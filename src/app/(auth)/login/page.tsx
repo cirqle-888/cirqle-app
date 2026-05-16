@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -10,6 +11,8 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const archivedFlag = searchParams.get('archived') === '1'
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
@@ -39,6 +42,12 @@ export default function LoginPage() {
           <p className="text-muted-foreground text-sm">Sign in to your workspace</p>
         </div>
 
+        {archivedFlag && (
+          <div className="mb-4 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2 text-sm text-amber-300">
+            Your account has been archived. Contact your administrator if this is unexpected.
+          </div>
+        )}
+
         {/* Card */}
         <div className="bg-card border border-border rounded-2xl p-6 shadow-xl">
           <form onSubmit={handleLogin} className="space-y-4">
@@ -57,9 +66,17 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-foreground mb-1.5">
-                Password
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-sm font-medium text-foreground">
+                  Password
+                </label>
+                <Link
+                  href="/forgot-password"
+                  className="text-xs text-primary hover:underline"
+                >
+                  Forgot password?
+                </Link>
+              </div>
               <input
                 type="password"
                 value={password}
@@ -83,6 +100,10 @@ export default function LoginPage() {
             >
               {loading ? 'Signing in…' : 'Sign in'}
             </button>
+
+            <p className="text-center text-xs text-muted-foreground pt-1">
+              You'll stay signed in on this device.
+            </p>
           </form>
         </div>
 

@@ -27,6 +27,16 @@ export default async function SettingsPage() {
     supabase.from('invoices').select('client_id, total_amount, paid_amount, status'),
   ])
 
+  // Load designations (graceful — may not exist yet if migration not run)
+  let designations: any[] = []
+  try {
+    const { data } = await supabase
+      .from('designations')
+      .select('id, name, is_admin, is_system, display_order')
+      .order('display_order')
+    designations = data || []
+  } catch {}
+
   return (
     <SettingsClient
       groups={groupsRes.data || []}
@@ -44,6 +54,7 @@ export default async function SettingsPage() {
       taskServiceUsage={(taskServiceUsageRes.data || []) as any[]}
       groupServices={groupServicesRes.data || []}
       invoices={(invoicesRes.data || []) as any[]}
+      designations={designations}
     />
   )
 }

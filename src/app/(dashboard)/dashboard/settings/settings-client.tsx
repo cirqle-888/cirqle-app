@@ -4,11 +4,12 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import Header from '@/components/layout/header'
 import AppSelect from '@/components/ui/app-select'
 import { createClient } from '@/lib/supabase/client'
-import { Plus, X, Edit2, Archive, Save, ChevronDown, ChevronLeft, ChevronRight, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays } from 'lucide-react'
+import { Plus, X, Edit2, Archive, ArchiveRestore, Save, ChevronDown, ChevronLeft, ChevronRight, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Mail, Send, RotateCcw as ResetKey } from 'lucide-react'
 import type { Currency } from '@/types'
 import InfoTip from '@/components/ui/info-tip'
 import { usePrivacy, getStoredPin, setStoredPin, isForceLocked } from '@/contexts/privacy-context'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { generateInviteToken, revokeInviteToken, archiveEmployee, restoreEmployee, adminResetPassword } from './employee-actions'
 
 // ── Module-level search bar (stable reference — never defined inside a component) ──
 function SearchBar({ value, onChange, placeholder = 'Search…', className = '' }: {
@@ -69,6 +70,7 @@ interface Props {
   taskServiceUsage: { service_id: string; created_at: string }[]
   groupServices: { group_id: string; service_id: string }[]
   invoices: { client_id: string; total_amount: number; paid_amount: number; status: string }[]
+  designations?: { id: string; name: string; is_admin: boolean; is_system: boolean }[]
 }
 
 export default function SettingsClient(props: Props) {
@@ -218,11 +220,60 @@ export default function SettingsClient(props: Props) {
     return tools.filter((t: any) => t.name?.toLowerCase().includes(q))
   }, [tools, toolSearch])
 
+  // Employee filter tabs: active | archived | all
+  const [empFilter, setEmpFilter] = useState<'active' | 'archived' | 'all'>('active')
+
   const filteredEmployees = useMemo(() => {
-    if (!empSearch) return employees
+    let pool = employees
+    if (empFilter === 'active')   pool = pool.filter((e: any) => !e.is_archived)
+    if (empFilter === 'archived') pool = pool.filter((e: any) =>  e.is_archived)
+    if (!empSearch) return pool
     const q = empSearch.toLowerCase()
-    return employees.filter((e: any) => e.cqid?.toLowerCase().includes(q) || e.name?.toLowerCase().includes(q) || e.role?.toLowerCase().includes(q))
-  }, [employees, empSearch])
+    return pool.filter((e: any) => e.cqid?.toLowerCase().includes(q) || e.name?.toLowerCase().includes(q) || e.role?.toLowerCase().includes(q))
+  }, [employees, empSearch, empFilter])
+
+  // Invite link modal state
+  const [inviteLink, setInviteLink] = useState<{ employeeId: string; cqid: string; url: string; expiresAt: string } | null>(null)
+  const [inviteCopied, setInviteCopied] = useState(false)
+  const [inviteBusy, setInviteBusy] = useState<string | null>(null)
+  const [resetPwdModal, setResetPwdModal] = useState<{ cqid: string; tempPassword: string } | null>(null)
+
+  async function handleGenerateInvite(emp: any) {
+    setInviteBusy(emp.id)
+    const res = await generateInviteToken(emp.id)
+    setInviteBusy(null)
+    if (!res.ok || !res.data) { alert(res.error || 'Failed to generate invite'); return }
+    setInviteLink({ employeeId: emp.id, cqid: emp.cqid, url: res.data.url, expiresAt: res.data.expiresAt })
+    setInviteCopied(false)
+    // patch local state
+    setEmployees(prev => prev.map((x: any) => x.id === emp.id ? { ...x, invite_token: res.data!.token, invite_token_expires_at: res.data!.expiresAt } : x))
+  }
+
+  async function handleArchive(emp: any) {
+    if (!confirm(`Archive ${emp.cqid}? They will be unable to log in. You can restore them anytime.`)) return
+    setInviteBusy(emp.id)
+    const res = await archiveEmployee(emp.id)
+    setInviteBusy(null)
+    if (!res.ok) { alert(res.error || 'Failed to archive'); return }
+    setEmployees(prev => prev.map((x: any) => x.id === emp.id ? { ...x, is_archived: true, is_active: false } : x))
+  }
+
+  async function handleRestore(emp: any) {
+    setInviteBusy(emp.id)
+    const res = await restoreEmployee(emp.id)
+    setInviteBusy(null)
+    if (!res.ok) { alert(res.error || 'Failed to restore'); return }
+    setEmployees(prev => prev.map((x: any) => x.id === emp.id ? { ...x, is_archived: false, is_active: true } : x))
+  }
+
+  async function handleAdminResetPassword(emp: any) {
+    if (!confirm(`Reset password for ${emp.cqid}? A new temporary password will be generated and shown to you.`)) return
+    setInviteBusy(emp.id)
+    const res = await adminResetPassword(emp.id)
+    setInviteBusy(null)
+    if (!res.ok || !res.data) { alert(res.error || 'Failed'); return }
+    setResetPwdModal({ cqid: emp.cqid, tempPassword: res.data.tempPassword })
+  }
 
   /** Save a single field directly to any table and patch the local state array */
   async function qeSave<T extends { id: string }>(
@@ -985,7 +1036,22 @@ export default function SettingsClient(props: Props) {
                   <Plus className="w-4 h-4" /> Add Employee
                 </button>
               </div>
-              <SearchBar value={empSearch} onChange={setEmpSearch} placeholder="Search by CQID, name or role…" className="mb-3" />
+              <div className="flex items-center gap-2 mb-3">
+                <div className="flex bg-secondary border border-border rounded-lg p-0.5">
+                  {(['active', 'archived', 'all'] as const).map(f => (
+                    <button
+                      key={f}
+                      onClick={() => setEmpFilter(f)}
+                      className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${empFilter === f ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                    >
+                      {f === 'active' ? 'Active' : f === 'archived' ? 'Archived' : 'All'}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex-1">
+                  <SearchBar value={empSearch} onChange={setEmpSearch} placeholder="Search by CQID, name or role…" />
+                </div>
+              </div>
 
               {/* Employee Access Info Banner */}
               <div className="mb-4 bg-blue-500/5 border border-blue-500/20 rounded-xl p-4">
@@ -1033,7 +1099,38 @@ export default function SettingsClient(props: Props) {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className={`text-xs px-2 py-0.5 rounded-md ${emp.is_active ? 'bg-green-500/15 text-green-400' : 'bg-gray-500/15 text-gray-400'}`}>{emp.is_active ? 'Active' : 'Inactive'}</span>
+                      {emp.is_archived && (
+                        <span className="text-xs px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-400">Archived</span>
+                      )}
+                      {!emp.is_archived && (
+                        <span className={`text-xs px-2 py-0.5 rounded-md ${emp.is_active ? 'bg-green-500/15 text-green-400' : 'bg-gray-500/15 text-gray-400'}`}>{emp.is_active ? 'Active' : 'Inactive'}</span>
+                      )}
+
+                      {/* Invite to register — when no auth_id and not archived */}
+                      {!emp.auth_id && !emp.is_archived && (
+                        <button
+                          onClick={() => handleGenerateInvite(emp)}
+                          disabled={inviteBusy === emp.id}
+                          title="Generate invite link"
+                          className="p-2 rounded-lg hover:bg-violet-500/15 text-muted-foreground hover:text-violet-400 transition-colors disabled:opacity-50"
+                        >
+                          <Send className="w-4 h-4" />
+                        </button>
+                      )}
+
+                      {/* Admin reset password — when registered */}
+                      {emp.auth_id && !emp.is_archived && (
+                        <button
+                          onClick={() => handleAdminResetPassword(emp)}
+                          disabled={inviteBusy === emp.id}
+                          title="Reset password (admin)"
+                          className="p-2 rounded-lg hover:bg-blue-500/15 text-muted-foreground hover:text-blue-400 transition-colors disabled:opacity-50"
+                        >
+                          <ResetKey className="w-4 h-4" />
+                        </button>
+                      )}
+
+                      {/* Portal token copy (legacy read-only view) */}
                       <button
                         onClick={() => {
                           const url = `${window.location.origin}/portal/${(emp as any).portal_token}`
@@ -1047,15 +1144,30 @@ export default function SettingsClient(props: Props) {
                       >
                         {copiedPortalId === emp.id ? <Check className="w-4 h-4 text-green-400" /> : <Link2 className="w-4 h-4" />}
                       </button>
-                      <button onClick={() => openEmployeeForm(emp)} className="p-2 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground">
+
+                      <button onClick={() => openEmployeeForm(emp)} className="p-2 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground" title="Edit">
                         <Edit2 className="w-4 h-4" />
                       </button>
-                      <button onClick={() => requestDelete('Employee', emp.id, emp.name || emp.cqid, async () => {
-                        await supabase.from('employees').update({ is_active: false }).eq('id', emp.id)
-                        setEmployees(prev => prev.filter((x: any) => x.id !== emp.id))
-                      })} className="p-2 rounded-lg hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400 transition-colors" title="Archive employee">
-                        <Archive className="w-4 h-4" />
-                      </button>
+
+                      {emp.is_archived ? (
+                        <button
+                          onClick={() => handleRestore(emp)}
+                          disabled={inviteBusy === emp.id}
+                          className="p-2 rounded-lg hover:bg-emerald-500/15 text-muted-foreground hover:text-emerald-400 transition-colors disabled:opacity-50"
+                          title="Restore employee"
+                        >
+                          <ArchiveRestore className="w-4 h-4" />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleArchive(emp)}
+                          disabled={inviteBusy === emp.id}
+                          className="p-2 rounded-lg hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400 transition-colors disabled:opacity-50"
+                          title="Archive employee"
+                        >
+                          <Archive className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1849,8 +1961,19 @@ export default function SettingsClient(props: Props) {
                     <div className="w-full bg-secondary/50 border border-border rounded-lg px-3 py-2 text-sm font-mono font-bold text-primary">{form.cqid || '—'}</div>
                   </FieldRow>
                   <FieldRow label="Full Name" required><input value={form.name || ''} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} required className={inputCls} /></FieldRow>
-                  <FieldRow label="Email"><input type="email" value={form.email || ''} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} className={inputCls} /></FieldRow>
-                  <FieldRow label="Phone"><input value={form.phone || ''} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} className={inputCls} /></FieldRow>
+                  <div className="grid grid-cols-2 gap-3">
+                    <FieldRow label="Email"><input type="email" value={form.email || ''} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} className={inputCls} /></FieldRow>
+                    <FieldRow label="Phone"><input value={form.phone || ''} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} className={inputCls} /></FieldRow>
+                  </div>
+                  <FieldRow label={<span className="flex items-center gap-1">Date of Birth <InfoTip text="Used to show a celebration on their birthday. Optional but recommended." /></span>}>
+                    <input
+                      type="date"
+                      value={form.date_of_birth || ''}
+                      onChange={e => setForm(p => ({ ...p, date_of_birth: e.target.value || null }))}
+                      max={new Date().toISOString().slice(0, 10)}
+                      className={inputCls}
+                    />
+                  </FieldRow>
                   <div className="border-t border-border pt-3">
                     <p className="text-xs font-medium text-muted-foreground mb-2">Emergency Contact</p>
                     <div className="grid grid-cols-2 gap-3">
@@ -1858,8 +1981,22 @@ export default function SettingsClient(props: Props) {
                       <FieldRow label="Contact Phone"><input value={form.emergency_contact_phone || ''} onChange={e => setForm(p => ({ ...p, emergency_contact_phone: e.target.value }))} className={inputCls} placeholder="Phone" /></FieldRow>
                     </div>
                   </div>
+                  {/* Designation — new permission system. Shown when designations table is loaded. */}
+                  {props.designations && props.designations.length > 0 && (
+                    <FieldRow label={<span className="flex items-center gap-1">Designation <InfoTip text="Controls what this employee can see and do. Configure designations in Settings → Designations." /></span>}>
+                      <AppSelect value={form.designation_id || ''} onChange={e => setForm(p => ({ ...p, designation_id: e.target.value || null }))}>
+                        <option value="">— select designation —</option>
+                        {props.designations.map(d => (
+                          <option key={d.id} value={d.id}>
+                            {d.name}{d.is_admin ? ' (Admin — full access)' : ''}{d.is_system ? '' : ''}
+                          </option>
+                        ))}
+                      </AppSelect>
+                    </FieldRow>
+                  )}
+
                   <div className="grid grid-cols-2 gap-3">
-                    <FieldRow label={<span className="flex items-center">Role <InfoTip text="super admin: full access (owner/MD) · accounts: finance only · team lead: manages tasks · employee: standard access · view only: read-only" /></span>}>
+                    <FieldRow label={<span className="flex items-center">Role (legacy) <InfoTip text="Legacy role — kept for compatibility. Designation above is now the source of truth." /></span>}>
                       <AppSelect value={form.role || 'employee'} onChange={e => setForm(p => ({ ...p, role: e.target.value }))}>
                         <option value="super_admin">Super Admin (Owner/MD)</option>
                         <option value="accounts">Accounts</option>
@@ -2431,6 +2568,104 @@ export default function SettingsClient(props: Props) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Invite link modal ── */}
+      {inviteLink && (
+        <ModalOverlay onClose={() => setInviteLink(null)}>
+          <div className="bg-card border border-border rounded-2xl p-6 max-w-md w-full">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-violet-500/15 flex items-center justify-center">
+                <Send className="w-5 h-5 text-violet-400" />
+              </div>
+              <div>
+                <h3 className="font-semibold">Invite {inviteLink.cqid}</h3>
+                <p className="text-xs text-muted-foreground">Share this link — valid for 7 days</p>
+              </div>
+            </div>
+
+            <div className="bg-secondary border border-border rounded-lg p-3 mb-3 break-all font-mono text-xs">
+              {inviteLink.url}
+            </div>
+
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(inviteLink.url)
+                  setInviteCopied(true)
+                  setTimeout(() => setInviteCopied(false), 2000)
+                }}
+                className="flex-1 flex items-center justify-center gap-2 bg-primary/15 hover:bg-primary/20 text-primary py-2 rounded-lg text-sm font-medium transition-colors"
+              >
+                {inviteCopied ? <><Check className="w-4 h-4" /> Copied!</> : <><Link2 className="w-4 h-4" /> Copy link</>}
+              </button>
+              <a
+                href={`https://wa.me/?text=${encodeURIComponent('Welcome to Cirqle! Complete your registration: ' + inviteLink.url)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex-1 flex items-center justify-center gap-2 bg-emerald-500/15 hover:bg-emerald-500/20 text-emerald-400 py-2 rounded-lg text-sm font-medium transition-colors"
+              >
+                <Send className="w-4 h-4" /> WhatsApp
+              </a>
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              The employee uses this link once to set their password and complete profile details.
+              Expires {new Date(inviteLink.expiresAt).toLocaleDateString()}.
+            </p>
+
+            <div className="flex justify-end mt-4">
+              <button
+                onClick={() => setInviteLink(null)}
+                className="px-4 py-2 bg-secondary hover:bg-secondary/80 rounded-lg text-sm font-medium"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* ── Admin reset password result modal ── */}
+      {resetPwdModal && (
+        <ModalOverlay onClose={() => setResetPwdModal(null)}>
+          <div className="bg-card border border-border rounded-2xl p-6 max-w-md w-full">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-blue-500/15 flex items-center justify-center">
+                <ResetKey className="w-5 h-5 text-blue-400" />
+              </div>
+              <div>
+                <h3 className="font-semibold">Password reset for {resetPwdModal.cqid}</h3>
+                <p className="text-xs text-muted-foreground">Share this with the employee securely</p>
+              </div>
+            </div>
+
+            <div className="bg-secondary border border-border rounded-lg p-3 mb-4 font-mono text-sm text-center">
+              {resetPwdModal.tempPassword}
+            </div>
+
+            <p className="text-xs text-amber-400/80 mb-4">
+              ⚠️ Ask the employee to sign in with this temporary password and immediately change it via "Forgot password" if needed. This password will not be shown again.
+            </p>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(resetPwdModal.tempPassword)
+                }}
+                className="flex-1 flex items-center justify-center gap-2 bg-primary/15 hover:bg-primary/20 text-primary py-2 rounded-lg text-sm font-medium transition-colors"
+              >
+                <Link2 className="w-4 h-4" /> Copy password
+              </button>
+              <button
+                onClick={() => setResetPwdModal(null)}
+                className="px-4 py-2 bg-secondary hover:bg-secondary/80 rounded-lg text-sm font-medium"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </ModalOverlay>
       )}
     </div>
   )
