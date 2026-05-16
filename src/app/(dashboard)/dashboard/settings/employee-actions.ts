@@ -11,33 +11,39 @@ interface ActionResult<T = void> {
 
 /**
  * Auth guard — fail OPEN for legacy super_admin until the designations migration is applied.
- * Once the migration runs and admins are on the "Admin" designation, this gates by permission key.
+ * Matches the employee row by auth_id OR (as a fallback) email, then backfills auth_id when
+ * found by email so the link sticks for future calls.
  */
 async function requirePermission(key: string): Promise<{ ok: true } | { ok: false; error: string }> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { ok: false, error: 'Not signed in.' }
 
+  const lookupAndBackfill = async (selectCols: string) => {
+    let { data: e } = await supabase.from('employees').select(selectCols).eq('auth_id', user.id).maybeSingle()
+    if (!e && user.email) {
+      const byEmail = await supabase.from('employees').select(selectCols).eq('email', user.email).maybeSingle()
+      e = byEmail.data
+      if (e) {
+        // Backfill auth_id so this is fast next time
+        const empAny = e as any
+        await supabase.from('employees').update({ auth_id: user.id }).eq('id', empAny.id)
+      }
+    }
+    return e as any
+  }
+
   // First, try the new shape (designation-based)
   let emp: any = null
   try {
-    const { data, error } = await supabase
-      .from('employees')
-      .select('id, role, is_archived, designation:designation_id(id, is_admin)')
-      .eq('auth_id', user.id)
-      .maybeSingle()
-    if (!error) emp = data
+    emp = await lookupAndBackfill('id, role, is_archived, designation:designation_id(id, is_admin)')
   } catch {}
 
   // Fallback to legacy shape if the new query fails
   if (!emp) {
-    const { data } = await supabase
-      .from('employees')
-      .select('id, role')
-      .eq('auth_id', user.id)
-      .maybeSingle()
-    if (data && data.role === 'super_admin') return { ok: true }
-    if (!data) return { ok: false, error: 'No employee record linked to your account.' }
+    emp = await lookupAndBackfill('id, role')
+    if (emp && emp.role === 'super_admin') return { ok: true }
+    if (!emp) return { ok: false, error: 'No employee record linked to your account.' }
     return { ok: false, error: 'Permission denied.' }
   }
 
