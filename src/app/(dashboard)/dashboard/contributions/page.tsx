@@ -1,0 +1,55 @@
+import { createClient } from '@/lib/supabase/server'
+import ContributionsClient from './contributions-client'
+
+export const dynamic = 'force-dynamic'
+
+export default async function ContributionsPage() {
+  const supabase = await createClient()
+
+  const [
+    tasksRes, employeesRes, groupsRes, parametersRes, toolsRes,
+    paramServicesRes, toolServicesRes, groupServicesRes,
+    scoresRes, clientsRes, servicesRes, assignmentsRes,
+    contributorRecordsRes, taskToolRecordsRes, pricingRes,
+  ] = await Promise.all([
+    supabase
+      .from('tasks')
+      .select('id, title, service_id, billing_amount_inr, status, task_date, client:clients(id, name), service:services(id, name)')
+      .in('status', ['pending', 'in_progress', 'done', 'delivered', 'invoiced', 'paid'])
+      .order('task_date', { ascending: false }),
+    supabase.from('employees').select('id, cqid, name, performance_rating, role').eq('is_active', true).order('cqid'),
+    supabase.from('contribution_groups').select('*').eq('is_active', true).order('display_order'),
+    supabase.from('parameters').select('*').eq('is_active', true).order('display_order'),
+    supabase.from('tools').select('*').eq('is_active', true).order('name'),
+    supabase.from('parameter_services').select('parameter_id, service_id'),
+    supabase.from('tool_services').select('tool_id, service_id'),
+    supabase.from('group_services').select('group_id, service_id'),
+    supabase.from('contribution_scores').select('task_id, employee_id, earnings_inr, score_percentage'),
+    supabase.from('clients').select('id, name').order('name'),
+    supabase.from('services').select('id, name').order('name'),
+    supabase.from('task_assignments').select('task_id, employee_id'),
+    supabase.from('contributions').select('task_id, employee_id, value').gt('value', 0), // only meaningful contributions
+    supabase.from('task_tools').select('task_id, tool_id'),                // which tools used per task
+    supabase.from('client_service_pricing').select('client_id, service_id, commission_percentage, price, currency'), // pre-defined rates
+  ])
+
+  return (
+    <ContributionsClient
+      tasks={tasksRes.data || []}
+      employees={employeesRes.data || []}
+      groups={groupsRes.data || []}
+      parameters={parametersRes.data || []}
+      tools={toolsRes.data || []}
+      parameterServices={paramServicesRes.data || []}
+      toolServices={toolServicesRes.data || []}
+      groupServices={groupServicesRes.data || []}
+      scores={scoresRes.data || []}
+      clients={clientsRes.data || []}
+      services={servicesRes.data || []}
+      taskAssignments={assignmentsRes.data || []}
+      contributorRecords={contributorRecordsRes.data || []}
+      taskToolRecords={taskToolRecordsRes.data || []}
+      pricingMatrix={pricingRes.data || []}
+    />
+  )
+}

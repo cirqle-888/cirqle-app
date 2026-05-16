@@ -1,0 +1,3005 @@
+'use client'
+
+import { useState, useMemo, useEffect, useRef } from 'react'
+import Header from '@/components/layout/header'
+import { createClient } from '@/lib/supabase/client'
+import { getStatusColor, getStatusLabel } from '@/lib/utils/invoice'
+import { Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, RefreshCw, TrendingDown, Users, Ban, Search, ExternalLink, ChevronDown, ChevronLeft, ChevronRight, Layers, LayoutGrid, List, CalendarDays, MoreVertical, Filter, Check } from 'lucide-react'
+import { formatCurrency } from '@/lib/calculations/currency'
+import Combobox from '@/components/ui/combobox'
+import AppSelect from '@/components/ui/app-select'
+import { FilterDropdown } from '@/components/ui/filter-dropdown'
+import type { Currency } from '@/types'
+import { getNextOccurrence, shouldGenerateNext } from '@/lib/utils/recurring'
+import { taskCode, taskCodeMatches, nextTaskNumber } from '@/lib/utils/task-code'
+import { seedFromTasks } from '@/lib/hooks/use-smart-sort'
+import { useRole } from '@/contexts/role-context'
+import { useToast, ToastContainer } from '@/components/ui/toast'
+import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { usePrivacy } from '@/contexts/privacy-context'
+
+interface Task {
+  id: string
+  task_number?: number | null
+  title: string
+  description?: string
+  client_id: string
+  service_id: string
+  status: string
+  billing_amount: number
+  billing_amount_inr: number
+  quantity?: number
+  currency: string
+  task_date: string
+  created_at: string
+  is_recurring?: boolean
+  recurring_interval?: string | null
+  recurring_end_date?: string | null
+  recurring_parent_id?: string | null
+  // Cancellation fields
+  cancelled_by?: 'client' | 'company' | 'no_show' | null
+  cancellation_notes?: string | null
+  honor_contributions?: boolean
+  loss_amount?: number
+  completion_pct?: number
+  client?: { id: string; name: string; code: string }
+  service?: { id: string; name: string }
+}
+
+interface Service {
+  id: string
+  name: string
+  pricing_type?: string
+  default_price?: number
+  default_currency?: string
+}
+
+interface Props {
+  initialTasks: Task[]
+  initialTrash: (Task & { deleted_at: string })[]
+  clients: { id: string; name: string; code: string }[]
+  services: Service[]
+  clientPricings: { client_id: string; service_id: string; price: number; currency: string }[]
+  employees: { id: string; cqid: string; name: string | null; is_active: boolean }[]
+  taskAssignments: { task_id: string; employee_id: string }[]
+  groups: { id: string; name: string; display_order: number }[]
+  parameters: { id: string; name: string; group_id: string; weight: number; is_master?: boolean; display_order: number }[]
+  groupServices: { group_id: string; service_id: string }[]
+  parameterServices: { parameter_id: string; service_id: string }[]
+  taskGroups: { task_id: string; group_id: string }[]
+  taskGroupAssignments: { task_id: string; group_id: string; employee_id: string }[]
+  taskParamAssignments: { task_id: string; parameter_id: string; employee_id: string }[]
+}
+
+// 'invoiced' is system-managed (set automatically when invoice is sent) — excluded from manual dropdown
+const STATUSES = ['pending', 'in_progress', 'done', 'invoiced', 'cancelled']
+const MANUAL_STATUSES = ['pending', 'in_progress', 'done', 'cancelled']
+const CURRENCIES: Currency[] = ['INR', 'AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
+
+const RECURRING_INTERVALS = [
+  { value: 'daily',     label: 'Daily' },
+  { value: 'weekly',    label: 'Weekly' },
+  { value: 'biweekly',  label: 'Bi-weekly' },
+  { value: 'monthly',   label: 'Monthly' },
+]
+
+const EMPTY_FORM = {
+  task_number: '',  // optional — auto-assigned if blank
+  title: '',
+  description: '',
+  client_id: '',
+  service_id: '',
+  status: 'pending',
+  quantity: '1',
+  hours: '1',
+  spend: '',       // for percentage_of_spend: client's total ad spend
+  currency: 'INR' as Currency,
+  task_date: new Date().toISOString().split('T')[0],
+  is_recurring: false,
+  recurring_interval: 'monthly',
+  recurring_end_date: '',
+}
+
+export default function TasksClient({ initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments }: Props) {
+  const { role, employee: currentEmployee } = useRole()
+  const { toasts, dismiss, success } = useToast()
+  const { dn } = usePrivacy()
+  const [tasks, setTasks] = useState<Task[]>(initialTasks)
+  const [trash, setTrash] = useState<(Task & { deleted_at: string })[]>(initialTrash)
+  const [showTrash, setShowTrash] = useState(false)
+  const [showForm, setShowForm] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [filterStatus, setFilterStatus] = useState('')
+  const [filterClient, setFilterClient] = useState('')
+  const [filterService, setFilterService] = useState('')
+  const [searchQ, setSearchQ] = useState('')
+  const [sortBy, setSortBy] = useState<'date_desc' | 'date_asc' | 'amount_desc' | 'client'>('date_desc')
+  const [form, setForm] = useState(EMPTY_FORM)
+  const [previewTaskNumber, setPreviewTaskNumber] = useState<number | null>(null)
+
+  useEffect(() => {
+    seedFromTasks(initialTasks.map(t => ({
+      clientId: t.client?.id,
+      serviceId: t.service?.id,
+      taskDate: t.task_date,
+      createdAt: t.created_at,
+    })))
+  }, [])
+
+  // Local copies so quick-set price updates reflect immediately without page reload
+  const [services, setServices] = useState(initialServices)
+  const [clientPricings, setClientPricings] = useState(initialClientPricings)
+
+  // Edit / delete state
+  const [editTask, setEditTask] = useState<Task | null>(null)
+
+  // Cmd+S / Ctrl+S: submit the currently open form
+  const addFormRef  = useRef<HTMLFormElement>(null)
+  const editFormRef = useRef<HTMLFormElement>(null)
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault()
+        if (showForm)    addFormRef.current?.requestSubmit()
+        else if (editTask) editFormRef.current?.requestSubmit()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [showForm, editTask])
+  const [editForm, setEditForm] = useState({ ...EMPTY_FORM, id: '' })
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null) // task id
+  const [deleting, setDeleting] = useState(false)
+  const [editSaving, setEditSaving] = useState(false)
+
+  // Quick-set price state
+  const [quickSet, setQuickSet] = useState<{ mode: 'default' | 'client'; price: string; currency: Currency } | null>(null)
+  const [quickSaving, setQuickSaving] = useState(false)
+
+  // Bulk selection state
+  const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set())
+  const [bulkMode, setBulkMode] = useState(false)
+
+  // Cancellation modal
+  const [cancelModal, setCancelModal] = useState<Task | null>(null)
+  const [cancelForm, setCancelForm] = useState({
+    cancelled_by:        'client' as 'client' | 'company' | 'no_show',
+    completion_pct:      50,
+    honor_contributions: true,
+    loss_amount:         '',
+    notes:               '',
+    record_cashbook:     true,
+  })
+  const [cancelSaving, setCancelSaving] = useState(false)
+
+  // Assignment modal state
+  const [assignModal, setAssignModal] = useState<{ taskId: string; taskNumber?: number | null; taskTitle: string; serviceId?: string } | null>(null)
+  const [localAssignments, setLocalAssignments] = useState<{ task_id: string; employee_id: string }[]>(initialTaskAssignments)
+  const [localTaskGroups, setLocalTaskGroups] = useState<{ task_id: string; group_id: string }[]>(initialTaskGroups)
+  const [localGroupAssignments, setLocalGroupAssignments] = useState<{ task_id: string; group_id: string; employee_id: string }[]>(initialTaskGroupAssignments)
+  const [localParamAssignments, setLocalParamAssignments] = useState<{ task_id: string; parameter_id: string; employee_id: string }[]>(initialTaskParamAssignments)
+  const [assignSaving, setAssignSaving] = useState(false)
+  const [assignSelected, setAssignSelected] = useState<Set<string>>(new Set())
+  const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set())
+  // empId → Set of groupIds assigned to that employee
+  const [empGroups, setEmpGroups] = useState<Record<string, Set<string>>>({})
+  // empId → Set of parameterIds assigned to that employee
+  const [empParams, setEmpParams] = useState<Record<string, Set<string>>>({})
+  // Which employee cards are expanded
+  const [expandedEmpCards, setExpandedEmpCards] = useState<Set<string>>(new Set())
+  // View mode & assignee filter
+  const [viewMode, setViewMode] = useState<'table' | 'board' | 'calendar'>('table')
+  const [filterAssignee, setFilterAssignee] = useState('')
+  // Calendar view state
+  const [calViewYear, setCalViewYear] = useState(() => new Date().getFullYear())
+  const [calViewMonth, setCalViewMonth] = useState(() => new Date().getMonth())
+  // Inline edit mode for table view
+  const [inlineEditMode, setInlineEditMode] = useState(false)
+  // Workload report
+  const [showWorkload, setShowWorkload] = useState(false)
+  // Board grouping dimension
+  const [boardGroupBy, setBoardGroupBy] = useState<'employee' | 'client' | 'service' | 'status' | 'date'>('employee')
+  // Date granularity for board (only when boardGroupBy === 'date')
+  const [boardDateGranularity, setBoardDateGranularity] = useState<'daily' | 'weekly' | 'monthly' | 'preset'>('preset')
+
+  // Header / toolbar popover state — More menu, Filter popover, View popover
+  const [moreOpen,   setMoreOpen]   = useState(false)
+  const [filterOpen, setFilterOpen] = useState(false)
+  const [viewOpen,   setViewOpen]   = useState(false)
+  const moreRef   = useRef<HTMLDivElement>(null)
+  const filterRef = useRef<HTMLDivElement>(null)
+  const viewRef   = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    function h(e: MouseEvent) {
+      if (moreRef.current   && !moreRef.current.contains(e.target as Node))   setMoreOpen(false)
+      if (filterRef.current && !filterRef.current.contains(e.target as Node)) setFilterOpen(false)
+      if (viewRef.current   && !viewRef.current.contains(e.target as Node))   setViewOpen(false)
+    }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [])
+
+  const supabase = createClient()
+
+  // Preview next task number when Add Task modal opens
+  useEffect(() => {
+    if (!showForm) { setPreviewTaskNumber(null); return }
+    if (form.task_number) { setPreviewTaskNumber(parseInt(form.task_number, 10)); return }
+    ;(async () => {
+      const r = await supabase
+        .from('tasks')
+        .select('task_number')
+        .order('task_number', { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle()
+      setPreviewTaskNumber((r.data?.task_number ?? 0) + 1)
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showForm, form.task_number])
+
+  // Sort services by most recently used
+  const sortedServices = useMemo(() => {
+    const lastUsed: Record<string, string> = {}
+    initialTasks.forEach(t => {
+      if (t.service?.id && (!lastUsed[t.service.id] || t.created_at > lastUsed[t.service.id])) {
+        lastUsed[t.service.id] = t.created_at
+      }
+    })
+    return [...services].sort((a, b) => {
+      const aU = lastUsed[a.id], bU = lastUsed[b.id]
+      if (aU && bU) return bU.localeCompare(aU)
+      if (aU) return -1
+      if (bU) return 1
+      return a.name.localeCompare(b.name)
+    })
+  }, [services, initialTasks])
+
+  // Derived: selected service object
+  const selectedService = services.find(s => s.id === form.service_id)
+  const pricingType = selectedService?.pricing_type || 'fixed_per_creative'
+
+  // Derived: unit price — client-specific first, then service default
+  const clientPrice = clientPricings.find(p => p.client_id === form.client_id && p.service_id === form.service_id)
+  const unitPrice = clientPrice?.price ?? selectedService?.default_price ?? 0
+  const unitCurrency = (clientPrice?.currency || selectedService?.default_currency || 'INR') as Currency
+
+  // Derived: computed billing amount
+  const computedAmount = useMemo(() => {
+    if (!selectedService) return 0
+    if (pricingType === 'fixed_per_creative') return unitPrice * (parseFloat(form.quantity) || 1)
+    if (pricingType === 'hourly') return unitPrice * (parseFloat(form.hours) || 1)
+    if (pricingType === 'percentage_of_spend') return (parseFloat(form.spend) || 0) * (unitPrice / 100)
+    return unitPrice // retainer
+  }, [pricingType, unitPrice, form.quantity, form.hours, form.spend, selectedService])
+
+  // When client or service changes, update currency
+  function handleClientChange(clientId: string) {
+    const cp = clientPricings.find(p => p.client_id === clientId && p.service_id === form.service_id)
+    setForm(p => ({ ...p, client_id: clientId, currency: (cp?.currency as Currency) || p.currency }))
+  }
+
+  function handleServiceChange(serviceId: string) {
+    const svc = services.find(s => s.id === serviceId)
+    const cp = clientPricings.find(p => p.client_id === form.client_id && p.service_id === serviceId)
+    const cur = (cp?.currency || svc?.default_currency || 'INR') as Currency
+    setForm(p => ({ ...p, service_id: serviceId, currency: cur, quantity: '1', hours: '1' }))
+  }
+
+  async function saveQuickPrice() {
+    if (!quickSet || !form.service_id) return
+    setQuickSaving(true)
+    const price = parseFloat(quickSet.price) || 0
+
+    if (quickSet.mode === 'default') {
+      await supabase.from('services').update({ default_price: price, default_currency: quickSet.currency }).eq('id', form.service_id)
+      setServices(prev => prev.map(s => s.id === form.service_id ? { ...s, default_price: price, default_currency: quickSet.currency } : s))
+    } else {
+      await supabase.from('client_service_pricing').upsert(
+        { client_id: form.client_id, service_id: form.service_id, price, currency: quickSet.currency, commission_percentage: 0 },
+        { onConflict: 'client_id,service_id' }
+      )
+      setClientPricings(prev => {
+        const existing = prev.findIndex(p => p.client_id === form.client_id && p.service_id === form.service_id)
+        const entry = { client_id: form.client_id, service_id: form.service_id, price, currency: quickSet.currency }
+        return existing >= 0 ? prev.map((p, i) => i === existing ? entry : p) : [...prev, entry]
+      })
+    }
+    setQuickSet(null)
+    setQuickSaving(false)
+  }
+
+  function openEdit(task: Task) {
+    setEditTask(task)
+    setEditForm({
+      id: task.id,
+      task_number: task.task_number != null ? String(task.task_number) : '',
+      title: task.title,
+      description: task.description || '',
+      client_id: task.client_id,
+      service_id: task.service_id,
+      status: task.status,
+      quantity: task.quantity ? String(task.quantity) : '1',
+      hours: '1',
+      spend: '',
+      currency: task.currency as Currency,
+      task_date: task.task_date,
+      is_recurring: false,
+      recurring_interval: 'monthly',
+      recurring_end_date: '',
+    })
+    setQuickSet(null)
+  }
+
+  async function handleEditSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!editTask) return
+    setEditSaving(true)
+
+    const svc = services.find(s => s.id === editForm.service_id)
+    const pt = svc?.pricing_type || 'fixed_per_creative'
+    const cp = clientPricings.find(p => p.client_id === editForm.client_id && p.service_id === editForm.service_id)
+    const up = cp?.price ?? svc?.default_price ?? 0
+    const uc = (cp?.currency || svc?.default_currency || 'INR') as Currency
+
+    let amount = up
+    let qty = 1
+    if (pt === 'fixed_per_creative') { qty = parseFloat(editForm.quantity) || 1; amount = up * qty }
+    else if (pt === 'hourly') { qty = parseFloat(editForm.hours) || 1; amount = up * qty }
+    else if (pt === 'percentage_of_spend') { qty = parseFloat(editForm.spend) || 0; amount = qty * (up / 100) }
+
+    const { data, error } = await supabase
+      .from('tasks')
+      .update({
+        ...(editForm.task_number ? { task_number: parseInt(editForm.task_number, 10) } : {}),
+        title: editForm.title,
+        description: editForm.description || null,
+        client_id: editForm.client_id,
+        service_id: editForm.service_id,
+        status: editForm.status,
+        billing_amount: amount,
+        billing_amount_inr: amount,
+        quantity: qty,
+        currency: uc,
+        task_date: editForm.task_date,
+      })
+      .eq('id', editTask.id)
+      .select(`*, client:clients(id, name, code), service:services(id, name)`)
+      .single()
+
+    if (!error && data) {
+      setTasks(prev => prev.map(t => t.id === editTask.id ? data : t))
+      setEditTask(null)
+    }
+    setEditSaving(false)
+  }
+
+  async function handleDelete(id: string) {
+    setDeleting(true)
+    const deletedAt = new Date().toISOString()
+    await supabase.from('tasks').update({ deleted_at: deletedAt }).eq('id', id)
+    // Move from active list to trash
+    const task = tasks.find(t => t.id === id)
+    if (task) setTrash(prev => [{ ...task, deleted_at: deletedAt }, ...prev])
+    setTasks(prev => prev.filter(t => t.id !== id))
+    setDeleteConfirm(null)
+    setEditTask(null)
+    setDeleting(false)
+  }
+
+  async function handleRestore(id: string) {
+    await supabase.from('tasks').update({ deleted_at: null }).eq('id', id)
+    const task = trash.find(t => t.id === id)
+    if (task) {
+      const { deleted_at, ...restored } = task
+      setTasks(prev => [restored as Task, ...prev])
+    }
+    setTrash(prev => prev.filter(t => t.id !== id))
+  }
+
+  async function handlePermanentDelete(id: string) {
+    setDeleting(true)
+    await supabase.from('tasks').delete().eq('id', id)
+    setTrash(prev => prev.filter(t => t.id !== id))
+    setDeleteConfirm(null)
+    setDeleting(false)
+  }
+
+  async function bulkUpdateStatus(status: string) {
+    const ids = [...selectedTasks]
+    await Promise.all(ids.map(id => supabase.from('tasks').update({ status }).eq('id', id)))
+    setTasks(prev => prev.map(t => selectedTasks.has(t.id) ? { ...t, status } : t))
+    setSelectedTasks(new Set())
+    setBulkMode(false)
+    success(`${ids.length} task${ids.length !== 1 ? 's' : ''} updated to ${getStatusLabel(status)}`)
+  }
+
+  async function duplicateTask(task: Task) {
+    const maxRow = await supabase.from('tasks').select('task_number').order('task_number', { ascending: false, nullsFirst: false }).limit(1).maybeSingle()
+    const tn = nextTaskNumber(maxRow.data?.task_number)
+    const { data } = await supabase.from('tasks').insert({
+      task_number: tn,
+      title: task.title + ' (copy)',
+      description: task.description,
+      client_id: task.client_id,
+      service_id: task.service_id,
+      status: 'pending',
+      billing_amount: task.billing_amount,
+      billing_amount_inr: task.billing_amount_inr,
+      currency: task.currency,
+      task_date: new Date().toISOString().split('T')[0],
+      quantity: task.quantity || 1,
+    }).select('*, client:clients(id,name,code), service:services(id,name)').single()
+    if (data) {
+      setTasks(prev => [data as Task, ...prev])
+      success('Task duplicated')
+    }
+  }
+
+  async function generateRecurringInstances(
+    parentTask: Task,
+    interval: string,
+    endDate: string | null,
+    baseAmount: number,
+    baseCurrency: string,
+    baseQty: number,
+  ) {
+    const sixMonthsOut = new Date()
+    sixMonthsOut.setMonth(sixMonthsOut.getMonth() + 6)
+    const hardLimit = sixMonthsOut.toISOString().split('T')[0]
+    const effectiveEnd = endDate || hardLimit
+
+    const instances: Array<{
+      title: string
+      description: string | null
+      client_id: string
+      service_id: string
+      status: string
+      billing_amount: number
+      billing_amount_inr: number
+      quantity: number
+      currency: string
+      task_date: string
+      is_recurring: boolean
+      recurring_parent_id: string
+    }> = []
+
+    let nextDate = getNextOccurrence(parentTask.task_date, interval)
+    let count = 0
+    const MAX_INSTANCES = 52
+
+    while (
+      shouldGenerateNext({ recurring_end_date: effectiveEnd }, nextDate) &&
+      count < MAX_INSTANCES
+    ) {
+      instances.push({
+        title: parentTask.title,
+        description: parentTask.description || null,
+        client_id: parentTask.client_id,
+        service_id: parentTask.service_id,
+        status: 'pending',
+        billing_amount: baseAmount,
+        billing_amount_inr: baseAmount,
+        quantity: baseQty,
+        currency: baseCurrency,
+        task_date: nextDate,
+        is_recurring: false,
+        recurring_parent_id: parentTask.id,
+      })
+      nextDate = getNextOccurrence(nextDate, interval)
+      count++
+    }
+
+    if (instances.length > 0) {
+      // Assign sequential task numbers
+      const maxRow = await supabase.from('tasks').select('task_number').order('task_number', { ascending: false, nullsFirst: false }).limit(1).maybeSingle()
+      let next = nextTaskNumber(maxRow.data?.task_number)
+      const numbered = instances.map(ins => ({ ...ins, task_number: next++ }))
+      await supabase.from('tasks').insert(numbered)
+    }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setSaving(true)
+    const qty = pricingType === 'fixed_per_creative' ? (parseFloat(form.quantity) || 1) :
+                pricingType === 'hourly' ? (parseFloat(form.hours) || 1) :
+                pricingType === 'percentage_of_spend' ? (parseFloat(form.spend) || 0) : 1
+
+    // Compute next task_number (sequential, starting at 1)
+    const maxRow = await supabase.from('tasks').select('task_number').order('task_number', { ascending: false, nullsFirst: false }).limit(1).maybeSingle()
+    const tn = form.task_number ? parseInt(form.task_number, 10) : nextTaskNumber(maxRow.data?.task_number)
+
+    const { data, error } = await supabase
+      .from('tasks')
+      .insert({
+        task_number: tn,
+        title: form.title,
+        description: form.description || null,
+        client_id: form.client_id,
+        service_id: form.service_id,
+        status: form.status,
+        billing_amount: computedAmount,
+        billing_amount_inr: computedAmount,
+        quantity: qty,
+        currency: unitCurrency,
+        task_date: form.task_date,
+        is_recurring: form.is_recurring,
+        recurring_interval: form.is_recurring ? form.recurring_interval : null,
+        recurring_end_date: form.is_recurring && form.recurring_end_date ? form.recurring_end_date : null,
+      })
+      .select(`*, client:clients(id, name, code), service:services(id, name)`)
+      .single()
+
+    if (!error && data) {
+      setTasks(prev => [data, ...prev])
+
+      if (form.is_recurring && form.recurring_interval) {
+        await generateRecurringInstances(
+          data as Task,
+          form.recurring_interval,
+          form.recurring_end_date || null,
+          computedAmount,
+          unitCurrency,
+          qty,
+        )
+      }
+
+      setShowForm(false)
+      setForm({ ...EMPTY_FORM, task_date: new Date().toISOString().split('T')[0] })
+      success(`Task #${tn} added`)
+    }
+    setSaving(false)
+  }
+
+  async function updateStatus(id: string, status: string) {
+    if (status === 'cancelled') {
+      // Open the cancellation wizard instead of saving directly
+      const task = tasks.find(t => t.id === id)
+      if (task) {
+        setCancelForm({
+          cancelled_by:        'client',
+          completion_pct:      task.status === 'done' ? 100 : task.status === 'in_progress' ? 70 : 10,
+          honor_contributions: task.status === 'in_progress' || task.status === 'done',
+          loss_amount:         task.billing_amount_inr ? String(Math.round(task.billing_amount_inr * 0.7)) : '',
+          notes:               '',
+          record_cashbook:     true,
+        })
+        setCancelModal(task)
+      }
+      return
+    }
+    await supabase.from('tasks').update({ status }).eq('id', id)
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t))
+  }
+
+  function openAssignModal(task: { id: string; task_number?: number | null; title: string; service_id?: string }) {
+    const current = localAssignments.filter(a => a.task_id === task.id).map(a => a.employee_id)
+    setAssignSelected(new Set(current))
+
+    // Pre-load saved groups for this task OR default to service-linked groups
+    const savedGroupIds = localTaskGroups.filter(tg => tg.task_id === task.id).map(tg => tg.group_id)
+    if (savedGroupIds.length > 0) {
+      setSelectedGroups(new Set(savedGroupIds))
+    } else if (task.service_id) {
+      const defaultGroupIds = groupServices.filter(gs => gs.service_id === task.service_id).map(gs => gs.group_id)
+      setSelectedGroups(new Set(defaultGroupIds))
+    } else {
+      setSelectedGroups(new Set())
+    }
+
+    // Build empGroups and empParams from existing assignments (employee-centric)
+    const newEmpGroups: Record<string, Set<string>> = {}
+    localGroupAssignments.filter(a => a.task_id === task.id).forEach(a => {
+      if (!newEmpGroups[a.employee_id]) newEmpGroups[a.employee_id] = new Set()
+      newEmpGroups[a.employee_id].add(a.group_id)
+    })
+    setEmpGroups(newEmpGroups)
+
+    const newEmpParams: Record<string, Set<string>> = {}
+    localParamAssignments.filter(a => a.task_id === task.id).forEach(a => {
+      if (!newEmpParams[a.employee_id]) newEmpParams[a.employee_id] = new Set()
+      newEmpParams[a.employee_id].add(a.parameter_id)
+    })
+    setEmpParams(newEmpParams)
+
+    // Expand cards that have any assignment
+    setExpandedEmpCards(new Set([
+      ...Object.keys(newEmpGroups),
+      ...Object.keys(newEmpParams),
+    ]))
+
+    setAssignModal({ taskId: task.id, taskNumber: task.task_number, taskTitle: task.title, serviceId: task.service_id })
+  }
+
+  async function saveAssignments() {
+    if (!assignModal) return
+    setAssignSaving(true)
+    const tid = assignModal.taskId
+
+    // 1. Save task-level employee assignments
+    await supabase.from('task_assignments').delete().eq('task_id', tid)
+    if (assignSelected.size > 0) {
+      await supabase.from('task_assignments').insert(
+        [...assignSelected].map(empId => ({ task_id: tid, employee_id: empId }))
+      )
+    }
+    setLocalAssignments(prev => [
+      ...prev.filter(a => a.task_id !== tid),
+      ...[...assignSelected].map(empId => ({ task_id: tid, employee_id: empId }))
+    ])
+
+    // 2. Active groups = union of all groups assigned to anyone
+    const activeGroupIds = new Set<string>()
+    Object.values(empGroups).forEach(set => set.forEach(gId => activeGroupIds.add(gId)))
+    setSelectedGroups(activeGroupIds)
+
+    // Save group selections (graceful — table may not exist)
+    try {
+      await supabase.from('task_groups').delete().eq('task_id', tid)
+      if (activeGroupIds.size > 0) {
+        await supabase.from('task_groups').insert(
+          [...activeGroupIds].map(gId => ({ task_id: tid, group_id: gId }))
+        )
+      }
+      setLocalTaskGroups(prev => [
+        ...prev.filter(tg => tg.task_id !== tid),
+        ...[...activeGroupIds].map(gId => ({ task_id: tid, group_id: gId }))
+      ])
+    } catch { /* task_groups table may not exist yet */ }
+
+    // 3. Save task_group_assignments rows (many per group allowed)
+    try {
+      await supabase.from('task_group_assignments').delete().eq('task_id', tid)
+      const groupRows: { task_id: string; group_id: string; employee_id: string }[] = []
+      Object.entries(empGroups).forEach(([empId, gSet]) => {
+        gSet.forEach(gId => groupRows.push({ task_id: tid, group_id: gId, employee_id: empId }))
+      })
+      if (groupRows.length > 0) {
+        await supabase.from('task_group_assignments').insert(groupRows)
+      }
+      setLocalGroupAssignments(prev => [
+        ...prev.filter(a => a.task_id !== tid),
+        ...groupRows
+      ])
+    } catch { /* task_group_assignments table may not exist yet */ }
+
+    // 4. Save task_parameter_assignments rows (many per param allowed)
+    try {
+      await supabase.from('task_parameter_assignments').delete().eq('task_id', tid)
+      const paramRows: { task_id: string; parameter_id: string; employee_id: string }[] = []
+      Object.entries(empParams).forEach(([empId, pSet]) => {
+        pSet.forEach(pId => paramRows.push({ task_id: tid, parameter_id: pId, employee_id: empId }))
+      })
+      if (paramRows.length > 0) {
+        await supabase.from('task_parameter_assignments').insert(paramRows)
+      }
+      setLocalParamAssignments(prev => [
+        ...prev.filter(a => a.task_id !== tid),
+        ...paramRows
+      ])
+    } catch { /* task_parameter_assignments table may not exist yet */ }
+
+    setAssignSaving(false)
+    setAssignModal(null)
+  }
+
+  async function handleCancellation() {
+    if (!cancelModal) return
+    setCancelSaving(true)
+    const lossAmt = parseFloat(cancelForm.loss_amount) || 0
+
+    // 1. Update task with cancellation metadata
+    await supabase.from('tasks').update({
+      status:               'cancelled',
+      cancelled_by:         cancelForm.cancelled_by,
+      cancellation_notes:   cancelForm.notes || null,
+      honor_contributions:  cancelForm.honor_contributions,
+      loss_amount:          lossAmt,
+      completion_pct:       cancelForm.completion_pct,
+    }).eq('id', cancelModal.id)
+
+    // 2. If NOT honoring contributions → remove contribution scores for this task
+    if (!cancelForm.honor_contributions) {
+      await supabase.from('contribution_scores').delete().eq('task_id', cancelModal.id)
+    }
+
+    // 3. Optionally record as company loss in cashbook
+    if (cancelForm.record_cashbook && lossAmt > 0) {
+      const who = cancelForm.cancelled_by === 'client' ? 'Client cancellation'
+        : cancelForm.cancelled_by === 'no_show' ? 'No-show'
+        : 'Company decision'
+      const desc = `[JOB LOSS] ${cancelModal.title}` +
+        (cancelModal.client?.name ? ` — ${cancelModal.client.name}` : '') +
+        ` (${cancelForm.completion_pct}% done, ${who})` +
+        (cancelForm.notes ? ` — ${cancelForm.notes}` : '')
+      await supabase.from('cashbook_entries').insert({
+        type:        'outflow',
+        amount_inr:  lossAmt,
+        entry_date:  cancelModal.task_date,
+        description: desc,
+      })
+    }
+
+    // 4. Update local state
+    setTasks(prev => prev.map(t => t.id === cancelModal.id ? {
+      ...t,
+      status:               'cancelled',
+      cancelled_by:         cancelForm.cancelled_by,
+      cancellation_notes:   cancelForm.notes || null,
+      honor_contributions:  cancelForm.honor_contributions,
+      loss_amount:          lossAmt,
+      completion_pct:       cancelForm.completion_pct,
+    } : t))
+
+    setCancelModal(null)
+    setCancelSaving(false)
+  }
+
+  const filteredTasks = useMemo(() => {
+    let t = tasks
+    if (filterStatus)  t = t.filter(x => x.status === filterStatus)
+    if (filterClient)  t = t.filter(x => x.client?.id === filterClient)
+    if (filterService) t = t.filter(x => x.service?.id === filterService)
+    if (searchQ) {
+      const q = searchQ.toLowerCase()
+      t = t.filter(x =>
+        x.title?.toLowerCase().includes(q) ||
+        x.client?.name?.toLowerCase().includes(q) ||
+        x.service?.name?.toLowerCase().includes(q) ||
+        taskCodeMatches(x, searchQ)
+      )
+    }
+    if (filterAssignee) {
+      t = t.filter(task =>
+        localAssignments.some(a => a.task_id === task.id && a.employee_id === filterAssignee) ||
+        localGroupAssignments.some(a => a.task_id === task.id && a.employee_id === filterAssignee) ||
+        localParamAssignments.some(a => a.task_id === task.id && a.employee_id === filterAssignee)
+      )
+    }
+    if (sortBy === 'date_asc')    t = [...t].sort((a, b) => a.task_date.localeCompare(b.task_date))
+    if (sortBy === 'date_desc')   t = [...t].sort((a, b) => b.task_date.localeCompare(a.task_date))
+    if (sortBy === 'amount_desc') t = [...t].sort((a, b) => (b.billing_amount_inr || 0) - (a.billing_amount_inr || 0))
+    if (sortBy === 'client')      t = [...t].sort((a, b) => (a.client?.name || '').localeCompare(b.client?.name || ''))
+    return t
+  }, [tasks, filterStatus, filterClient, filterService, searchQ, sortBy, filterAssignee, localAssignments, localGroupAssignments, localParamAssignments])
+
+  // For employee role, only show their assigned tasks
+  const visibleTasks = useMemo(() => {
+    if (role === 'employee' && currentEmployee) {
+      const myTaskIds = new Set(localAssignments.filter(a => a.employee_id === currentEmployee.id).map(a => a.task_id))
+      return filteredTasks.filter(t => myTaskIds.has(t.id))
+    }
+    return filteredTasks
+  }, [role, currentEmployee, localAssignments, filteredTasks])
+
+  const hasActiveFilters = !!(filterStatus || filterClient || filterService || searchQ || sortBy !== 'date_desc' || !!filterAssignee)
+  // Count of active filters visible in the Filter popover (search has its own bar; status has chips)
+  const activeFilterCount = [filterClient, filterService, filterAssignee, sortBy !== 'date_desc' ? 'sort' : ''].filter(Boolean).length
+
+  const inputCls = 'w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50'
+
+  return (
+    <div>
+      <Header
+        title="Tasks"
+        subtitle={showTrash ? `${trash.length} item${trash.length !== 1 ? 's' : ''} in Trash` : `${tasks.length} total tasks`}
+        actions={
+          <div className="flex items-center gap-2">
+            {!showTrash && (role === 'super_admin' || role === 'accounts' || role === 'team_lead') && (
+              <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90 transition-opacity">
+                <Plus className="w-4 h-4" /> Add Task
+              </button>
+            )}
+            {/* More menu — Workload + Trash */}
+            <div ref={moreRef} className="relative">
+              <button
+                onClick={() => setMoreOpen(v => !v)}
+                aria-label="More actions"
+                title="More"
+                className={`flex items-center justify-center w-9 h-9 rounded-lg border transition-colors ${
+                  moreOpen
+                    ? 'bg-white/10 border-white/20 text-foreground'
+                    : 'bg-secondary border-transparent text-muted-foreground hover:text-foreground hover:border-white/15'
+                }`}
+              >
+                <MoreVertical className="w-4 h-4" />
+                {trash.length > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-500/90 text-white text-[9px] leading-none rounded-full px-1.5 py-0.5 font-semibold">
+                    {trash.length}
+                  </span>
+                )}
+              </button>
+              {moreOpen && (
+                <div className="absolute right-0 top-full mt-1.5 z-50 bg-[#0d1117] border border-white/10 rounded-xl shadow-2xl p-1.5 min-w-[220px]">
+                  <button
+                    onClick={() => { setShowWorkload(true); setMoreOpen(false) }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-foreground hover:bg-white/5 transition-colors text-left"
+                  >
+                    <Users className="w-4 h-4 text-blue-400" />
+                    Workload Report
+                  </button>
+                  <button
+                    onClick={() => { setShowTrash(v => !v); setMoreOpen(false) }}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors text-left ${
+                      showTrash ? 'bg-red-500/10 text-red-400' : 'text-foreground hover:bg-white/5'
+                    }`}
+                  >
+                    <Trash2 className="w-4 h-4 text-red-400" />
+                    <span className="flex-1">Trash</span>
+                    {trash.length > 0 && (
+                      <span className="bg-red-500/20 text-red-400 text-[10px] rounded-full px-1.5 py-0.5 font-semibold">
+                        {trash.length}
+                      </span>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        }
+      />
+
+      {/* ── Trash View ── */}
+      {showTrash && (
+        <div className="p-6 space-y-4">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground bg-red-500/5 border border-red-500/15 rounded-xl px-4 py-3">
+            <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
+            Items in Trash are automatically deleted after <strong className="text-foreground mx-1">45 days</strong>. Restore within this window to recover.
+          </div>
+          {trash.length === 0 ? (
+            <div className="text-center py-16 text-muted-foreground">
+              <Trash2 className="w-10 h-10 mx-auto mb-3 opacity-20" />
+              <p className="text-sm">Trash is empty</p>
+            </div>
+          ) : (
+            <div className="bg-card border border-border rounded-xl overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-secondary/50">
+                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Task</th>
+                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Client</th>
+                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Service</th>
+                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Deleted</th>
+                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Expires</th>
+                    <th className="px-4 py-3"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {trash.map(task => {
+                    const deletedDate = new Date(task.deleted_at)
+                    const expiresDate = new Date(deletedDate.getTime() + 45 * 24 * 60 * 60 * 1000)
+                    const daysLeft = Math.ceil((expiresDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+                    return (
+                      <tr key={task.id} className="hover:bg-secondary/20 transition-colors opacity-70 hover:opacity-100">
+                        <td className="px-4 py-3">
+                          <p className="font-medium text-foreground line-through decoration-muted-foreground">{task.title}</p>
+                          {task.description && <p className="text-xs text-muted-foreground truncate max-w-[180px]">{task.description}</p>}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">{task.client?.name || '—'}</td>
+                        <td className="px-4 py-3 text-muted-foreground">{task.service?.name || '—'}</td>
+                        <td className="px-4 py-3 text-muted-foreground">{deletedDate.toLocaleDateString('en-GB')}</td>
+                        <td className="px-4 py-3">
+                          <span className={`text-xs font-medium ${daysLeft <= 7 ? 'text-red-400' : daysLeft <= 14 ? 'text-amber-400' : 'text-muted-foreground'}`}>
+                            {daysLeft}d left
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2 justify-end">
+                            <button onClick={() => handleRestore(task.id)}
+                              className="text-xs px-3 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 font-medium transition-colors">
+                              Restore
+                            </button>
+                            <button onClick={() => setDeleteConfirm(task.id)}
+                              className="text-xs px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 font-medium transition-colors">
+                              Delete Forever
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Main Task List ── */}
+      {!showTrash && <div className="p-6 space-y-4">
+        {/* Filters — sticky toolbar (sits below the Header which is sticky at top-0) */}
+        <div className="sticky top-[68px] z-20 bg-background pt-2 pb-3 -mt-2 space-y-2">
+          {/* Toolbar: Search · Filter · View · Select */}
+          <div className="flex items-center gap-2">
+            {/* Search bar — takes available space */}
+            <div className="flex items-center gap-2 bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2 flex-1 min-w-0">
+              <Search size={14} className="text-muted-foreground shrink-0" />
+              <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search by title, client, service, or task code (T-…)…" className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60 min-w-0" />
+              {searchQ && <button onClick={() => setSearchQ('')}><X size={12} className="text-muted-foreground" /></button>}
+            </div>
+
+            {/* Filter popover */}
+            <div ref={filterRef} className="relative shrink-0">
+              <button
+                onClick={() => setFilterOpen(v => !v)}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border transition-colors ${
+                  filterOpen || activeFilterCount > 0
+                    ? 'bg-violet-500/15 border-violet-500/40 text-violet-300'
+                    : 'bg-[#0d1117] border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
+                }`}
+              >
+                <Filter className="w-3.5 h-3.5" />
+                Filter
+                {activeFilterCount > 0 && (
+                  <span className="bg-violet-500/30 text-violet-200 text-[10px] rounded-full px-1.5 py-0.5 font-semibold leading-none">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
+              {filterOpen && (
+                <div className="absolute right-0 top-full mt-1.5 z-50 bg-[#0d1117] border border-white/10 rounded-xl shadow-2xl p-3 min-w-[260px] space-y-2.5">
+                  <div>
+                    <label className="block text-[11px] uppercase tracking-wide text-muted-foreground/70 mb-1">Client</label>
+                    <FilterDropdown
+                      options={[...new Map(tasks.filter(t => t.client?.id).map(t => [t.client!.id, t.client!])).values()]
+                        .map(c => ({ value: c.id, label: c.name }))}
+                      value={filterClient}
+                      onChange={setFilterClient}
+                      placeholder="All Clients"
+                      sortKey="clients"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] uppercase tracking-wide text-muted-foreground/70 mb-1">Service</label>
+                    <FilterDropdown
+                      options={[...new Map(tasks.filter(t => t.service?.id).map(t => [t.service!.id, t.service!])).values()]
+                        .map(s => ({ value: s.id, label: s.name }))}
+                      value={filterService}
+                      onChange={setFilterService}
+                      placeholder="All Services"
+                      sortKey="services"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] uppercase tracking-wide text-muted-foreground/70 mb-1">Assignee</label>
+                    <AppSelect
+                      value={filterAssignee}
+                      onChange={e => setFilterAssignee(e.target.value)}
+                    >
+                      <option value="">All assignees</option>
+                      {employees.map(emp => (
+                        <option key={emp.id} value={emp.id}>{dn(emp)}</option>
+                      ))}
+                    </AppSelect>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] uppercase tracking-wide text-muted-foreground/70 mb-1">Sort by</label>
+                    <FilterDropdown
+                      options={[
+                        { value: 'date_desc',   label: 'Newest First' },
+                        { value: 'date_asc',    label: 'Oldest First' },
+                        { value: 'amount_desc', label: 'Amount (High→Low)' },
+                        { value: 'client',      label: 'Client A→Z' },
+                      ]}
+                      value={sortBy === 'date_desc' ? '' : sortBy}
+                      onChange={v => setSortBy((v || 'date_desc') as typeof sortBy)}
+                      placeholder="Newest First"
+                    />
+                  </div>
+                  {hasActiveFilters && (
+                    <button
+                      onClick={() => { setFilterStatus(''); setFilterClient(''); setFilterService(''); setSearchQ(''); setSortBy('date_desc'); setFilterAssignee('') }}
+                      className="w-full mt-1 px-3 py-2 rounded-lg text-xs font-medium bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 border border-violet-500/20 transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      <X size={12} /> Clear all filters
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* View popover */}
+            <div ref={viewRef} className="relative shrink-0">
+              <button
+                onClick={() => setViewOpen(v => !v)}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border transition-colors ${
+                  viewOpen
+                    ? 'bg-white/10 border-white/20 text-foreground'
+                    : 'bg-[#0d1117] border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
+                }`}
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                View
+                <span className="text-muted-foreground/70 text-xs capitalize">· {viewMode}</span>
+              </button>
+              {viewOpen && (
+                <div className="absolute right-0 top-full mt-1.5 z-50 bg-[#0d1117] border border-white/10 rounded-xl shadow-2xl p-3 min-w-[260px] space-y-3">
+                  {/* View mode tap-targets */}
+                  <div className="grid grid-cols-3 gap-2">
+                    {([
+                      { key: 'table',    label: 'Table',    Icon: List },
+                      { key: 'board',    label: 'Board',    Icon: LayoutGrid },
+                      { key: 'calendar', label: 'Calendar', Icon: CalendarDays },
+                    ] as const).map(({ key, label, Icon }) => (
+                      <button
+                        key={key}
+                        onClick={() => setViewMode(key)}
+                        className={`flex flex-col items-center gap-1 px-2 py-2.5 rounded-lg border text-xs font-medium transition-colors ${
+                          viewMode === key
+                            ? 'bg-violet-500/15 border-violet-500/40 text-violet-300'
+                            : 'bg-white/[0.02] border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
+                        }`}
+                      >
+                        <Icon className="w-4 h-4" />
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Board: group by */}
+                  {viewMode === 'board' && (
+                    <div>
+                      <label className="block text-[11px] uppercase tracking-wide text-muted-foreground/70 mb-1">Group by</label>
+                      <AppSelect
+                        value={boardGroupBy}
+                        onChange={e => setBoardGroupBy(e.target.value as typeof boardGroupBy)}
+                      >
+                        <option value="employee">Employee</option>
+                        <option value="client">Client</option>
+                        <option value="service">Service</option>
+                        <option value="status">Status</option>
+                        <option value="date">Date</option>
+                      </AppSelect>
+                    </div>
+                  )}
+
+                  {/* Board + date: granularity */}
+                  {viewMode === 'board' && boardGroupBy === 'date' && (
+                    <div>
+                      <label className="block text-[11px] uppercase tracking-wide text-muted-foreground/70 mb-1">Date granularity</label>
+                      <AppSelect
+                        value={boardDateGranularity}
+                        onChange={e => setBoardDateGranularity(e.target.value as typeof boardDateGranularity)}
+                      >
+                        <option value="preset">Today · Week · Month</option>
+                        <option value="daily">By day</option>
+                        <option value="weekly">By week</option>
+                        <option value="monthly">By month</option>
+                      </AppSelect>
+                    </div>
+                  )}
+
+                  {/* Table: inline edit toggle */}
+                  {viewMode === 'table' && (
+                    <button
+                      onClick={() => setInlineEditMode(m => !m)}
+                      className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm border transition-colors ${
+                        inlineEditMode
+                          ? 'bg-blue-500/15 border-blue-500/40 text-blue-300'
+                          : 'bg-white/[0.02] border-white/10 text-foreground hover:border-white/20'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <Pencil className="w-3.5 h-3.5" />
+                        Inline edit
+                      </span>
+                      {inlineEditMode && <Check className="w-3.5 h-3.5" />}
+                    </button>
+                  )}
+
+                  <p className="text-[11px] text-muted-foreground/60 leading-snug pt-1 border-t border-white/5">
+                    {viewMode === 'table'    && 'Spreadsheet-style rows. Toggle inline edit to update cells directly.'}
+                    {viewMode === 'board'    && 'Kanban-style columns grouped by your chosen dimension.'}
+                    {viewMode === 'calendar' && 'Monthly calendar with tasks on their scheduled dates.'}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Bulk select toggle — stays visible */}
+            <button
+              onClick={() => { setBulkMode(m => !m); setSelectedTasks(new Set()) }}
+              className={`shrink-0 px-3 py-2 rounded-xl text-sm font-medium border transition-colors flex items-center gap-1.5 ${
+                bulkMode
+                  ? 'bg-violet-500/20 border-violet-500/40 text-violet-300'
+                  : 'bg-[#0d1117] border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
+              }`}>
+              {bulkMode ? <><X size={12} /> Exit Select</> : <>Select</>}
+            </button>
+          </div>
+
+          {/* Status filter chips */}
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={() => setFilterStatus('')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${!filterStatus ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}>All</button>
+            {STATUSES.map(s => (
+              <button key={s} onClick={() => setFilterStatus(s === filterStatus ? '' : s)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filterStatus === s ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}>
+                {getStatusLabel(s)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Table */}
+        {viewMode === 'table' && (
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-secondary/50">
+                {/* Bulk select checkbox column */}
+                {bulkMode && (
+                  <th className="w-10 pl-4 pr-2 py-3">
+                    <input
+                      type="checkbox"
+                      checked={visibleTasks.length > 0 && visibleTasks.every(t => selectedTasks.has(t.id))}
+                      onChange={e => {
+                        if (e.target.checked) setSelectedTasks(new Set(visibleTasks.map(t => t.id)))
+                        else setSelectedTasks(new Set())
+                      }}
+                      className="w-4 h-4 rounded accent-violet-500 cursor-pointer"
+                    />
+                  </th>
+                )}
+                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Task</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">
+                  <button onClick={() => setSortBy(s => s === 'client' ? 'date_desc' : 'client')}
+                    className={`flex items-center gap-1 hover:text-foreground transition-colors ${sortBy === 'client' ? 'text-violet-400' : ''}`}>
+                    Client
+                    <span className={`text-[10px] ${sortBy === 'client' ? 'opacity-100' : 'opacity-30'}`}>↕</span>
+                  </button>
+                </th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Service</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">
+                  <button
+                    onClick={() => setSortBy(s => s === 'date_desc' ? 'date_asc' : 'date_desc')}
+                    className={`flex items-center gap-1 hover:text-foreground transition-colors ${sortBy === 'date_desc' || sortBy === 'date_asc' ? 'text-violet-400' : ''}`}>
+                    Date
+                    <span className="text-[10px]">
+                      {sortBy === 'date_asc' ? '↑' : sortBy === 'date_desc' ? '↓' : <span className="opacity-30">↕</span>}
+                    </span>
+                  </button>
+                </th>
+                <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground">
+                  <button
+                    onClick={() => setSortBy(s => s === 'amount_desc' ? 'date_desc' : 'amount_desc')}
+                    className={`flex items-center gap-1 ml-auto hover:text-foreground transition-colors ${sortBy === 'amount_desc' ? 'text-violet-400' : ''}`}>
+                    Billing
+                    <span className={`text-[10px] ${sortBy === 'amount_desc' ? 'opacity-100' : 'opacity-30'}`}>↓</span>
+                  </button>
+                </th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Status</th>
+                <th className="w-16 px-4 py-3"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {visibleTasks.length === 0 && <tr><td colSpan={bulkMode ? 8 : 7} className="px-4 py-10 text-center text-sm text-muted-foreground">No tasks found</td></tr>}
+              {visibleTasks.map(task => (
+                <tr key={task.id}
+                  className={`hover:bg-secondary/30 transition-colors group ${inlineEditMode ? '' : 'cursor-pointer'} ${bulkMode && selectedTasks.has(task.id) ? 'bg-violet-500/[0.07]' : ''}`}
+                  onClick={
+                    bulkMode
+                      ? () => setSelectedTasks(prev => {
+                          const next = new Set(prev)
+                          if (next.has(task.id)) next.delete(task.id)
+                          else next.add(task.id)
+                          return next
+                        })
+                      : inlineEditMode
+                        ? undefined
+                        : () => openEdit(task)
+                  }
+                >
+                  {bulkMode && (
+                    <td className="w-10 pl-4 pr-2 py-3" onClick={e => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selectedTasks.has(task.id)}
+                        onChange={() => setSelectedTasks(prev => {
+                          const next = new Set(prev)
+                          if (next.has(task.id)) next.delete(task.id)
+                          else next.add(task.id)
+                          return next
+                        })}
+                        className="w-4 h-4 rounded accent-violet-500 cursor-pointer"
+                      />
+                    </td>
+                  )}
+                  <td className="px-4 py-3" onClick={e => inlineEditMode && e.stopPropagation()}>
+                    {inlineEditMode ? (
+                      <input
+                        type="text"
+                        defaultValue={task.title}
+                        onBlur={async e => {
+                          const val = e.target.value.trim()
+                          if (val && val !== task.title) {
+                            await supabase.from('tasks').update({ title: val }).eq('id', task.id)
+                            setTasks(prev => prev.map(t => t.id === task.id ? { ...t, title: val } : t))
+                          }
+                        }}
+                        onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                        className="w-full bg-secondary border border-border rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-500/50"
+                      />
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          title={`Task code · click to copy ${taskCode(task)}`}
+                          onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(taskCode(task)) }}
+                          className="text-[10px] font-mono font-semibold text-muted-foreground/60 bg-white/[0.04] border border-white/10 px-1.5 py-0.5 rounded shrink-0 cursor-pointer hover:text-foreground hover:border-white/25 transition-colors"
+                        >
+                          {taskCode(task)}
+                        </span>
+                        <p className="font-medium text-foreground">{task.title}</p>
+                        {task.is_recurring && (
+                          <span title="Recurring task">
+                            <RefreshCw className="w-3 h-3 text-primary/60 flex-shrink-0" />
+                          </span>
+                        )}
+                        {task.recurring_parent_id && (
+                          <span title="Recurring instance">
+                            <RefreshCw className="w-3 h-3 text-muted-foreground/50 flex-shrink-0" />
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {task.description && <p className="text-xs text-muted-foreground truncate max-w-[200px]">{task.description}</p>}
+                    {/* Assignment indicators */}
+                    {(() => {
+                      const taskEmps = localAssignments
+                        .filter(a => a.task_id === task.id)
+                        .map(a => employees.find(e => e.id === a.employee_id))
+                        .filter(Boolean)
+                      const taskGroupIds = localGroupAssignments
+                        .filter(a => a.task_id === task.id)
+                        .map(a => a.group_id)
+                      const taskParamIds = localParamAssignments
+                        .filter(a => a.task_id === task.id)
+                        .map(a => a.parameter_id)
+                      if (!taskEmps.length && !taskGroupIds.length && !taskParamIds.length && !inlineEditMode) return null
+                      return (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {taskEmps.map(emp => (
+                            <span key={emp!.id} className="inline-flex items-center gap-1 text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded-full">
+                              {emp!.cqid}
+                            </span>
+                          ))}
+                          {taskGroupIds.map(gId => {
+                            const g = groups.find(x => x.id === gId)
+                            const assignedEmp = employees.find(e => e.id === localGroupAssignments.find(a => a.task_id === task.id && a.group_id === gId)?.employee_id)
+                            if (!g) return null
+                            return (
+                              <span key={gId} className="inline-flex items-center gap-1 text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded-full">
+                                <Layers className="w-2.5 h-2.5" />{g.name}{assignedEmp ? ` · ${assignedEmp.cqid}` : ''}
+                              </span>
+                            )
+                          })}
+                          {taskParamIds.length > 0 && (
+                            <span className="inline-flex items-center gap-1 text-[10px] bg-purple-500/[0.07] text-purple-300/60 border border-purple-500/10 px-1.5 py-0.5 rounded-full">
+                              {taskParamIds.length} param{taskParamIds.length !== 1 ? 's' : ''}
+                            </span>
+                          )}
+                          {inlineEditMode && (
+                            <button
+                              onClick={e => { e.stopPropagation(); openAssignModal(task) }}
+                              className="text-[10px] inline-flex items-center gap-0.5 bg-blue-500/10 text-blue-400 border border-dashed border-blue-500/30 px-1.5 py-0.5 rounded-full hover:bg-blue-500/15 transition-colors"
+                            >
+                              <Users className="w-2.5 h-2.5" />+ assign
+                            </button>
+                          )}
+                        </div>
+                      )
+                    })()}
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground" onClick={e => inlineEditMode && e.stopPropagation()}>
+                    {inlineEditMode ? (
+                      <select
+                        value={task.client_id}
+                        onChange={async e => {
+                          const newId = e.target.value
+                          await supabase.from('tasks').update({ client_id: newId }).eq('id', task.id)
+                          const c = clients.find(x => x.id === newId)
+                          setTasks(prev => prev.map(t => t.id === task.id ? { ...t, client_id: newId, client: c ? { id: c.id, name: c.name, code: c.code } : undefined } : t))
+                        }}
+                        className="bg-secondary border border-border rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-500/50 w-full"
+                      >
+                        {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </select>
+                    ) : (
+                      task.client?.name || '—'
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground" onClick={e => inlineEditMode && e.stopPropagation()}>
+                    {inlineEditMode ? (
+                      <select
+                        value={task.service_id}
+                        onChange={async e => {
+                          const newId = e.target.value
+                          await supabase.from('tasks').update({ service_id: newId }).eq('id', task.id)
+                          const s = sortedServices.find(x => x.id === newId)
+                          setTasks(prev => prev.map(t => t.id === task.id ? { ...t, service_id: newId, service: s ? { id: s.id, name: s.name } : undefined } : t))
+                        }}
+                        className="bg-secondary border border-border rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-500/50 w-full"
+                      >
+                        {sortedServices.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                    ) : (
+                      task.service?.name || '—'
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground" onClick={e => inlineEditMode && e.stopPropagation()}>
+                    {inlineEditMode ? (
+                      <input
+                        type="date"
+                        defaultValue={task.task_date}
+                        onBlur={async e => {
+                          const val = e.target.value
+                          if (val && val !== task.task_date) {
+                            await supabase.from('tasks').update({ task_date: val }).eq('id', task.id)
+                            setTasks(prev => prev.map(t => t.id === task.id ? { ...t, task_date: val } : t))
+                          }
+                        }}
+                        className="bg-secondary border border-border rounded px-2 py-1 text-xs focus:outline-none focus:border-violet-500/50"
+                      />
+                    ) : (
+                      task.task_date
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right font-medium" onClick={e => inlineEditMode && e.stopPropagation()}>
+                    {role !== 'employee' && role !== 'team_lead' && (
+                      inlineEditMode ? (
+                        <input
+                          type="number"
+                          defaultValue={task.billing_amount}
+                          onBlur={async e => {
+                            const val = parseFloat(e.target.value) || 0
+                            if (val !== task.billing_amount) {
+                              await supabase.from('tasks').update({ billing_amount: val }).eq('id', task.id)
+                              setTasks(prev => prev.map(t => t.id === task.id ? { ...t, billing_amount: val } : t))
+                            }
+                          }}
+                          className="w-24 bg-secondary border border-border rounded px-2 py-1 text-sm text-right focus:outline-none focus:border-violet-500/50"
+                        />
+                      ) : (
+                        <>
+                          {formatCurrency(task.billing_amount, task.currency as Currency)}
+                          {task.quantity && task.quantity > 1 && <span className="text-xs text-muted-foreground ml-1">×{task.quantity}</span>}
+                        </>
+                      )
+                    )}
+                  </td>
+                  <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                    <select value={task.status} onChange={e => updateStatus(task.id, e.target.value)} className={`text-xs px-2 py-1 rounded-md border-0 cursor-pointer ${getStatusColor(task.status)}`} style={{ background: 'transparent' }}>
+                      {MANUAL_STATUSES.map(s => <option key={s} value={s} className="bg-card text-foreground">{getStatusLabel(s)}</option>)}
+                      {task.status === 'invoiced' && <option value="invoiced" className="bg-card text-foreground" disabled>🔒 Invoiced (system)</option>}
+                    </select>
+                    {task.status === 'cancelled' && task.cancelled_by && (
+                      <div className="mt-1 flex items-center gap-1 flex-wrap">
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">
+                          {task.cancelled_by === 'client' ? '👤 Client' : task.cancelled_by === 'no_show' ? '🚫 No-show' : '🏢 Company'}
+                        </span>
+                        {(task.completion_pct || 0) > 0 && (
+                          <span className="text-[9px] text-muted-foreground">{task.completion_pct}% done</span>
+                        )}
+                        {(task.loss_amount || 0) > 0 && (
+                          <span className="text-[9px] text-red-400 font-medium">
+                            Loss {formatCurrency(task.loss_amount!, task.currency as Currency)}
+                          </span>
+                        )}
+                        {task.honor_contributions && (
+                          <span title="Employee contributions honored" className="text-[9px] text-green-400">
+                            <Users className="inline w-2.5 h-2.5" /> Paid
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {(role === 'super_admin' || role === 'accounts' || role === 'team_lead') && (
+                        <button
+                          onClick={e => { e.stopPropagation(); openAssignModal(task) }}
+                          title="Assign team"
+                          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-blue-400 transition-colors px-1.5 py-1 rounded-lg hover:bg-blue-500/10">
+                          <Users className="w-3.5 h-3.5" />
+                          {(() => {
+                            const count = localAssignments.filter(a => a.task_id === task.id).length
+                            return count > 0 ? <span className="font-semibold text-blue-400">{count}</span> : null
+                          })()}
+                        </button>
+                      )}
+                      <button onClick={e => { e.stopPropagation(); openEdit(task) }} title="Edit task"
+                        className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      {role === 'super_admin' && (
+                        <a
+                          href={`/dashboard/settings`}
+                          title={`Edit ${task.client?.name} in Settings`}
+                          onClick={e => e.stopPropagation()}
+                          className="p-1 rounded hover:bg-white/[0.06] text-muted-foreground hover:text-violet-400 transition-colors"
+                        >
+                          <ExternalLink size={12} />
+                        </a>
+                      )}
+                      <button onClick={e => { e.stopPropagation(); setDeleteConfirm(task.id) }} title="Delete task"
+                        className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        )}
+
+        {/* Board View */}
+        {viewMode === 'board' && (() => {
+          type BoardSection = { label: string; tasks: typeof visibleTasks; paramName?: string }
+          type BoardColumn = {
+            key: string
+            badge: string       // small badge text (CQID, status icon, etc.)
+            title: string       // column title
+            subtitle?: string   // optional subtitle (date range, etc.)
+            color: string       // badge bg color class
+            sections: BoardSection[]
+            totalCount: number
+          }
+
+          // ── Compute columns based on grouping ──
+          let boardColumns: BoardColumn[] = []
+
+          if (boardGroupBy === 'employee') {
+            const visibleTaskIds = new Set(visibleTasks.map(t => t.id))
+            const boardEmpIds = new Set([
+              ...localAssignments.filter(a => visibleTaskIds.has(a.task_id)).map(a => a.employee_id),
+              ...localGroupAssignments.filter(a => visibleTaskIds.has(a.task_id)).map(a => a.employee_id),
+              ...localParamAssignments.filter(a => visibleTaskIds.has(a.task_id)).map(a => a.employee_id),
+            ])
+            boardColumns = employees.filter(e => boardEmpIds.has(e.id)).map(emp => {
+              const taskAssigned = visibleTasks.filter(t => localAssignments.some(a => a.task_id === t.id && a.employee_id === emp.id))
+              const groupSections = groups
+                .map(g => ({
+                  label: g.name,
+                  tasks: visibleTasks.filter(t => localGroupAssignments.some(a => a.task_id === t.id && a.group_id === g.id && a.employee_id === emp.id)),
+                }))
+                .filter(s => s.tasks.length > 0)
+              const myParamRows = localParamAssignments.filter(a => a.employee_id === emp.id && visibleTaskIds.has(a.task_id))
+              const paramSections = parameters
+                .filter(p => myParamRows.some(r => r.parameter_id === p.id))
+                .map(p => ({
+                  label: 'Parameters',
+                  tasks: visibleTasks.filter(t => myParamRows.some(r => r.task_id === t.id && r.parameter_id === p.id)),
+                  paramName: p.name,
+                }))
+              const sections: BoardSection[] = [
+                { label: 'Tasks', tasks: taskAssigned },
+                ...groupSections,
+                ...paramSections,
+              ]
+              return {
+                key: emp.id,
+                badge: emp.cqid.replace('CQID', ''),
+                title: dn(emp),
+                subtitle: emp.cqid,
+                color: 'bg-blue-500/15 border-blue-500/20 text-blue-400',
+                sections,
+                totalCount: sections.reduce((s, sec) => s + sec.tasks.length, 0),
+              }
+            })
+            // Unassigned column
+            const assignedTaskIds = new Set([
+              ...localAssignments.map(a => a.task_id),
+              ...localGroupAssignments.map(a => a.task_id),
+              ...localParamAssignments.map(a => a.task_id),
+            ])
+            const unassigned = visibleTasks.filter(t => !assignedTaskIds.has(t.id))
+            if (unassigned.length > 0) {
+              boardColumns.push({
+                key: 'unassigned',
+                badge: '—',
+                title: 'Unassigned',
+                color: 'bg-white/[0.06] border-white/10 text-muted-foreground',
+                sections: [{ label: 'Tasks', tasks: unassigned }],
+                totalCount: unassigned.length,
+              })
+            }
+          }
+          else if (boardGroupBy === 'client') {
+            const byClient = new Map<string, typeof visibleTasks>()
+            visibleTasks.forEach(t => {
+              const k = t.client_id || 'unknown'
+              if (!byClient.has(k)) byClient.set(k, [])
+              byClient.get(k)!.push(t)
+            })
+            boardColumns = [...byClient.entries()].map(([cId, tasks]) => {
+              const c = clients.find(x => x.id === cId)
+              return {
+                key: cId,
+                badge: c?.code || '?',
+                title: c?.name || 'Unknown client',
+                color: 'bg-violet-500/15 border-violet-500/20 text-violet-400',
+                sections: [{ label: 'Tasks', tasks }],
+                totalCount: tasks.length,
+              }
+            }).sort((a, b) => b.totalCount - a.totalCount)
+          }
+          else if (boardGroupBy === 'service') {
+            const byService = new Map<string, typeof visibleTasks>()
+            visibleTasks.forEach(t => {
+              const k = t.service_id || 'unknown'
+              if (!byService.has(k)) byService.set(k, [])
+              byService.get(k)!.push(t)
+            })
+            boardColumns = [...byService.entries()].map(([sId, tasks]) => {
+              const s = sortedServices.find(x => x.id === sId)
+              return {
+                key: sId,
+                badge: (s?.name || '?').slice(0, 2).toUpperCase(),
+                title: s?.name || 'Unknown service',
+                color: 'bg-cyan-500/15 border-cyan-500/20 text-cyan-400',
+                sections: [{ label: 'Tasks', tasks }],
+                totalCount: tasks.length,
+              }
+            }).sort((a, b) => b.totalCount - a.totalCount)
+          }
+          else if (boardGroupBy === 'status') {
+            const statusOrder: { key: string; label: string; color: string; badge: string }[] = [
+              { key: 'pending',     label: 'Pending',     color: 'bg-amber-500/15 border-amber-500/20 text-amber-400',  badge: '⋯' },
+              { key: 'in_progress', label: 'In Progress', color: 'bg-blue-500/15 border-blue-500/20 text-blue-400',     badge: '▶' },
+              { key: 'done',        label: 'Done',        color: 'bg-green-500/15 border-green-500/20 text-green-400',  badge: '✓' },
+              { key: 'invoiced',    label: 'Invoiced',    color: 'bg-purple-500/15 border-purple-500/20 text-purple-400', badge: '$' },
+              { key: 'cancelled',   label: 'Cancelled',   color: 'bg-red-500/15 border-red-500/20 text-red-400',         badge: '✗' },
+            ]
+            boardColumns = statusOrder.map(s => {
+              const tasks = visibleTasks.filter(t => t.status === s.key)
+              return {
+                key: s.key,
+                badge: s.badge,
+                title: s.label,
+                color: s.color,
+                sections: [{ label: 'Tasks', tasks }],
+                totalCount: tasks.length,
+              }
+            }).filter(c => c.totalCount > 0)
+          }
+          else if (boardGroupBy === 'date') {
+            const fmtMonth = (d: Date) => d.toLocaleString('en-US', { month: 'short', year: 'numeric' })
+            const fmtDay = (d: Date) => d.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+            const startOfWeek = (d: Date) => {
+              const r = new Date(d); r.setHours(0, 0, 0, 0)
+              const day = r.getDay()
+              const diff = (day === 0 ? -6 : 1 - day) // Monday start
+              r.setDate(r.getDate() + diff)
+              return r
+            }
+            const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+            if (boardDateGranularity === 'preset') {
+              const today = new Date(); today.setHours(0, 0, 0, 0)
+              const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 7)
+              const monthAgo = new Date(today); monthAgo.setDate(monthAgo.getDate() - 30)
+              const buckets = [
+                { key: 'today', title: 'Today',      check: (d: Date) => d.getTime() >= today.getTime(),                                       color: 'bg-green-500/15 border-green-500/20 text-green-400',     badge: '!' },
+                { key: 'week',  title: 'This Week', check: (d: Date) => d.getTime() >= weekAgo.getTime()  && d.getTime() < today.getTime(),    color: 'bg-blue-500/15 border-blue-500/20 text-blue-400',       badge: '7' },
+                { key: 'month', title: 'This Month',check: (d: Date) => d.getTime() >= monthAgo.getTime() && d.getTime() < weekAgo.getTime(),  color: 'bg-violet-500/15 border-violet-500/20 text-violet-400', badge: '30' },
+                { key: 'older', title: 'Older',    check: (d: Date) => d.getTime() < monthAgo.getTime(),                                       color: 'bg-white/[0.06] border-white/10 text-muted-foreground', badge: '∞' },
+              ]
+              boardColumns = buckets.map(b => {
+                const tasks = visibleTasks.filter(t => {
+                  const d = new Date(t.task_date)
+                  return !isNaN(d.getTime()) && b.check(d)
+                })
+                return {
+                  key: b.key,
+                  badge: b.badge,
+                  title: b.title,
+                  color: b.color,
+                  sections: [{ label: 'Tasks', tasks }],
+                  totalCount: tasks.length,
+                }
+              }).filter(c => c.totalCount > 0)
+            } else {
+              const byKey = new Map<string, { tasks: typeof visibleTasks; date: Date; title: string }>()
+              visibleTasks.forEach(t => {
+                const d = new Date(t.task_date)
+                if (isNaN(d.getTime())) return
+                let key: string, title: string, anchorDate: Date
+                if (boardDateGranularity === 'daily') {
+                  anchorDate = d
+                  key = ymd(d)
+                  title = fmtDay(d)
+                } else if (boardDateGranularity === 'weekly') {
+                  anchorDate = startOfWeek(d)
+                  key = ymd(anchorDate)
+                  title = `Week of ${fmtDay(anchorDate)}`
+                } else { // monthly
+                  anchorDate = new Date(d.getFullYear(), d.getMonth(), 1)
+                  key = `${anchorDate.getFullYear()}-${String(anchorDate.getMonth() + 1).padStart(2, '0')}`
+                  title = fmtMonth(anchorDate)
+                }
+                if (!byKey.has(key)) byKey.set(key, { tasks: [], date: anchorDate, title })
+                byKey.get(key)!.tasks.push(t)
+              })
+              boardColumns = [...byKey.entries()]
+                .sort((a, b) => b[1].date.getTime() - a[1].date.getTime())
+                .map(([key, v]) => ({
+                  key,
+                  badge: boardDateGranularity === 'monthly' ? v.date.toLocaleString('en-US', { month: 'short' }).slice(0, 3) :
+                         boardDateGranularity === 'weekly' ? 'W' : String(v.date.getDate()),
+                  title: v.title,
+                  color: 'bg-violet-500/15 border-violet-500/20 text-violet-400',
+                  sections: [{ label: 'Tasks', tasks: v.tasks }],
+                  totalCount: v.tasks.length,
+                }))
+            }
+          }
+
+          // Helper: render assignment chips for a task
+          const renderTaskChips = (task: typeof visibleTasks[number]) => {
+            const taskEmpIds = localAssignments.filter(a => a.task_id === task.id).map(a => a.employee_id)
+            const groupCount = localGroupAssignments.filter(a => a.task_id === task.id).length
+            const paramCount = localParamAssignments.filter(a => a.task_id === task.id).length
+            if (taskEmpIds.length === 0 && groupCount === 0 && paramCount === 0) return null
+            return (
+              <div className="flex flex-wrap gap-1 mt-1.5">
+                {taskEmpIds.map(eId => {
+                  const e = employees.find(x => x.id === eId)
+                  if (!e) return null
+                  return (
+                    <span key={eId} className="text-[9px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded-full">
+                      {e.cqid}
+                    </span>
+                  )
+                })}
+                {groupCount > 0 && (
+                  <span className="text-[9px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5">
+                    <Layers className="w-2.5 h-2.5" />{groupCount}g
+                  </span>
+                )}
+                {paramCount > 0 && (
+                  <span className="text-[9px] bg-purple-500/[0.07] text-purple-300/60 border border-purple-500/10 px-1.5 py-0.5 rounded-full">
+                    {paramCount}p
+                  </span>
+                )}
+              </div>
+            )
+          }
+
+          return (
+            <div className="overflow-x-auto pb-4">
+              <div className="flex gap-4 min-w-max">
+                {boardColumns.length === 0 && (
+                  <p className="text-sm text-muted-foreground italic px-2 py-10">
+                    No tasks match the current filters.
+                  </p>
+                )}
+                {boardColumns.map(col => (
+                  <div key={col.key} className="w-72 flex flex-col gap-3 shrink-0">
+                    {/* Column header */}
+                    <div className="flex items-center gap-2 px-1">
+                      <div className={`w-7 h-7 rounded-full border flex items-center justify-center shrink-0 ${col.color}`}>
+                        <span className="text-[10px] font-bold">{col.badge}</span>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold truncate">{col.title}</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {col.subtitle && <span className="mr-1">{col.subtitle} ·</span>}
+                          {col.totalCount} item{col.totalCount !== 1 ? 's' : ''}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Sections */}
+                    {col.sections.map(section => section.tasks.length > 0 && (
+                      <div key={section.label}>
+                        {/* Only show section label when grouping by employee (where multiple sections matter) */}
+                        {boardGroupBy === 'employee' && col.sections.filter(s => s.tasks.length > 0).length > 1 && (
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-1 mb-1.5">{section.label}</p>
+                        )}
+                        <div className="space-y-2">
+                          {section.tasks.map(task => (
+                            <div
+                              key={task.id + section.label + (section.paramName || '')}
+                              onClick={() => openEdit(task)}
+                              className="bg-card border border-border rounded-xl p-3 hover:border-white/25 transition-colors group cursor-pointer"
+                            >
+                              <div className="flex items-start gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-1.5 mb-0.5">
+                                    <span
+                                      title={`Task code · click to copy ${taskCode(task)}`}
+                                      onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(taskCode(task)) }}
+                                      className="text-[9px] font-mono font-semibold text-muted-foreground/60 bg-white/[0.04] border border-white/10 px-1 py-0.5 rounded shrink-0 cursor-pointer hover:text-foreground hover:border-white/25 transition-colors"
+                                    >
+                                      {taskCode(task)}
+                                    </span>
+                                  </div>
+                                  <p className="text-sm font-medium text-foreground leading-tight truncate">{task.title}</p>
+                                  {section.paramName && <p className="text-[10px] text-purple-400 mt-0.5">{section.paramName}</p>}
+                                </div>
+                                {(role === 'super_admin' || role === 'accounts' || role === 'team_lead') && (
+                                  <button
+                                    onClick={e => { e.stopPropagation(); openAssignModal(task) }}
+                                    title="Assign team"
+                                    className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-blue-400 transition-all p-1 rounded hover:bg-blue-500/10 shrink-0"
+                                  >
+                                    <Users className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                                {boardGroupBy !== 'client' && (
+                                  <span className="text-[10px] text-muted-foreground truncate max-w-[100px]">{task.client?.name || '—'}</span>
+                                )}
+                                {boardGroupBy !== 'service' && task.service?.name && (
+                                  <span className="text-[10px] text-cyan-400/60">{task.service.name}</span>
+                                )}
+                                {boardGroupBy !== 'status' && (
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${getStatusColor(task.status)}`}>{getStatusLabel(task.status)}</span>
+                                )}
+                                {boardGroupBy !== 'date' && (
+                                  <span className="text-[10px] text-muted-foreground/50">{task.task_date}</span>
+                                )}
+                              </div>
+                              {renderTaskChips(task)}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
+
+        {/* Calendar View */}
+        {viewMode === 'calendar' && (() => {
+          const calYear = calViewYear
+          const calMonth = calViewMonth
+          const firstDay = new Date(calYear, calMonth, 1)
+          const lastDay = new Date(calYear, calMonth + 1, 0)
+          const firstWeekday = firstDay.getDay() // 0 = Sunday
+          // Build a 6x7 grid of dates (some leading/trailing days from adjacent months)
+          const grid: { date: Date; inMonth: boolean }[] = []
+          const start = new Date(calYear, calMonth, 1 - firstWeekday)
+          for (let i = 0; i < 42; i++) {
+            const d = new Date(start)
+            d.setDate(start.getDate() + i)
+            grid.push({ date: d, inMonth: d.getMonth() === calMonth })
+          }
+          // suppress unused-var warning for lastDay (used implicitly via month math)
+          void lastDay
+          // Group visibleTasks by YYYY-MM-DD
+          const tasksByDate = new Map<string, typeof visibleTasks>()
+          visibleTasks.forEach(t => {
+            const k = t.task_date
+            if (!k) return
+            if (!tasksByDate.has(k)) tasksByDate.set(k, [])
+            tasksByDate.get(k)!.push(t)
+          })
+          const monthLabel = firstDay.toLocaleString('en-US', { month: 'long', year: 'numeric' })
+          const today = new Date(); today.setHours(0, 0, 0, 0)
+          const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+
+          return (
+            <div className="bg-card border border-border rounded-xl overflow-hidden">
+              {/* Month nav header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      let y = calYear, m = calMonth - 1
+                      if (m < 0) { m = 11; y -= 1 }
+                      setCalViewYear(y); setCalViewMonth(m)
+                    }}
+                    className="p-1.5 rounded-lg hover:bg-white/[0.06] text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => {
+                      const n = new Date()
+                      setCalViewYear(n.getFullYear()); setCalViewMonth(n.getMonth())
+                    }}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-white/10 hover:border-white/25 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Today
+                  </button>
+                  <button
+                    onClick={() => {
+                      let y = calYear, m = calMonth + 1
+                      if (m > 11) { m = 0; y += 1 }
+                      setCalViewYear(y); setCalViewMonth(m)
+                    }}
+                    className="p-1.5 rounded-lg hover:bg-white/[0.06] text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+                <h3 className="text-sm font-semibold">{monthLabel}</h3>
+                <span className="text-[10px] text-muted-foreground">{visibleTasks.length} task{visibleTasks.length !== 1 ? 's' : ''} this view</span>
+              </div>
+
+              {/* Weekday headers */}
+              <div className="grid grid-cols-7 border-b border-border bg-secondary/30">
+                {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
+                  <div key={d} className="px-2 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-center">
+                    {d}
+                  </div>
+                ))}
+              </div>
+
+              {/* Day cells */}
+              <div className="grid grid-cols-7">
+                {grid.map((cell, i) => {
+                  const key = ymd(cell.date)
+                  const dayTasks = tasksByDate.get(key) || []
+                  const isToday = cell.date.getTime() === today.getTime()
+                  return (
+                    <div
+                      key={i}
+                      className={`min-h-[100px] border-r border-b border-border/40 p-1.5 ${!cell.inMonth ? 'bg-black/20 opacity-40' : ''} ${(i+1) % 7 === 0 ? 'border-r-0' : ''} ${i >= 35 ? 'border-b-0' : ''}`}
+                    >
+                      <div className={`flex items-center justify-between mb-1`}>
+                        <span className={`text-[11px] font-medium ${isToday ? 'bg-blue-500 text-white rounded-full w-5 h-5 flex items-center justify-center' : 'text-muted-foreground'}`}>
+                          {cell.date.getDate()}
+                        </span>
+                        {dayTasks.length > 0 && (
+                          <span className="text-[9px] bg-violet-500/15 text-violet-400 border border-violet-500/20 px-1 rounded-full">
+                            {dayTasks.length}
+                          </span>
+                        )}
+                      </div>
+                      <div className="space-y-0.5">
+                        {dayTasks.slice(0, 3).map(task => (
+                          <button
+                            key={task.id}
+                            onClick={() => openEdit(task)}
+                            className={`w-full text-left text-[10px] truncate px-1.5 py-0.5 rounded ${getStatusColor(task.status)} hover:opacity-80 transition-opacity`}
+                            title={`${taskCode(task)} · ${task.title} — ${task.client?.name || ''}`}
+                          >
+                            <span className="opacity-60 mr-1 font-mono">{taskCode(task)}</span>{task.title}
+                          </button>
+                        ))}
+                        {dayTasks.length > 3 && (
+                          <p className="text-[9px] text-muted-foreground px-1.5">+{dayTasks.length - 3} more</p>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })()}
+      </div>}
+
+      {/* ── Cancellation Wizard Modal ── */}
+      {cancelModal && (
+        <ModalOverlay onClose={() => setCancelModal(null)}>
+          <div className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-border flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-500/15 flex items-center justify-center shrink-0">
+                <Ban className="w-5 h-5 text-red-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h2 className="font-semibold">Cancel Job</h2>
+                <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                  {cancelModal.title}
+                  {cancelModal.client?.name && ` — ${cancelModal.client.name}`}
+                </p>
+              </div>
+              <button onClick={() => setCancelModal(null)} className="text-muted-foreground hover:text-foreground p-1">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              {/* Task summary */}
+              <div className="flex gap-3 text-xs bg-secondary/50 rounded-xl px-4 py-3">
+                <div className="flex-1">
+                  <span className="text-muted-foreground">Service</span>
+                  <div className="font-medium mt-0.5">{cancelModal.service?.name || '—'}</div>
+                </div>
+                <div className="flex-1">
+                  <span className="text-muted-foreground">Billed Value</span>
+                  <div className="font-medium mt-0.5">{formatCurrency(cancelModal.billing_amount, cancelModal.currency as Currency)}</div>
+                </div>
+                <div className="flex-1">
+                  <span className="text-muted-foreground">Current Status</span>
+                  <div className={`inline-block px-1.5 py-0.5 rounded mt-0.5 text-[10px] font-semibold ${getStatusColor(cancelModal.status)}`}>
+                    {getStatusLabel(cancelModal.status)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Who cancelled */}
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Who cancelled this job?</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    ['client',  '👤', 'Client Request', 'Client asked to stop the job'],
+                    ['company', '🏢', 'Company Decision', 'Internal decision to cancel'],
+                    ['no_show', '🚫', 'Client No-show', 'Client became unresponsive'],
+                  ] as const).map(([val, emoji, label, desc]) => (
+                    <button key={val}
+                      onClick={() => setCancelForm(p => ({ ...p, cancelled_by: val }))}
+                      className={`flex flex-col items-center text-center gap-1 p-3 rounded-xl border text-xs transition-colors ${cancelForm.cancelled_by === val ? 'bg-red-500/15 border-red-500/40 text-red-300' : 'border-border/50 text-muted-foreground hover:border-border'}`}>
+                      <span className="text-lg">{emoji}</span>
+                      <span className="font-semibold">{label}</span>
+                      <span className="text-[9px] opacity-70">{desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Work completion slider */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-semibold text-muted-foreground">Work Completed</label>
+                  <span className="text-sm font-bold text-foreground">{cancelForm.completion_pct}%</span>
+                </div>
+                <input
+                  type="range" min={0} max={100} step={5}
+                  value={cancelForm.completion_pct}
+                  onChange={e => {
+                    const pct = parseInt(e.target.value)
+                    setCancelForm(p => ({
+                      ...p,
+                      completion_pct: pct,
+                      // Auto-suggest loss = billing × completion%
+                      loss_amount: cancelModal.billing_amount_inr > 0
+                        ? String(Math.round(cancelModal.billing_amount_inr * pct / 100))
+                        : p.loss_amount,
+                    }))
+                  }}
+                  className="w-full accent-red-500"
+                />
+                <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
+                  <span>0% — Not started</span>
+                  <span>50% — Half done</span>
+                  <span>100% — Fully done</span>
+                </div>
+              </div>
+
+              {/* Honor contributions + Loss amount */}
+              <div className="space-y-3">
+                {/* Toggle: honor contributions */}
+                <div
+                  onClick={() => setCancelForm(p => ({ ...p, honor_contributions: !p.honor_contributions }))}
+                  className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${cancelForm.honor_contributions ? 'bg-green-500/10 border-green-500/30' : 'bg-white/[0.02] border-border/40 hover:border-border'}`}>
+                  <div className={`mt-0.5 w-5 h-5 rounded border flex items-center justify-center shrink-0 transition-colors ${cancelForm.honor_contributions ? 'bg-green-500 border-green-500' : 'border-border/60'}`}>
+                    {cancelForm.honor_contributions && <span className="text-[11px] text-white font-bold">✓</span>}
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5 text-green-400" />Pay Employees for Work Done
+                    </div>
+                    <div className="text-[11px] text-muted-foreground mt-0.5">
+                      Keep employee contribution records — they receive their earnings despite client cancellation.
+                      The cost becomes a company loss.
+                    </div>
+                  </div>
+                </div>
+
+                {/* Loss amount input */}
+                {cancelForm.honor_contributions && (
+                  <div>
+                    <label className="text-xs font-semibold text-muted-foreground mb-1.5 block flex items-center gap-1.5">
+                      <TrendingDown className="w-3 h-3 text-red-400" />
+                      Loss Amount (INR) — Employee cost to absorb
+                    </label>
+                    <input
+                      type="number" min="0"
+                      value={cancelForm.loss_amount}
+                      onChange={e => setCancelForm(p => ({ ...p, loss_amount: e.target.value }))}
+                      placeholder="e.g. 3500"
+                      className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500/30"
+                    />
+                    <div className="text-[10px] text-muted-foreground mt-1">
+                      Auto-suggested: {formatCurrency(cancelModal.billing_amount_inr * cancelForm.completion_pct / 100, cancelModal.currency as Currency)} ({cancelForm.completion_pct}% of billing value)
+                    </div>
+                  </div>
+                )}
+
+                {/* Toggle: record in cashbook */}
+                {cancelForm.honor_contributions && parseFloat(cancelForm.loss_amount) > 0 && (
+                  <div
+                    onClick={() => setCancelForm(p => ({ ...p, record_cashbook: !p.record_cashbook }))}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer text-xs transition-colors ${cancelForm.record_cashbook ? 'bg-amber-500/10 border-amber-500/30 text-amber-300' : 'border-border/40 text-muted-foreground hover:border-border'}`}>
+                    <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${cancelForm.record_cashbook ? 'bg-amber-500 border-amber-500' : 'border-border/60'}`}>
+                      {cancelForm.record_cashbook && <span className="text-[10px] text-white font-bold">✓</span>}
+                    </div>
+                    Record {formatCurrency(parseFloat(cancelForm.loss_amount) || 0, cancelModal.currency as Currency)} as outflow in Cash Book
+                    <span className="text-muted-foreground text-[10px]">(affects bank balance)</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Cancellation Notes (optional)</label>
+                <textarea
+                  value={cancelForm.notes}
+                  onChange={e => setCancelForm(p => ({ ...p, notes: e.target.value }))}
+                  rows={2}
+                  placeholder="e.g. Client said budget cut, design started but not finalized…"
+                  className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500/30 resize-none"
+                />
+              </div>
+
+              {/* Summary box */}
+              <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-3 text-xs space-y-1">
+                <div className="font-semibold text-red-400 mb-1.5">Cancellation Summary</div>
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Cancelled by</span>
+                  <span className="text-foreground capitalize">{cancelForm.cancelled_by.replace('_', ' ')}</span>
+                </div>
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Work done</span>
+                  <span className="text-foreground">{cancelForm.completion_pct}%</span>
+                </div>
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Employee pay</span>
+                  <span className={cancelForm.honor_contributions ? 'text-green-400' : 'text-red-400'}>
+                    {cancelForm.honor_contributions ? 'Honored ✓' : 'Not paid ✗'}
+                  </span>
+                </div>
+                {cancelForm.honor_contributions && parseFloat(cancelForm.loss_amount) > 0 && (
+                  <div className="flex justify-between text-muted-foreground border-t border-red-500/20 pt-1 mt-1">
+                    <span>Company loss</span>
+                    <span className="text-red-400 font-semibold">
+                      − {formatCurrency(parseFloat(cancelForm.loss_amount), cancelModal.currency as Currency)}
+                      {cancelForm.record_cashbook ? ' (cashbook)' : ''}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 pb-6 flex gap-3">
+              <button onClick={() => setCancelModal(null)}
+                className="flex-1 py-2.5 bg-secondary text-sm font-medium rounded-xl hover:bg-secondary/80 transition-colors">
+                Keep Job Active
+              </button>
+              <button onClick={handleCancellation} disabled={cancelSaving}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2 transition-colors">
+                <Ban className="w-4 h-4" />
+                {cancelSaving ? 'Saving…' : 'Confirm Cancellation'}
+              </button>
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* ── Bulk action toolbar ── */}
+      {bulkMode && selectedTasks.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-2 duration-200">
+          <div className="flex items-center gap-2 bg-[#0d1117] border border-white/15 rounded-2xl shadow-2xl shadow-black/60 px-4 py-3">
+            <span className="text-xs font-semibold text-muted-foreground pr-2 border-r border-white/10">
+              {selectedTasks.size} selected
+            </span>
+            <button onClick={() => bulkUpdateStatus('done')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 text-xs font-semibold transition-colors border border-emerald-500/20">
+              <CheckCircle className="w-3.5 h-3.5" /> Mark Done
+            </button>
+            <button onClick={() => bulkUpdateStatus('in_progress')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 text-xs font-semibold transition-colors border border-blue-500/20">
+              <Clock className="w-3.5 h-3.5" /> In Progress
+            </button>
+            <button onClick={() => bulkUpdateStatus('pending')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-yellow-500/15 text-yellow-400 hover:bg-yellow-500/25 text-xs font-semibold transition-colors border border-yellow-500/20">
+              <Hash className="w-3.5 h-3.5" /> Pending
+            </button>
+            <button onClick={() => { setSelectedTasks(new Set()); setBulkMode(false) }}
+              className="ml-1 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/[0.06] transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-card border border-border rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle className="w-5 h-5 text-red-400" />
+              </div>
+              <div>
+                {showTrash ? (
+                  <>
+                    <p className="font-semibold">Delete Forever?</p>
+                    <p className="text-sm text-muted-foreground">This cannot be undone — no recovery.</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-semibold">Move to Trash?</p>
+                    <p className="text-sm text-muted-foreground">You can restore it within 45 days.</p>
+                  </>
+                )}
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteConfirm(null)} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80 transition-colors">
+                Cancel
+              </button>
+              <button
+                onClick={() => showTrash ? handlePermanentDelete(deleteConfirm) : handleDelete(deleteConfirm)}
+                disabled={deleting}
+                className="flex-1 bg-red-500 hover:bg-red-600 text-white text-sm font-medium py-2.5 rounded-lg disabled:opacity-50 transition-colors">
+                {deleting ? '…' : showTrash ? 'Delete Forever' : 'Move to Trash'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Assign Team Modal ── */}
+      {assignModal && (() => {
+        const relevantGroups = assignModal.serviceId
+          ? groups.filter(g => groupServices.some(gs => gs.group_id === g.id && gs.service_id === assignModal.serviceId))
+          : groups
+        const allGroups = relevantGroups.length > 0 ? relevantGroups : groups
+
+        return (
+          <ModalOverlay onClose={() => setAssignModal(null)}>
+            <div className="bg-[#0d1117] border border-white/10 rounded-2xl w-full max-w-[500px] shadow-2xl flex flex-col max-h-[90vh]">
+
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 shrink-0">
+                <div>
+                  <h2 className="font-semibold text-sm flex items-center gap-2">
+                    <Users className="w-4 h-4 text-blue-400" /> Assign Team
+                  </h2>
+                  <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-72">
+                    <span className="font-mono text-muted-foreground/60 mr-1.5">{taskCode(assignModal.taskNumber)}</span>
+                    {assignModal.taskTitle}
+                  </p>
+                </div>
+                <button onClick={() => setAssignModal(null)} className="text-muted-foreground hover:text-foreground p-1">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto divide-y divide-white/[0.06]">
+
+                {/* ── Section 1: Team ── */}
+                <div className="px-5 py-4">
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+                    Team — who works on this task?
+                  </p>
+                  {employees.length === 0 ? (
+                    <p className="text-xs text-muted-foreground py-2">No employees found. Add in Settings first.</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {employees.map(emp => {
+                        const on = assignSelected.has(emp.id)
+                        return (
+                          <button
+                            key={emp.id}
+                            type="button"
+                            onClick={() => setAssignSelected(prev => {
+                              const next = new Set(prev)
+                              if (next.has(emp.id)) next.delete(emp.id)
+                              else next.add(emp.id)
+                              return next
+                            })}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border transition-all ${
+                              on
+                                ? 'bg-blue-500/15 border-blue-500/40 text-blue-300'
+                                : 'bg-white/[0.04] border-white/10 text-muted-foreground hover:border-white/20 hover:text-foreground'
+                            }`}
+                          >
+                            {on && <CheckCircle className="w-3.5 h-3.5 shrink-0" />}
+                            <span>{dn(emp)}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Section 2: Per-Employee Assignments ── */}
+                {assignSelected.size > 0 && allGroups.length > 0 && (
+                  <div className="px-5 py-4">
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      <Layers className="w-3.5 h-3.5 text-purple-400" />
+                      <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                        Assignments per Person
+                      </p>
+                      <span className="text-[10px] text-muted-foreground/50 bg-white/[0.04] px-1.5 py-0.5 rounded-full">optional</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mb-3 leading-relaxed">
+                      For each team member, add the groups they handle. Then add specific parameters from those groups.
+                    </p>
+
+                    <div className="space-y-2">
+                      {[...assignSelected].map(empId => {
+                        const emp = employees.find(e => e.id === empId)
+                        if (!emp) return null
+
+                        const myGroupIds = empGroups[empId] ? [...empGroups[empId]] : []
+                        const myParamIds = empParams[empId] ? [...empParams[empId]] : []
+                        const isExpanded = expandedEmpCards.has(empId)
+
+                        // Available groups to ADD (not already assigned to this employee)
+                        const addableGroups = allGroups.filter(g => !empGroups[empId]?.has(g.id))
+
+                        // Available parameters to ADD: only from groups assigned to this employee, and not already assigned
+                        const addableParams = parameters
+                          .filter(p => empGroups[empId]?.has(p.group_id))
+                          .filter(p => !empParams[empId]?.has(p.id))
+                          .sort((a, b) => a.display_order - b.display_order)
+
+                        return (
+                          <div key={empId} className={`rounded-xl border overflow-hidden transition-colors ${
+                            (myGroupIds.length > 0 || myParamIds.length > 0)
+                              ? 'border-purple-500/25 bg-purple-500/[0.04]'
+                              : 'border-white/[0.07] bg-white/[0.01]'
+                          }`}>
+                            {/* Employee header — clickable to expand */}
+                            <button
+                              type="button"
+                              onClick={() => setExpandedEmpCards(prev => {
+                                const next = new Set(prev)
+                                if (next.has(empId)) next.delete(empId)
+                                else next.add(empId)
+                                return next
+                              })}
+                              className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/[0.02] transition-colors text-left"
+                            >
+                              <div className="w-7 h-7 rounded-full bg-blue-500/15 border border-blue-500/20 flex items-center justify-center shrink-0">
+                                <span className="text-[10px] font-bold text-blue-400">{emp.cqid.replace('CQID', '')}</span>
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold">{dn(emp)}</p>
+                                <p className="text-[10px] text-muted-foreground">
+                                  {myGroupIds.length} group{myGroupIds.length !== 1 ? 's' : ''} · {myParamIds.length} param{myParamIds.length !== 1 ? 's' : ''}
+                                </p>
+                              </div>
+                              {isExpanded
+                                ? <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+                                : <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />}
+                            </button>
+
+                            {isExpanded && (
+                              <div className="border-t border-white/[0.07] bg-black/20 px-3 py-3 space-y-3">
+
+                                {/* GROUPS */}
+                                <div>
+                                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+                                    Groups ({myGroupIds.length})
+                                  </p>
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    {myGroupIds.map(gId => {
+                                      const g = groups.find(x => x.id === gId)
+                                      if (!g) return null
+                                      return (
+                                        <span key={gId} className="inline-flex items-center gap-1 text-xs bg-purple-500/15 text-purple-300 border border-purple-500/25 px-2 py-1 rounded-full">
+                                          <Layers className="w-3 h-3" />
+                                          {g.name}
+                                          <button
+                                            type="button"
+                                            onClick={() => setEmpGroups(prev => {
+                                              const next = { ...prev }
+                                              const set = new Set(next[empId])
+                                              set.delete(gId)
+                                              next[empId] = set
+                                              // Also remove any params from this group for this employee
+                                              setEmpParams(prevP => {
+                                                const nextP = { ...prevP }
+                                                const pSet = new Set(nextP[empId])
+                                                parameters.filter(p => p.group_id === gId).forEach(p => pSet.delete(p.id))
+                                                nextP[empId] = pSet
+                                                return nextP
+                                              })
+                                              return next
+                                            })}
+                                            className="ml-0.5 hover:text-white"
+                                          >
+                                            <X className="w-3 h-3" />
+                                          </button>
+                                        </span>
+                                      )
+                                    })}
+                                    {addableGroups.length > 0 && (
+                                      <div className="w-44">
+                                        <Combobox
+                                          options={addableGroups.map(g => ({ id: g.id, label: g.name }))}
+                                          value=""
+                                          onChange={gId => {
+                                            if (!gId) return
+                                            setEmpGroups(prev => {
+                                              const next = { ...prev }
+                                              const set = new Set(next[empId])
+                                              set.add(gId)
+                                              next[empId] = set
+                                              return next
+                                            })
+                                          }}
+                                          placeholder="+ Add group…"
+                                          sortKey="task-assign-groups"
+                                        />
+                                      </div>
+                                    )}
+                                    {myGroupIds.length === 0 && addableGroups.length === 0 && (
+                                      <span className="text-[10px] text-muted-foreground/50 italic">No groups available</span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* PARAMETERS — only from groups this employee handles */}
+                                <div>
+                                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+                                    Parameters ({myParamIds.length})
+                                  </p>
+                                  {myGroupIds.length === 0 ? (
+                                    <p className="text-[10px] text-muted-foreground/50 italic">
+                                      Add a group above first — then parameters from that group will be available.
+                                    </p>
+                                  ) : (
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                      {myParamIds.map(pId => {
+                                        const p = parameters.find(x => x.id === pId)
+                                        if (!p) return null
+                                        const g = groups.find(x => x.id === p.group_id)
+                                        return (
+                                          <span key={pId} className="inline-flex items-center gap-1 text-xs bg-purple-500/10 text-purple-300/90 border border-purple-500/20 px-2 py-1 rounded-full">
+                                            {p.name}
+                                            {g && <span className="text-[9px] opacity-50">·{g.name.replace(' Group', '')}</span>}
+                                            <span className="text-[9px] opacity-50">×{p.weight}</span>
+                                            <button
+                                              type="button"
+                                              onClick={() => setEmpParams(prev => {
+                                                const next = { ...prev }
+                                                const set = new Set(next[empId])
+                                                set.delete(pId)
+                                                next[empId] = set
+                                                return next
+                                              })}
+                                              className="ml-0.5 hover:text-white"
+                                            >
+                                              <X className="w-3 h-3" />
+                                            </button>
+                                          </span>
+                                        )
+                                      })}
+                                      {addableParams.length > 0 && (
+                                        <div className="w-52">
+                                          <Combobox
+                                            options={addableParams.map(p => {
+                                              const g = groups.find(x => x.id === p.group_id)
+                                              return {
+                                                id: p.id,
+                                                label: p.name,
+                                                sub: g ? `${g.name} · ×${p.weight}` : `×${p.weight}`,
+                                              }
+                                            })}
+                                            value=""
+                                            onChange={pId => {
+                                              if (!pId) return
+                                              setEmpParams(prev => {
+                                                const next = { ...prev }
+                                                const set = new Set(next[empId])
+                                                set.add(pId)
+                                                next[empId] = set
+                                                return next
+                                              })
+                                            }}
+                                            placeholder="+ Add parameter…"
+                                            sortKey="task-assign-params"
+                                          />
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Hint when no team selected yet */}
+                {assignSelected.size === 0 && allGroups.length > 0 && (
+                  <div className="px-5 py-4">
+                    <p className="text-[11px] text-muted-foreground italic text-center">
+                      Select team members above to start assigning groups and parameters.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="flex gap-2 px-4 py-3 border-t border-white/10 shrink-0">
+                <button onClick={() => setAssignModal(null)}
+                  className="flex-1 py-2.5 rounded-xl border border-white/10 text-sm text-muted-foreground hover:text-foreground transition-colors">
+                  Cancel
+                </button>
+                <button onClick={saveAssignments} disabled={assignSaving}
+                  className="flex-1 min-w-0 py-2.5 rounded-xl gradient-bg text-white hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1.5 px-3">
+                  {assignSaving ? <span className="text-sm font-semibold">Saving…</span> : (
+                    <>
+                      <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span className="text-sm font-semibold leading-none">Save</span>
+                      {(() => {
+                        const totalGroups = new Set<string>()
+                        Object.values(empGroups).forEach(set => set.forEach(g => totalGroups.add(g)))
+                        const totalParams = new Set<string>()
+                        Object.values(empParams).forEach(set => set.forEach(p => totalParams.add(p)))
+                        const parts: string[] = []
+                        if (assignSelected.size > 0) parts.push(`${assignSelected.size} member${assignSelected.size !== 1 ? 's' : ''}`)
+                        if (totalGroups.size > 0) parts.push(`${totalGroups.size} group${totalGroups.size !== 1 ? 's' : ''}`)
+                        if (totalParams.size > 0) parts.push(`${totalParams.size} param${totalParams.size !== 1 ? 's' : ''}`)
+                        if (parts.length === 0) return null
+                        return (
+                          <span className="text-[10px] opacity-70 truncate leading-none">
+                            · {parts.join(' · ')}
+                          </span>
+                        )
+                      })()}
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </ModalOverlay>
+        )
+      })()}
+
+      {/* ── Workload Report Modal ── */}
+      {showWorkload && (() => {
+        // Build per-employee stats from local state
+        const report = employees.map(emp => {
+          const myTaskIds = new Set(localAssignments.filter(a => a.employee_id === emp.id).map(a => a.task_id))
+          const myTasks = tasks.filter(t => myTaskIds.has(t.id))
+          const groupCount = localGroupAssignments.filter(a => a.employee_id === emp.id).length
+          const paramCount = localParamAssignments.filter(a => a.employee_id === emp.id).length
+          const pending = myTasks.filter(t => t.status === 'pending').length
+          const inProgress = myTasks.filter(t => t.status === 'in_progress').length
+          const done = myTasks.filter(t => t.status === 'done' || t.status === 'invoiced').length
+          const total = myTasks.length
+          return { emp, total, pending, inProgress, done, groupCount, paramCount }
+        }).filter(r => r.total > 0 || r.groupCount > 0 || r.paramCount > 0)
+          .sort((a, b) => (b.pending + b.inProgress) - (a.pending + a.inProgress))
+
+        return (
+          <ModalOverlay onClose={() => setShowWorkload(false)}>
+            <div className="bg-[#0d1117] border border-white/10 rounded-2xl w-full max-w-xl shadow-2xl flex flex-col max-h-[88vh]">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 shrink-0">
+                <h2 className="font-semibold text-sm flex items-center gap-2">
+                  <Users className="w-4 h-4 text-blue-400" /> Workload Report
+                </h2>
+                <button onClick={() => setShowWorkload(false)} className="text-muted-foreground hover:text-foreground p-1">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4">
+                {report.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-10">
+                    No tasks assigned yet. Use the Assign button on each task to assign team members.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {report.map(({ emp, total, pending, inProgress, done, groupCount, paramCount }) => {
+                      const backlog = pending + inProgress
+                      const pctDone = total > 0 ? Math.round((done / total) * 100) : 0
+                      return (
+                        <div key={emp.id} className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-full bg-blue-500/15 border border-blue-500/20 flex items-center justify-center">
+                                <span className="text-xs font-bold text-blue-400">{emp.cqid}</span>
+                              </div>
+                              <div>
+                                <p className="text-sm font-semibold">{dn(emp)}</p>
+                                <p className="text-[11px] text-muted-foreground">{total} task{total !== 1 ? 's' : ''} assigned</p>
+                              </div>
+                            </div>
+                            {backlog > 0 && (
+                              <span className="text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-1 rounded-full">
+                                {backlog} backlog
+                              </span>
+                            )}
+                            {backlog === 0 && total > 0 && (
+                              <span className="text-xs font-semibold bg-green-500/10 text-green-400 border border-green-500/20 px-2 py-1 rounded-full">
+                                All clear ✓
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Status bars */}
+                          <div className="grid grid-cols-3 gap-2 mb-3">
+                            <div className="text-center bg-amber-500/5 rounded-lg py-2 border border-amber-500/10">
+                              <p className="text-lg font-bold text-amber-400">{pending}</p>
+                              <p className="text-[10px] text-muted-foreground">Pending</p>
+                            </div>
+                            <div className="text-center bg-blue-500/5 rounded-lg py-2 border border-blue-500/10">
+                              <p className="text-lg font-bold text-blue-400">{inProgress}</p>
+                              <p className="text-[10px] text-muted-foreground">In Progress</p>
+                            </div>
+                            <div className="text-center bg-green-500/5 rounded-lg py-2 border border-green-500/10">
+                              <p className="text-lg font-bold text-green-400">{done}</p>
+                              <p className="text-[10px] text-muted-foreground">Done</p>
+                            </div>
+                          </div>
+
+                          {/* Progress bar */}
+                          {total > 0 && (
+                            <div className="mb-2">
+                              <div className="flex justify-between text-[10px] text-muted-foreground mb-1">
+                                <span>Progress</span>
+                                <span>{pctDone}%</span>
+                              </div>
+                              <div className="h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
+                                <div className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full transition-all" style={{ width: `${pctDone}%` }} />
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Group / param counts */}
+                          {(groupCount > 0 || paramCount > 0) && (
+                            <div className="flex gap-3 mt-2">
+                              {groupCount > 0 && (
+                                <span className="text-[10px] text-purple-400/70 bg-purple-500/5 border border-purple-500/15 px-2 py-0.5 rounded-full">
+                                  {groupCount} group{groupCount !== 1 ? 's' : ''}
+                                </span>
+                              )}
+                              {paramCount > 0 && (
+                                <span className="text-[10px] text-purple-400/70 bg-purple-500/5 border border-purple-500/15 px-2 py-0.5 rounded-full">
+                                  {paramCount} param{paramCount !== 1 ? 's' : ''}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="px-4 py-3 border-t border-white/10 shrink-0">
+                <button onClick={() => setShowWorkload(false)}
+                  className="w-full py-2.5 rounded-xl border border-white/10 text-sm text-muted-foreground hover:text-foreground transition-colors">
+                  Close
+                </button>
+              </div>
+            </div>
+          </ModalOverlay>
+        )
+      })()}
+
+      {/* Edit Task Modal */}
+      {editTask && (
+        <ModalOverlay onClose={() => setEditTask(null)}>
+          <div className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+              <h2 className="font-semibold">Edit Task</h2>
+              <button onClick={() => setEditTask(null)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+            </div>
+            <form ref={editFormRef} onSubmit={handleEditSubmit} className="p-6 space-y-4">
+              {/* Task # + Title */}
+              <div className="grid grid-cols-[110px_1fr] gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Task #</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={editForm.task_number}
+                    onChange={e => setEditForm(p => ({ ...p, task_number: e.target.value }))}
+                    className={inputCls}
+                    placeholder="—"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Title *</label>
+                  <input value={editForm.title} onChange={e => setEditForm(p => ({ ...p, title: e.target.value }))} required className={inputCls} />
+                </div>
+              </div>
+
+              {/* Client + Service */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Client</label>
+                  <Combobox
+                    options={clients.map(c => ({ id: c.id, label: c.name, sub: c.code }))}
+                    value={editForm.client_id}
+                    onChange={id => setEditForm(p => ({ ...p, client_id: id }))}
+                    placeholder="Search client…"
+                    sortKey="clients"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Service</label>
+                  <Combobox
+                    options={sortedServices.map(s => ({ id: s.id, label: s.name }))}
+                    value={editForm.service_id}
+                    onChange={id => setEditForm(p => ({ ...p, service_id: id }))}
+                    placeholder="Search service…"
+                    sortKey="services"
+                  />
+                </div>
+              </div>
+
+              {/* Task Date */}
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Task Date</label>
+                <input type="date" value={editForm.task_date} onChange={e => setEditForm(p => ({ ...p, task_date: e.target.value }))} className={inputCls} />
+              </div>
+
+              {/* Quantity / Hours based on pricing type */}
+              {(() => {
+                const svc = services.find(s => s.id === editForm.service_id)
+                const pt = svc?.pricing_type || 'fixed_per_creative'
+                const cp = clientPricings.find(p => p.client_id === editForm.client_id && p.service_id === editForm.service_id)
+                const up = cp?.price ?? svc?.default_price ?? 0
+                const uc = (cp?.currency || svc?.default_currency || 'INR') as Currency
+                return (
+                  <div className="grid grid-cols-2 gap-3">
+                    {pt === 'fixed_per_creative' && (
+                      <div>
+                        <label className="block text-xs font-medium text-muted-foreground mb-1.5">Creatives</label>
+                        <input type="number" min="1" step="1" value={editForm.quantity} onChange={e => setEditForm(p => ({ ...p, quantity: e.target.value }))} className={inputCls} />
+                      </div>
+                    )}
+                    {pt === 'hourly' && (
+                      <div>
+                        <label className="block text-xs font-medium text-muted-foreground mb-1.5">Hours</label>
+                        <input type="number" min="0.5" step="0.5" value={editForm.hours} onChange={e => setEditForm(p => ({ ...p, hours: e.target.value }))} className={inputCls} />
+                      </div>
+                    )}
+                    {pt === 'percentage_of_spend' && (
+                      <div>
+                        <label className="block text-xs font-medium text-muted-foreground mb-1.5">Ad Spend ({uc})</label>
+                        <input type="number" min="0" step="0.01" value={editForm.spend} onChange={e => setEditForm(p => ({ ...p, spend: e.target.value }))} className={inputCls} placeholder="e.g. 1000" />
+                      </div>
+                    )}
+                    <div>
+                      <label className="block text-xs font-medium text-muted-foreground mb-1.5">Price ({uc})</label>
+                      <input readOnly value={up} className={inputCls + ' opacity-60 cursor-not-allowed'} />
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {/* Description (placed before status — more often updated) */}
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Description</label>
+                <textarea value={editForm.description} onChange={e => setEditForm(p => ({ ...p, description: e.target.value }))} rows={2} className={inputCls + ' resize-none'} placeholder="Optional notes…" />
+              </div>
+
+              {/* Status */}
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Status</label>
+                <AppSelect value={editForm.status} onChange={e => setEditForm(p => ({ ...p, status: e.target.value }))}>
+                  {MANUAL_STATUSES.map(s => <option key={s} value={s}>{getStatusLabel(s)}</option>)}
+                  {editForm.status === 'invoiced' && <option value="invoiced" disabled>🔒 Invoiced (system-managed)</option>}
+                </AppSelect>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setDeleteConfirm(editTask.id)}
+                  className="px-4 py-2.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 text-sm font-medium transition-colors flex items-center gap-1.5">
+                  <Trash2 className="w-3.5 h-3.5" /> Delete
+                </button>
+                <div className="flex-1" />
+                <button type="button" onClick={() => setEditTask(null)} className="px-4 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80 transition-colors">Cancel</button>
+                <button type="submit" disabled={editSaving} className="px-6 gradient-bg text-white text-sm font-medium py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50">
+                  {editSaving ? 'Saving…' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* Add Task Modal */}
+      {showForm && (
+        <ModalOverlay onClose={() => setShowForm(false)}>
+          <div className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+              <h2 className="font-semibold">Add Task</h2>
+              <button onClick={() => setShowForm(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+            </div>
+            <form ref={addFormRef} onSubmit={handleSubmit} className="p-6 space-y-4">
+
+              {/* Task number + Title */}
+              <div className="grid grid-cols-[110px_1fr] gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Task #</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={form.task_number}
+                    onChange={e => setForm(p => ({ ...p, task_number: e.target.value }))}
+                    className={inputCls}
+                    placeholder="Auto"
+                    title="Leave blank for auto-assigned sequential number"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Title *</label>
+                  <input value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} required className={inputCls} placeholder="e.g. Offer Flyer — June batch" />
+                </div>
+              </div>
+
+              {/* Client + Service */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Client *</label>
+                  <Combobox
+                    options={clients.map(c => ({ id: c.id, label: c.name, sub: c.code }))}
+                    value={form.client_id}
+                    onChange={handleClientChange}
+                    placeholder="Search client…"
+                    sortKey="clients"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Service *</label>
+                  <Combobox
+                    options={sortedServices.map(s => ({
+                      id: s.id,
+                      label: s.name,
+                      sub: initialTasks.some(t => t.service?.id === s.id) ? 'recent' : undefined
+                    }))}
+                    value={form.service_id}
+                    onChange={handleServiceChange}
+                    placeholder="Search service…"
+                    sortKey="services"
+                  />
+                </div>
+              </div>
+
+              {/* Task Date */}
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Task Date</label>
+                <input type="date" value={form.task_date} onChange={e => setForm(p => ({ ...p, task_date: e.target.value }))} className={inputCls} />
+                <div className="flex gap-1.5 mt-1.5">
+                  {[
+                    { label: 'Today',     date: new Date().toISOString().split('T')[0] },
+                    { label: 'Yesterday', date: new Date(Date.now() - 864e5).toISOString().split('T')[0] },
+                  ].map(q => (
+                    <button key={q.label} type="button" onClick={() => setForm(p => ({ ...p, task_date: q.date }))}
+                      className={`px-2.5 py-1 text-[10px] rounded-lg border transition-colors ${form.task_date === q.date ? 'bg-violet-500/20 border-violet-500/40 text-violet-300' : 'border-white/10 text-muted-foreground hover:border-white/20'}`}>
+                      {q.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Smart billing section — only shown when service is selected */}
+              {selectedService && (
+                <div className={`rounded-xl border p-4 space-y-3 ${
+                  pricingType === 'fixed_per_creative' ? 'bg-blue-500/5 border-blue-500/20' :
+                  pricingType === 'retainer'           ? 'bg-green-500/5 border-green-500/20' :
+                  pricingType === 'percentage_of_spend'? 'bg-purple-500/5 border-purple-500/20' :
+                                                         'bg-amber-500/5 border-amber-500/20'
+                }`}>
+                  {/* Header row */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      {pricingType === 'fixed_per_creative'  && <Hash className="w-3.5 h-3.5 text-blue-400" />}
+                      {pricingType === 'retainer'             && <CheckCircle className="w-3.5 h-3.5 text-green-400" />}
+                      {pricingType === 'hourly'               && <Clock className="w-3.5 h-3.5 text-amber-400" />}
+                      {pricingType === 'percentage_of_spend'  && <span className="text-sm font-bold text-purple-400">%</span>}
+                      <span className={`text-xs font-semibold uppercase tracking-wide ${
+                        pricingType === 'fixed_per_creative'   ? 'text-blue-400' :
+                        pricingType === 'retainer'             ? 'text-green-400' :
+                        pricingType === 'percentage_of_spend'  ? 'text-purple-400' : 'text-amber-400'
+                      }`}>
+                        {pricingType === 'fixed_per_creative'  ? 'Fixed per Creative' :
+                         pricingType === 'retainer'            ? 'Retainer' :
+                         pricingType === 'percentage_of_spend' ? '% of Client Spend' : 'Hourly'}
+                      </span>
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      {pricingType === 'percentage_of_spend'
+                        ? unitPrice > 0 ? `Your rate: ${unitPrice}%` : 'No % set'
+                        : clientPrice
+                          ? `Client price: ${unitCurrency} ${unitPrice}`
+                          : unitPrice > 0 ? `Default: ${unitCurrency} ${unitPrice}` : 'No price set'}
+                    </span>
+                  </div>
+
+                  {/* Fixed per Creative */}
+                  {pricingType === 'fixed_per_creative' && (
+                    <div className="flex items-end gap-3">
+                      <div className="flex-1">
+                        <label className="block text-xs text-muted-foreground mb-1">Number of creatives</label>
+                        <input type="number" min="1" step="1" value={form.quantity}
+                          onChange={e => setForm(p => ({ ...p, quantity: e.target.value }))}
+                          className={inputCls} placeholder="1" />
+                      </div>
+                      <div className="text-right pb-2">
+                        <p className="text-xs text-muted-foreground">{unitPrice} × {form.quantity || 1}</p>
+                        <p className="text-lg font-bold">{unitCurrency} {computedAmount.toLocaleString()}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* % of Spend */}
+                  {pricingType === 'percentage_of_spend' && (
+                    <div className="flex items-end gap-3">
+                      <div className="flex-1">
+                        <label className="block text-xs text-muted-foreground mb-1">Client's total ad spend ({unitCurrency})</label>
+                        <input type="number" min="0" step="0.01" value={form.spend}
+                          onChange={e => setForm(p => ({ ...p, spend: e.target.value }))}
+                          className={inputCls} placeholder="e.g. 1000" />
+                      </div>
+                      <div className="text-right pb-2">
+                        <p className="text-xs text-muted-foreground">{unitPrice}% of {form.spend || 0}</p>
+                        <p className="text-lg font-bold text-purple-400">{unitCurrency} {computedAmount.toLocaleString()}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Retainer */}
+                  {pricingType === 'retainer' && (
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-muted-foreground">Monthly retainer — auto-filled</p>
+                      <p className="text-lg font-bold text-green-400">{unitCurrency} {computedAmount.toLocaleString()}</p>
+                    </div>
+                  )}
+
+                  {/* Hourly */}
+                  {pricingType === 'hourly' && (
+                    <div className="flex items-end gap-3">
+                      <div className="flex-1">
+                        <label className="block text-xs text-muted-foreground mb-1">Hours worked</label>
+                        <input type="number" min="0.5" step="0.5" value={form.hours}
+                          onChange={e => setForm(p => ({ ...p, hours: e.target.value }))}
+                          className={inputCls} placeholder="1" />
+                      </div>
+                      <div className="text-right pb-2">
+                        <p className="text-xs text-muted-foreground">{unitPrice}/hr × {form.hours || 1}h</p>
+                        <p className="text-lg font-bold">{unitCurrency} {computedAmount.toLocaleString()}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Quick-set price if none configured */}
+                  {unitPrice === 0 && (
+                    <div className="space-y-2 pt-1 border-t border-amber-500/20">
+                      <p className="text-xs text-amber-400 font-medium">⚠ No price set — set it now:</p>
+                      {!quickSet ? (
+                        <div className="flex gap-2">
+                          <button type="button" onClick={() => setQuickSet({ mode: 'default', price: '', currency: 'INR' })}
+                            className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-secondary hover:bg-secondary/70 text-foreground border border-border transition-colors">
+                            Set default price for this service
+                          </button>
+                          {form.client_id && (
+                            <button type="button" onClick={() => setQuickSet({ mode: 'client', price: '', currency: unitCurrency })}
+                              className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 transition-colors">
+                              Set price for {clients.find(c => c.id === form.client_id)?.name?.split(' ')[0]}
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <p className="text-xs text-muted-foreground">
+                            {quickSet.mode === 'default' ? `Default price for "${selectedService?.name}"` : `Price for ${clients.find(c => c.id === form.client_id)?.name} — ${selectedService?.name}`}
+                          </p>
+                          <div className="flex gap-2 items-center">
+                            <input
+                              type="number" min="0" step="0.01" autoFocus
+                              value={quickSet.price}
+                              onChange={e => setQuickSet(q => q ? { ...q, price: e.target.value } : q)}
+                              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveQuickPrice() } if (e.key === 'Escape') setQuickSet(null) }}
+                              className="flex-1 bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                              placeholder="0.00"
+                            />
+                            <select value={quickSet.currency} onChange={e => setQuickSet(q => q ? { ...q, currency: e.target.value as Currency } : q)}
+                              className="bg-secondary border border-border rounded-lg px-2 py-1.5 text-sm focus:outline-none">
+                              {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                            <button type="button" onClick={saveQuickPrice} disabled={quickSaving || !quickSet.price}
+                              className="px-3 py-1.5 rounded-lg gradient-bg text-white text-xs font-medium disabled:opacity-50 whitespace-nowrap">
+                              {quickSaving ? '…' : 'Save'}
+                            </button>
+                            <button type="button" onClick={() => setQuickSet(null)} className="px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground">✕</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Pricing summary card */}
+              {selectedService && (
+                <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-3 flex items-center justify-between">
+                  <div className="text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">{selectedService.name}</span>
+                    {clientPrice && <span className="ml-1 text-violet-400">· Client rate</span>}
+                  </div>
+                  <div className="text-right">
+                    <div className="text-base font-bold">{formatCurrency(computedAmount, unitCurrency)}</div>
+                    <div className="text-[10px] text-muted-foreground">{pricingType.replace(/_/g, ' ')}</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Description (more often filled than status — placed before it) */}
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Description</label>
+                <textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} rows={3} className={inputCls + ' resize-none'} placeholder="What needs to be done? (optional details, revision notes…)" />
+              </div>
+
+              {/* Status (defaults to pending, often unchanged on create) */}
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Status</label>
+                <AppSelect value={form.status} onChange={e => setForm(p => ({ ...p, status: e.target.value }))}>
+                  {MANUAL_STATUSES.map(s => <option key={s} value={s}>{getStatusLabel(s)}</option>)}
+                </AppSelect>
+              </div>
+
+              {/* Recurring Task — collapsed by default, expands when checked */}
+              <div>
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={form.is_recurring}
+                    onChange={e => setForm(p => ({ ...p, is_recurring: e.target.checked }))}
+                    className="w-4 h-4 accent-violet-500"
+                  />
+                  <RefreshCw className="w-3.5 h-3.5" /> This is a recurring task
+                </label>
+                {form.is_recurring && (
+                  <div className="mt-2 pl-6 space-y-2 border-l-2 border-violet-500/30">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-muted-foreground mb-1.5">Repeat every</label>
+                        <AppSelect
+                          value={form.recurring_interval}
+                          onChange={e => setForm(p => ({ ...p, recurring_interval: e.target.value }))}
+                        >
+                          {RECURRING_INTERVALS.map(opt => (
+                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                          ))}
+                        </AppSelect>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-muted-foreground mb-1.5">End date <span className="text-muted-foreground/60">(optional)</span></label>
+                        <input
+                          type="date"
+                          value={form.recurring_end_date}
+                          onChange={e => setForm(p => ({ ...p, recurring_end_date: e.target.value }))}
+                          min={form.task_date}
+                          className={inputCls}
+                        />
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {form.recurring_end_date
+                        ? 'Instances will be created from task date up to the end date (max 52).'
+                        : 'No end date — instances will be created up to 6 months out (max 52).'}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setShowForm(false)} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80 transition-colors">Cancel</button>
+                <button type="submit" disabled={saving || !selectedService} className="flex-1 gradient-bg text-white text-sm font-medium py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1.5">
+                  {saving ? 'Saving…' : <>Add Task {previewTaskNumber != null && <span className="opacity-70">#{previewTaskNumber}</span>}</>}
+                </button>
+              </div>
+            </form>
+          </div>
+        </ModalOverlay>
+      )}
+    </div>
+  )
+}

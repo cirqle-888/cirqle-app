@@ -1,0 +1,5 @@
+cqid,name,email,phone,role,salary_type,base_salary,joined_date,is_active
+CQID001,Farooq,umarulfarooqvv@gmail.com,+91 9876543210,MD,Commision only,,1/15/24,TRUE
+CQID002,Sheya Salva,sheyahsalva@gmail.com,+91 9876543211,Seniour Design,Commision only,,3/1/24,TRUE
+CQID003,Safoora,safoorakunjimmu@gmail.com,+91 9876543211,Juniour Design,Commision only,,,
+,,,,,,,,

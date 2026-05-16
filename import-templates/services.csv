@@ -1,0 +1,36 @@
+name,pricing_type,description,display_order,is_active
+Offer Flyer,fixed_per_creative,Monthly social media creatives,1,TRUE
+Offer Flyer Updating,fixed_per_creative,Brand identity and logo design,2,TRUE
+Design Services,fixed_per_creative,,3,TRUE
+Label Design,fixed_per_creative,,4,TRUE
+Creative Posters,fixed_per_creative,,5,TRUE
+Social Media Poster,fixed_per_creative,,6,TRUE
+Simple Informative Posters,fixed_per_creative,,7,TRUE
+CV/Biodata,fixed_per_creative,,8,TRUE
+Company Profile,fixed_per_creative,,9,TRUE
+Table Mat Design,fixed_per_creative,,10,TRUE
+Logo,fixed_per_creative,,11,TRUE
+Revised Offer Flyer,fixed_per_creative,,12,TRUE
+Hoarding,fixed_per_creative,,13,TRUE
+Rivision/Updation,fixed_per_creative,,14,TRUE
+Facebook & Instagram Account Creation + Configuration,fixed_per_creative,,15,TRUE
+Facebook Cover Page Design,fixed_per_creative,,16,TRUE
+Profile Display Pictures (DPs) & Instagram Highlight Icons,fixed_per_creative,,17,TRUE
+Posting (including Story Size Variants),fixed_per_creative,,18,TRUE
+Facebook Ads Setup,fixed_per_creative,,19,TRUE
+"Ad Running
+(As Agreed / _100 Ad Spend)",fixed_per_creative,,20,TRUE
+Domain Purchase,fixed_per_creative,,21,TRUE
+Work Space Mail Configuration,fixed_per_creative,,22,TRUE
+Stationary Designs,fixed_per_creative,,23,TRUE
+A3 Offer Flyer,fixed_per_creative,,24,TRUE
+Logo Animation Video,fixed_per_creative,,25,TRUE
+Extra Design on Offer Flyer,fixed_per_creative,,26,TRUE
+Google Sheets Automation & Dashboard Development,fixed_per_creative,,27,TRUE
+Variants,fixed_per_creative,,28,TRUE
+Service at _100,fixed_per_creative,,29,TRUE
+Service at _150,fixed_per_creative,,30,TRUE
+Service at _200,fixed_per_creative,,31,TRUE
+Service at _250,fixed_per_creative,,32,TRUE
+Service at _300,fixed_per_creative,,33,TRUE
+Service at _350,fixed_per_creative,,34,TRUE
