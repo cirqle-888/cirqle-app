@@ -928,14 +928,28 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
       {!showTrash && <div className="p-6 space-y-4">
         {/* Filters — sticky toolbar (sits below the Header which is sticky at top-0) */}
         <div className="sticky top-[68px] z-20 bg-background pt-2 pb-3 -mt-2 space-y-2">
-          {/* Toolbar: Search · Filter · View · Select */}
+          {/* Toolbar: Select · Search · Filter · View */}
           <div className="flex items-center gap-2">
-            {/* Search bar — takes available space */}
-            <div className="flex items-center gap-2 bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2 flex-1 min-w-0">
+            {/* Bulk select toggle — leftmost */}
+            <button
+              onClick={() => { setBulkMode(m => !m); setSelectedTasks(new Set()) }}
+              className={`shrink-0 px-3 py-2 rounded-xl text-sm font-medium border transition-colors flex items-center gap-1.5 ${
+                bulkMode
+                  ? 'bg-violet-500/20 border-violet-500/40 text-violet-300'
+                  : 'bg-[#0d1117] border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
+              }`}>
+              {bulkMode ? <><X size={12} /> Exit Select</> : <>Select</>}
+            </button>
+
+            {/* Search bar — fixed width */}
+            <div className="flex items-center gap-2 bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2 w-56 min-w-0">
               <Search size={14} className="text-muted-foreground shrink-0" />
-              <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search by title, client, service, or task code (T-…)…" className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60 min-w-0" />
+              <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search tasks…" className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60 min-w-0" />
               {searchQ && <button onClick={() => setSearchQ('')}><X size={12} className="text-muted-foreground" /></button>}
             </div>
+
+            {/* Spacer */}
+            <div className="flex-1" />
 
             {/* Filter popover */}
             <div ref={filterRef} className="relative shrink-0">
@@ -1115,16 +1129,6 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
               )}
             </div>
 
-            {/* Bulk select toggle — stays visible */}
-            <button
-              onClick={() => { setBulkMode(m => !m); setSelectedTasks(new Set()) }}
-              className={`shrink-0 px-3 py-2 rounded-xl text-sm font-medium border transition-colors flex items-center gap-1.5 ${
-                bulkMode
-                  ? 'bg-violet-500/20 border-violet-500/40 text-violet-300'
-                  : 'bg-[#0d1117] border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
-              }`}>
-              {bulkMode ? <><X size={12} /> Exit Select</> : <>Select</>}
-            </button>
           </div>
 
           {/* Status filter chips */}

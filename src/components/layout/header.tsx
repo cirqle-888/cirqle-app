@@ -61,7 +61,7 @@ function Breadcrumbs() {
 
 export default function Header({ title, subtitle, actions }: HeaderProps) {
   return (
-    <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-10">
+    <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-30">
       <div>
         <Breadcrumbs />
         <h1 className="text-lg font-semibold text-foreground">{title}</h1>
