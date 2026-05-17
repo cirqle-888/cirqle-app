@@ -132,6 +132,16 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
   const [filterClient, setFilterClient] = useState('')
   const [filterService, setFilterService] = useState('')
   const [searchQ, setSearchQ] = useState('')
+
+  // Last-used filter — saved to localStorage for quick re-apply
+  type SavedFilter = { filterClient: string; filterService: string; filterAssignee: string; sortBy: string }
+  const [savedFilter, setSavedFilter] = useState<SavedFilter | null>(null)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('cirqle_tasks_last_filter')
+      if (raw) setSavedFilter(JSON.parse(raw))
+    } catch {}
+  }, [])
   const [sortBy, setSortBy] = useState<'date_desc' | 'date_asc' | 'amount_desc' | 'client'>('date_desc')
   const [form, setForm] = useState(EMPTY_FORM)
   const [previewTaskNumber, setPreviewTaskNumber] = useState<number | null>(null)
@@ -792,20 +802,33 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
   }, [role, currentEmployee, localAssignments, filteredTasks])
 
   const hasActiveFilters = !!(filterStatus || filterClient || filterService || searchQ || sortBy !== 'date_desc' || !!filterAssignee)
-  // Count of active filters visible in the Filter popover (search has its own bar; status has chips)
   const activeFilterCount = [filterClient, filterService, filterAssignee, sortBy !== 'date_desc' ? 'sort' : ''].filter(Boolean).length
 
-  // Top 3 clients by task frequency — shown as quick-filter chips in toolbar
-  const topClients = useMemo(() => {
-    const counts = new Map<string, { id: string; name: string; count: number }>()
-    tasks.forEach(t => {
-      if (!t.client?.id) return
-      const e = counts.get(t.client.id)
-      if (e) e.count++
-      else counts.set(t.client.id, { id: t.client.id, name: t.client.name, count: 1 })
-    })
-    return [...counts.values()].sort((a, b) => b.count - a.count).slice(0, 3)
-  }, [tasks])
+  // Save active filters to localStorage so user can recall them
+  useEffect(() => {
+    if (!filterClient && !filterService && !filterAssignee && sortBy === 'date_desc') return
+    try {
+      localStorage.setItem('cirqle_tasks_last_filter', JSON.stringify({ filterClient, filterService, filterAssignee, sortBy }))
+      setSavedFilter({ filterClient, filterService, filterAssignee, sortBy })
+    } catch {}
+  }, [filterClient, filterService, filterAssignee, sortBy])
+
+  // Build a human-readable label for the saved filter
+  const savedFilterLabel = useMemo(() => {
+    if (!savedFilter) return null
+    const parts: string[] = []
+    if (savedFilter.filterClient) {
+      const name = tasks.find(t => t.client?.id === savedFilter.filterClient)?.client?.name
+      if (name) parts.push(name)
+    }
+    if (savedFilter.filterService) {
+      const name = tasks.find(t => t.service?.id === savedFilter.filterService)?.service?.name
+      if (name) parts.push(name)
+    }
+    if (savedFilter.filterAssignee) parts.push('Assignee')
+    if (savedFilter.sortBy !== 'date_desc') parts.push('Sorted')
+    return parts.join(' · ') || null
+  }, [savedFilter, tasks])
 
   const inputCls = 'w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50'
 
@@ -816,6 +839,11 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
         subtitle={showTrash ? `${trash.length} item${trash.length !== 1 ? 's' : ''} in Trash` : `${tasks.length} total tasks`}
         actions={
           <div className="flex items-center gap-2">
+            {showTrash && (
+              <button onClick={() => setShowTrash(false)} className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-2 bg-secondary hover:bg-secondary/80 transition-colors">
+                <ChevronLeft className="w-4 h-4" /> Back to Tasks
+              </button>
+            )}
             {!showTrash && (role === 'super_admin' || role === 'accounts' || role === 'team_lead') && (
               <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90 transition-opacity">
                 <Plus className="w-4 h-4" /> Add Task
@@ -940,19 +968,8 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
       {!showTrash && <div className="p-6 space-y-4">
         {/* Filters — sticky toolbar (sits below the Header which is sticky at top-0) */}
         <div className="sticky top-[68px] z-20 bg-background pt-2 pb-3 -mt-2 space-y-2">
-          {/* Toolbar: Select · Search · [client chips] · Filter · [Table|Board|Cal] · ⚙ */}
+          {/* Toolbar: Search · [last-filter] · Filter · [Table|Board|Cal] · [⚙ board] · [✏ table] · Select */}
           <div className="flex items-center gap-2">
-            {/* Bulk select toggle — leftmost */}
-            <button
-              onClick={() => { setBulkMode(m => !m); setSelectedTasks(new Set()) }}
-              className={`shrink-0 px-3 py-2 rounded-xl text-sm font-medium border transition-colors flex items-center gap-1.5 ${
-                bulkMode
-                  ? 'bg-violet-500/20 border-violet-500/40 text-violet-300'
-                  : 'bg-[#0d1117] border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
-              }`}>
-              {bulkMode ? <><X size={12} /> Exit Select</> : <>Select</>}
-            </button>
-
             {/* Search bar — grows to fill available space */}
             <div className="flex items-center gap-2 bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2 flex-1 min-w-0">
               <Search size={14} className="text-muted-foreground shrink-0" />
@@ -960,23 +977,25 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
               {searchQ && <button onClick={() => setSearchQ('')}><X size={12} className="text-muted-foreground" /></button>}
             </div>
 
-            {/* Quick client filter chips — top 3 by task count */}
-            {topClients.map(c => (
+            {/* Last-used filter recall button */}
+            {savedFilterLabel && !hasActiveFilters && (
               <button
-                key={c.id}
-                title={c.name}
-                onClick={() => setFilterClient(fc => fc === c.id ? '' : c.id)}
-                className={`shrink-0 px-3 py-2 rounded-xl text-xs font-medium border transition-colors max-w-[120px] truncate ${
-                  filterClient === c.id
-                    ? 'bg-violet-500/20 border-violet-500/40 text-violet-300'
-                    : 'bg-[#0d1117] border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
-                }`}
+                title="Re-apply last filter"
+                onClick={() => {
+                  if (!savedFilter) return
+                  setFilterClient(savedFilter.filterClient)
+                  setFilterService(savedFilter.filterService)
+                  setFilterAssignee(savedFilter.filterAssignee)
+                  setSortBy(savedFilter.sortBy as typeof sortBy)
+                }}
+                className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border border-white/10 bg-[#0d1117] text-muted-foreground hover:text-foreground hover:border-white/20 transition-colors max-w-[180px]"
               >
-                {c.name}
+                <RefreshCw className="w-3 h-3 shrink-0" />
+                <span className="truncate">{savedFilterLabel}</span>
               </button>
-            ))}
+            )}
 
-            {/* Filter popover — icon only, compact */}
+            {/* Filter popover */}
             <div ref={filterRef} className="relative shrink-0">
               <button
                 onClick={() => setFilterOpen(v => !v)}
@@ -1077,28 +1096,24 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
               ))}
             </div>
 
-            {/* View settings ⚙ — inline edit, board grouping, etc. */}
-            <div ref={viewRef} className="relative shrink-0">
-              <button
-                onClick={() => setViewOpen(v => !v)}
-                className={`w-9 h-9 flex items-center justify-center rounded-xl border transition-colors ${
-                  viewOpen
-                    ? 'bg-white/10 border-white/20 text-foreground'
-                    : 'bg-[#0d1117] border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
-                }`}
-              >
-                <MoreVertical className="w-4 h-4" />
-              </button>
-              {viewOpen && (
-                <div className="absolute right-0 top-full mt-1.5 z-50 bg-[#0d1117] border border-white/10 rounded-xl shadow-2xl p-3 min-w-[220px] space-y-3">
-                  {/* Board: group by */}
-                  {viewMode === 'board' && (
+            {/* Board settings ⚙ — only visible in board view */}
+            {viewMode === 'board' && (
+              <div ref={viewRef} className="relative shrink-0">
+                <button
+                  onClick={() => setViewOpen(v => !v)}
+                  className={`w-9 h-9 flex items-center justify-center rounded-xl border transition-colors ${
+                    viewOpen
+                      ? 'bg-white/10 border-white/20 text-foreground'
+                      : 'bg-[#0d1117] border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
+                  }`}
+                >
+                  <MoreVertical className="w-4 h-4" />
+                </button>
+                {viewOpen && (
+                  <div className="absolute right-0 top-full mt-1.5 z-50 bg-[#0d1117] border border-white/10 rounded-xl shadow-2xl p-3 min-w-[220px] space-y-3">
                     <div>
                       <label className="block text-[11px] uppercase tracking-wide text-muted-foreground/70 mb-1">Group by</label>
-                      <AppSelect
-                        value={boardGroupBy}
-                        onChange={e => setBoardGroupBy(e.target.value as typeof boardGroupBy)}
-                      >
+                      <AppSelect value={boardGroupBy} onChange={e => setBoardGroupBy(e.target.value as typeof boardGroupBy)}>
                         <option value="employee">Employee</option>
                         <option value="client">Client</option>
                         <option value="service">Service</option>
@@ -1106,45 +1121,48 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                         <option value="date">Date</option>
                       </AppSelect>
                     </div>
-                  )}
+                    {boardGroupBy === 'date' && (
+                      <div>
+                        <label className="block text-[11px] uppercase tracking-wide text-muted-foreground/70 mb-1">Date granularity</label>
+                        <AppSelect value={boardDateGranularity} onChange={e => setBoardDateGranularity(e.target.value as typeof boardDateGranularity)}>
+                          <option value="preset">Today · Week · Month</option>
+                          <option value="daily">By day</option>
+                          <option value="weekly">By week</option>
+                          <option value="monthly">By month</option>
+                        </AppSelect>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
-                  {/* Board + date: granularity */}
-                  {viewMode === 'board' && boardGroupBy === 'date' && (
-                    <div>
-                      <label className="block text-[11px] uppercase tracking-wide text-muted-foreground/70 mb-1">Date granularity</label>
-                      <AppSelect
-                        value={boardDateGranularity}
-                        onChange={e => setBoardDateGranularity(e.target.value as typeof boardDateGranularity)}
-                      >
-                        <option value="preset">Today · Week · Month</option>
-                        <option value="daily">By day</option>
-                        <option value="weekly">By week</option>
-                        <option value="monthly">By month</option>
-                      </AppSelect>
-                    </div>
-                  )}
+            {/* Inline edit toggle — only in table view, visible on right */}
+            {viewMode === 'table' && (
+              <button
+                onClick={() => setInlineEditMode(m => !m)}
+                title="Toggle inline edit"
+                className={`shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border transition-colors ${
+                  inlineEditMode
+                    ? 'bg-blue-500/15 border-blue-500/40 text-blue-300'
+                    : 'bg-[#0d1117] border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
+                }`}
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                {inlineEditMode ? 'Editing' : 'Edit'}
+              </button>
+            )}
 
-                  {/* Table: inline edit toggle */}
-                  {viewMode === 'table' && (
-                    <button
-                      onClick={() => setInlineEditMode(m => !m)}
-                      className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm border transition-colors ${
-                        inlineEditMode
-                          ? 'bg-blue-500/15 border-blue-500/40 text-blue-300'
-                          : 'bg-white/[0.02] border-white/10 text-foreground hover:border-white/20'
-                      }`}
-                    >
-                      <span className="flex items-center gap-2">
-                        <Pencil className="w-3.5 h-3.5" />
-                        Inline edit
-                      </span>
-                      {inlineEditMode && <Check className="w-3.5 h-3.5" />}
-                    </button>
-                  )}
-
-                </div>
-              )}
-            </div>
+            {/* Bulk select toggle — rightmost */}
+            <button
+              onClick={() => { setBulkMode(m => !m); setSelectedTasks(new Set()) }}
+              className={`shrink-0 px-3 py-2 rounded-xl text-sm font-medium border transition-colors flex items-center gap-1.5 ${
+                bulkMode
+                  ? 'bg-violet-500/20 border-violet-500/40 text-violet-300'
+                  : 'bg-[#0d1117] border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
+              }`}>
+              {bulkMode ? <><X size={12} /> Exit</> : <>Select</>}
+            </button>
 
           </div>
 
