@@ -1131,9 +1131,9 @@ export default function ContributionsClient({
                               {/* Super admin: jump directly to task in Tasks page */}
                               {role === 'super_admin' && (
                                 <a
-                                  href={`/dashboard/tasks`}
+                                  href={`/dashboard/tasks?highlight=${task.id}`}
                                   title={`Open "${task.title}" in Tasks`}
-                                  onClick={e => { e.stopPropagation(); sessionStorage.setItem('highlight_task', task.id) }}
+                                  onClick={e => e.stopPropagation()}
                                   className="p-1.5 rounded-md text-muted-foreground/0 group-hover:text-violet-400/50 hover:!text-violet-400 hover:bg-violet-500/10 transition-all">
                                   <ExternalLink className="w-3.5 h-3.5" />
                                 </a>

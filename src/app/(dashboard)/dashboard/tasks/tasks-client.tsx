@@ -15,6 +15,7 @@ import { taskCode, taskCodeMatches, nextTaskNumber } from '@/lib/utils/task-code
 import { seedFromTasks } from '@/lib/hooks/use-smart-sort'
 import { useRole } from '@/contexts/role-context'
 import { useToast, ToastContainer } from '@/components/ui/toast'
+import { ClientEditModal } from '@/components/ui/client-edit-modal'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { usePrivacy } from '@/contexts/privacy-context'
 
@@ -104,6 +105,22 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
   const { role, employee: currentEmployee } = useRole()
   const { toasts, dismiss, success } = useToast()
   const { dn } = usePrivacy()
+  const [editClientId, setEditClientId] = useState<string | null>(null)
+  const [highlightedTaskId, setHighlightedTaskId] = useState<string | null>(null)
+
+  // Scroll to and briefly highlight a task when arriving with ?highlight=<id>
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('highlight')
+    if (!id) return
+    setHighlightedTaskId(id)
+    setTimeout(() => {
+      const el = document.querySelector(`[data-taskid="${id}"]`)
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 300)
+    setTimeout(() => setHighlightedTaskId(null), 2500)
+    window.history.replaceState(null, '', window.location.pathname)
+  }, [])
+
   const [tasks, setTasks] = useState<Task[]>(initialTasks)
   const [trash, setTrash] = useState<(Task & { deleted_at: string })[]>(initialTrash)
   const [showTrash, setShowTrash] = useState(false)
@@ -1174,7 +1191,8 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
               {visibleTasks.length === 0 && <tr><td colSpan={bulkMode ? 8 : 7} className="px-4 py-10 text-center text-sm text-muted-foreground">No tasks found</td></tr>}
               {visibleTasks.map(task => (
                 <tr key={task.id}
-                  className={`hover:bg-secondary/30 transition-colors group ${inlineEditMode ? '' : 'cursor-pointer'} ${bulkMode && selectedTasks.has(task.id) ? 'bg-violet-500/[0.07]' : ''}`}
+                  data-taskid={task.id}
+                  className={`hover:bg-secondary/30 transition-colors group ${inlineEditMode ? '' : 'cursor-pointer'} ${bulkMode && selectedTasks.has(task.id) ? 'bg-violet-500/[0.07]' : ''} ${highlightedTaskId === task.id ? 'ring-1 ring-violet-400 bg-violet-500/10' : ''}`}
                   onClick={
                     bulkMode
                       ? () => setSelectedTasks(prev => {
@@ -1411,9 +1429,9 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                       </button>
                       {role === 'super_admin' && (
                         <a
-                          href={`/dashboard/settings?tab=clients&editClient=${task.client_id}&returnTo=/dashboard/tasks`}
-                          title={`Edit ${task.client?.name} in Settings`}
-                          onClick={e => e.stopPropagation()}
+                          href="#"
+                          title={`Edit ${task.client?.name}`}
+                          onClick={e => { e.preventDefault(); e.stopPropagation(); setEditClientId(task.client_id) }}
                           className="p-1 rounded hover:bg-white/[0.06] text-muted-foreground hover:text-violet-400 transition-colors"
                         >
                           <ExternalLink size={12} />
@@ -2999,6 +3017,10 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
             </form>
           </div>
         </ModalOverlay>
+      )}
+
+      {editClientId && (
+        <ClientEditModal clientId={editClientId} onClose={() => setEditClientId(null)} />
       )}
     </div>
   )

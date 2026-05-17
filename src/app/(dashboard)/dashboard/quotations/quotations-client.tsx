@@ -13,6 +13,7 @@ import AppSelect from '@/components/ui/app-select'
 import { seedFromTasks } from '@/lib/hooks/use-smart-sort'
 import { useRole } from '@/contexts/role-context'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { ClientEditModal } from '@/components/ui/client-edit-modal'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -158,6 +159,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
   const isSuperAdmin = role === 'super_admin'
   const router = useRouter()
 
+  const [editClientId, setEditClientId] = useState<string | null>(null)
   const [quotations, setQuotations] = useState<Quotation[]>(initialQuotations)
   const [clients, setClients] = useState<ClientRow[]>(initialClients)
   const [showForm, setShowForm] = useState(false)
@@ -560,7 +562,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                 {isSuperAdmin && (
                   <button
                     title="Edit client in Settings"
-                    onClick={() => { window.location.href = `/dashboard/settings?tab=clients&editClient=${form.client_id}&returnTo=/dashboard/quotations` }}
+                    onClick={() => { if (form.client_id) setEditClientId(form.client_id) }}
                     className="text-muted-foreground hover:text-violet-400 transition-colors p-1 rounded hover:bg-violet-500/10"
                   >
                     <ExternalLink style={{ width: 10, height: 10 }} />
@@ -886,6 +888,10 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
             </form>
           </div>
         </ModalOverlay>
+      )}
+
+      {editClientId && (
+        <ClientEditModal clientId={editClientId} onClose={() => setEditClientId(null)} />
       )}
     </div>
   )

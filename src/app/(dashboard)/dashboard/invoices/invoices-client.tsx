@@ -23,6 +23,7 @@ import { useToast, ToastContainer } from '@/components/ui/toast'
 import { useRole } from '@/contexts/role-context'
 import type { Currency } from '@/types'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { ClientEditModal } from '@/components/ui/client-edit-modal'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface TaskRef {
@@ -108,6 +109,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   const [filterClient, setFilterClient] = useState<string>('')
   const [searchQ, setSearchQ] = useState('')
   const [tab, setTab] = useState<'active' | 'closed'>('active')
+  const [editClientId, setEditClientId] = useState<string | null>(null)
 
   // Panel modes
   const [panelMode, setPanelMode] = useState<'detail' | 'pay' | 'new' | 'generate' | 'statement' | 'discounts'>('detail')
@@ -1637,14 +1639,14 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                       </div>
                     )}
                     {role === 'super_admin' && (
-                      <a
-                        href={`/dashboard/settings?tab=clients&editClient=${inv.client_id}&returnTo=/dashboard/invoices`}
-                        onClick={e => e.stopPropagation()}
-                        title={`Edit ${inv.client?.name} in Settings`}
+                      <button
+                        type="button"
+                        onClick={e => { e.stopPropagation(); setEditClientId(inv.client_id) }}
+                        title={`Edit ${inv.client?.name}`}
                         className="text-muted-foreground/30 hover:text-violet-400 transition-colors"
                       >
                         <ExternalLink size={10} />
-                      </a>
+                      </button>
                     )}
                   </div>
                 </div>
@@ -3654,6 +3656,10 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             </div>
           </div>
         </ModalOverlay>
+      )}
+
+      {editClientId && (
+        <ClientEditModal clientId={editClientId} onClose={() => setEditClientId(null)} />
       )}
     </div>
   )
