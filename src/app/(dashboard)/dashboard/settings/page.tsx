@@ -1,7 +1,13 @@
 import { createClient } from '@/lib/supabase/server'
 import SettingsClient from './settings-client'
 
-export default async function SettingsPage() {
+const ALL_TABS = ['Company', 'Privacy & Security', 'Employees', 'Clients', 'Pricing Matrix', 'Services', 'Groups & Params', 'Tools', 'Bank Accounts', 'Cash Categories', 'Exchange Rates']
+const normalizeTab = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+
+export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+  const { tab: rawTab } = await searchParams
+  const initialTab = ALL_TABS.find(t => normalizeTab(t) === normalizeTab(rawTab ?? '')) ?? 'Company'
+
   const supabase = await createClient()
 
   const [
@@ -55,6 +61,7 @@ export default async function SettingsPage() {
       groupServices={groupServicesRes.data || []}
       invoices={(invoicesRes.data || []) as any[]}
       designations={designations}
+      initialTab={initialTab}
     />
   )
 }

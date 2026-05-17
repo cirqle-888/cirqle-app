@@ -71,6 +71,7 @@ interface Props {
   groupServices: { group_id: string; service_id: string }[]
   invoices: { client_id: string; total_amount: number; paid_amount: number; status: string }[]
   designations?: { id: string; name: string; is_admin: boolean; is_system: boolean }[]
+  initialTab?: string
 }
 
 export default function SettingsClient(props: Props) {
@@ -95,21 +96,11 @@ export default function SettingsClient(props: Props) {
     if (fromDB.length > 0) return fromDB
     try { return JSON.parse(localStorage.getItem('cirqle_group_services') || '[]') } catch { return [] }
   })
-  const [tab, setTab] = useState('Company')
+  const [tab, setTab] = useState(props.initialTab ?? 'Company')
   const supabase = createClient()
   const { dn, ds, isUnlocked, forceLock, setForceLockMode } = usePrivacy()
   const [forceLockState, setForceLockState] = useState<boolean>(false)
   useEffect(() => { setForceLockState(isForceLocked()) }, [])
-
-  // Restore active tab from URL hash on load, and keep hash in sync
-  useEffect(() => {
-    const hash = window.location.hash.replace('#', '')
-    if (hash) {
-      const ALL_TABS = ['Company', 'Privacy & Security', 'Employees', 'Clients', 'Pricing Matrix', 'Services', 'Groups & Params', 'Tools', 'Bank Accounts', 'Cash Categories', 'Exchange Rates']
-      const matched = ALL_TABS.find(t => t.toLowerCase().replace(/[^a-z0-9]+/g, '-') === hash)
-      if (matched) setTab(matched)
-    }
-  }, [])
 
   // ── Privacy PIN management ──────────────────────────
   const [pinForm, setPinForm] = useState({ current: '', next: '', confirm: '' })
@@ -651,7 +642,7 @@ export default function SettingsClient(props: Props) {
               </p>
               <div className="space-y-0.5">
                 {group.tabs.map(t => (
-                  <button key={t} onClick={() => { setTab(t); setQuickEdit(false); window.history.replaceState(null, '', `#${t.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`) }}
+                  <button key={t} onClick={() => { setTab(t); setQuickEdit(false); window.history.replaceState(null, '', `?tab=${t.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`) }}
                     className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${tab === t ? 'bg-primary/15 text-primary font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-secondary'}`}>
                     {t}
                   </button>
