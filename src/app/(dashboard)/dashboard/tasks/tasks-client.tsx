@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { getStatusColor, getStatusLabel } from '@/lib/utils/invoice'
-import { Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, RefreshCw, TrendingDown, Users, Ban, Search, ExternalLink, ChevronDown, ChevronLeft, ChevronRight, Layers, LayoutGrid, List, CalendarDays, MoreVertical, Filter, Check, Building2, BarChart2 } from 'lucide-react'
+import { Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, RefreshCw, TrendingDown, Users, Ban, Search, ExternalLink, ChevronDown, ChevronLeft, ChevronRight, Layers, LayoutGrid, List, CalendarDays, MoreVertical, Building2, BarChart2 } from 'lucide-react'
 import { formatCurrency } from '@/lib/calculations/currency'
 import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
@@ -44,6 +44,14 @@ interface Task {
   honor_contributions?: boolean
   loss_amount?: number
   completion_pct?: number
+  // Variant fields (Phase 1)
+  parent_task_id?: string | null
+  variant_type?: 'revision' | 'concept' | 'size' | null
+  variant_label?: string | null
+  billing_mode?: 'fixed' | 'percent_of_parent' | 'parameter_driven'
+  billing_percent?: number | null
+  billing_override?: boolean
+  is_billable?: boolean
   client?: { id: string; name: string; code: string }
   service?: { id: string; name: string }
 }
@@ -100,6 +108,15 @@ const EMPTY_FORM = {
   is_recurring: false,
   recurring_interval: 'monthly',
   recurring_end_date: '',
+  // ── Variant fields (Phase 1: manual entry; auto-fill comes in Phase 2) ──
+  parent_task_id: '',                                                            // empty = original task
+  variant_type: '' as '' | 'revision' | 'concept' | 'size',
+  variant_label: '',                                                             // "Story", "Banner", "Concept 2"...
+  billing_mode: 'fixed' as 'fixed' | 'percent_of_parent' | 'parameter_driven',
+  billing_percent: '',                                                           // string for input; parsed on save
+  billing_override: false,                                                       // true when user types a custom amount
+  is_billable: true,                                                             // false = internal/non-billable concept
+  manual_billing_amount: '',                                                     // user-typed override amount
 }
 
 export default function TasksClient({ initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments }: Props) {
@@ -133,15 +150,6 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
   const [filterService, setFilterService] = useState('')
   const [searchQ, setSearchQ] = useState('')
 
-  // Last-used filter — saved to localStorage for quick re-apply
-  type SavedFilter = { filterClient: string; filterService: string; filterAssignee: string; sortBy: string }
-  const [savedFilter, setSavedFilter] = useState<SavedFilter | null>(null)
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem('cirqle_tasks_last_filter')
-      if (raw) setSavedFilter(JSON.parse(raw))
-    } catch {}
-  }, [])
   const [sortBy, setSortBy] = useState<'date_desc' | 'date_asc' | 'amount_desc' | 'client'>('date_desc')
   const [form, setForm] = useState(EMPTY_FORM)
   const [previewTaskNumber, setPreviewTaskNumber] = useState<number | null>(null)
@@ -231,18 +239,12 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
   // Date granularity for board (only when boardGroupBy === 'date')
   const [boardDateGranularity, setBoardDateGranularity] = useState<'daily' | 'weekly' | 'monthly' | 'preset'>('preset')
 
-  // Header / toolbar popover state — More menu, Filter popover, View popover
-  const [moreOpen,   setMoreOpen]   = useState(false)
-  const [filterOpen, setFilterOpen] = useState(false)
-  const [viewOpen,   setViewOpen]   = useState(false)
-  const moreRef   = useRef<HTMLDivElement>(null)
-  const filterRef = useRef<HTMLDivElement>(null)
+  // Board settings popover state
+  const [viewOpen, setViewOpen] = useState(false)
   const viewRef   = useRef<HTMLDivElement>(null)
   useEffect(() => {
     function h(e: MouseEvent) {
-      if (moreRef.current   && !moreRef.current.contains(e.target as Node))   setMoreOpen(false)
-      if (filterRef.current && !filterRef.current.contains(e.target as Node)) setFilterOpen(false)
-      if (viewRef.current   && !viewRef.current.contains(e.target as Node))   setViewOpen(false)
+      if (viewRef.current && !viewRef.current.contains(e.target as Node)) setViewOpen(false)
     }
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
@@ -292,14 +294,50 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
   const unitPrice = clientPrice?.price ?? selectedService?.default_price ?? 0
   const unitCurrency = (clientPrice?.currency || selectedService?.default_currency || 'INR') as Currency
 
+  // Derived: parent task (when creating a variant)
+  const parentTask = useMemo(
+    () => form.parent_task_id ? tasks.find(t => t.id === form.parent_task_id) : null,
+    [form.parent_task_id, tasks]
+  )
+
   // Derived: computed billing amount
+  //   1. If user typed a manual override → that wins
+  //   2. Else if linked to a parent task → derive from parent + billing_mode
+  //   3. Else use the standard pricing-matrix calculation
   const computedAmount = useMemo(() => {
+    // Non-billable variant: ₹0
+    if (form.parent_task_id && !form.is_billable) return 0
+
+    // Manual override
+    if (form.billing_override && form.manual_billing_amount) {
+      return parseFloat(form.manual_billing_amount) || 0
+    }
+
+    // Variant of a parent task
+    if (parentTask) {
+      const parentBilling = parentTask.billing_amount_inr || 0
+      if (form.billing_mode === 'percent_of_parent') {
+        const pct = parseFloat(form.billing_percent) || 0
+        return Math.round((parentBilling * pct / 100) * 100) / 100
+      }
+      if (form.billing_mode === 'parameter_driven') {
+        // Phase 1: surfaced as percent input; Phase 2 will sum parameter weights from contributions
+        const pct = parseFloat(form.billing_percent) || 0
+        return Math.round((parentBilling * pct / 100) * 100) / 100
+      }
+      // billing_mode === 'fixed' on a variant: user enters manual amount via manual_billing_amount
+      return parseFloat(form.manual_billing_amount) || 0
+    }
+
+    // Standard pricing-matrix calculation (original task)
     if (!selectedService) return 0
     if (pricingType === 'fixed_per_creative') return unitPrice * (parseFloat(form.quantity) || 1)
     if (pricingType === 'hourly') return unitPrice * (parseFloat(form.hours) || 1)
     if (pricingType === 'percentage_of_spend') return (parseFloat(form.spend) || 0) * (unitPrice / 100)
     return unitPrice // retainer
-  }, [pricingType, unitPrice, form.quantity, form.hours, form.spend, selectedService])
+  }, [pricingType, unitPrice, form.quantity, form.hours, form.spend, selectedService,
+      parentTask, form.parent_task_id, form.is_billable, form.billing_mode, form.billing_percent,
+      form.billing_override, form.manual_billing_amount])
 
   // When client or service changes, update currency
   function handleClientChange(clientId: string) {
@@ -355,6 +393,15 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
       is_recurring: false,
       recurring_interval: 'monthly',
       recurring_end_date: '',
+      // Variant fields (Phase 1): editing variants will get a dedicated panel in Phase 2
+      parent_task_id:    task.parent_task_id || '',
+      variant_type:      (task.variant_type || '') as '' | 'revision' | 'concept' | 'size',
+      variant_label:     task.variant_label || '',
+      billing_mode:      (task.billing_mode || 'fixed') as 'fixed' | 'percent_of_parent' | 'parameter_driven',
+      billing_percent:   task.billing_percent != null ? String(task.billing_percent) : '',
+      billing_override:  !!task.billing_override,
+      is_billable:       task.is_billable !== false,
+      manual_billing_amount: task.billing_amount_inr != null ? String(task.billing_amount_inr) : '',
     })
     setQuickSet(null)
   }
@@ -555,6 +602,14 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
         is_recurring: form.is_recurring,
         recurring_interval: form.is_recurring ? form.recurring_interval : null,
         recurring_end_date: form.is_recurring && form.recurring_end_date ? form.recurring_end_date : null,
+        // ── Variant fields (Phase 1) ──
+        parent_task_id:   form.parent_task_id || null,
+        variant_type:     form.variant_type || null,
+        variant_label:    form.variant_label || null,
+        billing_mode:     form.billing_mode,
+        billing_percent:  form.billing_percent ? parseFloat(form.billing_percent) : null,
+        billing_override: form.billing_override,
+        is_billable:      form.is_billable,
       })
       .select(`*, client:clients(id, name, code), service:services(id, name)`)
       .single()
@@ -804,32 +859,6 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
   const hasActiveFilters = !!(filterStatus || filterClient || filterService || searchQ || sortBy !== 'date_desc' || !!filterAssignee)
   const activeFilterCount = [filterClient, filterService, filterAssignee, sortBy !== 'date_desc' ? 'sort' : ''].filter(Boolean).length
 
-  // Save active filters to localStorage so user can recall them
-  useEffect(() => {
-    if (!filterClient && !filterService && !filterAssignee && sortBy === 'date_desc') return
-    try {
-      localStorage.setItem('cirqle_tasks_last_filter', JSON.stringify({ filterClient, filterService, filterAssignee, sortBy }))
-      setSavedFilter({ filterClient, filterService, filterAssignee, sortBy })
-    } catch {}
-  }, [filterClient, filterService, filterAssignee, sortBy])
-
-  // Build a human-readable label for the saved filter
-  const savedFilterLabel = useMemo(() => {
-    if (!savedFilter) return null
-    const parts: string[] = []
-    if (savedFilter.filterClient) {
-      const name = tasks.find(t => t.client?.id === savedFilter.filterClient)?.client?.name
-      if (name) parts.push(name)
-    }
-    if (savedFilter.filterService) {
-      const name = tasks.find(t => t.service?.id === savedFilter.filterService)?.service?.name
-      if (name) parts.push(name)
-    }
-    if (savedFilter.filterAssignee) parts.push('Assignee')
-    if (savedFilter.sortBy !== 'date_desc') parts.push('Sorted')
-    return parts.join(' · ') || null
-  }, [savedFilter, tasks])
-
   const inputCls = 'w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50'
 
   return (
@@ -839,61 +868,43 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
         subtitle={showTrash ? `${trash.length} item${trash.length !== 1 ? 's' : ''} in Trash` : `${tasks.length} total tasks`}
         actions={
           <div className="flex items-center gap-2">
-            {showTrash && (
+            {showTrash ? (
               <button onClick={() => setShowTrash(false)} className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-2 bg-secondary hover:bg-secondary/80 transition-colors">
                 <ChevronLeft className="w-4 h-4" /> Back to Tasks
               </button>
-            )}
-            {!showTrash && (role === 'super_admin' || role === 'accounts' || role === 'team_lead') && (
-              <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90 transition-opacity">
-                <Plus className="w-4 h-4" /> Add Task
-              </button>
-            )}
-            {/* More menu — Workload + Trash */}
-            <div ref={moreRef} className="relative">
-              <button
-                onClick={() => setMoreOpen(v => !v)}
-                aria-label="More actions"
-                title="More"
-                className={`flex items-center justify-center w-9 h-9 rounded-lg border transition-colors ${
-                  moreOpen
-                    ? 'bg-white/10 border-white/20 text-foreground'
-                    : 'bg-secondary border-transparent text-muted-foreground hover:text-foreground hover:border-white/15'
-                }`}
-              >
-                <MoreVertical className="w-4 h-4" />
-                {trash.length > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-red-500/90 text-white text-[9px] leading-none rounded-full px-1.5 py-0.5 font-semibold">
-                    {trash.length}
-                  </span>
+            ) : (
+              <>
+                {/* Workload Report */}
+                <button
+                  onClick={() => setShowWorkload(true)}
+                  title="Workload Report"
+                  className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-2 bg-secondary hover:bg-secondary/80 transition-colors"
+                >
+                  <Users className="w-4 h-4 text-blue-400" />
+                  <span className="hidden sm:inline">Workload</span>
+                </button>
+                {/* Trash */}
+                <button
+                  onClick={() => setShowTrash(true)}
+                  title="Trash"
+                  className="relative flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-2 bg-secondary hover:bg-secondary/80 transition-colors"
+                >
+                  <Trash2 className="w-4 h-4 text-red-400" />
+                  <span className="hidden sm:inline">Trash</span>
+                  {trash.length > 0 && (
+                    <span className="bg-red-500/20 text-red-400 text-[10px] rounded-full px-1.5 py-0.5 font-semibold">
+                      {trash.length}
+                    </span>
+                  )}
+                </button>
+                {/* Add Task */}
+                {(role === 'super_admin' || role === 'accounts' || role === 'team_lead') && (
+                  <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90 transition-opacity">
+                    <Plus className="w-4 h-4" /> Add Task
+                  </button>
                 )}
-              </button>
-              {moreOpen && (
-                <div className="absolute right-0 top-full mt-1.5 z-50 bg-[#0d1117] border border-white/10 rounded-xl shadow-2xl p-1.5 min-w-[220px]">
-                  <button
-                    onClick={() => { setShowWorkload(true); setMoreOpen(false) }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-foreground hover:bg-white/5 transition-colors text-left"
-                  >
-                    <Users className="w-4 h-4 text-blue-400" />
-                    Workload Report
-                  </button>
-                  <button
-                    onClick={() => { setShowTrash(v => !v); setMoreOpen(false) }}
-                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors text-left ${
-                      showTrash ? 'bg-red-500/10 text-red-400' : 'text-foreground hover:bg-white/5'
-                    }`}
-                  >
-                    <Trash2 className="w-4 h-4 text-red-400" />
-                    <span className="flex-1">Trash</span>
-                    {trash.length > 0 && (
-                      <span className="bg-red-500/20 text-red-400 text-[10px] rounded-full px-1.5 py-0.5 font-semibold">
-                        {trash.length}
-                      </span>
-                    )}
-                  </button>
-                </div>
-              )}
-            </div>
+              </>
+            )}
           </div>
         }
       />
@@ -966,226 +977,185 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
 
       {/* ── Main Task List ── */}
       {!showTrash && <div className="p-6 space-y-4">
-        {/* Filters — sticky toolbar (sits below the Header which is sticky at top-0) */}
-        <div className="sticky top-[68px] z-20 bg-background pt-2 pb-3 -mt-2 space-y-2">
-          {/* Toolbar: Search · [last-filter] · Filter · [Table|Board|Cal] · [⚙ board] · [✏ table] · Select */}
-          <div className="flex items-center gap-2">
-            {/* Search bar — grows to fill available space */}
-            <div className="flex items-center gap-2 bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2 flex-1 min-w-0">
-              <Search size={14} className="text-muted-foreground shrink-0" />
-              <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search by title, client, service or task code…" className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60 min-w-0" />
-              {searchQ && <button onClick={() => setSearchQ('')}><X size={12} className="text-muted-foreground" /></button>}
+        {/* Sticky toolbar — sits below the sticky Header. pt/pb provide breathing room
+            so when scrolled there's visible space above (between header and toolbar) and below (before thead). */}
+        <div className="sticky top-[92px] z-20 bg-background pt-4 pb-4 space-y-2 w-full">
+
+          {/* Row 1: [Select | Edit] · [Search flex-1] · [View segment] · [⚙ board] */}
+          <div className="flex items-center gap-2 w-full">
+            {/* Left group: Select + Inline Edit — solid action-mode toggles */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                onClick={() => { setBulkMode(m => !m); setSelectedTasks(new Set()) }}
+                className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm ${
+                  bulkMode
+                    ? 'bg-violet-500 text-white shadow-violet-500/30'
+                    : 'bg-secondary border border-border text-foreground hover:bg-secondary/60'
+                }`}>
+                {bulkMode ? <><X size={12} /> Exit Select</> : <>Select</>}
+              </button>
+              {viewMode === 'table' && (
+                <button
+                  onClick={() => setInlineEditMode(m => !m)}
+                  title="Toggle inline edit"
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all shadow-sm ${
+                    inlineEditMode
+                      ? 'bg-blue-500 text-white shadow-blue-500/30'
+                      : 'bg-secondary border border-border text-foreground hover:bg-secondary/60'
+                  }`}
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  {inlineEditMode ? 'Editing' : 'Edit'}
+                </button>
+              )}
             </div>
 
-            {/* Last-used filter recall button */}
-            {savedFilterLabel && !hasActiveFilters && (
-              <button
-                title="Re-apply last filter"
-                onClick={() => {
-                  if (!savedFilter) return
-                  setFilterClient(savedFilter.filterClient)
-                  setFilterService(savedFilter.filterService)
-                  setFilterAssignee(savedFilter.filterAssignee)
-                  setSortBy(savedFilter.sortBy as typeof sortBy)
-                }}
-                className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border border-white/10 bg-[#0d1117] text-muted-foreground hover:text-foreground hover:border-white/20 transition-colors max-w-[180px]"
-              >
-                <RefreshCw className="w-3 h-3 shrink-0" />
-                <span className="truncate">{savedFilterLabel}</span>
-              </button>
-            )}
+            {/* Search — flex-1 */}
+            <div className="flex items-center gap-2 bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2 flex-1 basis-0 min-w-0">
+              <Search size={14} className="text-muted-foreground shrink-0" />
+              <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search by title, client, service or code…" className="flex-1 min-w-0 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60" />
+              {searchQ && <button onClick={() => setSearchQ('')} className="shrink-0"><X size={12} className="text-muted-foreground" /></button>}
+            </div>
 
-            {/* Filter popover */}
-            <div ref={filterRef} className="relative shrink-0">
-              <button
-                onClick={() => setFilterOpen(v => !v)}
-                className={`w-9 h-9 flex items-center justify-center rounded-xl border transition-colors relative ${
-                  filterOpen || activeFilterCount > 0
-                    ? 'bg-violet-500/15 border-violet-500/40 text-violet-300'
-                    : 'bg-[#0d1117] border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
-                }`}
-              >
-                <Filter className="w-4 h-4" />
-                {activeFilterCount > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-violet-500 text-white text-[9px] leading-none rounded-full px-1 py-0.5 font-bold">
-                    {activeFilterCount}
-                  </span>
-                )}
-              </button>
-              {filterOpen && (
-                <div className="absolute right-0 top-full mt-1.5 z-50 bg-[#0d1117] border border-white/10 rounded-xl shadow-2xl p-3 min-w-[260px] space-y-2.5">
-                  <div>
-                    <label className="block text-[11px] uppercase tracking-wide text-muted-foreground/70 mb-1">Client</label>
-                    <FilterDropdown
-                      options={[...new Map(tasks.filter(t => t.client?.id).map(t => [t.client!.id, t.client!])).values()]
-                        .map(c => ({ value: c.id, label: c.name }))}
-                      value={filterClient}
-                      onChange={setFilterClient}
-                      placeholder="All Clients"
-                      sortKey="clients"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] uppercase tracking-wide text-muted-foreground/70 mb-1">Service</label>
-                    <FilterDropdown
-                      options={[...new Map(tasks.filter(t => t.service?.id).map(t => [t.service!.id, t.service!])).values()]
-                        .map(s => ({ value: s.id, label: s.name }))}
-                      value={filterService}
-                      onChange={setFilterService}
-                      placeholder="All Services"
-                      sortKey="services"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] uppercase tracking-wide text-muted-foreground/70 mb-1">Assignee</label>
-                    <AppSelect
-                      value={filterAssignee}
-                      onChange={e => setFilterAssignee(e.target.value)}
+            {/* Inline view segment: Table · Board · ⚙(board-only) · Calendar */}
+            <div ref={viewRef} className="relative shrink-0">
+              <div className="flex items-center bg-[#0d1117] border border-white/10 rounded-xl p-1 gap-0.5">
+                {([
+                  { key: 'table',    Icon: List,         label: 'Table' },
+                  { key: 'board',    Icon: LayoutGrid,   label: 'Board' },
+                  { key: 'calendar', Icon: CalendarDays, label: 'Calendar' },
+                ] as const).map(({ key, Icon, label }) => (
+                  <span key={key} className="flex items-center">
+                    <button
+                      onClick={() => setViewMode(key)}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
+                        viewMode === key
+                          ? 'bg-white/10 text-foreground'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
                     >
-                      <option value="">All assignees</option>
-                      {employees.map(emp => (
-                        <option key={emp.id} value={emp.id}>{dn(emp)}</option>
-                      ))}
+                      <Icon className="w-3.5 h-3.5" />
+                      {label}
+                    </button>
+                    {/* Board settings ⚙ — sits immediately after the Board button, only visible when Board is active */}
+                    {key === 'board' && viewMode === 'board' && (
+                      <button
+                        onClick={() => setViewOpen(v => !v)}
+                        title="Board settings"
+                        className={`ml-0.5 px-2 py-1.5 rounded-lg flex items-center justify-center transition-colors ${
+                          viewOpen
+                            ? 'bg-white/10 text-foreground'
+                            : 'text-muted-foreground hover:text-foreground hover:bg-white/[0.04]'
+                        }`}
+                      >
+                        <MoreVertical className="w-4 h-4" />
+                      </button>
+                    )}
+                  </span>
+                ))}
+              </div>
+              {/* Group By popover */}
+              {viewMode === 'board' && viewOpen && (
+                <div className="absolute right-0 top-full mt-1.5 z-50 bg-[#0d1117] border border-white/10 rounded-xl shadow-2xl p-3 min-w-[220px] space-y-3">
+                  <div>
+                    <label className="block text-[11px] uppercase tracking-wide text-muted-foreground/70 mb-1">Group by</label>
+                    <AppSelect value={boardGroupBy} onChange={e => setBoardGroupBy(e.target.value as typeof boardGroupBy)}>
+                      <option value="employee">Employee</option>
+                      <option value="client">Client</option>
+                      <option value="service">Service</option>
+                      <option value="status">Status</option>
+                      <option value="date">Date</option>
                     </AppSelect>
                   </div>
-                  <div>
-                    <label className="block text-[11px] uppercase tracking-wide text-muted-foreground/70 mb-1">Sort by</label>
-                    <FilterDropdown
-                      options={[
-                        { value: 'date_desc',   label: 'Newest First' },
-                        { value: 'date_asc',    label: 'Oldest First' },
-                        { value: 'amount_desc', label: 'Amount (High→Low)' },
-                        { value: 'client',      label: 'Client A→Z' },
-                      ]}
-                      value={sortBy === 'date_desc' ? '' : sortBy}
-                      onChange={v => setSortBy((v || 'date_desc') as typeof sortBy)}
-                      placeholder="Newest First"
-                    />
-                  </div>
-                  {hasActiveFilters && (
-                    <button
-                      onClick={() => { setFilterStatus(''); setFilterClient(''); setFilterService(''); setSearchQ(''); setSortBy('date_desc'); setFilterAssignee('') }}
-                      className="w-full mt-1 px-3 py-2 rounded-lg text-xs font-medium bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 border border-violet-500/20 transition-colors flex items-center justify-center gap-1.5"
-                    >
-                      <X size={12} /> Clear all filters
-                    </button>
+                  {boardGroupBy === 'date' && (
+                    <div>
+                      <label className="block text-[11px] uppercase tracking-wide text-muted-foreground/70 mb-1">Date granularity</label>
+                      <AppSelect value={boardDateGranularity} onChange={e => setBoardDateGranularity(e.target.value as typeof boardDateGranularity)}>
+                        <option value="preset">Today · Week · Month</option>
+                        <option value="daily">By day</option>
+                        <option value="weekly">By week</option>
+                        <option value="monthly">By month</option>
+                      </AppSelect>
+                    </div>
                   )}
                 </div>
               )}
             </div>
-
-            {/* Inline view mode segment: Table · Board · Calendar */}
-            <div className="flex items-center bg-[#0d1117] border border-white/10 rounded-xl p-1 gap-0.5 shrink-0">
-              {([
-                { key: 'table',    Icon: List,         label: 'Table' },
-                { key: 'board',    Icon: LayoutGrid,   label: 'Board' },
-                { key: 'calendar', Icon: CalendarDays, label: 'Cal' },
-              ] as const).map(({ key, Icon, label }) => (
-                <button
-                  key={key}
-                  onClick={() => setViewMode(key)}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
-                    viewMode === key
-                      ? 'bg-white/10 text-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  <Icon className="w-3.5 h-3.5" />
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {/* Board settings ⚙ — only visible in board view */}
-            {viewMode === 'board' && (
-              <div ref={viewRef} className="relative shrink-0">
-                <button
-                  onClick={() => setViewOpen(v => !v)}
-                  className={`w-9 h-9 flex items-center justify-center rounded-xl border transition-colors ${
-                    viewOpen
-                      ? 'bg-white/10 border-white/20 text-foreground'
-                      : 'bg-[#0d1117] border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
-                  }`}
-                >
-                  <MoreVertical className="w-4 h-4" />
-                </button>
-                {viewOpen && (
-                  <div className="absolute right-0 top-full mt-1.5 z-50 bg-[#0d1117] border border-white/10 rounded-xl shadow-2xl p-3 min-w-[220px] space-y-3">
-                    <div>
-                      <label className="block text-[11px] uppercase tracking-wide text-muted-foreground/70 mb-1">Group by</label>
-                      <AppSelect value={boardGroupBy} onChange={e => setBoardGroupBy(e.target.value as typeof boardGroupBy)}>
-                        <option value="employee">Employee</option>
-                        <option value="client">Client</option>
-                        <option value="service">Service</option>
-                        <option value="status">Status</option>
-                        <option value="date">Date</option>
-                      </AppSelect>
-                    </div>
-                    {boardGroupBy === 'date' && (
-                      <div>
-                        <label className="block text-[11px] uppercase tracking-wide text-muted-foreground/70 mb-1">Date granularity</label>
-                        <AppSelect value={boardDateGranularity} onChange={e => setBoardDateGranularity(e.target.value as typeof boardDateGranularity)}>
-                          <option value="preset">Today · Week · Month</option>
-                          <option value="daily">By day</option>
-                          <option value="weekly">By week</option>
-                          <option value="monthly">By month</option>
-                        </AppSelect>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Inline edit toggle — only in table view, visible on right */}
-            {viewMode === 'table' && (
-              <button
-                onClick={() => setInlineEditMode(m => !m)}
-                title="Toggle inline edit"
-                className={`shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border transition-colors ${
-                  inlineEditMode
-                    ? 'bg-blue-500/15 border-blue-500/40 text-blue-300'
-                    : 'bg-[#0d1117] border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
-                }`}
-              >
-                <Pencil className="w-3.5 h-3.5" />
-                {inlineEditMode ? 'Editing' : 'Edit'}
-              </button>
-            )}
-
-            {/* Bulk select toggle — rightmost */}
-            <button
-              onClick={() => { setBulkMode(m => !m); setSelectedTasks(new Set()) }}
-              className={`shrink-0 px-3 py-2 rounded-xl text-sm font-medium border transition-colors flex items-center gap-1.5 ${
-                bulkMode
-                  ? 'bg-violet-500/20 border-violet-500/40 text-violet-300'
-                  : 'bg-[#0d1117] border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
-              }`}>
-              {bulkMode ? <><X size={12} /> Exit</> : <>Select</>}
-            </button>
-
           </div>
 
-          {/* Status filter chips */}
-          <div className="flex gap-2 flex-wrap">
+          {/* Row 2: Filters → divider → Status chips → Clear all */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Client — FilterDropdown has built-in × when active */}
+            <FilterDropdown
+              options={[...new Map(tasks.filter(t => t.client?.id).map(t => [t.client!.id, t.client!])).values()]
+                .map(c => ({ value: c.id, label: c.name }))}
+              value={filterClient}
+              onChange={setFilterClient}
+              placeholder="Client"
+              sortKey="clients"
+            />
+            {/* Service */}
+            <FilterDropdown
+              options={[...new Map(tasks.filter(t => t.service?.id).map(t => [t.service!.id, t.service!])).values()]
+                .map(s => ({ value: s.id, label: s.name }))}
+              value={filterService}
+              onChange={setFilterService}
+              placeholder="Service"
+              sortKey="services"
+            />
+            {/* Assignee — FilterDropdown for consistent pill style with built-in × */}
+            <FilterDropdown
+              options={employees.map(emp => ({ value: emp.id, label: dn(emp) }))}
+              value={filterAssignee}
+              onChange={setFilterAssignee}
+              placeholder="Assignee"
+              sortKey="employees"
+            />
+            {/* Sort by */}
+            <FilterDropdown
+              options={[
+                { value: 'date_desc',   label: 'Newest First' },
+                { value: 'date_asc',    label: 'Oldest First' },
+                { value: 'amount_desc', label: 'Amount (High→Low)' },
+                { value: 'client',      label: 'Client A→Z' },
+              ]}
+              value={sortBy === 'date_desc' ? '' : sortBy}
+              onChange={v => setSortBy((v || 'date_desc') as typeof sortBy)}
+              placeholder="Sort by"
+            />
+            {/* Divider */}
+            <span className="w-px h-5 bg-white/10 shrink-0" />
+            {/* Status chips */}
             <button onClick={() => setFilterStatus('')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${!filterStatus ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}>All</button>
             {STATUSES.map(s => (
               <button key={s} onClick={() => setFilterStatus(s === filterStatus ? '' : s)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filterStatus === s ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}>
                 {getStatusLabel(s)}
               </button>
             ))}
+            {/* Clear all — only when any filter active, at end of row */}
+            {hasActiveFilters && (
+              <button
+                onClick={() => { setFilterStatus(''); setFilterClient(''); setFilterService(''); setSearchQ(''); setSortBy('date_desc'); setFilterAssignee('') }}
+                className="ml-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20 transition-colors flex items-center gap-1"
+              >
+                <X size={11} /> Clear all
+              </button>
+            )}
           </div>
         </div>
 
         {/* Table */}
         {viewMode === 'table' && (
-        <div className="bg-card border border-border rounded-xl overflow-hidden">
+        <div className="bg-card border border-border rounded-xl overflow-visible">
           <table className="w-full text-sm">
-            <thead>
+            {/* Sticky table header — sits flush below the toolbar.
+                top intentionally less than toolbar-bottom so toolbar (z-20, bg-background) covers the overlap & hides any sub-pixel gap.
+                Toolbar = 92 (offset) + 16 (pt-4) + ~80 (2 rows) + 8 (gap) + 16 (pb-4) ≈ 212. Thead top at 204 gives 8px overlap. */}
+            <thead className="sticky top-[204px] z-10 bg-card">
               <tr className="border-b border-border bg-secondary/50">
                 {/* Bulk select checkbox column */}
                 {bulkMode && (
-                  <th className="w-10 pl-4 pr-2 py-3">
+                  <th className="w-10 pl-4 pr-2 py-3 bg-secondary/95 backdrop-blur-sm">
                     <input
                       type="checkbox"
                       checked={visibleTasks.length > 0 && visibleTasks.every(t => selectedTasks.has(t.id))}
@@ -1197,16 +1167,17 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                     />
                   </th>
                 )}
-                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Task</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">
+                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground w-20 bg-secondary/95 backdrop-blur-sm">Task No.</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm">Task Title</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm">
                   <button onClick={() => setSortBy(s => s === 'client' ? 'date_desc' : 'client')}
                     className={`flex items-center gap-1 hover:text-foreground transition-colors ${sortBy === 'client' ? 'text-violet-400' : ''}`}>
                     Client
                     <span className={`text-[10px] ${sortBy === 'client' ? 'opacity-100' : 'opacity-30'}`}>↕</span>
                   </button>
                 </th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Service</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">
+                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm">Service</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm">
                   <button
                     onClick={() => setSortBy(s => s === 'date_desc' ? 'date_asc' : 'date_desc')}
                     className={`flex items-center gap-1 hover:text-foreground transition-colors ${sortBy === 'date_desc' || sortBy === 'date_asc' ? 'text-violet-400' : ''}`}>
@@ -1216,7 +1187,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                     </span>
                   </button>
                 </th>
-                <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground">
+                <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm">
                   <button
                     onClick={() => setSortBy(s => s === 'amount_desc' ? 'date_desc' : 'amount_desc')}
                     className={`flex items-center gap-1 ml-auto hover:text-foreground transition-colors ${sortBy === 'amount_desc' ? 'text-violet-400' : ''}`}>
@@ -1224,12 +1195,12 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                     <span className={`text-[10px] ${sortBy === 'amount_desc' ? 'opacity-100' : 'opacity-30'}`}>↓</span>
                   </button>
                 </th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Status</th>
-                <th className="w-16 px-4 py-3"></th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm">Status</th>
+                <th className="w-16 px-4 py-3 bg-secondary/95 backdrop-blur-sm"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {visibleTasks.length === 0 && <tr><td colSpan={bulkMode ? 8 : 7} className="px-4 py-10 text-center text-sm text-muted-foreground">No tasks found</td></tr>}
+              {visibleTasks.length === 0 && <tr><td colSpan={bulkMode ? 9 : 8} className="px-4 py-10 text-center text-sm text-muted-foreground">No tasks found</td></tr>}
               {visibleTasks.map(task => (
                 <tr key={task.id}
                   data-taskid={task.id}
@@ -1262,6 +1233,17 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                       />
                     </td>
                   )}
+                  {/* Task No. column */}
+                  <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                    <span
+                      title={`Task code · click to copy ${taskCode(task)}`}
+                      onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(taskCode(task)) }}
+                      className="text-[10px] font-mono font-semibold text-muted-foreground/60 bg-white/[0.04] border border-white/10 px-1.5 py-0.5 rounded shrink-0 cursor-pointer hover:text-foreground hover:border-white/25 transition-colors"
+                    >
+                      {taskCode(task)}
+                    </span>
+                  </td>
+                  {/* Task Title column */}
                   <td className="px-4 py-3" onClick={e => inlineEditMode && e.stopPropagation()}>
                     {inlineEditMode ? (
                       <input
@@ -1279,13 +1261,6 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                       />
                     ) : (
                       <div className="flex items-center gap-1.5">
-                        <span
-                          title={`Task code · click to copy ${taskCode(task)}`}
-                          onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(taskCode(task)) }}
-                          className="text-[10px] font-mono font-semibold text-muted-foreground/60 bg-white/[0.04] border border-white/10 px-1.5 py-0.5 rounded shrink-0 cursor-pointer hover:text-foreground hover:border-white/25 transition-colors"
-                        >
-                          {taskCode(task)}
-                        </span>
                         <p className="font-medium text-foreground">{task.title}</p>
                         {task.is_recurring && (
                           <span title="Recurring task">
@@ -1733,7 +1708,10 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
           }
 
           return (
-            <div className="overflow-x-auto pb-4">
+            // Board scroll container — owns BOTH x and y scroll. Sticky column headers
+            // (top-0 inside) work because this is the nearest scroll ancestor.
+            // Height = viewport - sticky page header (92px) - sticky toolbar (~120px) - some padding.
+            <div className="overflow-auto pb-4 h-[calc(100vh-220px)]">
               <div className="flex gap-4 min-w-max">
                 {boardColumns.length === 0 && (
                   <p className="text-sm text-muted-foreground italic px-2 py-10">
@@ -1742,8 +1720,8 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                 )}
                 {boardColumns.map(col => (
                   <div key={col.key} className="w-72 flex flex-col gap-3 shrink-0">
-                    {/* Column header */}
-                    <div className="flex items-center gap-2 px-1">
+                    {/* Column header — sticky to top of board scroll container so it stays visible while scrolling cards */}
+                    <div className="sticky top-0 z-10 flex items-center gap-2 px-1 py-2 bg-background/95 backdrop-blur-sm rounded-lg">
                       <div className={`w-7 h-7 rounded-full border flex items-center justify-center shrink-0 ${col.color}`}>
                         <span className="text-[10px] font-bold">{col.badge}</span>
                       </div>
@@ -2719,6 +2697,161 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                     sortKey="services"
                   />
                 </div>
+              </div>
+
+              {/* ── Variant linking (collapsed by default; opens when a parent is picked) ── */}
+              <div className="rounded-xl border border-white/10 bg-white/[0.02]">
+                <details>
+                  <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground flex items-center gap-2">
+                    <span className="inline-flex w-4 h-4 items-center justify-center rounded bg-white/5 text-[10px]">↳</span>
+                    Link as variant of another task <span className="text-[10px] text-muted-foreground/60">(revision / concept / size)</span>
+                  </summary>
+                  <div className="px-3 pb-3 pt-1 space-y-2.5 border-t border-white/[0.06]">
+                    <div>
+                      <label className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1">Parent task</label>
+                      <Combobox
+                        options={tasks
+                          .filter(t => !t.parent_task_id)  // only original tasks can be parents
+                          .map(t => ({ id: t.id, label: t.title, sub: `${t.client?.name ?? '—'} · ${t.task_date}` }))}
+                        value={form.parent_task_id}
+                        onChange={(parentId: string) => {
+                          const parent = tasks.find(t => t.id === parentId)
+                          setForm(p => ({
+                            ...p,
+                            parent_task_id: parentId,
+                            // Inherit client + service from parent for consistency
+                            client_id: parent?.client?.id || p.client_id,
+                            service_id: parent?.service?.id || p.service_id,
+                          }))
+                        }}
+                        placeholder="Search original task…"
+                      />
+                      {form.parent_task_id && (
+                        <button
+                          type="button"
+                          onClick={() => setForm(p => ({
+                            ...p, parent_task_id: '', variant_type: '', variant_label: '',
+                            billing_mode: 'fixed', billing_percent: '', billing_override: false,
+                            is_billable: true, manual_billing_amount: '',
+                          }))}
+                          className="mt-1 text-[10px] text-muted-foreground hover:text-foreground"
+                        >
+                          ✕ Unlink (make this an original task)
+                        </button>
+                      )}
+                    </div>
+
+                    {form.parent_task_id && (
+                      <>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1">Variant type</label>
+                            <select
+                              value={form.variant_type}
+                              onChange={e => setForm(p => ({ ...p, variant_type: e.target.value as typeof p.variant_type }))}
+                              className={inputCls}
+                            >
+                              <option value="">— Select —</option>
+                              <option value="revision">Revision</option>
+                              <option value="concept">Concept option</option>
+                              <option value="size">Size variant</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1">Label</label>
+                            <input
+                              value={form.variant_label}
+                              onChange={e => setForm(p => ({ ...p, variant_label: e.target.value }))}
+                              className={inputCls}
+                              placeholder={form.variant_type === 'size' ? 'e.g. Story' : form.variant_type === 'concept' ? 'e.g. Concept 2' : 'e.g. May date update'}
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1">Billing mode</label>
+                          <div className="flex gap-1 text-[11px]">
+                            {([
+                              { v: 'fixed',              l: 'Fixed amount' },
+                              { v: 'percent_of_parent',  l: '% of parent' },
+                              { v: 'parameter_driven',   l: 'Parameter-driven' },
+                            ] as const).map(opt => (
+                              <button
+                                key={opt.v}
+                                type="button"
+                                onClick={() => setForm(p => ({ ...p, billing_mode: opt.v, billing_override: false }))}
+                                className={`flex-1 px-2 py-1.5 rounded-md border transition-colors ${
+                                  form.billing_mode === opt.v
+                                    ? 'bg-violet-500/15 border-violet-500/40 text-violet-200'
+                                    : 'border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
+                                }`}
+                              >
+                                {opt.l}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {(form.billing_mode === 'percent_of_parent' || form.billing_mode === 'parameter_driven') && (
+                          <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
+                            <div>
+                              <label className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1">
+                                {form.billing_mode === 'percent_of_parent' ? 'Percent of parent' : 'Parameter weight % (sum)'}
+                              </label>
+                              <div className="relative">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={form.billing_percent}
+                                  onChange={e => setForm(p => ({ ...p, billing_percent: e.target.value, billing_override: false }))}
+                                  className={inputCls}
+                                  placeholder={form.variant_type === 'size' ? '50' : '100'}
+                                />
+                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+                              </div>
+                            </div>
+                            <div className="text-[11px] text-muted-foreground pb-2">
+                              of {parentTask?.billing_amount_inr ? `₹${parentTask.billing_amount_inr.toLocaleString('en-IN')}` : '—'}
+                            </div>
+                          </div>
+                        )}
+
+                        {form.billing_mode === 'fixed' && (
+                          <div>
+                            <label className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1">Fixed amount</label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={form.manual_billing_amount}
+                              onChange={e => setForm(p => ({ ...p, manual_billing_amount: e.target.value, billing_override: true }))}
+                              className={inputCls}
+                              placeholder="0"
+                            />
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-between pt-1">
+                          <label className="flex items-center gap-2 text-[11px] text-muted-foreground cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={!form.is_billable}
+                              onChange={e => setForm(p => ({ ...p, is_billable: !e.target.checked }))}
+                              className="accent-violet-500"
+                            />
+                            Internal only — don&apos;t bill the client
+                          </label>
+                          <div className="text-[11px] text-muted-foreground">
+                            Computed: <span className="text-foreground font-semibold">
+                              {unitCurrency} {computedAmount.toLocaleString('en-IN')}
+                            </span>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </details>
               </div>
 
               {/* Task Date */}

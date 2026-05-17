@@ -6,7 +6,7 @@ import { ChevronRight, Home } from 'lucide-react'
 
 interface HeaderProps {
   title: string
-  subtitle?: string
+  subtitle?: React.ReactNode
   actions?: React.ReactNode
 }
 
@@ -65,7 +65,7 @@ export default function Header({ title, subtitle, actions }: HeaderProps) {
       <div>
         <Breadcrumbs />
         <h1 className="text-lg font-semibold text-foreground">{title}</h1>
-        {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
+        {subtitle && <div className="text-sm text-muted-foreground">{subtitle}</div>}
       </div>
       {actions && <div className="flex items-center gap-2">{actions}</div>}
     </div>

@@ -15,7 +15,7 @@ import {
   ChevronLeft, ChevronRight, Minus, Plus, X, Check,
   Search, Filter, PlusCircle, Eye, EyeOff, Clock, CheckCircle2, AlertCircle,
   UserCheck, Users, CalendarDays, Lock, Edit2, ChevronDown, Trash2, Copy, ExternalLink,
-  List, LayoutGrid,
+  List, LayoutGrid, MoreVertical, CheckCircle,
 } from 'lucide-react'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import AppSelect from '@/components/ui/app-select'
@@ -165,18 +165,24 @@ export default function ContributionsClient({
   const { dn, isUnlocked, openUnlockModal } = usePrivacy()
   const { role, employee: currentEmployee } = useRole()
 
-  // ── Toolbar popover state — Filter popover, View popover ──
-  const [filterOpen, setFilterOpen] = useState(false)
-  const [viewOpen,   setViewOpen]   = useState(false)
-  const filterRef = useRef<HTMLDivElement>(null)
-  const viewRef   = useRef<HTMLDivElement>(null)
+  // ── Bulk-selection state ──────────────────────────────
+  const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set())
+  const [bulkMode, setBulkMode] = useState(false)
+
+  // ── Board view: Group By + Date granularity + settings popover ──
+  const [boardGroupBy, setBoardGroupBy] = useState<'employee' | 'client' | 'service' | 'status' | 'date'>('status')
+  const [boardDateGranularity, setBoardDateGranularity] = useState<'preset' | 'daily' | 'weekly' | 'monthly'>('preset')
+  const [showBoardSettings, setShowBoardSettings] = useState(false)
+  const boardSettingsRef = useRef<HTMLDivElement>(null)
+
+  // ── Missing-scores toast visibility ───────────────────
+  const [showMissingBanner, setShowMissingBanner] = useState(true)
   useEffect(() => {
     function h(e: MouseEvent) {
       const target = e.target as Element | null
       // Skip closing if click landed inside a portaled FilterDropdown / DateFilter panel
       if (target && typeof target.closest === 'function' && target.closest('[data-filter-dropdown-panel="true"]')) return
-      if (filterRef.current && !filterRef.current.contains(e.target as Node)) setFilterOpen(false)
-      if (viewRef.current   && !viewRef.current.contains(e.target as Node))   setViewOpen(false)
+      if (boardSettingsRef.current && !boardSettingsRef.current.contains(e.target as Node)) setShowBoardSettings(false)
     }
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
@@ -673,6 +679,32 @@ export default function ContributionsClient({
     setEditingTask(task)
   }
 
+  // ── Bulk actions ─────────────────────────────────────
+  async function bulkUpdateStatus(status: string) {
+    const ids = [...selectedTasks]
+    if (ids.length === 0) return
+    await Promise.all(ids.map(id => supabase.from('tasks').update({ status }).eq('id', id)))
+    setLocalTasks(prev => prev.map(t => selectedTasks.has(t.id) ? { ...t, status } : t))
+    setSelectedTasks(new Set())
+    setBulkMode(false)
+    toast.success(`${ids.length} task${ids.length !== 1 ? 's' : ''} updated`)
+    router.refresh()
+  }
+
+  async function bulkDeleteTasks() {
+    const ids = [...selectedTasks]
+    if (ids.length === 0) return
+    if (!confirm(`Move ${ids.length} task${ids.length !== 1 ? 's' : ''} to trash?`)) return
+    await Promise.all(ids.map(id =>
+      supabase.from('tasks').update({ deleted_at: new Date().toISOString() }).eq('id', id)
+    ))
+    setLocalTasks(prev => prev.filter(t => !selectedTasks.has(t.id)))
+    setSelectedTasks(new Set())
+    setBulkMode(false)
+    toast.success(`${ids.length} task${ids.length !== 1 ? 's' : ''} moved to trash`)
+    router.refresh()
+  }
+
   // ── Title suggestions (unique titles from existing tasks) ──
   const titleSuggestions = useMemo(() => {
     const seen = new Set<string>()
@@ -757,27 +789,22 @@ export default function ContributionsClient({
       (filterEmployee ? 1 : 0)
     const hasAnyFilter = activeFilterCount > 0 || !!search || statusFilter !== 'all'
 
-    const viewLabel = listViewMode === 'list' ? 'List' : listViewMode === 'board' ? 'Board' : 'Calendar'
-    const ViewIcon  = listViewMode === 'list' ? List : listViewMode === 'board' ? LayoutGrid : CalendarDays
-
     const headerActions = (
       <>
-        {/* Admin view toggle — compact, sits in the page header */}
+        {/* Admin view toggle — matches Tasks header button sizing */}
         {canSeeFinancials && (
           <button onClick={() => setShowFinancials(f => !f)}
             title={showFinancials ? 'Switch to employee view' : 'Switch to admin view'}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-all ${
-              showFinancials ? 'bg-card border-border text-foreground' : 'bg-secondary border-transparent text-muted-foreground'
-            }`}>
-            {showFinancials ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-            {showFinancials ? 'Admin' : 'Employee'}
+            className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-2 bg-secondary hover:bg-secondary/80 transition-colors">
+            {showFinancials ? <Eye className="w-4 h-4 text-blue-400" /> : <EyeOff className="w-4 h-4 text-amber-400" />}
+            <span className="hidden sm:inline">{showFinancials ? 'Admin' : 'Employee'}</span>
           </button>
         )}
-        {/* Add task — opens modal */}
+        {/* Add task — matches Tasks Add Task button */}
         {canSeeFinancials && (
           <button onClick={() => setShowAddTask(true)}
-            className="flex items-center gap-1.5 gradient-bg text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:opacity-90 transition-opacity">
-            <PlusCircle className="w-3.5 h-3.5" /> Add Task
+            className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90 transition-opacity">
+            <Plus className="w-4 h-4" /> Add Task
           </button>
         )}
       </>
@@ -794,11 +821,170 @@ export default function ContributionsClient({
 
         <div className="p-6 space-y-4">
 
-          {/* ── Sticky toolbar (Status tabs + Search/Filter/View) — sits below the Header ── */}
-          <div className="sticky top-[68px] z-20 bg-background pt-2 pb-3 -mt-2 space-y-3">
+          {/* ── Sticky toolbar — mirrors Tasks page layout exactly. pt/pb provide breathing room when scrolled. ── */}
+          <div className="sticky top-[92px] z-20 bg-background pt-4 pb-4 space-y-2 w-full">
 
-          {/* ── Status tabs — primary filter dimension, kept prominent ── */}
-          <div className="flex items-center bg-secondary rounded-xl p-1 gap-1 flex-wrap">
+          {/* Row 1: [Select] · [Search flex-1] · [List|Board|Calendar] · [⚙ board-only] */}
+          <div className="flex items-center gap-2 w-full">
+            {/* Left group: Select (toggles bulk mode) · All (toggles select/deselect all when active) */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                onClick={() => { setBulkMode(m => !m); setSelectedTasks(new Set()) }}
+                className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm ${
+                  bulkMode
+                    ? 'bg-violet-500 text-white shadow-violet-500/30'
+                    : 'bg-secondary border border-border text-foreground hover:bg-secondary/60'
+                }`}>
+                <CheckCircle className="w-3 h-3" /> Select
+              </button>
+              {bulkMode && (() => {
+                const allSelected = myVisibleTasks.length > 0 && myVisibleTasks.every(t => selectedTasks.has(t.id))
+                return (
+                  <button
+                    onClick={() => {
+                      if (allSelected) setSelectedTasks(new Set())
+                      else setSelectedTasks(new Set(myVisibleTasks.map(t => t.id)))
+                    }}
+                    title={allSelected ? 'Deselect all visible tasks' : 'Select all visible tasks'}
+                    className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm ${
+                      allSelected
+                        ? 'bg-violet-500/20 border border-violet-500/40 text-violet-200'
+                        : 'bg-secondary border border-border text-foreground hover:bg-secondary/60'
+                    }`}
+                  >
+                    {allSelected ? <Check className="w-3 h-3" /> : <span className="w-3 h-3 rounded-sm border border-current opacity-60" />}
+                    All ({myVisibleTasks.length})
+                  </button>
+                )
+              })()}
+            </div>
+
+            {/* Search — flex-1 */}
+            <div className="flex items-center gap-2 bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2 flex-1 basis-0 min-w-0">
+              <Search size={14} className="text-muted-foreground shrink-0" />
+              <input value={search} onChange={e => setSearch(e.target.value)}
+                placeholder="Search tasks, clients, services, or task code (T-…)…"
+                className="flex-1 min-w-0 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60" />
+              {search && <button onClick={() => setSearch('')} className="shrink-0"><X size={12} className="text-muted-foreground" /></button>}
+            </div>
+
+            {/* Inline view segment: List · Board · ⚙(board-only) · Calendar */}
+            <div ref={boardSettingsRef} className="relative shrink-0">
+              <div className="flex items-center bg-[#0d1117] border border-white/10 rounded-xl p-1 gap-0.5">
+                {([
+                  { key: 'list',     Icon: List,         label: 'List' },
+                  { key: 'board',    Icon: LayoutGrid,   label: 'Board' },
+                  { key: 'calendar', Icon: CalendarDays, label: 'Calendar' },
+                ] as const).map(({ key, Icon, label }) => (
+                  <span key={key} className="flex items-center">
+                    <button
+                      onClick={() => setListViewMode(key)}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
+                        listViewMode === key
+                          ? 'bg-white/10 text-foreground'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      {label}
+                    </button>
+                    {/* Board settings ⚙ — sits immediately after the Board button, only visible when Board is active */}
+                    {key === 'board' && listViewMode === 'board' && (
+                      <button
+                        onClick={() => setShowBoardSettings(v => !v)}
+                        title="Board settings"
+                        className={`ml-0.5 px-2 py-1.5 rounded-lg flex items-center justify-center transition-colors ${
+                          showBoardSettings
+                            ? 'bg-white/10 text-foreground'
+                            : 'text-muted-foreground hover:text-foreground hover:bg-white/[0.04]'
+                        }`}
+                      >
+                        <MoreVertical className="w-4 h-4" />
+                      </button>
+                    )}
+                  </span>
+                ))}
+              </div>
+              {/* Group By popover */}
+              {listViewMode === 'board' && showBoardSettings && (
+                <div className="absolute right-0 top-full mt-1.5 z-50 bg-[#0d1117] border border-white/10 rounded-xl shadow-2xl p-3 min-w-[220px] space-y-3">
+                  <div>
+                    <label className="block text-[11px] uppercase tracking-wide text-muted-foreground/70 mb-1">Group by</label>
+                    <AppSelect value={boardGroupBy} onChange={e => setBoardGroupBy(e.target.value as typeof boardGroupBy)}>
+                      <option value="status">Status</option>
+                      <option value="employee">Employee</option>
+                      <option value="client">Client</option>
+                      <option value="service">Service</option>
+                      <option value="date">Date</option>
+                    </AppSelect>
+                  </div>
+                  {boardGroupBy === 'date' && (
+                    <div>
+                      <label className="block text-[11px] uppercase tracking-wide text-muted-foreground/70 mb-1">Date granularity</label>
+                      <AppSelect value={boardDateGranularity} onChange={e => setBoardDateGranularity(e.target.value as typeof boardDateGranularity)}>
+                        <option value="preset">Today · Week · Month</option>
+                        <option value="daily">By day</option>
+                        <option value="weekly">By week</option>
+                        <option value="monthly">By month</option>
+                      </AppSelect>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Row 2: Filters → divider → Status chips → Clear all */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Date — leads the row, sets the time scope before other filters */}
+            <DateFilter value={filterDate} onChange={setFilterDate} />
+            {/* Employee */}
+            <FilterDropdown
+              options={employees.map(emp => ({ value: emp.id, label: dn(emp) }))}
+              value={filterEmployee}
+              onChange={v => { setFilterEmployee(v); setFilterEmployeeMode('worked') }}
+              placeholder="Employee"
+              sortKey="employees"
+            />
+            {/* Employee mode (Worked / Solo / +Assigned) — appears only when employee selected */}
+            {filterEmployee && (
+              <div className="flex items-center bg-secondary rounded-lg p-0.5 gap-0.5 border border-border/50 shrink-0">
+                <button type="button" onClick={() => setFilterEmployeeMode('worked')}
+                  title="Tasks this employee worked on"
+                  className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition-all ${filterEmployeeMode === 'worked' ? 'bg-primary text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                  Worked
+                </button>
+                <button type="button" onClick={() => setFilterEmployeeMode('solo')}
+                  title="Sole contributor"
+                  className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition-all ${filterEmployeeMode === 'solo' ? 'bg-amber-500 text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                  Solo
+                </button>
+                <button type="button" onClick={() => setFilterEmployeeMode('any')}
+                  title="Contributed or assigned"
+                  className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition-all ${filterEmployeeMode === 'any' ? 'bg-primary text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                  + Assigned
+                </button>
+              </div>
+            )}
+            {/* Client */}
+            <FilterDropdown
+              options={clients.map(c => ({ value: c.id, label: c.name }))}
+              value={filterClient}
+              onChange={setFilterClient}
+              placeholder="Client"
+              sortKey="clients"
+            />
+            {/* Service */}
+            <FilterDropdown
+              options={services.map(s => ({ value: s.id, label: s.name }))}
+              value={filterService}
+              onChange={setFilterService}
+              placeholder="Service"
+              sortKey="services"
+            />
+            {/* Divider */}
+            <span className="w-px h-5 bg-white/10 shrink-0" />
+            {/* Status chips */}
             {([
               { key: 'all',     label: 'All',     count: localTasks.length },
               { key: 'pending', label: 'Pending', count: pendingCount     },
@@ -806,181 +992,56 @@ export default function ContributionsClient({
               { key: 'missing', label: 'Missing', count: missingCount     },
             ] as const).map(({ key, label, count }) => (
               <button key={key} onClick={() => setStatusFilter(key as any)}
-                className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-1.5 ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 ${
                   statusFilter === key
                     ? key === 'missing'
-                      ? 'bg-orange-500/20 text-orange-300 shadow-sm border border-orange-500/30'
-                      : 'bg-card text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
+                      ? 'bg-orange-500/20 text-orange-300 border border-orange-500/30'
+                      : 'gradient-bg text-white'
+                    : 'bg-secondary text-muted-foreground hover:text-foreground'
                 }`}>
                 {label}
-                <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-md ${
+                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
                   statusFilter === key && key === 'missing' ? 'bg-orange-500/30 text-orange-300' :
-                  statusFilter === key ? 'bg-primary/20 text-primary' : 'opacity-50 bg-border/50'
+                  statusFilter === key ? 'bg-white/20 text-white' : 'bg-border/50 opacity-60'
                 }`}>{count}</span>
                 {key === 'missing' && count > 0 && statusFilter !== 'missing' && (
                   <span className="w-1.5 h-1.5 rounded-full bg-orange-400 shrink-0" />
                 )}
               </button>
             ))}
-          </div>
-
-          {/* ── Toolbar: Search + Filter popover + View popover ── */}
-          <div className="flex items-center gap-2 flex-wrap">
-
-            {/* Search */}
-            <div className="flex items-center gap-2 bg-secondary rounded-xl px-3 py-1.5 flex-1 min-w-48">
-              <Search className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-              <input value={search} onChange={e => setSearch(e.target.value)}
-                className="bg-transparent text-sm outline-none flex-1 placeholder:text-muted-foreground/50"
-                placeholder="Search tasks, clients, services, or task code (T-…)…" />
-              {search && <button onClick={() => setSearch('')}><X className="w-3 h-3 text-muted-foreground" /></button>}
-            </div>
-
-            {/* Filter popover */}
-            <div ref={filterRef} className="relative">
-              <button onClick={() => setFilterOpen(o => !o)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20 transition-colors">
-                <Filter className="w-3.5 h-3.5" /> Filter
-                {activeFilterCount > 0 && (
-                  <span className="text-[10px] bg-violet-500/20 text-violet-300 px-1.5 py-0.5 rounded-full">
-                    {activeFilterCount}
-                  </span>
-                )}
+            {/* Clear all */}
+            {hasAnyFilter && (
+              <button
+                onClick={() => {
+                  setSearch('')
+                  setFilterClient('')
+                  setFilterService('')
+                  setFilterEmployee('')
+                  setFilterEmployeeMode('worked')
+                  setFilterDate(null)
+                  setStatusFilter('all')
+                }}
+                className="ml-1 text-xs text-muted-foreground hover:text-foreground px-2 py-1.5 rounded-md hover:bg-white/[0.04] transition-colors flex items-center gap-1 shrink-0"
+              >
+                <X size={12} /> Clear all
               </button>
-              {filterOpen && (
-                <div className="absolute right-0 top-full mt-1.5 z-50 bg-[#0d1117] border border-white/10 rounded-xl shadow-2xl p-4 min-w-[300px] space-y-3">
-                  {/* Client */}
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Client</label>
-                    <FilterDropdown
-                      options={clients.map(c => ({ value: c.id, label: c.name }))}
-                      value={filterClient}
-                      onChange={setFilterClient}
-                      placeholder="All clients"
-                      sortKey="clients"
-                      className="w-full"
-                    />
-                  </div>
-
-                  {/* Service */}
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Service</label>
-                    <FilterDropdown
-                      options={services.map(s => ({ value: s.id, label: s.name }))}
-                      value={filterService}
-                      onChange={setFilterService}
-                      placeholder="All services"
-                      sortKey="services"
-                      className="w-full"
-                    />
-                  </div>
-
-                  {/* Date */}
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Date</label>
-                    <DateFilter value={filterDate} onChange={setFilterDate} className="w-full" />
-                  </div>
-
-                  {/* Employee + mode toggle */}
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Employee</label>
-                    <FilterDropdown
-                      options={employees.map(emp => ({ value: emp.id, label: dn(emp) }))}
-                      value={filterEmployee}
-                      onChange={v => { setFilterEmployee(v); setFilterEmployeeMode('worked') }}
-                      placeholder="All employees"
-                      sortKey="employees"
-                      className="w-full"
-                    />
-                    {filterEmployee && (
-                      <div className="flex items-center bg-secondary rounded-lg p-0.5 gap-0.5 border border-border/50 mt-1.5">
-                        <button type="button" onClick={() => setFilterEmployeeMode('worked')}
-                          title="Tasks this employee worked on"
-                          className={`flex-1 text-[11px] font-medium px-2.5 py-1 rounded-md transition-all ${filterEmployeeMode === 'worked' ? 'bg-primary text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
-                          Worked
-                        </button>
-                        <button type="button" onClick={() => setFilterEmployeeMode('solo')}
-                          title="Tasks this employee was the sole contributor"
-                          className={`flex-1 text-[11px] font-medium px-2.5 py-1 rounded-md transition-all ${filterEmployeeMode === 'solo' ? 'bg-amber-500 text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
-                          Solo
-                        </button>
-                        <button type="button" onClick={() => setFilterEmployeeMode('any')}
-                          title="Contributed or assigned"
-                          className={`flex-1 text-[11px] font-medium px-2.5 py-1 rounded-md transition-all ${filterEmployeeMode === 'any' ? 'bg-primary text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
-                          + Assigned
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Clear all */}
-                  {hasAnyFilter && (
-                    <div className="pt-2 border-t border-white/[0.06]">
-                      <button
-                        onClick={() => {
-                          setSearch('')
-                          setFilterClient('')
-                          setFilterService('')
-                          setFilterEmployee('')
-                          setFilterEmployeeMode('worked')
-                          setFilterDate(null)
-                          setStatusFilter('all')
-                        }}
-                        className="w-full text-xs text-muted-foreground hover:text-foreground py-1.5 rounded-md hover:bg-white/[0.04] transition-colors"
-                      >
-                        Clear all filters
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* View popover — list / board / calendar */}
-            <div ref={viewRef} className="relative">
-              <button onClick={() => setViewOpen(o => !o)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20 transition-colors">
-                <ViewIcon className="w-3.5 h-3.5" /> View
-                <span className="text-[10px] bg-white/[0.06] text-foreground/80 px-1.5 py-0.5 rounded-full">{viewLabel}</span>
-              </button>
-              {viewOpen && (
-                <div className="absolute right-0 top-full mt-1.5 z-50 bg-[#0d1117] border border-white/10 rounded-xl shadow-2xl p-1.5 min-w-[160px]">
-                  {([
-                    { key: 'list',     label: 'List',     icon: List         },
-                    { key: 'board',    label: 'Board',    icon: LayoutGrid   },
-                    { key: 'calendar', label: 'Calendar', icon: CalendarDays },
-                  ] as const).map(({ key, label, icon: Icon }) => (
-                    <button
-                      key={key}
-                      onClick={() => { setListViewMode(key); setViewOpen(false) }}
-                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
-                        listViewMode === key
-                          ? 'bg-violet-500/15 text-violet-300'
-                          : 'text-muted-foreground hover:text-foreground hover:bg-white/[0.04]'
-                      }`}
-                    >
-                      <Icon className="w-3.5 h-3.5" /> {label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            )}
           </div>
 
           </div>
           {/* ── End sticky toolbar ── */}
 
-          {/* ── Missing contributions banner ── */}
-          {missingCount > 0 && (
-            <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl px-4 py-3 flex items-center gap-3">
+          {/* ── Missing-scores toast (bottom-right) — list view only ── */}
+          {missingCount > 0 && listViewMode === 'list' && showMissingBanner && (
+            <div className="fixed bottom-6 right-6 z-40 bg-orange-500/20 border border-orange-500/40 rounded-lg px-4 py-3 flex items-center gap-3 max-w-sm shadow-2xl">
               <AlertCircle className="w-4 h-4 text-orange-400 shrink-0" />
-              <p className="text-xs text-orange-300">
-                <span className="font-semibold">{missingCount} completed {missingCount === 1 ? 'task' : 'tasks'}</span>{' '}
-                {missingCount === 1 ? 'has' : 'have'} no commission scores yet. Open the{' '}
-                <button onClick={() => setStatusFilter('missing')} className="underline hover:text-orange-200 font-semibold">Missing</button>{' '}
-                tab to review and save contributions for them.
+              <p className="text-xs text-orange-300 leading-relaxed flex-1">
+                <span className="font-semibold">{missingCount} task{missingCount === 1 ? '' : 's'}</span> need scoring.{' '}
+                <button onClick={() => setStatusFilter('missing')} className="underline hover:text-orange-200 font-semibold">View</button>
               </p>
+              <button onClick={() => setShowMissingBanner(false)} className="shrink-0 text-orange-400 hover:text-orange-300">
+                <X className="w-4 h-4" />
+              </button>
             </div>
           )}
 
@@ -1009,6 +1070,7 @@ export default function ContributionsClient({
             </div>
           ) : (
             <div className="space-y-6">
+              {/* Select-all row removed — "All" toggle button in toolbar replaces this */}
               {tasksByDate.map(([date, dateTasks]) => (
                 <div key={date}>
                   <div className="flex items-center gap-3 mb-2">
@@ -1022,12 +1084,39 @@ export default function ContributionsClient({
                       const contributed = taskScoreMap[task.id]
                       const doneEmps = contributed ? [...contributed] : []
 
+                      const isSelected = selectedTasks.has(task.id)
                       return (
                         <div key={task.id}
                           data-taskid={task.id}
-                          onClick={() => openTask(task)}
-                          className={`bg-card border rounded-xl px-4 py-3.5 hover:border-primary/30 hover:bg-primary/[0.02] transition-all group cursor-pointer select-none ${highlightedTaskId === task.id ? 'border-violet-400 ring-1 ring-violet-400 bg-violet-500/10' : 'border-border'}`}>
+                          onClick={() => {
+                            if (bulkMode) {
+                              setSelectedTasks(prev => {
+                                const next = new Set(prev)
+                                if (next.has(task.id)) next.delete(task.id)
+                                else next.add(task.id)
+                                return next
+                              })
+                            } else {
+                              openTask(task)
+                            }
+                          }}
+                          className={`bg-card border rounded-xl px-4 py-3.5 hover:border-primary/30 hover:bg-primary/[0.02] transition-all group cursor-pointer select-none ${highlightedTaskId === task.id ? 'border-violet-400 ring-1 ring-violet-400 bg-violet-500/10' : bulkMode && isSelected ? 'border-violet-400/60 bg-violet-500/[0.07]' : 'border-border'}`}>
                           <div className="flex items-start gap-3">
+                            {bulkMode && (
+                              <div className="pt-1 shrink-0" onClick={e => e.stopPropagation()}>
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => setSelectedTasks(prev => {
+                                    const next = new Set(prev)
+                                    if (next.has(task.id)) next.delete(task.id)
+                                    else next.add(task.id)
+                                    return next
+                                  })}
+                                  className="w-4 h-4 rounded accent-violet-500 cursor-pointer"
+                                />
+                              </div>
+                            )}
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-1 flex-wrap">
                                 <span
@@ -1153,38 +1242,100 @@ export default function ContributionsClient({
                 default: return s || '—'
               }
             }
-            const cols: { key: string; title: string; color: string; badge: string; tasks: typeof localTasks }[] = [
-              { key: 'pending',  title: 'Pending',           color: 'bg-amber-500/15 border-amber-500/20 text-amber-400',  badge: '⋯', tasks: [] },
-              { key: 'partial',  title: 'Partial Scoring',   color: 'bg-blue-500/15 border-blue-500/20 text-blue-400',     badge: '½', tasks: [] },
-              { key: 'scored',   title: 'Fully Scored',      color: 'bg-green-500/15 border-green-500/20 text-green-400',  badge: '✓', tasks: [] },
-              { key: 'missing',  title: 'Missing (done, not scored)', color: 'bg-orange-500/15 border-orange-500/20 text-orange-400', badge: '!', tasks: [] },
-            ]
+            type BoardCol = { key: string; title: string; color: string; badge: string; tasks: any[] }
+            const colMap = new Map<string, BoardCol>()
+            const cols: BoardCol[] = []
+            const pushTo = (key: string, title: string, color: string, badge: string, task: any) => {
+              if (!colMap.has(key)) {
+                const col: BoardCol = { key, title, color, badge, tasks: [] }
+                colMap.set(key, col); cols.push(col)
+              }
+              colMap.get(key)!.tasks.push(task)
+            }
+
             myVisibleTasks.forEach(t => {
-              const scored = taskScoredSet.has(t.id)
-              const hasAnyContrib = (taskScoreMap[t.id]?.size || 0) > 0
-              if (t.status === 'done' && !scored && !hasAnyContrib) {
-                cols.find(c => c.key === 'missing')!.tasks.push(t)
-              } else if (scored) {
-                cols.find(c => c.key === 'scored')!.tasks.push(t)
-              } else if (hasAnyContrib) {
-                cols.find(c => c.key === 'partial')!.tasks.push(t)
-              } else {
-                cols.find(c => c.key === 'pending')!.tasks.push(t)
+              if (boardGroupBy === 'employee') {
+                const assignedIds = taskAssignmentMap[t.id] ? [...taskAssignmentMap[t.id]] : []
+                const contribIds = taskScoreMap[t.id] ? [...taskScoreMap[t.id]] : []
+                const allIds = [...new Set([...assignedIds, ...contribIds])]
+                if (allIds.length === 0) {
+                  pushTo('unassigned', 'Unassigned', 'bg-secondary border-border text-muted-foreground', '?', t)
+                } else {
+                  allIds.forEach(eId => {
+                    const emp = employees.find(e => e.id === eId)
+                    const title = emp ? dn(emp) : 'Unknown'
+                    pushTo(eId, title, 'bg-violet-500/15 border-violet-500/20 text-violet-300', emp?.cqid || '•', t)
+                  })
+                }
+              } else if (boardGroupBy === 'client') {
+                const key = t.client?.id || 'unclient'
+                const title = t.client?.name || 'No Client'
+                pushTo(key, title, 'bg-cyan-500/15 border-cyan-500/20 text-cyan-300', '•', t)
+              } else if (boardGroupBy === 'service') {
+                const key = t.service_id || 'noservice'
+                const title = t.service?.name || 'No Service'
+                pushTo(key, title, 'bg-emerald-500/15 border-emerald-500/20 text-emerald-300', '•', t)
+              } else if (boardGroupBy === 'status') {
+                // Default: scoring-status (pending / partial / scored / missing)
+                const scored = taskScoredSet.has(t.id)
+                const hasAnyContrib = (taskScoreMap[t.id]?.size || 0) > 0
+                if (t.status === 'done' && !scored && !hasAnyContrib) {
+                  pushTo('missing', 'Missing (done, not scored)', 'bg-orange-500/15 border-orange-500/20 text-orange-400', '!', t)
+                } else if (scored) {
+                  pushTo('scored', 'Fully Scored', 'bg-green-500/15 border-green-500/20 text-green-400', '✓', t)
+                } else if (hasAnyContrib) {
+                  pushTo('partial', 'Partial Scoring', 'bg-blue-500/15 border-blue-500/20 text-blue-400', '½', t)
+                } else {
+                  pushTo('pending', 'Pending', 'bg-amber-500/15 border-amber-500/20 text-amber-400', '⋯', t)
+                }
+              } else if (boardGroupBy === 'date') {
+                if (!t.task_date) {
+                  pushTo('nodate', 'No Date', 'bg-secondary border-border text-muted-foreground', '•', t)
+                  return
+                }
+                if (boardDateGranularity === 'preset') {
+                  const todayD = new Date(); todayD.setHours(0, 0, 0, 0)
+                  const taskD = new Date(t.task_date + 'T00:00:00'); taskD.setHours(0, 0, 0, 0)
+                  const diff = Math.floor((taskD.getTime() - todayD.getTime()) / 86400000)
+                  if (diff === 0) pushTo('today', 'Today', 'bg-violet-500/15 border-violet-500/20 text-violet-300', '★', t)
+                  else if (diff > 0 && diff <= 7) pushTo('week', 'This Week', 'bg-blue-500/15 border-blue-500/20 text-blue-400', '⋯', t)
+                  else if (diff > 7) pushTo('later', 'Later', 'bg-secondary border-border text-muted-foreground', '→', t)
+                  else pushTo('past', 'Past', 'bg-secondary border-border text-muted-foreground', '·', t)
+                } else if (boardDateGranularity === 'daily') {
+                  pushTo(t.task_date, fmt(t.task_date), 'bg-cyan-500/15 border-cyan-500/20 text-cyan-300', '·', t)
+                } else if (boardDateGranularity === 'weekly') {
+                  const d = new Date(t.task_date + 'T00:00:00')
+                  const ws = new Date(d); ws.setDate(d.getDate() - d.getDay())
+                  const key = ws.toISOString().split('T')[0]
+                  pushTo(key, `Week of ${fmt(key)}`, 'bg-blue-500/15 border-blue-500/20 text-blue-300', 'W', t)
+                } else if (boardDateGranularity === 'monthly') {
+                  const key = t.task_date.substring(0, 7)
+                  const title = new Date(t.task_date + 'T00:00:00').toLocaleString('en-US', { month: 'long', year: 'numeric' })
+                  pushTo(key, title, 'bg-emerald-500/15 border-emerald-500/20 text-emerald-300', 'M', t)
+                }
               }
             })
+
+            // Sort date columns chronologically when grouping by date (daily/weekly/monthly use ISO-like keys)
+            if (boardGroupBy === 'date' && boardDateGranularity !== 'preset') {
+              cols.sort((a, b) => a.key.localeCompare(b.key))
+            }
 
             const visibleCols = cols.filter(c => c.tasks.length > 0)
 
             return (
-              <div className="overflow-x-auto pb-4">
+              // Board scroll container — owns BOTH x and y scroll. Sticky column headers
+              // (top-0 inside) work because this is the nearest scroll ancestor.
+              // Height = viewport - sticky page header (92px) - sticky toolbar (~120px) - some padding.
+              <div className="overflow-auto pb-4 h-[calc(100vh-220px)]">
                 <div className="flex gap-4 min-w-max">
                   {visibleCols.length === 0 && (
                     <p className="text-sm text-muted-foreground italic px-2 py-10">No tasks match the current filters.</p>
                   )}
                   {visibleCols.map(col => (
                     <div key={col.key} className="w-72 flex flex-col gap-3 shrink-0">
-                      {/* Column header */}
-                      <div className="flex items-center gap-2 px-1">
+                      {/* Column header — sticky to top of board scroll container so it stays visible while scrolling cards */}
+                      <div className="sticky top-0 z-10 flex items-center gap-2 px-1 py-2 bg-background/95 backdrop-blur-sm rounded-lg">
                         <div className={`w-7 h-7 rounded-full border flex items-center justify-center shrink-0 ${col.color}`}>
                           <span className="text-[10px] font-bold">{col.badge}</span>
                         </div>
@@ -1517,6 +1668,35 @@ export default function ContributionsClient({
               </form>
             </div>
           </ModalOverlay>
+        )}
+
+        {/* ── Bulk action toolbar ── */}
+        {bulkMode && selectedTasks.size > 0 && (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-2 duration-200">
+            <div className="flex items-center gap-2 bg-[#0d1117] border border-white/15 rounded-2xl shadow-2xl shadow-black/60 px-4 py-3">
+              <span className="text-xs font-semibold text-muted-foreground pr-2 border-r border-white/10">
+                {selectedTasks.size} selected
+              </span>
+              <button onClick={() => bulkUpdateStatus('done')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 text-xs font-semibold transition-colors border border-emerald-500/20">
+                <CheckCircle className="w-3.5 h-3.5" /> Mark Done
+              </button>
+              <button onClick={() => bulkUpdateStatus('pending')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 text-xs font-semibold transition-colors border border-amber-500/20">
+                <Clock className="w-3.5 h-3.5" /> Mark Pending
+              </button>
+              {canSeeFinancials && (
+                <button onClick={bulkDeleteTasks}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-500/15 text-red-400 hover:bg-red-500/25 text-xs font-semibold transition-colors border border-red-500/20">
+                  <Trash2 className="w-3.5 h-3.5" /> Delete
+                </button>
+              )}
+              <button onClick={() => { setSelectedTasks(new Set()); setBulkMode(false) }}
+                className="ml-1 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/[0.06] transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
         )}
       </div>
     )

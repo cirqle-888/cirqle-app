@@ -127,7 +127,7 @@ const TEMPLATES: Record<ImportMode, { header: string; example: string }> = {
     ].join('\n'),
   },
   contributions: {
-    header: 'id,task_id,task_title,task_date,employee_cqid,score_percentage,earnings',
+    header: 'id,task_id,task_title,task_date,employee_cqid,score_percentage,earnings_inr',
     example: [
       '"","","Social Media Pack Jun","2025-06-01","CQ001","60","3000"',
       '"","","Social Media Pack Jun","2025-06-01","CQ002","40","2000"',
@@ -136,6 +136,8 @@ const TEMPLATES: Record<ImportMode, { header: string; example: string }> = {
 }
 
 // ─── Export configuration ─────────────────────────────────────────────────────
+// `orderBy` is tried first; if the column does not exist in the DB schema the
+// export falls back to an unordered query so it still succeeds.
 const EXPORT_CONFIG: Record<ImportMode, { table: string; orderBy?: string }> = {
   employees:      { table: 'employees',                orderBy: 'cqid' },
   clients:        { table: 'clients',                  orderBy: 'name' },
@@ -144,7 +146,7 @@ const EXPORT_CONFIG: Record<ImportMode, { table: string; orderBy?: string }> = {
   parameters:     { table: 'parameters',               orderBy: 'display_order' },
   tools:          { table: 'tools',                    orderBy: 'name' },
   pricing_matrix: { table: 'client_service_pricing',   orderBy: 'client_id' },
-  jobs:           { table: 'tasks',                    orderBy: 'task_number' },
+  jobs:           { table: 'tasks',                    orderBy: 'task_date' },
   contributions:  { table: 'contribution_scores',      orderBy: 'task_id' },
 }
 
@@ -394,10 +396,27 @@ export default function ImportClient({ clients, services, employees, groups, par
   // ── Export current data ────────────────────────────────────────────────────
   async function exportCurrentData(m: ImportMode) {
     const cfg = EXPORT_CONFIG[m]
-    let q = supabase.from(cfg.table).select('*')
-    if (cfg.orderBy) q = q.order(cfg.orderBy, { ascending: true, nullsFirst: false }) as typeof q
-    const { data, error } = await q
-    if (error) { toastError(`Export failed: ${error.message}`); return }
+    // Try ordered first; if the orderBy column is missing on this DB schema,
+    // retry without ordering so the export still works.
+    let data: any[] | null = null
+    let lastError: any = null
+    if (cfg.orderBy) {
+      const ordered = await supabase.from(cfg.table).select('*').order(cfg.orderBy, { ascending: true, nullsFirst: false })
+      if (ordered.error) lastError = ordered.error
+      else data = ordered.data as any[]
+    }
+    if (!data) {
+      const plain = await supabase.from(cfg.table).select('*')
+      if (plain.error) {
+        toastError(`Export failed: ${plain.error.message}`)
+        return
+      }
+      data = plain.data as any[]
+      if (lastError) {
+        // Silent fallback worked — let the user know ordering was skipped
+        console.warn(`Export ordering by "${cfg.orderBy}" skipped: ${lastError.message}`)
+      }
+    }
     if (!data || data.length === 0) { toastError('No data to export'); return }
     const allKeys = new Set<string>()
     data.forEach((r: Record<string, unknown>) => Object.keys(r).forEach(k => allKeys.add(k)))
@@ -473,14 +492,22 @@ export default function ImportClient({ clients, services, employees, groups, par
     const idx = (k: string) => h.findIndex(c => c.includes(k))
     const iId = h.findIndex(c => c === 'id')
     const iName = idx('name'), iPricing = idx('pricing'), iDesc = idx('desc'), iOrd = idx('order')
+    const iDefaultPrice = h.findIndex(c => c === 'default_price' || c === 'defaultprice')
+    const iDefaultCurr  = h.findIndex(c => c === 'default_currency' || c.includes('currency'))
+    const iActive = h.findIndex(c => c === 'is_active' || c === 'active')
 
     return lines.slice(1).map((c, i) => {
       const g = (j: number) => j >= 0 ? c[j]?.trim() || '' : ''
+      const activeRaw = g(iActive)
       const r: ParsedRow = { ...baseRow(i), row_id: g(iId), name: g(iName), pricing_type: g(iPricing) || 'fixed_per_creative',
-        description: g(iDesc), display_order: g(iOrd) || '0' }
+        description: g(iDesc), display_order: g(iOrd) || '0',
+        default_price: g(iDefaultPrice), default_currency: g(iDefaultCurr) || 'INR',
+        is_active: activeRaw === '' || activeRaw === 'true' || activeRaw === 'TRUE' || activeRaw === '1',
+      }
       if (!r.name) r.errors.push('name is required')
       const valid = ['fixed_per_creative','percentage_of_spend','retainer','hourly']
       if (!valid.includes(r.pricing_type)) r.errors.push(`pricing_type "${r.pricing_type}" invalid`)
+      if (r.default_price && isNaN(parseFloat(r.default_price))) r.errors.push('default_price must be a number')
       return finalize(r)
     })
   }
@@ -601,15 +628,34 @@ export default function ImportClient({ clients, services, employees, groups, par
     const iNumber = h.findIndex(c => c === 'task_number' || c === 'number' || c === 'task#' || c === 'no' || c === 'task_no')
     const iTitle = idx('title'), iClient = h.findIndex(c => c.includes('client'))
     const iService = h.findIndex(c => c.includes('service')), iDate = h.findIndex(c => c.includes('date'))
-    const iAmount = h.findIndex(c => c.includes('amount') || c.includes('billing'))
-    const iStatus = idx('status'), iDesc = h.findIndex(c => c.includes('desc'))
+    const iAmountInr = h.findIndex(c => c === 'billing_amount_inr' || c === 'billing_amount_inr')
+    const iAmount    = h.findIndex(c => c === 'billing_amount')
+    const iCurr      = h.findIndex(c => c === 'currency')
+    const iQty       = h.findIndex(c => c === 'quantity' || c === 'qty')
+    const iStatus    = idx('status'), iDesc = h.findIndex(c => c.includes('desc'))
+    const iRecurring = h.findIndex(c => c === 'is_recurring' || c === 'recurring')
+    const iRecInt    = h.findIndex(c => c === 'recurring_interval')
+    const iRecEnd    = h.findIndex(c => c === 'recurring_end_date')
 
     return lines.slice(1).map((c, i) => {
       const g = (j: number) => j >= 0 ? c[j]?.trim() || '' : ''
       const tnRaw = g(iNumber).replace(/^#/, '').trim()
-      const r: ParsedRow = { ...baseRow(i), row_id: g(iId), task_number: tnRaw, title: g(iTitle), client_ref: g(iClient),
+      // billing_amount_inr takes precedence; fall back to billing_amount
+      const billingInr = g(iAmountInr) || g(iAmount)
+      const billingAmt = g(iAmount) || g(iAmountInr)
+      const recurringRaw = g(iRecurring)
+      const r: ParsedRow = {
+        ...baseRow(i),
+        row_id: g(iId), task_number: tnRaw, title: g(iTitle), client_ref: g(iClient),
         service_ref: g(iService), task_date: normalizeDate(g(iDate)),
-        billing_amount_inr: g(iAmount), task_status: g(iStatus) || 'done', description: g(iDesc) }
+        billing_amount_inr: billingInr, billing_amount: billingAmt,
+        currency: g(iCurr) || 'INR',
+        quantity: g(iQty) || '1',
+        task_status: g(iStatus) || 'done', description: g(iDesc),
+        is_recurring: recurringRaw === 'true' || recurringRaw === 'TRUE' || recurringRaw === '1',
+        recurring_interval: g(iRecInt) || null,
+        recurring_end_date: g(iRecEnd) ? normalizeDate(g(iRecEnd)) : null,
+      }
       if (!r.title)     r.errors.push('title is required')
       if (!r.task_date) r.errors.push('task_date is required')
       else if (!/^\d{4}-\d{2}-\d{2}$/.test(r.task_date)) r.errors.push('task_date must be YYYY-MM-DD')
@@ -617,8 +663,12 @@ export default function ImportClient({ clients, services, employees, groups, par
       if (r.client_ref) { r.client_id = clientMap[norm(r.client_ref)]; if (!r.client_id) r.warnings.push(`Client "${r.client_ref}" not found`) }
       if (r.service_ref) { r.service_id = serviceMap[norm(r.service_ref)]; if (!r.service_id) r.warnings.push(`Service "${r.service_ref}" not found`) }
       if (r.billing_amount_inr && isNaN(parseFloat(r.billing_amount_inr))) r.errors.push('billing_amount_inr must be a number')
+      if (r.quantity && isNaN(parseFloat(r.quantity))) r.errors.push('quantity must be a number')
       const validSt = ['pending','in_progress','done','invoiced','cancelled']
       if (r.task_status && !validSt.includes(r.task_status)) r.errors.push(`status "${r.task_status}" invalid`)
+      const validIntervals = ['daily','weekly','biweekly','monthly']
+      if (r.recurring_interval && !validIntervals.includes(r.recurring_interval)) r.errors.push(`recurring_interval "${r.recurring_interval}" invalid`)
+      if (r.recurring_end_date && !/^\d{4}-\d{2}-\d{2}$/.test(r.recurring_end_date)) r.errors.push('recurring_end_date must be YYYY-MM-DD')
       return finalize(r)
     })
   }
@@ -866,13 +916,16 @@ export default function ImportClient({ clients, services, employees, groups, par
           fields: {
             name: r.name, pricing_type: r.pricing_type, description: r.description || null,
             display_order: parseInt(r.display_order) || 0,
+            default_price: r.default_price ? parseFloat(r.default_price) : null,
+            default_currency: r.default_currency || 'INR',
+            is_active: r.is_active !== false,
           },
         }))
         if (operation === 'update') {
           await backupBeforeUpdate(table, recs.map(r => r.row_id))
           await batchUpdate(table, recs)
         } else {
-          await batchInsert(table, recs.map(r => ({ ...r.fields, is_active: true })))
+          await batchInsert(table, recs.map(r => r.fields))
         }
         break
       }
@@ -1001,8 +1054,13 @@ export default function ImportClient({ clients, services, employees, groups, par
               client_id: r.client_id || null, service_id: r.service_id || null,
               task_date: r.task_date,
               billing_amount_inr: parseFloat(r.billing_amount_inr) || 0,
-              billing_amount: parseFloat(r.billing_amount_inr) || 0,
+              billing_amount: parseFloat(r.billing_amount) || parseFloat(r.billing_amount_inr) || 0,
+              currency: r.currency || 'INR',
+              quantity: parseFloat(r.quantity) || 1,
               status: r.task_status || 'done',
+              is_recurring: r.is_recurring || false,
+              recurring_interval: r.recurring_interval || null,
+              recurring_end_date: r.recurring_end_date || null,
             }
             if (r.task_number && /^\d+$/.test(r.task_number)) {
               fields.task_number = parseInt(r.task_number, 10)
@@ -1030,9 +1088,15 @@ export default function ImportClient({ clients, services, employees, groups, par
               task_number: tn,
               title: r.title, description: r.description || null,
               client_id: r.client_id || null, service_id: r.service_id || null,
-              task_date: r.task_date, billing_amount_inr: parseFloat(r.billing_amount_inr) || 0,
-              billing_amount: parseFloat(r.billing_amount_inr) || 0, currency: 'INR',
+              task_date: r.task_date,
+              billing_amount_inr: parseFloat(r.billing_amount_inr) || 0,
+              billing_amount: parseFloat(r.billing_amount) || parseFloat(r.billing_amount_inr) || 0,
+              currency: r.currency || 'INR',
+              quantity: parseFloat(r.quantity) || 1,
               status: r.task_status || 'done',
+              is_recurring: r.is_recurring || false,
+              recurring_interval: r.recurring_interval || null,
+              recurring_end_date: r.recurring_end_date || null,
             }
           })
           await batchInsert('tasks', taskRows)
@@ -1152,7 +1216,7 @@ export default function ImportClient({ clients, services, employees, groups, par
         .limit(500)
     } else if (m === 'contributions') {
       q = supabase.from('contribution_scores')
-        .select('id, score_percentage, earnings, calculated_at, tasks(title, task_date), employees(name, cqid)')
+        .select('id, score_percentage, earnings_inr, calculated_at, tasks(title, task_date), employees(name, cqid)')
         .order('calculated_at', { ascending: false })
         .limit(500)
     } else {
@@ -1387,7 +1451,7 @@ export default function ImportClient({ clients, services, employees, groups, par
           <td className={tdCls+' font-mono text-[11px]'}>{(r.tasks as any)?.task_date || '—'}</td>
           <td className={tdCls}>{(r.employees as any)?.cqid} · {(r.employees as any)?.name}</td>
           <td className={tdCls+' text-right font-mono'}>{r.score_percentage}%</td>
-          <td className={tdCls+' text-right font-mono'}>{r.earnings ? `₹${Number(r.earnings).toLocaleString('en-IN')}` : '—'}</td>
+          <td className={tdCls+' text-right font-mono'}>{r.earnings_inr ? `₹${Number(r.earnings_inr).toLocaleString('en-IN')}` : '—'}</td>
         </tr>))}</tbody></table>
     )
   }
@@ -1824,17 +1888,15 @@ export default function ImportClient({ clients, services, employees, groups, par
                   onClick={() => {
                     let header = '', example = ''
                     if (contribSubMode === 'earnings_only') {
-                      header = 'task_id,task_title,task_date,employee_cqid,earnings_inr'
-                      example = ['"","Social Media Pack Jun","2026-05-01","CQ001","3000"', '"","Social Media Pack Jun","2026-05-01","CQ002","2000"'].join('\n')
+                      header = 'id,task_id,task_title,task_date,employee_cqid,earnings_inr'
+                      example = ['"","","Social Media Pack Jun","2026-05-01","CQ001","3000"', '"","","Social Media Pack Jun","2026-05-01","CQ002","2000"'].join('\n')
                     } else if (contribSubMode === 'score_pct') {
-                      header = 'task_id,task_title,task_date,employee_cqid,score_percentage,earnings_inr'
-                      example = ['"","Social Media Pack Jun","2026-05-01","CQ001","60","3000"', '"","Social Media Pack Jun","2026-05-01","CQ002","40","2000"'].join('\n')
+                      header = 'id,task_id,task_title,task_date,employee_cqid,score_percentage,earnings_inr'
+                      example = ['"","","Social Media Pack Jun","2026-05-01","CQ001","60","3000"', '"","","Social Media Pack Jun","2026-05-01","CQ002","40","2000"'].join('\n')
                     } else {
-                      const paramHeaders = parameters.map(p => `"${p.name}"`).join(',')
-                      const paramZeros   = parameters.map(() => '0').join(',')
-                      header = `task_id,task_title,task_date,employee_cqid,${parameters.map(p => p.name).join(',')}`
-                      example = `"","Social Media Pack Jun","2026-05-01","CQ001",${paramZeros}\n"","Social Media Pack Jun","2026-05-01","CQ002",${paramZeros}`
-                      void paramHeaders  // used inline above
+                      const paramZeros = parameters.map(() => '0').join(',')
+                      header = `id,task_id,task_title,task_date,employee_cqid,${parameters.map(p => p.name).join(',')}`
+                      example = `"","","Social Media Pack Jun","2026-05-01","CQ001",${paramZeros}\n"","","Social Media Pack Jun","2026-05-01","CQ002",${paramZeros}`
                     }
                     const blob = new Blob([header + '\n' + example], { type: 'text/csv;charset=utf-8;' })
                     const a = document.createElement('a')

@@ -160,10 +160,16 @@ export function DateFilter({ value, onChange, className = '' }: Props) {
         <Calendar className="w-3.5 h-3.5 shrink-0" />
         <span className="truncate max-w-[110px]">{label}</span>
         {isActive ? (
-          <button type="button" onClick={e => { e.stopPropagation(); onChange(null) }}
-            className="shrink-0 opacity-50 hover:opacity-100 transition-opacity">
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={e => { e.stopPropagation(); onChange(null) }}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onChange(null) } }}
+            className="shrink-0 opacity-50 hover:opacity-100 transition-opacity cursor-pointer"
+            aria-label="Clear date filter"
+          >
             <X className="w-3 h-3" />
-          </button>
+          </span>
         ) : (
           <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
         )}
