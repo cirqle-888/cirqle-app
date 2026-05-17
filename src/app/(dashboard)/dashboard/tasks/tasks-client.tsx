@@ -949,10 +949,10 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
             </div>
 
             {/* Filter popover */}
-            <div ref={filterRef} className="relative shrink-0">
+            <div ref={filterRef} className="relative w-[130px] shrink-0">
               <button
                 onClick={() => setFilterOpen(v => !v)}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border transition-colors ${
+                className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border transition-colors ${
                   filterOpen || activeFilterCount > 0
                     ? 'bg-violet-500/15 border-violet-500/40 text-violet-300'
                     : 'bg-[#0d1117] border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
@@ -1029,10 +1029,10 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
             </div>
 
             {/* View popover */}
-            <div ref={viewRef} className="relative shrink-0">
+            <div ref={viewRef} className="relative w-[150px] shrink-0">
               <button
                 onClick={() => setViewOpen(v => !v)}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border transition-colors ${
+                className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border transition-colors ${
                   viewOpen
                     ? 'bg-white/10 border-white/20 text-foreground'
                     : 'bg-[#0d1117] border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
