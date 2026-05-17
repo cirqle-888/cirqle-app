@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { X, Search } from 'lucide-react'
+import { X, Search, Check } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { ModalOverlay } from './modal-overlay'
 import AppSelect from './app-select'
@@ -35,8 +35,16 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState<Record<string, any>>({})
   const [services, setServices] = useState<any[]>([])
+
+  // Services currently shown in the UI (for editing pricing)
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set())
+  // ALL pricing from DB — used to preserve rows we don't show on save
+  const [allDbPricings, setAllDbPricings] = useState<Record<string, { price: string; commission_percentage: string; currency: string }>>({})
+  // Pricing state for all selected services (including newly added)
   const [pricings, setPricings] = useState<Record<string, { price: string; commission_percentage: string; currency: string }>>({})
+  // Services user explicitly removed this session (to delete from DB)
+  const [explicitlyRemoved, setExplicitlyRemoved] = useState<Set<string>>(new Set())
+
   const [serviceSearch, setServiceSearch] = useState('')
 
   useEffect(() => {
@@ -48,23 +56,32 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
       ])
       if (clientRes.data) setForm(clientRes.data)
       if (servicesRes.data) setServices(servicesRes.data)
+
+      const allPricing: Record<string, { price: string; commission_percentage: string; currency: string }> = {}
       if (pricingRes.data) {
-        const p: Record<string, { price: string; commission_percentage: string; currency: string }> = {}
-        const sel = new Set<string>()
         pricingRes.data.forEach((r: any) => {
-          p[r.service_id] = { price: String(r.price || ''), commission_percentage: String(r.commission_percentage || ''), currency: r.currency || 'INR' }
-          sel.add(r.service_id)
+          allPricing[r.service_id] = {
+            price: String(r.price || ''),
+            commission_percentage: String(r.commission_percentage || ''),
+            currency: r.currency || 'INR',
+          }
         })
-        // Always ensure the task's specific service is pre-selected
-        if (serviceId && !sel.has(serviceId)) {
-          sel.add(serviceId)
-          if (!p[serviceId]) p[serviceId] = { price: '', commission_percentage: '', currency: clientRes.data?.default_currency || 'INR' }
+      }
+      setAllDbPricings(allPricing)
+
+      // When opened from a specific task: show only that service
+      // When opened without a serviceId (e.g. from settings): show all configured services
+      if (serviceId) {
+        const sel = new Set([serviceId])
+        const shown: Record<string, { price: string; commission_percentage: string; currency: string }> = {
+          [serviceId]: allPricing[serviceId] || { price: '', commission_percentage: '', currency: clientRes.data?.default_currency || 'INR' },
         }
-        setPricings(p)
         setSelectedServices(sel)
-      } else if (serviceId) {
-        setSelectedServices(new Set([serviceId]))
-        setPricings({ [serviceId]: { price: '', commission_percentage: '', currency: clientRes.data?.default_currency || 'INR' } })
+        setPricings(shown)
+      } else {
+        const sel = new Set(Object.keys(allPricing))
+        setSelectedServices(sel)
+        setPricings({ ...allPricing })
       }
       setLoading(false)
     }
@@ -76,25 +93,54 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
     e.preventDefault()
     setSaving(true)
     const { data: updated } = await supabase.from('clients').update(form).eq('id', clientId).select().single()
-    // Save pricing
-    const rows = Object.entries(pricings)
-      .filter(([, v]) => v.price !== '' || v.commission_percentage !== '')
-      .map(([service_id, v]) => ({
-        client_id: clientId, service_id,
-        price: parseFloat(v.price) || 0,
-        commission_percentage: parseFloat(v.commission_percentage) || 0,
-        currency: v.currency || 'INR',
-        is_active: true,
-      }))
-    if (rows.length > 0) {
-      await supabase.from('client_service_pricing').upsert(rows, { onConflict: 'client_id,service_id' })
+
+    // Build rows to upsert: selected services (shown + edited) + hidden DB services (unchanged)
+    const upsertRows: any[] = []
+
+    // 1. Services shown in UI — save current edited values
+    for (const [service_id, v] of Object.entries(pricings)) {
+      if (selectedServices.has(service_id) && !explicitlyRemoved.has(service_id)) {
+        upsertRows.push({
+          client_id: clientId, service_id,
+          price: parseFloat(v.price) || 0,
+          commission_percentage: parseFloat(v.commission_percentage) || 0,
+          currency: v.currency || 'INR',
+          is_active: true,
+        })
+      }
     }
-    // Remove deselected services
-    const allPricedIds = Object.keys(pricings)
-    const removed = allPricedIds.filter(id => !selectedServices.has(id))
-    if (removed.length > 0) {
-      await supabase.from('client_service_pricing').delete().eq('client_id', clientId).in('service_id', removed)
+
+    // 2. Hidden DB services (not shown in this session) — preserve as-is
+    if (serviceId) {
+      for (const [service_id, v] of Object.entries(allDbPricings)) {
+        if (!selectedServices.has(service_id) && !explicitlyRemoved.has(service_id)) {
+          upsertRows.push({
+            client_id: clientId, service_id,
+            price: parseFloat(v.price) || 0,
+            commission_percentage: parseFloat(v.commission_percentage) || 0,
+            currency: v.currency || 'INR',
+            is_active: true,
+          })
+        }
+      }
     }
+
+    if (upsertRows.length > 0) {
+      await supabase.from('client_service_pricing').upsert(upsertRows, { onConflict: 'client_id,service_id' })
+    }
+
+    // Delete only explicitly removed services
+    const toDelete = [...explicitlyRemoved]
+    if (!serviceId) {
+      // Full edit mode: also delete services that were deselected without explicit remove
+      const allShownIds = Object.keys(allDbPricings)
+      allShownIds.forEach(id => { if (!selectedServices.has(id)) toDelete.push(id) })
+    }
+    const uniqueToDelete = [...new Set(toDelete)]
+    if (uniqueToDelete.length > 0) {
+      await supabase.from('client_service_pricing').delete().eq('client_id', clientId).in('service_id', uniqueToDelete)
+    }
+
     setSaving(false)
     if (onSaved && updated) onSaved(updated)
     onClose()
@@ -102,22 +148,38 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
 
   const addService = (id: string) => {
     setSelectedServices(prev => new Set([...prev, id]))
-    setPricings(p => ({ ...p, [id]: p[id] || { price: '', commission_percentage: '', currency: form.default_currency || 'INR' } }))
+    // Use existing DB pricing if available, else blank
+    setPricings(p => ({ ...p, [id]: allDbPricings[id] || p[id] || { price: '', commission_percentage: '', currency: form.default_currency || 'INR' } }))
+    setExplicitlyRemoved(prev => { const n = new Set(prev); n.delete(id); return n })
     setServiceSearch('')
   }
+
   const removeService = (id: string) => {
     setSelectedServices(prev => { const n = new Set(prev); n.delete(id); return n })
-    setPricings(p => { const n = { ...p }; delete n[id]; return n })
+    setExplicitlyRemoved(prev => new Set([...prev, id]))
   }
 
-  const filteredServices = services.filter(s => !selectedServices.has(s.id) && (!serviceSearch || s.name.toLowerCase().includes(serviceSearch.toLowerCase())))
+  // Services not currently shown
+  const unselectedServices = services.filter(s =>
+    !selectedServices.has(s.id) &&
+    (!serviceSearch || s.name.toLowerCase().includes(serviceSearch.toLowerCase()))
+  )
+  // Is this service already configured in DB (has existing pricing)?
+  const isConfigured = (id: string) => id in allDbPricings
   const selectedServiceList = services.filter(s => selectedServices.has(s.id))
 
   return (
     <ModalOverlay onClose={onClose}>
       <div className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-card rounded-t-2xl z-10">
-          <h2 className="font-semibold">Edit Client</h2>
+          <div>
+            <h2 className="font-semibold">Edit Client</h2>
+            {serviceId && (
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Showing pricing for this task's service
+              </p>
+            )}
+          </div>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
         </div>
 
@@ -181,62 +243,26 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
               </div>
             </div>
 
-            {/* Services */}
+            {/* Service Pricing */}
             {services.length > 0 && (
               <div className="border-t border-border pt-4 space-y-3">
-                <div>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Service Pricing</p>
-                  {serviceId && (
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Showing pricing for this task's service. Add more services below.
-                    </p>
-                  )}
-                </div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Service Pricing</p>
 
+                {/* Pricing rows for shown services */}
                 {selectedServiceList.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 p-2.5 bg-secondary/40 rounded-lg border border-border min-h-[36px]">
-                    {selectedServiceList.map(svc => (
-                      <span key={svc.id} className="inline-flex items-center gap-1 pl-2.5 pr-1 py-0.5 rounded-full text-xs font-medium bg-primary/15 text-primary border border-primary/25">
-                        {svc.name}
-                        <button type="button" onClick={() => removeService(svc.id)} className="w-4 h-4 rounded-full flex items-center justify-center hover:bg-primary/20 text-primary/70 hover:text-primary">×</button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                <div className="relative">
-                  <input type="text" value={serviceSearch} onChange={e => setServiceSearch(e.target.value)} placeholder="Search and add services…" className={inputCls + ' pl-8'} />
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-                  {serviceSearch && filteredServices.length > 0 && (
-                    <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-xl z-20 max-h-48 overflow-y-auto">
-                      {filteredServices.map(svc => (
-                        <button key={svc.id} type="button" onClick={() => addService(svc.id)} className="w-full text-left px-3 py-2 text-sm hover:bg-secondary/60 flex items-center gap-2">
-                          <span className="text-primary text-xs">+</span> {svc.name}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {!serviceSearch && filteredServices.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {filteredServices.slice(0, 8).map(svc => (
-                      <button key={svc.id} type="button" onClick={() => addService(svc.id)} className="px-2.5 py-1 rounded-full text-xs text-muted-foreground bg-secondary border border-transparent hover:border-border hover:text-foreground transition-colors">
-                        + {svc.name}
-                      </button>
-                    ))}
-                    {filteredServices.length > 8 && <span className="px-2.5 py-1 text-xs text-muted-foreground">+{filteredServices.length - 8} more — use search</span>}
-                  </div>
-                )}
-
-                {selectedServiceList.length > 0 && (
-                  <div className="space-y-2 pt-1">
-                    <p className="text-xs text-muted-foreground font-medium">Pricing for selected services</p>
+                  <div className="space-y-2">
                     {selectedServiceList.map(svc => {
                       const p = pricings[svc.id] || { price: '', commission_percentage: '', currency: form.default_currency || 'INR' }
                       return (
                         <div key={svc.id} className="bg-secondary/40 rounded-lg px-3 py-2.5">
-                          <p className="text-xs font-medium mb-2">{svc.name}</p>
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-xs font-medium">{svc.name}</p>
+                            {svc.id !== serviceId && (
+                              <button type="button" onClick={() => removeService(svc.id)} className="text-muted-foreground hover:text-red-400 transition-colors text-xs">
+                                <X className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
                           <div className="grid grid-cols-3 gap-2">
                             <div>
                               <label className="block text-xs text-muted-foreground mb-1">Price</label>
@@ -258,6 +284,56 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
                     })}
                   </div>
                 )}
+
+                {/* Add more services */}
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground font-medium">Add more services</p>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={serviceSearch}
+                      onChange={e => setServiceSearch(e.target.value)}
+                      placeholder="Search services…"
+                      className={inputCls + ' pl-8'}
+                    />
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+                    {serviceSearch && unselectedServices.length > 0 && (
+                      <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-xl z-20 max-h-48 overflow-y-auto">
+                        {unselectedServices.map(svc => (
+                          <button key={svc.id} type="button" onClick={() => addService(svc.id)}
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-secondary/60 flex items-center justify-between gap-2">
+                            <span className="flex items-center gap-2">
+                              <span className="text-primary text-xs">+</span> {svc.name}
+                            </span>
+                            {isConfigured(svc.id) && (
+                              <span className="text-[10px] text-green-400 flex items-center gap-0.5 shrink-0">
+                                <Check className="w-2.5 h-2.5" /> configured
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {!serviceSearch && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {unselectedServices.slice(0, 8).map(svc => (
+                        <button key={svc.id} type="button" onClick={() => addService(svc.id)}
+                          className={`px-2.5 py-1 rounded-full text-xs border transition-colors flex items-center gap-1 ${
+                            isConfigured(svc.id)
+                              ? 'text-green-400 bg-green-500/10 border-green-500/25 hover:bg-green-500/20'
+                              : 'text-muted-foreground bg-secondary border-transparent hover:border-border hover:text-foreground'
+                          }`}>
+                          {isConfigured(svc.id) ? <Check className="w-2.5 h-2.5" /> : '+'} {svc.name}
+                        </button>
+                      ))}
+                      {unselectedServices.length > 8 && (
+                        <span className="px-2.5 py-1 text-xs text-muted-foreground">+{unselectedServices.length - 8} more — use search</span>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
