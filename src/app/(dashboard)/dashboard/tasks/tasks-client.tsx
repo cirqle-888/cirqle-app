@@ -795,6 +795,18 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
   // Count of active filters visible in the Filter popover (search has its own bar; status has chips)
   const activeFilterCount = [filterClient, filterService, filterAssignee, sortBy !== 'date_desc' ? 'sort' : ''].filter(Boolean).length
 
+  // Top 3 clients by task frequency — shown as quick-filter chips in toolbar
+  const topClients = useMemo(() => {
+    const counts = new Map<string, { id: string; name: string; count: number }>()
+    tasks.forEach(t => {
+      if (!t.client?.id) return
+      const e = counts.get(t.client.id)
+      if (e) e.count++
+      else counts.set(t.client.id, { id: t.client.id, name: t.client.name, count: 1 })
+    })
+    return [...counts.values()].sort((a, b) => b.count - a.count).slice(0, 3)
+  }, [tasks])
+
   const inputCls = 'w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50'
 
   return (
@@ -928,7 +940,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
       {!showTrash && <div className="p-6 space-y-4">
         {/* Filters — sticky toolbar (sits below the Header which is sticky at top-0) */}
         <div className="sticky top-[68px] z-20 bg-background pt-2 pb-3 -mt-2 space-y-2">
-          {/* Toolbar: Select · Search · Filter · View */}
+          {/* Toolbar: Select · Search · [client chips] · Filter · [Table|Board|Cal] · ⚙ */}
           <div className="flex items-center gap-2">
             {/* Bulk select toggle — leftmost */}
             <button
@@ -948,20 +960,35 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
               {searchQ && <button onClick={() => setSearchQ('')}><X size={12} className="text-muted-foreground" /></button>}
             </div>
 
-            {/* Filter popover */}
-            <div ref={filterRef} className="relative w-[130px] shrink-0">
+            {/* Quick client filter chips — top 3 by task count */}
+            {topClients.map(c => (
+              <button
+                key={c.id}
+                title={c.name}
+                onClick={() => setFilterClient(fc => fc === c.id ? '' : c.id)}
+                className={`shrink-0 px-3 py-2 rounded-xl text-xs font-medium border transition-colors max-w-[120px] truncate ${
+                  filterClient === c.id
+                    ? 'bg-violet-500/20 border-violet-500/40 text-violet-300'
+                    : 'bg-[#0d1117] border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
+                }`}
+              >
+                {c.name}
+              </button>
+            ))}
+
+            {/* Filter popover — icon only, compact */}
+            <div ref={filterRef} className="relative shrink-0">
               <button
                 onClick={() => setFilterOpen(v => !v)}
-                className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border transition-colors ${
+                className={`w-9 h-9 flex items-center justify-center rounded-xl border transition-colors relative ${
                   filterOpen || activeFilterCount > 0
                     ? 'bg-violet-500/15 border-violet-500/40 text-violet-300'
                     : 'bg-[#0d1117] border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
                 }`}
               >
-                <Filter className="w-3.5 h-3.5" />
-                Filter
+                <Filter className="w-4 h-4" />
                 {activeFilterCount > 0 && (
-                  <span className="bg-violet-500/30 text-violet-200 text-[10px] rounded-full px-1.5 py-0.5 font-semibold leading-none">
+                  <span className="absolute -top-1 -right-1 bg-violet-500 text-white text-[9px] leading-none rounded-full px-1 py-0.5 font-bold">
                     {activeFilterCount}
                   </span>
                 )}
@@ -1028,44 +1055,42 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
               )}
             </div>
 
-            {/* View popover */}
-            <div ref={viewRef} className="relative w-[150px] shrink-0">
+            {/* Inline view mode segment: Table · Board · Calendar */}
+            <div className="flex items-center bg-[#0d1117] border border-white/10 rounded-xl p-1 gap-0.5 shrink-0">
+              {([
+                { key: 'table',    Icon: List,         label: 'Table' },
+                { key: 'board',    Icon: LayoutGrid,   label: 'Board' },
+                { key: 'calendar', Icon: CalendarDays, label: 'Cal' },
+              ] as const).map(({ key, Icon, label }) => (
+                <button
+                  key={key}
+                  onClick={() => setViewMode(key)}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
+                    viewMode === key
+                      ? 'bg-white/10 text-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* View settings ⚙ — inline edit, board grouping, etc. */}
+            <div ref={viewRef} className="relative shrink-0">
               <button
                 onClick={() => setViewOpen(v => !v)}
-                className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border transition-colors ${
+                className={`w-9 h-9 flex items-center justify-center rounded-xl border transition-colors ${
                   viewOpen
                     ? 'bg-white/10 border-white/20 text-foreground'
                     : 'bg-[#0d1117] border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
                 }`}
               >
-                <LayoutGrid className="w-3.5 h-3.5" />
-                View
-                <span className="text-muted-foreground/70 text-xs capitalize">· {viewMode}</span>
+                <MoreVertical className="w-4 h-4" />
               </button>
               {viewOpen && (
-                <div className="absolute right-0 top-full mt-1.5 z-50 bg-[#0d1117] border border-white/10 rounded-xl shadow-2xl p-3 min-w-[260px] space-y-3">
-                  {/* View mode tap-targets */}
-                  <div className="grid grid-cols-3 gap-2">
-                    {([
-                      { key: 'table',    label: 'Table',    Icon: List },
-                      { key: 'board',    label: 'Board',    Icon: LayoutGrid },
-                      { key: 'calendar', label: 'Calendar', Icon: CalendarDays },
-                    ] as const).map(({ key, label, Icon }) => (
-                      <button
-                        key={key}
-                        onClick={() => setViewMode(key)}
-                        className={`flex flex-col items-center gap-1 px-2 py-2.5 rounded-lg border text-xs font-medium transition-colors ${
-                          viewMode === key
-                            ? 'bg-violet-500/15 border-violet-500/40 text-violet-300'
-                            : 'bg-white/[0.02] border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
-                        }`}
-                      >
-                        <Icon className="w-4 h-4" />
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-
+                <div className="absolute right-0 top-full mt-1.5 z-50 bg-[#0d1117] border border-white/10 rounded-xl shadow-2xl p-3 min-w-[220px] space-y-3">
                   {/* Board: group by */}
                   {viewMode === 'board' && (
                     <div>
@@ -1117,11 +1142,6 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                     </button>
                   )}
 
-                  <p className="text-[11px] text-muted-foreground/60 leading-snug pt-1 border-t border-white/5">
-                    {viewMode === 'table'    && 'Spreadsheet-style rows. Toggle inline edit to update cells directly.'}
-                    {viewMode === 'board'    && 'Kanban-style columns grouped by your chosen dimension.'}
-                    {viewMode === 'calendar' && 'Monthly calendar with tasks on their scheduled dates.'}
-                  </p>
                 </div>
               )}
             </div>
