@@ -1411,7 +1411,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                       </button>
                       {role === 'super_admin' && (
                         <a
-                          href={`/dashboard/settings`}
+                          href={`/dashboard/settings?tab=clients&editClient=${task.client_id}&returnTo=/dashboard/tasks`}
                           title={`Edit ${task.client?.name} in Settings`}
                           onClick={e => e.stopPropagation()}
                           className="p-1 rounded hover:bg-white/[0.06] text-muted-foreground hover:text-violet-400 transition-colors"

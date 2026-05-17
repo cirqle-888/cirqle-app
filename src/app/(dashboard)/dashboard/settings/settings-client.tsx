@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useRef, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import Header from '@/components/layout/header'
 import AppSelect from '@/components/ui/app-select'
 import { createClient } from '@/lib/supabase/client'
@@ -73,6 +74,7 @@ interface Props {
   designations?: { id: string; name: string; is_admin: boolean; is_system: boolean }[]
   initialTab?: string
   initialEditClientId?: string
+  returnTo?: string
 }
 
 export default function SettingsClient(props: Props) {
@@ -98,6 +100,7 @@ export default function SettingsClient(props: Props) {
     try { return JSON.parse(localStorage.getItem('cirqle_group_services') || '[]') } catch { return [] }
   })
   const [tab, setTab] = useState(props.initialTab ?? 'Company')
+  const router = useRouter()
   const supabase = createClient()
   const { dn, ds, isUnlocked, forceLock, setForceLockMode } = usePrivacy()
   const [forceLockState, setForceLockState] = useState<boolean>(false)
@@ -429,6 +432,11 @@ export default function SettingsClient(props: Props) {
     setSaving(false); setShowForm(null)
   }
 
+  function closeClientForm() {
+    setShowForm(null)
+    if (props.returnTo) router.push(props.returnTo)
+  }
+
   // --- Clients ---
   async function saveClient(e: React.FormEvent) {
     e.preventDefault(); setSaving(true)
@@ -456,7 +464,8 @@ export default function SettingsClient(props: Props) {
         await supabase.from('client_service_pricing').upsert(pricingRows, { onConflict: 'client_id,service_id' })
       }
     }
-    setSaving(false); setShowForm(null)
+    setSaving(false)
+    closeClientForm()
   }
 
   // --- Services ---
@@ -1947,11 +1956,19 @@ export default function SettingsClient(props: Props) {
 
       {/* Modal Forms */}
       {showForm && (
-        <ModalOverlay onClose={() => setShowForm(null)}>
+        <ModalOverlay onClose={() => showForm === 'client' ? closeClientForm() : setShowForm(null)}>
           <div className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-card rounded-t-2xl">
-              <h2 className="font-semibold capitalize">{editingId ? 'Edit' : 'Add'} {showForm}</h2>
-              <button onClick={() => setShowForm(null)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+              <div>
+                {props.returnTo && showForm === 'client' && (
+                  <button type="button" onClick={closeClientForm} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mb-1 transition-colors">
+                    <ChevronLeft className="w-3 h-3" />
+                    Back to {props.returnTo.split('/').pop()}
+                  </button>
+                )}
+                <h2 className="font-semibold capitalize">{editingId ? 'Edit' : 'Add'} {showForm}</h2>
+              </div>
+              <button onClick={() => showForm === 'client' ? closeClientForm() : setShowForm(null)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
             </div>
 
             <form onSubmit={
@@ -2546,7 +2563,7 @@ export default function SettingsClient(props: Props) {
               )}
 
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setShowForm(null)} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80">Cancel</button>
+                <button type="button" onClick={() => showForm === 'client' ? closeClientForm() : setShowForm(null)} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80">Cancel</button>
                 <button type="submit" disabled={saving} className="flex-1 gradient-bg text-white text-sm font-medium py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>
               </div>
             </form>

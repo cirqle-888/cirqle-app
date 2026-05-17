@@ -560,7 +560,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                 {isSuperAdmin && (
                   <button
                     title="Edit client in Settings"
-                    onClick={() => { window.location.href = '/dashboard/settings' }}
+                    onClick={() => { window.location.href = `/dashboard/settings?tab=clients&editClient=${form.client_id}&returnTo=/dashboard/quotations` }}
                     className="text-muted-foreground hover:text-violet-400 transition-colors p-1 rounded hover:bg-violet-500/10"
                   >
                     <ExternalLink style={{ width: 10, height: 10 }} />
