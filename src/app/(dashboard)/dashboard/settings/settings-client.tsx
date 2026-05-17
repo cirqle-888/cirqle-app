@@ -101,6 +101,16 @@ export default function SettingsClient(props: Props) {
   const [forceLockState, setForceLockState] = useState<boolean>(false)
   useEffect(() => { setForceLockState(isForceLocked()) }, [])
 
+  // Restore active tab from URL hash on load, and keep hash in sync
+  useEffect(() => {
+    const hash = window.location.hash.replace('#', '')
+    if (hash) {
+      const ALL_TABS = ['Company', 'Privacy & Security', 'Employees', 'Clients', 'Pricing Matrix', 'Services', 'Groups & Params', 'Tools', 'Bank Accounts', 'Cash Categories', 'Exchange Rates']
+      const matched = ALL_TABS.find(t => t.toLowerCase().replace(/[^a-z0-9]+/g, '-') === hash)
+      if (matched) setTab(matched)
+    }
+  }, [])
+
   // ── Privacy PIN management ──────────────────────────
   const [pinForm, setPinForm] = useState({ current: '', next: '', confirm: '' })
   const [pinMsg, setPinMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
@@ -641,7 +651,7 @@ export default function SettingsClient(props: Props) {
               </p>
               <div className="space-y-0.5">
                 {group.tabs.map(t => (
-                  <button key={t} onClick={() => { setTab(t); setQuickEdit(false) }}
+                  <button key={t} onClick={() => { setTab(t); setQuickEdit(false); window.history.replaceState(null, '', `#${t.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`) }}
                     className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${tab === t ? 'bg-primary/15 text-primary font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-secondary'}`}>
                     {t}
                   </button>
