@@ -941,15 +941,12 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
               {bulkMode ? <><X size={12} /> Exit Select</> : <>Select</>}
             </button>
 
-            {/* Search bar — fixed width */}
-            <div className="flex items-center gap-2 bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2 w-56 min-w-0">
+            {/* Search bar — grows to fill available space */}
+            <div className="flex items-center gap-2 bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2 flex-1 min-w-0">
               <Search size={14} className="text-muted-foreground shrink-0" />
-              <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search tasks…" className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60 min-w-0" />
+              <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search by title, client, service or task code…" className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60 min-w-0" />
               {searchQ && <button onClick={() => setSearchQ('')}><X size={12} className="text-muted-foreground" /></button>}
             </div>
-
-            {/* Spacer */}
-            <div className="flex-1" />
 
             {/* Filter popover */}
             <div ref={filterRef} className="relative shrink-0">
