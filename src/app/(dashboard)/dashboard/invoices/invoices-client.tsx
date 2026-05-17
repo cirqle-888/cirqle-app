@@ -1638,7 +1638,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                     )}
                     {role === 'super_admin' && (
                       <a
-                        href="/dashboard/settings?tab=clients"
+                        href={`/dashboard/settings?tab=clients&editClient=${inv.client_id}`}
                         onClick={e => e.stopPropagation()}
                         title={`Edit ${inv.client?.name} in Settings`}
                         className="text-muted-foreground/30 hover:text-violet-400 transition-colors"

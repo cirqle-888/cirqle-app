@@ -72,6 +72,7 @@ interface Props {
   invoices: { client_id: string; total_amount: number; paid_amount: number; status: string }[]
   designations?: { id: string; name: string; is_admin: boolean; is_system: boolean }[]
   initialTab?: string
+  initialEditClientId?: string
 }
 
 export default function SettingsClient(props: Props) {
@@ -101,6 +102,15 @@ export default function SettingsClient(props: Props) {
   const { dn, ds, isUnlocked, forceLock, setForceLockMode } = usePrivacy()
   const [forceLockState, setForceLockState] = useState<boolean>(false)
   useEffect(() => { setForceLockState(isForceLocked()) }, [])
+
+  // Auto-open client edit form when arriving from invoice "Edit client" link
+  useEffect(() => {
+    if (!props.initialEditClientId) return
+    const client = props.clients.find((c: any) => c.id === props.initialEditClientId)
+    if (client) openClientForm(client)
+  // openClientForm is stable across renders; props.clients is the initial value
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // ── Privacy PIN management ──────────────────────────
   const [pinForm, setPinForm] = useState({ current: '', next: '', confirm: '' })

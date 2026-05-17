@@ -4,8 +4,8 @@ import SettingsClient from './settings-client'
 const ALL_TABS = ['Company', 'Privacy & Security', 'Employees', 'Clients', 'Pricing Matrix', 'Services', 'Groups & Params', 'Tools', 'Bank Accounts', 'Cash Categories', 'Exchange Rates']
 const normalizeTab = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-')
 
-export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
-  const { tab: rawTab } = await searchParams
+export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string; editClient?: string }> }) {
+  const { tab: rawTab, editClient } = await searchParams
   const initialTab = ALL_TABS.find(t => normalizeTab(t) === normalizeTab(rawTab ?? '')) ?? 'Company'
 
   const supabase = await createClient()
@@ -62,6 +62,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       invoices={(invoicesRes.data || []) as any[]}
       designations={designations}
       initialTab={initialTab}
+      initialEditClientId={editClient}
     />
   )
 }
