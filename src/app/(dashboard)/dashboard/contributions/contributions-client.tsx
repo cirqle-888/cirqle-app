@@ -147,6 +147,20 @@ export default function ContributionsClient({
   // ── Task edit modal state ────────────────────────────
   const [editingTask, setEditingTask] = useState<any>(null)
 
+  // ── Highlight task from ?highlight= URL param ────────
+  const [highlightedTaskId, setHighlightedTaskId] = useState<string | null>(null)
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('highlight')
+    if (!id) return
+    setHighlightedTaskId(id)
+    setTimeout(() => {
+      const el = document.querySelector(`[data-taskid="${id}"]`)
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 300)
+    setTimeout(() => setHighlightedTaskId(null), 2500)
+    window.history.replaceState(null, '', window.location.pathname)
+  }, [])
+
   const supabase = createClient()
   const { dn, isUnlocked, openUnlockModal } = usePrivacy()
   const { role, employee: currentEmployee } = useRole()
@@ -1010,8 +1024,9 @@ export default function ContributionsClient({
 
                       return (
                         <div key={task.id}
+                          data-taskid={task.id}
                           onClick={() => openTask(task)}
-                          className="bg-card border border-border rounded-xl px-4 py-3.5 hover:border-primary/30 hover:bg-primary/[0.02] transition-all group cursor-pointer select-none">
+                          className={`bg-card border rounded-xl px-4 py-3.5 hover:border-primary/30 hover:bg-primary/[0.02] transition-all group cursor-pointer select-none ${highlightedTaskId === task.id ? 'border-violet-400 ring-1 ring-violet-400 bg-violet-500/10' : 'border-border'}`}>
                           <div className="flex items-start gap-3">
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-1 flex-wrap">

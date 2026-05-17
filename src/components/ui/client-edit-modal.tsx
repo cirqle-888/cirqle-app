@@ -9,6 +9,7 @@ import type { Currency } from '@/types'
 
 interface Props {
   clientId: string
+  serviceId?: string
   onClose: () => void
   onSaved?: (client: any) => void
 }
@@ -28,7 +29,7 @@ function Field({ label, required, children }: { label: string; required?: boolea
   )
 }
 
-export function ClientEditModal({ clientId, onClose, onSaved }: Props) {
+export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props) {
   const supabase = createClient()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -54,8 +55,16 @@ export function ClientEditModal({ clientId, onClose, onSaved }: Props) {
           p[r.service_id] = { price: String(r.price || ''), commission_percentage: String(r.commission_percentage || ''), currency: r.currency || 'INR' }
           sel.add(r.service_id)
         })
+        // Always ensure the task's specific service is pre-selected
+        if (serviceId && !sel.has(serviceId)) {
+          sel.add(serviceId)
+          if (!p[serviceId]) p[serviceId] = { price: '', commission_percentage: '', currency: clientRes.data?.default_currency || 'INR' }
+        }
         setPricings(p)
         setSelectedServices(sel)
+      } else if (serviceId) {
+        setSelectedServices(new Set([serviceId]))
+        setPricings({ [serviceId]: { price: '', commission_percentage: '', currency: clientRes.data?.default_currency || 'INR' } })
       }
       setLoading(false)
     }
@@ -175,7 +184,14 @@ export function ClientEditModal({ clientId, onClose, onSaved }: Props) {
             {/* Services */}
             {services.length > 0 && (
               <div className="border-t border-border pt-4 space-y-3">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Services this client uses</p>
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Service Pricing</p>
+                  {serviceId && (
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Showing pricing for this task's service. Add more services below.
+                    </p>
+                  )}
+                </div>
 
                 {selectedServiceList.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 p-2.5 bg-secondary/40 rounded-lg border border-border min-h-[36px]">

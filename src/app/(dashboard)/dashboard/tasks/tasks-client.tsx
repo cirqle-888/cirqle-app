@@ -107,6 +107,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
   const { toasts, dismiss, success } = useToast()
   const { dn } = usePrivacy()
   const [editClientId, setEditClientId] = useState<string | null>(null)
+  const [editClientServiceId, setEditClientServiceId] = useState<string | null>(null)
   const [highlightedTaskId, setHighlightedTaskId] = useState<string | null>(null)
 
   // Scroll to and briefly highlight a task when arriving with ?highlight=<id>
@@ -1432,7 +1433,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                         <button
                           type="button"
                           title={`Edit client: ${task.client?.name}`}
-                          onClick={e => { e.stopPropagation(); setEditClientId(task.client_id) }}
+                          onClick={e => { e.stopPropagation(); setEditClientId(task.client_id); setEditClientServiceId(task.service_id ?? null) }}
                           className="p-1.5 rounded-md text-muted-foreground hover:text-violet-400 hover:bg-violet-500/10 transition-colors"
                         >
                           <Building2 className="w-3.5 h-3.5" />
@@ -2921,7 +2922,11 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
       )}
 
       {editClientId && (
-        <ClientEditModal clientId={editClientId} onClose={() => setEditClientId(null)} />
+        <ClientEditModal
+          clientId={editClientId}
+          serviceId={editClientServiceId ?? undefined}
+          onClose={() => { setEditClientId(null); setEditClientServiceId(null) }}
+        />
       )}
     </div>
   )
