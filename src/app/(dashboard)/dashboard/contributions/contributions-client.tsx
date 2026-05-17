@@ -21,6 +21,7 @@ import { useToast, ToastContainer } from '@/components/ui/toast'
 import AppSelect from '@/components/ui/app-select'
 import { useRole } from '@/contexts/role-context'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { TaskEditModal } from '@/components/ui/task-edit-modal'
 
 interface Score { task_id: string; employee_id: string; earnings_inr: number; score_percentage: number }
 interface Assignment { task_id: string; employee_id: string }
@@ -145,9 +146,6 @@ export default function ContributionsClient({
 
   // ── Task edit modal state ────────────────────────────
   const [editingTask, setEditingTask] = useState<any>(null)
-  const [editTaskForm, setEditTaskForm] = useState({ title: '', client_id: '', service_id: '', task_date: '', billing_amount_inr: '', status: 'pending' })
-  const [savingEdit, setSavingEdit] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const supabase = createClient()
   const { dn, isUnlocked, openUnlockModal } = usePrivacy()
@@ -659,53 +657,6 @@ export default function ContributionsClient({
   // ── Edit Task handlers ────────────────────────────────
   function openEditTask(task: any) {
     setEditingTask(task)
-    setEditTaskForm({
-      title: task.title || '',
-      client_id: task.client?.id || '',
-      service_id: task.service_id || '',
-      task_date: task.task_date || new Date().toISOString().split('T')[0],
-      billing_amount_inr: task.billing_amount_inr?.toString() || '',
-      status: task.status || 'pending',
-    })
-  }
-
-  async function handleDeleteTask() {
-    if (!editingTask) return
-    setSavingEdit(true)
-    await supabase.from('tasks').delete().eq('id', editingTask.id)
-    setLocalTasks(prev => prev.filter(t => t.id !== editingTask.id))
-    setEditingTask(null)
-    setConfirmDelete(false)
-    setSavingEdit(false)
-  }
-
-  async function handleSaveEdit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!editingTask || !editTaskForm.title.trim()) return
-    setSavingEdit(true)
-    const payload: any = {
-      title: editTaskForm.title.trim(),
-      status: editTaskForm.status,
-      task_date: editTaskForm.task_date,
-      billing_amount_inr: parseFloat(editTaskForm.billing_amount_inr as string) || 0,
-    }
-    if (editTaskForm.client_id) payload.client_id = editTaskForm.client_id
-    else payload.client_id = null
-    if (editTaskForm.service_id) payload.service_id = editTaskForm.service_id
-    else payload.service_id = null
-
-    const { data, error } = await supabase
-      .from('tasks')
-      .update(payload)
-      .eq('id', editingTask.id)
-      .select('id, title, service_id, billing_amount_inr, status, task_date, client:clients(id, name), service:services(id, name)')
-      .single()
-
-    if (!error && data) {
-      setLocalTasks(prev => prev.map(t => t.id === editingTask.id ? data : t))
-      setEditingTask(null)
-    }
-    setSavingEdit(false)
   }
 
   // ── Title suggestions (unique titles from existing tasks) ──
@@ -1403,127 +1354,22 @@ export default function ContributionsClient({
 
         {/* ── Edit Task Modal ── */}
         {editingTask && (
-          <ModalOverlay onClose={() => { setEditingTask(null); setConfirmDelete(false) }}>
-            <div className="bg-card border border-border rounded-2xl w-full max-w-md shadow-2xl">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-                <div>
-                  <h2 className="font-bold text-base">Edit Task</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-72">{editingTask.title}</p>
-                </div>
-                <button onClick={() => { setEditingTask(null); setConfirmDelete(false) }}
-                  className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <form onSubmit={handleSaveEdit} className="p-5 space-y-4">
-                {/* Title */}
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Task Title *</label>
-                  <input
-                    value={editTaskForm.title}
-                    onChange={e => setEditTaskForm(f => ({ ...f, title: e.target.value }))}
-                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                    placeholder="e.g. Big Mid Week Offer Flyer"
-                    autoFocus
-                  />
-                </div>
-
-                {/* Date + Status row */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Task Date</label>
-                    <div className="relative">
-                      <CalendarDays className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-                      <input type="date"
-                        value={editTaskForm.task_date}
-                        onChange={e => setEditTaskForm(f => ({ ...f, task_date: e.target.value }))}
-                        className="w-full bg-secondary border border-border rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Status</label>
-                    <AppSelect value={editTaskForm.status} onChange={e => setEditTaskForm(f => ({ ...f, status: e.target.value }))}>
-                      <option value="pending">Pending</option>
-                      <option value="in_progress">In Progress</option>
-                      <option value="done">Done</option>
-                    </AppSelect>
-                  </div>
-                </div>
-
-                {/* Client + Service row */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Client</label>
-                    <AppSelect value={editTaskForm.client_id} onChange={e => setEditTaskForm(f => ({ ...f, client_id: e.target.value }))}>
-                      <option value="">Select client…</option>
-                      {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </AppSelect>
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Service</label>
-                    <AppSelect value={editTaskForm.service_id} onChange={e => setEditTaskForm(f => ({ ...f, service_id: e.target.value }))}>
-                      <option value="">Select service…</option>
-                      {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </AppSelect>
-                  </div>
-                </div>
-
-                {/* Billing amount */}
-                {showFinancials && (
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Billing Amount (₹)</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">₹</span>
-                      <input type="number" min="0" step="1"
-                        value={editTaskForm.billing_amount_inr}
-                        onChange={e => setEditTaskForm(f => ({ ...f, billing_amount_inr: e.target.value }))}
-                        className="w-full bg-secondary border border-border rounded-lg pl-7 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                        placeholder="0" />
-                    </div>
-                  </div>
-                )}
-
-                {/* Delete zone */}
-                {confirmDelete ? (
-                  <div className="bg-red-500/10 border border-red-500/25 rounded-xl p-3 space-y-2">
-                    <p className="text-xs font-medium text-red-400">Delete this task permanently? This cannot be undone.</p>
-                    <div className="flex gap-2">
-                      <button type="button" onClick={() => setConfirmDelete(false)}
-                        className="flex-1 bg-secondary text-xs font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors">
-                        Keep task
-                      </button>
-                      <button type="button" onClick={handleDeleteTask} disabled={savingEdit}
-                        className="flex-1 bg-red-500 text-white text-xs font-semibold px-3 py-2 rounded-lg hover:bg-red-600 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5">
-                        {savingEdit ? <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                        Yes, delete
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <button type="button" onClick={() => setConfirmDelete(true)}
-                    className="flex items-center gap-1.5 text-xs text-red-400/60 hover:text-red-400 transition-colors w-full justify-center py-1">
-                    <Trash2 className="w-3.5 h-3.5" /> Delete this task
-                  </button>
-                )}
-
-                <div className="flex gap-3 pt-1">
-                  <button type="button" onClick={() => { setEditingTask(null); setConfirmDelete(false) }}
-                    className="flex-1 bg-secondary border border-border text-sm font-medium px-4 py-2.5 rounded-lg hover:bg-secondary/80 transition-colors">
-                    Cancel
-                  </button>
-                  <button type="submit" disabled={savingEdit}
-                    className="flex-1 gradient-bg text-white text-sm font-medium px-4 py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50 transition-opacity flex items-center justify-center gap-2">
-                    {savingEdit ? (
-                      <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Saving…</>
-                    ) : (
-                      <><Check className="w-4 h-4" />Save Changes</>
-                    )}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </ModalOverlay>
+          <TaskEditModal
+            task={editingTask}
+            clients={clients}
+            services={services}
+            clientPricings={pricingMatrix.map(p => ({
+              client_id: p.client_id,
+              service_id: p.service_id,
+              price: p.price ?? 0,
+              currency: p.currency ?? 'INR',
+              commission_percentage: p.commission_percentage ?? 0,
+            }))}
+            showFinancials={showFinancials}
+            onSaved={(data) => setLocalTasks(prev => prev.map(t => t.id === data.id ? data : t))}
+            onDeleted={(id) => setLocalTasks(prev => prev.filter(t => t.id !== id))}
+            onClose={() => setEditingTask(null)}
+          />
         )}
 
         {/* ── Add Task Modal ── */}

@@ -16,6 +16,7 @@ import { seedFromTasks } from '@/lib/hooks/use-smart-sort'
 import { useRole } from '@/contexts/role-context'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { ClientEditModal } from '@/components/ui/client-edit-modal'
+import { TaskEditModal } from '@/components/ui/task-edit-modal'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { usePrivacy } from '@/contexts/privacy-context'
 
@@ -2598,128 +2599,20 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
         )
       })()}
 
-      {/* Edit Task Modal */}
       {editTask && (
-        <ModalOverlay onClose={() => setEditTask(null)}>
-          <div className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-              <h2 className="font-semibold">Edit Task</h2>
-              <button onClick={() => setEditTask(null)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
-            </div>
-            <form ref={editFormRef} onSubmit={handleEditSubmit} className="p-6 space-y-4">
-              {/* Task # + Title */}
-              <div className="grid grid-cols-[110px_1fr] gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Task #</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={editForm.task_number}
-                    onChange={e => setEditForm(p => ({ ...p, task_number: e.target.value }))}
-                    className={inputCls}
-                    placeholder="—"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Title *</label>
-                  <input value={editForm.title} onChange={e => setEditForm(p => ({ ...p, title: e.target.value }))} required className={inputCls} />
-                </div>
-              </div>
-
-              {/* Client + Service */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Client</label>
-                  <Combobox
-                    options={clients.map(c => ({ id: c.id, label: c.name, sub: c.code }))}
-                    value={editForm.client_id}
-                    onChange={id => setEditForm(p => ({ ...p, client_id: id }))}
-                    placeholder="Search client…"
-                    sortKey="clients"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Service</label>
-                  <Combobox
-                    options={sortedServices.map(s => ({ id: s.id, label: s.name }))}
-                    value={editForm.service_id}
-                    onChange={id => setEditForm(p => ({ ...p, service_id: id }))}
-                    placeholder="Search service…"
-                    sortKey="services"
-                  />
-                </div>
-              </div>
-
-              {/* Task Date */}
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Task Date</label>
-                <input type="date" value={editForm.task_date} onChange={e => setEditForm(p => ({ ...p, task_date: e.target.value }))} className={inputCls} />
-              </div>
-
-              {/* Quantity / Hours based on pricing type */}
-              {(() => {
-                const svc = services.find(s => s.id === editForm.service_id)
-                const pt = svc?.pricing_type || 'fixed_per_creative'
-                const cp = clientPricings.find(p => p.client_id === editForm.client_id && p.service_id === editForm.service_id)
-                const up = cp?.price ?? svc?.default_price ?? 0
-                const uc = (cp?.currency || svc?.default_currency || 'INR') as Currency
-                return (
-                  <div className="grid grid-cols-2 gap-3">
-                    {pt === 'fixed_per_creative' && (
-                      <div>
-                        <label className="block text-xs font-medium text-muted-foreground mb-1.5">Creatives</label>
-                        <input type="number" min="1" step="1" value={editForm.quantity} onChange={e => setEditForm(p => ({ ...p, quantity: e.target.value }))} className={inputCls} />
-                      </div>
-                    )}
-                    {pt === 'hourly' && (
-                      <div>
-                        <label className="block text-xs font-medium text-muted-foreground mb-1.5">Hours</label>
-                        <input type="number" min="0.5" step="0.5" value={editForm.hours} onChange={e => setEditForm(p => ({ ...p, hours: e.target.value }))} className={inputCls} />
-                      </div>
-                    )}
-                    {pt === 'percentage_of_spend' && (
-                      <div>
-                        <label className="block text-xs font-medium text-muted-foreground mb-1.5">Ad Spend ({uc})</label>
-                        <input type="number" min="0" step="0.01" value={editForm.spend} onChange={e => setEditForm(p => ({ ...p, spend: e.target.value }))} className={inputCls} placeholder="e.g. 1000" />
-                      </div>
-                    )}
-                    <div>
-                      <label className="block text-xs font-medium text-muted-foreground mb-1.5">Price ({uc})</label>
-                      <input readOnly value={up} className={inputCls + ' opacity-60 cursor-not-allowed'} />
-                    </div>
-                  </div>
-                )
-              })()}
-
-              {/* Description (placed before status — more often updated) */}
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Description</label>
-                <textarea value={editForm.description} onChange={e => setEditForm(p => ({ ...p, description: e.target.value }))} rows={2} className={inputCls + ' resize-none'} placeholder="Optional notes…" />
-              </div>
-
-              {/* Status */}
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Status</label>
-                <AppSelect value={editForm.status} onChange={e => setEditForm(p => ({ ...p, status: e.target.value }))}>
-                  {MANUAL_STATUSES.map(s => <option key={s} value={s}>{getStatusLabel(s)}</option>)}
-                  {editForm.status === 'invoiced' && <option value="invoiced" disabled>🔒 Invoiced (system-managed)</option>}
-                </AppSelect>
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setDeleteConfirm(editTask.id)}
-                  className="px-4 py-2.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 text-sm font-medium transition-colors flex items-center gap-1.5">
-                  <Trash2 className="w-3.5 h-3.5" /> Delete
-                </button>
-                <div className="flex-1" />
-                <button type="button" onClick={() => setEditTask(null)} className="px-4 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80 transition-colors">Cancel</button>
-                <button type="submit" disabled={editSaving} className="px-6 gradient-bg text-white text-sm font-medium py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50">
-                  {editSaving ? 'Saving…' : 'Save Changes'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </ModalOverlay>
+        <TaskEditModal
+          task={editTask}
+          clients={clients}
+          services={services}
+          clientPricings={clientPricings}
+          onSaved={(data) => setTasks(prev => prev.map(t => t.id === data.id ? data : t))}
+          onDeleted={(id) => {
+            const t = tasks.find(t => t.id === id)
+            if (t) setTrash(prev => [{ ...t, deleted_at: new Date().toISOString() }, ...prev])
+            setTasks(prev => prev.filter(t => t.id !== id))
+          }}
+          onClose={() => setEditTask(null)}
+        />
       )}
 
       {/* Add Task Modal */}
