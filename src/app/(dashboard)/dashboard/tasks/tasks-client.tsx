@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { getStatusColor, getStatusLabel } from '@/lib/utils/invoice'
-import { Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, RefreshCw, TrendingDown, Users, Ban, Search, ExternalLink, ChevronDown, ChevronLeft, ChevronRight, Layers, LayoutGrid, List, CalendarDays, MoreVertical, Filter, Check } from 'lucide-react'
+import { Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, RefreshCw, TrendingDown, Users, Ban, Search, ExternalLink, ChevronDown, ChevronLeft, ChevronRight, Layers, LayoutGrid, List, CalendarDays, MoreVertical, Filter, Check, Building2, BarChart2 } from 'lucide-react'
 import { formatCurrency } from '@/lib/calculations/currency'
 import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
@@ -1428,16 +1428,24 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                         className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
-                      {role === 'super_admin' && (
-                        <a
-                          href="#"
-                          title={`Edit ${task.client?.name}`}
-                          onClick={e => { e.preventDefault(); e.stopPropagation(); setEditClientId(task.client_id) }}
-                          className="p-1 rounded hover:bg-white/[0.06] text-muted-foreground hover:text-violet-400 transition-colors"
+                      {task.client_id && role === 'super_admin' && (
+                        <button
+                          type="button"
+                          title={`Edit client: ${task.client?.name}`}
+                          onClick={e => { e.stopPropagation(); setEditClientId(task.client_id) }}
+                          className="p-1.5 rounded-md text-muted-foreground hover:text-violet-400 hover:bg-violet-500/10 transition-colors"
                         >
-                          <ExternalLink size={12} />
-                        </a>
+                          <Building2 className="w-3.5 h-3.5" />
+                        </button>
                       )}
+                      <a
+                        href={`/dashboard/contributions?highlight=${task.id}`}
+                        title="View contribution"
+                        onClick={e => e.stopPropagation()}
+                        className="p-1.5 rounded-md text-muted-foreground hover:text-green-400 hover:bg-green-500/10 transition-colors"
+                      >
+                        <BarChart2 className="w-3.5 h-3.5" />
+                      </a>
                       <button onClick={e => { e.stopPropagation(); setDeleteConfirm(task.id) }} title="Delete task"
                         className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors">
                         <Trash2 className="w-3.5 h-3.5" />
