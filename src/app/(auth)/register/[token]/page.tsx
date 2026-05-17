@@ -18,15 +18,25 @@ export default async function RegisterPage({ params }: { params: Promise<{ token
     )
   }
 
-  const { data: emp } = await supabase
-    .from('employees')
-    .select(`
-      id, cqid, name, email, phone, invite_token, invite_token_expires_at,
-      auth_id, is_archived,
-      designation:designation_id ( id, name )
-    `)
-    .eq('invite_token', token)
-    .maybeSingle()
+  // Try with designation join; fall back without it if the column doesn't exist yet
+  let emp: any = null
+  {
+    const { data, error } = await supabase
+      .from('employees')
+      .select('id, cqid, name, email, phone, invite_token, invite_token_expires_at, auth_id, is_archived, designation:designation_id ( id, name )')
+      .eq('invite_token', token)
+      .maybeSingle()
+    if (!error) {
+      emp = data
+    } else {
+      const { data: fallback } = await supabase
+        .from('employees')
+        .select('id, cqid, name, email, phone, invite_token, invite_token_expires_at, auth_id, is_archived')
+        .eq('invite_token', token)
+        .maybeSingle()
+      emp = fallback
+    }
+  }
 
   if (!emp) {
     return (
