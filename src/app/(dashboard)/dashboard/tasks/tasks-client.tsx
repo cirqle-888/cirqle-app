@@ -15,6 +15,7 @@ import { taskCode, taskCodeMatches, nextTaskNumber } from '@/lib/utils/task-code
 import { seedFromTasks } from '@/lib/hooks/use-smart-sort'
 import { useRole } from '@/contexts/role-context'
 import { useToast, ToastContainer } from '@/components/ui/toast'
+import { formatTaskDate, fullTaskDate } from '@/lib/utils/format-date'
 import { ClientEditModal } from '@/components/ui/client-edit-modal'
 import { TaskEditModal } from '@/components/ui/task-edit-modal'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
@@ -121,7 +122,7 @@ const EMPTY_FORM = {
 
 export default function TasksClient({ initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments }: Props) {
   const { role, employee: currentEmployee } = useRole()
-  const { toasts, dismiss, success } = useToast()
+  const { toasts, dismiss, success, error: toastError } = useToast()
   const { dn } = usePrivacy()
   const [editClientId, setEditClientId] = useState<string | null>(null)
   const [editClientServiceId, setEditClientServiceId] = useState<string | null>(null)
@@ -150,7 +151,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
   const [filterService, setFilterService] = useState('')
   const [searchQ, setSearchQ] = useState('')
 
-  const [sortBy, setSortBy] = useState<'date_desc' | 'date_asc' | 'amount_desc' | 'client'>('date_desc')
+  const [sortBy, setSortBy] = useState<'today_first' | 'date_desc' | 'date_asc' | 'amount_desc' | 'client'>('today_first')
   const [form, setForm] = useState(EMPTY_FORM)
   const [previewTaskNumber, setPreviewTaskNumber] = useState<number | null>(null)
 
@@ -602,14 +603,17 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
         is_recurring: form.is_recurring,
         recurring_interval: form.is_recurring ? form.recurring_interval : null,
         recurring_end_date: form.is_recurring && form.recurring_end_date ? form.recurring_end_date : null,
-        // ── Variant fields (Phase 1) ──
-        parent_task_id:   form.parent_task_id || null,
-        variant_type:     form.variant_type || null,
-        variant_label:    form.variant_label || null,
-        billing_mode:     form.billing_mode,
-        billing_percent:  form.billing_percent ? parseFloat(form.billing_percent) : null,
-        billing_override: form.billing_override,
-        is_billable:      form.is_billable,
+        // ── Variant fields — only included when the user actually linked a parent task,
+        //    so original-task inserts still work even if migration 002 hasn't been run yet ──
+        ...(form.parent_task_id ? {
+          parent_task_id:   form.parent_task_id,
+          variant_type:     form.variant_type || null,
+          variant_label:    form.variant_label || null,
+          billing_mode:     form.billing_mode,
+          billing_percent:  form.billing_percent ? parseFloat(form.billing_percent) : null,
+          billing_override: form.billing_override,
+          is_billable:      form.is_billable,
+        } : {}),
       })
       .select(`*, client:clients(id, name, code), service:services(id, name)`)
       .single()
@@ -631,6 +635,15 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
       setShowForm(false)
       setForm({ ...EMPTY_FORM, task_date: new Date().toISOString().split('T')[0] })
       success(`Task #${tn} added`)
+    } else if (error) {
+      // Surface the DB error to the user (e.g. missing variant columns if migration 002 wasn't run yet).
+      // Supabase PostgrestError has non-enumerable props — pull them out explicitly so we don't log {}.
+      const err = error as { message?: string; details?: string; hint?: string; code?: string }
+      const parts = [err.message, err.details, err.hint, err.code && `(${err.code})`].filter(Boolean)
+      const detail = parts.join(' · ') || 'Unknown database error'
+      // Use console.warn instead of console.error to avoid Next.js dev overlay
+      console.warn('Add task failed:', { message: err.message, details: err.details, hint: err.hint, code: err.code })
+      toastError(`Add task failed: ${detail}`)
     }
     setSaving(false)
   }
@@ -840,6 +853,21 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
         localParamAssignments.some(a => a.task_id === task.id && a.employee_id === filterAssignee)
       )
     }
+    if (sortBy === 'today_first') {
+      // Today at top → upcoming ascending (soonest next) → past descending (most recent first)
+      const today = new Date().toISOString().split('T')[0]
+      t = [...t].sort((a, b) => {
+        const aIsToday = a.task_date === today
+        const bIsToday = b.task_date === today
+        if (aIsToday !== bIsToday) return aIsToday ? -1 : 1
+        const aFuture = a.task_date > today
+        const bFuture = b.task_date > today
+        if (aFuture !== bFuture) return aFuture ? -1 : 1
+        return aFuture
+          ? a.task_date.localeCompare(b.task_date)   // upcoming: soonest first
+          : b.task_date.localeCompare(a.task_date)   // past: most recent first
+      })
+    }
     if (sortBy === 'date_asc')    t = [...t].sort((a, b) => a.task_date.localeCompare(b.task_date))
     if (sortBy === 'date_desc')   t = [...t].sort((a, b) => b.task_date.localeCompare(a.task_date))
     if (sortBy === 'amount_desc') t = [...t].sort((a, b) => (b.billing_amount_inr || 0) - (a.billing_amount_inr || 0))
@@ -856,8 +884,8 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
     return filteredTasks
   }, [role, currentEmployee, localAssignments, filteredTasks])
 
-  const hasActiveFilters = !!(filterStatus || filterClient || filterService || searchQ || sortBy !== 'date_desc' || !!filterAssignee)
-  const activeFilterCount = [filterClient, filterService, filterAssignee, sortBy !== 'date_desc' ? 'sort' : ''].filter(Boolean).length
+  const hasActiveFilters = !!(filterStatus || filterClient || filterService || searchQ || sortBy !== 'today_first' || !!filterAssignee)
+  const activeFilterCount = [filterClient, filterService, filterAssignee, sortBy !== 'today_first' ? 'sort' : ''].filter(Boolean).length
 
   const inputCls = 'w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50'
 
@@ -1114,13 +1142,14 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
             {/* Sort by */}
             <FilterDropdown
               options={[
+                { value: 'today_first', label: 'Today First' },
                 { value: 'date_desc',   label: 'Newest First' },
                 { value: 'date_asc',    label: 'Oldest First' },
                 { value: 'amount_desc', label: 'Amount (High→Low)' },
                 { value: 'client',      label: 'Client A→Z' },
               ]}
-              value={sortBy === 'date_desc' ? '' : sortBy}
-              onChange={v => setSortBy((v || 'date_desc') as typeof sortBy)}
+              value={sortBy === 'today_first' ? '' : sortBy}
+              onChange={v => setSortBy((v || 'today_first') as typeof sortBy)}
               placeholder="Sort by"
             />
             {/* Divider */}
@@ -1135,7 +1164,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
             {/* Clear all — only when any filter active, at end of row */}
             {hasActiveFilters && (
               <button
-                onClick={() => { setFilterStatus(''); setFilterClient(''); setFilterService(''); setSearchQ(''); setSortBy('date_desc'); setFilterAssignee('') }}
+                onClick={() => { setFilterStatus(''); setFilterClient(''); setFilterService(''); setSearchQ(''); setSortBy('today_first'); setFilterAssignee('') }}
                 className="ml-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20 transition-colors flex items-center gap-1"
               >
                 <X size={11} /> Clear all
@@ -1373,7 +1402,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                         className="bg-secondary border border-border rounded px-2 py-1 text-xs focus:outline-none focus:border-violet-500/50"
                       />
                     ) : (
-                      task.task_date
+                      <span title={fullTaskDate(task.task_date)}>{formatTaskDate(task.task_date)}</span>
                     )}
                   </td>
                   <td className="px-4 py-3 text-right font-medium" onClick={e => inlineEditMode && e.stopPropagation()}>
@@ -1617,19 +1646,22 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
             const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
             if (boardDateGranularity === 'preset') {
-              const today = new Date(); today.setHours(0, 0, 0, 0)
-              const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 7)
-              const monthAgo = new Date(today); monthAgo.setDate(monthAgo.getDate() - 30)
+              const now = new Date(); now.setHours(0, 0, 0, 0)
+              const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`
+              const weekAgo = new Date(now); weekAgo.setDate(weekAgo.getDate() - 7)
+              const monthAgo = new Date(now); monthAgo.setDate(monthAgo.getDate() - 30)
+              const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1)
               const buckets = [
-                { key: 'today', title: 'Today',      check: (d: Date) => d.getTime() >= today.getTime(),                                       color: 'bg-green-500/15 border-green-500/20 text-green-400',     badge: '!' },
-                { key: 'week',  title: 'This Week', check: (d: Date) => d.getTime() >= weekAgo.getTime()  && d.getTime() < today.getTime(),    color: 'bg-blue-500/15 border-blue-500/20 text-blue-400',       badge: '7' },
-                { key: 'month', title: 'This Month',check: (d: Date) => d.getTime() >= monthAgo.getTime() && d.getTime() < weekAgo.getTime(),  color: 'bg-violet-500/15 border-violet-500/20 text-violet-400', badge: '30' },
-                { key: 'older', title: 'Older',    check: (d: Date) => d.getTime() < monthAgo.getTime(),                                       color: 'bg-white/[0.06] border-white/10 text-muted-foreground', badge: '∞' },
+                { key: 'upcoming', title: 'Upcoming',   check: (d: Date) => d.getTime() >= tomorrow.getTime(),                                              color: 'bg-orange-500/15 border-orange-500/20 text-orange-400',  badge: '↑' },
+                { key: 'today',    title: 'Today',      check: (_d: Date, s: string) => s === todayStr,                                                     color: 'bg-green-500/15 border-green-500/20 text-green-400',     badge: '!' },
+                { key: 'week',     title: 'This Week',  check: (d: Date, s: string) => s !== todayStr && d.getTime() >= weekAgo.getTime() && d.getTime() < now.getTime(),  color: 'bg-blue-500/15 border-blue-500/20 text-blue-400',       badge: '7' },
+                { key: 'month',    title: 'This Month', check: (d: Date, s: string) => s !== todayStr && d.getTime() >= monthAgo.getTime() && d.getTime() < weekAgo.getTime(), color: 'bg-violet-500/15 border-violet-500/20 text-violet-400', badge: '30' },
+                { key: 'older',    title: 'Older',      check: (d: Date) => d.getTime() < monthAgo.getTime(),                                               color: 'bg-white/[0.06] border-white/10 text-muted-foreground', badge: '∞' },
               ]
               boardColumns = buckets.map(b => {
                 const tasks = visibleTasks.filter(t => {
                   const d = new Date(t.task_date)
-                  return !isNaN(d.getTime()) && b.check(d)
+                  return !isNaN(d.getTime()) && b.check(d, t.task_date)
                 })
                 return {
                   key: b.key,
@@ -1783,7 +1815,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                                   <span className={`text-[10px] px-1.5 py-0.5 rounded ${getStatusColor(task.status)}`}>{getStatusLabel(task.status)}</span>
                                 )}
                                 {boardGroupBy !== 'date' && (
-                                  <span className="text-[10px] text-muted-foreground/50">{task.task_date}</span>
+                                  <span className="text-[10px] text-muted-foreground/50" title={fullTaskDate(task.task_date)}>{formatTaskDate(task.task_date)}</span>
                                 )}
                               </div>
                               {renderTaskChips(task)}
@@ -2644,12 +2676,12 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
       {/* Add Task Modal */}
       {showForm && (
         <ModalOverlay onClose={() => setShowForm(false)}>
-          <div className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+          <div className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
               <h2 className="font-semibold">Add Task</h2>
               <button onClick={() => setShowForm(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
             </div>
-            <form ref={addFormRef} onSubmit={handleSubmit} className="p-6 space-y-4">
+            <form ref={addFormRef} onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto">
 
               {/* Task number + Title */}
               <div className="grid grid-cols-[110px_1fr] gap-3">

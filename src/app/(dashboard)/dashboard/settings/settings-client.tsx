@@ -5,12 +5,13 @@ import { useRouter } from 'next/navigation'
 import Header from '@/components/layout/header'
 import AppSelect from '@/components/ui/app-select'
 import { createClient } from '@/lib/supabase/client'
-import { Plus, X, Edit2, Archive, ArchiveRestore, Save, ChevronDown, ChevronLeft, ChevronRight, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Mail, Send, RotateCcw as ResetKey } from 'lucide-react'
+import { Plus, X, Edit2, Archive, ArchiveRestore, Save, ChevronDown, ChevronLeft, ChevronRight, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Mail, Send, RotateCcw as ResetKey, RefreshCw } from 'lucide-react'
 import type { Currency } from '@/types'
 import InfoTip from '@/components/ui/info-tip'
 import { usePrivacy, getStoredPin, setStoredPin, isForceLocked } from '@/contexts/privacy-context'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { generateInviteToken, revokeInviteToken, archiveEmployee, restoreEmployee, adminResetPassword } from './employee-actions'
+import { RecalcBillingModal } from './recalc-billing-modal'
 
 // ── Module-level search bar (stable reference — never defined inside a component) ──
 function SearchBar({ value, onChange, placeholder = 'Search…', className = '' }: {
@@ -346,6 +347,24 @@ export default function SettingsClient(props: Props) {
     return m
   })
   const [matrixSaving, setMatrixSaving] = useState<string | null>(null)
+
+  // Recalculate-task-billing modal (one-off maintenance action — hidden behind a button)
+  const [showRecalcModal, setShowRecalcModal] = useState(false)
+  // Flatten the matrix into the array shape the modal expects
+  const clientPricingsArray = useMemo(() => {
+    return Object.entries(matrix).flatMap(([key, cell]) => {
+      const [client_id, service_id] = key.split('::')
+      if (!client_id || !service_id) return []
+      const priceNum = cell.price === '' ? null : parseFloat(cell.price)
+      return [{
+        client_id,
+        service_id,
+        price: priceNum,
+        percentage_rate: null,  // matrix UI doesn't expose percentage_rate yet; modal falls back to default
+        currency: cell.currency,
+      }]
+    })
+  }, [matrix])
 
   async function saveMatrixCell(clientId: string, serviceId: string, cell: MatrixCell) {
     const key = `${clientId}::${serviceId}`
@@ -1721,6 +1740,17 @@ export default function SettingsClient(props: Props) {
                     <h2 className="text-sm font-semibold mb-0.5">Pricing Matrix</h2>
                     <p className="text-xs text-muted-foreground">Click any cell to edit. Changes auto-save when you leave the field.</p>
                   </div>
+                  {/* Maintenance action — applies this matrix to existing tasks. Hidden behind a button
+                      because it's only used after bulk imports or matrix-wide price changes. */}
+                  <button
+                    type="button"
+                    onClick={() => setShowRecalcModal(true)}
+                    title="Apply the current Pricing Matrix to existing tasks (one-time / on-demand maintenance)"
+                    className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg border border-violet-500/30 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20 shrink-0"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Recalculate Task Billing
+                  </button>
                 </div>
                 <div className="flex items-center gap-2 mb-3">
                   <SearchBar value={matrixClientSearch} onChange={setMatrixClientSearch} placeholder="Filter clients…" className="flex-1" />
@@ -1811,6 +1841,15 @@ export default function SettingsClient(props: Props) {
                   </table>
                 </div>
                 <p className="text-xs text-muted-foreground mt-3">Price is billed amount per creative / per unit. Commission % is what comes off the top before employee calculation.</p>
+
+                {/* One-off maintenance modal — applies the matrix to existing tasks */}
+                <RecalcBillingModal
+                  open={showRecalcModal}
+                  onClose={() => setShowRecalcModal(false)}
+                  clients={props.clients}
+                  services={props.services}
+                  clientPricings={clientPricingsArray}
+                />
               </div>
             )
           })()}

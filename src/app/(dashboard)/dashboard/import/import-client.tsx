@@ -187,7 +187,7 @@ const COLUMNS: Record<ImportMode, ColDef[]> = {
     { col: 'salary_type',        req: false, notes: 'fixed / fixed_plus_commission / commission_only (default: fixed)' },
     { col: 'base_salary',        req: false, notes: 'Monthly base in INR' },
     { col: 'performance_rating', req: false, notes: '0–100 (default: 70)' },
-    { col: 'joined_date',        req: false, notes: 'YYYY-MM-DD' },
+    { col: 'joined_date',        req: false, notes: 'DD-MM-YYYY (also accepts YYYY-MM-DD or M/D/YYYY)' },
     { col: 'is_active',          req: false, notes: 'true / false (default: true)' },
   ],
   clients: [
@@ -257,7 +257,7 @@ const COLUMNS: Record<ImportMode, ColDef[]> = {
     { col: 'title',               req: true,  notes: 'Task name' },
     { col: 'client_name_or_code', req: false, notes: 'Client name or client code' },
     { col: 'service_name',        req: false, notes: 'Must match service name exactly' },
-    { col: 'task_date',           req: true,  notes: 'YYYY-MM-DD' },
+    { col: 'task_date',           req: true,  notes: 'DD-MM-YYYY (also accepts YYYY-MM-DD or M/D/YYYY)' },
     { col: 'billing_amount_inr',  req: false, notes: 'INR amount; no ₹ symbol' },
     { col: 'billing_amount',      req: false, notes: 'Amount in task currency (defaults to billing_amount_inr if blank)' },
     { col: 'currency',            req: false, notes: 'INR / USD / AED etc. (default: INR)' },
@@ -266,13 +266,13 @@ const COLUMNS: Record<ImportMode, ColDef[]> = {
     { col: 'description',         req: false, notes: '' },
     { col: 'is_recurring',        req: false, notes: 'true / false' },
     { col: 'recurring_interval',  req: false, notes: 'daily / weekly / biweekly / monthly' },
-    { col: 'recurring_end_date',  req: false, notes: 'YYYY-MM-DD when the recurrence stops' },
+    { col: 'recurring_end_date',  req: false, notes: 'DD-MM-YYYY when the recurrence stops (also accepts YYYY-MM-DD)' },
   ],
   contributions: [
     ID_COL,
     { col: 'task_id',          req: false, notes: 'Optional · use raw task UUID if available (faster lookup)' },
     { col: 'task_title',       req: true,  notes: 'Exact task title in DB — import jobs first (ignored if task_id is provided)' },
-    { col: 'task_date',        req: true,  notes: 'YYYY-MM-DD — used to find the task (with task_title)' },
+    { col: 'task_date',        req: true,  notes: 'DD-MM-YYYY (also accepts YYYY-MM-DD) — used to find the task (with task_title)' },
     { col: 'employee_cqid',    req: true,  notes: 'e.g. CQ001' },
     { col: 'score_percentage', req: true,  notes: '0–100' },
     { col: 'earnings',         req: true,  notes: 'INR amount' },
@@ -315,11 +315,25 @@ function normalizeDate(raw: string): string {
   if (!s) return s
   // Already YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
-  // M/D/YY or M/D/YYYY  (e.g. 5/1/26 or 5/1/2026)
+  // YYYY/MM/DD
+  if (/^\d{4}\/\d{2}\/\d{2}$/.test(s)) return s.replace(/\//g, '-')
+  // Slash-delimited: D/M/YYYY or M/D/YYYY — default to D/M/YYYY (Indian convention)
   const slash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/)
   if (slash) {
-    let [, m, d, y] = slash
+    let [, a, b, y] = slash
     if (y.length === 2) y = (parseInt(y) >= 50 ? '19' : '20') + y
+    const aNum = parseInt(a), bNum = parseInt(b)
+    let d: string, m: string
+    if (aNum > 12) {
+      // First part > 12 → must be day (D/M/YYYY)
+      d = a; m = b
+    } else if (bNum > 12) {
+      // Second part > 12 → must be day, so first is month (M/D/YYYY)
+      m = a; d = b
+    } else {
+      // Ambiguous — use D/M/YYYY (Indian convention)
+      d = a; m = b
+    }
     return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
   }
   // DD-MM-YYYY (e.g. 01-05-2026)
@@ -330,6 +344,7 @@ function normalizeDate(raw: string): string {
   }
   return s  // return as-is; validation will catch it
 }
+
 
 function downloadTemplate(mode: ImportMode) {
   const { header, example } = TEMPLATES[mode]
@@ -446,7 +461,7 @@ export default function ImportClient({ clients, services, employees, groups, par
       const g = (j: number) => j >= 0 ? c[j]?.trim() || '' : ''
       const r: ParsedRow = { ...baseRow(i), row_id: g(iId), cqid: g(iCqid), name: g(iName), email: g(iEmail),
         phone: g(iPhone), role: g(iRole) || 'employee', salary_type: g(iSalType) || 'fixed',
-        base_salary: g(iBase), performance_rating: g(iRating) || '70', joined_date: g(iJoined) }
+        base_salary: g(iBase), performance_rating: g(iRating) || '70', joined_date: normalizeDate(g(iJoined)) }
       if (!r.cqid)  r.errors.push('cqid is required')
       if (!r.name)  r.errors.push('name is required')
       if (!r.email) r.errors.push('email is required')
@@ -455,7 +470,7 @@ export default function ImportClient({ clients, services, employees, groups, par
       if (r.role && !validRoles.includes(r.role)) r.errors.push(`role "${r.role}" invalid`)
       const validSalTypes = ['fixed','commission_only','fixed_plus_commission','pure_commission','base_plus_commission','fixed_plus_bonus','hourly']
       if (r.salary_type && !validSalTypes.includes(r.salary_type)) r.errors.push(`salary_type "${r.salary_type}" invalid`)
-      if (r.joined_date && !/^\d{4}-\d{2}-\d{2}$/.test(r.joined_date)) r.errors.push('joined_date must be YYYY-MM-DD')
+      if (r.joined_date && !/^\d{4}-\d{2}-\d{2}$/.test(r.joined_date)) r.errors.push('joined_date must be DD-MM-YYYY (e.g. 18-05-2026)')
       return finalize(r)
     })
   }
@@ -658,7 +673,7 @@ export default function ImportClient({ clients, services, employees, groups, par
       }
       if (!r.title)     r.errors.push('title is required')
       if (!r.task_date) r.errors.push('task_date is required')
-      else if (!/^\d{4}-\d{2}-\d{2}$/.test(r.task_date)) r.errors.push('task_date must be YYYY-MM-DD')
+      else if (!/^\d{4}-\d{2}-\d{2}$/.test(r.task_date)) r.errors.push('task_date must be DD-MM-YYYY (e.g. 18-05-2026)')
       if (tnRaw && !/^\d+$/.test(tnRaw)) r.errors.push('task_number must be a whole number')
       if (r.client_ref) { r.client_id = clientMap[norm(r.client_ref)]; if (!r.client_id) r.warnings.push(`Client "${r.client_ref}" not found`) }
       if (r.service_ref) { r.service_id = serviceMap[norm(r.service_ref)]; if (!r.service_id) r.warnings.push(`Service "${r.service_ref}" not found`) }
@@ -668,7 +683,7 @@ export default function ImportClient({ clients, services, employees, groups, par
       if (r.task_status && !validSt.includes(r.task_status)) r.errors.push(`status "${r.task_status}" invalid`)
       const validIntervals = ['daily','weekly','biweekly','monthly']
       if (r.recurring_interval && !validIntervals.includes(r.recurring_interval)) r.errors.push(`recurring_interval "${r.recurring_interval}" invalid`)
-      if (r.recurring_end_date && !/^\d{4}-\d{2}-\d{2}$/.test(r.recurring_end_date)) r.errors.push('recurring_end_date must be YYYY-MM-DD')
+      if (r.recurring_end_date && !/^\d{4}-\d{2}-\d{2}$/.test(r.recurring_end_date)) r.errors.push('recurring_end_date must be DD-MM-YYYY (e.g. 18-05-2026)')
       return finalize(r)
     })
   }
@@ -723,7 +738,7 @@ export default function ImportClient({ clients, services, employees, groups, par
       } else {
         if (!r.task_ref)  r.errors.push('task_title is required (or provide task_id column)')
         if (!r.task_date) r.errors.push('task_date is required')
-        else if (!/^\d{4}-\d{2}-\d{2}$/.test(r.task_date)) r.errors.push('task_date must be YYYY-MM-DD')
+        else if (!/^\d{4}-\d{2}-\d{2}$/.test(r.task_date)) r.errors.push('task_date must be DD-MM-YYYY (e.g. 18-05-2026)')
         if (r.task_ref && r.task_date) {
           r.task_id = taskMap[`${r.task_ref}|||${r.task_date}`]
           if (!r.task_id) r.warnings.push(`Task not matched — check title & date match exactly`)
@@ -1070,36 +1085,42 @@ export default function ImportClient({ clients, services, employees, groups, par
           await backupBeforeUpdate('tasks', recs.map(r => r.row_id))
           await batchUpdate('tasks', recs)
         } else {
-          // Fetch current max task_number to auto-assign blanks
-          const maxRow = await supabase.from('tasks').select('task_number').order('task_number', { ascending: false, nullsFirst: false }).limit(1).maybeSingle()
-          let nextNum = (maxRow.data?.task_number ?? 0) + 1
-          const explicitUsed = new Set<number>()
-          const taskRows = valid.map(r => {
-            let tn: number
-            if (r.task_number && /^\d+$/.test(r.task_number)) {
-              tn = parseInt(r.task_number, 10)
-              explicitUsed.add(tn)
-            } else {
-              // Skip over any explicitly-used numbers
-              while (explicitUsed.has(nextNum)) nextNum++
-              tn = nextNum++
-            }
-            return {
-              task_number: tn,
-              title: r.title, description: r.description || null,
-              client_id: r.client_id || null, service_id: r.service_id || null,
-              task_date: r.task_date,
-              billing_amount_inr: parseFloat(r.billing_amount_inr) || 0,
-              billing_amount: parseFloat(r.billing_amount) || parseFloat(r.billing_amount_inr) || 0,
-              currency: r.currency || 'INR',
-              quantity: parseFloat(r.quantity) || 1,
-              status: r.task_status || 'done',
-              is_recurring: r.is_recurring || false,
-              recurring_interval: r.recurring_interval || null,
-              recurring_end_date: r.recurring_end_date || null,
-            }
-          })
-          await batchInsert('tasks', taskRows)
+          // Base columns guaranteed to exist in schema
+          const baseRows = valid.map(r => ({
+            title: r.title,
+            description: r.description || null,
+            client_id: r.client_id || null,
+            service_id: r.service_id || null,
+            task_date: r.task_date,
+            billing_amount_inr: parseFloat(r.billing_amount_inr) || 0,
+            billing_amount: parseFloat(r.billing_amount) || parseFloat(r.billing_amount_inr) || 0,
+            currency: r.currency || 'INR',
+            status: r.task_status || 'done',
+          }))
+
+          // Extended columns added by migration 003 (may not exist on older deployments)
+          const extendedRows = valid.map((r, i) => ({
+            ...baseRows[i],
+            ...(r.task_number && /^\d+$/.test(r.task_number) ? { task_number: parseInt(r.task_number, 10) } : {}),
+            quantity: parseFloat(r.quantity) || 1,
+            is_recurring: r.is_recurring || false,
+            recurring_interval: r.recurring_interval || null,
+            recurring_end_date: r.recurring_end_date || null,
+          }))
+
+          // Probe with a single extended row — fall back to base-only on any schema error
+          const probe = await supabase.from('tasks').insert([extendedRows[0]]).select('id')
+          const schemaError = probe.error?.message?.includes('column') || probe.error?.message?.includes('schema cache')
+          if (schemaError) {
+            // One or more new columns missing — import without them and warn once
+            res.errors.push('⚠️ Some task columns (task_number / quantity / is_recurring) not found in schema. Run migrations/003_tasks_import_columns.sql in Supabase. Importing base fields only.')
+            await batchInsert('tasks', baseRows)
+          } else {
+            // Extended columns exist — count probe row and import the rest
+            if (probe.error) { res.errors.push(`Batch 1: ${probe.error.message}`); res.skipped += 1 }
+            else { res.inserted += probe.data?.length || 0 }
+            if (extendedRows.length > 1) await batchInsert('tasks', extendedRows.slice(1))
+          }
         }
         break
       }
@@ -1252,7 +1273,7 @@ export default function ImportClient({ clients, services, employees, groups, par
     // Warn about cascade for certain entity types
     const cascadeWarnings: Record<string, string> = {
       parameters:    'Contributions referencing these parameters will also be deleted.',
-      jobs:          'Contributions and contribution scores for these tasks will also be deleted.',
+      jobs:          'Invoice items, contributions, and contribution scores for these tasks will also be deleted.',
       employees:     'Contribution scores for these employees will also be deleted.',
       groups:        'All parameters (and their contributions) inside these groups will also be deleted.',
     }
@@ -1285,6 +1306,8 @@ export default function ImportClient({ clients, services, employees, groups, par
         }
       }
       if (cleanupMode === 'jobs') {
+        // Delete invoice_items referencing these tasks (FK: invoice_items_task_id_fkey)
+        await batchDelete('invoice_items', 'task_id', ids)
         // Delete contribution_scores for these tasks
         await batchDelete('contribution_scores', 'task_id', ids)
         await batchDelete('contributions', 'task_id', ids)
