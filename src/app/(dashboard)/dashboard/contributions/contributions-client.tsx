@@ -831,7 +831,7 @@ export default function ContributionsClient({
             <div className="flex items-center gap-1.5 shrink-0 order-2 sm:order-none">
               <button
                 onClick={() => { setBulkMode(m => !m); setSelectedTasks(new Set()) }}
-                className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm ${
+                className={`h-[34px] px-3 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer ${
                   bulkMode
                     ? 'bg-violet-500 text-white shadow-violet-500/30'
                     : 'bg-secondary border border-border text-foreground hover:bg-secondary/60'
@@ -847,7 +847,7 @@ export default function ContributionsClient({
                       else setSelectedTasks(new Set(myVisibleTasks.map(t => t.id)))
                     }}
                     title={allSelected ? 'Deselect all visible tasks' : 'Select all visible tasks'}
-                    className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm ${
+                    className={`h-[34px] px-3 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer ${
                       allSelected
                         ? 'bg-violet-500/20 border border-violet-500/40 text-violet-200'
                         : 'bg-secondary border border-border text-foreground hover:bg-secondary/60'
@@ -860,8 +860,9 @@ export default function ContributionsClient({
               })()}
             </div>
 
-            {/* Search — full-width on mobile (order-1), flex-1 on desktop */}
-            <div className="order-1 sm:order-none w-full sm:w-auto flex items-center gap-2 bg-secondary border border-foreground/15 rounded-xl px-3 py-2 sm:flex-1 sm:basis-0 min-w-0">
+            {/* Search — full-width on mobile (order-1), flex-1 on desktop.
+                h-[34px] matches the other toolbar buttons for visual rhythm. */}
+            <div className="order-1 sm:order-none w-full sm:w-auto flex items-center gap-2 bg-secondary border border-foreground/15 rounded-xl h-[34px] px-3 sm:flex-1 sm:basis-0 min-w-0">
               <Search size={14} className="text-muted-foreground shrink-0" />
               <input value={search} onChange={e => setSearch(e.target.value)}
                 placeholder="Search tasks, clients, services, code…"
@@ -869,8 +870,9 @@ export default function ContributionsClient({
               {search && <button onClick={() => setSearch('')} className="shrink-0 cursor-pointer"><X size={12} className="text-muted-foreground" /></button>}
             </div>
 
-            {/* Inline view segment: List · Board · ⚙(board-only) · Calendar */}
-            <div ref={boardSettingsRef} className="relative shrink-0 order-3 sm:order-none ml-auto sm:ml-0">
+            {/* Inline view segment: List · Board · ⚙(board-only) · Calendar
+                No ml-auto on mobile — flows directly after Select with a single gap. */}
+            <div ref={boardSettingsRef} className="relative shrink-0 order-3 sm:order-none">
               <div className="flex items-center bg-secondary border border-foreground/15 rounded-xl p-1 gap-0.5">
                 {([
                   { key: 'list',     Icon: List,         label: 'List',     hideOnMobile: false },
@@ -993,7 +995,7 @@ export default function ContributionsClient({
               { key: 'missing', label: 'Missing', count: missingCount     },
             ] as const).map(({ key, label, count }) => (
               <button key={key} onClick={() => setStatusFilter(key as any)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 ${
+                className={`h-[34px] px-3 rounded-xl text-xs font-medium transition-colors flex items-center gap-1.5 cursor-pointer ${
                   statusFilter === key
                     ? key === 'missing'
                       ? 'bg-orange-500/20 text-orange-300 border border-orange-500/30'

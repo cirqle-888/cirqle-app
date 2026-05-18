@@ -77,8 +77,9 @@ function StickyToolbar({ children }: { children: ReactNode }) {
         bg-background/95 backdrop-blur-md
         supports-[backdrop-filter]:bg-background/80
         border-b border-border/40
-        px-6 py-4
-        space-y-2
+        px-4 sm:px-6
+        py-3 sm:py-4
+        space-y-1.5 sm:space-y-2
       "
     >
       {children}
@@ -91,7 +92,8 @@ function StickyToolbar({ children }: { children: ReactNode }) {
  * Filters/chips rows can still wrap via flex-wrap inside their own row.
  */
 function StickyToolbarRow({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <div className={`flex items-center gap-2 w-full ${className}`}>{children}</div>
+  // Tighter gaps on mobile so wrapped buttons sit closer together.
+  return <div className={`flex items-center gap-1.5 sm:gap-2 w-full ${className}`}>{children}</div>
 }
 
 // Compound component API: <StickyToolbar.Row>

@@ -1132,20 +1132,21 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
 
       {/* ── Main Task List ── */}
       {!showTrash && <div className="p-6 space-y-4">
-        {/* Sticky toolbar — sits below the sticky Header. pt/pb provide breathing room
-            so when scrolled there's visible space above (between header and toolbar) and below (before thead). */}
-        <div className="sticky top-[92px] z-20 bg-background pt-4 pb-4 space-y-2 w-full">
+        {/* Sticky toolbar — sits below the sticky Header.
+            Tighter vertical rhythm on mobile (pt-3 pb-3 space-y-1.5) so 4-5 wrapped
+            toolbar rows don't crowd out the actual content. */}
+        <div className="sticky top-[92px] z-20 bg-background pt-3 sm:pt-4 pb-3 sm:pb-4 space-y-1.5 sm:space-y-2 w-full">
 
           {/* Row 1: [Select | Edit] · [Search flex-1] · [View segment] · [⚙ board]
               On mobile (<sm) the row wraps; Search jumps to the top via order-first
               and takes full width so it's actually usable. Select/Edit and the View
-              toggle drop below on the second wrap-line, where they have room to breathe. */}
-          <div className="flex flex-wrap items-center gap-2 w-full">
+              toggle drop below on the second wrap-line. Tighter gap on mobile. */}
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 w-full">
             {/* Left group: Select + Inline Edit — solid action-mode toggles */}
             <div className="flex items-center gap-1.5 shrink-0 order-2 sm:order-none">
               <button
                 onClick={() => { setBulkMode(m => !m); setSelectedTasks(new Set()) }}
-                className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm ${
+                className={`h-[34px] px-3 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer ${
                   bulkMode
                     ? 'bg-violet-500 text-white shadow-violet-500/30'
                     : 'bg-secondary border border-border text-foreground hover:bg-secondary/60'
@@ -1156,7 +1157,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                 <button
                   onClick={() => setInlineEditMode(m => !m)}
                   title="Toggle inline edit"
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all shadow-sm ${
+                  className={`flex items-center gap-1.5 h-[34px] px-3 rounded-xl text-xs font-semibold transition-all shadow-sm cursor-pointer ${
                     inlineEditMode
                       ? 'bg-blue-500 text-white shadow-blue-500/30'
                       : 'bg-secondary border border-border text-foreground hover:bg-secondary/60'
@@ -1169,8 +1170,9 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
             </div>
 
             {/* Search — full-width on mobile (order-first so it sits at top of wrapped row),
-                flex-1 on desktop so it fills the gap between action group and view toggle. */}
-            <div className="order-1 sm:order-none w-full sm:w-auto flex items-center gap-2 bg-secondary border border-foreground/15 rounded-xl px-3 py-2 sm:flex-1 sm:basis-0 min-w-0">
+                flex-1 on desktop so it fills the gap between action group and view toggle.
+                h-[34px] matches the other toolbar buttons for visual rhythm. */}
+            <div className="order-1 sm:order-none w-full sm:w-auto flex items-center gap-2 bg-secondary border border-foreground/15 rounded-xl h-[34px] px-3 sm:flex-1 sm:basis-0 min-w-0">
               <Search size={14} className="text-muted-foreground shrink-0" />
               <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search title, client, service, code…" className="flex-1 min-w-0 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60" />
               {searchQ && <button onClick={() => setSearchQ('')} className="shrink-0 cursor-pointer"><X size={12} className="text-muted-foreground" /></button>}
@@ -1179,8 +1181,9 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
             {/* Inline view segment: Table · Board · ⚙(board-only) · Calendar
                 Calendar hidden below sm — limited utility on phones and the
                 three-button row otherwise overflows out of the viewport.
-                order-3 keeps it on the wrapped row at the right of Select/Edit on mobile. */}
-            <div ref={viewRef} className="relative shrink-0 order-3 sm:order-none ml-auto sm:ml-0">
+                order-3 keeps it directly next to Select/Edit on mobile — no
+                ml-auto so the buttons flow naturally with a single gap. */}
+            <div ref={viewRef} className="relative shrink-0 order-3 sm:order-none">
               <div className="flex items-center bg-secondary border border-foreground/15 rounded-xl p-1 gap-0.5">
                 {([
                   { key: 'table',    Icon: List,         label: 'Table',    hideOnMobile: false },
@@ -1246,7 +1249,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
           </div>
 
           {/* Row 2: Filters → divider → Status chips → Clear all */}
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
             {/* Client — FilterDropdown has built-in × when active */}
             <FilterDropdown
               options={[...new Map(tasks.filter(t => t.client?.id).map(t => [t.client!.id, t.client!])).values()]
@@ -1289,9 +1292,9 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
             {/* Divider */}
             <span className="w-px h-5 bg-foreground/10 shrink-0" />
             {/* Status chips */}
-            <button onClick={() => setFilterStatus('')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${!filterStatus ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}>All</button>
+            <button onClick={() => setFilterStatus('')} className={`h-[34px] px-3 rounded-xl text-xs font-medium transition-colors cursor-pointer ${!filterStatus ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}>All</button>
             {STATUSES.map(s => (
-              <button key={s} onClick={() => setFilterStatus(s === filterStatus ? '' : s)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filterStatus === s ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}>
+              <button key={s} onClick={() => setFilterStatus(s === filterStatus ? '' : s)} className={`h-[34px] px-3 rounded-xl text-xs font-medium transition-colors cursor-pointer ${filterStatus === s ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}>
                 {getStatusLabel(s)}
               </button>
             ))}

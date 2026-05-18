@@ -61,13 +61,13 @@ function Breadcrumbs() {
 
 export default function Header({ title, subtitle, actions }: HeaderProps) {
   return (
-    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pl-16 pr-4 py-4 md:px-6 border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-30">
+    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pl-14 sm:pl-16 pr-4 py-3 sm:py-4 md:px-6 border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-30">
       <div className="w-full sm:w-auto">
         <Breadcrumbs />
         <h1 className="text-lg font-semibold text-foreground truncate">{title}</h1>
         {subtitle && <div className="text-sm text-muted-foreground truncate">{subtitle}</div>}
       </div>
-      {actions && <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 w-full sm:w-auto hide-scrollbar">{actions}</div>}
+      {actions && <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 sm:pb-0 w-full sm:w-auto hide-scrollbar">{actions}</div>}
     </div>
   )
 }
