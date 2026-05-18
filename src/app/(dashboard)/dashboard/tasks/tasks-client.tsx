@@ -73,8 +73,8 @@ interface Props {
   clientPricings: { client_id: string; service_id: string; price: number; currency: string }[]
   employees: { id: string; cqid: string; name: string | null; is_active: boolean }[]
   taskAssignments: { task_id: string; employee_id: string }[]
-  groups: { id: string; name: string; display_order: number }[]
-  parameters: { id: string; name: string; group_id: string; weight: number; is_master?: boolean; display_order: number }[]
+  groups: { id: string; name: string; weight: number; display_order: number }[]
+  parameters: { id: string; name: string; group_id: string; weight: number; is_master?: boolean; input_type?: 'percentage' | 'count'; display_order: number }[]
   groupServices: { group_id: string; service_id: string }[]
   parameterServices: { parameter_id: string; service_id: string }[]
   taskGroups: { task_id: string; group_id: string }[]
@@ -300,6 +300,78 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
     () => form.parent_task_id ? tasks.find(t => t.id === form.parent_task_id) : null,
     [form.parent_task_id, tasks]
   )
+
+  // ── Variant: selected parameter IDs + per-parameter VALUE (count or %) ──
+  // The billing math is GROUP-NORMALIZED:
+  //   share(param)         = weight × (value if count, value/100 if percentage)
+  //   group_internal_share = min(1.0, Σ share over selected params in that group)
+  //   total_fraction       = Σ over groups: (group.weight / 100) × group_internal_share
+  //   billing              = parent_billing × total_fraction
+  //
+  // Mathematically capped at 100% because Σ group.weight = 100 and each
+  // group_internal_share is clamped to 1.0.
+  const [variantParamIds, setVariantParamIds] = useState<Set<string>>(new Set())
+  const [variantParamValues, setVariantParamValues] = useState<Record<string, string>>({})
+
+  // Service ↔ parameter linkage (used to highlight relevant params for this service)
+  const serviceLinkedParamIds = useMemo(() => {
+    if (!form.service_id) return new Set<string>()
+    const linkedGroupIds = new Set(groupServices.filter(g => g.service_id === form.service_id).map(g => g.group_id))
+    const directParamIds = new Set(parameterServices.filter(p => p.service_id === form.service_id).map(p => p.parameter_id))
+    const all = new Set<string>(directParamIds)
+    parameters.forEach(p => { if (linkedGroupIds.has(p.group_id)) all.add(p.id) })
+    return all
+  }, [form.service_id, parameters, groupServices, parameterServices])
+
+  /** Raw share of one parameter inside its group (before group cap). 0.0–∞ */
+  function paramRawShare(paramId: string): number {
+    const p = parameters.find(x => x.id === paramId)
+    if (!p) return 0
+    const rawValue = variantParamValues[paramId]
+    const v = rawValue === '' || rawValue == null ? 1 : (parseFloat(rawValue) || 0)
+    return p.input_type === 'percentage' ? p.weight * (v / 100) : p.weight * v
+  }
+
+  /** A group's internal share — sum of selected params in that group, capped at 1.0 */
+  function computeGroupShare(groupId: string): number {
+    const idsInGroup = [...variantParamIds].filter(id => parameters.find(x => x.id === id)?.group_id === groupId)
+    if (idsInGroup.length === 0) return 0
+    return Math.min(1, idsInGroup.reduce((sum, id) => sum + paramRawShare(id), 0))
+  }
+
+  /** Total task fraction. Σ over groups: (group.weight / 100) × group_share. Capped at 1.0. */
+  function computeTotalFraction(): number {
+    return groups.reduce((sum, g) => sum + ((g.weight || 0) / 100) * computeGroupShare(g.id), 0)
+  }
+
+  // Auto-default billing_mode by variant_type
+  useEffect(() => {
+    if (!form.variant_type) return
+    const desired = form.variant_type === 'revision' ? 'parameter_driven' : 'percent_of_parent'
+    if (form.billing_mode !== desired && !form.billing_override) {
+      setForm(p => ({ ...p, billing_mode: desired }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.variant_type])
+
+  // Auto-sum selected parameters into billing_percent using group-normalized math
+  useEffect(() => {
+    if (form.billing_mode !== 'parameter_driven') return
+    if (form.billing_override) return
+    const pct = (computeTotalFraction() * 100).toFixed(2).replace(/\.?0+$/, '')
+    if (form.billing_percent !== pct) {
+      setForm(p => ({ ...p, billing_percent: pct }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [variantParamIds, variantParamValues, form.billing_mode, parameters, groups])
+
+  // Reset checklist & values when modal closes or parent unlinked
+  useEffect(() => {
+    if (!showForm || !form.parent_task_id) {
+      setVariantParamIds(new Set())
+      setVariantParamValues({})
+    }
+  }, [showForm, form.parent_task_id])
 
   // Derived: computed billing amount
   //   1. If user typed a manual override → that wins
@@ -613,6 +685,41 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
           billing_percent:  form.billing_percent ? parseFloat(form.billing_percent) : null,
           billing_override: form.billing_override,
           is_billable:      form.is_billable,
+          // Snapshot the billing math with per-group breakdown so historical invoices
+          // stay stable even if weights are tuned later. Stored in `billing_snapshot` JSONB.
+          billing_snapshot: form.billing_mode === 'parameter_driven' ? {
+            formula:         'parameter_driven',
+            parent_billing:  parentTask?.billing_amount_inr ?? 0,
+            total_fraction:  computeTotalFraction(),
+            computed_amount: computedAmount,
+            computed_at:     new Date().toISOString(),
+            groups:          groups.map(g => {
+              const groupParams = parameters.filter(p => p.group_id === g.id && variantParamIds.has(p.id))
+              if (groupParams.length === 0) return null
+              const internalShare = computeGroupShare(g.id)
+              return {
+                group_id:               g.id,
+                group_name:             g.name,
+                group_weight:           g.weight || 0,
+                internal_share:         internalShare,
+                contribution_to_parent: ((g.weight || 0) / 100) * internalShare * 100,
+                selections: groupParams.map(p => ({
+                  parameter_id: p.id,
+                  name:         p.name,
+                  weight:       p.weight,
+                  value:        parseFloat(variantParamValues[p.id] || '1') || 0,
+                  input_type:   p.input_type || 'count',
+                  is_master:    !!p.is_master,
+                })),
+              }
+            }).filter(Boolean),
+          } : {
+            formula:         form.billing_mode,
+            parent_billing:  parentTask?.billing_amount_inr ?? 0,
+            percent:         form.billing_percent ? parseFloat(form.billing_percent) : null,
+            computed_amount: computedAmount,
+            computed_at:     new Date().toISOString(),
+          },
         } : {}),
       })
       .select(`*, client:clients(id, name, code), service:services(id, name)`)
@@ -620,6 +727,25 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
 
     if (!error && data) {
       setTasks(prev => [data, ...prev])
+
+      // ── Auto-create contribution slots from the selected billable parameters ──
+      // One-way sync: billing parameters → contribution rows. Each row inherits the value
+      // entered at billing time. Employees fill in who did each part later; editing
+      // contributions does NOT flow back to billing (snapshot is frozen).
+      if (form.parent_task_id && form.billing_mode === 'parameter_driven' && variantParamIds.size > 0) {
+        const slots = [...variantParamIds].map(parameter_id => ({
+          task_id:      data.id,
+          parameter_id,
+          employee_id:  null,
+          value:        parseFloat(variantParamValues[parameter_id] || '1') || 0,
+          locked:       false,
+        }))
+        const { error: slotErr } = await supabase.from('contributions').insert(slots)
+        if (slotErr) {
+          console.warn('Auto-creating contribution slots failed:', slotErr)
+          toastError(`Task saved, but contribution slots couldn't be pre-filled: ${slotErr.message}`)
+        }
+      }
 
       if (form.is_recurring && form.recurring_interval) {
         await generateRecurringInstances(
@@ -2824,12 +2950,11 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                           </div>
                         </div>
 
-                        {(form.billing_mode === 'percent_of_parent' || form.billing_mode === 'parameter_driven') && (
+                        {/* percent_of_parent: simple % input (concepts / sizes) */}
+                        {form.billing_mode === 'percent_of_parent' && (
                           <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
                             <div>
-                              <label className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1">
-                                {form.billing_mode === 'percent_of_parent' ? 'Percent of parent' : 'Parameter weight % (sum)'}
-                              </label>
+                              <label className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1">Percent of parent</label>
                               <div className="relative">
                                 <input
                                   type="number"
@@ -2846,6 +2971,217 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                             <div className="text-[11px] text-muted-foreground pb-2">
                               of {parentTask?.billing_amount_inr ? `₹${parentTask.billing_amount_inr.toLocaleString('en-IN')}` : '—'}
                             </div>
+                          </div>
+                        )}
+
+                        {/* parameter_driven: grouped checklist with master/sub exclusivity */}
+                        {form.billing_mode === 'parameter_driven' && (
+                          <div className="space-y-3">
+                            {groups.length === 0 ? (
+                              <p className="text-[11px] text-muted-foreground bg-white/[0.02] border border-white/10 rounded-lg px-3 py-2">
+                                No contribution groups exist yet. Set them up in <span className="text-violet-300">Settings → Groups &amp; Params</span> first.
+                              </p>
+                            ) : (
+                              <>
+                                {groups.map(g => {
+                                  const groupParams = parameters
+                                    .filter(p => p.group_id === g.id)
+                                    .sort((a, b) => {
+                                      if (!!a.is_master !== !!b.is_master) return a.is_master ? -1 : 1
+                                      return a.display_order - b.display_order
+                                    })
+                                  if (groupParams.length === 0) return null
+                                  const masterParam = groupParams.find(p => p.is_master)
+                                  const subParams   = groupParams.filter(p => !p.is_master)
+                                  const masterSelected = masterParam ? variantParamIds.has(masterParam.id) : false
+                                  const anySubSelected = subParams.some(p => variantParamIds.has(p.id))
+                                  const internalShare  = computeGroupShare(g.id)
+                                  const groupPct       = (g.weight || 0)
+                                  const groupContrib   = (groupPct / 100) * internalShare * 100
+
+                                  // Helpers for master/sub exclusivity
+                                  const checkMaster = () => {
+                                    if (!masterParam) return
+                                    setVariantParamIds(prev => {
+                                      const next = new Set(prev)
+                                      // Toggle master; if turning ON, drop all subs in this group
+                                      if (next.has(masterParam.id)) {
+                                        next.delete(masterParam.id)
+                                      } else {
+                                        subParams.forEach(p => next.delete(p.id))
+                                        next.add(masterParam.id)
+                                        setVariantParamValues(vals => ({
+                                          ...vals,
+                                          [masterParam.id]: vals[masterParam.id] ?? (masterParam.input_type === 'percentage' ? '100' : '1'),
+                                        }))
+                                      }
+                                      return next
+                                    })
+                                    if (form.billing_override) setForm(f => ({ ...f, billing_override: false }))
+                                  }
+                                  const toggleSub = (p: typeof parameters[number]) => {
+                                    setVariantParamIds(prev => {
+                                      const next = new Set(prev)
+                                      // Selecting a sub auto-drops the master in this group
+                                      if (masterParam) next.delete(masterParam.id)
+                                      if (next.has(p.id)) {
+                                        next.delete(p.id)
+                                      } else {
+                                        next.add(p.id)
+                                        setVariantParamValues(vals => ({
+                                          ...vals,
+                                          [p.id]: vals[p.id] ?? (p.input_type === 'percentage' ? '100' : '1'),
+                                        }))
+                                      }
+                                      return next
+                                    })
+                                    if (form.billing_override) setForm(f => ({ ...f, billing_override: false }))
+                                  }
+
+                                  return (
+                                    <div key={g.id} className="bg-white/[0.02] border border-white/10 rounded-lg overflow-hidden">
+                                      {/* Group header */}
+                                      <div className="flex items-center gap-2 px-2.5 py-1.5 bg-white/[0.03] border-b border-white/[0.05]">
+                                        <span className="text-[11px] font-semibold text-foreground">{g.name}</span>
+                                        <span className="text-[9px] font-mono text-blue-300 bg-blue-500/10 border border-blue-500/20 rounded px-1.5 py-0.5">{groupPct}% of task</span>
+                                        <span className="ml-auto text-[10px] font-mono text-violet-300/80">
+                                          → {groupContrib.toFixed(2).replace(/\.?0+$/, '')}% of parent
+                                        </span>
+                                      </div>
+
+                                      {/* Master parameter */}
+                                      {masterParam && (() => {
+                                        const isPercent = masterParam.input_type === 'percentage'
+                                        const rawValue  = variantParamValues[masterParam.id] ?? ''
+                                        const effective = masterSelected ? Math.min(1, paramRawShare(masterParam.id)) * 100 : 0
+                                        return (
+                                          <div className={`px-2.5 py-1.5 ${anySubSelected ? 'opacity-40' : ''}`}>
+                                            <div className="flex items-center gap-2.5">
+                                              <input
+                                                type="checkbox"
+                                                checked={masterSelected}
+                                                disabled={anySubSelected}
+                                                onChange={checkMaster}
+                                                className="accent-violet-500 w-3.5 h-3.5"
+                                              />
+                                              <span className="flex-1 text-xs">
+                                                {masterParam.name}
+                                                <span className="ml-1.5 text-[9px] uppercase tracking-wider text-amber-300/80">master</span>
+                                              </span>
+                                              <span className="text-[10px] font-mono text-violet-300 bg-violet-500/10 border border-violet-500/20 rounded px-1.5 py-0.5">
+                                                {(masterParam.weight * 100).toFixed(2).replace(/\.?0+$/, '')}%{isPercent ? ' max' : '/each'}
+                                              </span>
+                                            </div>
+                                            {masterSelected && !anySubSelected && (
+                                              <div className="flex items-center gap-2 mt-1.5 ml-6">
+                                                <label className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-semibold">
+                                                  {isPercent ? '% done' : 'Count'}
+                                                </label>
+                                                <input
+                                                  type="number"
+                                                  min="0"
+                                                  step="1"
+                                                  value={rawValue}
+                                                  onChange={e => {
+                                                    setVariantParamValues(vals => ({ ...vals, [masterParam.id]: e.target.value }))
+                                                    if (form.billing_override) setForm(f => ({ ...f, billing_override: false }))
+                                                  }}
+                                                  placeholder={isPercent ? '100' : '1'}
+                                                  className="w-20 bg-secondary border border-border rounded px-2 py-0.5 text-xs focus:outline-none focus:border-violet-500/50"
+                                                />
+                                                <span className="text-[10px] text-muted-foreground/60">{isPercent ? '%' : 'units'}</span>
+                                                <span className="text-[10px] font-mono text-violet-300/80 ml-auto">
+                                                  → {effective.toFixed(2).replace(/\.?0+$/, '')}% of group
+                                                </span>
+                                              </div>
+                                            )}
+                                          </div>
+                                        )
+                                      })()}
+
+                                      {/* Sub-parameters — collapsible "Detailed Edit" section */}
+                                      {subParams.length > 0 && (
+                                        <details className="border-t border-white/[0.04]" open={anySubSelected}>
+                                          <summary className={`cursor-pointer select-none px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/70 hover:text-foreground flex items-center gap-1.5 ${masterSelected ? 'opacity-40' : ''}`}>
+                                            <span>Show sub-parameters ({subParams.length})</span>
+                                            {anySubSelected && <span className="text-[9px] text-violet-300/80 normal-case tracking-normal">· {subParams.filter(p => variantParamIds.has(p.id)).length} active</span>}
+                                          </summary>
+                                          <div className={`divide-y divide-white/[0.04] ${masterSelected ? 'opacity-40' : ''}`}>
+                                            {subParams.map(p => {
+                                              const checked = variantParamIds.has(p.id)
+                                              const isPercent = p.input_type === 'percentage'
+                                              const rawValue = variantParamValues[p.id] ?? ''
+                                              const effective = checked ? paramRawShare(p.id) * 100 : 0
+                                              const linked = serviceLinkedParamIds.has(p.id)
+                                              return (
+                                                <div key={p.id} className="px-2.5 py-1.5">
+                                                  <div className="flex items-center gap-2.5">
+                                                    <input
+                                                      type="checkbox"
+                                                      checked={checked}
+                                                      disabled={masterSelected}
+                                                      onChange={() => toggleSub(p)}
+                                                      className="accent-violet-500 w-3.5 h-3.5"
+                                                    />
+                                                    <span className={`flex-1 text-xs ${linked ? '' : 'text-muted-foreground/70'}`}>{p.name}</span>
+                                                    {linked && (
+                                                      <span className="text-[9px] uppercase tracking-wider text-blue-300/80 bg-blue-500/10 border border-blue-500/20 rounded px-1 py-0.5">
+                                                        for this service
+                                                      </span>
+                                                    )}
+                                                    <span className="text-[10px] font-mono text-violet-300 bg-violet-500/10 border border-violet-500/20 rounded px-1.5 py-0.5">
+                                                      {(p.weight * 100).toFixed(2).replace(/\.?0+$/, '')}%{isPercent ? ' max' : '/each'}
+                                                    </span>
+                                                  </div>
+                                                  {checked && (
+                                                    <div className="flex items-center gap-2 mt-1.5 ml-6">
+                                                      <label className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-semibold">
+                                                        {isPercent ? '% done' : 'Count'}
+                                                      </label>
+                                                      <input
+                                                        type="number"
+                                                        min="0"
+                                                        step="1"
+                                                        value={rawValue}
+                                                        onChange={e => {
+                                                          setVariantParamValues(vals => ({ ...vals, [p.id]: e.target.value }))
+                                                          if (form.billing_override) setForm(f => ({ ...f, billing_override: false }))
+                                                        }}
+                                                        placeholder={isPercent ? '100' : '1'}
+                                                        className="w-20 bg-secondary border border-border rounded px-2 py-0.5 text-xs focus:outline-none focus:border-violet-500/50"
+                                                      />
+                                                      <span className="text-[10px] text-muted-foreground/60">{isPercent ? '%' : 'units'}</span>
+                                                      <span className="text-[10px] font-mono text-violet-300/80 ml-auto">
+                                                        → {effective.toFixed(2).replace(/\.?0+$/, '')}% of group
+                                                      </span>
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              )
+                                            })}
+                                          </div>
+                                        </details>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+
+                                {/* Total readout */}
+                                {variantParamIds.size > 0 && parentTask?.billing_amount_inr != null && (() => {
+                                  const totalPct = parseFloat(form.billing_percent || '0')
+                                  return (
+                                    <div className="bg-violet-500/[0.08] border border-violet-500/30 rounded-lg px-2.5 py-2 text-violet-100">
+                                      <div className="text-[11px] font-mono">
+                                        ₹{parentTask.billing_amount_inr.toLocaleString('en-IN')} × {totalPct}% = <span className="font-bold">₹{computedAmount.toLocaleString('en-IN')}</span>
+                                      </div>
+                                      <div className="text-[10px] text-violet-200/70 mt-0.5">
+                                        Group-normalized · cannot exceed 100% of parent
+                                      </div>
+                                    </div>
+                                  )
+                                })()}
+                              </>
+                            )}
                           </div>
                         )}
 

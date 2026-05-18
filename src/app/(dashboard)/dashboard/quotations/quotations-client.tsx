@@ -604,8 +604,9 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                 )}
 
                 {quo.items && quo.items.length > 0 && (
-                  <table className="w-full text-sm">
-                    <thead>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm min-w-[500px]">
+                      <thead>
                       <tr className="bg-secondary/40">
                         <th className="text-left px-5 py-2 text-xs text-muted-foreground font-medium">Description</th>
                         <th className="text-center px-4 py-2 text-xs text-muted-foreground font-medium">Qty</th>
@@ -628,6 +629,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 )}
                 {quo.notes && (
                   <div className="px-5 py-3 border-t border-border/50 text-xs text-muted-foreground">
@@ -657,7 +659,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
 
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               {/* Client + Currency row */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1.5">Client *</label>
                   <Combobox
@@ -686,7 +688,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                           <span className="text-xs text-emerald-400 font-medium">Client added!</span>
                         )}
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <div>
                           <label className="block text-[10px] text-muted-foreground mb-1">Name *</label>
                           <input
@@ -707,7 +709,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                           />
                         </div>
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <div>
                           <label className="block text-[10px] text-muted-foreground mb-1">Phone</label>
                           <input
@@ -770,7 +772,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
               </div>
 
               {/* Dates */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1.5">Issue Date</label>
                   <input
@@ -796,9 +798,9 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                 <label className="block text-xs font-medium text-muted-foreground mb-2">Line Items</label>
                 <div className="space-y-2">
                   {form.items.map((item, i) => (
-                    <div key={i} className="grid grid-cols-12 gap-2 items-center">
+                    <div key={i} className="flex flex-col sm:grid sm:grid-cols-12 gap-2 sm:items-center">
                       <input
-                        className={`col-span-5 ${INPUT_CLS}`}
+                        className={`sm:col-span-5 ${INPUT_CLS}`}
                         placeholder="Description"
                         value={item.description}
                         onChange={e => updateItem(i, 'description', e.target.value)}
@@ -806,7 +808,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                       <input
                         type="number"
                         min="1"
-                        className={`col-span-2 ${INPUT_CLS} text-center`}
+                        className={`sm:col-span-2 ${INPUT_CLS} sm:text-center`}
                         placeholder="Qty"
                         value={item.quantity}
                         onChange={e => updateItem(i, 'quantity', parseFloat(e.target.value) || 1)}
@@ -815,12 +817,12 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                         type="number"
                         min="0"
                         step="0.01"
-                        className={`col-span-3 ${INPUT_CLS}`}
+                        className={`sm:col-span-3 ${INPUT_CLS}`}
                         placeholder="Rate"
                         value={item.unit_price || ''}
                         onChange={e => updateItem(i, 'unit_price', parseFloat(e.target.value) || 0)}
                       />
-                      <div className="col-span-2 text-sm font-medium text-right pr-1 tabular-nums">
+                      <div className="sm:col-span-2 text-sm font-medium sm:text-right pr-1 tabular-nums">
                         {item.total > 0 ? item.total.toLocaleString('en-IN') : '—'}
                       </div>
                     </div>

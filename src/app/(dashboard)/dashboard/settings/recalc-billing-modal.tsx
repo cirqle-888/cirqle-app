@@ -115,10 +115,14 @@ export function RecalcBillingModal({ open, onClose, clients, services, clientPri
     return q
   }
 
+  const PREVIEW_LIMIT = 500  // show up to 500 rows in the scrollable list
+
   async function runPreview() {
     setLoading(true); setError(null); setApplied(null); setPreviewRows(null)
     try {
-      const { data, error: err, count } = await buildQuery(false).order('task_number', { ascending: false, nullsFirst: false }).limit(30)
+      const { data, error: err, count } = await buildQuery(false)
+        .order('task_number', { ascending: false, nullsFirst: false })
+        .limit(PREVIEW_LIMIT)
       if (err) { setError(err.message); return }
       const rows: PreviewRow[] = (data ?? []).map((t: any) => {
         const svc = serviceById[t.service_id]
@@ -138,6 +142,22 @@ export function RecalcBillingModal({ open, onClose, clients, services, clientPri
       setLoading(false)
     }
   }
+
+  // Auto-load preview when modal opens or filters change — user can see at-a-glance which
+  // tasks need pricing without clicking anything.
+  useEffect(() => {
+    if (!open) return
+    runPreview()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, scope, filterClient, filterService, dateFrom, dateTo])
+
+  // Stats from the preview rows (used to surface "X still need a matrix entry")
+  const previewStats = useMemo(() => {
+    if (!previewRows) return null
+    const willChange   = previewRows.filter(r => r.next !== r.current).length
+    const willStillBeZero = previewRows.filter(r => r.next === 0).length
+    return { willChange, willStillBeZero }
+  }, [previewRows])
 
   async function runApply() {
     if (totalMatching == null) { await runPreview(); return }
@@ -253,46 +273,89 @@ export function RecalcBillingModal({ open, onClose, clients, services, clientPri
             </div>
           )}
 
+          {/* Summary stats — visible the moment the modal opens */}
+          {previewStats && totalMatching != null && (
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-lg border border-border bg-secondary/30 px-3 py-2">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-semibold">Matching</div>
+                <div className="text-lg font-bold text-foreground">{totalMatching}</div>
+              </div>
+              <div className="rounded-lg border border-green-500/30 bg-green-500/[0.06] px-3 py-2">
+                <div className="text-[10px] uppercase tracking-wider text-green-400/80 font-semibold">Will be fixed</div>
+                <div className="text-lg font-bold text-green-300">{previewStats.willChange - previewStats.willStillBeZero}</div>
+              </div>
+              <div className={`rounded-lg border px-3 py-2 ${previewStats.willStillBeZero > 0 ? 'border-amber-500/30 bg-amber-500/[0.06]' : 'border-border bg-secondary/30'}`}>
+                <div className={`text-[10px] uppercase tracking-wider font-semibold ${previewStats.willStillBeZero > 0 ? 'text-amber-400/80' : 'text-muted-foreground/70'}`}>Missing matrix entry</div>
+                <div className={`text-lg font-bold ${previewStats.willStillBeZero > 0 ? 'text-amber-300' : 'text-foreground'}`}>{previewStats.willStillBeZero}</div>
+              </div>
+            </div>
+          )}
+
           {previewRows && (
             <div>
               <div className="flex items-center justify-between mb-2">
                 <p className="text-[11px] uppercase tracking-wider text-muted-foreground/70 font-semibold">
-                  Preview {previewRows.length < (totalMatching ?? 0) ? `(showing first ${previewRows.length} of ${totalMatching})` : `(${previewRows.length} task${previewRows.length === 1 ? '' : 's'})`}
+                  {previewRows.length < (totalMatching ?? 0)
+                    ? `Showing first ${previewRows.length} of ${totalMatching}`
+                    : `${previewRows.length} task${previewRows.length === 1 ? '' : 's'}`}
                 </p>
+                <div className="flex items-center gap-3 text-[10px] text-muted-foreground/60">
+                  <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Still ₹0 (matrix missing)</span>
+                </div>
               </div>
               <div className="border border-border rounded-lg overflow-hidden">
-                <table className="w-full text-xs">
-                  <thead className="bg-secondary/60">
-                    <tr className="border-b border-border">
-                      <th className="text-left px-2.5 py-2 font-medium text-muted-foreground">#</th>
-                      <th className="text-left px-2.5 py-2 font-medium text-muted-foreground">Task</th>
-                      <th className="text-left px-2.5 py-2 font-medium text-muted-foreground">Client / Service</th>
-                      <th className="text-right px-2.5 py-2 font-medium text-muted-foreground">Date</th>
-                      <th className="text-right px-2.5 py-2 font-medium text-muted-foreground">Current</th>
-                      <th className="text-right px-2.5 py-2 font-medium text-violet-400">New</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {previewRows.length === 0 ? (
-                      <tr><td colSpan={6} className="px-2.5 py-6 text-center text-muted-foreground">No tasks match the current filters.</td></tr>
-                    ) : previewRows.map(r => (
-                      <tr key={r.task.id} className="border-b border-border/30 last:border-b-0">
-                        <td className="px-2.5 py-2 font-mono text-muted-foreground">#{r.task.task_number ?? '?'}</td>
-                        <td className="px-2.5 py-2 max-w-[160px] truncate" title={r.task.title}>{r.task.title}</td>
-                        <td className="px-2.5 py-2 text-muted-foreground">
-                          <div className="truncate max-w-[160px]" title={r.client?.name}>{r.client?.name ?? '—'}</div>
-                          <div className="text-[10px] truncate max-w-[160px]" title={r.service?.name}>{r.service?.name ?? '—'}</div>
-                        </td>
-                        <td className="px-2.5 py-2 text-right font-mono">{formatTaskDate(r.task.task_date)}</td>
-                        <td className="px-2.5 py-2 text-right font-mono text-muted-foreground">{fmtINR(r.current)}</td>
-                        <td className={`px-2.5 py-2 text-right font-mono font-semibold ${r.next > r.current ? 'text-green-400' : r.next < r.current ? 'text-red-400' : 'text-foreground'}`}>
-                          {fmtINR(r.next)}
-                        </td>
+                <div className="max-h-[40vh] overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-secondary/60 sticky top-0 z-10">
+                      <tr className="border-b border-border">
+                        <th className="text-left px-2.5 py-2 font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm">#</th>
+                        <th className="text-left px-2.5 py-2 font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm">Task</th>
+                        <th className="text-left px-2.5 py-2 font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm">Client / Service</th>
+                        <th className="text-right px-2.5 py-2 font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm">Date</th>
+                        <th className="text-right px-2.5 py-2 font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm">Current</th>
+                        <th className="text-right px-2.5 py-2 font-medium text-violet-400 bg-secondary/95 backdrop-blur-sm">New</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {previewRows.length === 0 ? (
+                        <tr><td colSpan={6} className="px-2.5 py-6 text-center text-muted-foreground">No tasks match the current filters.</td></tr>
+                      ) : previewRows.map(r => {
+                        const stillZero = r.next === 0
+                        return (
+                          <tr key={r.task.id} className={`border-b border-border/30 last:border-b-0 ${stillZero ? 'bg-amber-500/[0.04]' : ''}`}>
+                            <td className="px-2.5 py-2 font-mono text-muted-foreground">#{r.task.task_number ?? '?'}</td>
+                            <td className="px-2.5 py-2 max-w-[160px] truncate" title={r.task.title}>{r.task.title}</td>
+                            <td className="px-2.5 py-2 text-muted-foreground">
+                              <div className="truncate max-w-[160px]" title={r.client?.name}>{r.client?.name ?? '—'}</div>
+                              <div className="text-[10px] truncate max-w-[160px]" title={r.service?.name}>{r.service?.name ?? '—'}</div>
+                            </td>
+                            <td className="px-2.5 py-2 text-right font-mono">{formatTaskDate(r.task.task_date)}</td>
+                            <td className="px-2.5 py-2 text-right font-mono text-muted-foreground">{fmtINR(r.current)}</td>
+                            <td className={`px-2.5 py-2 text-right font-mono font-semibold ${
+                              stillZero ? 'text-amber-300'
+                              : r.next > r.current ? 'text-green-400'
+                              : r.next < r.current ? 'text-red-400'
+                              : 'text-foreground'
+                            }`}>
+                              {fmtINR(r.next)}
+                              {stillZero && <div className="text-[9px] font-normal text-amber-400/70 normal-case mt-0.5">add to matrix</div>}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
+              {previewStats && previewStats.willStillBeZero > 0 && (
+                <div className="mt-2 flex items-start gap-2 bg-amber-500/[0.06] border border-amber-500/30 rounded-lg px-3 py-2 text-[11px] text-amber-200">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-semibold">{previewStats.willStillBeZero} task{previewStats.willStillBeZero === 1 ? '' : 's'}</span> would still show ₹0 after recalc because the Pricing Matrix has no entry for that client + service combo.
+                    Add a price for those rows in the matrix above, then click Preview again.
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

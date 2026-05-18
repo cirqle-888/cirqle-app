@@ -22,6 +22,7 @@ import AppSelect from '@/components/ui/app-select'
 import { useRole } from '@/contexts/role-context'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { TaskEditModal } from '@/components/ui/task-edit-modal'
+import { PageShell, PageContent, StickyToolbar, PageChrome } from '@/components/layout/page-shell'
 
 interface Score { task_id: string; employee_id: string; earnings_inr: number; score_percentage: number }
 interface Assignment { task_id: string; employee_id: string }
@@ -811,21 +812,18 @@ export default function ContributionsClient({
     )
 
     return (
-      <div>
+      <PageShell>
         <ToastContainer toasts={toast.toasts} onDismiss={toast.dismiss} />
-        <Header
-          title="Contributions"
-          subtitle={`${localTasks.length} task${localTasks.length !== 1 ? 's' : ''}`}
-          actions={headerActions}
-        />
+        <PageChrome>
+          <Header
+            title="Contributions"
+            subtitle={`${localTasks.length} task${localTasks.length !== 1 ? 's' : ''}`}
+            actions={headerActions}
+          />
 
-        <div className="p-6 space-y-4">
-
-          {/* ── Sticky toolbar — mirrors Tasks page layout exactly. pt/pb provide breathing room when scrolled. ── */}
-          <div className="sticky top-[92px] z-20 bg-background pt-4 pb-4 space-y-2 w-full">
-
+          <StickyToolbar>
           {/* Row 1: [Select] · [Search flex-1] · [List|Board|Calendar] · [⚙ board-only] */}
-          <div className="flex items-center gap-2 w-full">
+          <StickyToolbar.Row>
             {/* Left group: Select (toggles bulk mode) · All (toggles select/deselect all when active) */}
             <div className="flex items-center gap-1.5 shrink-0">
               <button
@@ -932,10 +930,10 @@ export default function ContributionsClient({
                 </div>
               )}
             </div>
-          </div>
+          </StickyToolbar.Row>
 
           {/* Row 2: Filters → divider → Status chips → Clear all */}
-          <div className="flex items-center gap-2 flex-wrap">
+          <StickyToolbar.Row className="flex-wrap">
             {/* Date — leads the row, sets the time scope before other filters */}
             <DateFilter value={filterDate} onChange={setFilterDate} />
             {/* Employee */}
@@ -1026,10 +1024,11 @@ export default function ContributionsClient({
                 <X size={12} /> Clear all
               </button>
             )}
-          </div>
+          </StickyToolbar.Row>
+        </StickyToolbar>
+        </PageChrome>
 
-          </div>
-          {/* ── End sticky toolbar ── */}
+        <PageContent>
 
           {/* ── Missing-scores toast (bottom-right) — list view only ── */}
           {missingCount > 0 && listViewMode === 'list' && showMissingBanner && (
@@ -1516,7 +1515,7 @@ export default function ContributionsClient({
               </div>
             )
           })()}
-        </div>
+        </PageContent>
 
         {/* ── Edit Task Modal ── */}
         {editingTask && (
@@ -1698,7 +1697,7 @@ export default function ContributionsClient({
             </div>
           </div>
         )}
-      </div>
+      </PageShell>
     )
   }
 

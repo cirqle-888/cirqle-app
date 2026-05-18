@@ -111,7 +111,7 @@ export function TaskEditModal({
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {/* Task # + Title */}
-          <div className="grid grid-cols-[110px_1fr] gap-3">
+          <div className="flex flex-col sm:grid sm:grid-cols-[110px_1fr] gap-3">
             <div>
               <label className="block text-xs font-medium text-muted-foreground mb-1.5">Task #</label>
               <input type="number" min="1" value={form.task_number} onChange={e => setForm(p => ({ ...p, task_number: e.target.value }))} className={inputCls} placeholder="—" />
@@ -123,7 +123,7 @@ export function TaskEditModal({
           </div>
 
           {/* Client + Service */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-muted-foreground mb-1.5">Client</label>
               <Combobox
@@ -147,7 +147,7 @@ export function TaskEditModal({
           </div>
 
           {/* Task Date + Status */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-muted-foreground mb-1.5">Task Date</label>
               <div className="relative">
@@ -166,7 +166,7 @@ export function TaskEditModal({
 
           {/* Quantity / Hours / Spend + Price */}
           {showFinancials && (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {pt === 'fixed_per_creative' && (
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1.5">Creatives</label>

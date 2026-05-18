@@ -2389,7 +2389,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               sortKey="clients"
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-muted-foreground mb-1.5 block">Issue Date</label>
               <input type="date" value={newForm.issue_date}
@@ -2508,7 +2508,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
           {/* Date inputs */}
           {genForm.mode === 'range' ? (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground mb-1.5 block">From</label>
                 <input type="date" value={genForm.date_from}
@@ -2652,7 +2652,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           {/* Mode */}
           <div>
             <label className="text-xs text-muted-foreground mb-1.5 block">Period Type</label>
-            <div className="grid grid-cols-2 gap-1.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
               {([
                 ['month', '📅 Month'],
                 ['year',  '📆 Year'],
@@ -2687,7 +2687,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             </div>
           )}
           {stmtForm.mode === 'range' && (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground mb-1.5 block">From</label>
                 <input type="date" value={stmtForm.date_from}

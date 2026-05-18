@@ -279,8 +279,9 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         </div>
 
         {/* Entries */}
-        <div className="bg-card border border-border rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="bg-card border border-border rounded-xl">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[600px]">
             <thead>
               <tr className="border-b border-border bg-secondary/50">
                 <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Date</th>
@@ -313,6 +314,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
 
@@ -342,7 +344,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 ))}
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1.5">Category *</label>
                   <Combobox
@@ -362,7 +364,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="flex flex-col sm:grid sm:grid-cols-3 gap-3">
                 <div className="col-span-2">
                   <label className="block text-xs font-medium text-muted-foreground mb-1.5">
                     Amount *
@@ -393,7 +395,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 </p>
               )}
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1.5">Date *</label>
                   <input type="date" value={form.entry_date} onChange={e => setForm(p => ({ ...p, entry_date: e.target.value }))} required className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none" />

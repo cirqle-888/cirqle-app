@@ -752,8 +752,9 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
             RECORDS TAB
         ════════════════════════════════════════════════════ */}
         {tab === 'Records' && (
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="bg-card border border-border rounded-xl">
+            <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[700px]">
               <thead>
                 <tr className="border-b border-border bg-secondary/50">
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Employee</th>
@@ -807,6 +808,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                 })}
               </tbody>
             </table>
+            </div>
           </div>
         )}
 
@@ -997,8 +999,9 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
             ADVANCES TAB
         ════════════════════════════════════════════════════ */}
         {tab === 'Advances' && (
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="bg-card border border-border rounded-xl">
+            <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[500px]">
               <thead>
                 <tr className="border-b border-border bg-secondary/50">
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Employee</th>
@@ -1025,6 +1028,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         )}
 
@@ -1032,8 +1036,9 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
             CREDITS TAB
         ════════════════════════════════════════════════════ */}
         {tab === 'Credits' && (
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="bg-card border border-border rounded-xl">
+            <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[500px]">
               <thead>
                 <tr className="border-b border-border bg-secondary/50">
                   <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Entity</th>
@@ -1060,6 +1065,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         )}
 
@@ -1343,7 +1349,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                   {empList.filter(e => e.is_active).map(e => <option key={e.id} value={e.id}>{e.cqid}{isUnlocked && e.name ? ` — ${e.name}` : ''}</option>)}
                 </select>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1.5">Month</label>
                   <select value={payForm.month} onChange={e => setPayForm(p => ({ ...p, month: parseInt(e.target.value) }))} className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none">
@@ -1376,7 +1382,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                   )}
                 </div>
               )}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1.5">Base Salary</label>
                   <input type="number" min="0" step="0.01" value={payForm.base_salary} onChange={e => setPayForm(p => ({ ...p, base_salary: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none" placeholder="0.00" />
@@ -1389,7 +1395,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                   <input type="number" min="0" step="0.01" value={payForm.commission_earned} onChange={e => setPayForm(p => ({ ...p, commission_earned: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none" placeholder="0.00" />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1.5">Advance Deductions</label>
                   <input type="number" min="0" step="0.01" value={payForm.advances_deducted} onChange={e => setPayForm(p => ({ ...p, advances_deducted: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none" placeholder="0.00" />
@@ -1430,7 +1436,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                   {empList.filter(e => e.is_active).map(e => <option key={e.id} value={e.id}>{e.cqid}{isUnlocked && e.name ? ` — ${e.name}` : ''}</option>)}
                 </select>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1.5">Amount</label>
                   <input type="number" min="0" step="0.01" value={advForm.amount} onChange={e => setAdvForm(p => ({ ...p, amount: e.target.value }))} required className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none" placeholder="0.00" />
@@ -1479,7 +1485,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                   {empList.map(e => <option key={e.id} value={e.id}>{e.cqid}{isUnlocked && e.name ? ` — ${e.name}` : ''}</option>)}
                 </select>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1.5">Amount</label>
                   <input type="number" min="0" step="0.01" value={creditForm.amount} onChange={e => setCreditForm(p => ({ ...p, amount: e.target.value }))} required className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none" placeholder="0.00" />

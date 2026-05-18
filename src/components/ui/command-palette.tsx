@@ -379,20 +379,25 @@ export function CommandPalette() {
 
 // ─── Trigger button (for sidebar / header) ────────────────────────────────────
 
-export function CommandPaletteTrigger({ className = '' }: { className?: string }) {
+export function CommandPaletteTrigger({ className = '', isCollapsed = false }: { className?: string, isCollapsed?: boolean }) {
   return (
     <button
       type="button"
       onClick={() => {
         window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true }))
       }}
-      className={`flex items-center gap-2 h-8 px-3 rounded-lg text-xs text-muted-foreground/60 bg-white/[0.03] border border-white/[0.06] hover:border-white/[0.12] hover:text-muted-foreground transition-all ${className}`}
+      className={`flex items-center h-8 ${isCollapsed ? 'justify-center w-8 px-0 gap-0' : 'gap-2 px-3'} rounded-lg text-xs text-muted-foreground/60 bg-white/[0.03] border border-white/[0.06] hover:border-white/[0.12] hover:text-muted-foreground transition-all ${className}`}
+      title={isCollapsed ? 'Search (⌘K)' : undefined}
     >
       <Search className="w-3 h-3 shrink-0" />
-      <span className="flex-1 text-left">Search…</span>
-      <kbd className="hidden sm:inline-flex items-center gap-0.5 font-mono text-[9px] text-muted-foreground/30">
-        <span>⌘</span><span>K</span>
-      </kbd>
+      {!isCollapsed && (
+        <div className="flex flex-1 items-center justify-between">
+          <span className="text-left whitespace-nowrap">Search…</span>
+          <kbd className="hidden sm:inline-flex items-center gap-0.5 font-mono text-[9px] text-muted-foreground/30">
+            <span>⌘</span><span>K</span>
+          </kbd>
+        </div>
+      )}
     </button>
   )
 }

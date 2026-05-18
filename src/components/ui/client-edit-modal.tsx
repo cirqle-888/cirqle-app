@@ -187,8 +187,8 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
           <div className="flex items-center justify-center py-16 text-muted-foreground text-sm">Loading…</div>
         ) : (
           <form onSubmit={handleSubmit} className="p-6 space-y-4">
-            <div className="grid grid-cols-3 gap-3">
-              <div className="col-span-2">
+            <div className="flex flex-col sm:grid sm:grid-cols-3 gap-3">
+              <div className="sm:col-span-2">
                 <Field label="Client Name" required>
                   <input value={form.name || ''} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} required className={inputCls} />
                 </Field>
@@ -198,7 +198,7 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
               </Field>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Field label="Email"><input type="email" value={form.email || ''} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} className={inputCls} /></Field>
               <Field label="Phone"><input value={form.phone || ''} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} className={inputCls} /></Field>
             </div>
@@ -207,7 +207,7 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
               <textarea value={form.address || ''} onChange={e => setForm(p => ({ ...p, address: e.target.value }))} rows={2} className={inputCls + ' resize-none'} />
             </Field>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Field label="Country"><input value={form.country || ''} onChange={e => setForm(p => ({ ...p, country: e.target.value }))} className={inputCls} placeholder="India" /></Field>
               <Field label="Default Currency">
                 <AppSelect value={form.default_currency || 'INR'} onChange={e => setForm(p => ({ ...p, default_currency: e.target.value }))}>
@@ -219,7 +219,7 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
             {/* Billing Cycle */}
             <div className="border-t border-border pt-4 space-y-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Invoice Billing Cycle</p>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field label="Billing Cycle">
                   <AppSelect value={form.billing_cycle || 'monthly'} onChange={e => setForm(p => ({ ...p, billing_cycle: e.target.value }))}>
                     <option value="monthly">📅 Monthly</option>
@@ -263,7 +263,7 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
                               </button>
                             )}
                           </div>
-                          <div className="grid grid-cols-3 gap-2">
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                             <div>
                               <label className="block text-xs text-muted-foreground mb-1">Price</label>
                               <input type="number" min="0" step="0.01" value={p.price} onChange={e => setPricings(prev => ({ ...prev, [svc.id]: { ...prev[svc.id], price: e.target.value } }))} className={inputCls} placeholder="0" />
