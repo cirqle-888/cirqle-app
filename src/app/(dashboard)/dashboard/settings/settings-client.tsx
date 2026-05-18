@@ -10,8 +10,9 @@ import type { Currency } from '@/types'
 import InfoTip from '@/components/ui/info-tip'
 import { usePrivacy, getStoredPin, setStoredPin, isForceLocked } from '@/contexts/privacy-context'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
-import { generateInviteToken, revokeInviteToken, archiveEmployee, restoreEmployee, adminResetPassword } from './employee-actions'
+import { generateInviteToken, revokeInviteToken, archiveEmployee, restoreEmployee, adminResetPassword, updateEmployeeAvatar } from './employee-actions'
 import { RecalcBillingModal } from './recalc-billing-modal'
+import { EmployeeAvatar, AvatarPicker } from '@/components/ui/employee-avatar'
 
 // ── Module-level search bar (stable reference — never defined inside a component) ──
 function SearchBar({ value, onChange, placeholder = 'Search…', className = '' }: {
@@ -252,6 +253,9 @@ export default function SettingsClient(props: Props) {
   const [inviteCopied, setInviteCopied] = useState(false)
   const [inviteBusy, setInviteBusy] = useState<string | null>(null)
   const [resetPwdModal, setResetPwdModal] = useState<{ cqid: string; tempPassword: string } | null>(null)
+  const [avatarModal, setAvatarModal] = useState<{ id: string; cqid: string; name: string | null; currentUrl: string | null } | null>(null)
+  const [avatarPickerValue, setAvatarPickerValue] = useState<string | null>(null)
+  const [avatarSaving, setAvatarSaving] = useState(false)
 
   async function handleGenerateInvite(emp: any) {
     setInviteBusy(emp.id)
@@ -1118,9 +1122,13 @@ export default function SettingsClient(props: Props) {
                 {filteredEmployees.map(emp => (
                   <div key={emp.id} className="bg-card border border-border rounded-xl px-5 py-4 flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-lg gradient-bg flex items-center justify-center shrink-0">
-                        <span className="text-white font-bold text-xs">{emp.cqid}</span>
-                      </div>
+                      <EmployeeAvatar
+                        avatarUrl={(emp as any).avatar_url}
+                        name={emp.name}
+                        cqid={emp.cqid}
+                        size={36}
+                        rounded="lg"
+                      />
                       <div>
                         <div className="flex items-center gap-2">
                           <p className="font-medium">{emp.cqid}</p>
@@ -1182,6 +1190,20 @@ export default function SettingsClient(props: Props) {
                         className="p-2 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-violet-400 disabled:opacity-30"
                       >
                         {copiedPortalId === emp.id ? <Check className="w-4 h-4 text-green-400" /> : <Link2 className="w-4 h-4" />}
+                      </button>
+
+                      {/* Change avatar */}
+                      <button
+                        onClick={() => {
+                          setAvatarModal({ id: emp.id, cqid: emp.cqid, name: emp.name, currentUrl: (emp as any).avatar_url ?? null })
+                          setAvatarPickerValue((emp as any).avatar_url ?? null)
+                        }}
+                        className="p-2 rounded-lg hover:bg-violet-500/15 text-muted-foreground hover:text-violet-400 transition-colors"
+                        title="Change avatar"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/>
+                        </svg>
                       </button>
 
                       <button onClick={() => openEmployeeForm(emp)} className="p-2 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground" title="Edit">
@@ -2695,7 +2717,7 @@ export default function SettingsClient(props: Props) {
 
       {/* ── Admin reset password result modal ── */}
       {resetPwdModal && (
-        <ModalOverlay onClose={() => setResetPwdModal(null)}>
+        <ModalOverlay onClose={() => { setResetPwdModal(null) }}>
           <div className="bg-card border border-border rounded-2xl p-6 max-w-md w-full">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 rounded-xl bg-blue-500/15 flex items-center justify-center">
@@ -2729,6 +2751,57 @@ export default function SettingsClient(props: Props) {
                 className="px-4 py-2 bg-secondary hover:bg-secondary/80 rounded-lg text-sm font-medium"
               >
                 Done
+              </button>
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* ── Avatar picker modal ──────────────────────────────────── */}
+      {avatarModal && (
+        <ModalOverlay onClose={() => setAvatarModal(null)}>
+          <div className="bg-card border border-border rounded-2xl p-6 max-w-sm w-full">
+            <div className="flex items-center gap-3 mb-5">
+              <EmployeeAvatar
+                avatarUrl={avatarPickerValue}
+                name={avatarModal.name}
+                cqid={avatarModal.cqid}
+                size={44}
+                rounded="xl"
+              />
+              <div>
+                <h3 className="font-semibold">Edit avatar — {avatarModal.cqid}</h3>
+                <p className="text-xs text-muted-foreground">Choose a preset or upload a photo</p>
+              </div>
+            </div>
+
+            <AvatarPicker
+              value={avatarPickerValue}
+              onChange={setAvatarPickerValue}
+              name={avatarModal.name}
+              cqid={avatarModal.cqid}
+            />
+
+            <div className="flex gap-2 mt-5">
+              <button
+                onClick={async () => {
+                  setAvatarSaving(true)
+                  const res = await updateEmployeeAvatar(avatarModal.id, avatarPickerValue)
+                  setAvatarSaving(false)
+                  if (!res.ok) { alert(res.error || 'Failed to save avatar'); return }
+                  // Refresh page data so avatars update
+                  window.location.reload()
+                }}
+                disabled={avatarSaving}
+                className="flex-1 gradient-bg text-white text-sm font-medium py-2 rounded-lg hover:opacity-90 disabled:opacity-50"
+              >
+                {avatarSaving ? 'Saving…' : 'Save avatar'}
+              </button>
+              <button
+                onClick={() => setAvatarModal(null)}
+                className="px-4 py-2 bg-secondary hover:bg-secondary/80 rounded-lg text-sm font-medium"
+              >
+                Cancel
               </button>
             </div>
           </div>

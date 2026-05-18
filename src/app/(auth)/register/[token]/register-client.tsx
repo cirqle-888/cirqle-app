@@ -2,7 +2,9 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { completeRegistration } from './actions'
+import { AvatarPicker } from '@/components/ui/employee-avatar'
 
 interface Props {
   token: string
@@ -26,6 +28,7 @@ export default function RegisterClient({ token, employee }: Props) {
   const [dob, setDob]                   = useState('')
   const [emerName, setEmerName]         = useState('')
   const [emerPhone, setEmerPhone]       = useState('')
+  const [avatarUrl, setAvatarUrl]       = useState<string | null>(null)
   const [error, setError]               = useState('')
   const [loading, setLoading]           = useState(false)
 
@@ -50,6 +53,7 @@ export default function RegisterClient({ token, employee }: Props) {
       dateOfBirth: dob,
       emergencyContactName: emerName,
       emergencyContactPhone: emerPhone,
+      avatarUrl,
     })
     setLoading(false)
     if (!res.ok) {
@@ -78,6 +82,7 @@ export default function RegisterClient({ token, employee }: Props) {
         </div>
 
         <div className="bg-card border border-border rounded-2xl p-6 shadow-xl">
+          {/* Employee badge */}
           <div className="flex items-center gap-3 pb-4 mb-4 border-b border-border">
             <div className="flex-1">
               <div className="text-xs text-muted-foreground">Your employee ID</div>
@@ -91,7 +96,17 @@ export default function RegisterClient({ token, employee }: Props) {
             )}
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-5">
+            {/* Avatar picker */}
+            <Section title="Profile photo" subtitle="Optional — you can change this later">
+              <AvatarPicker
+                value={avatarUrl}
+                onChange={setAvatarUrl}
+                name={name}
+                cqid={employee.cqid}
+              />
+            </Section>
+
             <Section title="Account">
               <Field label="Email address" required>
                 <input
@@ -186,6 +201,9 @@ export default function RegisterClient({ token, employee }: Props) {
             {error && (
               <div className="bg-destructive/10 border border-destructive/30 rounded-lg px-3 py-2 text-sm text-destructive">
                 {error}
+                {error.includes('already exists') && (
+                  <span> <Link href="/forgot-password" className="underline font-medium">Forgot your password?</Link></span>
+                )}
               </div>
             )}
 
@@ -196,6 +214,11 @@ export default function RegisterClient({ token, employee }: Props) {
             >
               {loading ? 'Creating account…' : 'Complete registration'}
             </button>
+
+            <p className="text-center text-xs text-muted-foreground">
+              Already have an account?{' '}
+              <Link href="/login" className="text-primary hover:underline">Sign in</Link>
+            </p>
           </form>
         </div>
 
@@ -210,12 +233,15 @@ export default function RegisterClient({ token, employee }: Props) {
 const inputCls =
   'w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-colors'
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
     <div>
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-        {title}
-      </h3>
+      <div className="flex items-baseline gap-2 mb-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          {title}
+        </h3>
+        {subtitle && <span className="text-[11px] text-muted-foreground/60">{subtitle}</span>}
+      </div>
       <div className="space-y-3">{children}</div>
     </div>
   )

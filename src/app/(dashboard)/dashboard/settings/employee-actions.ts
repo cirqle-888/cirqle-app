@@ -2,6 +2,7 @@
 
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
+import { headers } from 'next/headers'
 
 interface ActionResult<T = void> {
   ok: boolean
@@ -99,7 +100,12 @@ export async function generateInviteToken(employeeId: string): Promise<ActionRes
     .eq('id', employeeId)
   if (error) return { ok: false, error: error.message }
 
-  const origin = process.env.NEXT_PUBLIC_APP_URL || ''
+  // Derive origin from the actual incoming request so the link always points
+  // to the real domain (works on localhost AND production without config changes).
+  const hdrs = await headers()
+  const host  = hdrs.get('host') || ''
+  const proto = hdrs.get('x-forwarded-proto') || (host.startsWith('localhost') ? 'http' : 'https')
+  const origin = `${proto}://${host}`
   const url = `${origin}/register/${token}`
   return { ok: true, data: { token, url, expiresAt } }
 }
@@ -188,4 +194,33 @@ export async function adminResetPassword(employeeId: string): Promise<ActionResu
   })
   if (error) return { ok: false, error: error.message }
   return { ok: true, data: { tempPassword } }
+}
+
+/**
+ * Update an employee's avatar_url (preset ID or uploaded photo URL).
+ * Employees can update their own; admins can update anyone's.
+ */
+export async function updateEmployeeAvatar(employeeId: string, avatarUrl: string | null): Promise<ActionResult> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { ok: false, error: 'Not signed in.' }
+
+  const admin = createAdminClient()
+
+  // Check ownership (own record) or admin permission
+  const { data: self } = await admin.from('employees').select('id').eq('auth_id', user.id).maybeSingle()
+  const isSelf = self?.id === employeeId
+
+  if (!isSelf) {
+    const auth = await requirePermission('employees.edit')
+    if (!auth.ok) return { ok: false, error: auth.error }
+  }
+
+  const { error } = await admin
+    .from('employees')
+    .update({ avatar_url: avatarUrl })
+    .eq('id', employeeId)
+
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
 }

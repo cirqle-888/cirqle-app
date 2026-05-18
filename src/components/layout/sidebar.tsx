@@ -27,8 +27,10 @@ import {
   ChevronLeft,
   Sun,
   Moon,
+  KeyRound,
 } from 'lucide-react'
 import { CommandPaletteTrigger } from '@/components/ui/command-palette'
+import { EmployeeAvatar } from '@/components/ui/employee-avatar'
 
 // ─────────────────────────────────────────────────────
 // Nav definition — grouped by workflow (top = most used)
@@ -248,20 +250,58 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
         </button>
       </div>
 
-      {/* Sign out */}
-      <div className={`pb-3 transition-all duration-300 ${isCollapsed ? 'px-2 pt-1' : 'px-3 py-3'}`}>
-        <button
-          onClick={handleSignOut}
-          title={isCollapsed ? 'Sign out' : undefined}
-          className={`flex items-center rounded-lg text-sm font-medium text-muted-foreground hover:bg-sidebar-accent hover:text-destructive transition-all duration-300 ${
-            isCollapsed ? 'justify-center p-2.5' : 'gap-3 w-full px-3 py-2.5'
-          }`}
-        >
-          <LogOut className="w-4 h-4 shrink-0 transition-colors" />
-          <div className={`overflow-hidden transition-all duration-300 text-left ${isCollapsed ? 'w-0 opacity-0' : 'w-[100px] opacity-100'}`}>
-            <span className="whitespace-nowrap">Sign out</span>
+      {/* User profile card + sign out */}
+      <div className={`border-t border-sidebar-border pb-3 transition-all duration-300 ${isCollapsed ? 'px-2 pt-2' : 'px-3 pt-3'}`}>
+        {/* Collapsed: just sign-out icon */}
+        {isCollapsed ? (
+          <button
+            onClick={handleSignOut}
+            title="Sign out"
+            className="flex items-center justify-center p-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:bg-sidebar-accent hover:text-destructive transition-all duration-300 w-full"
+          >
+            <LogOut className="w-4 h-4 shrink-0" />
+          </button>
+        ) : (
+          <div className="space-y-1">
+            {/* User row */}
+            {employee && (
+              <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg">
+                <EmployeeAvatar
+                  avatarUrl={(employee as any).avatar_url}
+                  name={employee.name}
+                  cqid={employee.cqid}
+                  size={30}
+                  rounded="full"
+                  className="shrink-0"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-sidebar-foreground truncate">
+                    {employee.name || employee.cqid || 'You'}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground truncate">{employee.cqid}</div>
+                </div>
+              </div>
+            )}
+
+            {/* Change password */}
+            <a
+              href="/forgot-password"
+              className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-all duration-300"
+            >
+              <KeyRound className="w-4 h-4 shrink-0" />
+              <span className="truncate whitespace-nowrap">Change password</span>
+            </a>
+
+            {/* Sign out */}
+            <button
+              onClick={handleSignOut}
+              className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-sidebar-accent hover:text-destructive transition-all duration-300 w-full"
+            >
+              <LogOut className="w-4 h-4 shrink-0 transition-colors" />
+              <span className="whitespace-nowrap">Sign out</span>
+            </button>
           </div>
-        </button>
+        )}
       </div>
     </div>
   )

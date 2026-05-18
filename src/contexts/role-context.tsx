@@ -16,6 +16,7 @@ export interface Employee {
   role: Role
   cqid: string | null
   is_active: boolean
+  avatar_url?: string | null
 }
 
 interface RoleContextType {
@@ -102,7 +103,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
 
         const { data: emp, error } = await supabase
           .from('employees')
-          .select('id, auth_id, name, email, role, cqid, is_active')
+          .select('id, auth_id, name, email, role, cqid, is_active, avatar_url')
           .or(`auth_id.eq.${user.id},email.eq.${user.email}`)
           .maybeSingle()
 

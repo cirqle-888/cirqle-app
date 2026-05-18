@@ -12,6 +12,7 @@ export interface RegistrationInput {
   dateOfBirth: string
   emergencyContactName: string
   emergencyContactPhone: string
+  avatarUrl?: string | null
 }
 
 export interface RegistrationResult {
@@ -44,6 +45,13 @@ export async function completeRegistration(input: RegistrationInput): Promise<Re
     return { ok: false, error: 'Password must be at least 8 characters.' }
   }
 
+  // 2b. Check if this email already has an auth account
+  const { data: existingUsers } = await admin.auth.admin.listUsers()
+  const emailTaken = existingUsers?.users?.some(u => u.email?.toLowerCase() === input.email.toLowerCase())
+  if (emailTaken) {
+    return { ok: false, error: 'An account with this email already exists. Please sign in or use a different email address.' }
+  }
+
   // 3. Create auth user
   const { data: created, error: createErr } = await admin.auth.admin.createUser({
     email: input.email,
@@ -51,7 +59,11 @@ export async function completeRegistration(input: RegistrationInput): Promise<Re
     email_confirm: true,
   })
   if (createErr || !created.user) {
-    return { ok: false, error: createErr?.message || 'Could not create account.' }
+    const msg = createErr?.message || ''
+    if (msg.toLowerCase().includes('already') || msg.toLowerCase().includes('duplicate')) {
+      return { ok: false, error: 'An account with this email already exists. Please sign in instead.' }
+    }
+    return { ok: false, error: 'Could not create account. Please try again or contact your administrator.' }
   }
 
   // 4. Link auth user to employee, set fields, clear token
@@ -65,6 +77,7 @@ export async function completeRegistration(input: RegistrationInput): Promise<Re
       date_of_birth: input.dateOfBirth,
       emergency_contact_name: input.emergencyContactName || null,
       emergency_contact_phone: input.emergencyContactPhone || null,
+      avatar_url: input.avatarUrl || null,
       invite_token: null,
       invite_token_expires_at: null,
       registered_at: new Date().toISOString(),
