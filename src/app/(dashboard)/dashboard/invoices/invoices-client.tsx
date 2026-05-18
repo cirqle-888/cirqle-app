@@ -1603,7 +1603,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               <div
                 key={inv.id}
                 onClick={() => selectInvoice(inv.id)}
-                className={`px-3 py-3 cursor-pointer hover:bg-white/[0.02] transition-colors ${isSelected ? 'bg-violet-500/10 border-l-2 border-l-violet-500' : 'border-l-2 border-l-transparent'}`}
+                className={`px-3 py-3 cursor-pointer hover:bg-foreground/[0.02] transition-colors ${isSelected ? 'bg-violet-500/10 border-l-2 border-l-violet-500' : 'border-l-2 border-l-transparent'}`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
@@ -1698,7 +1698,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           </div>
           <div className="flex gap-1.5 items-start shrink-0">
             <button onClick={() => refreshInvoice(inv.id)} title="Refresh"
-              className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-white/5 rounded-lg transition-colors">
+              className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-foreground/5 rounded-lg transition-colors">
               <RefreshCw className="w-3.5 h-3.5" />
             </button>
             <button onClick={() => setPreviewInv(inv)} title="Preview invoice"
@@ -1706,7 +1706,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               <Eye className="w-3.5 h-3.5" />
             </button>
             <button onClick={() => printInvoice(inv)} title="Print"
-              className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-white/5 rounded-lg transition-colors">
+              className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-foreground/5 rounded-lg transition-colors">
               <Printer className="w-3.5 h-3.5" />
             </button>
             {/* Force-edit toggle — requires reason before unlocking */}
@@ -1729,7 +1729,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
 
           {/* Action pipeline */}
-          <div className="bg-white/[0.03] rounded-xl border border-border/40 p-3">
+          <div className="bg-foreground/[0.03] rounded-xl border border-border/40 p-3">
             <div className="flex items-center gap-1 mb-3">
               {STATUS_PIPELINE.map((s, idx) => {
                 const pos = STATUS_PIPELINE.indexOf(inv.status)
@@ -1739,7 +1739,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                   <div key={s} className="flex items-center flex-1 min-w-0">
                     <div className={`text-center flex-1 min-w-0 ${isCurrent ? 'text-violet-400' : isPast ? 'text-green-400' : 'text-muted-foreground/40'}`}>
                       <div className={`mx-auto w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold mb-0.5
-                        ${isCurrent ? 'bg-violet-500/20 border border-violet-500' : isPast ? 'bg-green-500/20 border border-green-500' : 'bg-white/5 border border-border/40'}`}>
+                        ${isCurrent ? 'bg-violet-500/20 border border-violet-500' : isPast ? 'bg-green-500/20 border border-green-500' : 'bg-foreground/5 border border-border/40'}`}>
                         {isPast ? '✓' : idx + 1}
                       </div>
                       <div className="text-[9px] truncate">{getStatusLabel(s)}</div>
@@ -1776,7 +1776,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               {inv.status === 'draft' && (
                 <button
                   onClick={() => setPanelMode('pay')}
-                  className="flex-1 min-w-[120px] py-1.5 px-3 bg-white/[0.06] hover:bg-white/[0.1] text-foreground text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 transition-colors border border-border/40">
+                  className="flex-1 min-w-[120px] py-1.5 px-3 bg-foreground/[0.06] hover:bg-foreground/[0.1] text-foreground text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 transition-colors border border-border/40">
                   <CreditCard className="w-3.5 h-3.5" />Quick Pay
                 </button>
               )}
@@ -1801,7 +1801,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           </div>
 
           {/* Amounts */}
-          <div className="bg-white/[0.03] rounded-xl border border-border/40 p-3 space-y-2">
+          <div className="bg-foreground/[0.03] rounded-xl border border-border/40 p-3 space-y-2">
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Subtotal</span>
               <span className="font-medium">{fmt(inv.subtotal || inv.total_amount, inv.currency)}</span>
@@ -1920,12 +1920,12 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             </div>
             <div className="space-y-1">
               {(inv.items || []).length === 0 && (
-                <div className="text-xs text-muted-foreground text-center py-4 bg-white/[0.02] rounded-lg border border-dashed border-border/40">
+                <div className="text-xs text-muted-foreground text-center py-4 bg-foreground/[0.02] rounded-lg border border-dashed border-border/40">
                   No items yet — tasks marked "done" auto-appear here
                 </div>
               )}
               {(inv.items || []).sort((a, b) => a.display_order - b.display_order).map(item => (
-                <div key={item.id} className="flex items-start gap-2 p-2 bg-white/[0.02] rounded-lg border border-border/30 hover:border-border/60 transition-colors group">
+                <div key={item.id} className="flex items-start gap-2 p-2 bg-foreground/[0.02] rounded-lg border border-border/30 hover:border-border/60 transition-colors group">
                   <div className="flex-1 min-w-0">
                     {editable ? (
                       <input
@@ -2001,7 +2001,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
           {/* ── Discount Calculator ─────────────────────────────────────────────── */}
           {(editable || inv.discount_amount > 0) && (
-            <div className="bg-white/[0.03] rounded-xl border border-border/40 overflow-hidden">
+            <div className="bg-foreground/[0.03] rounded-xl border border-border/40 overflow-hidden">
               <button
                 onClick={() => {
                   if (!showDiscount) { setShowDiscount(true); loadDiscountCalc(inv.client_id, inv.id) }
@@ -2026,17 +2026,17 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                     <>
                       {/* Client stats */}
                       <div className="grid grid-cols-3 gap-2 pt-2">
-                        <div className="bg-white/[0.03] rounded-lg p-2 text-center">
+                        <div className="bg-foreground/[0.03] rounded-lg p-2 text-center">
                           <div className="text-[10px] text-muted-foreground">Total Billed</div>
                           <div className="text-xs font-semibold">{fmt(discountCalc.totalBilled)}</div>
                         </div>
-                        <div className="bg-white/[0.03] rounded-lg p-2 text-center">
+                        <div className="bg-foreground/[0.03] rounded-lg p-2 text-center">
                           <div className="text-[10px] text-muted-foreground">Payment Rate</div>
                           <div className={`text-xs font-semibold ${discountCalc.paymentRate >= 0.95 ? 'text-green-400' : discountCalc.paymentRate >= 0.8 ? 'text-amber-400' : 'text-red-400'}`}>
                             {(discountCalc.paymentRate * 100).toFixed(0)}%
                           </div>
                         </div>
-                        <div className="bg-white/[0.03] rounded-lg p-2 text-center">
+                        <div className="bg-foreground/[0.03] rounded-lg p-2 text-center">
                           <div className="text-[10px] text-muted-foreground">Invoices</div>
                           <div className="text-xs font-semibold">{discountCalc.invoiceCount}</div>
                         </div>
@@ -2113,7 +2113,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                           <div className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider mb-1.5">Discount History</div>
                           <div className="space-y-1 max-h-28 overflow-y-auto">
                             {discountCalc.discHistory.slice(0, 5).map((d: any, i: number) => (
-                              <div key={i} className="flex items-center justify-between text-[10px] p-1.5 bg-white/[0.02] rounded border border-border/20">
+                              <div key={i} className="flex items-center justify-between text-[10px] p-1.5 bg-foreground/[0.02] rounded border border-border/20">
                                 <span className="text-muted-foreground truncate flex-1 mr-2">{d.reason}</span>
                                 <span className="text-orange-400 font-semibold shrink-0">{fmt(d.discount_amount || 0)}</span>
                               </div>
@@ -2129,7 +2129,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           )}
 
           {/* ── Change Log ──────────────────────────────────────────────────────── */}
-          <div className="bg-white/[0.03] rounded-xl border border-border/40 overflow-hidden">
+          <div className="bg-foreground/[0.03] rounded-xl border border-border/40 overflow-hidden">
             <button
               onClick={() => {
                 if (!showChangeLogs) loadChangeLogs(inv.id)
@@ -2150,7 +2150,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 ) : (
                   <div className="space-y-1 pt-2 max-h-52 overflow-y-auto">
                     {changeLogs.map((log: any) => (
-                      <div key={log.id} className="p-2 bg-white/[0.02] rounded-lg border border-border/20 text-[10px]">
+                      <div key={log.id} className="p-2 bg-foreground/[0.02] rounded-lg border border-border/20 text-[10px]">
                         <div className="flex items-center justify-between mb-0.5">
                           <span className="text-blue-400 font-semibold capitalize">{log.field_name.replace(/_/g, ' ')}</span>
                           <span className="text-muted-foreground">
@@ -2196,7 +2196,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
           {/* Notes */}
           {inv.notes && (
-            <div className="text-xs text-muted-foreground bg-white/[0.02] rounded-lg p-3 border border-border/30">
+            <div className="text-xs text-muted-foreground bg-foreground/[0.02] rounded-lg p-3 border border-border/30">
               {inv.notes}
             </div>
           )}
@@ -2217,7 +2217,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             <h3 className="font-semibold text-sm">Record Payment</h3>
             <div className="text-xs text-muted-foreground">{inv.invoice_number} · Balance {fmt(balance, inv.currency)}</div>
           </div>
-          <button onClick={() => setPanelMode('detail')} className="p-1.5 hover:bg-white/5 rounded-lg text-muted-foreground hover:text-foreground">
+          <button onClick={() => setPanelMode('detail')} className="p-1.5 hover:bg-foreground/5 rounded-lg text-muted-foreground hover:text-foreground">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -2312,7 +2312,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           })()}
 
           {/* Advance payment toggle */}
-          <div className={`flex items-start gap-3 p-3 rounded-xl border transition-colors cursor-pointer ${isAdvancePayment ? 'bg-amber-500/10 border-amber-500/30' : 'bg-white/[0.02] border-border/40 hover:border-border/60'}`}
+          <div className={`flex items-start gap-3 p-3 rounded-xl border transition-colors cursor-pointer ${isAdvancePayment ? 'bg-amber-500/10 border-amber-500/30' : 'bg-foreground/[0.02] border-border/40 hover:border-border/60'}`}
             onClick={() => setIsAdvancePayment(p => !p)}>
             <div className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${isAdvancePayment ? 'bg-amber-500 border-amber-500' : 'border-border/60'}`}>
               {isAdvancePayment && <span className="text-[10px] text-white font-bold">✓</span>}
@@ -2367,7 +2367,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             <h3 className="font-semibold text-sm">Manual Invoice</h3>
             <p className="text-[11px] text-muted-foreground">For one-off / override invoices. Tasks auto-generate drafts.</p>
           </div>
-          <button onClick={() => setPanelMode('detail')} className="p-1.5 hover:bg-white/5 rounded-lg text-muted-foreground hover:text-foreground">
+          <button onClick={() => setPanelMode('detail')} className="p-1.5 hover:bg-foreground/5 rounded-lg text-muted-foreground hover:text-foreground">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -2475,7 +2475,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             </h3>
             <p className="text-[11px] text-muted-foreground">Pick a client + period → fetch done tasks → create invoice</p>
           </div>
-          <button onClick={() => { setPanelMode('detail'); setGenTasks([]) }} className="p-1.5 hover:bg-white/5 rounded-lg text-muted-foreground hover:text-foreground">
+          <button onClick={() => { setPanelMode('detail'); setGenTasks([]) }} className="p-1.5 hover:bg-foreground/5 rounded-lg text-muted-foreground hover:text-foreground">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -2536,7 +2536,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
           {/* Fetch button */}
           <button onClick={fetchGenTasks} disabled={genLoading || !genForm.client_id}
-            className="w-full py-2 bg-white/[0.06] hover:bg-white/[0.1] border border-border/40 text-sm font-medium rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50">
+            className="w-full py-2 bg-foreground/[0.06] hover:bg-foreground/[0.1] border border-border/40 text-sm font-medium rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50">
             <Search className="w-3.5 h-3.5" />
             {genLoading ? 'Fetching…' : 'Fetch Done Tasks'}
           </button>
@@ -2561,7 +2561,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                     const hasConflict = activeConflict.length > 0
                     return (
                   <label key={task.id} className={`flex items-start gap-2 p-2 rounded-lg border cursor-pointer transition-colors
-                    ${hasConflict ? 'bg-amber-500/5 border-amber-500/30' : genSelectedIds.has(task.id) ? 'bg-violet-500/10 border-violet-500/30' : 'bg-white/[0.02] border-border/30 hover:border-border/60'}`}>
+                    ${hasConflict ? 'bg-amber-500/5 border-amber-500/30' : genSelectedIds.has(task.id) ? 'bg-violet-500/10 border-violet-500/30' : 'bg-foreground/[0.02] border-border/30 hover:border-border/60'}`}>
                     <input type="checkbox" checked={genSelectedIds.has(task.id)}
                       onChange={e => setGenSelectedIds(prev => {
                         const n = new Set(prev)
@@ -2609,7 +2609,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           )}
 
           {genTasks.length === 0 && !genLoading && genForm.client_id && (
-            <div className="text-xs text-muted-foreground text-center py-6 bg-white/[0.02] rounded-xl border border-dashed border-border/40">
+            <div className="text-xs text-muted-foreground text-center py-6 bg-foreground/[0.02] rounded-xl border border-dashed border-border/40">
               Click "Fetch Done Tasks" to see available tasks
             </div>
           )}
@@ -2631,7 +2631,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             </h3>
             <p className="text-[11px] text-muted-foreground">Print account statements by month, year, range, or specific day</p>
           </div>
-          <button onClick={() => setPanelMode('detail')} className="p-1.5 hover:bg-white/5 rounded-lg text-muted-foreground hover:text-foreground">
+          <button onClick={() => setPanelMode('detail')} className="p-1.5 hover:bg-foreground/5 rounded-lg text-muted-foreground hover:text-foreground">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -2751,7 +2751,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 </div>
               </div>
             ) : (
-              <div className="text-xs text-muted-foreground text-center py-3 bg-white/[0.02] rounded-xl border border-dashed border-border/40">
+              <div className="text-xs text-muted-foreground text-center py-3 bg-foreground/[0.02] rounded-xl border border-dashed border-border/40">
                 No invoices in selected period
               </div>
             )
@@ -2863,7 +2863,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             </h3>
             <p className="text-[11px] text-muted-foreground">Discounts · Bad debts · Overdue aging · Advances</p>
           </div>
-          <button onClick={() => setPanelMode('detail')} className="p-1.5 hover:bg-white/5 rounded-lg text-muted-foreground hover:text-foreground">
+          <button onClick={() => setPanelMode('detail')} className="p-1.5 hover:bg-foreground/5 rounded-lg text-muted-foreground hover:text-foreground">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -2880,7 +2880,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               className={`flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-medium rounded-t-lg border border-b-0 transition-colors ${analyticsTab === t.id ? t.active : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
               {t.label}
               {t.count > 0 && (
-                <span className={`text-[9px] px-1 py-0.5 rounded-full ${analyticsTab === t.id ? 'bg-white/20' : 'bg-white/[0.06]'}`}>{t.count}</span>
+                <span className={`text-[9px] px-1 py-0.5 rounded-full ${analyticsTab === t.id ? 'bg-foreground/20' : 'bg-foreground/[0.06]'}`}>{t.count}</span>
               )}
             </button>
           ))}
@@ -2896,11 +2896,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                   <div className="text-[10px] text-orange-400/70 mb-0.5">Total Given</div>
                   <div className="text-sm font-bold text-orange-300">{fmt(totalDiscGiven)}</div>
                 </div>
-                <div className="bg-white/[0.03] border border-border/40 rounded-xl p-3 text-center">
+                <div className="bg-foreground/[0.03] border border-border/40 rounded-xl p-3 text-center">
                   <div className="text-[10px] text-muted-foreground mb-0.5">Entries</div>
                   <div className="text-sm font-bold">{discRows.length}</div>
                 </div>
-                <div className="bg-white/[0.03] border border-border/40 rounded-xl p-3 text-center">
+                <div className="bg-foreground/[0.03] border border-border/40 rounded-xl p-3 text-center">
                   <div className="text-[10px] text-muted-foreground mb-0.5">Avg %</div>
                   <div className="text-sm font-bold">{avgDiscPct.toFixed(1)}%</div>
                 </div>
@@ -2932,7 +2932,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                     const pct    = totalDiscGiven > 0 ? (cTotal / totalDiscGiven) * 100 : 0
                     return (
                       <div key={c.id} onClick={() => setDiscFilterClient(c.id)}
-                        className="p-2.5 bg-white/[0.02] rounded-lg border border-border/30 hover:border-orange-500/30 cursor-pointer transition-colors">
+                        className="p-2.5 bg-foreground/[0.02] rounded-lg border border-border/30 hover:border-orange-500/30 cursor-pointer transition-colors">
                         <div className="flex items-center justify-between mb-1.5">
                           <div>
                             <div className="text-xs font-medium">{c.name}</div>
@@ -2940,7 +2940,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                           </div>
                           <div className="text-sm font-semibold text-orange-400">{fmt(cTotal)}</div>
                         </div>
-                        <div className="h-1 bg-white/[0.06] rounded-full overflow-hidden">
+                        <div className="h-1 bg-foreground/[0.06] rounded-full overflow-hidden">
                           <div className="h-full bg-orange-400/60 rounded-full" style={{ width: `${pct}%` }} />
                         </div>
                       </div>
@@ -2962,11 +2962,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 {discAnalyticsLoading ? (
                   <div className="py-8 text-center text-xs text-muted-foreground">Loading…</div>
                 ) : discRows.length === 0 ? (
-                  <div className="py-8 text-center text-xs text-muted-foreground bg-white/[0.02] rounded-xl border border-dashed border-border/40">No discounts recorded yet</div>
+                  <div className="py-8 text-center text-xs text-muted-foreground bg-foreground/[0.02] rounded-xl border border-dashed border-border/40">No discounts recorded yet</div>
                 ) : (
                   <div className="space-y-2">
                     {discRows.map((d: any, i: number) => (
-                      <div key={d.id || i} className="p-3 bg-white/[0.02] rounded-xl border border-border/30 hover:border-orange-500/20 transition-colors">
+                      <div key={d.id || i} className="p-3 bg-foreground/[0.02] rounded-xl border border-border/30 hover:border-orange-500/20 transition-colors">
                         <div className="flex items-start justify-between gap-2 mb-1">
                           <div className="min-w-0">
                             <div className="text-xs font-medium">{d.client?.name || '—'}</div>
@@ -2980,7 +2980,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                           </div>
                         </div>
                         {d.reason && d.reason !== 'No reason provided' && (
-                          <div className="text-[10px] text-muted-foreground italic bg-white/[0.02] px-2 py-1 rounded">{d.reason}</div>
+                          <div className="text-[10px] text-muted-foreground italic bg-foreground/[0.02] px-2 py-1 rounded">{d.reason}</div>
                         )}
                         <div className="text-[10px] text-muted-foreground/50 mt-1">
                           {new Date(d.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })}
@@ -3006,14 +3006,14 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                   <div className="text-[10px] text-red-400/70 mb-0.5">Unrecovered</div>
                   <div className="text-sm font-bold text-red-300">{fmt(badDebtUnpaid)}</div>
                 </div>
-                <div className="bg-white/[0.03] border border-border/40 rounded-xl p-3 text-center">
+                <div className="bg-foreground/[0.03] border border-border/40 rounded-xl p-3 text-center">
                   <div className="text-[10px] text-muted-foreground mb-0.5">Invoices</div>
                   <div className="text-sm font-bold">{badDebtInvoices.length}</div>
                 </div>
               </div>
 
               {badDebtInvoices.length === 0 ? (
-                <div className="py-10 text-center text-xs text-muted-foreground bg-white/[0.02] rounded-xl border border-dashed border-border/40">
+                <div className="py-10 text-center text-xs text-muted-foreground bg-foreground/[0.02] rounded-xl border border-dashed border-border/40">
                   <BadgeCheck className="w-6 h-6 mx-auto mb-2 opacity-30" />
                   No bad debt invoices — great financial health!
                 </div>
@@ -3059,13 +3059,13 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
                   {/* Recovery rate */}
                   {totalBadDebt > 0 && (
-                    <div className="bg-white/[0.03] rounded-xl border border-border/40 p-3">
+                    <div className="bg-foreground/[0.03] rounded-xl border border-border/40 p-3">
                       <div className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider mb-2">Recovery Rate</div>
                       <div className="flex items-center justify-between text-sm mb-1.5">
                         <span className="text-green-400">Recovered</span>
                         <span className="font-semibold text-green-400">{fmt(totalBadDebt - badDebtUnpaid)}</span>
                       </div>
-                      <div className="h-2 bg-white/[0.06] rounded-full overflow-hidden">
+                      <div className="h-2 bg-foreground/[0.06] rounded-full overflow-hidden">
                         <div className="h-full bg-green-500/60 rounded-full transition-all"
                           style={{ width: `${totalBadDebt > 0 ? ((totalBadDebt - badDebtUnpaid) / totalBadDebt) * 100 : 0}%` }} />
                       </div>
@@ -3088,7 +3088,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 <button
                   onClick={() => loadJobLosses(true)}
                   disabled={jobLossesLoading}
-                  className="flex items-center gap-1 px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground bg-white/[0.04] hover:bg-white/[0.08] border border-border/40 rounded-lg transition-colors disabled:opacity-50">
+                  className="flex items-center gap-1 px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground bg-foreground/[0.04] hover:bg-foreground/[0.08] border border-border/40 rounded-lg transition-colors disabled:opacity-50">
                   <RefreshCw size={10} className={jobLossesLoading ? 'animate-spin' : ''} />
                   {jobLossesLoading ? 'Loading…' : 'Refresh'}
                 </button>
@@ -3099,11 +3099,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                   <div className="text-[10px] text-rose-400/70 mb-0.5">Total Loss</div>
                   <div className="text-sm font-bold text-rose-300">{fmt(totalLoss)}</div>
                 </div>
-                <div className="bg-white/[0.03] border border-border/40 rounded-xl p-3 text-center">
+                <div className="bg-foreground/[0.03] border border-border/40 rounded-xl p-3 text-center">
                   <div className="text-[10px] text-muted-foreground mb-0.5">Jobs</div>
                   <div className="text-sm font-bold">{lossFiltered.length}</div>
                 </div>
-                <div className="bg-white/[0.03] border border-border/40 rounded-xl p-3 text-center">
+                <div className="bg-foreground/[0.03] border border-border/40 rounded-xl p-3 text-center">
                   <div className="text-[10px] text-muted-foreground mb-0.5">Clients</div>
                   <div className="text-sm font-bold">{new Set(lossFiltered.map((j: any) => j.client?.id)).size}</div>
                 </div>
@@ -3121,7 +3121,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 return (
                   <div className="grid grid-cols-3 gap-1.5">
                     {Object.entries(byType).map(([type, data]: any) => (
-                      <div key={type} className="bg-white/[0.02] border border-border/30 rounded-lg p-2 text-center">
+                      <div key={type} className="bg-foreground/[0.02] border border-border/30 rounded-lg p-2 text-center">
                         <div className={`text-[10px] font-medium ${typeColors[type]}`}>{typeLabels[type]}</div>
                         <div className="text-xs font-bold mt-0.5">{fmt(data.total)}</div>
                         <div className="text-[9px] text-muted-foreground">{data.count} job{data.count !== 1 ? 's' : ''}</div>
@@ -3151,7 +3151,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               {jobLossesLoading ? (
                 <div className="py-8 text-center text-xs text-muted-foreground">Loading job losses…</div>
               ) : lossFiltered.length === 0 ? (
-                <div className="py-10 text-center text-xs text-muted-foreground bg-white/[0.02] rounded-xl border border-dashed border-border/40">
+                <div className="py-10 text-center text-xs text-muted-foreground bg-foreground/[0.02] rounded-xl border border-dashed border-border/40">
                   No job losses recorded yet.<br/>
                   <span className="text-[10px] opacity-60">Losses are recorded when you cancel a task and mark employee pay as honored.</span>
                 </div>
@@ -3190,12 +3190,12 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                         </div>
                         {/* Completion bar */}
                         {(job.completion_pct || 0) > 0 && (
-                          <div className="mt-2 h-1 bg-white/[0.06] rounded-full overflow-hidden">
+                          <div className="mt-2 h-1 bg-foreground/[0.06] rounded-full overflow-hidden">
                             <div className="h-full bg-rose-500/50 rounded-full" style={{ width: `${job.completion_pct}%` }} />
                           </div>
                         )}
                         {job.cancellation_notes && (
-                          <div className="text-[10px] text-muted-foreground italic mt-1.5 bg-white/[0.02] px-2 py-1 rounded">
+                          <div className="text-[10px] text-muted-foreground italic mt-1.5 bg-foreground/[0.02] px-2 py-1 rounded">
                             {job.cancellation_notes}
                           </div>
                         )}
@@ -3213,7 +3213,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                             {expandedLossId === job.id && (
                               <div className="mt-1.5 space-y-1 border-t border-rose-500/15 pt-1.5">
                                 {(job.contributions || []).map((c: any, ci: number) => (
-                                  <div key={ci} className="flex items-center justify-between text-[10px] px-2 py-1 bg-white/[0.03] rounded">
+                                  <div key={ci} className="flex items-center justify-between text-[10px] px-2 py-1 bg-foreground/[0.03] rounded">
                                     <span className="text-foreground font-medium">
                                       {c.employee?.name || '—'}
                                       {c.employee?.cqid && <span className="text-muted-foreground ml-1">#{c.employee.cqid}</span>}
@@ -3256,11 +3256,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                   <div className="text-[10px] text-amber-400/70 mb-0.5">Total Overdue</div>
                   <div className="text-sm font-bold text-amber-300">{fmt(totalOverdue)}</div>
                 </div>
-                <div className="bg-white/[0.03] border border-border/40 rounded-xl p-3 text-center">
+                <div className="bg-foreground/[0.03] border border-border/40 rounded-xl p-3 text-center">
                   <div className="text-[10px] text-muted-foreground mb-0.5">Invoices</div>
                   <div className="text-sm font-bold">{overdueFiltered.length}</div>
                 </div>
-                <div className="bg-white/[0.03] border border-border/40 rounded-xl p-3 text-center">
+                <div className="bg-foreground/[0.03] border border-border/40 rounded-xl p-3 text-center">
                   <div className="text-[10px] text-muted-foreground mb-0.5">Clients</div>
                   <div className="text-sm font-bold">{overdueByClient.length}</div>
                 </div>
@@ -3281,7 +3281,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               />
 
               {overdueFiltered.length === 0 ? (
-                <div className="py-10 text-center text-xs text-muted-foreground bg-white/[0.02] rounded-xl border border-dashed border-border/40">
+                <div className="py-10 text-center text-xs text-muted-foreground bg-foreground/[0.02] rounded-xl border border-dashed border-border/40">
                   <CheckCircle className="w-6 h-6 mx-auto mb-2 opacity-30" />
                   No overdue invoices!
                 </div>
@@ -3315,7 +3315,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                         const oldest = c.oldest ? Math.floor((today.getTime() - new Date(c.oldest + 'T00:00:00').getTime()) / 86400000) : 0
                         const bucket = c.oldest ? ageBucket(c.oldest) : null
                         return (
-                          <div key={i} className="p-2.5 bg-white/[0.02] rounded-lg border border-border/30">
+                          <div key={i} className="p-2.5 bg-foreground/[0.02] rounded-lg border border-border/30">
                             <div className="flex items-center justify-between mb-1.5">
                               <div>
                                 <div className="text-xs font-medium">{c.name}</div>
@@ -3333,7 +3333,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                                 const bkt = inv.due_date ? ageBucket(inv.due_date) : null
                                 return (
                                   <div key={inv.id} onClick={() => { selectInvoice(inv.id); setPanelMode('detail') }}
-                                    className="flex items-center justify-between text-[10px] px-2 py-1 bg-white/[0.02] rounded cursor-pointer hover:bg-amber-500/10 transition-colors">
+                                    className="flex items-center justify-between text-[10px] px-2 py-1 bg-foreground/[0.02] rounded cursor-pointer hover:bg-amber-500/10 transition-colors">
                                     <span className="font-mono text-muted-foreground">{inv.invoice_number}</span>
                                     <span className={bkt?.color}>{daysOver}d overdue</span>
                                     <span className="text-amber-400 font-semibold">
@@ -3382,11 +3382,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                   <div className="text-[10px] text-blue-400/70 mb-0.5">Total Advances</div>
                   <div className="text-sm font-bold text-blue-300">{fmt(totalAdvance)}</div>
                 </div>
-                <div className="bg-white/[0.03] border border-border/40 rounded-xl p-3 text-center">
+                <div className="bg-foreground/[0.03] border border-border/40 rounded-xl p-3 text-center">
                   <div className="text-[10px] text-muted-foreground mb-0.5">Payments</div>
                   <div className="text-sm font-bold">{advFiltered.length}</div>
                 </div>
-                <div className="bg-white/[0.03] border border-border/40 rounded-xl p-3 text-center">
+                <div className="bg-foreground/[0.03] border border-border/40 rounded-xl p-3 text-center">
                   <div className="text-[10px] text-muted-foreground mb-0.5">Clients</div>
                   <div className="text-sm font-bold">{new Set(advFiltered.map((p: any) => p.invoice?.client_id)).size}</div>
                 </div>
@@ -3395,7 +3395,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               {advanceLoading ? (
                 <div className="py-8 text-center text-xs text-muted-foreground">Loading advance payments…</div>
               ) : advFiltered.length === 0 ? (
-                <div className="py-10 text-center text-xs text-muted-foreground bg-white/[0.02] rounded-xl border border-dashed border-border/40">
+                <div className="py-10 text-center text-xs text-muted-foreground bg-foreground/[0.02] rounded-xl border border-dashed border-border/40">
                   No advance payments recorded yet
                 </div>
               ) : (
@@ -3445,12 +3445,12 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4"
           onMouseDown={e => { if (e.target === e.currentTarget) setConfirmModal(null) }}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-          <div className="relative bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl w-full max-w-sm p-5 animate-in fade-in zoom-in-95 duration-150">
+          <div className="relative bg-secondary border border-foreground/15 rounded-2xl shadow-2xl w-full max-w-sm p-5 animate-in fade-in zoom-in-95 duration-150">
             <h3 className="font-semibold text-sm mb-2">{confirmModal.title}</h3>
             <p className="text-sm text-muted-foreground mb-5 leading-relaxed">{confirmModal.body}</p>
             <div className="flex gap-2">
               <button onClick={() => setConfirmModal(null)}
-                className="flex-1 py-2.5 rounded-xl border border-white/10 text-sm font-medium text-muted-foreground hover:text-foreground hover:border-white/20 transition-colors">
+                className="flex-1 py-2.5 rounded-xl border border-foreground/15 text-sm font-medium text-muted-foreground hover:text-foreground hover:border-foreground/20 transition-colors">
                 Cancel
               </button>
               <button onClick={confirmModal.onConfirm}
@@ -3468,18 +3468,18 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
       {/* ── Stats bar ── */}
       <div className="border-b border-border/40 px-4 py-2.5 grid grid-cols-2 sm:grid-cols-6 gap-3">
-        <div className="bg-white/[0.03] rounded-xl p-3 border border-border/30">
+        <div className="bg-foreground/[0.03] rounded-xl p-3 border border-border/30">
           <div className="text-[10px] text-muted-foreground mb-0.5">Outstanding</div>
           <div className="text-sm font-bold text-foreground">{fmt(stats.outstanding)}</div>
         </div>
-        <div className={`bg-white/[0.03] rounded-xl p-3 border ${stats.overdueCount > 0 ? 'border-red-500/30' : 'border-border/30'}`}>
+        <div className={`bg-foreground/[0.03] rounded-xl p-3 border ${stats.overdueCount > 0 ? 'border-red-500/30' : 'border-border/30'}`}>
           <div className="text-[10px] text-muted-foreground mb-0.5">Overdue</div>
           <div className={`text-sm font-bold ${stats.overdueCount > 0 ? 'text-red-400' : 'text-foreground'}`}>
             {fmt(stats.overdueAmt)}
             {stats.overdueCount > 0 && <span className="ml-1 text-[10px]">({stats.overdueCount})</span>}
           </div>
         </div>
-        <div className={`bg-white/[0.03] rounded-xl p-3 border ${stats.draftCount > 0 ? 'border-amber-500/30' : 'border-border/30'}`}>
+        <div className={`bg-foreground/[0.03] rounded-xl p-3 border ${stats.draftCount > 0 ? 'border-amber-500/30' : 'border-border/30'}`}>
           <div className="text-[10px] text-muted-foreground mb-0.5 flex items-center gap-1">
             <Zap className="w-2.5 h-2.5" />Auto Drafts
           </div>
@@ -3573,10 +3573,10 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       {/* ── Invoice Preview Modal ───────────────────────────────────────────── */}
       {previewInv && (
         <ModalOverlay onClose={() => setPreviewInv(null)} zIndex="z-[300]">
-          <div className="flex flex-col bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+          <div className="flex flex-col bg-secondary border border-foreground/15 rounded-2xl shadow-2xl overflow-hidden"
             style={{ width: 'min(860px, 96vw)', height: 'min(92vh, 900px)' }}>
             {/* Modal header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-foreground/15 shrink-0">
               <div className="flex items-center gap-2.5">
                 <Eye className="w-4 h-4 text-violet-400" />
                 <div>
@@ -3586,11 +3586,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={() => printInvoice(previewInv)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.06] hover:bg-white/10 text-xs font-medium text-foreground transition-colors border border-white/10">
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-foreground/[0.06] hover:bg-foreground/10 text-xs font-medium text-foreground transition-colors border border-foreground/15">
                   <Printer className="w-3.5 h-3.5" />Print / Download
                 </button>
                 <button onClick={() => setPreviewInv(null)}
-                  className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-white/5 rounded-lg transition-colors">
+                  className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-foreground/5 rounded-lg transition-colors">
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -3644,7 +3644,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             <div className="flex gap-3">
               <button
                 onClick={() => { setEditReasonModal(null); setEditReasonInput('') }}
-                className="flex-1 py-2 border border-border/40 text-sm text-muted-foreground rounded-xl hover:bg-white/5 transition-colors">
+                className="flex-1 py-2 border border-border/40 text-sm text-muted-foreground rounded-xl hover:bg-foreground/5 transition-colors">
                 Cancel
               </button>
               <button

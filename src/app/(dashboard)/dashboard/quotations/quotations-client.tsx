@@ -56,7 +56,7 @@ const CURRENCIES: Currency[] = ['INR', 'AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
 const QUO_STATUSES = ['draft', 'sent', 'approved', 'rejected', 'converted']
 
 const INPUT_CLS =
-  'w-full bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-colors'
+  'w-full bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-colors'
 
 // ─── Status workflow steps ────────────────────────────────────────────────────
 
@@ -93,7 +93,7 @@ function StatusWorkflow({ status }: { status: string }) {
                     ? `${STEP_COLOR[step]} border-transparent ring-2 ring-offset-1 ring-offset-card ring-current scale-110`
                     : isPast
                     ? `${STEP_COLOR[step]} border-transparent opacity-70`
-                    : 'bg-transparent border-white/20'
+                    : 'bg-transparent border-foreground/20'
                 }`}
               />
               <span
@@ -107,7 +107,7 @@ function StatusWorkflow({ status }: { status: string }) {
             {i < steps.length - 1 && (
               <div
                 className={`h-px w-6 mb-3 transition-all ${
-                  isPast || isCurrent ? 'bg-white/20' : 'bg-white/10'
+                  isPast || isCurrent ? 'bg-foreground/20' : 'bg-foreground/10'
                 }`}
               />
             )}
@@ -423,7 +423,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
 
       {/* ── Toast notification ────────────────────────────────────────────── */}
       {toast.show && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-[#1a1f2e] border border-white/10 rounded-2xl px-5 py-3 shadow-2xl text-sm font-medium animate-in fade-in slide-in-from-bottom-3">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-[#1a1f2e] border border-foreground/15 rounded-2xl px-5 py-3 shadow-2xl text-sm font-medium animate-in fade-in slide-in-from-bottom-3">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{toast.message}</span>
           <button
@@ -443,7 +443,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search by client or quotation number…"
-            className="w-full bg-[#0d1117] border border-white/10 rounded-xl pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-colors placeholder:text-muted-foreground/60"
+            className="w-full bg-secondary border border-foreground/15 rounded-xl pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-colors placeholder:text-muted-foreground/60"
           />
           {search && (
             <button
@@ -466,7 +466,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
 
         {filteredQuotations.length === 0 && !search && (
           <div className="flex flex-col items-center justify-center py-20 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-white/[0.04] border border-white/10 flex items-center justify-center mb-4">
+            <div className="w-16 h-16 rounded-2xl bg-foreground/[0.04] border border-foreground/15 flex items-center justify-center mb-4">
               <FileText className="w-7 h-7 text-muted-foreground/40" />
             </div>
             <h3 className="font-semibold text-foreground mb-1">No quotations yet</h3>
@@ -506,7 +506,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                   <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                     <span className="text-xs text-foreground/80 font-medium">{quo.client?.name}</span>
                     {quo.client?.code && (
-                      <span className="text-[10px] text-muted-foreground font-mono bg-white/5 px-1.5 py-0.5 rounded">
+                      <span className="text-[10px] text-muted-foreground font-mono bg-foreground/5 px-1.5 py-0.5 rounded">
                         {quo.client.code}
                       </span>
                     )}
@@ -589,7 +589,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                     >
                       {convertingId === quo.id ? (
                         <>
-                          <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                          <span className="w-4 h-4 border-2 border-foreground/40 border-t-white rounded-full animate-spin" />
                           Creating Invoice…
                         </>
                       ) : (
@@ -681,7 +681,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                       + New Client
                     </button>
                   ) : (
-                    <div className="mt-2 bg-[#0d1117] border border-white/10 rounded-xl p-3 space-y-2">
+                    <div className="mt-2 bg-secondary border border-foreground/15 rounded-xl p-3 space-y-2">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-xs font-medium text-muted-foreground">Quick-Add Client</span>
                         {newClientSuccess && (
@@ -743,7 +743,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                         <button
                           type="button"
                           onClick={() => { setShowNewClient(false); setNewClient({ name: '', code: '', phone: '', email: '', default_currency: 'INR' }) }}
-                          className="flex-1 text-xs bg-white/5 hover:bg-white/10 py-1.5 rounded-lg transition-colors"
+                          className="flex-1 text-xs bg-foreground/5 hover:bg-foreground/10 py-1.5 rounded-lg transition-colors"
                         >
                           Cancel
                         </button>

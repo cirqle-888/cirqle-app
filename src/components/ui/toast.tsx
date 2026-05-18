@@ -94,7 +94,7 @@ function Toast({ toast, onDismiss }: ToastProps) {
 
       {/* Progress bar (shows undo window) */}
       {toast.action && (
-        <div className="absolute bottom-0 left-0 h-0.5 bg-white/[0.04] w-full">
+        <div className="absolute bottom-0 left-0 h-0.5 bg-foreground/[0.04] w-full">
           <div
             className={`h-full ${progressColors[toast.type]} transition-none`}
             style={{ width: `${progress}%` }}

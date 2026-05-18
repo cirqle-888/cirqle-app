@@ -42,7 +42,7 @@ function Badge({ badge }: { badge: SortBadge }) {
 // ─── Divider between sort sections ───────────────────────────────────────────
 function Divider({ label }: { label: string }) {
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 bg-white/[0.02]">
+    <div className="flex items-center gap-2 px-3 py-1.5 bg-foreground/[0.02]">
       <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/50">{label}</span>
       <div className="flex-1 h-px bg-border/30" />
     </div>
@@ -165,7 +165,7 @@ export default function Combobox({
           className={`w-full text-left px-3 py-2.5 text-sm transition-colors flex items-center justify-between gap-2
             ${o.id === value
               ? 'bg-violet-500/15 text-violet-300'
-              : 'text-foreground hover:bg-white/[0.06]'
+              : 'text-foreground hover:bg-foreground/[0.06]'
             }`}
         >
           <div className="min-w-0 flex-1">
@@ -186,9 +186,9 @@ export default function Combobox({
         type="button"
         disabled={disabled}
         onClick={() => { setOpen(v => !v); setTimeout(() => inputRef.current?.focus(), 50) }}
-        className={`w-full bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2 text-sm text-left flex items-center justify-between gap-2
+        className={`w-full bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm text-left flex items-center justify-between gap-2
           focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20
-          hover:border-white/20 transition-colors
+          hover:border-foreground/20 transition-colors
           ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
           ${open ? 'border-violet-500/50 ring-1 ring-violet-500/20' : ''}`}
       >
@@ -228,12 +228,12 @@ export default function Combobox({
             minWidth: 220,
             zIndex: 1000,
           }}
-          className="bg-[#0d1117] border border-white/10 rounded-xl shadow-2xl shadow-black/50 overflow-hidden
+          className="bg-secondary border border-foreground/15 rounded-xl shadow-2xl shadow-black/50 overflow-hidden
             animate-in fade-in slide-in-from-top-1 duration-100"
         >
           {/* Search bar */}
-          <div className="p-2 border-b border-white/[0.06]">
-            <div className="flex items-center gap-2 bg-white/[0.04] rounded-lg px-3 py-1.5 border border-white/[0.06]">
+          <div className="p-2 border-b border-foreground/[0.06]">
+            <div className="flex items-center gap-2 bg-foreground/[0.04] rounded-lg px-3 py-1.5 border border-foreground/[0.06]">
               <Search className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
               <input
                 ref={inputRef}

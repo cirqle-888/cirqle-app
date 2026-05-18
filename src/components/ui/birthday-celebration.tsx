@@ -59,7 +59,7 @@ export function BirthdayCelebration({ employeeId, name, cqid }: Props) {
           <button
             onClick={dismiss}
             aria-label="Dismiss"
-            className="absolute top-2 right-2 p-1 rounded-md hover:bg-white/10 transition-colors text-white/60 hover:text-white"
+            className="absolute top-2 right-2 p-1 rounded-md hover:bg-foreground/10 transition-colors text-white/60 hover:text-white"
           >
             <X className="w-3.5 h-3.5" />
           </button>

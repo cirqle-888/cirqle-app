@@ -112,7 +112,7 @@ export default function PortalClient({ employee, tasks, contributions, scores, p
   return (
     <div className="min-h-screen bg-[#090d13]">
       {/* Header */}
-      <div className="bg-gradient-to-r from-[#111827] to-[#0d1117] border-b border-white/10 px-4 py-4">
+      <div className="bg-gradient-to-r from-[#111827] to-[#0d1117] border-b border-foreground/15 px-4 py-4">
         <div className="max-w-2xl mx-auto">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
@@ -135,17 +135,17 @@ export default function PortalClient({ employee, tasks, contributions, scores, p
       <div className="max-w-2xl mx-auto px-4 py-5 space-y-5">
         {/* Stats */}
         <div className="grid grid-cols-3 gap-3">
-          <div className="bg-white/[0.03] border border-white/10 rounded-xl p-3 text-center">
+          <div className="bg-foreground/[0.03] border border-foreground/15 rounded-xl p-3 text-center">
             <div className="text-[10px] text-muted-foreground mb-1">Pending</div>
             <div className={`text-lg font-bold ${tasksByStatus.pending.length > 0 ? 'text-orange-400' : 'text-muted-foreground'}`}>
               {tasksByStatus.pending.length}
             </div>
           </div>
-          <div className="bg-white/[0.03] border border-white/10 rounded-xl p-3 text-center">
+          <div className="bg-foreground/[0.03] border border-foreground/15 rounded-xl p-3 text-center">
             <div className="text-[10px] text-muted-foreground mb-1">Submitted</div>
             <div className="text-lg font-bold text-blue-400">{tasksByStatus.submitted.length}</div>
           </div>
-          <div className="bg-white/[0.03] border border-white/10 rounded-xl p-3 text-center">
+          <div className="bg-foreground/[0.03] border border-foreground/15 rounded-xl p-3 text-center">
             <div className="text-[10px] text-muted-foreground mb-1">Earned</div>
             <div className="text-lg font-bold text-green-400">{inr(totalEarned)}</div>
           </div>
@@ -173,10 +173,10 @@ export default function PortalClient({ employee, tasks, contributions, scores, p
                 const hasAnyInput = Object.values(taskContribs).some(v => v > 0)
 
                 return (
-                  <div key={task.id} className="bg-[#0d1117] border border-orange-500/20 rounded-xl overflow-hidden">
+                  <div key={task.id} className="bg-secondary border border-orange-500/20 rounded-xl overflow-hidden">
                     <button
                       onClick={() => setExpandedTask(isOpen ? null : task.id)}
-                      className="w-full px-4 py-3.5 flex items-start justify-between text-left hover:bg-white/[0.02] transition-colors">
+                      className="w-full px-4 py-3.5 flex items-start justify-between text-left hover:bg-foreground/[0.02] transition-colors">
                       <div className="flex-1 min-w-0 pr-3">
                         <div className="font-medium text-sm truncate">{task.title}</div>
                         <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5 flex-wrap">
@@ -193,7 +193,7 @@ export default function PortalClient({ employee, tasks, contributions, scores, p
                     </button>
 
                     {isOpen && (
-                      <div className="border-t border-white/10 px-4 py-4 space-y-5">
+                      <div className="border-t border-foreground/15 px-4 py-4 space-y-5">
                         {grouped.length === 0 ? (
                           <p className="text-xs text-muted-foreground text-center py-2">No parameters configured for this service. Contact admin.</p>
                         ) : (
@@ -244,7 +244,7 @@ export default function PortalClient({ employee, tasks, contributions, scores, p
                           disabled={saving === task.id || grouped.length === 0}
                           className="w-full py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 text-white text-sm font-semibold hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2 transition-opacity">
                           {saving === task.id ? (
-                            <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Saving…</>
+                            <><span className="w-4 h-4 border-2 border-foreground/30 border-t-white rounded-full animate-spin" />Saving…</>
                           ) : (
                             <><Zap className="w-4 h-4" />Submit Contribution</>
                           )}
@@ -272,10 +272,10 @@ export default function PortalClient({ employee, tasks, contributions, scores, p
                 const taskContribs = localContribs[task.id] || {}
 
                 return (
-                  <div key={task.id} className="bg-[#0d1117] border border-blue-500/20 rounded-xl overflow-hidden">
+                  <div key={task.id} className="bg-secondary border border-blue-500/20 rounded-xl overflow-hidden">
                     <button
                       onClick={() => setExpandedTask(isOpen ? null : task.id)}
-                      className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-white/[0.02] transition-colors">
+                      className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-foreground/[0.02] transition-colors">
                       <div className="flex-1 min-w-0">
                         <div className="font-medium text-sm truncate">{task.title}</div>
                         <div className="text-xs text-muted-foreground mt-0.5">
@@ -289,7 +289,7 @@ export default function PortalClient({ employee, tasks, contributions, scores, p
                     </button>
 
                     {isOpen && (
-                      <div className="border-t border-white/10 px-4 py-4 space-y-4">
+                      <div className="border-t border-foreground/15 px-4 py-4 space-y-4">
                         <p className="text-xs text-blue-400/80">Your submitted values — you can update before admin finalizes scores.</p>
                         {grouped.map(({ group, params }) => (
                           <div key={group.id}>
@@ -348,7 +348,7 @@ export default function PortalClient({ employee, tasks, contributions, scores, p
             </div>
             <div className="space-y-2">
               {tasksByStatus.scored.map((task: any) => (
-                <div key={task.id} className="bg-[#0d1117] border border-green-500/15 rounded-xl px-4 py-3 flex items-center justify-between">
+                <div key={task.id} className="bg-secondary border border-green-500/15 rounded-xl px-4 py-3 flex items-center justify-between">
                   <div className="min-w-0 flex-1">
                     <div className="font-medium text-sm truncate">{task.title}</div>
                     <div className="text-xs text-muted-foreground mt-0.5">

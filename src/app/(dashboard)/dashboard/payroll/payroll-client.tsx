@@ -1087,10 +1087,10 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
 
         return (
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <div className="bg-[#0d1117] border border-white/10 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div className="bg-secondary border border-foreground/15 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl">
 
               {/* Header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 sticky top-0 bg-[#0d1117] z-10">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-foreground/15 sticky top-0 bg-secondary z-10">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl gradient-bg flex items-center justify-center shrink-0">
                     <span className="text-white font-bold text-xs">{emp.cqid}</span>
@@ -1102,7 +1102,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                     </p>
                   </div>
                 </div>
-                <button onClick={() => setSelectedEmp(null)} className="text-muted-foreground hover:text-foreground p-1.5 rounded-lg hover:bg-white/5">
+                <button onClick={() => setSelectedEmp(null)} className="text-muted-foreground hover:text-foreground p-1.5 rounded-lg hover:bg-foreground/5">
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -1117,7 +1117,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                     { label: 'Net Payable',  value: `₹${(record?.net_salary ?? (emp.base_salary || 0) + commission).toLocaleString('en-IN')}`, cls: 'font-semibold' },
                     { label: 'Active Days',  value: `${workedDays.size} / ${daysInMon}`, cls: 'text-blue-400' },
                   ].map(item => (
-                    <div key={item.label} className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-3">
+                    <div key={item.label} className="bg-foreground/[0.03] border border-foreground/[0.06] rounded-xl p-3">
                       <p className="text-[10px] text-muted-foreground uppercase font-medium mb-1">{item.label}</p>
                       <p className={`text-sm ${item.cls}`}>{item.value}</p>
                       {item.label === 'Net Payable' && (
@@ -1179,7 +1179,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                           className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-medium border transition-all
                             ${worked   ? 'bg-green-500/20 text-green-300 border-green-500/30' :
                               isToday  ? 'bg-blue-500/15 text-blue-400 border-blue-500/20' :
-                                         'bg-white/[0.02] text-muted-foreground/30 border-white/[0.04]'}`}>
+                                         'bg-foreground/[0.02] text-muted-foreground/30 border-foreground/[0.04]'}`}>
                           {d}
                         </div>
                       )
@@ -1187,7 +1187,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                   </div>
                   <div className="flex gap-5 mt-2.5">
                     <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><span className="w-2.5 h-2.5 rounded-sm bg-green-500/20 border border-green-500/30" /> Has contributions</span>
-                    <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><span className="w-2.5 h-2.5 rounded-sm bg-white/[0.02] border border-white/[0.04]" /> No data</span>
+                    <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><span className="w-2.5 h-2.5 rounded-sm bg-foreground/[0.02] border border-foreground/[0.04]" /> No data</span>
                   </div>
                 </div>
 
@@ -1200,7 +1200,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                     </h3>
                     <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
                       {empTasks.map(t => (
-                        <div key={t.id} className="flex items-center gap-3 bg-white/[0.02] border border-white/[0.05] rounded-lg px-3 py-2">
+                        <div key={t.id} className="flex items-center gap-3 bg-foreground/[0.02] border border-foreground/[0.05] rounded-lg px-3 py-2">
                           <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${
                             t.status === 'paid'      ? 'bg-green-400'  :
                             t.status === 'invoiced'  ? 'bg-blue-400'   :
@@ -1221,11 +1221,11 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                 )}
 
                 {/* Footer actions */}
-                <div className="flex gap-2 pt-2 border-t border-white/10">
+                <div className="flex gap-2 pt-2 border-t border-foreground/15">
                   {record ? (
                     <>
                       <button onClick={() => printSalarySlip(record)}
-                        className="flex items-center gap-1.5 bg-white/[0.04] hover:bg-white/[0.07] border border-white/10 text-sm px-4 py-2 rounded-lg transition-colors">
+                        className="flex items-center gap-1.5 bg-foreground/[0.04] hover:bg-foreground/[0.07] border border-foreground/15 text-sm px-4 py-2 rounded-lg transition-colors">
                         <Printer className="w-3.5 h-3.5" /> Print Slip
                       </button>
                       {record.status !== 'paid' && (
@@ -1259,8 +1259,8 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
       ════════════════════════════════════════════════════ */}
       {generatePreview && (
         <ModalOverlay onClose={() => setGeneratePreview(null)}>
-          <div className="bg-[#0d1117] border border-white/10 rounded-2xl w-full max-w-xl shadow-2xl">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+          <div className="bg-secondary border border-foreground/15 rounded-2xl w-full max-w-xl shadow-2xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-foreground/15">
               <div>
                 <h2 className="font-semibold">Generate Payroll — {MONTHS[viewMonth - 1]} {viewYear}</h2>
                 <p className="text-xs text-muted-foreground mt-0.5">
@@ -1274,7 +1274,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
             <div className="p-5">
               <table className="w-full text-sm mb-4">
                 <thead>
-                  <tr className="text-xs text-muted-foreground border-b border-white/10">
+                  <tr className="text-xs text-muted-foreground border-b border-foreground/15">
                     <th className="text-left pb-2.5">Employee</th>
                     <th className="text-right pb-2.5">Base</th>
                     <th className="text-right pb-2.5">Commission</th>
@@ -1299,7 +1299,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                   ))}
                 </tbody>
                 <tfoot>
-                  <tr className="border-t-2 border-white/15">
+                  <tr className="border-t-2 border-foreground/20">
                     <td className="pt-3 text-xs font-semibold">Total</td>
                     <td className="pt-3 text-right text-xs text-muted-foreground">₹{generatePreview.reduce((s, p) => s + p.base_salary, 0).toLocaleString('en-IN')}</td>
                     <td className="pt-3 text-right text-xs text-green-400">+₹{generatePreview.reduce((s, p) => s + p.commission_earned, 0).toLocaleString('en-IN')}</td>
@@ -1313,7 +1313,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
               </p>
               <div className="flex gap-2">
                 <button onClick={() => setGeneratePreview(null)}
-                  className="flex-1 py-2.5 rounded-xl border border-white/10 text-sm text-muted-foreground hover:text-foreground hover:border-white/20 transition-colors">
+                  className="flex-1 py-2.5 rounded-xl border border-foreground/15 text-sm text-muted-foreground hover:text-foreground hover:border-foreground/20 transition-colors">
                   Cancel
                 </button>
                 <button onClick={confirmGenerate} disabled={saving}
@@ -1515,12 +1515,12 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4"
           onMouseDown={e => { if (e.target === e.currentTarget) setConfirmModal(null) }}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-          <div className="relative bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl w-full max-w-sm p-5">
+          <div className="relative bg-secondary border border-foreground/15 rounded-2xl shadow-2xl w-full max-w-sm p-5">
             <h3 className="font-semibold text-sm mb-2">{confirmModal.title}</h3>
             <p className="text-sm text-muted-foreground mb-5 leading-relaxed whitespace-pre-line">{confirmModal.body}</p>
             <div className="flex gap-2">
               <button onClick={() => setConfirmModal(null)}
-                className="flex-1 py-2.5 rounded-xl border border-white/10 text-sm font-medium text-muted-foreground hover:text-foreground hover:border-white/20 transition-colors">
+                className="flex-1 py-2.5 rounded-xl border border-foreground/15 text-sm font-medium text-muted-foreground hover:text-foreground hover:border-foreground/20 transition-colors">
                 Cancel
               </button>
               <button onClick={confirmModal.onConfirm}

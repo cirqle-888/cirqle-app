@@ -205,7 +205,7 @@ export function TaskEditModal({
               <div className="flex gap-2">
                 <button type="button" onClick={() => setConfirmDelete(false)} className="flex-1 bg-secondary text-xs font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors">Keep task</button>
                 <button type="button" onClick={handleDelete} disabled={deleting} className="flex-1 bg-red-500 text-white text-xs font-semibold px-3 py-2 rounded-lg hover:bg-red-600 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5">
-                  {deleting ? <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                  {deleting ? <span className="w-3.5 h-3.5 border-2 border-foreground/30 border-t-white rounded-full animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
                   Yes, delete
                 </button>
               </div>

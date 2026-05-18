@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { useRole, Role, roleRoutes } from '@/contexts/role-context'
+import { useTheme } from '@/contexts/theme-context'
 import {
   LayoutDashboard,
   CheckSquare,
@@ -24,6 +25,8 @@ import {
   Menu,
   X,
   ChevronLeft,
+  Sun,
+  Moon,
 } from 'lucide-react'
 import { CommandPaletteTrigger } from '@/components/ui/command-palette'
 
@@ -101,6 +104,7 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
   const router = useRouter()
   const { isUnlocked, openUnlockModal, lock } = usePrivacy()
   const { role, employee } = useRole()
+  const { theme, toggleTheme } = useTheme()
 
   const allowedRoutes = roleRoutes[role]
   const nav = allNav.filter(item => allowedRoutes.includes(item.href))
@@ -190,8 +194,29 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
         })}
       </nav>
 
+      {/* Theme toggle */}
+      <div className={`pt-2 border-t border-sidebar-border transition-all duration-300 ${isCollapsed ? 'px-2' : 'px-3'}`}>
+        <button
+          onClick={toggleTheme}
+          title={theme === 'dark' ? 'Dark mode — click for light' : 'Light mode — click for dark'}
+          className={`flex items-center rounded-lg text-sm font-medium transition-all duration-300 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground ${
+            isCollapsed ? 'justify-center p-2.5' : 'gap-3 w-full px-3 py-2.5'
+          }`}
+        >
+          {theme === 'dark'
+            ? <Moon className="w-4 h-4 shrink-0 text-blue-300 transition-colors" />
+            : <Sun className="w-4 h-4 shrink-0 text-amber-500 transition-colors" />}
+          <div className={`text-left overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0' : 'flex-1 opacity-100'}`}>
+            <span className="block leading-tight truncate whitespace-nowrap">{theme === 'dark' ? 'Dark mode' : 'Light mode'}</span>
+            <span className="block text-[10px] opacity-60 leading-tight truncate whitespace-nowrap">
+              Tap to switch theme
+            </span>
+          </div>
+        </button>
+      </div>
+
       {/* Privacy lock */}
-      <div className={`pt-2 border-t border-sidebar-border transition-all duration-300 ${isCollapsed ? 'px-2 pb-2' : 'px-3'}`}>
+      <div className={`pt-1 transition-all duration-300 ${isCollapsed ? 'px-2 pb-2' : 'px-3'}`}>
         <button
           onClick={isUnlocked ? lock : openUnlockModal}
           title={isUnlocked ? 'Employee names visible — click to lock' : 'Employee names hidden — click to unlock'}

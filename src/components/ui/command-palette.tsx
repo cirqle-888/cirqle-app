@@ -98,7 +98,7 @@ function SectionLabel({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-2 px-3 pt-3 pb-1.5">
       <span className="text-[9px] font-semibold text-muted-foreground/40 uppercase tracking-widest">{label}</span>
-      <div className="flex-1 h-px bg-white/[0.04]" />
+      <div className="flex-1 h-px bg-foreground/[0.04]" />
     </div>
   )
 }
@@ -118,7 +118,7 @@ function ResultRow({ result, active, onSelect }: { result: Result; active: boole
       type="button"
       onClick={onSelect}
       className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors rounded-lg mx-1 ${
-        active ? 'bg-violet-500/15 text-foreground' : 'text-foreground hover:bg-white/[0.04]'
+        active ? 'bg-violet-500/15 text-foreground' : 'text-foreground hover:bg-foreground/[0.04]'
       }`}
     >
       <KindIcon result={result} />
@@ -306,10 +306,10 @@ export function CommandPalette() {
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
 
       {/* Panel */}
-      <div className="relative w-full max-w-xl bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl shadow-black/60 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+      <div className="relative w-full max-w-xl bg-secondary border border-foreground/15 rounded-2xl shadow-2xl shadow-black/60 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
 
         {/* Search input */}
-        <div className="flex items-center gap-3 px-4 py-3.5 border-b border-white/[0.06]">
+        <div className="flex items-center gap-3 px-4 py-3.5 border-b border-foreground/[0.06]">
           <Search className="w-4 h-4 text-muted-foreground/60 shrink-0" />
           <input
             ref={inputRef}
@@ -328,7 +328,7 @@ export function CommandPalette() {
                 <X className="w-4 h-4" />
               </button>
             )}
-            <kbd className="hidden sm:inline-flex items-center gap-1 text-[10px] font-mono text-muted-foreground/40 bg-white/[0.04] border border-white/[0.06] rounded px-1.5 py-0.5">
+            <kbd className="hidden sm:inline-flex items-center gap-1 text-[10px] font-mono text-muted-foreground/40 bg-foreground/[0.04] border border-foreground/[0.06] rounded px-1.5 py-0.5">
               ESC
             </kbd>
           </div>
@@ -365,7 +365,7 @@ export function CommandPalette() {
         </div>
 
         {/* Footer hint */}
-        <div className="flex items-center justify-between px-4 py-2.5 border-t border-white/[0.06] text-[10px] text-muted-foreground/30 font-mono">
+        <div className="flex items-center justify-between px-4 py-2.5 border-t border-foreground/[0.06] text-[10px] text-muted-foreground/30 font-mono">
           <div className="flex items-center gap-3">
             <span>↑↓ navigate</span>
             <span>↵ open</span>
@@ -386,7 +386,7 @@ export function CommandPaletteTrigger({ className = '', isCollapsed = false }: {
       onClick={() => {
         window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true }))
       }}
-      className={`flex items-center h-8 ${isCollapsed ? 'justify-center w-8 px-0 gap-0' : 'gap-2 px-3'} rounded-lg text-xs text-muted-foreground/60 bg-white/[0.03] border border-white/[0.06] hover:border-white/[0.12] hover:text-muted-foreground transition-all ${className}`}
+      className={`flex items-center h-8 ${isCollapsed ? 'justify-center w-8 px-0 gap-0' : 'gap-2 px-3'} rounded-lg text-xs text-muted-foreground/60 bg-foreground/[0.03] border border-foreground/[0.06] hover:border-foreground/[0.12] hover:text-muted-foreground transition-all ${className}`}
       title={isCollapsed ? 'Search (⌘K)' : undefined}
     >
       <Search className="w-3 h-3 shrink-0" />

@@ -2107,12 +2107,12 @@ export default function SettingsClient(props: Props) {
 
                       {/* Calendar dropdown */}
                       {salaryDayCalOpen && (
-                        <div className="absolute top-full left-0 mt-1.5 z-50 bg-[#0d1117] border border-white/15 rounded-2xl shadow-2xl p-3 w-72">
+                        <div className="absolute top-full left-0 mt-1.5 z-50 bg-secondary border border-foreground/20 rounded-2xl shadow-2xl p-3 w-72">
                           {/* Month navigation */}
                           <div className="flex items-center justify-between mb-3 px-1">
                             <button type="button"
                               onClick={() => setSalaryCalViewDate(d => new Date(d.getFullYear(), d.getMonth() - 1, 1))}
-                              className="p-1 rounded-lg hover:bg-white/[0.06] text-muted-foreground hover:text-foreground transition-colors">
+                              className="p-1 rounded-lg hover:bg-foreground/[0.06] text-muted-foreground hover:text-foreground transition-colors">
                               <ChevronLeft className="w-4 h-4" />
                             </button>
                             <span className="text-sm font-semibold">
@@ -2120,7 +2120,7 @@ export default function SettingsClient(props: Props) {
                             </span>
                             <button type="button"
                               onClick={() => setSalaryCalViewDate(d => new Date(d.getFullYear(), d.getMonth() + 1, 1))}
-                              className="p-1 rounded-lg hover:bg-white/[0.06] text-muted-foreground hover:text-foreground transition-colors">
+                              className="p-1 rounded-lg hover:bg-foreground/[0.06] text-muted-foreground hover:text-foreground transition-colors">
                               <ChevronRight className="w-4 h-4" />
                             </button>
                           </div>
@@ -2162,7 +2162,7 @@ export default function SettingsClient(props: Props) {
                                         !day ? 'invisible' :
                                         isSelected
                                           ? 'gradient-bg text-white shadow-sm'
-                                          : 'hover:bg-white/[0.08] text-muted-foreground hover:text-foreground'
+                                          : 'hover:bg-foreground/[0.08] text-muted-foreground hover:text-foreground'
                                       }`}
                                     >
                                       {day}
@@ -2174,7 +2174,7 @@ export default function SettingsClient(props: Props) {
                           })()}
 
                           {/* Footer hint */}
-                          <p className="text-[10px] text-muted-foreground text-center mt-3 pt-2 border-t border-white/10">
+                          <p className="text-[10px] text-muted-foreground text-center mt-3 pt-2 border-t border-foreground/15">
                             Salary paid on the <span className="text-foreground font-semibold">{form.salary_day || 1}{
                               (() => { const d = form.salary_day||1; return d===1||d===21||d===31?'st':d===2||d===22?'nd':d===3||d===23?'rd':'th' })()
                             }</span> of each month
@@ -2615,7 +2615,7 @@ export default function SettingsClient(props: Props) {
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4"
           onMouseDown={e => { if (e.target === e.currentTarget) setDeleteConfirm(null) }}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-          <div className="relative bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl w-full max-w-sm p-5 animate-in fade-in zoom-in-95 duration-150">
+          <div className="relative bg-secondary border border-foreground/15 rounded-2xl shadow-2xl w-full max-w-sm p-5 animate-in fade-in zoom-in-95 duration-150">
             <h3 className="font-semibold text-sm mb-2">Archive {deleteConfirm.type}</h3>
             <p className="text-sm text-muted-foreground mb-1 leading-relaxed">
               Archive <span className="text-foreground font-medium">"{deleteConfirm.name}"</span>?
@@ -2625,7 +2625,7 @@ export default function SettingsClient(props: Props) {
             </p>
             <div className="flex gap-2">
               <button onClick={() => setDeleteConfirm(null)}
-                className="flex-1 py-2.5 rounded-xl border border-white/10 text-sm font-medium text-muted-foreground hover:text-foreground hover:border-white/20 transition-colors">
+                className="flex-1 py-2.5 rounded-xl border border-foreground/15 text-sm font-medium text-muted-foreground hover:text-foreground hover:border-foreground/20 transition-colors">
                 Cancel
               </button>
               <button onClick={() => { confirmDelete(); setDeleteConfirm(null) }}

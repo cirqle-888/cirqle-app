@@ -591,7 +591,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               </div>
 
               {/* Recurring entry */}
-              <div className={`rounded-xl border p-3 transition-colors ${recurringMonths > 0 ? 'bg-violet-500/10 border-violet-500/30' : 'bg-white/[0.02] border-border/40'}`}>
+              <div className={`rounded-xl border p-3 transition-colors ${recurringMonths > 0 ? 'bg-violet-500/10 border-violet-500/30' : 'bg-foreground/[0.02] border-border/40'}`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <input type="checkbox" id="recurring-toggle" checked={recurringMonths > 0}

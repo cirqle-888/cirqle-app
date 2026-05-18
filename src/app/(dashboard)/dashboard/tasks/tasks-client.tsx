@@ -1165,7 +1165,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
             </div>
 
             {/* Search — flex-1 */}
-            <div className="flex items-center gap-2 bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2 flex-1 basis-0 min-w-0">
+            <div className="flex items-center gap-2 bg-secondary border border-foreground/15 rounded-xl px-3 py-2 flex-1 basis-0 min-w-0">
               <Search size={14} className="text-muted-foreground shrink-0" />
               <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search by title, client, service or code…" className="flex-1 min-w-0 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60" />
               {searchQ && <button onClick={() => setSearchQ('')} className="shrink-0"><X size={12} className="text-muted-foreground" /></button>}
@@ -1173,7 +1173,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
 
             {/* Inline view segment: Table · Board · ⚙(board-only) · Calendar */}
             <div ref={viewRef} className="relative shrink-0">
-              <div className="flex items-center bg-[#0d1117] border border-white/10 rounded-xl p-1 gap-0.5">
+              <div className="flex items-center bg-secondary border border-foreground/15 rounded-xl p-1 gap-0.5">
                 {([
                   { key: 'table',    Icon: List,         label: 'Table' },
                   { key: 'board',    Icon: LayoutGrid,   label: 'Board' },
@@ -1184,7 +1184,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                       onClick={() => setViewMode(key)}
                       className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
                         viewMode === key
-                          ? 'bg-white/10 text-foreground'
+                          ? 'bg-foreground/10 text-foreground'
                           : 'text-muted-foreground hover:text-foreground'
                       }`}
                     >
@@ -1198,8 +1198,8 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                         title="Board settings"
                         className={`ml-0.5 px-2 py-1.5 rounded-lg flex items-center justify-center transition-colors ${
                           viewOpen
-                            ? 'bg-white/10 text-foreground'
-                            : 'text-muted-foreground hover:text-foreground hover:bg-white/[0.04]'
+                            ? 'bg-foreground/10 text-foreground'
+                            : 'text-muted-foreground hover:text-foreground hover:bg-foreground/[0.04]'
                         }`}
                       >
                         <MoreVertical className="w-4 h-4" />
@@ -1210,7 +1210,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
               </div>
               {/* Group By popover */}
               {viewMode === 'board' && viewOpen && (
-                <div className="absolute right-0 top-full mt-1.5 z-50 bg-[#0d1117] border border-white/10 rounded-xl shadow-2xl p-3 min-w-[220px] space-y-3">
+                <div className="absolute right-0 top-full mt-1.5 z-50 bg-secondary border border-foreground/15 rounded-xl shadow-2xl p-3 min-w-[220px] space-y-3">
                   <div>
                     <label className="block text-[11px] uppercase tracking-wide text-muted-foreground/70 mb-1">Group by</label>
                     <AppSelect value={boardGroupBy} onChange={e => setBoardGroupBy(e.target.value as typeof boardGroupBy)}>
@@ -1279,7 +1279,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
               placeholder="Sort by"
             />
             {/* Divider */}
-            <span className="w-px h-5 bg-white/10 shrink-0" />
+            <span className="w-px h-5 bg-foreground/10 shrink-0" />
             {/* Status chips */}
             <button onClick={() => setFilterStatus('')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${!filterStatus ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}>All</button>
             {STATUSES.map(s => (
@@ -1393,7 +1393,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                     <span
                       title={`Task code · click to copy ${taskCode(task)}`}
                       onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(taskCode(task)) }}
-                      className="text-[10px] font-mono font-semibold text-muted-foreground/60 bg-white/[0.04] border border-white/10 px-1.5 py-0.5 rounded shrink-0 cursor-pointer hover:text-foreground hover:border-white/25 transition-colors"
+                      className="text-[10px] font-mono font-semibold text-muted-foreground/60 bg-foreground/[0.04] border border-foreground/15 px-1.5 py-0.5 rounded shrink-0 cursor-pointer hover:text-foreground hover:border-foreground/25 transition-colors"
                     >
                       {taskCode(task)}
                     </span>
@@ -1695,7 +1695,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                 key: 'unassigned',
                 badge: '—',
                 title: 'Unassigned',
-                color: 'bg-white/[0.06] border-white/10 text-muted-foreground',
+                color: 'bg-foreground/[0.06] border-foreground/15 text-muted-foreground',
                 sections: [{ label: 'Tasks', tasks: unassigned }],
                 totalCount: unassigned.length,
               })
@@ -1782,7 +1782,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                 { key: 'today',    title: 'Today',      check: (_d: Date, s: string) => s === todayStr,                                                     color: 'bg-green-500/15 border-green-500/20 text-green-400',     badge: '!' },
                 { key: 'week',     title: 'This Week',  check: (d: Date, s: string) => s !== todayStr && d.getTime() >= weekAgo.getTime() && d.getTime() < now.getTime(),  color: 'bg-blue-500/15 border-blue-500/20 text-blue-400',       badge: '7' },
                 { key: 'month',    title: 'This Month', check: (d: Date, s: string) => s !== todayStr && d.getTime() >= monthAgo.getTime() && d.getTime() < weekAgo.getTime(), color: 'bg-violet-500/15 border-violet-500/20 text-violet-400', badge: '30' },
-                { key: 'older',    title: 'Older',      check: (d: Date) => d.getTime() < monthAgo.getTime(),                                               color: 'bg-white/[0.06] border-white/10 text-muted-foreground', badge: '∞' },
+                { key: 'older',    title: 'Older',      check: (d: Date) => d.getTime() < monthAgo.getTime(),                                               color: 'bg-foreground/[0.06] border-foreground/15 text-muted-foreground', badge: '∞' },
               ]
               boardColumns = buckets.map(b => {
                 const tasks = visibleTasks.filter(t => {
@@ -1904,7 +1904,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                             <div
                               key={task.id + section.label + (section.paramName || '')}
                               onClick={() => openEdit(task)}
-                              className="bg-card border border-border rounded-xl p-3 hover:border-white/25 transition-colors group cursor-pointer"
+                              className="bg-card border border-border rounded-xl p-3 hover:border-foreground/25 transition-colors group cursor-pointer"
                             >
                               <div className="flex items-start gap-2">
                                 <div className="flex-1 min-w-0">
@@ -1912,7 +1912,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                                     <span
                                       title={`Task code · click to copy ${taskCode(task)}`}
                                       onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(taskCode(task)) }}
-                                      className="text-[9px] font-mono font-semibold text-muted-foreground/60 bg-white/[0.04] border border-white/10 px-1 py-0.5 rounded shrink-0 cursor-pointer hover:text-foreground hover:border-white/25 transition-colors"
+                                      className="text-[9px] font-mono font-semibold text-muted-foreground/60 bg-foreground/[0.04] border border-foreground/15 px-1 py-0.5 rounded shrink-0 cursor-pointer hover:text-foreground hover:border-foreground/25 transition-colors"
                                     >
                                       {taskCode(task)}
                                     </span>
@@ -1997,7 +1997,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                       if (m < 0) { m = 11; y -= 1 }
                       setCalViewYear(y); setCalViewMonth(m)
                     }}
-                    className="p-1.5 rounded-lg hover:bg-white/[0.06] text-muted-foreground hover:text-foreground transition-colors"
+                    className="p-1.5 rounded-lg hover:bg-foreground/[0.06] text-muted-foreground hover:text-foreground transition-colors"
                   >
                     <ChevronLeft className="w-4 h-4" />
                   </button>
@@ -2006,7 +2006,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                       const n = new Date()
                       setCalViewYear(n.getFullYear()); setCalViewMonth(n.getMonth())
                     }}
-                    className="text-xs px-3 py-1.5 rounded-lg border border-white/10 hover:border-white/25 text-muted-foreground hover:text-foreground transition-colors"
+                    className="text-xs px-3 py-1.5 rounded-lg border border-foreground/15 hover:border-foreground/25 text-muted-foreground hover:text-foreground transition-colors"
                   >
                     Today
                   </button>
@@ -2016,7 +2016,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                       if (m > 11) { m = 0; y += 1 }
                       setCalViewYear(y); setCalViewMonth(m)
                     }}
-                    className="p-1.5 rounded-lg hover:bg-white/[0.06] text-muted-foreground hover:text-foreground transition-colors"
+                    className="p-1.5 rounded-lg hover:bg-foreground/[0.06] text-muted-foreground hover:text-foreground transition-colors"
                   >
                     <ChevronRight className="w-4 h-4" />
                   </button>
@@ -2173,7 +2173,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                 {/* Toggle: honor contributions */}
                 <div
                   onClick={() => setCancelForm(p => ({ ...p, honor_contributions: !p.honor_contributions }))}
-                  className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${cancelForm.honor_contributions ? 'bg-green-500/10 border-green-500/30' : 'bg-white/[0.02] border-border/40 hover:border-border'}`}>
+                  className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${cancelForm.honor_contributions ? 'bg-green-500/10 border-green-500/30' : 'bg-foreground/[0.02] border-border/40 hover:border-border'}`}>
                   <div className={`mt-0.5 w-5 h-5 rounded border flex items-center justify-center shrink-0 transition-colors ${cancelForm.honor_contributions ? 'bg-green-500 border-green-500' : 'border-border/60'}`}>
                     {cancelForm.honor_contributions && <span className="text-[11px] text-white font-bold">✓</span>}
                   </div>
@@ -2282,8 +2282,8 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
       {/* ── Bulk action toolbar ── */}
       {bulkMode && selectedTasks.size > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-2 duration-200">
-          <div className="flex items-center gap-2 bg-[#0d1117] border border-white/15 rounded-2xl shadow-2xl shadow-black/60 px-4 py-3">
-            <span className="text-xs font-semibold text-muted-foreground pr-2 border-r border-white/10">
+          <div className="flex items-center gap-2 bg-secondary border border-foreground/20 rounded-2xl shadow-2xl shadow-black/60 px-4 py-3">
+            <span className="text-xs font-semibold text-muted-foreground pr-2 border-r border-foreground/15">
               {selectedTasks.size} selected
             </span>
             <button onClick={() => bulkUpdateStatus('done')}
@@ -2299,7 +2299,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
               <Hash className="w-3.5 h-3.5" /> Pending
             </button>
             <button onClick={() => { setSelectedTasks(new Set()); setBulkMode(false) }}
-              className="ml-1 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/[0.06] transition-colors">
+              className="ml-1 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] transition-colors">
               <X className="w-4 h-4" />
             </button>
           </div>
@@ -2352,10 +2352,10 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
 
         return (
           <ModalOverlay onClose={() => setAssignModal(null)}>
-            <div className="bg-[#0d1117] border border-white/10 rounded-2xl w-full max-w-[500px] shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="bg-secondary border border-foreground/15 rounded-2xl w-full max-w-[500px] shadow-2xl flex flex-col max-h-[90vh]">
 
               {/* Header */}
-              <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 shrink-0">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-foreground/15 shrink-0">
                 <div>
                   <h2 className="font-semibold text-sm flex items-center gap-2">
                     <Users className="w-4 h-4 text-blue-400" /> Assign Team
@@ -2396,7 +2396,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border transition-all ${
                               on
                                 ? 'bg-blue-500/15 border-blue-500/40 text-blue-300'
-                                : 'bg-white/[0.04] border-white/10 text-muted-foreground hover:border-white/20 hover:text-foreground'
+                                : 'bg-foreground/[0.04] border-foreground/15 text-muted-foreground hover:border-foreground/20 hover:text-foreground'
                             }`}
                           >
                             {on && <CheckCircle className="w-3.5 h-3.5 shrink-0" />}
@@ -2416,7 +2416,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                       <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
                         Assignments per Person
                       </p>
-                      <span className="text-[10px] text-muted-foreground/50 bg-white/[0.04] px-1.5 py-0.5 rounded-full">optional</span>
+                      <span className="text-[10px] text-muted-foreground/50 bg-foreground/[0.04] px-1.5 py-0.5 rounded-full">optional</span>
                     </div>
                     <p className="text-[11px] text-muted-foreground mb-3 leading-relaxed">
                       For each team member, add the groups they handle. Then add specific parameters from those groups.
@@ -2444,7 +2444,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                           <div key={empId} className={`rounded-xl border overflow-hidden transition-colors ${
                             (myGroupIds.length > 0 || myParamIds.length > 0)
                               ? 'border-purple-500/25 bg-purple-500/[0.04]'
-                              : 'border-white/[0.07] bg-white/[0.01]'
+                              : 'border-foreground/[0.07] bg-foreground/[0.01]'
                           }`}>
                             {/* Employee header — clickable to expand */}
                             <button
@@ -2455,7 +2455,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                                 else next.add(empId)
                                 return next
                               })}
-                              className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/[0.02] transition-colors text-left"
+                              className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-foreground/[0.02] transition-colors text-left"
                             >
                               <div className="w-7 h-7 rounded-full bg-blue-500/15 border border-blue-500/20 flex items-center justify-center shrink-0">
                                 <span className="text-[10px] font-bold text-blue-400">{emp.cqid.replace('CQID', '')}</span>
@@ -2472,7 +2472,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                             </button>
 
                             {isExpanded && (
-                              <div className="border-t border-white/[0.07] bg-black/20 px-3 py-3 space-y-3">
+                              <div className="border-t border-foreground/[0.07] bg-black/20 px-3 py-3 space-y-3">
 
                                 {/* GROUPS */}
                                 <div>
@@ -2623,9 +2623,9 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
               </div>
 
               {/* Footer */}
-              <div className="flex gap-2 px-4 py-3 border-t border-white/10 shrink-0">
+              <div className="flex gap-2 px-4 py-3 border-t border-foreground/15 shrink-0">
                 <button onClick={() => setAssignModal(null)}
-                  className="flex-1 py-2.5 rounded-xl border border-white/10 text-sm text-muted-foreground hover:text-foreground transition-colors">
+                  className="flex-1 py-2.5 rounded-xl border border-foreground/15 text-sm text-muted-foreground hover:text-foreground transition-colors">
                   Cancel
                 </button>
                 <button onClick={saveAssignments} disabled={assignSaving}
@@ -2677,8 +2677,8 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
 
         return (
           <ModalOverlay onClose={() => setShowWorkload(false)}>
-            <div className="bg-[#0d1117] border border-white/10 rounded-2xl w-full max-w-xl shadow-2xl flex flex-col max-h-[88vh]">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 shrink-0">
+            <div className="bg-secondary border border-foreground/15 rounded-2xl w-full max-w-xl shadow-2xl flex flex-col max-h-[88vh]">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-foreground/15 shrink-0">
                 <h2 className="font-semibold text-sm flex items-center gap-2">
                   <Users className="w-4 h-4 text-blue-400" /> Workload Report
                 </h2>
@@ -2698,7 +2698,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                       const backlog = pending + inProgress
                       const pctDone = total > 0 ? Math.round((done / total) * 100) : 0
                       return (
-                        <div key={emp.id} className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+                        <div key={emp.id} className="rounded-xl border border-foreground/15 bg-foreground/[0.02] p-4">
                           <div className="flex items-center justify-between mb-3">
                             <div className="flex items-center gap-2">
                               <div className="w-8 h-8 rounded-full bg-blue-500/15 border border-blue-500/20 flex items-center justify-center">
@@ -2744,7 +2744,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                                 <span>Progress</span>
                                 <span>{pctDone}%</span>
                               </div>
-                              <div className="h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
+                              <div className="h-1.5 bg-foreground/[0.06] rounded-full overflow-hidden">
                                 <div className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full transition-all" style={{ width: `${pctDone}%` }} />
                               </div>
                             </div>
@@ -2772,9 +2772,9 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                 )}
               </div>
 
-              <div className="px-4 py-3 border-t border-white/10 shrink-0">
+              <div className="px-4 py-3 border-t border-foreground/15 shrink-0">
                 <button onClick={() => setShowWorkload(false)}
-                  className="w-full py-2.5 rounded-xl border border-white/10 text-sm text-muted-foreground hover:text-foreground transition-colors">
+                  className="w-full py-2.5 rounded-xl border border-foreground/15 text-sm text-muted-foreground hover:text-foreground transition-colors">
                   Close
                 </button>
               </div>
@@ -2858,13 +2858,13 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
               </div>
 
               {/* ── Variant linking (collapsed by default; opens when a parent is picked) ── */}
-              <div className="rounded-xl border border-white/10 bg-white/[0.02]">
+              <div className="rounded-xl border border-foreground/15 bg-foreground/[0.02]">
                 <details>
                   <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground flex items-center gap-2">
-                    <span className="inline-flex w-4 h-4 items-center justify-center rounded bg-white/5 text-[10px]">↳</span>
+                    <span className="inline-flex w-4 h-4 items-center justify-center rounded bg-foreground/5 text-[10px]">↳</span>
                     Link as variant of another task <span className="text-[10px] text-muted-foreground/60">(revision / concept / size)</span>
                   </summary>
-                  <div className="px-3 pb-3 pt-1 space-y-2.5 border-t border-white/[0.06]">
+                  <div className="px-3 pb-3 pt-1 space-y-2.5 border-t border-foreground/[0.06]">
                     <div>
                       <label className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1">Parent task</label>
                       <Combobox
@@ -2941,7 +2941,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                                 className={`flex-1 px-2 py-1.5 rounded-md border transition-colors ${
                                   form.billing_mode === opt.v
                                     ? 'bg-violet-500/15 border-violet-500/40 text-violet-200'
-                                    : 'border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
+                                    : 'border-foreground/15 text-muted-foreground hover:text-foreground hover:border-foreground/20'
                                 }`}
                               >
                                 {opt.l}
@@ -2978,7 +2978,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                         {form.billing_mode === 'parameter_driven' && (
                           <div className="space-y-3">
                             {groups.length === 0 ? (
-                              <p className="text-[11px] text-muted-foreground bg-white/[0.02] border border-white/10 rounded-lg px-3 py-2">
+                              <p className="text-[11px] text-muted-foreground bg-foreground/[0.02] border border-foreground/15 rounded-lg px-3 py-2">
                                 No contribution groups exist yet. Set them up in <span className="text-violet-300">Settings → Groups &amp; Params</span> first.
                               </p>
                             ) : (
@@ -3039,9 +3039,9 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                                   }
 
                                   return (
-                                    <div key={g.id} className="bg-white/[0.02] border border-white/10 rounded-lg overflow-hidden">
+                                    <div key={g.id} className="bg-foreground/[0.02] border border-foreground/15 rounded-lg overflow-hidden">
                                       {/* Group header */}
-                                      <div className="flex items-center gap-2 px-2.5 py-1.5 bg-white/[0.03] border-b border-white/[0.05]">
+                                      <div className="flex items-center gap-2 px-2.5 py-1.5 bg-foreground/[0.03] border-b border-foreground/[0.05]">
                                         <span className="text-[11px] font-semibold text-foreground">{g.name}</span>
                                         <span className="text-[9px] font-mono text-blue-300 bg-blue-500/10 border border-blue-500/20 rounded px-1.5 py-0.5">{groupPct}% of task</span>
                                         <span className="ml-auto text-[10px] font-mono text-violet-300/80">
@@ -3101,7 +3101,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
 
                                       {/* Sub-parameters — collapsible "Detailed Edit" section */}
                                       {subParams.length > 0 && (
-                                        <details className="border-t border-white/[0.04]" open={anySubSelected}>
+                                        <details className="border-t border-foreground/[0.04]" open={anySubSelected}>
                                           <summary className={`cursor-pointer select-none px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/70 hover:text-foreground flex items-center gap-1.5 ${masterSelected ? 'opacity-40' : ''}`}>
                                             <span>Show sub-parameters ({subParams.length})</span>
                                             {anySubSelected && <span className="text-[9px] text-violet-300/80 normal-case tracking-normal">· {subParams.filter(p => variantParamIds.has(p.id)).length} active</span>}
@@ -3232,7 +3232,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                     { label: 'Yesterday', date: new Date(Date.now() - 864e5).toISOString().split('T')[0] },
                   ].map(q => (
                     <button key={q.label} type="button" onClick={() => setForm(p => ({ ...p, task_date: q.date }))}
-                      className={`px-2.5 py-1 text-[10px] rounded-lg border transition-colors ${form.task_date === q.date ? 'bg-violet-500/20 border-violet-500/40 text-violet-300' : 'border-white/10 text-muted-foreground hover:border-white/20'}`}>
+                      className={`px-2.5 py-1 text-[10px] rounded-lg border transition-colors ${form.task_date === q.date ? 'bg-violet-500/20 border-violet-500/40 text-violet-300' : 'border-foreground/15 text-muted-foreground hover:border-foreground/20'}`}>
                       {q.label}
                     </button>
                   ))}

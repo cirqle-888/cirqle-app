@@ -48,32 +48,86 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* Cirqle dark theme — always dark */
+/* ─────────────────────────────────────────────────────────────────────────
+   Cirqle theme tokens
+   :root holds the LIGHT theme. The `.dark` class on <html> (set by the
+   ThemeProvider) swaps in the dark theme. Brand accents (purple ring/primary
+   + gradient) stay identical across both themes — only surface + text flip.
+   ───────────────────────────────────────────────────────────────────────── */
 :root {
+  /* Surfaces — soft warm whites with cool tint */
+  --background: oklch(0.985 0.003 250);
+  --foreground: oklch(0.16 0.018 250);
+  --card: oklch(1.000 0 0);
+  --card-foreground: oklch(0.16 0.018 250);
+  --popover: oklch(1.000 0 0);
+  --popover-foreground: oklch(0.16 0.018 250);
+  --secondary: oklch(0.96 0.005 250);
+  --secondary-foreground: oklch(0.22 0.014 250);
+  --muted: oklch(0.96 0.005 250);
+  --muted-foreground: oklch(0.46 0.014 250);
+  --border: oklch(0.16 0.018 250 / 10%);
+  --input: oklch(0.16 0.018 250 / 8%);
+
+  /* Brand accents — same in both themes */
+  --primary: oklch(0.55 0.22 280);
+  --primary-foreground: oklch(0.985 0 0);
+  --accent: oklch(0.55 0.22 280);
+  --accent-foreground: oklch(0.985 0 0);
+  --ring: oklch(0.55 0.22 280);
+  --destructive: oklch(0.55 0.22 25);
+
+  /* Charts */
+  --chart-1: oklch(0.55 0.22 280);
+  --chart-2: oklch(0.55 0.15 225);
+  --chart-3: oklch(0.55 0.18 140);
+  --chart-4: oklch(0.60 0.18 55);
+  --chart-5: oklch(0.55 0.22 25);
+
+  /* Sidebar — slightly different from main bg for hierarchy */
+  --sidebar: oklch(0.97 0.005 250);
+  --sidebar-foreground: oklch(0.22 0.014 250);
+  --sidebar-primary: oklch(0.55 0.22 280);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.94 0.008 250);
+  --sidebar-accent-foreground: oklch(0.22 0.014 250);
+  --sidebar-border: oklch(0.16 0.018 250 / 10%);
+  --sidebar-ring: oklch(0.55 0.22 280);
+
+  --radius: 0.625rem;
+}
+
+.dark {
+  /* Surfaces — deep slate-blue darks (Cirqle's original brand palette) */
   --background: oklch(0.11 0.018 250);
   --foreground: oklch(0.93 0.008 250);
   --card: oklch(0.15 0.018 250);
   --card-foreground: oklch(0.93 0.008 250);
   --popover: oklch(0.15 0.018 250);
   --popover-foreground: oklch(0.93 0.008 250);
-  --primary: oklch(0.55 0.22 280);
-  --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.19 0.018 250);
   --secondary-foreground: oklch(0.85 0.008 250);
   --muted: oklch(0.19 0.018 250);
   --muted-foreground: oklch(0.58 0.012 250);
-  --accent: oklch(0.55 0.22 280);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.62 0.22 25);
   --border: oklch(1 0 0 / 8%);
   --input: oklch(1 0 0 / 10%);
+
+  /* Brand accents — same in both themes */
+  --primary: oklch(0.55 0.22 280);
+  --primary-foreground: oklch(0.985 0 0);
+  --accent: oklch(0.55 0.22 280);
+  --accent-foreground: oklch(0.985 0 0);
   --ring: oklch(0.55 0.22 280);
+  --destructive: oklch(0.62 0.22 25);
+
+  /* Charts — brighter for contrast on dark */
   --chart-1: oklch(0.55 0.22 280);
   --chart-2: oklch(0.65 0.15 225);
   --chart-3: oklch(0.72 0.18 140);
   --chart-4: oklch(0.75 0.18 55);
   --chart-5: oklch(0.62 0.22 25);
-  --radius: 0.625rem;
+
+  /* Sidebar */
   --sidebar: oklch(0.13 0.018 250);
   --sidebar-foreground: oklch(0.85 0.008 250);
   --sidebar-primary: oklch(0.55 0.22 280);
@@ -96,8 +150,8 @@
   }
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { @apply bg-white/10 rounded-full; }
-  ::-webkit-scrollbar-thumb:hover { @apply bg-white/20; }
+  ::-webkit-scrollbar-thumb { @apply bg-foreground/15 rounded-full; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-foreground/30; }
   
   .hide-scrollbar::-webkit-scrollbar {
     display: none;
@@ -135,7 +189,7 @@
     mask-composite: exclude;
   }
   .glass {
-    @apply bg-white/5 backdrop-blur-sm border border-white/10;
+    @apply bg-foreground/[0.04] backdrop-blur-sm border border-foreground/10;
   }
   .stat-card {
     @apply bg-card border border-border rounded-xl p-5;

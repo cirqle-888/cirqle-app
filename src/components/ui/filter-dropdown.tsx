@@ -140,7 +140,7 @@ export function FilterDropdown({
         className={`flex items-center gap-2 h-[34px] px-3 rounded-xl text-sm font-medium transition-all border
           ${isActive
             ? 'bg-violet-500/15 border-violet-500/40 text-violet-300'
-            : 'bg-[#0d1117] border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
+            : 'bg-secondary border-foreground/15 text-muted-foreground hover:text-foreground hover:border-foreground/20'
           }
           ${open ? 'border-violet-500/50 ring-1 ring-violet-500/20' : ''}`}
       >
@@ -176,12 +176,12 @@ export function FilterDropdown({
             width: 256,
             zIndex: 1000,
           }}
-          className="bg-[#0d1117] border border-white/10 rounded-xl shadow-2xl shadow-black/50 overflow-hidden
+          className="bg-secondary border border-foreground/15 rounded-xl shadow-2xl shadow-black/50 overflow-hidden
           animate-in fade-in slide-in-from-top-1 duration-100">
 
           {/* Search bar */}
-          <div className="p-2 border-b border-white/[0.06]">
-            <div className="flex items-center gap-2 bg-white/[0.04] rounded-lg px-3 py-1.5 border border-white/[0.06]">
+          <div className="p-2 border-b border-foreground/[0.06]">
+            <div className="flex items-center gap-2 bg-foreground/[0.04] rounded-lg px-3 py-1.5 border border-foreground/[0.06]">
               <Search className="w-3.5 h-3.5 text-muted-foreground/60 shrink-0" />
               <input ref={searchRef} value={search} onChange={e => setSearch(e.target.value)}
                 className="bg-transparent text-sm outline-none flex-1 placeholder:text-muted-foreground/50"
@@ -242,7 +242,7 @@ function SectionLabel({ icon, label }: { icon: React.ReactNode; label: string })
     <div className="flex items-center gap-1.5 px-3 pt-2 pb-1">
       <span className="text-muted-foreground/40">{icon}</span>
       <span className="text-[9px] font-semibold text-muted-foreground/40 uppercase tracking-wider">{label}</span>
-      <div className="flex-1 h-px bg-white/[0.04]" />
+      <div className="flex-1 h-px bg-foreground/[0.04]" />
     </div>
   )
 }
@@ -251,10 +251,10 @@ function OptionRow({ opt, selected, onSelect }: { opt: FilterOption; selected: b
   return (
     <button type="button" onClick={() => onSelect(opt.value)}
       className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left transition-colors
-        ${selected ? 'bg-violet-500/15 text-violet-300' : 'text-foreground hover:bg-white/[0.06]'}`}
+        ${selected ? 'bg-violet-500/15 text-violet-300' : 'text-foreground hover:bg-foreground/[0.06]'}`}
     >
       <span className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 transition-all
-        ${selected ? 'border-violet-500 bg-violet-500' : 'border-white/20'}`}>
+        ${selected ? 'border-violet-500 bg-violet-500' : 'border-foreground/20'}`}>
         {selected && <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />}
       </span>
       <span className="truncate">{opt.label}</span>

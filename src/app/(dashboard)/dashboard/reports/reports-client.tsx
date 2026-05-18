@@ -336,13 +336,13 @@ export default function ReportsClient({ employees, scores, tasks }: Props) {
                   className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
                     active ? 'gradient-bg text-white shadow-md' : 'bg-card border border-border text-muted-foreground hover:text-foreground hover:border-border/80'
                   }`}>
-                  <span className={`w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold ${active ? 'bg-white/20' : 'bg-secondary'}`}
+                  <span className={`w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold ${active ? 'bg-foreground/20' : 'bg-secondary'}`}
                     style={active ? {} : { color: EMP_COLORS[i % EMP_COLORS.length] }}>
                     {e.cqid.replace('CQID', '')}
                   </span>
                   {dn(e)}
                   {eCount > 0 && (
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${active ? 'bg-white/25 text-white' : 'bg-primary/15 text-primary'}`}>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${active ? 'bg-foreground/25 text-white' : 'bg-primary/15 text-primary'}`}>
                       {eCount}
                     </span>
                   )}

@@ -1808,14 +1808,14 @@ export default function ImportClient({ clients, services, employees, groups, par
           <div className="space-y-3">
             <div className="flex items-center gap-2">
               <span className="text-xs text-muted-foreground">Operation:</span>
-              <div className="flex items-center border border-white/10 rounded-lg overflow-hidden h-[30px]">
-                <button onClick={() => setOperation('insert')} className={`px-3 text-xs flex items-center gap-1.5 transition-colors h-full ${operation === 'insert' ? 'bg-white/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+              <div className="flex items-center border border-foreground/15 rounded-lg overflow-hidden h-[30px]">
+                <button onClick={() => setOperation('insert')} className={`px-3 text-xs flex items-center gap-1.5 transition-colors h-full ${operation === 'insert' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
                   + Insert new
                 </button>
-                <button onClick={() => setOperation('update')} className={`px-3 text-xs flex items-center gap-1.5 transition-colors border-l border-white/10 h-full ${operation === 'update' ? 'bg-amber-500/15 text-amber-300' : 'text-muted-foreground hover:text-foreground'}`}>
+                <button onClick={() => setOperation('update')} className={`px-3 text-xs flex items-center gap-1.5 transition-colors border-l border-foreground/15 h-full ${operation === 'update' ? 'bg-amber-500/15 text-amber-300' : 'text-muted-foreground hover:text-foreground'}`}>
                   ✎ Update existing
                 </button>
-                <button onClick={() => setOperation('delete')} className={`px-3 text-xs flex items-center gap-1.5 transition-colors border-l border-white/10 ${operation === 'delete' ? 'bg-red-500/15 text-red-300' : 'text-muted-foreground hover:text-foreground'}`}>
+                <button onClick={() => setOperation('delete')} className={`px-3 text-xs flex items-center gap-1.5 transition-colors border-l border-foreground/15 ${operation === 'delete' ? 'bg-red-500/15 text-red-300' : 'text-muted-foreground hover:text-foreground'}`}>
                   🗑 Delete
                 </button>
               </div>
@@ -1861,7 +1861,7 @@ export default function ImportClient({ clients, services, employees, groups, par
                 <button
                   type="button"
                   onClick={() => exportCurrentData(mode)}
-                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-white/10 text-muted-foreground hover:text-foreground hover:border-white/25 transition-colors"
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-foreground/15 text-muted-foreground hover:text-foreground hover:border-foreground/25 transition-colors"
                   title="Download a CSV of current data — use this as a backup or to edit existing rows"
                 >
                   <Download className="w-3 h-3" /> Export current data

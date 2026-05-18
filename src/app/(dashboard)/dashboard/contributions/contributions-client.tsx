@@ -858,7 +858,7 @@ export default function ContributionsClient({
             </div>
 
             {/* Search — flex-1 */}
-            <div className="flex items-center gap-2 bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2 flex-1 basis-0 min-w-0">
+            <div className="flex items-center gap-2 bg-secondary border border-foreground/15 rounded-xl px-3 py-2 flex-1 basis-0 min-w-0">
               <Search size={14} className="text-muted-foreground shrink-0" />
               <input value={search} onChange={e => setSearch(e.target.value)}
                 placeholder="Search tasks, clients, services, or task code (T-…)…"
@@ -868,7 +868,7 @@ export default function ContributionsClient({
 
             {/* Inline view segment: List · Board · ⚙(board-only) · Calendar */}
             <div ref={boardSettingsRef} className="relative shrink-0">
-              <div className="flex items-center bg-[#0d1117] border border-white/10 rounded-xl p-1 gap-0.5">
+              <div className="flex items-center bg-secondary border border-foreground/15 rounded-xl p-1 gap-0.5">
                 {([
                   { key: 'list',     Icon: List,         label: 'List' },
                   { key: 'board',    Icon: LayoutGrid,   label: 'Board' },
@@ -879,7 +879,7 @@ export default function ContributionsClient({
                       onClick={() => setListViewMode(key)}
                       className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
                         listViewMode === key
-                          ? 'bg-white/10 text-foreground'
+                          ? 'bg-foreground/10 text-foreground'
                           : 'text-muted-foreground hover:text-foreground'
                       }`}
                     >
@@ -893,8 +893,8 @@ export default function ContributionsClient({
                         title="Board settings"
                         className={`ml-0.5 px-2 py-1.5 rounded-lg flex items-center justify-center transition-colors ${
                           showBoardSettings
-                            ? 'bg-white/10 text-foreground'
-                            : 'text-muted-foreground hover:text-foreground hover:bg-white/[0.04]'
+                            ? 'bg-foreground/10 text-foreground'
+                            : 'text-muted-foreground hover:text-foreground hover:bg-foreground/[0.04]'
                         }`}
                       >
                         <MoreVertical className="w-4 h-4" />
@@ -905,7 +905,7 @@ export default function ContributionsClient({
               </div>
               {/* Group By popover */}
               {listViewMode === 'board' && showBoardSettings && (
-                <div className="absolute right-0 top-full mt-1.5 z-50 bg-[#0d1117] border border-white/10 rounded-xl shadow-2xl p-3 min-w-[220px] space-y-3">
+                <div className="absolute right-0 top-full mt-1.5 z-50 bg-secondary border border-foreground/15 rounded-xl shadow-2xl p-3 min-w-[220px] space-y-3">
                   <div>
                     <label className="block text-[11px] uppercase tracking-wide text-muted-foreground/70 mb-1">Group by</label>
                     <AppSelect value={boardGroupBy} onChange={e => setBoardGroupBy(e.target.value as typeof boardGroupBy)}>
@@ -981,7 +981,7 @@ export default function ContributionsClient({
               sortKey="services"
             />
             {/* Divider */}
-            <span className="w-px h-5 bg-white/10 shrink-0" />
+            <span className="w-px h-5 bg-foreground/10 shrink-0" />
             {/* Status chips */}
             {([
               { key: 'all',     label: 'All',     count: localTasks.length },
@@ -1000,7 +1000,7 @@ export default function ContributionsClient({
                 {label}
                 <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
                   statusFilter === key && key === 'missing' ? 'bg-orange-500/30 text-orange-300' :
-                  statusFilter === key ? 'bg-white/20 text-white' : 'bg-border/50 opacity-60'
+                  statusFilter === key ? 'bg-foreground/20 text-white' : 'bg-border/50 opacity-60'
                 }`}>{count}</span>
                 {key === 'missing' && count > 0 && statusFilter !== 'missing' && (
                   <span className="w-1.5 h-1.5 rounded-full bg-orange-400 shrink-0" />
@@ -1019,7 +1019,7 @@ export default function ContributionsClient({
                   setFilterDate(null)
                   setStatusFilter('all')
                 }}
-                className="ml-1 text-xs text-muted-foreground hover:text-foreground px-2 py-1.5 rounded-md hover:bg-white/[0.04] transition-colors flex items-center gap-1 shrink-0"
+                className="ml-1 text-xs text-muted-foreground hover:text-foreground px-2 py-1.5 rounded-md hover:bg-foreground/[0.04] transition-colors flex items-center gap-1 shrink-0"
               >
                 <X size={12} /> Clear all
               </button>
@@ -1121,7 +1121,7 @@ export default function ContributionsClient({
                                 <span
                                   title={`Task code · click to copy ${taskCode(task)}`}
                                   onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(taskCode(task)) }}
-                                  className="text-[10px] font-mono font-semibold text-muted-foreground/60 bg-white/[0.04] border border-white/10 px-1.5 py-0.5 rounded shrink-0 cursor-pointer hover:text-foreground hover:border-white/25 transition-colors"
+                                  className="text-[10px] font-mono font-semibold text-muted-foreground/60 bg-foreground/[0.04] border border-foreground/15 px-1.5 py-0.5 rounded shrink-0 cursor-pointer hover:text-foreground hover:border-foreground/25 transition-colors"
                                 >
                                   {taskCode(task)}
                                 </span>
@@ -1353,13 +1353,13 @@ export default function ContributionsClient({
                             <button
                               key={task.id}
                               onClick={() => openTask(task)}
-                              className="w-full text-left bg-card border border-border rounded-xl p-3 hover:border-white/25 transition-colors cursor-pointer"
+                              className="w-full text-left bg-card border border-border rounded-xl p-3 hover:border-foreground/25 transition-colors cursor-pointer"
                             >
                               <div className="flex items-center gap-1.5 mb-0.5">
                                 <span
                                   title={`Task code · click to copy ${taskCode(task)}`}
                                   onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(taskCode(task)) }}
-                                  className="text-[9px] font-mono font-semibold text-muted-foreground/60 bg-white/[0.04] border border-white/10 px-1 py-0.5 rounded shrink-0 cursor-pointer hover:text-foreground hover:border-white/25 transition-colors"
+                                  className="text-[9px] font-mono font-semibold text-muted-foreground/60 bg-foreground/[0.04] border border-foreground/15 px-1 py-0.5 rounded shrink-0 cursor-pointer hover:text-foreground hover:border-foreground/25 transition-colors"
                                 >
                                   {taskCode(task)}
                                 </span>
@@ -1438,7 +1438,7 @@ export default function ContributionsClient({
                         if (m < 0) { m = 11; y -= 1 }
                         setCalViewYear(y); setCalViewMonth(m)
                       }}
-                      className="p-1.5 rounded-lg hover:bg-white/[0.06] text-muted-foreground hover:text-foreground transition-colors"
+                      className="p-1.5 rounded-lg hover:bg-foreground/[0.06] text-muted-foreground hover:text-foreground transition-colors"
                     >
                       <ChevronLeft className="w-4 h-4" />
                     </button>
@@ -1447,7 +1447,7 @@ export default function ContributionsClient({
                         const n = new Date()
                         setCalViewYear(n.getFullYear()); setCalViewMonth(n.getMonth())
                       }}
-                      className="text-xs px-3 py-1.5 rounded-lg border border-white/10 hover:border-white/25 text-muted-foreground hover:text-foreground transition-colors"
+                      className="text-xs px-3 py-1.5 rounded-lg border border-foreground/15 hover:border-foreground/25 text-muted-foreground hover:text-foreground transition-colors"
                     >
                       Today
                     </button>
@@ -1457,7 +1457,7 @@ export default function ContributionsClient({
                         if (m > 11) { m = 0; y += 1 }
                         setCalViewYear(y); setCalViewMonth(m)
                       }}
-                      className="p-1.5 rounded-lg hover:bg-white/[0.06] text-muted-foreground hover:text-foreground transition-colors"
+                      className="p-1.5 rounded-lg hover:bg-foreground/[0.06] text-muted-foreground hover:text-foreground transition-colors"
                     >
                       <ChevronRight className="w-4 h-4" />
                     </button>
@@ -1658,7 +1658,7 @@ export default function ContributionsClient({
                   <button type="submit" disabled={addingTask}
                     className="flex-1 gradient-bg text-white text-sm font-medium px-4 py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50 transition-opacity flex items-center justify-center gap-2">
                     {addingTask ? (
-                      <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Creating…</>
+                      <><span className="w-4 h-4 border-2 border-foreground/30 border-t-white rounded-full animate-spin" />Creating…</>
                     ) : (
                       <><PlusCircle className="w-4 h-4" />Create Task</>
                     )}
@@ -1672,8 +1672,8 @@ export default function ContributionsClient({
         {/* ── Bulk action toolbar ── */}
         {bulkMode && selectedTasks.size > 0 && (
           <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-2 duration-200">
-            <div className="flex items-center gap-2 bg-[#0d1117] border border-white/15 rounded-2xl shadow-2xl shadow-black/60 px-4 py-3">
-              <span className="text-xs font-semibold text-muted-foreground pr-2 border-r border-white/10">
+            <div className="flex items-center gap-2 bg-secondary border border-foreground/20 rounded-2xl shadow-2xl shadow-black/60 px-4 py-3">
+              <span className="text-xs font-semibold text-muted-foreground pr-2 border-r border-foreground/15">
                 {selectedTasks.size} selected
               </span>
               <button onClick={() => bulkUpdateStatus('done')}
@@ -1691,7 +1691,7 @@ export default function ContributionsClient({
                 </button>
               )}
               <button onClick={() => { setSelectedTasks(new Set()); setBulkMode(false) }}
-                className="ml-1 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/[0.06] transition-colors">
+                className="ml-1 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] transition-colors">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -1734,7 +1734,7 @@ export default function ContributionsClient({
                 <span
                   title={`Task code · click to copy ${taskCode(selectedTask)}`}
                   onClick={() => navigator.clipboard?.writeText(taskCode(selectedTask))}
-                  className="text-[10px] font-mono font-semibold text-muted-foreground/70 bg-white/[0.04] border border-white/10 px-1.5 py-0.5 rounded shrink-0 cursor-pointer hover:text-foreground hover:border-white/25 transition-colors"
+                  className="text-[10px] font-mono font-semibold text-muted-foreground/70 bg-foreground/[0.04] border border-foreground/15 px-1.5 py-0.5 rounded shrink-0 cursor-pointer hover:text-foreground hover:border-foreground/25 transition-colors"
                 >
                   {taskCode(selectedTask)}
                 </span>
@@ -2202,7 +2202,7 @@ export default function ContributionsClient({
         <button onClick={handleSave} disabled={saving}
           className="flex items-center gap-2 gradient-bg text-white text-sm font-semibold px-6 py-2.5 rounded-xl hover:opacity-90 disabled:opacity-40 transition-opacity shadow-md shadow-primary/20">
           {saving
-            ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Saving…</>
+            ? <><span className="w-4 h-4 border-2 border-foreground/30 border-t-white rounded-full animate-spin" /> Saving…</>
             : calculatedResult
               ? <><Check className="w-4 h-4" /> Save &amp; Mark Done</>
               : 'Save Contributions'
