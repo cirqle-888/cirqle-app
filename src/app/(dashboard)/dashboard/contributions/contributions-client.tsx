@@ -1539,9 +1539,13 @@ export default function ContributionsClient({
 
         {/* ── Add Task Modal ── */}
         {showAddTask && (
-          <ModalOverlay onClose={() => { setShowAddTask(false); setAddTaskError('') }}>
-            <div className="bg-card border border-border rounded-2xl w-full max-w-md shadow-2xl">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <ModalOverlay onClose={() => { setShowAddTask(false); setAddTaskError('') }} sheetOnMobile>
+            <div className="bg-card border border-border w-full h-full sm:h-auto sm:max-w-md sm:max-h-[90vh] shadow-2xl rounded-t-2xl sm:rounded-2xl flex flex-col">
+              {/* Mobile drag-handle hint */}
+              <div className="sm:hidden flex justify-center pt-2 pb-1 shrink-0">
+                <div className="w-10 h-1 rounded-full bg-foreground/20" />
+              </div>
+              <div className="flex items-center justify-between px-5 py-3 sm:py-4 border-b border-border shrink-0">
                 <div>
                   <h2 className="font-bold text-base">Add New Task</h2>
                   <p className="text-xs text-muted-foreground mt-0.5">Create a task to track contributions</p>
@@ -1552,7 +1556,7 @@ export default function ContributionsClient({
                 </button>
               </div>
 
-              <form onSubmit={handleAddTask} className="p-5 space-y-4">
+              <form onSubmit={handleAddTask} className="px-5 pt-4 pb-4 space-y-4 overflow-y-auto flex-1">
                 {/* Title — searchable combobox */}
                 <div className="relative">
                   <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Task Title *</label>
@@ -1592,7 +1596,7 @@ export default function ContributionsClient({
                 </div>
 
                 {/* Date + Status row */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Task Date</label>
                     <div className="relative">
@@ -1614,7 +1618,7 @@ export default function ContributionsClient({
                 </div>
 
                 {/* Client + Service row */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Client</label>
                     <AppSelect value={addTaskForm.client_id} onChange={e => setAddTaskForm(f => ({ ...f, client_id: e.target.value }))}>
@@ -1650,13 +1654,14 @@ export default function ContributionsClient({
                   <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{addTaskError}</p>
                 )}
 
-                <div className="flex gap-3 pt-1">
+                {/* Sticky action footer */}
+                <div className="sticky bottom-0 -mx-5 px-5 -mb-4 pb-4 pt-3 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/85 border-t border-border flex gap-3">
                   <button type="button" onClick={() => { setShowAddTask(false); setAddTaskError('') }}
-                    className="flex-1 bg-secondary border border-border text-sm font-medium px-4 py-2.5 rounded-lg hover:bg-secondary/80 transition-colors">
+                    className="flex-1 bg-secondary border border-border text-sm font-medium px-4 py-3 sm:py-2.5 rounded-lg hover:bg-secondary/80 transition-colors">
                     Cancel
                   </button>
                   <button type="submit" disabled={addingTask}
-                    className="flex-1 gradient-bg text-white text-sm font-medium px-4 py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50 transition-opacity flex items-center justify-center gap-2">
+                    className="flex-1 gradient-bg text-white text-sm font-medium px-4 py-3 sm:py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50 transition-opacity flex items-center justify-center gap-2">
                     {addingTask ? (
                       <><span className="w-4 h-4 border-2 border-foreground/30 border-t-white rounded-full animate-spin" />Creating…</>
                     ) : (
@@ -2197,10 +2202,12 @@ export default function ContributionsClient({
 
       </div>
 
-      {/* ── Fixed bottom action bar ── */}
-      <div className="fixed bottom-0 left-60 right-0 z-20 bg-card/95 backdrop-blur-md border-t border-border px-6 py-3.5 flex items-center gap-3">
+      {/* ── Fixed bottom action bar ──
+          On mobile: spans full width (sidebar is hidden behind hamburger).
+          On md+: clears the 240px desktop sidebar via left-60. */}
+      <div className="fixed bottom-0 left-0 md:left-60 right-0 z-20 bg-card/95 backdrop-blur-md border-t border-border px-4 sm:px-6 py-3 sm:py-3.5 flex items-center gap-2 sm:gap-3 flex-wrap pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <button onClick={handleSave} disabled={saving}
-          className="flex items-center gap-2 gradient-bg text-white text-sm font-semibold px-6 py-2.5 rounded-xl hover:opacity-90 disabled:opacity-40 transition-opacity shadow-md shadow-primary/20">
+          className="flex-1 sm:flex-initial flex items-center justify-center gap-2 gradient-bg text-white text-sm font-semibold px-4 sm:px-6 py-3 sm:py-2.5 rounded-xl hover:opacity-90 disabled:opacity-40 transition-opacity shadow-md shadow-primary/20">
           {saving
             ? <><span className="w-4 h-4 border-2 border-foreground/30 border-t-white rounded-full animate-spin" /> Saving…</>
             : calculatedResult
@@ -2209,8 +2216,8 @@ export default function ContributionsClient({
           }
         </button>
         <button onClick={() => setView('list')}
-          className="flex items-center gap-2 bg-secondary border border-border text-sm font-medium px-5 py-2.5 rounded-xl hover:bg-secondary/80 transition-colors">
-          <ChevronLeft className="w-4 h-4" /> Back to list
+          className="flex items-center gap-2 bg-secondary border border-border text-sm font-medium px-4 sm:px-5 py-3 sm:py-2.5 rounded-xl hover:bg-secondary/80 transition-colors shrink-0">
+          <ChevronLeft className="w-4 h-4" /> <span className="hidden sm:inline">Back to list</span>
         </button>
         {/* Discard draft button — only shown if there's a local draft */}
         {selectedTask && (() => {

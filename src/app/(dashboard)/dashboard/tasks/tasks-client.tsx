@@ -1013,7 +1013,8 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
   const hasActiveFilters = !!(filterStatus || filterClient || filterService || searchQ || sortBy !== 'today_first' || !!filterAssignee)
   const activeFilterCount = [filterClient, filterService, filterAssignee, sortBy !== 'today_first' ? 'sort' : ''].filter(Boolean).length
 
-  const inputCls = 'w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50'
+  // py-2.5 on mobile = 40px touch target; py-2 keeps desktop density unchanged.
+  const inputCls = 'w-full bg-secondary border border-border rounded-lg px-3 py-2.5 sm:py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50'
 
   return (
     <div>
@@ -1301,7 +1302,9 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
 
         {/* Table */}
         {viewMode === 'table' && (
-        <div className="bg-card border border-border rounded-xl overflow-visible">
+        <>
+        {/* Desktop: full table — hidden below sm */}
+        <div className="hidden sm:block bg-card border border-border rounded-xl overflow-visible">
           <table className="w-full text-sm">
             {/* Sticky table header — sits flush below the toolbar.
                 top intentionally less than toolbar-bottom so toolbar (z-20, bg-background) covers the overlap & hides any sub-pixel gap.
@@ -1627,6 +1630,81 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
             </tbody>
           </table>
         </div>
+
+        {/* Mobile: stacked card list — visible below sm. Same data, denser tap-friendly layout. */}
+        <div className="sm:hidden space-y-2">
+          {visibleTasks.length === 0 && (
+            <div className="bg-card border border-border rounded-xl px-4 py-10 text-center text-sm text-muted-foreground">No tasks found</div>
+          )}
+          {visibleTasks.map(task => {
+            const isSelected = bulkMode && selectedTasks.has(task.id)
+            return (
+              <div
+                key={task.id}
+                data-taskid={task.id}
+                onClick={
+                  bulkMode
+                    ? () => setSelectedTasks(prev => {
+                        const next = new Set(prev)
+                        if (next.has(task.id)) next.delete(task.id)
+                        else next.add(task.id)
+                        return next
+                      })
+                    : () => openEdit(task)
+                }
+                className={`bg-card border rounded-xl px-3.5 py-3 active:bg-secondary/50 transition-colors ${
+                  isSelected ? 'border-violet-500/60 bg-violet-500/[0.06]' : 'border-border'
+                } ${highlightedTaskId === task.id ? 'ring-1 ring-violet-400' : ''}`}
+              >
+                {/* Top row — code · title · status */}
+                <div className="flex items-start gap-2.5">
+                  {bulkMode && (
+                    <input
+                      type="checkbox"
+                      checked={selectedTasks.has(task.id)}
+                      onChange={() => {}}
+                      onClick={e => e.stopPropagation()}
+                      className="mt-0.5 w-4 h-4 rounded accent-violet-500 shrink-0"
+                    />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span
+                        title={`Task code · ${taskCode(task)}`}
+                        onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(taskCode(task)) }}
+                        className="text-[10px] font-mono font-semibold text-muted-foreground/70 bg-foreground/[0.04] border border-foreground/15 px-1.5 py-0.5 rounded shrink-0"
+                      >
+                        {taskCode(task)}
+                      </span>
+                      {task.is_recurring && <RefreshCw className="w-3 h-3 text-primary/60 shrink-0" />}
+                      {task.recurring_parent_id && <RefreshCw className="w-3 h-3 text-muted-foreground/50 shrink-0" />}
+                      <p className="font-medium text-sm text-foreground truncate">{task.title}</p>
+                    </div>
+                    {/* Meta line — client · service */}
+                    <p className="text-xs text-muted-foreground truncate mt-0.5">
+                      {task.client?.name || '—'} <span className="text-muted-foreground/40">·</span> {task.service?.name || '—'}
+                    </p>
+                  </div>
+                  <span className={`shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${getStatusColor(task.status)}`}>
+                    {getStatusLabel(task.status)}
+                  </span>
+                </div>
+
+                {/* Bottom row — date · billing · assignees */}
+                <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-border/50">
+                  <span className="text-[11px] text-muted-foreground" title={fullTaskDate(task.task_date)}>
+                    {formatTaskDate(task.task_date)}
+                  </span>
+                  <span className="text-[11px] font-semibold text-foreground tabular-nums">
+                    {formatCurrency(task.billing_amount, task.currency as Currency)}
+                    {(task.quantity ?? 1) > 1 && <span className="text-muted-foreground/60 font-normal ml-1">×{task.quantity}</span>}
+                  </span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        </>
         )}
 
         {/* Board View */}
@@ -2799,18 +2877,22 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
         />
       )}
 
-      {/* Add Task Modal */}
+      {/* Add Task Modal — full-screen bottom-sheet on mobile, centered dialog on desktop */}
       {showForm && (
-        <ModalOverlay onClose={() => setShowForm(false)}>
-          <div className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
-              <h2 className="font-semibold">Add Task</h2>
-              <button onClick={() => setShowForm(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+        <ModalOverlay onClose={() => setShowForm(false)} sheetOnMobile>
+          <div className="bg-card border border-border w-full h-full sm:h-auto sm:max-w-lg sm:max-h-[90vh] shadow-2xl rounded-t-2xl sm:rounded-2xl flex flex-col">
+            {/* Mobile drag-handle hint */}
+            <div className="sm:hidden flex justify-center pt-2 pb-1 shrink-0">
+              <div className="w-10 h-1 rounded-full bg-foreground/20" />
             </div>
-            <form ref={addFormRef} onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto">
+            <div className="flex items-center justify-between px-5 sm:px-6 py-3 sm:py-4 border-b border-border shrink-0">
+              <h2 className="font-semibold text-base">Add Task</h2>
+              <button onClick={() => setShowForm(false)} className="text-muted-foreground hover:text-foreground p-1 -m-1"><X className="w-5 h-5" /></button>
+            </div>
+            <form ref={addFormRef} onSubmit={handleSubmit} className="px-5 sm:px-6 pt-4 pb-4 space-y-4 overflow-y-auto flex-1">
 
               {/* Task number + Title */}
-              <div className="grid grid-cols-[110px_1fr] gap-3">
+              <div className="grid grid-cols-[88px_1fr] sm:grid-cols-[110px_1fr] gap-3">
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1.5">Task #</label>
                   <input
@@ -2830,7 +2912,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
               </div>
 
               {/* Client + Service */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1.5">Client *</label>
                   <Combobox
@@ -3418,7 +3500,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                 </label>
                 {form.is_recurring && (
                   <div className="mt-2 pl-6 space-y-2 border-l-2 border-violet-500/30">
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-muted-foreground mb-1.5">Repeat every</label>
                         <AppSelect
@@ -3450,9 +3532,12 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                 )}
               </div>
 
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80 transition-colors">Cancel</button>
-                <button type="submit" disabled={saving || !selectedService} className="flex-1 gradient-bg text-white text-sm font-medium py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1.5">
+              {/* Sticky action footer — always reachable while scrolling.
+                  -mx-5/-mx-6 + px-5/px-6 lets the bar span the full width of
+                  the scroll container and sit on top of a backdrop-blur surface. */}
+              <div className="sticky bottom-0 -mx-5 sm:-mx-6 px-5 sm:px-6 -mb-4 pb-4 pt-3 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/85 border-t border-border flex gap-3">
+                <button type="button" onClick={() => setShowForm(false)} className="flex-1 bg-secondary text-sm font-medium py-3 sm:py-2.5 rounded-lg hover:bg-secondary/80 transition-colors">Cancel</button>
+                <button type="submit" disabled={saving || !selectedService} className="flex-1 gradient-bg text-white text-sm font-medium py-3 sm:py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1.5">
                   {saving ? 'Saving…' : <>Add Task {previewTaskNumber != null && <span className="opacity-70">#{previewTaskNumber}</span>}</>}
                 </button>
               </div>
