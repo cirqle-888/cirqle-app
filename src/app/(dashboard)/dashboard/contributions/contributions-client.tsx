@@ -127,7 +127,9 @@ export default function ContributionsClient({
   const autoRecalcRan = useRef(false)
 
   // ── Financial visibility ─────────────────────────────
-  const [showFinancials, setShowFinancials] = useState(true)
+  // Default OFF — initial render is the privacy-respecting employee view.
+  // Admins can flip to financials mode via the eye toggle in the header.
+  const [showFinancials, setShowFinancials] = useState(false)
 
   // ── Entry-view state ─────────────────────────────────
   const [contributions, setContributions] = useState<Record<string, Record<string, number>>>({})
@@ -822,10 +824,11 @@ export default function ContributionsClient({
           />
 
           <StickyToolbar>
-          {/* Row 1: [Select] · [Search flex-1] · [List|Board|Calendar] · [⚙ board-only] */}
-          <StickyToolbar.Row>
+          {/* Row 1: [Select] · [Search flex-1] · [List|Board|Calendar] · [⚙ board-only]
+              flex-wrap + order-* so Search jumps to top on mobile and gets full width. */}
+          <StickyToolbar.Row className="flex-wrap">
             {/* Left group: Select (toggles bulk mode) · All (toggles select/deselect all when active) */}
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0 order-2 sm:order-none">
               <button
                 onClick={() => { setBulkMode(m => !m); setSelectedTasks(new Set()) }}
                 className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm ${
@@ -857,27 +860,27 @@ export default function ContributionsClient({
               })()}
             </div>
 
-            {/* Search — flex-1 */}
-            <div className="flex items-center gap-2 bg-secondary border border-foreground/15 rounded-xl px-3 py-2 flex-1 basis-0 min-w-0">
+            {/* Search — full-width on mobile (order-1), flex-1 on desktop */}
+            <div className="order-1 sm:order-none w-full sm:w-auto flex items-center gap-2 bg-secondary border border-foreground/15 rounded-xl px-3 py-2 sm:flex-1 sm:basis-0 min-w-0">
               <Search size={14} className="text-muted-foreground shrink-0" />
               <input value={search} onChange={e => setSearch(e.target.value)}
-                placeholder="Search tasks, clients, services, or task code (T-…)…"
+                placeholder="Search tasks, clients, services, code…"
                 className="flex-1 min-w-0 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60" />
-              {search && <button onClick={() => setSearch('')} className="shrink-0"><X size={12} className="text-muted-foreground" /></button>}
+              {search && <button onClick={() => setSearch('')} className="shrink-0 cursor-pointer"><X size={12} className="text-muted-foreground" /></button>}
             </div>
 
             {/* Inline view segment: List · Board · ⚙(board-only) · Calendar */}
-            <div ref={boardSettingsRef} className="relative shrink-0">
+            <div ref={boardSettingsRef} className="relative shrink-0 order-3 sm:order-none ml-auto sm:ml-0">
               <div className="flex items-center bg-secondary border border-foreground/15 rounded-xl p-1 gap-0.5">
                 {([
-                  { key: 'list',     Icon: List,         label: 'List' },
-                  { key: 'board',    Icon: LayoutGrid,   label: 'Board' },
-                  { key: 'calendar', Icon: CalendarDays, label: 'Calendar' },
-                ] as const).map(({ key, Icon, label }) => (
-                  <span key={key} className="flex items-center">
+                  { key: 'list',     Icon: List,         label: 'List',     hideOnMobile: false },
+                  { key: 'board',    Icon: LayoutGrid,   label: 'Board',    hideOnMobile: false },
+                  { key: 'calendar', Icon: CalendarDays, label: 'Calendar', hideOnMobile: true  },
+                ] as const).map(({ key, Icon, label, hideOnMobile }) => (
+                  <span key={key} className={`flex items-center ${hideOnMobile ? 'hidden sm:flex' : ''}`}>
                     <button
                       onClick={() => setListViewMode(key)}
-                      className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
+                      className={`cursor-pointer px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
                         listViewMode === key
                           ? 'bg-foreground/10 text-foreground'
                           : 'text-muted-foreground hover:text-foreground'

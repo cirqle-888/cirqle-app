@@ -1136,10 +1136,13 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
             so when scrolled there's visible space above (between header and toolbar) and below (before thead). */}
         <div className="sticky top-[92px] z-20 bg-background pt-4 pb-4 space-y-2 w-full">
 
-          {/* Row 1: [Select | Edit] · [Search flex-1] · [View segment] · [⚙ board] */}
-          <div className="flex items-center gap-2 w-full">
+          {/* Row 1: [Select | Edit] · [Search flex-1] · [View segment] · [⚙ board]
+              On mobile (<sm) the row wraps; Search jumps to the top via order-first
+              and takes full width so it's actually usable. Select/Edit and the View
+              toggle drop below on the second wrap-line, where they have room to breathe. */}
+          <div className="flex flex-wrap items-center gap-2 w-full">
             {/* Left group: Select + Inline Edit — solid action-mode toggles */}
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0 order-2 sm:order-none">
               <button
                 onClick={() => { setBulkMode(m => !m); setSelectedTasks(new Set()) }}
                 className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm ${
@@ -1165,25 +1168,29 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
               )}
             </div>
 
-            {/* Search — flex-1 */}
-            <div className="flex items-center gap-2 bg-secondary border border-foreground/15 rounded-xl px-3 py-2 flex-1 basis-0 min-w-0">
+            {/* Search — full-width on mobile (order-first so it sits at top of wrapped row),
+                flex-1 on desktop so it fills the gap between action group and view toggle. */}
+            <div className="order-1 sm:order-none w-full sm:w-auto flex items-center gap-2 bg-secondary border border-foreground/15 rounded-xl px-3 py-2 sm:flex-1 sm:basis-0 min-w-0">
               <Search size={14} className="text-muted-foreground shrink-0" />
-              <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search by title, client, service or code…" className="flex-1 min-w-0 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60" />
-              {searchQ && <button onClick={() => setSearchQ('')} className="shrink-0"><X size={12} className="text-muted-foreground" /></button>}
+              <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search title, client, service, code…" className="flex-1 min-w-0 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60" />
+              {searchQ && <button onClick={() => setSearchQ('')} className="shrink-0 cursor-pointer"><X size={12} className="text-muted-foreground" /></button>}
             </div>
 
-            {/* Inline view segment: Table · Board · ⚙(board-only) · Calendar */}
-            <div ref={viewRef} className="relative shrink-0">
+            {/* Inline view segment: Table · Board · ⚙(board-only) · Calendar
+                Calendar hidden below sm — limited utility on phones and the
+                three-button row otherwise overflows out of the viewport.
+                order-3 keeps it on the wrapped row at the right of Select/Edit on mobile. */}
+            <div ref={viewRef} className="relative shrink-0 order-3 sm:order-none ml-auto sm:ml-0">
               <div className="flex items-center bg-secondary border border-foreground/15 rounded-xl p-1 gap-0.5">
                 {([
-                  { key: 'table',    Icon: List,         label: 'Table' },
-                  { key: 'board',    Icon: LayoutGrid,   label: 'Board' },
-                  { key: 'calendar', Icon: CalendarDays, label: 'Calendar' },
-                ] as const).map(({ key, Icon, label }) => (
-                  <span key={key} className="flex items-center">
+                  { key: 'table',    Icon: List,         label: 'Table',    hideOnMobile: false },
+                  { key: 'board',    Icon: LayoutGrid,   label: 'Board',    hideOnMobile: false },
+                  { key: 'calendar', Icon: CalendarDays, label: 'Calendar', hideOnMobile: true  },
+                ] as const).map(({ key, Icon, label, hideOnMobile }) => (
+                  <span key={key} className={`flex items-center ${hideOnMobile ? 'hidden sm:flex' : ''}`}>
                     <button
                       onClick={() => setViewMode(key)}
-                      className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
+                      className={`cursor-pointer px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
                         viewMode === key
                           ? 'bg-foreground/10 text-foreground'
                           : 'text-muted-foreground hover:text-foreground'
@@ -1652,7 +1659,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                       })
                     : () => openEdit(task)
                 }
-                className={`bg-card border rounded-xl px-3.5 py-3 active:bg-secondary/50 transition-colors ${
+                className={`cursor-pointer bg-card border rounded-xl px-3.5 py-3 active:bg-secondary/50 transition-colors ${
                   isSelected ? 'border-violet-500/60 bg-violet-500/[0.06]' : 'border-border'
                 } ${highlightedTaskId === task.id ? 'ring-1 ring-violet-400' : ''}`}
               >

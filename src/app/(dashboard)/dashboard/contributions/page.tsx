@@ -14,7 +14,7 @@ export default async function ContributionsPage() {
   ] = await Promise.all([
     supabase
       .from('tasks')
-      .select('id, title, service_id, billing_amount_inr, status, task_date, client:clients(id, name), service:services(id, name)')
+      .select('id, task_number, title, service_id, billing_amount_inr, status, task_date, client:clients(id, name), service:services(id, name)')
       .in('status', ['pending', 'in_progress', 'done', 'delivered', 'invoiced', 'paid'])
       .order('task_date', { ascending: false }),
     supabase.from('employees').select('id, cqid, name, performance_rating, role').eq('is_active', true).order('cqid'),
