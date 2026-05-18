@@ -692,6 +692,23 @@ export default function SettingsClient(props: Props) {
               </div>
             </div>
           ))}
+
+          {/* Access & Roles — link to designations page */}
+          <div className="mt-4">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/40 px-3 mb-1.5 flex items-center gap-1.5">
+              <span>🔐</span>
+              <span>Team Access</span>
+            </p>
+            <a
+              href="/dashboard/settings/designations"
+              className="flex items-center justify-between w-full text-left px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors group"
+            >
+              <span>Access & Roles</span>
+              <svg className="w-3 h-3 opacity-40 group-hover:opacity-70 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+              </svg>
+            </a>
+          </div>
         </div>
 
         {/* Settings content */}

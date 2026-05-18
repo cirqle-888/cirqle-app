@@ -12,12 +12,17 @@ interface RefEmployee  { id: string; cqid: string; name: string }
 interface RefGroup     { id: string; name: string; weight: number }
 interface RefParameter { id: string; name: string; group_id: string; weight: number; display_order: number }
 
+interface RefBankAccount  { id: string; name: string }
+interface RefCashCategory { id: string; name: string; type: string }
+
 interface Props {
-  clients:    RefClient[]
-  services:   RefService[]
-  employees:  RefEmployee[]
-  groups:     RefGroup[]
-  parameters: RefParameter[]
+  clients:         RefClient[]
+  services:        RefService[]
+  employees:       RefEmployee[]
+  groups:          RefGroup[]
+  parameters:      RefParameter[]
+  bankAccounts:    RefBankAccount[]
+  cashCategories:  RefCashCategory[]
 }
 
 export type ContribSubMode = 'earnings_only' | 'score_pct' | 'param_detail'
@@ -32,6 +37,9 @@ export type ImportMode =
   | 'pricing_matrix'
   | 'jobs'
   | 'contributions'
+  | 'cashbook_entries'
+  | 'invoices'
+  | 'invoice_status'
 
 interface ParsedRow {
   _line:    number
@@ -42,16 +50,52 @@ interface ParsedRow {
 }
 
 // ─── Mode metadata ────────────────────────────────────────────────────────────
+// Flat list kept for backward compatibility (cleanup tab, TABLE_FOR_MODE, etc.)
 const MODES: { key: ImportMode; label: string; emoji: string }[] = [
-  { key: 'employees',     label: 'Employees',     emoji: '👤' },
-  { key: 'clients',       label: 'Clients',        emoji: '🏢' },
-  { key: 'services',      label: 'Services',       emoji: '⚙️' },
-  { key: 'groups',        label: 'Contribution Groups', emoji: '🗂️' },
-  { key: 'parameters',    label: 'Parameters',     emoji: '📊' },
-  { key: 'tools',          label: 'Tools',           emoji: '🔧' },
-  { key: 'pricing_matrix', label: 'Pricing Matrix',  emoji: '💰' },
-  { key: 'jobs',           label: 'Jobs (Tasks)',     emoji: '✅' },
-  { key: 'contributions', label: 'Contributions',  emoji: '📈' },
+  { key: 'employees',      label: 'Employees',           emoji: '👤' },
+  { key: 'clients',        label: 'Clients',             emoji: '🏢' },
+  { key: 'services',       label: 'Services',            emoji: '⚙️' },
+  { key: 'groups',         label: 'Contribution Groups', emoji: '🗂️' },
+  { key: 'parameters',     label: 'Parameters',          emoji: '📊' },
+  { key: 'tools',          label: 'Tools',               emoji: '🔧' },
+  { key: 'pricing_matrix', label: 'Pricing Matrix',      emoji: '💰' },
+  { key: 'jobs',           label: 'Jobs (Tasks)',         emoji: '✅' },
+  { key: 'cashbook_entries', label: 'Cashbook Entries',  emoji: '📒' },
+  { key: 'contributions',  label: 'Contributions',       emoji: '📈' },
+  { key: 'invoices',       label: 'Invoices',            emoji: '🧾' },
+  { key: 'invoice_status', label: 'Invoice Status Update', emoji: '🔄' },
+]
+
+// Tiered grouping — shown in the import UI to guide the user on order
+const IMPORT_TIERS: { tier: number; label: string; color: string; hint: string; modes: ImportMode[] }[] = [
+  {
+    tier: 1,
+    label: 'Foundation',
+    color: 'emerald',
+    hint: 'No dependencies — import these first',
+    modes: ['employees', 'clients', 'services', 'groups', 'parameters', 'tools'],
+  },
+  {
+    tier: 2,
+    label: 'Pricing',
+    color: 'blue',
+    hint: 'Needs Clients + Services to exist first',
+    modes: ['pricing_matrix'],
+  },
+  {
+    tier: 3,
+    label: 'Operations',
+    color: 'amber',
+    hint: 'Needs Clients + Services. Tasks must exist before cashbook entries that reference them',
+    modes: ['jobs', 'cashbook_entries'],
+  },
+  {
+    tier: 4,
+    label: 'Financial Records',
+    color: 'violet',
+    hint: 'Needs Jobs/Tasks + Employees to exist first',
+    modes: ['contributions', 'invoices', 'invoice_status'],
+  },
 ]
 
 // ─── Templates ───────────────────────────────────────────────────────────────
@@ -133,6 +177,29 @@ const TEMPLATES: Record<ImportMode, { header: string; example: string }> = {
       '"","","Social Media Pack Jun","2025-06-01","CQ002","40","2000"',
     ].join('\n'),
   },
+  cashbook_entries: {
+    header: 'id,entry_date,type,category_name,bank_account_name,amount,currency,amount_inr,description,reference',
+    example: [
+      '"","2024-01-15","inflow","Invoice Payment","HDFC Current","25000","INR","25000","Payment from Sea Star - Invoice #INV-001","INV-001"',
+      '"","2024-01-20","outflow","Salary","HDFC Current","15000","INR","15000","Salary for CQ001 - January 2024",""',
+      '"","2024-01-25","outflow","Software Subscription","HDFC Current","1200","INR","1200","Adobe CC monthly",""',
+    ].join('\n'),
+  },
+  invoices: {
+    header: 'id,invoice_number,client_name_or_code,issue_date,due_date,billing_period_start,billing_period_end,currency,subtotal,tax_rate,discount_amount,notes,status',
+    example: [
+      '"","INV-2024-001","Sea Star Supermarket","2024-01-31","2024-02-14","2024-01-01","2024-01-31","INR","50000","0","0","January 2024 services","draft"',
+      '"","INV-2024-002","SSM001","2024-02-29","2024-03-14","2024-02-01","2024-02-29","INR","45000","0","0","February 2024 services","sent"',
+    ].join('\n'),
+  },
+  invoice_status: {
+    header: 'invoice_number_or_id,status,paid_amount,payment_date,payment_method,notes',
+    example: [
+      '"INV-2024-001","paid","50000","2024-02-10","bank_transfer","Full payment received"',
+      '"INV-2024-002","partial","20000","2024-03-05","cheque","Partial payment - balance pending"',
+      '"INV-2024-003","cancelled","","","","Client cancelled project"',
+    ].join('\n'),
+  },
 }
 
 // ─── Export configuration ─────────────────────────────────────────────────────
@@ -148,6 +215,9 @@ const EXPORT_CONFIG: Record<ImportMode, { table: string; orderBy?: string }> = {
   pricing_matrix: { table: 'client_service_pricing',   orderBy: 'client_id' },
   jobs:           { table: 'tasks',                    orderBy: 'task_date' },
   contributions:  { table: 'contribution_scores',      orderBy: 'task_id' },
+  cashbook_entries: { table: 'cashbook_entries', orderBy: 'entry_date' },
+  invoices:         { table: 'invoices',          orderBy: 'issue_date' },
+  invoice_status:   { table: 'invoices',          orderBy: 'invoice_number' },
 }
 
 // ─── CSV output helpers ───────────────────────────────────────────────────────
@@ -277,6 +347,41 @@ const COLUMNS: Record<ImportMode, ColDef[]> = {
     { col: 'score_percentage', req: true,  notes: '0–100' },
     { col: 'earnings',         req: true,  notes: 'INR amount' },
   ],
+  cashbook_entries: [
+    ID_COL,
+    { col: 'entry_date',        req: true,  notes: 'DD-MM-YYYY (also accepts YYYY-MM-DD)' },
+    { col: 'type',              req: true,  notes: 'inflow / outflow' },
+    { col: 'category_name',     req: false, notes: 'Must match a category name in Cash Categories settings' },
+    { col: 'bank_account_name', req: false, notes: 'Must match a bank account name in Bank Accounts settings' },
+    { col: 'amount',            req: true,  notes: 'Amount in the transaction currency' },
+    { col: 'currency',          req: false, notes: 'INR / AED / USD etc. (default: INR)' },
+    { col: 'amount_inr',        req: false, notes: 'INR equivalent (defaults to amount if currency is INR)' },
+    { col: 'description',       req: false, notes: 'Description / notes' },
+    { col: 'reference',         req: false, notes: 'Reference number, invoice number, etc.' },
+  ],
+  invoices: [
+    ID_COL,
+    { col: 'invoice_number',        req: true,  notes: 'Unique invoice number e.g. INV-2024-001' },
+    { col: 'client_name_or_code',   req: true,  notes: 'Client name or client code' },
+    { col: 'issue_date',            req: true,  notes: 'DD-MM-YYYY' },
+    { col: 'due_date',              req: false, notes: 'DD-MM-YYYY (default: issue_date + 14 days)' },
+    { col: 'billing_period_start',  req: false, notes: 'DD-MM-YYYY — month/period start' },
+    { col: 'billing_period_end',    req: false, notes: 'DD-MM-YYYY — month/period end' },
+    { col: 'currency',              req: false, notes: 'INR / AED / USD etc. (default: INR)' },
+    { col: 'subtotal',              req: false, notes: 'Invoice subtotal amount' },
+    { col: 'tax_rate',              req: false, notes: 'Tax % (default: 0)' },
+    { col: 'discount_amount',       req: false, notes: 'Discount amount (default: 0)' },
+    { col: 'notes',                 req: false, notes: 'Invoice notes' },
+    { col: 'status',                req: false, notes: 'draft / reviewed / sent / partial / paid / cancelled (default: draft)' },
+  ],
+  invoice_status: [
+    { col: 'invoice_number_or_id', req: true,  notes: 'Invoice number (e.g. INV-2024-001) or raw UUID' },
+    { col: 'status',               req: true,  notes: 'draft / reviewed / sent / partial / paid / cancelled / bad_debt / overdue' },
+    { col: 'paid_amount',          req: false, notes: 'Amount paid — required when status is partial or paid' },
+    { col: 'payment_date',         req: false, notes: 'DD-MM-YYYY' },
+    { col: 'payment_method',       req: false, notes: 'bank_transfer / cheque / cash / upi / other' },
+    { col: 'notes',                req: false, notes: 'Payment or status change notes' },
+  ],
 }
 
 // ─── CSV helpers ──────────────────────────────────────────────────────────────
@@ -374,7 +479,7 @@ function IssueCell({ row }: { row: ParsedRow }) {
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-export default function ImportClient({ clients, services, employees, groups, parameters }: Props) {
+export default function ImportClient({ clients, services, employees, groups, parameters, bankAccounts, cashCategories }: Props) {
   const supabase = createClient()
   const { toasts, dismiss, success, error: toastError } = useToast()
 
@@ -407,6 +512,8 @@ export default function ImportClient({ clients, services, employees, groups, par
   const serviceMap = useMemo(() => { const m: Record<string, string> = {}; services.forEach(s => { m[norm(s.name)] = s.id }); return m }, [services])
   const empMap     = useMemo(() => { const m: Record<string, string> = {}; employees.forEach(e => { m[norm(e.cqid)] = e.id }); return m }, [employees])
   const groupMap   = useMemo(() => { const m: Record<string, string> = {}; groups.forEach(g => { m[norm(g.name)] = g.id }); return m }, [groups])
+  const bankAccountMap = useMemo(() => { const m: Record<string, string> = {}; bankAccounts.forEach(b => { m[norm(b.name)] = b.id }); return m }, [bankAccounts])
+  const cashCategoryMap = useMemo(() => { const m: Record<string, string> = {}; cashCategories.forEach(c => { m[norm(c.name)] = c.id }); return m }, [cashCategories])
 
   // ── Export current data ────────────────────────────────────────────────────
   async function exportCurrentData(m: ImportMode) {
@@ -774,6 +881,142 @@ export default function ImportClient({ clients, services, employees, groups, par
     })
   }
 
+  function parseCashbookEntries(lines: string[][]): ParsedRow[] {
+    const h = lines[0].map(norm)
+    const iId       = h.findIndex(c => c === 'id')
+    const iDate     = h.findIndex(c => c.includes('entry_date') || c.includes('date'))
+    const iType     = h.findIndex(c => c === 'type')
+    const iCat      = h.findIndex(c => c.includes('category'))
+    const iBank     = h.findIndex(c => c.includes('bank') || c.includes('account'))
+    const iAmt      = h.findIndex(c => c === 'amount')
+    const iCurr     = h.findIndex(c => c === 'currency')
+    const iAmtInr   = h.findIndex(c => c.includes('amount_inr') || c.includes('inr'))
+    const iDesc     = h.findIndex(c => c.includes('description') || c.includes('desc'))
+    const iRef      = h.findIndex(c => c.includes('reference') || c.includes('ref'))
+
+    return lines.slice(1).map((c, i) => {
+      const g = (j: number) => j >= 0 ? c[j]?.trim() || '' : ''
+      const catName  = g(iCat)
+      const bankName = g(iBank)
+      const currency = g(iCurr) || 'INR'
+      const amount   = g(iAmt)
+      const amtInr   = g(iAmtInr) || (currency === 'INR' ? amount : '')
+      const r: ParsedRow = {
+        ...baseRow(i), row_id: g(iId),
+        entry_date: normalizeDate(g(iDate)),
+        type: g(iType) || 'inflow',
+        category_name: catName,
+        category_id: catName ? cashCategoryMap[norm(catName)] : undefined,
+        bank_account_name: bankName,
+        bank_account_id: bankName ? bankAccountMap[norm(bankName)] : undefined,
+        amount, currency, amount_inr: amtInr,
+        description: g(iDesc), reference: g(iRef),
+      }
+      if (!r.entry_date) r.errors.push('entry_date is required')
+      else if (!/^\d{4}-\d{2}-\d{2}$/.test(r.entry_date)) r.errors.push('entry_date must be DD-MM-YYYY')
+      if (!['inflow', 'outflow'].includes(r.type)) r.errors.push('type must be inflow or outflow')
+      if (!r.amount) r.errors.push('amount is required')
+      else if (isNaN(parseFloat(r.amount))) r.errors.push('amount must be a number')
+      if (catName && !r.category_id) r.warnings.push(`Category "${catName}" not found — will leave blank`)
+      if (bankName && !r.bank_account_id) r.warnings.push(`Bank account "${bankName}" not found — will leave blank`)
+      return finalize(r)
+    })
+  }
+
+  function parseInvoices(lines: string[][]): ParsedRow[] {
+    const h = lines[0].map(norm)
+    const iId       = h.findIndex(c => c === 'id')
+    const iNum      = h.findIndex(c => c.includes('invoice_number') || c.includes('number'))
+    const iClient   = h.findIndex(c => c.includes('client'))
+    const iIssue    = h.findIndex(c => c.includes('issue'))
+    const iDue      = h.findIndex(c => c.includes('due'))
+    const iPStart   = h.findIndex(c => c.includes('period_start') || c.includes('start'))
+    const iPEnd     = h.findIndex(c => c.includes('period_end') || c.includes('end'))
+    const iCurr     = h.findIndex(c => c === 'currency')
+    const iSub      = h.findIndex(c => c.includes('subtotal'))
+    const iTax      = h.findIndex(c => c.includes('tax'))
+    const iDisc     = h.findIndex(c => c.includes('discount'))
+    const iNotes    = h.findIndex(c => c.includes('notes'))
+    const iStatus   = h.findIndex(c => c === 'status')
+
+    const validStatuses = ['draft','reviewed','sent','partial','paid','cancelled','bad_debt','overdue']
+
+    return lines.slice(1).map((c, i) => {
+      const g = (j: number) => j >= 0 ? c[j]?.trim() || '' : ''
+      const clientRef = g(iClient)
+      const issueDate = normalizeDate(g(iIssue))
+      let dueDate = normalizeDate(g(iDue))
+      if (!dueDate && issueDate) {
+        // Default due date: issue + 14 days
+        const d = new Date(issueDate)
+        d.setDate(d.getDate() + 14)
+        dueDate = d.toISOString().slice(0, 10)
+      }
+      const invoiceStatus = g(iStatus) || 'draft'
+      const r: ParsedRow = {
+        ...baseRow(i), row_id: g(iId),
+        invoice_number: g(iNum),
+        client_ref: clientRef,
+        client_id: clientRef ? clientMap[norm(clientRef)] : undefined,
+        issue_date: issueDate, due_date: dueDate,
+        billing_period_start: normalizeDate(g(iPStart)),
+        billing_period_end:   normalizeDate(g(iPEnd)),
+        currency: g(iCurr) || 'INR',
+        subtotal: g(iSub) || '0',
+        tax_rate: g(iTax) || '0',
+        discount_amount: g(iDisc) || '0',
+        notes: g(iNotes), invoice_status: invoiceStatus,
+      }
+      if (!r.invoice_number) r.errors.push('invoice_number is required')
+      if (!r.client_id) r.errors.push(`Client "${clientRef}" not found — must match an existing client name or code`)
+      if (!r.issue_date) r.errors.push('issue_date is required')
+      else if (!/^\d{4}-\d{2}-\d{2}$/.test(r.issue_date)) r.errors.push('issue_date must be DD-MM-YYYY')
+      if (!validStatuses.includes(invoiceStatus)) r.errors.push(`status "${invoiceStatus}" invalid`)
+      return finalize(r)
+    })
+  }
+
+  async function parseInvoiceStatus(lines: string[][]): Promise<ParsedRow[]> {
+    const h = lines[0].map(norm)
+    const iRef    = h.findIndex(c => c.includes('invoice_number') || c.includes('number') || c.includes('id'))
+    const iStatus = h.findIndex(c => c === 'status')
+    const iPaid   = h.findIndex(c => c.includes('paid_amount') || c.includes('paid'))
+    const iDate   = h.findIndex(c => c.includes('payment_date') || c.includes('date'))
+    const iMethod = h.findIndex(c => c.includes('method') || c.includes('payment_method'))
+    const iNotes  = h.findIndex(c => c.includes('notes'))
+
+    // Pre-load invoice number → id map
+    const { data: invRows } = await supabase.from('invoices').select('id, invoice_number')
+    const invMap: Record<string, string> = {}
+    ;(invRows || []).forEach((inv: any) => { invMap[norm(inv.invoice_number)] = inv.id })
+
+    const validStatuses = ['draft','reviewed','sent','partial','paid','cancelled','bad_debt','overdue']
+    const validMethods  = ['bank_transfer','cheque','cash','upi','online','other','']
+
+    return lines.slice(1).map((c, i) => {
+      const g = (j: number) => j >= 0 ? c[j]?.trim() || '' : ''
+      const ref           = g(iRef)
+      const invoiceStatus = g(iStatus)
+      const isUUID = /^[0-9a-f-]{36}$/i.test(ref)
+      const invId  = isUUID ? ref : invMap[norm(ref)]
+      const r: ParsedRow = {
+        ...baseRow(i), row_id: undefined,
+        invoice_ref: ref, invoice_id: invId,
+        invoice_status: invoiceStatus, paid_amount: g(iPaid),
+        payment_date: normalizeDate(g(iDate)),
+        payment_method: g(iMethod) || '',
+        notes: g(iNotes),
+      }
+      if (!ref) r.errors.push('invoice_number_or_id is required')
+      else if (!invId) r.errors.push(`Invoice "${ref}" not found in database`)
+      if (!invoiceStatus) r.errors.push('status is required')
+      else if (!validStatuses.includes(invoiceStatus)) r.errors.push(`status "${invoiceStatus}" invalid — use: ${validStatuses.join(', ')}`)
+      if ((invoiceStatus === 'partial' || invoiceStatus === 'paid') && !r.paid_amount) r.warnings.push('paid_amount recommended when status is partial or paid')
+      if (r.payment_method && !validMethods.includes(r.payment_method)) r.warnings.push(`payment_method "${r.payment_method}" not standard`)
+      return finalize(r)
+    })
+  }
+
   // ── File handler ───────────────────────────────────────────────────────────
   const handleFile = useCallback(async (file: File) => {
     const text = await file.text()
@@ -790,6 +1033,9 @@ export default function ImportClient({ clients, services, employees, groups, par
       case 'pricing_matrix': parsed = parsePricingMatrix(lines);     break
       case 'jobs':           parsed = parseJobs(lines);              break
       case 'contributions': parsed = await parseContributions(lines); break
+      case 'cashbook_entries': parsed = parseCashbookEntries(lines);        break
+      case 'invoices':         parsed = parseInvoices(lines);               break
+      case 'invoice_status':   parsed = await parseInvoiceStatus(lines);    break
     }
     if (operation === 'update' || operation === 'delete') {
       parsed.forEach(p => {
@@ -802,7 +1048,7 @@ export default function ImportClient({ clients, services, employees, groups, par
     setRows(parsed)
     setStep('preview')
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, operation, clientMap, serviceMap, empMap, groupMap])
+  }, [mode, operation, clientMap, serviceMap, empMap, groupMap, bankAccountMap, cashCategoryMap])
 
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; if (f) handleFile(f) }
   const onDrop = (e: React.DragEvent) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f) }
@@ -1187,6 +1433,97 @@ export default function ImportClient({ clients, services, employees, groups, par
         }
         break
       }
+
+      case 'cashbook_entries': {
+        const table = 'cashbook_entries'
+        if (operation === 'delete') {
+          const ids = valid.map(r => r.row_id).filter(Boolean) as string[]
+          await backupBeforeUpdate(table, ids)
+          await batchDelete(table, ids)
+          break
+        }
+        const recs = valid.map(r => ({
+          row_id: r.row_id,
+          fields: {
+            entry_date:      r.entry_date,
+            type:            r.type,
+            category_id:     r.category_id || null,
+            bank_account_id: r.bank_account_id || null,
+            amount:          parseFloat(r.amount) || 0,
+            currency:        r.currency || 'INR',
+            amount_inr:      parseFloat(r.amount_inr || r.amount) || 0,
+            description:     r.description || null,
+            reference:       r.reference || null,
+          },
+        }))
+        if (operation === 'update') {
+          await backupBeforeUpdate(table, recs.map(r => r.row_id).filter(Boolean) as string[])
+          await batchUpdate(table, recs.filter(r => r.row_id) as any)
+        } else {
+          await batchInsert(table, recs.map(r => r.fields))
+        }
+        break
+      }
+
+      case 'invoices': {
+        const table = 'invoices'
+        if (operation === 'delete') {
+          const ids = valid.map(r => r.row_id).filter(Boolean) as string[]
+          await backupBeforeUpdate(table, ids)
+          await batchDelete(table, ids)
+          break
+        }
+        const recs = valid.map(r => ({
+          row_id: r.row_id,
+          fields: {
+            invoice_number:       r.invoice_number,
+            client_id:            r.client_id,
+            issue_date:           r.issue_date,
+            due_date:             r.due_date || null,
+            billing_period_start: r.billing_period_start || null,
+            billing_period_end:   r.billing_period_end   || null,
+            currency:             r.currency || 'INR',
+            subtotal:             parseFloat(r.subtotal) || 0,
+            total_amount:         parseFloat(r.subtotal) || 0,
+            tax_rate:             parseFloat(r.tax_rate) || 0,
+            tax_amount:           0,
+            discount_amount:      parseFloat(r.discount_amount) || 0,
+            status:               r.invoice_status || 'draft',
+            notes:                r.notes || null,
+          },
+        }))
+        if (operation === 'update') {
+          await backupBeforeUpdate(table, recs.map(r => r.row_id).filter(Boolean) as string[])
+          await batchUpdate(table, recs.filter(r => r.row_id) as any)
+        } else {
+          await batchInsert(table, recs.map(r => r.fields))
+        }
+        break
+      }
+
+      case 'invoice_status': {
+        // Special: update invoice status + optionally insert a payment record
+        for (const r of valid) {
+          const invId = r.invoice_id
+          if (!invId) { res.skipped += 1; continue }
+          const updateFields: any = { status: r.invoice_status }
+          if (r.paid_amount) updateFields.paid_amount = parseFloat(r.paid_amount)
+          const { error: updErr } = await supabase.from('invoices').update(updateFields).eq('id', invId)
+          if (updErr) { res.errors.push(`${r.invoice_ref}: ${updErr.message}`); res.skipped += 1; continue }
+          // Optionally insert payment record
+          if (r.paid_amount && parseFloat(r.paid_amount) > 0) {
+            await supabase.from('invoice_payments').insert({
+              invoice_id: invId,
+              amount: parseFloat(r.paid_amount),
+              payment_date: r.payment_date || new Date().toISOString().slice(0, 10),
+              payment_method: r.payment_method || 'other',
+              notes: r.notes || null,
+            }).select('id')
+          }
+          res.inserted += 1
+        }
+        break
+      }
     }
 
     setResult(res)
@@ -1200,15 +1537,18 @@ export default function ImportClient({ clients, services, employees, groups, par
 
   // ── Clean-up helpers ───────────────────────────────────────────────────────
   const TABLE_FOR_MODE: Record<ImportMode, string> = {
-    employees:      'employees',
-    clients:        'clients',
-    services:       'services',
-    groups:         'contribution_groups',
-    parameters:     'parameters',
-    tools:          'tools',
-    pricing_matrix: 'client_service_pricing',
-    jobs:           'tasks',
-    contributions:  'contribution_scores',
+    employees:        'employees',
+    clients:          'clients',
+    services:         'services',
+    groups:           'contribution_groups',
+    parameters:       'parameters',
+    tools:            'tools',
+    pricing_matrix:   'client_service_pricing',
+    jobs:             'tasks',
+    contributions:    'contribution_scores',
+    cashbook_entries: 'cashbook_entries',
+    invoices:         'invoices',
+    invoice_status:   'invoices',
   }
 
   async function loadCleanupRecords(m: ImportMode) {
@@ -1462,6 +1802,35 @@ export default function ImportClient({ clients, services, employees, groups, par
         </tr>))}</tbody></table>
     )
 
+    if (cleanupMode === 'cashbook_entries') return (
+      <table className="w-full text-xs"><thead><tr className="border-b border-border bg-background/40">
+        <CheckTh/><th className={thCls}>Date</th><th className={thCls}>Type</th>
+        <th className={thCls}>Description</th><th className={thCls+' text-right'}>Amount</th><th className={thCls}>Currency</th>
+      </tr></thead><tbody>{cleanupRecords.map((r: any) => (
+        <tr key={r.id} className={selCls(r.id)} onClick={() => toggleSelect(r.id)}>
+          <CheckTd id={r.id}/>
+          <td className={tdCls+' font-mono'}>{r.entry_date}</td>
+          <td className={tdCls}><span className={r.type==='inflow'?'text-green-400':'text-red-400'}>{r.type}</span></td>
+          <td className={tdCls+' max-w-[200px] truncate'} title={r.description}>{r.description || '—'}</td>
+          <td className={tdCls+' text-right font-mono'}>{r.amount?.toLocaleString('en-IN')}</td>
+          <td className={tdCls}>{r.currency}</td>
+        </tr>))}</tbody></table>
+    )
+
+    if (cleanupMode === 'invoices') return (
+      <table className="w-full text-xs"><thead><tr className="border-b border-border bg-background/40">
+        <CheckTh/><th className={thCls}>Invoice #</th><th className={thCls}>Issue Date</th>
+        <th className={thCls}>Status</th><th className={thCls+' text-right'}>Total</th>
+      </tr></thead><tbody>{cleanupRecords.map((r: any) => (
+        <tr key={r.id} className={selCls(r.id)} onClick={() => toggleSelect(r.id)}>
+          <CheckTd id={r.id}/>
+          <td className={tdCls+' font-mono text-violet-300'}>{r.invoice_number}</td>
+          <td className={tdCls+' font-mono'}>{r.issue_date}</td>
+          <td className={tdCls}>{r.status}</td>
+          <td className={tdCls+' text-right font-mono'}>₹{r.total_amount?.toLocaleString('en-IN')}</td>
+        </tr>))}</tbody></table>
+    )
+
     // contributions
     return (
       <table className="w-full"><thead><tr className="border-b border-border bg-background/40">
@@ -1626,6 +1995,61 @@ export default function ImportClient({ clients, services, employees, groups, par
         </tr>))}</tbody></table>
     )
 
+    if (mode === 'cashbook_entries') return (
+      <table className="w-full text-xs"><thead><tr className="border-b border-border bg-background/40">
+        <th className={thCls}>#</th><th className={thCls}>St</th><th className={thCls}>Date</th>
+        <th className={thCls}>Type</th><th className={thCls}>Category</th><th className={thCls}>Bank Account</th>
+        <th className={thCls+' text-right'}>Amount</th><th className={thCls}>Currency</th><th className={thCls}>Issues</th>
+      </tr></thead><tbody>{rows.map(r => (
+        <tr key={r._line} className={`border-b border-border/40 ${r.status==='error'?'bg-red-500/5':r.status==='warn'?'bg-yellow-500/5':''}`}>
+          <td className={tdCls+' text-muted-foreground'}>{r._line}</td>
+          <td className={tdCls}><StatusBadge status={r.status}/></td>
+          <td className={tdCls+' font-mono'}>{r.entry_date}</td>
+          <td className={tdCls}><span className={r.type==='inflow'?'text-green-400':'text-red-400'}>{r.type}</span></td>
+          <td className={tdCls}>{r.category_id?<span className="text-green-400">{r.category_name}</span>:<span className="text-muted-foreground/50">{r.category_name||'—'}</span>}</td>
+          <td className={tdCls}>{r.bank_account_id?<span className="text-green-400">{r.bank_account_name}</span>:<span className="text-muted-foreground/50">{r.bank_account_name||'—'}</span>}</td>
+          <td className={tdCls+' text-right font-mono'}>{r.amount?parseFloat(r.amount).toLocaleString('en-IN'):'—'}</td>
+          <td className={tdCls}>{r.currency}</td>
+          <IssueCell row={r}/>
+        </tr>))}</tbody></table>
+    )
+
+    if (mode === 'invoices') return (
+      <table className="w-full text-xs"><thead><tr className="border-b border-border bg-background/40">
+        <th className={thCls}>#</th><th className={thCls}>St</th><th className={thCls}>Invoice #</th>
+        <th className={thCls}>Client</th><th className={thCls}>Issue Date</th>
+        <th className={thCls+' text-right'}>Subtotal</th><th className={thCls}>Status</th><th className={thCls}>Issues</th>
+      </tr></thead><tbody>{rows.map(r => (
+        <tr key={r._line} className={`border-b border-border/40 ${r.status==='error'?'bg-red-500/5':r.status==='warn'?'bg-yellow-500/5':''}`}>
+          <td className={tdCls+' text-muted-foreground'}>{r._line}</td>
+          <td className={tdCls}><StatusBadge status={r.status}/></td>
+          <td className={tdCls+' font-mono text-violet-300'}>{r.invoice_number}</td>
+          <td className={tdCls}>{r.client_id?<span className="text-green-400">{r.client_ref}</span>:<span className="text-red-400">{r.client_ref||'missing'}</span>}</td>
+          <td className={tdCls+' font-mono'}>{r.issue_date}</td>
+          <td className={tdCls+' text-right font-mono'}>{r.subtotal?`₹${parseFloat(r.subtotal).toLocaleString('en-IN')}`:'—'}</td>
+          <td className={tdCls}>{r.invoice_status}</td>
+          <IssueCell row={r}/>
+        </tr>))}</tbody></table>
+    )
+
+    if (mode === 'invoice_status') return (
+      <table className="w-full text-xs"><thead><tr className="border-b border-border bg-background/40">
+        <th className={thCls}>#</th><th className={thCls}>St</th><th className={thCls}>Invoice Ref</th>
+        <th className={thCls}>New Status</th><th className={thCls+' text-right'}>Paid Amount</th>
+        <th className={thCls}>Payment Date</th><th className={thCls}>Method</th><th className={thCls}>Issues</th>
+      </tr></thead><tbody>{rows.map(r => (
+        <tr key={r._line} className={`border-b border-border/40 ${r.status==='error'?'bg-red-500/5':r.status==='warn'?'bg-yellow-500/5':''}`}>
+          <td className={tdCls+' text-muted-foreground'}>{r._line}</td>
+          <td className={tdCls}><StatusBadge status={r.status}/></td>
+          <td className={tdCls}>{r.invoice_id?<span className="text-green-400">{r.invoice_ref}</span>:<span className="text-red-400">{r.invoice_ref||'missing'}</span>}</td>
+          <td className={tdCls}>{r.invoice_status}</td>
+          <td className={tdCls+' text-right font-mono'}>{r.paid_amount?`₹${parseFloat(r.paid_amount).toLocaleString('en-IN')}`:'—'}</td>
+          <td className={tdCls+' font-mono'}>{r.payment_date||'—'}</td>
+          <td className={tdCls}>{r.payment_method||'—'}</td>
+          <IssueCell row={r}/>
+        </tr>))}</tbody></table>
+    )
+
     // contributions
     const visibleParams = contribSubMode === 'param_detail' ? parameters.slice(0, 6) : []
     return (
@@ -1710,39 +2134,66 @@ export default function ImportClient({ clients, services, employees, groups, par
         </div>
       </div>
 
-      {/* Mode tabs — shared for both views */}
-      <div className="space-y-1.5">
-        <div className="flex flex-wrap gap-1.5">
-          {MODES.map(({ key, label, emoji }) => {
-            const active = pageTab === 'import' ? mode === key : cleanupMode === key
+      {/* Mode selector — tiered for import, flat for cleanup */}
+      <div className="space-y-3">
+        {pageTab === 'import' ? (
+          IMPORT_TIERS.map(tier => {
+            const tierModes = MODES.filter(m => tier.modes.includes(m.key))
+            const tierColors: Record<string, string> = {
+              emerald: 'text-emerald-400 border-emerald-500/20 bg-emerald-500/5',
+              blue:    'text-blue-400 border-blue-500/20 bg-blue-500/5',
+              amber:   'text-amber-400 border-amber-500/20 bg-amber-500/5',
+              violet:  'text-violet-400 border-violet-500/20 bg-violet-500/5',
+            }
+            const activeColor: Record<string, string> = {
+              emerald: 'bg-emerald-600',
+              blue:    'bg-blue-600',
+              amber:   'bg-amber-600',
+              violet:  'bg-violet-600',
+            }
             return (
+              <div key={tier.tier} className={`rounded-xl border p-3 space-y-2 ${tierColors[tier.color]}`}>
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-current/10 ${tierColors[tier.color].split(' ')[0]}`}>
+                    Tier {tier.tier}
+                  </span>
+                  <span className={`text-xs font-semibold ${tierColors[tier.color].split(' ')[0]}`}>{tier.label}</span>
+                  <span className="text-[11px] text-muted-foreground/60">— {tier.hint}</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {tierModes.map(({ key, label, emoji }) => (
+                    <button
+                      key={key}
+                      onClick={() => { setMode(key); reset() }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                        mode === key
+                          ? `${activeColor[tier.color]} text-white shadow`
+                          : 'bg-background border border-border text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      <span>{emoji}</span><span>{label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )
+          })
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {MODES.map(({ key, label, emoji }) => (
               <button
                 key={key}
-                onClick={() => {
-                  if (pageTab === 'import') { setMode(key); reset() }
-                  else { setCleanupMode(key); loadCleanupRecords(key) }
-                }}
+                onClick={() => { setCleanupMode(key); loadCleanupRecords(key) }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
-                  active
-                    ? pageTab === 'import' ? 'bg-violet-600 text-white shadow' : 'bg-red-600 text-white shadow'
+                  cleanupMode === key
+                    ? 'bg-red-600 text-white shadow'
                     : 'bg-card border border-border text-muted-foreground hover:text-foreground'
                 }`}
               >
-                <span>{emoji}</span>
-                <span>{label}</span>
+                <span>{emoji}</span><span>{label}</span>
               </button>
-            )
-          })}
-        </div>
-        {pageTab === 'import' && (
-          <>
-            {(mode === 'parameters' || mode === 'tools') && (
-              <p className="text-[11px] text-yellow-400">⚠️ Import <strong>Contribution Groups</strong> first — parameters and tools need a group to exist</p>
-            )}
-            {mode === 'contributions' && (
-              <p className="text-[11px] text-yellow-400">⚠️ Import <strong>Jobs</strong> first — contributions are matched by task title + date</p>
-            )}
-          </>
+            ))}
+          </div>
         )}
         {pageTab === 'cleanup' && (
           <p className="text-[11px] text-red-400">⚠️ Deletion is permanent and cannot be undone. Select records carefully before deleting.</p>
