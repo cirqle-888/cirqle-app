@@ -101,11 +101,19 @@ export async function generateInviteToken(employeeId: string): Promise<ActionRes
   if (error) return { ok: false, error: error.message }
 
   // Derive origin from the actual incoming request so the link always points
-  // to the real domain (works on localhost AND production without config changes).
+  // to the real domain. On localhost, fall back to NEXT_PUBLIC_APP_URL so that
+  // invite links shared with employees always use the live production URL.
   const hdrs = await headers()
   const host  = hdrs.get('host') || ''
-  const proto = hdrs.get('x-forwarded-proto') || (host.startsWith('localhost') ? 'http' : 'https')
-  const origin = `${proto}://${host}`
+  const isLocal = host.startsWith('localhost') || host.startsWith('127.')
+  let origin: string
+  if (isLocal && process.env.NEXT_PUBLIC_APP_URL && !process.env.NEXT_PUBLIC_APP_URL.includes('localhost')) {
+    // Dev machine → use the configured production URL
+    origin = process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, '')
+  } else {
+    const proto = hdrs.get('x-forwarded-proto') || (isLocal ? 'http' : 'https')
+    origin = `${proto}://${host}`
+  }
   const url = `${origin}/register/${token}`
   return { ok: true, data: { token, url, expiresAt } }
 }
