@@ -214,6 +214,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
   // Statement generator
   const [stmtDetailed, setStmtDetailed] = useState(false)
+  const [stmtExpandedInvId, setStmtExpandedInvId] = useState<string | null>(null)
   const [stmtForm, setStmtForm] = useState({
     client_id: '',
     mode: 'month' as 'month' | 'year' | 'range' | 'day',
@@ -3081,151 +3082,305 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   // RIGHT PANEL — Statement Generator
   // ─────────────────────────────────────────────────────────────────────────
   function renderStatementPanel() {
+    // ── Compute date range from form ───────────────────────────────────────
+    let stmtFrom = '', stmtTo = '', stmtPeriodLabel = ''
+    if (stmtForm.mode === 'month') {
+      stmtFrom = stmtForm.month + '-01'
+      const d2 = new Date(stmtForm.month + '-01')
+      const ld = new Date(d2.getFullYear(), d2.getMonth() + 1, 0).getDate()
+      stmtTo = `${stmtForm.month}-${ld}`
+      stmtPeriodLabel = new Date(stmtFrom + 'T00:00:00').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
+    } else if (stmtForm.mode === 'year') {
+      stmtFrom = `${stmtForm.year}-01-01`; stmtTo = `${stmtForm.year}-12-31`
+      stmtPeriodLabel = stmtForm.year
+    } else if (stmtForm.mode === 'day') {
+      stmtFrom = stmtTo = stmtForm.specific_date
+      stmtPeriodLabel = fmtDate(stmtForm.specific_date)
+    } else {
+      stmtFrom = stmtForm.date_from; stmtTo = stmtForm.date_to
+      stmtPeriodLabel = stmtFrom && stmtTo ? `${fmtDate(stmtFrom)} – ${fmtDate(stmtTo)}` : ''
+    }
+
+    const stmtInvoices = invoices
+      .filter(inv => {
+        if (stmtForm.client_id && inv.client_id !== stmtForm.client_id) return false
+        const d = inv.issue_date || inv.created_at?.slice(0, 10) || ''
+        return d >= stmtFrom && d <= stmtTo
+      })
+      .sort((a, b) => (a.issue_date || '').localeCompare(b.issue_date || ''))
+
+    const stmtTotalBilled  = stmtInvoices.reduce((s, i) => s + (i.total_amount  || 0), 0)
+    const stmtTotalPaid    = stmtInvoices.reduce((s, i) => s + (i.paid_amount   || 0), 0)
+    const stmtTotalBalance = stmtTotalBilled - stmtTotalPaid
+    const stmtTotalTasks   = stmtInvoices.reduce((s, i) => s + (i.items?.length || 0), 0)
+
     return (
       <div className="flex flex-col h-full overflow-hidden">
-        <div className="px-4 py-3 border-b border-border/40 flex items-center justify-between">
+
+        {/* Header */}
+        <div className="px-4 py-3 border-b border-border/40 flex items-center justify-between shrink-0">
           <div>
             <h3 className="font-semibold text-sm flex items-center gap-1.5">
               <Receipt className="w-4 h-4 text-blue-400" />Statement Generator
             </h3>
-            <p className="text-[11px] text-muted-foreground">Print account statements by month, year, range, or specific day</p>
+            <p className="text-[11px] text-muted-foreground">Account statements with task-level breakdown</p>
           </div>
           <button onClick={() => setPanelMode('detail')} className="p-1.5 hover:bg-foreground/5 rounded-lg text-muted-foreground hover:text-foreground">
             <X className="w-4 h-4" />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
 
-          {/* Client */}
-          <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block">Client (leave blank for all)</label>
-            <Combobox
-              options={[{ id: '', label: 'All Clients', sub: 'combined statement' }, ...clients.map(c => ({ id: c.id, label: c.name, sub: c.code }))]}
-              value={stmtForm.client_id}
-              onChange={v => setStmtForm(p => ({ ...p, client_id: v }))}
-              placeholder="All clients…"
-              sortKey="clients"
-            />
-          </div>
+        <div className="flex-1 overflow-y-auto">
+          <div className="px-4 py-4 space-y-4">
 
-          {/* Mode */}
-          <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block">Period Type</label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-              {([
-                ['month', '📅 Month'],
-                ['year',  '📆 Year'],
-                ['range', '🗓️ Date Range'],
-                ['day',   '📌 Specific Day'],
-              ] as const).map(([m, label]) => (
-                <button key={m} onClick={() => setStmtForm(p => ({ ...p, mode: m }))}
-                  className={`py-1.5 text-xs rounded-lg border transition-colors ${stmtForm.mode === m ? 'bg-blue-500/20 border-blue-500/50 text-blue-300' : 'border-border/40 text-muted-foreground hover:border-border'}`}>
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Date inputs */}
-          {stmtForm.mode === 'month' && (
+            {/* ── Client selector ── */}
             <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Month</label>
+              <label className="text-xs text-muted-foreground mb-1.5 block">Client</label>
+              <Combobox
+                options={[{ id: '', label: 'All Clients', sub: 'combined statement' }, ...clients.map(c => ({ id: c.id, label: c.name, sub: c.code }))]}
+                value={stmtForm.client_id}
+                onChange={v => { setStmtForm(p => ({ ...p, client_id: v })); setStmtExpandedInvId(null) }}
+                placeholder="All clients…"
+                sortKey="clients"
+              />
+            </div>
+
+            {/* ── Period Type ── */}
+            <div>
+              <label className="text-xs text-muted-foreground mb-1.5 block">Period</label>
+              <div className="grid grid-cols-2 gap-1.5">
+                {([
+                  ['month', '📅 Month'],
+                  ['year',  '📆 Year'],
+                  ['range', '🗓 Date Range'],
+                  ['day',   '📌 Specific Day'],
+                ] as const).map(([m, label]) => (
+                  <button key={m} onClick={() => setStmtForm(p => ({ ...p, mode: m }))}
+                    className={`py-1.5 text-xs rounded-lg border transition-colors ${stmtForm.mode === m ? 'bg-blue-500/20 border-blue-500/50 text-blue-300' : 'border-border/40 text-muted-foreground hover:border-border'}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* ── Date inputs ── */}
+            {stmtForm.mode === 'month' && (
               <input type="month" value={stmtForm.month}
                 onChange={e => setStmtForm(p => ({ ...p, month: e.target.value }))}
-                className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500/50"
-              />
-            </div>
-          )}
-          {stmtForm.mode === 'year' && (
-            <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Year</label>
-              <input type="number" min="2020" max="2030" value={stmtForm.year}
+                className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500/50" />
+            )}
+            {stmtForm.mode === 'year' && (
+              <input type="number" min="2020" max="2099" value={stmtForm.year}
                 onChange={e => setStmtForm(p => ({ ...p, year: e.target.value }))}
-                className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500/50"
-              />
-            </div>
-          )}
-          {stmtForm.mode === 'range' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground mb-1.5 block">From</label>
-                <input type="date" value={stmtForm.date_from}
-                  onChange={e => setStmtForm(p => ({ ...p, date_from: e.target.value }))}
-                  className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500/50"
-                />
+                className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500/50" />
+            )}
+            {stmtForm.mode === 'range' && (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">From</label>
+                  <input type="date" value={stmtForm.date_from}
+                    onChange={e => setStmtForm(p => ({ ...p, date_from: e.target.value }))}
+                    className="w-full bg-background border border-border/40 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-blue-500/50" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">To</label>
+                  <input type="date" value={stmtForm.date_to}
+                    onChange={e => setStmtForm(p => ({ ...p, date_to: e.target.value }))}
+                    className="w-full bg-background border border-border/40 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-blue-500/50" />
+                </div>
               </div>
-              <div>
-                <label className="text-xs text-muted-foreground mb-1.5 block">To</label>
-                <input type="date" value={stmtForm.date_to}
-                  onChange={e => setStmtForm(p => ({ ...p, date_to: e.target.value }))}
-                  className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500/50"
-                />
-              </div>
-            </div>
-          )}
-          {stmtForm.mode === 'day' && (
-            <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Date</label>
+            )}
+            {stmtForm.mode === 'day' && (
               <input type="date" value={stmtForm.specific_date}
                 onChange={e => setStmtForm(p => ({ ...p, specific_date: e.target.value }))}
-                className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500/50"
-              />
+                className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500/50" />
+            )}
+
+          </div>
+
+          {/* ── Summary bar (always visible when invoices exist) ── */}
+          {stmtInvoices.length > 0 ? (
+            <>
+              <div className="mx-4 mb-3 grid grid-cols-3 gap-2">
+                <div className="rounded-xl bg-foreground/[0.03] border border-border/30 p-3 text-center">
+                  <div className="text-[9px] text-muted-foreground uppercase tracking-wider mb-1">Billed</div>
+                  <div className="text-sm font-bold text-foreground">{fmt(stmtTotalBilled)}</div>
+                  <div className="text-[9px] text-muted-foreground mt-0.5">{stmtInvoices.length} inv · {stmtTotalTasks} tasks</div>
+                </div>
+                <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/20 p-3 text-center">
+                  <div className="text-[9px] text-emerald-400/70 uppercase tracking-wider mb-1">Received</div>
+                  <div className="text-sm font-bold text-emerald-400">{fmt(stmtTotalPaid)}</div>
+                  <div className="text-[9px] text-muted-foreground mt-0.5">
+                    {stmtTotalBilled > 0 ? Math.round(stmtTotalPaid / stmtTotalBilled * 100) : 0}% collected
+                  </div>
+                </div>
+                <div className={`rounded-xl p-3 text-center border ${stmtTotalBalance > 0 ? 'bg-red-500/5 border-red-500/20' : 'bg-emerald-500/5 border-emerald-500/20'}`}>
+                  <div className={`text-[9px] uppercase tracking-wider mb-1 ${stmtTotalBalance > 0 ? 'text-red-400/70' : 'text-emerald-400/70'}`}>Balance</div>
+                  <div className={`text-sm font-bold ${stmtTotalBalance > 0 ? 'text-red-400' : 'text-emerald-400'}`}>{fmt(stmtTotalBalance)}</div>
+                  <div className="text-[9px] text-muted-foreground mt-0.5">{stmtTotalBalance > 0 ? 'outstanding' : 'settled ✓'}</div>
+                </div>
+              </div>
+
+              {/* ── Invoice accordion list ── */}
+              <div className="px-4 pb-2 space-y-1.5">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
+                    {stmtPeriodLabel} · {stmtInvoices.length} Invoice{stmtInvoices.length !== 1 ? 's' : ''}
+                  </span>
+                  <button
+                    onClick={() => setStmtExpandedInvId(null)}
+                    className="text-[10px] text-muted-foreground hover:text-foreground transition-colors">
+                    Collapse all
+                  </button>
+                </div>
+
+                {stmtInvoices.map(inv => {
+                  const balance   = Math.max(0, (inv.total_amount || 0) - (inv.paid_amount || 0))
+                  const expanded  = stmtExpandedInvId === inv.id
+                  const overdue   = isOverdue(inv.due_date || '', inv.status)
+                  const statusLbl = overdue && inv.status !== 'paid' ? 'Overdue' : getStatusLabel(inv.status)
+                  const isPaid    = inv.status === 'paid' || balance === 0
+                  const isOver    = (overdue && inv.status !== 'paid') || inv.status === 'overdue'
+                  const sortedItems = [...(inv.items || [])].sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0))
+                  const taskCount = sortedItems.length
+
+                  return (
+                    <div key={inv.id}
+                      className={`rounded-xl border transition-colors overflow-hidden ${expanded ? 'border-blue-500/30 bg-blue-500/[0.04]' : 'border-border/30 bg-foreground/[0.02]'}`}>
+
+                      {/* Invoice header row */}
+                      <button
+                        className="w-full flex items-start gap-2 p-2.5 text-left"
+                        onClick={() => setStmtExpandedInvId(expanded ? null : inv.id)}>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[11px] font-mono font-semibold text-foreground/90">{inv.invoice_number}</span>
+                            {!stmtForm.client_id && (
+                              <span className="text-[10px] text-muted-foreground truncate max-w-[90px]">{inv.client?.name}</span>
+                            )}
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${
+                              isPaid ? 'bg-emerald-500/15 text-emerald-400' :
+                              isOver ? 'bg-red-500/15 text-red-400' :
+                              inv.status === 'partial' ? 'bg-amber-500/15 text-amber-400' :
+                              'bg-foreground/10 text-muted-foreground'
+                            }`}>{statusLbl}</span>
+                          </div>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="text-[10px] text-muted-foreground">{fmtDate(inv.issue_date || '')}</span>
+                            {taskCount > 0 && (
+                              <span className="text-[10px] text-muted-foreground">{taskCount} task{taskCount !== 1 ? 's' : ''}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="text-xs font-semibold">{fmt(inv.total_amount || 0)}</div>
+                          {(inv.paid_amount || 0) > 0 && (
+                            <div className="text-[10px] text-emerald-400">+{fmt(inv.paid_amount || 0)}</div>
+                          )}
+                          {balance > 0 && (
+                            <div className="text-[10px] text-red-400 font-semibold">{fmt(balance)} due</div>
+                          )}
+                        </div>
+                        <ChevronRight className={`w-3.5 h-3.5 shrink-0 mt-0.5 text-muted-foreground transition-transform ${expanded ? 'rotate-90' : ''}`} />
+                      </button>
+
+                      {/* Expanded: tasks + payments */}
+                      {expanded && (
+                        <div className="border-t border-border/30 mx-2 mb-2 pt-2 space-y-0.5">
+
+                          {/* Tasks */}
+                          {sortedItems.length > 0 && (
+                            <>
+                              <div className="text-[9px] text-muted-foreground/60 uppercase tracking-wider px-1 py-1 font-semibold">Tasks</div>
+                              {sortedItems.map((it, i) => (
+                                <div key={it.id ?? i}
+                                  className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-foreground/[0.03] hover:bg-foreground/[0.06] transition-colors">
+                                  <span className="text-[9px] text-muted-foreground/40 font-mono w-4 text-right shrink-0">{i + 1}</span>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="text-[11px] text-foreground/90 truncate">{it.description}</div>
+                                    <div className="text-[9px] text-muted-foreground">
+                                      {it.task?.task_date
+                                        ? new Date(it.task.task_date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+                                        : '—'}
+                                      {it.service?.name && <span className="ml-1 opacity-60">· {it.service.name}</span>}
+                                    </div>
+                                  </div>
+                                  <div className="text-[11px] font-semibold text-foreground/80 shrink-0 tabular-nums">
+                                    {it.total > 0 ? fmt(it.total, it.currency as any) : <span className="text-muted-foreground/40 font-normal">—</span>}
+                                  </div>
+                                </div>
+                              ))}
+                              {/* Tasks subtotal */}
+                              <div className="flex items-center justify-between px-2 pt-1.5 pb-0.5 border-t border-border/20 mt-1">
+                                <span className="text-[10px] text-muted-foreground">{taskCount} tasks · subtotal</span>
+                                <span className="text-[11px] font-bold">{fmt(inv.total_amount || 0)}</span>
+                              </div>
+                            </>
+                          )}
+
+                          {/* Payments */}
+                          {(inv.payments || []).length > 0 && (
+                            <>
+                              <div className="text-[9px] text-muted-foreground/60 uppercase tracking-wider px-1 py-1 mt-1 font-semibold">Payments Received</div>
+                              {(inv.payments || []).map((pmt: any, pi: number) => (
+                                <div key={pmt.id ?? pi}
+                                  className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-emerald-500/[0.06] border border-emerald-500/10">
+                                  <CheckCircle className="w-3 h-3 text-emerald-400 shrink-0" />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="text-[10px] text-emerald-300 font-medium">
+                                      {pmt.payment_date ? new Date(pmt.payment_date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+                                    </div>
+                                    <div className="text-[9px] text-muted-foreground">
+                                      {({ bank_transfer: 'Bank Transfer', cash: 'Cash', upi: 'UPI', cheque: 'Cheque', online: 'Online', other: 'Other' } as any)[pmt.payment_method] || pmt.payment_method}
+                                      {pmt.reference && <span className="ml-1">· {pmt.reference}</span>}
+                                    </div>
+                                  </div>
+                                  <div className="text-[11px] font-semibold text-emerald-400 shrink-0 tabular-nums">
+                                    {fmt(pmt.amount)}
+                                  </div>
+                                </div>
+                              ))}
+                            </>
+                          )}
+
+                          {/* Balance summary for this invoice */}
+                          <div className={`flex items-center justify-between px-3 py-2 mt-1.5 rounded-lg ${isPaid ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-red-500/8 border border-red-500/20'}`}>
+                            <div>
+                              <div className="text-[10px] text-muted-foreground">Billed <span className="font-semibold text-foreground/80">{fmt(inv.total_amount || 0)}</span></div>
+                              <div className="text-[10px] text-emerald-400">Received <span className="font-semibold">{fmt(inv.paid_amount || 0)}</span></div>
+                            </div>
+                            <div className="text-right">
+                              <div className={`text-sm font-bold ${isPaid ? 'text-emerald-400' : 'text-red-400'}`}>{fmt(balance)}</div>
+                              <div className={`text-[9px] ${isPaid ? 'text-emerald-400/70' : 'text-red-400/70'}`}>{isPaid ? 'Settled ✓' : 'outstanding'}</div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </>
+          ) : (
+            <div className="mx-4 mb-4 text-xs text-muted-foreground text-center py-8 bg-foreground/[0.02] rounded-xl border border-dashed border-border/40">
+              No invoices in selected period
             </div>
           )}
 
-          {/* Preview counts */}
-          {(() => {
-            let from = '', to = ''
-            if (stmtForm.mode === 'month') {
-              from = stmtForm.month + '-01'
-              const d = new Date(stmtForm.month + '-01')
-              const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
-              to = `${stmtForm.month}-${lastDay}`
-            } else if (stmtForm.mode === 'year') {
-              from = `${stmtForm.year}-01-01`; to = `${stmtForm.year}-12-31`
-            } else if (stmtForm.mode === 'day') {
-              from = to = stmtForm.specific_date
-            } else {
-              from = stmtForm.date_from; to = stmtForm.date_to
-            }
-            const preview = invoices.filter(inv => {
-              if (stmtForm.client_id && inv.client_id !== stmtForm.client_id) return false
-              const d = inv.issue_date || ''
-              return d >= from && d <= to
-            })
-            const totalBilled  = preview.reduce((s, i) => s + (i.total_amount || 0), 0)
-            const totalPaid    = preview.reduce((s, i) => s + (i.paid_amount  || 0), 0)
-            return preview.length > 0 ? (
-              <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl p-3 space-y-1.5">
-                <div className="text-[10px] text-blue-400/80 font-semibold uppercase tracking-wider">Preview</div>
-                <div className="flex justify-between text-xs">
-                  <span className="text-muted-foreground">{preview.length} invoice{preview.length !== 1 ? 's' : ''}</span>
-                  <span className="font-medium">{fmt(totalBilled)}</span>
-                </div>
-                <div className="flex justify-between text-xs text-green-400">
-                  <span>Paid</span><span>{fmt(totalPaid)}</span>
-                </div>
-                <div className="flex justify-between text-xs font-semibold text-red-400">
-                  <span>Outstanding</span><span>{fmt(totalBilled - totalPaid)}</span>
-                </div>
-              </div>
-            ) : (
-              <div className="text-xs text-muted-foreground text-center py-3 bg-foreground/[0.02] rounded-xl border border-dashed border-border/40">
-                No invoices in selected period
-              </div>
-            )
-          })()}
-
-          <button onClick={printStatement}
-            className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2 transition-colors">
-            <Printer className="w-4 h-4" />Print Statement
-          </button>
-          <button onClick={printDetailedStatement}
-            className="w-full py-2.5 px-4 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-300 text-sm font-medium transition-colors flex items-center justify-center gap-2">
-            <FileText className="w-4 h-4" />Print Detailed Statement
-            <span className="text-[10px] opacity-60">(tasks · payments · discounts)</span>
-          </button>
+          {/* ── Print buttons ── */}
+          <div className="px-4 pb-5 space-y-2">
+            <button onClick={printStatement} disabled={stmtInvoices.length === 0}
+              className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2 transition-colors">
+              <Printer className="w-4 h-4" />Print Statement
+            </button>
+            <button onClick={printDetailedStatement} disabled={stmtInvoices.length === 0}
+              className="w-full py-2.5 px-4 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 disabled:opacity-40 disabled:cursor-not-allowed border border-blue-500/30 text-blue-300 text-sm font-medium transition-colors flex items-center justify-center gap-2">
+              <FileText className="w-4 h-4" />Print Detailed Statement
+              <span className="text-[10px] opacity-60">(tasks · payments)</span>
+            </button>
+          </div>
         </div>
+
       </div>
     )
   }
