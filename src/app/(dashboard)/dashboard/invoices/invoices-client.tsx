@@ -112,7 +112,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   const [editClientId, setEditClientId] = useState<string | null>(null)
 
   // Panel modes
-  const [panelMode, setPanelMode] = useState<'detail' | 'pay' | 'new' | 'generate' | 'statement' | 'discounts'>('detail')
+  const [panelMode, setPanelMode] = useState<'detail' | 'pay' | 'new' | 'generate' | 'batch_generate' | 'statement' | 'discounts'>('detail')
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
@@ -183,6 +183,25 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   const [jobLossesLoaded, setJobLossesLoaded]           = useState(false)
   const [analyticsFilterClient, setAnalyticsFilterClient] = useState('')
   const [expandedLossId, setExpandedLossId]               = useState<string | null>(null)
+
+  // Batch generate state
+  const [batchGroups, setBatchGroups] = useState<{
+    key: string; client_id: string; client_name: string; client_code: string;
+    month: string; taskCount: number; total: number; currency: string;
+    taskIds: string[]; default_currency?: string
+    tasks?: { id: string; title: string; task_date: string; billing_amount_inr: number; currency: string }[]
+  }[]>([])
+  const [batchExpandedKey, setBatchExpandedKey] = useState<string | null>(null)
+  const [batchLoading, setBatchLoading] = useState(false)
+  const [batchSelected, setBatchSelected] = useState<Set<string>>(new Set())
+  const [batchGenerating, setBatchGenerating] = useState(false)
+  const [batchDone, setBatchDone] = useState(0)
+  // Batch panel filters
+  const [batchFilterClient, setBatchFilterClient] = useState('')
+  const [batchFilterMonthFrom, setBatchFilterMonthFrom] = useState('')
+  const [batchFilterMonthTo, setBatchFilterMonthTo] = useState('')
+  const [batchFilterMinAmount, setBatchFilterMinAmount] = useState('')
+  const [batchSortBy, setBatchSortBy] = useState<'client_asc' | 'month_asc' | 'month_desc' | 'amount_desc'>('month_asc')
 
   // Invoice preview modal
   const [previewInv, setPreviewInv] = useState<Invoice | null>(null)
@@ -811,6 +830,165 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     setGenTasks([]); setGenSelectedIds(new Set())
     success(`Invoice ${invNum} created with ${selected.length} items`)
     setSaving(false)
+  }
+
+  // ── Batch historical invoice generation ──────────────────────────────────
+  async function fetchBatchGroups() {
+    setBatchLoading(true); setBatchGroups([]); setBatchSelected(new Set()); setBatchDone(0); setBatchExpandedKey(null)
+
+    // Probe whether soft-delete column exists so we can exclude trashed tasks
+    const probe = await supabase.from('tasks').select('deleted_at').limit(0)
+    const hasSoftDelete = !probe.error
+
+    // Fetch all done tasks not yet invoiced — exclude soft-deleted (trashed) tasks
+    let query = supabase
+      .from('tasks')
+      .select('id, title, task_date, billing_amount_inr, currency, client_id, client:clients(id, name, code, default_currency)')
+      .eq('status', 'done')
+      .order('task_date')
+    if (hasSoftDelete) query = query.is('deleted_at', null)
+
+    const { data: doneTasks } = await query
+    if (!doneTasks?.length) { setBatchLoading(false); return }
+
+    // Find which ones are already in active invoices
+    const taskIds = doneTasks.map((t: any) => t.id)
+    const { data: existingItems } = await supabase
+      .from('invoice_items')
+      .select('task_id, invoice:invoices(id, status)')
+      .in('task_id', taskIds)
+
+    const invoicedTaskIds = new Set<string>()
+    ;(existingItems || []).forEach((item: any) => {
+      if (item.task_id && item.invoice && item.invoice.status !== 'cancelled') {
+        invoicedTaskIds.add(item.task_id)
+      }
+    })
+
+    // Filter to only un-invoiced tasks
+    const uninvoiced = doneTasks.filter((t: any) => !invoicedTaskIds.has(t.id))
+
+    // Group by client + month — store full task objects for preview
+    type BatchGroup = typeof batchGroups[0]
+    const groupMap: Record<string, BatchGroup & { tasks: NonNullable<BatchGroup['tasks']> }> = {}
+    uninvoiced.forEach((t: any) => {
+      const clientId = t.client_id || t.client?.id
+      const clientName = t.client?.name || 'Unknown'
+      const clientCode = t.client?.code || 'CLI'
+      const month = t.task_date ? t.task_date.slice(0, 7) : 'unknown'
+      const key = `${clientId}__${month}`
+      if (!groupMap[key]) {
+        groupMap[key] = {
+          key, client_id: clientId, client_name: clientName,
+          client_code: clientCode, month, taskCount: 0, total: 0,
+          currency: t.client?.default_currency || 'INR',
+          taskIds: [], default_currency: t.client?.default_currency,
+          tasks: [],
+        }
+      }
+      groupMap[key].taskCount++
+      groupMap[key].total += t.billing_amount_inr || 0
+      groupMap[key].taskIds.push(t.id)
+      groupMap[key].tasks.push({
+        id: t.id, title: t.title,
+        task_date: t.task_date, billing_amount_inr: t.billing_amount_inr || 0,
+        currency: t.currency || 'INR',
+      })
+    })
+
+    const groups = Object.values(groupMap).sort((a, b) => {
+      if (a.client_name < b.client_name) return -1
+      if (a.client_name > b.client_name) return 1
+      return a.month < b.month ? -1 : 1
+    })
+    setBatchGroups(groups)
+    setBatchSelected(new Set(groups.map(g => g.key)))
+    setBatchLoading(false)
+  }
+
+  async function runBatchGenerate() {
+    const toGenerate = batchGroups.filter(g => batchSelected.has(g.key))
+    if (!toGenerate.length) { toastError('No groups selected'); return }
+    setBatchGenerating(true); setBatchDone(0)
+    let doneCount = 0; let errorCount = 0
+
+    for (const group of toGenerate) {
+      try {
+        const [year2, mm] = group.month.split('-')
+        const yy = year2.slice(-2)
+        const baseNum = `INV-${yy}${mm}-${group.client_code}`
+        const { data: takenNums$ } = await supabase
+          .from('invoices').select('invoice_number').like('invoice_number', `${baseNum}%`)
+        const takenNums = new Set((takenNums$ || []).map((r: any) => r.invoice_number))
+        let invNum = baseNum; let suffix = 2
+        while (takenNums.has(invNum)) invNum = `${baseNum}-${suffix++}`
+
+        const periodStart = `${group.month}-01`
+        const lastDay = new Date(parseInt(year2), parseInt(mm), 0).getDate()
+        const periodEnd = `${group.month}-${String(lastDay).padStart(2, '0')}`
+
+        const { data: inv, error } = await supabase.from('invoices').insert({
+          invoice_number: invNum,
+          client_id: group.client_id,
+          status: 'draft',
+          issue_date: new Date().toISOString().split('T')[0],
+          total_amount: group.total,
+          paid_amount: 0,
+          currency: group.currency || 'INR',
+        }).select('id').single()
+
+        if (error || !inv) { errorCount++; continue }
+
+        // Extended columns (ignore if not migrated)
+        await supabase.from('invoices').update({
+          billing_period_start: periodStart, billing_period_end: periodEnd,
+          subtotal: group.total, tax_rate: 0, tax_amount: 0, discount_amount: 0, previous_balance: 0,
+        }).eq('id', inv.id)
+
+        // Fetch task details for items
+        const { data: taskDetails } = await supabase
+          .from('tasks')
+          .select('id, title, billing_amount_inr, currency')
+          .in('id', group.taskIds)
+
+        if (taskDetails?.length) {
+          await supabase.from('invoice_items').insert(
+            taskDetails.map((t: any, idx: number) => ({
+              invoice_id: inv.id, task_id: t.id,
+              description: t.title, quantity: 1,
+              unit_price: t.billing_amount_inr, total: t.billing_amount_inr,
+              currency: t.currency || 'INR', display_order: idx,
+            }))
+          )
+        }
+        doneCount++
+        setBatchDone(doneCount)
+      } catch { errorCount++ }
+    }
+
+    // Reload invoices
+    const { data: newInvoices } = await supabase
+      .from('invoices')
+      .select('*, client:clients(id,name,code,phone,email,address), items:invoice_items(*, task:tasks(id,title,task_date,status,billing_amount_inr,currency), service:services(id,name)), payments(*)')
+      .order('created_at', { ascending: false })
+
+    if (newInvoices) setInvoices(newInvoices.map(inv => ({
+      ...inv,
+      subtotal: (inv as any).subtotal ?? inv.total_amount ?? 0,
+      tax_rate: (inv as any).tax_rate ?? 0,
+      tax_amount: (inv as any).tax_amount ?? 0,
+      discount_amount: (inv as any).discount_amount ?? 0,
+      previous_balance: (inv as any).previous_balance ?? 0,
+    })))
+
+    setBatchGenerating(false)
+    if (errorCount > 0) {
+      toastError(`${doneCount} invoices created, ${errorCount} failed`)
+    } else {
+      success(`${doneCount} invoice${doneCount !== 1 ? 's' : ''} created successfully`)
+    }
+    // Clear generated groups from list
+    await fetchBatchGroups()
   }
 
   // ── Statement generator ────────────────────────────────────────────────────
@@ -2619,6 +2797,286 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // RIGHT PANEL — Batch Generate (Historical)
+  // ─────────────────────────────────────────────────────────────────────────
+  function renderBatchGeneratePanel() {
+    // ── Apply filters + sort to raw groups ────────────────────────────────
+    const minAmt = parseFloat(batchFilterMinAmount) || 0
+    const visibleGroups = batchGroups
+      .filter(g => {
+        if (batchFilterClient && !g.client_name.toLowerCase().includes(batchFilterClient.toLowerCase())) return false
+        if (batchFilterMonthFrom && g.month < batchFilterMonthFrom) return false
+        if (batchFilterMonthTo   && g.month > batchFilterMonthTo)   return false
+        if (minAmt > 0 && g.total < minAmt) return false
+        return true
+      })
+      .sort((a, b) => {
+        if (batchSortBy === 'client_asc')  return a.client_name.localeCompare(b.client_name) || a.month.localeCompare(b.month)
+        if (batchSortBy === 'month_desc')  return b.month.localeCompare(a.month) || a.client_name.localeCompare(b.client_name)
+        if (batchSortBy === 'amount_desc') return b.total - a.total
+        // month_asc (default)
+        return a.month.localeCompare(b.month) || a.client_name.localeCompare(b.client_name)
+      })
+
+    const selectedGroups = visibleGroups.filter(g => batchSelected.has(g.key))
+    const totalInvoices  = selectedGroups.length
+    const totalAmount    = selectedGroups.reduce((s, g) => s + g.total, 0)
+
+    const hasFilters = batchFilterClient || batchFilterMonthFrom || batchFilterMonthTo || batchFilterMinAmount
+    const clearFilters = () => { setBatchFilterClient(''); setBatchFilterMonthFrom(''); setBatchFilterMonthTo(''); setBatchFilterMinAmount('') }
+
+    return (
+      <div className="flex flex-col h-full overflow-hidden">
+
+        {/* Header */}
+        <div className="px-4 py-3 border-b border-border/40 flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-sm flex items-center gap-1.5">
+              <History className="w-4 h-4 text-emerald-400" />Batch Generate — Historical
+            </h3>
+            <p className="text-[11px] text-muted-foreground">Un-invoiced done tasks · grouped by client + month</p>
+          </div>
+          <button onClick={() => { setPanelMode('detail'); setBatchGroups([]) }} className="p-1.5 hover:bg-foreground/5 rounded-lg text-muted-foreground hover:text-foreground">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Scan prompt */}
+        {batchGroups.length === 0 && !batchLoading && (
+          <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6 text-center">
+            <History className="w-10 h-10 text-emerald-400/30" />
+            <p className="text-sm text-muted-foreground">
+              Scans all <strong>Done</strong> tasks without an active invoice, then groups them by client and billing month.
+            </p>
+            <button onClick={fetchBatchGroups}
+              className="px-5 py-2.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-sm font-medium rounded-xl transition-colors">
+              Scan Un-invoiced Tasks
+            </button>
+          </div>
+        )}
+
+        {batchLoading && (
+          <div className="flex-1 flex items-center justify-center gap-2 text-muted-foreground">
+            <RefreshCw className="w-4 h-4 animate-spin" />
+            <span className="text-sm">Scanning tasks…</span>
+          </div>
+        )}
+
+        {!batchLoading && batchGroups.length > 0 && (
+          <>
+            {/* ── Filter bar ─────────────────────────────────────────────── */}
+            <div className="px-4 pt-3 pb-2 border-b border-border/30 space-y-2">
+
+              {/* Row 1: Client search + Sort */}
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                  <input
+                    type="text" placeholder="Filter by client…" value={batchFilterClient}
+                    onChange={e => setBatchFilterClient(e.target.value)}
+                    className="w-full pl-7 pr-2 py-1.5 text-xs bg-background border border-border/40 rounded-lg focus:outline-none focus:border-emerald-500/50"
+                  />
+                </div>
+                <select value={batchSortBy} onChange={e => setBatchSortBy(e.target.value as any)}
+                  className="text-xs bg-background border border-border/40 rounded-lg px-2 py-1.5 focus:outline-none focus:border-emerald-500/50 text-muted-foreground">
+                  <option value="month_asc">Month ↑ (oldest)</option>
+                  <option value="month_desc">Month ↓ (newest)</option>
+                  <option value="client_asc">Client A→Z</option>
+                  <option value="amount_desc">Amount ↓</option>
+                </select>
+              </div>
+
+              {/* Row 2: Month range */}
+              <div className="flex gap-2 items-center">
+                <Calendar className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                <div className="flex gap-1.5 flex-1">
+                  <input type="month" value={batchFilterMonthFrom}
+                    onChange={e => setBatchFilterMonthFrom(e.target.value)}
+                    className="flex-1 text-xs bg-background border border-border/40 rounded-lg px-2 py-1.5 focus:outline-none focus:border-emerald-500/50 text-muted-foreground"
+                    title="From month"
+                  />
+                  <span className="text-muted-foreground/50 text-xs self-center">→</span>
+                  <input type="month" value={batchFilterMonthTo}
+                    onChange={e => setBatchFilterMonthTo(e.target.value)}
+                    className="flex-1 text-xs bg-background border border-border/40 rounded-lg px-2 py-1.5 focus:outline-none focus:border-emerald-500/50 text-muted-foreground"
+                    title="To month"
+                  />
+                </div>
+                <div className="relative">
+                  <IndianRupee className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                  <input type="number" placeholder="Min ₹" value={batchFilterMinAmount}
+                    onChange={e => setBatchFilterMinAmount(e.target.value)}
+                    className="w-20 pl-5 pr-2 py-1.5 text-xs bg-background border border-border/40 rounded-lg focus:outline-none focus:border-emerald-500/50"
+                    title="Minimum invoice amount"
+                  />
+                </div>
+                {hasFilters && (
+                  <button onClick={clearFilters} className="text-[10px] text-red-400 hover:text-red-300 whitespace-nowrap" title="Clear all filters">
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+
+              {/* Quick month shortcuts */}
+              <div className="flex gap-1.5 flex-wrap">
+                {[
+                  { label: '2023', from: '2023-01', to: '2023-12' },
+                  { label: '2024', from: '2024-01', to: '2024-12' },
+                  { label: '2025', from: '2025-01', to: '2025-12' },
+                  { label: 'Q1 \'25', from: '2025-01', to: '2025-03' },
+                  { label: 'Q2 \'25', from: '2025-04', to: '2025-06' },
+                  { label: 'Q3 \'25', from: '2025-07', to: '2025-09' },
+                  { label: 'Q4 \'25', from: '2025-10', to: '2025-12' },
+                ].map(({ label, from, to }) => {
+                  const active = batchFilterMonthFrom === from && batchFilterMonthTo === to
+                  return (
+                    <button key={label}
+                      onClick={() => { setBatchFilterMonthFrom(active ? '' : from); setBatchFilterMonthTo(active ? '' : to) }}
+                      className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${active ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300' : 'border-border/40 text-muted-foreground hover:border-emerald-500/30 hover:text-emerald-400'}`}>
+                      {label}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Summary + select controls */}
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-muted-foreground">
+                  {visibleGroups.length} / {batchGroups.length} groups
+                  {hasFilters && <span className="text-amber-400 ml-1">(filtered)</span>}
+                </span>
+                <div className="flex gap-2 text-[10px] text-emerald-400">
+                  <button onClick={() => {
+                    const next = new Set(batchSelected)
+                    visibleGroups.forEach(g => next.add(g.key))
+                    setBatchSelected(next)
+                  }}>Select visible</button>
+                  <span className="text-border">|</span>
+                  <button onClick={() => {
+                    const next = new Set(batchSelected)
+                    visibleGroups.forEach(g => next.delete(g.key))
+                    setBatchSelected(next)
+                  }}>Deselect visible</button>
+                  <span className="text-border">|</span>
+                  <button onClick={fetchBatchGroups} className="flex items-center gap-0.5 text-muted-foreground hover:text-foreground">
+                    <RefreshCw className="w-2.5 h-2.5" />Rescan
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Groups list ─────────────────────────────────────────────── */}
+            <div className="flex-1 overflow-y-auto px-4 py-2 space-y-1">
+              {visibleGroups.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground text-sm">
+                  No groups match the current filters
+                </div>
+              ) : visibleGroups.map(group => {
+                const checked  = batchSelected.has(group.key)
+                const expanded = batchExpandedKey === group.key
+                const [year, mon] = group.month.split('-')
+                const monthLabel = new Date(`${group.month}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
+                const groupTasks = group.tasks || []
+                return (
+                  <div key={group.key}
+                    className={`rounded-lg border transition-colors ${checked ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-foreground/[0.02] border-border/30'}`}>
+
+                    {/* ── Group header row ── */}
+                    <div className="flex items-center gap-2 p-2.5">
+                      <input type="checkbox" checked={checked}
+                        onChange={e => {
+                          const next = new Set(batchSelected)
+                          if (e.target.checked) next.add(group.key); else next.delete(group.key)
+                          setBatchSelected(next)
+                        }}
+                        className="w-3.5 h-3.5 accent-emerald-500 shrink-0"
+                      />
+                      <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setBatchExpandedKey(expanded ? null : group.key)}>
+                        <div className="text-xs font-medium truncate">{group.client_name}</div>
+                        <div className="text-[10px] text-muted-foreground">{monthLabel} · {group.taskCount} task{group.taskCount !== 1 ? 's' : ''}</div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="text-xs font-semibold text-emerald-300">{fmt(group.total, group.currency as any)}</div>
+                        <div className="text-[10px] text-muted-foreground font-mono">INV-{year.slice(-2)}{mon}-{group.client_code}</div>
+                      </div>
+                      {/* Expand toggle */}
+                      <button
+                        onClick={() => setBatchExpandedKey(expanded ? null : group.key)}
+                        title={expanded ? 'Collapse tasks' : 'Preview tasks'}
+                        className={`shrink-0 p-1 rounded transition-colors ${expanded ? 'text-emerald-400 bg-emerald-500/10' : 'text-muted-foreground hover:text-foreground hover:bg-foreground/5'}`}>
+                        {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+
+                    {/* ── Expanded task list ── */}
+                    {expanded && (
+                      <div className="border-t border-border/30 mx-2 mb-2 pt-2 space-y-0.5">
+                        {groupTasks.length === 0 ? (
+                          <p className="text-[11px] text-muted-foreground px-1 py-1">No task details available</p>
+                        ) : groupTasks.map((t, i) => (
+                          <div key={t.id}
+                            className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-foreground/[0.03] hover:bg-foreground/[0.06] transition-colors group">
+                            <span className="text-[9px] text-muted-foreground/50 font-mono w-4 text-right shrink-0">{i + 1}</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-[11px] text-foreground/90 truncate">{t.title}</div>
+                              <div className="text-[9px] text-muted-foreground">
+                                {t.task_date ? new Date(t.task_date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}
+                              </div>
+                            </div>
+                            <div className="text-[11px] font-semibold text-foreground/80 shrink-0 tabular-nums">
+                              {t.billing_amount_inr > 0 ? fmt(t.billing_amount_inr, t.currency as any) : <span className="text-muted-foreground/40 font-normal">—</span>}
+                            </div>
+                          </div>
+                        ))}
+                        {/* Group total */}
+                        <div className="flex items-center justify-between px-2 pt-1.5 mt-0.5 border-t border-border/20">
+                          <span className="text-[10px] text-muted-foreground">{groupTasks.length} tasks · subtotal</span>
+                          <span className="text-[11px] font-bold text-emerald-400">{fmt(group.total, group.currency as any)}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* ── Progress bar (while generating) ────────────────────────── */}
+            {batchGenerating && (
+              <div className="px-4 pb-2">
+                <div className="bg-foreground/[0.04] border border-border/40 rounded-xl p-3">
+                  <div className="flex items-center justify-between mb-2 text-xs text-muted-foreground">
+                    <span>Generating invoices…</span>
+                    <span>{batchDone} / {totalInvoices}</span>
+                  </div>
+                  <div className="h-1.5 bg-foreground/10 rounded-full overflow-hidden">
+                    <div className="h-full bg-emerald-500 transition-all duration-300 rounded-full"
+                      style={{ width: totalInvoices > 0 ? `${Math.round((batchDone / totalInvoices) * 100)}%` : '0%' }} />
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── Footer ───────────────────────────────────────────────────────── */}
+        {!batchLoading && batchGroups.length > 0 && (
+          <div className="px-4 py-3 border-t border-border/40 flex items-center justify-between gap-3">
+            <div className="text-[11px] text-muted-foreground">
+              <span className="font-semibold text-foreground">{totalInvoices}</span> selected
+              {totalInvoices > 0 && <span className="ml-1.5 text-emerald-400">{fmt(totalAmount)}</span>}
+            </div>
+            <button onClick={runBatchGenerate} disabled={batchGenerating || totalInvoices === 0}
+              className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+              <Zap className="w-3.5 h-3.5" />
+              {batchGenerating ? `Creating… (${batchDone}/${totalInvoices})` : `Generate ${totalInvoices} Invoice${totalInvoices !== 1 ? 's' : ''}`}
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // RIGHT PANEL — Statement Generator
   // ─────────────────────────────────────────────────────────────────────────
   function renderStatementPanel() {
@@ -3433,7 +3891,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   // ─────────────────────────────────────────────────────────────────────────
   // MAIN RENDER
   // ─────────────────────────────────────────────────────────────────────────
-  const showRightPanel = selectedInv || ['new', 'generate', 'statement', 'discounts'].includes(panelMode)
+  const showRightPanel = selectedInv || ['new', 'generate', 'batch_generate', 'statement', 'discounts'].includes(panelMode)
 
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
@@ -3497,6 +3955,15 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           </div>
         </button>
         <button
+          onClick={() => { setPanelMode('batch_generate'); setSelectedId(null); setBatchGroups([]); setBatchDone(0) }}
+          className={`rounded-xl p-3 border flex items-center gap-2 text-left transition-colors ${panelMode === 'batch_generate' ? 'bg-emerald-500/20 border-emerald-500/40' : 'bg-emerald-600/10 hover:bg-emerald-600/20 border-emerald-500/20'}`}>
+          <History className="w-4 h-4 text-emerald-400 shrink-0" />
+          <div>
+            <div className="text-[10px] text-emerald-300/70">Batch</div>
+            <div className="text-xs font-semibold text-emerald-300">Historical</div>
+          </div>
+        </button>
+        <button
           onClick={() => { setPanelMode('statement'); setSelectedId(null) }}
           className={`rounded-xl p-3 border flex items-center gap-2 text-left transition-colors ${panelMode === 'statement' ? 'bg-blue-500/20 border-blue-500/40' : 'bg-blue-600/10 hover:bg-blue-600/20 border-blue-500/20'}`}>
           <Receipt className="w-4 h-4 text-blue-400 shrink-0" />
@@ -3527,6 +3994,35 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         ))}
         <div className="flex-1" />
         <button
+          onClick={() => {
+            const rows = [
+              ['Invoice #', 'Client', 'Status', 'Issue Date', 'Due Date', 'Currency', 'Subtotal', 'Discount', 'Tax', 'Total', 'Paid', 'Balance'],
+              ...invoices.map(inv => [
+                inv.invoice_number,
+                inv.client?.name || '',
+                inv.status,
+                inv.issue_date || '',
+                inv.due_date || '',
+                inv.currency,
+                (inv.subtotal || inv.total_amount || 0).toFixed(2),
+                (inv.discount_amount || 0).toFixed(2),
+                (inv.tax_amount || 0).toFixed(2),
+                (inv.total_amount || 0).toFixed(2),
+                (inv.paid_amount || 0).toFixed(2),
+                balanceDue(inv).toFixed(2),
+              ])
+            ]
+            const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
+            const blob = new Blob([csv], { type: 'text/csv' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a'); a.href = url
+            a.download = `invoices-${new Date().toISOString().slice(0, 10)}.csv`
+            a.click(); URL.revokeObjectURL(url)
+          }}
+          className="mb-1 flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground border border-border/40 hover:border-border/70 rounded-lg px-2.5 py-1 transition-colors bg-foreground/[0.02] hover:bg-foreground/[0.05]">
+          <Download className="w-3.5 h-3.5" />Export CSV
+        </button>
+        <button
           onClick={() => { setPanelMode('new'); setSelectedId(null) }}
           className="mb-1 flex items-center gap-1 text-[11px] font-medium text-violet-400 hover:text-violet-300 border border-violet-500/30 hover:border-violet-500/60 rounded-lg px-2.5 py-1 transition-colors bg-violet-500/5 hover:bg-violet-500/10">
           <Plus className="w-3.5 h-3.5" />New Invoice
@@ -3550,10 +4046,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 ← Back to invoices
               </button>
             </div>
-            {panelMode === 'new'       && renderNewPanel()}
-            {panelMode === 'generate'  && renderGeneratePanel()}
-            {panelMode === 'statement' && renderStatementPanel()}
-            {panelMode === 'discounts' && renderDiscountsPanel()}
+            {panelMode === 'new'            && renderNewPanel()}
+            {panelMode === 'generate'       && renderGeneratePanel()}
+            {panelMode === 'batch_generate' && renderBatchGeneratePanel()}
+            {panelMode === 'statement'      && renderStatementPanel()}
+            {panelMode === 'discounts'      && renderDiscountsPanel()}
             {panelMode === 'detail'    && selectedInv && renderDetail(selectedInv)}
             {panelMode === 'pay'       && selectedInv && renderPayPanel(selectedInv)}
           </div>

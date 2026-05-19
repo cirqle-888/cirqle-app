@@ -40,6 +40,7 @@ export type ImportMode =
   | 'cashbook_entries'
   | 'invoices'
   | 'invoice_status'
+  | 'discounts'
 
 interface ParsedRow {
   _line:    number
@@ -64,6 +65,7 @@ const MODES: { key: ImportMode; label: string; emoji: string }[] = [
   { key: 'contributions',  label: 'Contributions',       emoji: '📈' },
   { key: 'invoices',       label: 'Invoices',            emoji: '🧾' },
   { key: 'invoice_status', label: 'Invoice Status Update', emoji: '🔄' },
+  { key: 'discounts',      label: 'Discount History',    emoji: '🎁' },
 ]
 
 // Tiered grouping — shown in the import UI to guide the user on order
@@ -94,7 +96,7 @@ const IMPORT_TIERS: { tier: number; label: string; color: string; hint: string; 
     label: 'Financial Records',
     color: 'violet',
     hint: 'Needs Jobs/Tasks + Employees to exist first',
-    modes: ['contributions', 'invoices', 'invoice_status'],
+    modes: ['contributions', 'invoices', 'invoice_status', 'discounts'],
   },
 ]
 
@@ -118,11 +120,11 @@ const TEMPLATES: Record<ImportMode, { header: string; example: string }> = {
     ].join('\n'),
   },
   services: {
-    header: 'id,name,pricing_type,description,display_order,default_price,default_currency,is_active',
+    header: 'id,name,pricing_type,description,display_order,default_price,default_currency,group_names,is_active',
     example: [
-      '"","Offer Flyer","fixed_per_creative","Promotional offer flyer design","1","","INR","true"',
-      '"","Social Media Management","retainer","Monthly social media package","2","","INR","true"',
-      '"","Paid Ads","percentage_of_spend","Google/Meta ad management","3","","INR","true"',
+      '"","Offer Flyer","fixed_per_creative","Promotional offer flyer design","1","","INR","Design Group | Variable Group","true"',
+      '"","Social Media Management","retainer","Monthly social media package","2","","INR","Design Group","true"',
+      '"","Paid Ads","percentage_of_spend","Google/Meta ad management","3","","INR","","true"',
     ].join('\n'),
   },
   groups: {
@@ -200,6 +202,14 @@ const TEMPLATES: Record<ImportMode, { header: string; example: string }> = {
       '"INV-2024-003","cancelled","","","","Client cancelled project"',
     ].join('\n'),
   },
+  discounts: {
+    header: 'id,invoice_number_or_id,client_name_or_code,discount_amount,discount_percentage,invoice_total,reason,discount_date',
+    example: [
+      '"","INV-2024-001","Sea Star Supermarket","2000","","50000","Year-end loyalty discount","2024-12-15"',
+      '"","INV-2024-002","SSM001","","10","45000","10% promo discount","2024-12-20"',
+      '"","","Sea Star Supermarket","5000","","","Goodwill discount (no specific invoice)","2024-12-25"',
+    ].join('\n'),
+  },
 }
 
 // ─── Export configuration ─────────────────────────────────────────────────────
@@ -218,6 +228,7 @@ const EXPORT_CONFIG: Record<ImportMode, { table: string; orderBy?: string }> = {
   cashbook_entries: { table: 'cashbook_entries', orderBy: 'entry_date' },
   invoices:         { table: 'invoices',          orderBy: 'issue_date' },
   invoice_status:   { table: 'invoices',          orderBy: 'invoice_number' },
+  discounts:        { table: 'discount_logs',     orderBy: 'created_at' },
 }
 
 // ─── CSV output helpers ───────────────────────────────────────────────────────
@@ -282,6 +293,7 @@ const COLUMNS: Record<ImportMode, ColDef[]> = {
     { col: 'display_order',    req: false, notes: 'Sort order number' },
     { col: 'default_price',    req: false, notes: 'Fallback price when no client-specific pricing exists' },
     { col: 'default_currency', req: false, notes: 'INR / USD / AED etc. (default: INR)' },
+    { col: 'group_names',      req: false, notes: 'Contribution groups linked to this service. Separate multiple with | or , e.g. "Design Group | Variable Group". Names must match existing groups.' },
     { col: 'is_active',        req: false, notes: 'true / false (default: true)' },
   ],
   groups: [
@@ -381,6 +393,16 @@ const COLUMNS: Record<ImportMode, ColDef[]> = {
     { col: 'payment_date',         req: false, notes: 'DD-MM-YYYY' },
     { col: 'payment_method',       req: false, notes: 'bank_transfer / cheque / cash / upi / other' },
     { col: 'notes',                req: false, notes: 'Payment or status change notes' },
+  ],
+  discounts: [
+    ID_COL,
+    { col: 'invoice_number_or_id', req: false, notes: 'Invoice number (e.g. INV-2024-001) or UUID — optional. Leave blank for client-level/standalone discount' },
+    { col: 'client_name_or_code',  req: true,  notes: 'Client name or code (e.g. SSM001) — required when no invoice ref' },
+    { col: 'discount_amount',      req: false, notes: 'Flat discount in INR — either this or discount_percentage is required' },
+    { col: 'discount_percentage',  req: false, notes: '% discount applied — either this or discount_amount is required' },
+    { col: 'invoice_total',        req: false, notes: 'Invoice total at the time of discount (for record-keeping; defaults to 0 if no invoice ref)' },
+    { col: 'reason',               req: false, notes: 'Reason / note for the discount' },
+    { col: 'discount_date',        req: false, notes: 'DD-MM-YYYY when the discount was given (defaults to today)' },
   ],
 }
 
@@ -540,6 +562,45 @@ export default function ImportClient({ clients, services, employees, groups, par
       }
     }
     if (!data || data.length === 0) { toastError('No data to export'); return }
+
+    // ── Enrichment per mode ──
+    // Services: append a `group_names` column (pipe-separated) so the export
+    // is round-trippable through import (which now accepts group_names).
+    if (m === 'services') {
+      const [gsRes, grpRes] = await Promise.all([
+        supabase.from('group_services').select('group_id, service_id'),
+        supabase.from('contribution_groups').select('id, name'),
+      ])
+      if (!gsRes.error && !grpRes.error) {
+        const groupNameById: Record<string, string> = {}
+        ;(grpRes.data || []).forEach((g: any) => { groupNameById[g.id] = g.name })
+        const groupsByService: Record<string, string[]> = {}
+        ;(gsRes.data || []).forEach((row: any) => {
+          if (!groupsByService[row.service_id]) groupsByService[row.service_id] = []
+          if (groupNameById[row.group_id]) groupsByService[row.service_id].push(groupNameById[row.group_id])
+        })
+        data = data.map((r: any) => ({ ...r, group_names: (groupsByService[r.id] || []).join(' | ') }))
+      }
+    }
+
+    // Discounts: enrich with invoice_number + client_name_or_code for human-readable export
+    if (m === 'discounts') {
+      const invIds = [...new Set(data.map((r: any) => r.invoice_id).filter(Boolean))]
+      const clIds  = [...new Set(data.map((r: any) => r.client_id).filter(Boolean))]
+      const [invRes, clRes] = await Promise.all([
+        invIds.length ? supabase.from('invoices').select('id, invoice_number').in('id', invIds) : Promise.resolve({ data: [] as any[], error: null }),
+        clIds.length  ? supabase.from('clients').select('id, name, code').in('id', clIds)        : Promise.resolve({ data: [] as any[], error: null }),
+      ])
+      const invByid = new Map<string, string>(); ((invRes as any).data || []).forEach((i: any) => invByid.set(i.id, i.invoice_number))
+      const clByid  = new Map<string, string>(); ((clRes  as any).data || []).forEach((c: any) => clByid.set(c.id,  c.code || c.name))
+      data = data.map((r: any) => ({
+        ...r,
+        invoice_number_or_id: r.invoice_id ? (invByid.get(r.invoice_id) || r.invoice_id) : '',
+        client_name_or_code:  r.client_id  ? (clByid.get(r.client_id)   || '')           : '',
+        discount_date:        r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : '',
+      }))
+    }
+
     const allKeys = new Set<string>()
     data.forEach((r: Record<string, unknown>) => Object.keys(r).forEach(k => allKeys.add(k)))
     const headers = ['id', ...[...allKeys].filter(k => k !== 'id').sort()]
@@ -611,25 +672,43 @@ export default function ImportClient({ clients, services, employees, groups, par
 
   function parseServices(lines: string[][]): ParsedRow[] {
     const h = lines[0].map(norm)
-    const idx = (k: string) => h.findIndex(c => c.includes(k))
+    // Use EXACT match for 'name' to avoid matching 'group_names'
     const iId = h.findIndex(c => c === 'id')
-    const iName = idx('name'), iPricing = idx('pricing'), iDesc = idx('desc'), iOrd = idx('order')
+    const iName = h.findIndex(c => c === 'name')        // exact — not group_names
+    const iPricing = h.findIndex(c => c.includes('pricing'))
+    const iDesc = h.findIndex(c => c.includes('desc'))
+    const iOrd  = h.findIndex(c => c.includes('order'))
     const iDefaultPrice = h.findIndex(c => c === 'default_price' || c === 'defaultprice')
-    const iDefaultCurr  = h.findIndex(c => c === 'default_currency' || c.includes('currency'))
+    const iDefaultCurr  = h.findIndex(c => c === 'default_currency' || (c.includes('currency') && !c.includes('default') ? false : c.includes('currency')))
+    const iGroupNames   = h.findIndex(c => c === 'group_names' || c === 'groups' || c === 'contribution_groups')
     const iActive = h.findIndex(c => c === 'is_active' || c === 'active')
 
     return lines.slice(1).map((c, i) => {
       const g = (j: number) => j >= 0 ? c[j]?.trim() || '' : ''
       const activeRaw = g(iActive)
+      const groupNamesRaw = g(iGroupNames)
+      // Split on | or , and trim — supports "Design Group | Variable Group" or "Design Group, Variable Group"
+      const groupNames = groupNamesRaw
+        ? groupNamesRaw.split(/[|,]/).map(s => s.trim()).filter(Boolean)
+        : []
+      const groupIds: string[] = []
+      const missingGroups: string[] = []
+      for (const gn of groupNames) {
+        const gid = groupMap[norm(gn)]
+        if (gid) groupIds.push(gid)
+        else missingGroups.push(gn)
+      }
       const r: ParsedRow = { ...baseRow(i), row_id: g(iId), name: g(iName), pricing_type: g(iPricing) || 'fixed_per_creative',
         description: g(iDesc), display_order: g(iOrd) || '0',
         default_price: g(iDefaultPrice), default_currency: g(iDefaultCurr) || 'INR',
+        group_names: groupNames, group_ids: groupIds,
         is_active: activeRaw === '' || activeRaw === 'true' || activeRaw === 'TRUE' || activeRaw === '1',
       }
       if (!r.name) r.errors.push('name is required')
       const valid = ['fixed_per_creative','percentage_of_spend','retainer','hourly']
       if (!valid.includes(r.pricing_type)) r.errors.push(`pricing_type "${r.pricing_type}" invalid`)
       if (r.default_price && isNaN(parseFloat(r.default_price))) r.errors.push('default_price must be a number')
+      if (missingGroups.length > 0) r.warnings.push(`Group(s) not found: ${missingGroups.join(', ')} — these will be skipped`)
       return finalize(r)
     })
   }
@@ -1017,6 +1096,62 @@ export default function ImportClient({ clients, services, employees, groups, par
     })
   }
 
+  async function parseDiscounts(lines: string[][]): Promise<ParsedRow[]> {
+    const h = lines[0].map(norm)
+    const iId         = h.findIndex(c => c === 'id')
+    const iInvoiceRef = h.findIndex(c => c.includes('invoice_number') || c.includes('invoice_id') || c === 'invoice_ref')
+    const iClient     = h.findIndex(c => c.includes('client'))
+    const iAmount     = h.findIndex(c => c === 'discount_amount' || c === 'amount')
+    const iPct        = h.findIndex(c => c === 'discount_percentage' || c === 'percentage' || c === 'percent')
+    const iTotal      = h.findIndex(c => c.includes('invoice_total') || c === 'total')
+    const iReason     = h.findIndex(c => c.includes('reason') || c.includes('note'))
+    const iDate       = h.findIndex(c => c.includes('discount_date') || c.includes('date'))
+
+    // Pre-load invoice number → id map
+    const { data: invRows } = await supabase.from('invoices').select('id, invoice_number, client_id, total_amount')
+    const invMap: Record<string, { id: string; client_id: string; total: number }> = {}
+    ;(invRows || []).forEach((inv: any) => { invMap[norm(inv.invoice_number)] = { id: inv.id, client_id: inv.client_id, total: inv.total_amount || 0 } })
+
+    return lines.slice(1).map((c, i) => {
+      const g = (j: number) => j >= 0 ? c[j]?.trim() || '' : ''
+      const invoiceRef = g(iInvoiceRef)
+      const clientRef  = g(iClient)
+      const amount     = g(iAmount)
+      const pct        = g(iPct)
+      const total      = g(iTotal)
+      const reason     = g(iReason)
+      const discountDate = normalizeDate(g(iDate)) || new Date().toISOString().slice(0, 10)
+
+      // Resolve invoice_id (optional)
+      const isUUID = /^[0-9a-f-]{36}$/i.test(invoiceRef)
+      const invMatch = invoiceRef ? (isUUID ? { id: invoiceRef, client_id: '', total: 0 } : invMap[norm(invoiceRef)]) : null
+      const invoice_id  = invMatch?.id || null
+      const invoice_total_fallback = invMatch?.total || 0
+      // Resolve client_id (required)
+      let client_id = clientRef ? clientMap[norm(clientRef)] : (invMatch?.client_id || '')
+
+      const r: ParsedRow = {
+        ...baseRow(i), row_id: g(iId),
+        invoice_ref:         invoiceRef,
+        invoice_id:          invoice_id,
+        client_ref:          clientRef,
+        client_id:           client_id,
+        discount_amount:     amount,
+        discount_percentage: pct,
+        invoice_total:       total || String(invoice_total_fallback),
+        reason:              reason,
+        discount_date:       discountDate,
+      }
+      if (invoiceRef && !invoice_id) r.errors.push(`Invoice "${invoiceRef}" not found in database`)
+      if (!client_id) r.errors.push(`Client "${clientRef}" not found — required for discount history`)
+      if (!amount && !pct) r.errors.push('Either discount_amount or discount_percentage is required')
+      if (amount && isNaN(parseFloat(amount))) r.errors.push('discount_amount must be a number')
+      if (pct && isNaN(parseFloat(pct))) r.errors.push('discount_percentage must be a number')
+      if (r.discount_date && !/^\d{4}-\d{2}-\d{2}$/.test(r.discount_date)) r.errors.push('discount_date must be DD-MM-YYYY or YYYY-MM-DD')
+      return finalize(r)
+    })
+  }
+
   // ── File handler ───────────────────────────────────────────────────────────
   const handleFile = useCallback(async (file: File) => {
     const text = await file.text()
@@ -1036,6 +1171,7 @@ export default function ImportClient({ clients, services, employees, groups, par
       case 'cashbook_entries': parsed = parseCashbookEntries(lines);        break
       case 'invoices':         parsed = parseInvoices(lines);               break
       case 'invoice_status':   parsed = await parseInvoiceStatus(lines);    break
+      case 'discounts':        parsed = await parseDiscounts(lines);        break
     }
     if (operation === 'update' || operation === 'delete') {
       parsed.forEach(p => {
@@ -1173,7 +1309,8 @@ export default function ImportClient({ clients, services, employees, groups, par
           break
         }
         const recs = valid.map(r => ({
-          row_id: r.row_id,
+          row_id:    r.row_id,
+          group_ids: (r.group_ids || []) as string[],   // contribution group ids parsed from CSV
           fields: {
             name: r.name, pricing_type: r.pricing_type, description: r.description || null,
             display_order: parseInt(r.display_order) || 0,
@@ -1182,11 +1319,36 @@ export default function ImportClient({ clients, services, employees, groups, par
             is_active: r.is_active !== false,
           },
         }))
+
+        // Helper: replace group_services links for one service id
+        async function saveServiceGroups(serviceId: string, groupIds: string[]) {
+          // Clean wipe + insert (mirrors the settings UI behaviour). Gracefully
+          // ignores failures (e.g. if the group_services table doesn't exist).
+          const { error: delErr } = await supabase.from('group_services').delete().eq('service_id', serviceId)
+          if (delErr) return // table missing — skip silently
+          if (groupIds.length > 0) {
+            await supabase.from('group_services').insert(
+              groupIds.map(gid => ({ group_id: gid, service_id: serviceId }))
+            )
+          }
+        }
+
         if (operation === 'update') {
           await backupBeforeUpdate(table, recs.map(r => r.row_id))
-          await batchUpdate(table, recs)
+          await batchUpdate(table, recs.map(r => ({ row_id: r.row_id!, fields: r.fields })))
+          // Save group links for rows that specified group_names
+          for (const r of recs) {
+            if (r.row_id) await saveServiceGroups(r.row_id, r.group_ids)
+          }
         } else {
-          await batchInsert(table, recs.map(r => r.fields))
+          // Insert one-by-one so we can capture the new service IDs and save their group links.
+          // (batchInsert collapses the response, losing per-row ids.)
+          for (const r of recs) {
+            const { data, error } = await supabase.from(table).insert(r.fields).select('id').single()
+            if (error) { res.errors.push(`Service "${r.fields.name}": ${error.message}`); res.skipped += 1; continue }
+            res.inserted += 1
+            if (data?.id && r.group_ids.length > 0) await saveServiceGroups(data.id, r.group_ids)
+          }
         }
         break
       }
@@ -1501,6 +1663,45 @@ export default function ImportClient({ clients, services, employees, groups, par
         break
       }
 
+      case 'discounts': {
+        const table = 'discount_logs'
+        if (operation === 'delete') {
+          const ids = valid.map(r => r.row_id).filter(Boolean) as string[]
+          await backupBeforeUpdate(table, ids)
+          await batchDelete(table, ids)
+          break
+        }
+        const recs = valid.map(r => {
+          const amount = parseFloat(r.discount_amount) || 0
+          const pct    = parseFloat(r.discount_percentage) || 0
+          const total  = parseFloat(r.invoice_total) || 0
+          // Derive whichever wasn't provided
+          let finalAmount     = amount
+          let finalPercentage = pct
+          if (!finalAmount && finalPercentage && total > 0)     finalAmount     = (finalPercentage / 100) * total
+          if (!finalPercentage && finalAmount && total > 0)     finalPercentage = (finalAmount   / total) * 100
+          return {
+            row_id: r.row_id,
+            fields: {
+              invoice_id:          r.invoice_id || null,
+              client_id:           r.client_id,
+              discount_amount:     finalAmount,
+              discount_percentage: finalPercentage,
+              invoice_total:       total,
+              reason:              r.reason || 'Bulk import',
+              created_at:          r.discount_date ? new Date(r.discount_date).toISOString() : new Date().toISOString(),
+            },
+          }
+        })
+        if (operation === 'update') {
+          await backupBeforeUpdate(table, recs.map(r => r.row_id).filter(Boolean) as string[])
+          await batchUpdate(table, recs.filter(r => r.row_id) as any)
+        } else {
+          await batchInsert(table, recs.map(r => r.fields))
+        }
+        break
+      }
+
       case 'invoice_status': {
         // Special: update invoice status + optionally insert a payment record
         for (const r of valid) {
@@ -1549,6 +1750,7 @@ export default function ImportClient({ clients, services, employees, groups, par
     cashbook_entries: 'cashbook_entries',
     invoices:         'invoices',
     invoice_status:   'invoices',
+    discounts:        'discount_logs',
   }
 
   async function loadCleanupRecords(m: ImportMode) {

@@ -787,6 +787,44 @@ export default function SettingsClient(props: Props) {
                     className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
                   />
                 </div>
+
+                {/* Favicon */}
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">App Favicon</label>
+                  <p className="text-[11px] text-muted-foreground/60 mb-2">Shown in browser tabs. Best as a square PNG/SVG, 32×32 or 64×64 px.</p>
+                  <div className="flex gap-2 items-center mb-2">
+                    <label className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-secondary border border-border text-sm text-muted-foreground hover:text-foreground hover:border-border/80 cursor-pointer transition-colors">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                      Upload favicon
+                      <input type="file" accept="image/*,.svg,.ico" className="hidden"
+                        onChange={e => {
+                          const file = e.target.files?.[0]
+                          if (!file) return
+                          const reader = new FileReader()
+                          reader.onload = ev => setCompanySettings(p => ({ ...p, favicon_url: ev.target?.result as string }))
+                          reader.readAsDataURL(file)
+                        }}
+                      />
+                    </label>
+                    <span className="text-xs text-muted-foreground/50">or paste a URL below</span>
+                  </div>
+                  <input
+                    value={companySettings['favicon_url'] || ''}
+                    onChange={e => setCompanySettings(p => ({ ...p, favicon_url: e.target.value }))}
+                    placeholder="https://… or leave blank to use default Cirqle icon"
+                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  />
+                  {companySettings['favicon_url'] && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <div className="w-8 h-8 rounded border border-border bg-secondary p-0.5 flex items-center justify-center overflow-hidden">
+                        <img src={companySettings['favicon_url']} alt="Favicon preview" className="w-full h-full object-contain" />
+                      </div>
+                      <span className="text-xs text-muted-foreground">Preview (32×32)</span>
+                      <button type="button" onClick={() => setCompanySettings(p => ({ ...p, favicon_url: '' }))}
+                        className="text-xs text-red-400 hover:text-red-300 ml-2 transition-colors">Remove</button>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Invoicing */}
@@ -1078,6 +1116,46 @@ export default function SettingsClient(props: Props) {
                     <p className="col-span-2 text-xs text-muted-foreground">GST calculation logic on invoices/quotations is ready to activate — it will auto-compute CGST + SGST (domestic) or IGST (inter-state) once billing is built out.</p>
                   </div>
                 )}
+              </div>
+
+              {/* Data Visibility — per-role access control */}
+              <div className="space-y-4 border-t border-border pt-5">
+                <div>
+                  <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Data Visibility</h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">Control what employees and team leads can see in the app.</p>
+                </div>
+
+                {([
+                  { key: 'visibility_billing',      label: 'Billing amounts & invoice values', hint: 'Task billing, invoice totals, earnings' },
+                  { key: 'visibility_contributions', label: 'Contribution scores & percentages', hint: 'Score %, earnings per task' },
+                  { key: 'visibility_employee_names', label: 'Employee names & personal details', hint: 'Names, email, phone, DOB in HR sections' },
+                ] as const).map(({ key, label, hint }) => (
+                  <div key={key}>
+                    <label className="block text-xs font-medium text-foreground mb-0.5">{label}</label>
+                    <p className="text-[11px] text-muted-foreground/60 mb-1.5">{hint}</p>
+                    <div className="flex gap-1.5">
+                      {([
+                        { val: 'all',         lbl: 'All roles' },
+                        { val: 'team_lead',   lbl: 'Team Lead+' },
+                        { val: 'admin_only',  lbl: 'Admin only' },
+                      ] as const).map(({ val, lbl }) => (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() => setCompanySettings(p => ({ ...p, [key]: val }))}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                            (companySettings[key] || 'all') === val
+                              ? 'bg-primary/20 border-primary/50 text-primary'
+                              : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
+                          }`}
+                        >{lbl}</button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                <div className="bg-amber-500/8 border border-amber-500/20 rounded-lg px-3 py-2 text-[11px] text-amber-400/80">
+                  ⚠️ These settings restrict what data is <strong>displayed</strong>. Super admins always see everything regardless of this setting.
+                </div>
               </div>
 
               <button onClick={saveCompanySettings} disabled={saving} className="gradient-bg text-white text-sm font-medium px-5 py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50">

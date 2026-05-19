@@ -1,6 +1,31 @@
 import { createClient } from '@/lib/supabase/server'
 import TasksClient from './tasks-client'
 
+export const dynamic = 'force-dynamic'
+
+// Supabase enforces a server-side max-rows cap (default 1,000) that overrides
+// any client `.limit()` value. To fetch every task we paginate with `.range()`
+// in chunks of 1,000 until we hit a partial page. Capped at 50,000 as a
+// runaway-safety guard (10× more than any real agency should hit).
+async function fetchAllTasks(supabase: Awaited<ReturnType<typeof createClient>>, hasDeletedAt: boolean) {
+  const PAGE = 1000
+  const MAX_PAGES = 50          // 50 × 1000 = 50,000 hard ceiling
+  const all: any[] = []
+  for (let page = 0; page < MAX_PAGES; page++) {
+    let q = supabase
+      .from('tasks')
+      .select(`*, client:clients(id, name, code), service:services(id, name)`)
+      .order('task_number', { ascending: false, nullsFirst: false })
+      .range(page * PAGE, (page + 1) * PAGE - 1)
+    if (hasDeletedAt) q = q.is('deleted_at', null)
+    const { data, error } = await q
+    if (error || !data) break
+    all.push(...data)
+    if (data.length < PAGE) break    // last page reached
+  }
+  return all
+}
+
 export default async function TasksPage() {
   const supabase = await createClient()
 
@@ -22,19 +47,16 @@ export default async function TasksPage() {
 
   const fallback = <T,>() => ({ data: [] as T[], error: null })
 
-  const [tasksRes, clientsRes, servicesRes, clientPricingsRes, employeesRes, taskAssignmentsRes,
+  // Fetch tasks via pagination (bypasses Supabase's 1000-row response cap)
+  // in parallel with all the smaller reference-data queries.
+  const [allTasks, dbCountRes, clientsRes, servicesRes, clientPricingsRes, employeesRes, taskAssignmentsRes,
     groupsRes, paramsRes, groupServicesRes, paramServicesRes,
     taskGroupsRes, taskGroupAssignmentsRes, taskParamAssignmentsRes] = await Promise.all([
+    fetchAllTasks(supabase, hasDeletedAt),
+    // Real DB count — tells us if there are more tasks than loaded
     hasDeletedAt
-      ? supabase
-          .from('tasks')
-          .select(`*, client:clients(id, name, code), service:services(id, name)`)
-          .is('deleted_at', null)
-          .order('created_at', { ascending: false })
-      : supabase
-          .from('tasks')
-          .select(`*, client:clients(id, name, code), service:services(id, name)`)
-          .order('created_at', { ascending: false }),
+      ? supabase.from('tasks').select('id', { count: 'exact', head: true }).is('deleted_at', null)
+      : supabase.from('tasks').select('id', { count: 'exact', head: true }),
     supabase.from('clients').select('id, name, code').eq('is_active', true).order('name'),
     supabase.from('services').select('id, name, default_price, default_currency, pricing_type').eq('is_active', true).order('display_order').order('name'),
     supabase.from('client_service_pricing').select('client_id, service_id, price, currency'),
@@ -52,6 +74,13 @@ export default async function TasksPage() {
       .then(r => r, () => fallback<{ task_id: string; parameter_id: string; employee_id: string }>()),
   ])
 
+  // Fetch visibility settings
+  const [visibilityBillingRes, visibilityContribRes, visibilityNamesRes] = await Promise.all([
+    supabase.from('company_settings').select('value').eq('key', 'visibility_billing').maybeSingle(),
+    supabase.from('company_settings').select('value').eq('key', 'visibility_contributions').maybeSingle(),
+    supabase.from('company_settings').select('value').eq('key', 'visibility_employee_names').maybeSingle(),
+  ])
+
   // Fetch trash only if column exists
   const trashRes = hasDeletedAt
     ? await supabase
@@ -64,6 +93,7 @@ export default async function TasksPage() {
 
   return (
     <TasksClient
+      dbTaskTotal={dbCountRes.count ?? undefined}
       initialTasks={tasksRes.data || []}
       initialTrash={(trashRes.data || []) as any[]}
       clients={clientsRes.data || []}
@@ -78,6 +108,11 @@ export default async function TasksPage() {
       taskGroups={(taskGroupsRes.data || []) as any[]}
       taskGroupAssignments={(taskGroupAssignmentsRes.data || []) as any[]}
       taskParamAssignments={(taskParamAssignmentsRes.data || []) as any[]}
+      visibilitySettings={{
+        billing:        (visibilityBillingRes.data?.value as string) || 'all',
+        contributions:  (visibilityContribRes.data?.value as string) || 'all',
+        employee_names: (visibilityNamesRes.data?.value as string) || 'all',
+      }}
     />
   )
 }

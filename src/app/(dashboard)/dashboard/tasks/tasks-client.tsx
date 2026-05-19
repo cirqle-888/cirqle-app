@@ -65,7 +65,14 @@ interface Service {
   default_currency?: string
 }
 
+interface VisibilitySettings {
+  billing: string          // 'all' | 'team_lead' | 'admin_only'
+  contributions: string
+  employee_names: string
+}
+
 interface Props {
+  dbTaskTotal?: number
   initialTasks: Task[]
   initialTrash: (Task & { deleted_at: string })[]
   clients: { id: string; name: string; code: string }[]
@@ -80,6 +87,7 @@ interface Props {
   taskGroups: { task_id: string; group_id: string }[]
   taskGroupAssignments: { task_id: string; group_id: string; employee_id: string }[]
   taskParamAssignments: { task_id: string; parameter_id: string; employee_id: string }[]
+  visibilitySettings?: VisibilitySettings
 }
 
 // 'invoiced' is system-managed (set automatically when invoice is sent) — excluded from manual dropdown
@@ -120,10 +128,21 @@ const EMPTY_FORM = {
   manual_billing_amount: '',                                                     // user-typed override amount
 }
 
-export default function TasksClient({ initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments }: Props) {
+export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, visibilitySettings }: Props) {
   const { role, employee: currentEmployee } = useRole()
   const { toasts, dismiss, success, error: toastError } = useToast()
   const { dn } = usePrivacy()
+
+  // ── Visibility helpers ─────────────────────────────────────────────────────
+  // Returns true if the current user's role meets the required visibility level
+  function canSee(setting: string | undefined): boolean {
+    if (!setting || setting === 'all') return true
+    if (setting === 'admin_only') return role === 'super_admin' || role === 'accounts'
+    if (setting === 'team_lead') return role === 'super_admin' || role === 'accounts' || role === 'team_lead'
+    return true
+  }
+  const showBilling     = canSee(visibilitySettings?.billing)
+  const showEmpNames    = canSee(visibilitySettings?.employee_names)
   const [editClientId, setEditClientId] = useState<string | null>(null)
   const [editClientServiceId, setEditClientServiceId] = useState<string | null>(null)
   const [highlightedTaskId, setHighlightedTaskId] = useState<string | null>(null)
@@ -144,6 +163,107 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
   const [tasks, setTasks] = useState<Task[]>(initialTasks)
   const [trash, setTrash] = useState<(Task & { deleted_at: string })[]>(initialTrash)
   const [showTrash, setShowTrash] = useState(false)
+  const [trashDbCount, setTrashDbCount] = useState<number | null>(null)
+  const [dbSearchResults, setDbSearchResults] = useState<Task[] | null>(null)
+  const [dbSearching, setDbSearching]         = useState(false)
+
+  // ── Database search mode ─────────────────────────────────────────────────
+  // When active, results are fetched directly from Supabase with the current
+  // filters applied — gives access to every task regardless of the in-memory
+  // loaded set (useful for very old or large datasets).
+  const DB_PAGE_SIZE = 100
+  const [dbMode, setDbMode]               = useState(false)
+  const [dbModeResults, setDbModeResults] = useState<Task[]>([])
+  const [dbModeTotal, setDbModeTotal]     = useState<number | null>(null)
+  const [dbModeLoading, setDbModeLoading] = useState(false)
+  const [dbModePage, setDbModePage]       = useState(0)
+
+  async function runDbSearch(page = 0) {
+    setDbModeLoading(true)
+    try {
+      // Detect soft-delete support once per call
+      const probe = await supabase.from('tasks').select('deleted_at').limit(0)
+      const hasSoftDelete = !probe.error
+
+      type Q = ReturnType<typeof supabase.from> extends { select: (...a: any[]) => infer R } ? R : any
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let q: any = supabase
+        .from('tasks')
+        .select('*, client:clients(id, name, code), service:services(id, name)', { count: 'exact' })
+
+      if (hasSoftDelete) q = q.is('deleted_at', null)
+
+      // Apply filters
+      if (filterStatus)  q = q.eq('status', filterStatus)
+      if (filterClient)  q = q.eq('client_id', filterClient)
+      if (filterService) q = q.eq('service_id', filterService)
+
+      // Search query
+      if (searchQ) {
+        const trimmed = searchQ.trim()
+        if (trimmed.startsWith('#')) {
+          const num = parseInt(trimmed.slice(1), 10)
+          if (!isNaN(num)) q = q.eq('task_number', num)
+        } else {
+          // Full-text search on title; also match exact task number
+          const num = parseInt(trimmed, 10)
+          if (!isNaN(num) && String(num) === trimmed) {
+            q = q.or(`title.ilike.%${trimmed}%,task_number.eq.${num}`)
+          } else {
+            q = q.ilike('title', `%${trimmed}%`)
+          }
+        }
+      }
+
+      // Sort
+      if (sortBy === 'date_asc')    q = q.order('task_date',           { ascending: true,  nullsFirst: false })
+      else if (sortBy === 'date_desc')   q = q.order('task_date',      { ascending: false, nullsFirst: false })
+      else if (sortBy === 'amount_desc') q = q.order('billing_amount_inr', { ascending: false, nullsFirst: false })
+      else if (sortBy === 'client')      q = q.order('client_id',      { ascending: true,  nullsFirst: false })
+      else                               q = q.order('task_number',    { ascending: false, nullsFirst: false })
+
+      // Paginate
+      q = q.range(page * DB_PAGE_SIZE, (page + 1) * DB_PAGE_SIZE - 1)
+
+      const { data, count, error } = await q
+      if (!error) {
+        // Post-filter by assignee client-side (task_assignments is loaded)
+        let rows: Task[] = (data || []) as Task[]
+        if (filterAssignee) {
+          const assignedIds = new Set(localAssignments.filter(a => a.employee_id === filterAssignee).map(a => a.task_id))
+          rows = rows.filter(t => assignedIds.has(t.id))
+        }
+        setDbModeResults(rows)
+        setDbModeTotal(count)
+        setDbModePage(page)
+        setDbMode(true)
+      }
+    } finally {
+      setDbModeLoading(false)
+    }
+  }
+
+  function exitDbMode() {
+    setDbMode(false)
+    setDbModeResults([])
+    setDbModeTotal(null)
+    setDbModePage(0)
+  }
+
+  // Fetch the live total count of soft-deleted tasks from the DB on mount
+  // (initialTrash only covers the last 45 days, so the count may be higher)
+  useEffect(() => {
+    ;(async () => {
+      const probe = await supabase.from('tasks').select('deleted_at').limit(0)
+      if (probe.error) return // column doesn't exist — no soft-delete
+      const { count } = await supabase
+        .from('tasks')
+        .select('id', { count: 'exact', head: true })
+        .not('deleted_at', 'is', null)
+      if (count != null) setTrashDbCount(count)
+    })()
+  }, [])
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
   const [filterStatus, setFilterStatus] = useState('')
@@ -152,6 +272,8 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
   const [searchQ, setSearchQ] = useState('')
 
   const [sortBy, setSortBy] = useState<'today_first' | 'date_desc' | 'date_asc' | 'amount_desc' | 'client'>('today_first')
+  const [tablePage, setTablePage] = useState(0)
+  const [tablePageSize, setTablePageSize] = useState(100)
   const [form, setForm] = useState(EMPTY_FORM)
   const [previewTaskNumber, setPreviewTaskNumber] = useState<number | null>(null)
 
@@ -964,13 +1086,30 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
     if (filterClient)  t = t.filter(x => x.client?.id === filterClient)
     if (filterService) t = t.filter(x => x.service?.id === filterService)
     if (searchQ) {
-      const q = searchQ.toLowerCase()
-      t = t.filter(x =>
-        x.title?.toLowerCase().includes(q) ||
-        x.client?.name?.toLowerCase().includes(q) ||
-        x.service?.name?.toLowerCase().includes(q) ||
-        taskCodeMatches(x, searchQ)
-      )
+      const trimmed = searchQ.trim()
+      if (trimmed.startsWith('#')) {
+        // Exact task-number search: #1 → only task #1, not #10, #11, #100
+        const num = parseInt(trimmed.slice(1), 10)
+        t = isNaN(num) ? [] : t.filter(x => x.task_number === num)
+      } else {
+        const q = trimmed.toLowerCase()
+        // General search — title, client, service, or partial number match
+        // Exact number matches float to the top
+        const exact: typeof t = []
+        const rest:  typeof t = []
+        t.forEach(x => {
+          const matches =
+            x.title?.toLowerCase().includes(q) ||
+            x.client?.name?.toLowerCase().includes(q) ||
+            x.service?.name?.toLowerCase().includes(q) ||
+            taskCodeMatches(x, trimmed)
+          if (!matches) return
+          // put exact task-number match first (e.g. query "1" → #1 before #10)
+          if (x.task_number != null && String(x.task_number) === q) exact.push(x)
+          else rest.push(x)
+        })
+        t = [...exact, ...rest]
+      }
     }
     if (filterAssignee) {
       t = t.filter(task =>
@@ -983,19 +1122,21 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
       // Today at top → upcoming ascending (soonest next) → past descending (most recent first)
       const today = new Date().toISOString().split('T')[0]
       t = [...t].sort((a, b) => {
-        const aIsToday = a.task_date === today
-        const bIsToday = b.task_date === today
+        const aDate = a.task_date || ''
+        const bDate = b.task_date || ''
+        const aIsToday = aDate === today
+        const bIsToday = bDate === today
         if (aIsToday !== bIsToday) return aIsToday ? -1 : 1
-        const aFuture = a.task_date > today
-        const bFuture = b.task_date > today
+        const aFuture = aDate > today
+        const bFuture = bDate > today
         if (aFuture !== bFuture) return aFuture ? -1 : 1
         return aFuture
-          ? a.task_date.localeCompare(b.task_date)   // upcoming: soonest first
-          : b.task_date.localeCompare(a.task_date)   // past: most recent first
+          ? aDate.localeCompare(bDate)   // upcoming: soonest first
+          : bDate.localeCompare(aDate)   // past: most recent first
       })
     }
-    if (sortBy === 'date_asc')    t = [...t].sort((a, b) => a.task_date.localeCompare(b.task_date))
-    if (sortBy === 'date_desc')   t = [...t].sort((a, b) => b.task_date.localeCompare(a.task_date))
+    if (sortBy === 'date_asc')    t = [...t].sort((a, b) => (a.task_date || '').localeCompare(b.task_date || ''))
+    if (sortBy === 'date_desc')   t = [...t].sort((a, b) => (b.task_date || '').localeCompare(a.task_date || ''))
     if (sortBy === 'amount_desc') t = [...t].sort((a, b) => (b.billing_amount_inr || 0) - (a.billing_amount_inr || 0))
     if (sortBy === 'client')      t = [...t].sort((a, b) => (a.client?.name || '').localeCompare(b.client?.name || ''))
     return t
@@ -1010,8 +1151,56 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
     return filteredTasks
   }, [role, currentEmployee, localAssignments, filteredTasks])
 
+  // Reset to page 0 and clear DB search results when filters/search/sort change
+  useEffect(() => { setTablePage(0); setDbSearchResults(null); exitDbMode() }, [filterStatus, filterClient, filterService, searchQ, sortBy, filterAssignee])
+
+  // ── Auto-fallback to database search ──────────────────────────────────────
+  // When the user types a query (especially #number) and finds nothing in the
+  // loaded set, automatically search the database after a short debounce.
+  // This makes any task — including the very oldest (#1, #2, #3…) — findable
+  // any time without the user needing to click a button.
+  useEffect(() => {
+    if (dbMode) return                    // already in DB mode, don't re-trigger
+    if (!searchQ.trim() && !filterClient) return  // need at least a search or client filter
+    if (filteredTasks.length > 0) return  // local results exist — no need to hit DB
+
+    const handle = setTimeout(() => {
+      // Only auto-search if we still have nothing locally
+      if (filteredTasks.length === 0) runDbSearch(0)
+    }, 350)                                // 350ms debounce — feels instant but cheap
+
+    return () => clearTimeout(handle)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQ, filterClient, filterService, filterStatus, filteredTasks.length])
+
+  // Paginated slice for the table view (board/calendar use full visibleTasks)
+  // When DB mode is active, we use dbModeResults instead of the in-memory visibleTasks
+  const totalPages = dbMode
+    ? Math.ceil((dbModeTotal ?? dbModeResults.length) / DB_PAGE_SIZE)
+    : Math.ceil(visibleTasks.length / tablePageSize)
+  const pagedTasks = dbMode
+    ? dbModeResults
+    : searchQ
+      ? visibleTasks              // when searching locally, show all matches on one page
+      : visibleTasks.slice(tablePage * tablePageSize, (tablePage + 1) * tablePageSize)
+
   const hasActiveFilters = !!(filterStatus || filterClient || filterService || searchQ || sortBy !== 'today_first' || !!filterAssignee)
   const activeFilterCount = [filterClient, filterService, filterAssignee, sortBy !== 'today_first' ? 'sort' : ''].filter(Boolean).length
+
+  // Client filter options: merge active clients (from props) with any unique clients
+  // found in loaded tasks — this ensures inactive clients like old imported ones still appear
+  const clientFilterOptions = useMemo(() => {
+    const seen = new Set<string>()
+    const result: { value: string; label: string }[] = []
+    clients.forEach(c => { seen.add(c.id); result.push({ value: c.id, label: c.name }) })
+    tasks.forEach(t => {
+      if (t.client && !seen.has(t.client.id)) {
+        seen.add(t.client.id)
+        result.push({ value: t.client.id, label: t.client.name })
+      }
+    })
+    return result.sort((a, b) => a.label.localeCompare(b.label))
+  }, [clients, tasks])
 
   // py-2.5 on mobile = 40px touch target; py-2 keeps desktop density unchanged.
   const inputCls = 'w-full bg-secondary border border-border rounded-lg px-3 py-2.5 sm:py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50'
@@ -1020,7 +1209,15 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
     <div>
       <Header
         title="Tasks"
-        subtitle={showTrash ? `${trash.length} item${trash.length !== 1 ? 's' : ''} in Trash` : `${tasks.length} total tasks`}
+        subtitle={
+          showTrash
+            ? `${trashDbCount ?? trash.length} item${(trashDbCount ?? trash.length) !== 1 ? 's' : ''} in Trash`
+            : dbMode
+              ? `Database search · ${dbModeTotal != null ? `${dbModeTotal} match${dbModeTotal !== 1 ? 'es' : ''}` : '…'}`
+              : dbTaskTotal != null && dbTaskTotal > tasks.length
+                ? `${tasks.length} loaded · ${dbTaskTotal} total in DB`
+                : `${tasks.length} total tasks`
+        }
         actions={
           <div className="flex items-center gap-2">
             {showTrash ? (
@@ -1039,19 +1236,32 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                   <span className="hidden sm:inline">Workload</span>
                 </button>
                 {/* Trash */}
-                <button
-                  onClick={() => setShowTrash(true)}
-                  title="Trash"
-                  className="relative flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-2 bg-secondary hover:bg-secondary/80 transition-colors"
-                >
-                  <Trash2 className="w-4 h-4 text-red-400" />
-                  <span className="hidden sm:inline">Trash</span>
-                  {trash.length > 0 && (
-                    <span className="bg-red-500/20 text-red-400 text-[10px] rounded-full px-1.5 py-0.5 font-semibold">
-                      {trash.length}
-                    </span>
-                  )}
-                </button>
+                {(() => {
+                  // Use live DB count (covers all soft-deleted, not just last 45 days)
+                  // Fall back to local list count while DB count is loading
+                  const liveCount = trashDbCount ?? trash.length
+                  const hasItems  = liveCount > 0
+                  return (
+                    <button
+                      onClick={() => setShowTrash(true)}
+                      title={hasItems ? `${liveCount} item${liveCount !== 1 ? 's' : ''} in Trash` : 'Trash (empty)'}
+                      className={`relative flex items-center gap-1.5 text-sm font-medium border rounded-lg px-3 py-2 transition-colors
+                        ${hasItems
+                          ? 'text-red-400 border-red-500/30 bg-red-500/5 hover:bg-red-500/10'
+                          : 'text-muted-foreground border-border bg-secondary hover:bg-secondary/80 hover:text-foreground'}`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      <span className="hidden sm:inline">Trash</span>
+                      {/* Always show badge — red when items, muted when empty */}
+                      <span className={`text-[10px] rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 font-semibold transition-colors
+                        ${hasItems
+                          ? 'bg-red-500 text-white animate-pulse'
+                          : 'bg-foreground/10 text-muted-foreground/50'}`}>
+                        {trashDbCount === null ? '…' : liveCount}
+                      </span>
+                    </button>
+                  )
+                })()}
                 {/* Add Task */}
                 {(role === 'super_admin' || role === 'accounts' || role === 'team_lead') && (
                   <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90 transition-opacity">
@@ -1174,7 +1384,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                 h-[34px] matches the other toolbar buttons for visual rhythm. */}
             <div className="order-1 sm:order-none w-full sm:w-auto flex items-center gap-2 bg-secondary border border-foreground/15 rounded-xl h-[34px] px-3 sm:flex-1 sm:basis-0 min-w-0">
               <Search size={14} className="text-muted-foreground shrink-0" />
-              <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search title, client, service, code…" className="flex-1 min-w-0 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60" />
+              <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search title, client, service, #number…" className="flex-1 min-w-0 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60" />
               {searchQ && <button onClick={() => setSearchQ('')} className="shrink-0 cursor-pointer"><X size={12} className="text-muted-foreground" /></button>}
             </div>
 
@@ -1250,19 +1460,17 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
 
           {/* Row 2: Filters → divider → Status chips → Clear all */}
           <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-            {/* Client — FilterDropdown has built-in × when active */}
+            {/* Client — merged list: active clients + any inactive clients found in loaded tasks */}
             <FilterDropdown
-              options={[...new Map(tasks.filter(t => t.client?.id).map(t => [t.client!.id, t.client!])).values()]
-                .map(c => ({ value: c.id, label: c.name }))}
+              options={clientFilterOptions}
               value={filterClient}
               onChange={setFilterClient}
               placeholder="Client"
               sortKey="clients"
             />
-            {/* Service */}
+            {/* Service — use pre-fetched services list */}
             <FilterDropdown
-              options={[...new Map(tasks.filter(t => t.service?.id).map(t => [t.service!.id, t.service!])).values()]
-                .map(s => ({ value: s.id, label: s.name }))}
+              options={services.map(s => ({ value: s.id, label: s.name }))}
               value={filterService}
               onChange={setFilterService}
               placeholder="Service"
@@ -1289,6 +1497,29 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
               onChange={v => setSortBy((v || 'today_first') as typeof sortBy)}
               placeholder="Sort by"
             />
+
+            {/* ── Search Database button ── */}
+            {!dbMode ? (
+              <button
+                onClick={() => runDbSearch(0)}
+                disabled={dbModeLoading}
+                title="Search all tasks directly in the database — bypasses the in-memory loaded set"
+                className="flex items-center gap-1.5 h-[34px] px-3 rounded-xl text-xs font-medium border border-violet-500/30 bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 transition-colors disabled:opacity-50 shrink-0"
+              >
+                {dbModeLoading
+                  ? <><RefreshCw size={12} className="animate-spin" /> Searching…</>
+                  : <><Search size={12} /> Search DB</>}
+              </button>
+            ) : (
+              <button
+                onClick={exitDbMode}
+                title="Exit database search mode — go back to in-memory loaded tasks"
+                className="flex items-center gap-1.5 h-[34px] px-3 rounded-xl text-xs font-medium border border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors shrink-0"
+              >
+                <X size={12} /> Exit DB mode
+              </button>
+            )}
+
             {/* Divider */}
             <span className="w-px h-5 bg-foreground/10 shrink-0" />
             {/* Status chips */}
@@ -1307,7 +1538,93 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                 <X size={11} /> Clear all
               </button>
             )}
+
+            {/* ── Inline pagination — table view only ── */}
+            {viewMode === 'table' && totalPages > 1 && (
+              <>
+                <span className="w-px h-5 bg-foreground/10 shrink-0 ml-auto" />
+                <div className="flex items-center gap-1 shrink-0">
+                  {/* First */}
+                  <button
+                    onClick={() => dbMode ? runDbSearch(0) : setTablePage(0)}
+                    disabled={dbMode ? dbModePage === 0 : tablePage === 0}
+                    title="First page"
+                    className="h-[30px] w-[30px] flex items-center justify-center rounded-lg border border-border/50 text-muted-foreground disabled:opacity-30 hover:bg-foreground/5 hover:text-foreground transition-colors text-sm font-mono">
+                    «
+                  </button>
+                  {/* Prev */}
+                  <button
+                    onClick={() => dbMode ? runDbSearch(Math.max(0, dbModePage - 1)) : setTablePage(p => Math.max(0, p - 1))}
+                    disabled={dbMode ? dbModePage === 0 : tablePage === 0}
+                    title="Previous page"
+                    className="h-[30px] w-[30px] flex items-center justify-center rounded-lg border border-border/50 text-muted-foreground disabled:opacity-30 hover:bg-foreground/5 hover:text-foreground transition-colors text-sm font-mono">
+                    ‹
+                  </button>
+
+                  {/* Page indicator + jump input */}
+                  <div className="flex items-center gap-1 px-2 h-[30px] rounded-lg border border-border/50 bg-background text-xs text-muted-foreground">
+                    <input
+                      type="number" min={1} max={totalPages}
+                      key={dbMode ? dbModePage : tablePage}
+                      defaultValue={(dbMode ? dbModePage : tablePage) + 1}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          const n = parseInt((e.target as HTMLInputElement).value, 10)
+                          if (!isNaN(n)) {
+                            const p = Math.max(0, Math.min(totalPages - 1, n - 1))
+                            dbMode ? runDbSearch(p) : setTablePage(p)
+                          }
+                        }
+                      }}
+                      className="w-8 text-center bg-transparent focus:outline-none text-foreground font-medium [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                    <span className="opacity-50">/ {totalPages}</span>
+                  </div>
+
+                  {/* Next */}
+                  <button
+                    onClick={() => dbMode ? runDbSearch(Math.min(totalPages - 1, dbModePage + 1)) : setTablePage(p => Math.min(totalPages - 1, p + 1))}
+                    disabled={dbMode ? dbModePage >= totalPages - 1 : tablePage === totalPages - 1}
+                    title="Next page"
+                    className="h-[30px] w-[30px] flex items-center justify-center rounded-lg border border-border/50 text-muted-foreground disabled:opacity-30 hover:bg-foreground/5 hover:text-foreground transition-colors text-sm font-mono">
+                    ›
+                  </button>
+                  {/* Last */}
+                  <button
+                    onClick={() => dbMode ? runDbSearch(totalPages - 1) : setTablePage(totalPages - 1)}
+                    disabled={dbMode ? dbModePage >= totalPages - 1 : tablePage === totalPages - 1}
+                    title="Last page"
+                    className="h-[30px] w-[30px] flex items-center justify-center rounded-lg border border-border/50 text-muted-foreground disabled:opacity-30 hover:bg-foreground/5 hover:text-foreground transition-colors text-sm font-mono">
+                    »
+                  </button>
+
+                  {/* Rows-per-page — only for local mode */}
+                  {!dbMode && (
+                    <select value={tablePageSize} onChange={e => { setTablePageSize(Number(e.target.value)); setTablePage(0) }}
+                      title="Rows per page"
+                      className="h-[30px] px-1.5 rounded-lg border border-border/50 bg-background text-xs text-muted-foreground focus:outline-none focus:border-violet-500/50">
+                      {[50, 100, 200, 500].map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  )}
+                </div>
+              </>
+            )}
           </div>
+
+          {/* ── DB mode banner ── */}
+          {dbMode && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-violet-500/10 border border-violet-500/20 text-xs text-violet-300">
+              <Search size={12} className="shrink-0" />
+              <span>
+                <strong>Database search active</strong> — showing results directly from Supabase.
+                {dbModeTotal != null && ` Found ${dbModeTotal} task${dbModeTotal !== 1 ? 's' : ''} matching your filters.`}
+                {dbModeTotal != null && dbModeTotal > DB_PAGE_SIZE && ` Showing ${DB_PAGE_SIZE} per page.`}
+              </span>
+              <button onClick={exitDbMode} className="ml-auto flex items-center gap-1 text-violet-400 hover:text-violet-200 transition-colors shrink-0">
+                <X size={11} /> Back to loaded
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Table */}
@@ -1368,8 +1685,31 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {visibleTasks.length === 0 && <tr><td colSpan={bulkMode ? 9 : 8} className="px-4 py-10 text-center text-sm text-muted-foreground">No tasks found</td></tr>}
-              {visibleTasks.map(task => (
+              {pagedTasks.length === 0 && !dbModeLoading && (
+                <tr><td colSpan={bulkMode ? 9 : 8} className="px-4 py-10 text-center">
+                  <p className="text-sm text-muted-foreground mb-3">
+                    {dbMode ? 'No tasks found in database matching your filters.' : 'No tasks found in loaded data.'}
+                  </p>
+                  {!dbMode && (
+                    <button
+                      onClick={() => runDbSearch(0)}
+                      disabled={dbModeLoading}
+                      className="inline-flex items-center gap-1.5 text-xs text-violet-400 hover:text-violet-300 border border-violet-500/30 hover:border-violet-500/50 rounded-lg px-3 py-1.5 transition-colors bg-violet-500/5 hover:bg-violet-500/10 disabled:opacity-50"
+                    >
+                      <Search size={12} />
+                      {dbModeLoading ? 'Searching database…' : 'Search entire database with these filters'}
+                    </button>
+                  )}
+                </td></tr>
+              )}
+              {dbModeLoading && (
+                <tr><td colSpan={bulkMode ? 9 : 8} className="px-4 py-10 text-center">
+                  <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                    <RefreshCw size={14} className="animate-spin" /> Searching database…
+                  </div>
+                </td></tr>
+              )}
+              {pagedTasks.map(task => (
                 <tr key={task.id}
                   data-taskid={task.id}
                   className={`hover:bg-secondary/30 transition-colors group ${inlineEditMode ? '' : 'cursor-pointer'} ${bulkMode && selectedTasks.has(task.id) ? 'bg-violet-500/[0.07]' : ''} ${highlightedTaskId === task.id ? 'ring-1 ring-violet-400 bg-violet-500/10' : ''}`}
@@ -1545,8 +1885,8 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                     )}
                   </td>
                   <td className="px-4 py-3 text-right font-medium" onClick={e => inlineEditMode && e.stopPropagation()}>
-                    {role !== 'employee' && role !== 'team_lead' && (
-                      inlineEditMode ? (
+                    {showBilling && (
+                      (role !== 'employee' && role !== 'team_lead') && inlineEditMode ? (
                         <input
                           type="number"
                           defaultValue={task.billing_amount}
@@ -1641,6 +1981,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
           </table>
         </div>
 
+
         {/* Mobile: stacked card list — visible below sm. Same data, denser tap-friendly layout. */}
         <div className="sm:hidden space-y-2">
           {visibleTasks.length === 0 && (
@@ -1705,10 +2046,12 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                   <span className="text-[11px] text-muted-foreground" title={fullTaskDate(task.task_date)}>
                     {formatTaskDate(task.task_date)}
                   </span>
-                  <span className="text-[11px] font-semibold text-foreground tabular-nums">
-                    {formatCurrency(task.billing_amount, task.currency as Currency)}
-                    {(task.quantity ?? 1) > 1 && <span className="text-muted-foreground/60 font-normal ml-1">×{task.quantity}</span>}
-                  </span>
+                  {showBilling && (
+                    <span className="text-[11px] font-semibold text-foreground tabular-nums">
+                      {formatCurrency(task.billing_amount, task.currency as Currency)}
+                      {(task.quantity ?? 1) > 1 && <span className="text-muted-foreground/60 font-normal ml-1">×{task.quantity}</span>}
+                    </span>
+                  )}
                 </div>
               </div>
             )
@@ -2111,6 +2454,7 @@ export default function TasksClient({ initialTasks, initialTrash, clients, servi
                 </div>
                 <h3 className="text-sm font-semibold">{monthLabel}</h3>
                 <span className="text-[10px] text-muted-foreground">{visibleTasks.length} task{visibleTasks.length !== 1 ? 's' : ''} this view</span>
+                {tasks.length > visibleTasks.length && <span className="text-[10px] text-muted-foreground/50 ml-1">({tasks.length} total loaded)</span>}
               </div>
 
               {/* Weekday headers */}

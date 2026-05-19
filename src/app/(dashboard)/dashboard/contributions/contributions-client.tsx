@@ -27,6 +27,12 @@ import { PageShell, PageContent, StickyToolbar, PageChrome } from '@/components/
 interface Score { task_id: string; employee_id: string; earnings_inr: number; score_percentage: number }
 interface Assignment { task_id: string; employee_id: string }
 
+interface VisibilitySettings {
+  billing: string
+  contributions: string
+  employee_names: string
+}
+
 interface Props {
   tasks: any[]
   employees: any[]
@@ -43,6 +49,7 @@ interface Props {
   contributorRecords: { task_id: string; employee_id: string; value: number }[]
   taskToolRecords: { task_id: string; tool_id: string }[]
   pricingMatrix: { client_id: string; service_id: string; commission_percentage: number | null; price: number | null; currency: string | null }[]
+  visibilitySettings?: VisibilitySettings
 }
 
 // ─────────────────────────────────────────────────────
@@ -80,7 +87,7 @@ export default function ContributionsClient({
   tasks: initialTasks, employees, groups, parameters, tools,
   parameterServices, toolServices, groupServices: groupServicesFromDB,
   scores, clients, services, taskAssignments: taskAssignmentsFromDB,
-  contributorRecords, taskToolRecords, pricingMatrix,
+  contributorRecords, taskToolRecords, pricingMatrix, visibilitySettings,
 }: Props) {
 
   // ── Toast ───────────────────────────────────────────
@@ -167,6 +174,17 @@ export default function ContributionsClient({
   const supabase = createClient()
   const { dn, isUnlocked, openUnlockModal } = usePrivacy()
   const { role, employee: currentEmployee } = useRole()
+
+  // ── Visibility helpers ────────────────────────────────
+  function canSee(setting: string | undefined): boolean {
+    if (!setting || setting === 'all') return true
+    if (setting === 'admin_only') return role === 'super_admin' || role === 'accounts'
+    if (setting === 'team_lead') return role === 'super_admin' || role === 'accounts' || role === 'team_lead'
+    return true
+  }
+  const showBilling      = canSee(visibilitySettings?.billing)
+  const showContribs     = canSee(visibilitySettings?.contributions)
+  const showEmpNames     = canSee(visibilitySettings?.employee_names)
 
   // ── Bulk-selection state ──────────────────────────────
   const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set())
@@ -429,7 +447,8 @@ export default function ContributionsClient({
     })
   }, [localTasks, search, filterClient, filterService, filterDate, filterEmployee, filterEmployeeMode, statusFilter, taskScoreMap, taskAssignmentMap, employees])
 
-  const canSeeFinancials = role === 'super_admin' || role === 'accounts'
+  // canSeeFinancials: respects visibility settings (contributions + billing both gate this panel)
+  const canSeeFinancials = showContribs && showBilling
 
   // For employee/view_only role, only show their assigned tasks
   const myVisibleTasks = useMemo(() => {

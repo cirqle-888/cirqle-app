@@ -11,6 +11,7 @@ export default async function ContributionsPage() {
     paramServicesRes, toolServicesRes, groupServicesRes,
     scoresRes, clientsRes, servicesRes, assignmentsRes,
     contributorRecordsRes, taskToolRecordsRes, pricingRes,
+    visibilityBillingRes, visibilityContribRes, visibilityNamesRes,
   ] = await Promise.all([
     supabase
       .from('tasks')
@@ -31,6 +32,9 @@ export default async function ContributionsPage() {
     supabase.from('contributions').select('task_id, employee_id, value').gt('value', 0), // only meaningful contributions
     supabase.from('task_tools').select('task_id, tool_id'),                // which tools used per task
     supabase.from('client_service_pricing').select('client_id, service_id, commission_percentage, price, currency'), // pre-defined rates
+    supabase.from('company_settings').select('value').eq('key', 'visibility_billing').maybeSingle(),
+    supabase.from('company_settings').select('value').eq('key', 'visibility_contributions').maybeSingle(),
+    supabase.from('company_settings').select('value').eq('key', 'visibility_employee_names').maybeSingle(),
   ])
 
   return (
@@ -50,6 +54,11 @@ export default async function ContributionsPage() {
       contributorRecords={contributorRecordsRes.data || []}
       taskToolRecords={taskToolRecordsRes.data || []}
       pricingMatrix={pricingRes.data || []}
+      visibilitySettings={{
+        billing:        (visibilityBillingRes.data?.value as string) || 'all',
+        contributions:  (visibilityContribRes.data?.value as string) || 'all',
+        employee_names: (visibilityNamesRes.data?.value as string) || 'all',
+      }}
     />
   )
 }
