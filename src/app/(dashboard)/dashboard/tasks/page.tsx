@@ -94,7 +94,7 @@ export default async function TasksPage() {
   return (
     <TasksClient
       dbTaskTotal={dbCountRes.count ?? undefined}
-      initialTasks={tasksRes.data || []}
+      initialTasks={allTasks || []}
       initialTrash={(trashRes.data || []) as any[]}
       clients={clientsRes.data || []}
       services={servicesRes.data || []}

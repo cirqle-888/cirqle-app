@@ -840,26 +840,40 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const probe = await supabase.from('tasks').select('deleted_at').limit(0)
     const hasSoftDelete = !probe.error
 
-    // Fetch all done tasks not yet invoiced — exclude soft-deleted (trashed) tasks
-    let query = supabase
-      .from('tasks')
-      .select('id, title, task_date, billing_amount_inr, currency, client_id, client:clients(id, name, code, default_currency)')
-      .eq('status', 'done')
-      .order('task_date')
-    if (hasSoftDelete) query = query.is('deleted_at', null)
-
-    const { data: doneTasks } = await query
-    if (!doneTasks?.length) { setBatchLoading(false); return }
+    // Fetch ALL done tasks with pagination — Supabase caps each response at 1000 rows,
+    // so we page with .range() in 1000-row chunks until we get a partial page.
+    const PAGE = 1000
+    const doneTasks: any[] = []
+    for (let page = 0; page < 50; page++) {
+      let q = supabase
+        .from('tasks')
+        .select('id, title, task_date, billing_amount_inr, currency, client_id, client:clients(id, name, code, default_currency)')
+        .eq('status', 'done')
+        .order('task_date')
+        .range(page * PAGE, (page + 1) * PAGE - 1)
+      if (hasSoftDelete) q = q.is('deleted_at', null)
+      const { data, error } = await q
+      if (error || !data) break
+      doneTasks.push(...data)
+      if (data.length < PAGE) break   // last page reached
+    }
+    if (!doneTasks.length) { setBatchLoading(false); return }
 
     // Find which ones are already in active invoices
     const taskIds = doneTasks.map((t: any) => t.id)
-    const { data: existingItems } = await supabase
-      .from('invoice_items')
-      .select('task_id, invoice:invoices(id, status)')
-      .in('task_id', taskIds)
+    // Supabase also caps .in() results at 1000 — chunk the taskIds lookup
+    const CHUNK = 500
+    const allExistingItems: any[] = []
+    for (let i = 0; i < taskIds.length; i += CHUNK) {
+      const { data } = await supabase
+        .from('invoice_items')
+        .select('task_id, invoice:invoices(id, status)')
+        .in('task_id', taskIds.slice(i, i + CHUNK))
+      if (data) allExistingItems.push(...data)
+    }
 
     const invoicedTaskIds = new Set<string>()
-    ;(existingItems || []).forEach((item: any) => {
+    ;(allExistingItems || []).forEach((item: any) => {
       if (item.task_id && item.invoice && item.invoice.status !== 'cancelled') {
         invoicedTaskIds.add(item.task_id)
       }

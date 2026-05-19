@@ -290,6 +290,35 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
   const [services, setServices] = useState(initialServices)
   const [clientPricings, setClientPricings] = useState(initialClientPricings)
 
+  // ── Sticky header + toolbar measurement ────────────────────────────────────
+  // Both the page Header and the task toolbar are sticky. We measure both with
+  // ResizeObservers so the thead always sticks flush below the toolbar with
+  // zero gap — no hardcoded pixel values that break when content wraps.
+  const headerRef  = useRef<HTMLDivElement>(null)
+  const toolbarRef = useRef<HTMLDivElement>(null)
+  const [headerHeight,  setHeaderHeight]  = useState(92)
+  const [toolbarHeight, setToolbarHeight] = useState(120)
+  useEffect(() => {
+    if (!headerRef.current) return
+    const el = headerRef.current
+    const measure = () => setHeaderHeight(el.offsetHeight)
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    measure()
+    return () => ro.disconnect()
+  }, [])
+  useEffect(() => {
+    if (!toolbarRef.current) return
+    const el = toolbarRef.current
+    const measure = () => setToolbarHeight(el.offsetHeight)
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    measure()
+    return () => ro.disconnect()
+  }, [])
+  // thead sticks right below the toolbar; toolbar sticks right below the header.
+  const theadTop = headerHeight + toolbarHeight
+
   // Edit / delete state
   const [editTask, setEditTask] = useState<Task | null>(null)
 
@@ -1157,12 +1186,14 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
   // ── Auto-fallback to database search ──────────────────────────────────────
   // When the user types a query (especially #number) and finds nothing in the
   // loaded set, automatically search the database after a short debounce.
-  // This makes any task — including the very oldest (#1, #2, #3…) — findable
-  // any time without the user needing to click a button.
+  // Skipped entirely when all tasks are already loaded — then the local
+  // result is definitive and a DB round-trip would just be wasted latency.
   useEffect(() => {
     if (dbMode) return                    // already in DB mode, don't re-trigger
     if (!searchQ.trim() && !filterClient) return  // need at least a search or client filter
     if (filteredTasks.length > 0) return  // local results exist — no need to hit DB
+    // Skip if loaded set is complete (DB has nothing extra)
+    if (dbTaskTotal != null && dbTaskTotal <= tasks.length) return
 
     const handle = setTimeout(() => {
       // Only auto-search if we still have nothing locally
@@ -1208,6 +1239,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
   return (
     <div>
       <Header
+        ref={headerRef}
         title="Tasks"
         subtitle={
           showTrash
@@ -1340,12 +1372,17 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
         </div>
       )}
 
-      {/* ── Main Task List ── */}
-      {!showTrash && <div className="p-6 space-y-4">
+      {/* ── Main Task List ──
+          No vertical `space-y` here: the gap between the sticky toolbar and
+          the sticky thead must be ZERO, otherwise rows scroll through a
+          transparent strip when the page is scrolled. The toolbar's own
+          py-3 provides the top/bottom breathing-room. */}
+      {!showTrash && <div className="px-6 pb-6">
         {/* Sticky toolbar — sits below the sticky Header.
-            Tighter vertical rhythm on mobile (pt-3 pb-3 space-y-1.5) so 4-5 wrapped
-            toolbar rows don't crowd out the actual content. */}
-        <div className="sticky top-[92px] z-20 bg-background pt-3 sm:pt-4 pb-3 sm:pb-4 space-y-1.5 sm:space-y-2 w-full">
+            Symmetric pt/pb so the gap above (between page-Header and toolbar)
+            matches the visual breathing-room. Bottom padding is also what the
+            thead measures against, so there's no transparent strip below. */}
+        <div ref={toolbarRef} className="sticky z-20 bg-background py-2 sm:py-3 space-y-1.5 sm:space-y-2 w-full" style={{ top: headerHeight }}>
 
           {/* Row 1: [Select | Edit] · [Search flex-1] · [View segment] · [⚙ board]
               On mobile (<sm) the row wraps; Search jumps to the top via order-first
@@ -1498,27 +1535,34 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
               placeholder="Sort by"
             />
 
-            {/* ── Search Database button ── */}
-            {!dbMode ? (
-              <button
-                onClick={() => runDbSearch(0)}
-                disabled={dbModeLoading}
-                title="Search all tasks directly in the database — bypasses the in-memory loaded set"
-                className="flex items-center gap-1.5 h-[34px] px-3 rounded-xl text-xs font-medium border border-violet-500/30 bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 transition-colors disabled:opacity-50 shrink-0"
-              >
-                {dbModeLoading
-                  ? <><RefreshCw size={12} className="animate-spin" /> Searching…</>
-                  : <><Search size={12} /> Search DB</>}
-              </button>
-            ) : (
-              <button
-                onClick={exitDbMode}
-                title="Exit database search mode — go back to in-memory loaded tasks"
-                className="flex items-center gap-1.5 h-[34px] px-3 rounded-xl text-xs font-medium border border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors shrink-0"
-              >
-                <X size={12} /> Exit DB mode
-              </button>
-            )}
+            {/* ── Search Database button ──
+                Only shown when not all tasks are loaded (i.e. DB has more rows
+                than memory). With ≤10K tasks total this never appears since
+                page.tsx now paginates the full set into memory. */}
+            {(() => {
+              const allLoaded = dbTaskTotal != null && dbTaskTotal <= tasks.length
+              if (allLoaded && !dbMode) return null   // hide button entirely when redundant
+              return !dbMode ? (
+                <button
+                  onClick={() => runDbSearch(0)}
+                  disabled={dbModeLoading}
+                  title="Search all tasks directly in the database — bypasses the in-memory loaded set"
+                  className="flex items-center gap-1.5 h-[34px] px-3 rounded-xl text-xs font-medium border border-violet-500/30 bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 transition-colors disabled:opacity-50 shrink-0"
+                >
+                  {dbModeLoading
+                    ? <><RefreshCw size={12} className="animate-spin" /> Searching…</>
+                    : <><Search size={12} /> Search DB</>}
+                </button>
+              ) : (
+                <button
+                  onClick={exitDbMode}
+                  title="Exit database search mode — go back to in-memory loaded tasks"
+                  className="flex items-center gap-1.5 h-[34px] px-3 rounded-xl text-xs font-medium border border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors shrink-0"
+                >
+                  <X size={12} /> Exit DB mode
+                </button>
+              )
+            })()}
 
             {/* Divider */}
             <span className="w-px h-5 bg-foreground/10 shrink-0" />
@@ -1634,9 +1678,10 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
         <div className="hidden sm:block bg-card border border-border rounded-xl overflow-visible">
           <table className="w-full text-sm">
             {/* Sticky table header — sits flush below the toolbar.
-                top intentionally less than toolbar-bottom so toolbar (z-20, bg-background) covers the overlap & hides any sub-pixel gap.
-                Toolbar = 92 (offset) + 16 (pt-4) + ~80 (2 rows) + 8 (gap) + 16 (pb-4) ≈ 212. Thead top at 204 gives 8px overlap. */}
-            <thead className="sticky top-[204px] z-10 bg-card">
+                top is measured dynamically by a ResizeObserver on the toolbar,
+                so it always matches the toolbar bottom regardless of how it
+                wraps or which optional buttons are visible. */}
+            <thead className="sticky z-10 bg-card" style={{ top: theadTop }}>
               <tr className="border-b border-border bg-secondary/50">
                 {/* Bulk select checkbox column */}
                 {bulkMode && (
@@ -1688,9 +1733,9 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
               {pagedTasks.length === 0 && !dbModeLoading && (
                 <tr><td colSpan={bulkMode ? 9 : 8} className="px-4 py-10 text-center">
                   <p className="text-sm text-muted-foreground mb-3">
-                    {dbMode ? 'No tasks found in database matching your filters.' : 'No tasks found in loaded data.'}
+                    {dbMode ? 'No tasks found in database matching your filters.' : 'No tasks found.'}
                   </p>
-                  {!dbMode && (
+                  {!dbMode && dbTaskTotal != null && dbTaskTotal > tasks.length && (
                     <button
                       onClick={() => runDbSearch(0)}
                       disabled={dbModeLoading}

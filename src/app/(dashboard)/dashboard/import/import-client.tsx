@@ -4,6 +4,13 @@ import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { Download } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useToast, ToastContainer } from '@/components/ui/toast'
+import { buildHeader, buildExampleRow, buildColumnDefs, parseRowFromSchema, buildInsertRecord, norm as sNorm } from '@/lib/import/engine'
+import {
+  FIELD_SCHEMA, EMPLOYEE_FIELDS, CLIENT_FIELDS, GROUP_FIELDS, PARAMETER_FIELDS, TOOL_FIELDS,
+  EMPLOYEE_EXTRA_EXAMPLES, CLIENT_EXTRA_EXAMPLES, SERVICE_EXTRA_EXAMPLES, JOB_EXTRA_EXAMPLES,
+  getContribFields,
+} from '@/lib/import/schemas'
+import type { ParseContext } from '@/lib/import/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface RefClient    { id: string; name: string; code: string }
@@ -101,116 +108,14 @@ const IMPORT_TIERS: { tier: number; label: string; color: string; hint: string; 
 ]
 
 // ─── Templates ───────────────────────────────────────────────────────────────
-// `id` is the first column in every template — leave blank for new inserts,
-// required for Update mode. Use the "Export current data" button to get a CSV
-// with real `id` values already filled in, then modify and re-import.
-const TEMPLATES: Record<ImportMode, { header: string; example: string }> = {
-  employees: {
-    header: 'id,cqid,name,email,phone,role,salary_type,base_salary,performance_rating,joined_date,is_active',
-    example: [
-      '"","CQ001","John Smith","john@cirqle.in","9876543210","employee","fixed","25000","80","2024-01-15","true"',
-      '"","CQ002","Jane Doe","jane@cirqle.in","9876543211","team_lead","fixed_plus_commission","30000","85","2024-03-01","true"',
-    ].join('\n'),
-  },
-  clients: {
-    header: 'id,code,name,contact_name,phone,email,address,gstin,default_currency,billing_cycle,billing_day,is_active',
-    example: [
-      '"","SSM001","Sea Star Supermarket","Ravi Kumar","9876540001","ravi@seastar.in","MG Road, Kochi","","INR","monthly","1","true"',
-      '"","BNM001","B.N. Mart Supermarket","Anita Nair","9876540002","","Anna Nagar, Chennai","","INR","monthly","1","true"',
-    ].join('\n'),
-  },
-  services: {
-    header: 'id,name,pricing_type,description,display_order,default_price,default_currency,group_names,is_active',
-    example: [
-      '"","Offer Flyer","fixed_per_creative","Promotional offer flyer design","1","","INR","Design Group | Variable Group","true"',
-      '"","Social Media Management","retainer","Monthly social media package","2","","INR","Design Group","true"',
-      '"","Paid Ads","percentage_of_spend","Google/Meta ad management","3","","INR","","true"',
-    ].join('\n'),
-  },
-  groups: {
-    header: 'id,name,weight,description,display_order,is_active',
-    example: [
-      '"","Design Group","50","Core design work parameters","1","true"',
-      '"","Variable Group","50","Variable/product update parameters","2","true"',
-    ].join('\n'),
-  },
-  parameters: {
-    header: 'id,group_name,name,is_master,weight,description,display_order,input_type,is_active',
-    example: [
-      '"","Design Group","Design","TRUE","1","Main design score (0-100%)","1","percentage","true"',
-      '"","Design Group","Date Change","FALSE","0.04","Date update on existing design","2","count","true"',
-      '"","Design Group","Title Change","FALSE","0.16","Title/heading change","3","count","true"',
-      '"","Design Group","Color Change","FALSE","0.12","Color scheme change","4","count","true"',
-      '"","Design Group","Background Change","FALSE","0.2","Background image/color change","5","count","true"',
-      '"","Design Group","Redesign","FALSE","0.48","Full redesign of existing creative","6","count","true"',
-      '"","Design Group","Design Cleanup","FALSE","0.003","Minor cleanup and polish","7","count","true"',
-      '"","Variable Group","Products","TRUE","1","Product variable score (count)","1","count","true"',
-      '"","Variable Group","Photo Updating","FALSE","0.02","Product photo update","2","count","true"',
-      '"","Variable Group","Price Updating","FALSE","0.01","Price update on creative","3","count","true"',
-    ].join('\n'),
-  },
-  tools: {
-    header: 'id,name,fixed_percentage,group_name,description,is_active',
-    example: [
-      '"","Ideogram","10","Design Group","AI image generation tool","true"',
-      '"","ChatGPT","5","","AI text/copy tool","true"',
-    ].join('\n'),
-  },
-  pricing_matrix: {
-    header: 'id,client_name_or_code,service_name,price,percentage_rate,commission_percentage,currency,is_active',
-    example: [
-      '"","Sea Star Supermarket","Offer Flyer","250","","75","INR","true"',
-      '"","Sea Star Supermarket","Paid Ads","","15","60","INR","true"',
-      '"","B.N. Mart Supermarket","Offer Flyer","200","","75","INR","true"',
-      '"","B.N. Mart Supermarket","Paid Ads","","12","60","INR","true"',
-    ].join('\n'),
-  },
-  jobs: {
-    header: 'id,task_number,title,client_name_or_code,service_name,task_date,billing_amount_inr,billing_amount,currency,quantity,status,description,is_recurring,recurring_interval,recurring_end_date',
-    example: [
-      '"","","Social Media Pack Jun","Sea Star Supermarket","Offer Flyer","2025-06-01","5000","5000","INR","1","done","","false","",""',
-      '"","","Logo Design","SSM001","Branding","2025-06-03","8000","8000","INR","1","done","Final version delivered","false","",""',
-    ].join('\n'),
-  },
-  contributions: {
-    header: 'id,task_id,task_title,task_date,employee_cqid,score_percentage,earnings_inr',
-    example: [
-      '"","","Social Media Pack Jun","2025-06-01","CQ001","60","3000"',
-      '"","","Social Media Pack Jun","2025-06-01","CQ002","40","2000"',
-    ].join('\n'),
-  },
-  cashbook_entries: {
-    header: 'id,entry_date,type,category_name,bank_account_name,amount,currency,amount_inr,description,reference',
-    example: [
-      '"","2024-01-15","inflow","Invoice Payment","HDFC Current","25000","INR","25000","Payment from Sea Star - Invoice #INV-001","INV-001"',
-      '"","2024-01-20","outflow","Salary","HDFC Current","15000","INR","15000","Salary for CQ001 - January 2024",""',
-      '"","2024-01-25","outflow","Software Subscription","HDFC Current","1200","INR","1200","Adobe CC monthly",""',
-    ].join('\n'),
-  },
-  invoices: {
-    header: 'id,invoice_number,client_name_or_code,issue_date,due_date,billing_period_start,billing_period_end,currency,subtotal,tax_rate,discount_amount,notes,status',
-    example: [
-      '"","INV-2024-001","Sea Star Supermarket","2024-01-31","2024-02-14","2024-01-01","2024-01-31","INR","50000","0","0","January 2024 services","draft"',
-      '"","INV-2024-002","SSM001","2024-02-29","2024-03-14","2024-02-01","2024-02-29","INR","45000","0","0","February 2024 services","sent"',
-    ].join('\n'),
-  },
-  invoice_status: {
-    header: 'invoice_number_or_id,status,paid_amount,payment_date,payment_method,notes',
-    example: [
-      '"INV-2024-001","paid","50000","2024-02-10","bank_transfer","Full payment received"',
-      '"INV-2024-002","partial","20000","2024-03-05","cheque","Partial payment - balance pending"',
-      '"INV-2024-003","cancelled","","","","Client cancelled project"',
-    ].join('\n'),
-  },
-  discounts: {
-    header: 'id,invoice_number_or_id,client_name_or_code,discount_amount,discount_percentage,invoice_total,reason,discount_date',
-    example: [
-      '"","INV-2024-001","Sea Star Supermarket","2000","","50000","Year-end loyalty discount","2024-12-15"',
-      '"","INV-2024-002","SSM001","","10","45000","10% promo discount","2024-12-20"',
-      '"","","Sea Star Supermarket","5000","","","Goodwill discount (no specific invoice)","2024-12-25"',
-    ].join('\n'),
-  },
-}
+// Schema-driven: template header, example row, and column docs all derive from
+// FIELD_SCHEMA. To add a field, edit the relevant schema file — no changes here.
+const TEMPLATES: Record<ImportMode, { header: string; example: string }> = Object.fromEntries(
+  (Object.keys(FIELD_SCHEMA) as ImportMode[]).map(m => [m, {
+    header:  buildHeader(FIELD_SCHEMA[m]),
+    example: buildExampleRow(FIELD_SCHEMA[m]),
+  }])
+) as Record<ImportMode, { header: string; example: string }>
 
 // ─── Export configuration ─────────────────────────────────────────────────────
 // `orderBy` is tried first; if the column does not exist in the DB schema the
@@ -253,158 +158,12 @@ function downloadCsv(filename: string, content: string) {
 }
 
 // ─── Column definitions ───────────────────────────────────────────────────────
-// First column `id` is always optional for Insert mode (blank = new row),
-// REQUIRED for Update mode (matches the existing DB row to modify).
+// Schema-driven: derived from FIELD_SCHEMA. No manual list needed.
+// Kept as a typed alias for any legacy code that still uses COLUMNS[mode].
 type ColDef = { col: string; req: boolean; notes: string }
-const ID_COL: ColDef = { col: 'id', req: false, notes: 'Leave blank for new rows · REQUIRED in Update mode (use Export to get current ids)' }
-const COLUMNS: Record<ImportMode, ColDef[]> = {
-  employees: [
-    ID_COL,
-    { col: 'cqid',               req: true,  notes: 'Unique ID e.g. CQ001' },
-    { col: 'name',               req: true,  notes: 'Full name' },
-    { col: 'email',              req: true,  notes: 'Unique email' },
-    { col: 'phone',              req: false, notes: 'Mobile number' },
-    { col: 'role',               req: false, notes: 'employee / team_lead / accounts / view_only (default: employee)' },
-    { col: 'salary_type',        req: false, notes: 'fixed / fixed_plus_commission / commission_only (default: fixed)' },
-    { col: 'base_salary',        req: false, notes: 'Monthly base in INR' },
-    { col: 'performance_rating', req: false, notes: '0–100 (default: 70)' },
-    { col: 'joined_date',        req: false, notes: 'DD-MM-YYYY (also accepts YYYY-MM-DD or M/D/YYYY)' },
-    { col: 'is_active',          req: false, notes: 'true / false (default: true)' },
-  ],
-  clients: [
-    ID_COL,
-    { col: 'code',             req: true,  notes: 'Unique short code e.g. SSM001' },
-    { col: 'name',             req: true,  notes: 'Full client/company name' },
-    { col: 'contact_name',     req: false, notes: 'Primary contact person' },
-    { col: 'phone',            req: false, notes: '' },
-    { col: 'email',            req: false, notes: '' },
-    { col: 'address',          req: false, notes: '' },
-    { col: 'gstin',            req: false, notes: 'GST number if applicable' },
-    { col: 'default_currency', req: false, notes: 'INR / USD / AED etc. (default: INR)' },
-    { col: 'billing_cycle',    req: false, notes: 'monthly (default) / weekly / daily / none' },
-    { col: 'billing_day',      req: false, notes: 'Day of month (1-28) for monthly billing' },
-    { col: 'is_active',        req: false, notes: 'true / false (default: true)' },
-  ],
-  services: [
-    ID_COL,
-    { col: 'name',             req: true,  notes: 'Service name' },
-    { col: 'pricing_type',     req: true,  notes: 'fixed_per_creative / percentage_of_spend / retainer / hourly' },
-    { col: 'description',      req: false, notes: '' },
-    { col: 'display_order',    req: false, notes: 'Sort order number' },
-    { col: 'default_price',    req: false, notes: 'Fallback price when no client-specific pricing exists' },
-    { col: 'default_currency', req: false, notes: 'INR / USD / AED etc. (default: INR)' },
-    { col: 'group_names',      req: false, notes: 'Contribution groups linked to this service. Separate multiple with | or , e.g. "Design Group | Variable Group". Names must match existing groups.' },
-    { col: 'is_active',        req: false, notes: 'true / false (default: true)' },
-  ],
-  groups: [
-    ID_COL,
-    { col: 'name',          req: true,  notes: 'Group name e.g. Design Group' },
-    { col: 'weight',        req: true,  notes: '0–100, groups must add up to 100' },
-    { col: 'description',   req: false, notes: '' },
-    { col: 'display_order', req: false, notes: '' },
-    { col: 'is_active',     req: false, notes: 'true / false (default: true)' },
-  ],
-  parameters: [
-    ID_COL,
-    { col: 'group_name',    req: true,  notes: 'Must match an existing group name exactly' },
-    { col: 'name',          req: true,  notes: 'Parameter name' },
-    { col: 'is_master',     req: false, notes: 'TRUE for master parameter (Design, Products) — gets % score. FALSE for sub-parameters — get count values' },
-    { col: 'weight',        req: false, notes: 'Relative weight within group. Master = 1, sub-params = decimal (0.04, 0.16 etc.)' },
-    { col: 'description',   req: false, notes: '' },
-    { col: 'display_order', req: false, notes: '' },
-    { col: 'input_type',    req: false, notes: 'percentage / count (default: count)' },
-    { col: 'is_active',     req: false, notes: 'true / false (default: true)' },
-  ],
-  tools: [
-    ID_COL,
-    { col: 'name',             req: true,  notes: 'Tool name e.g. Ideogram' },
-    { col: 'fixed_percentage', req: true,  notes: '% of task billing assigned to this tool' },
-    { col: 'group_name',       req: false, notes: 'Optional group association' },
-    { col: 'description',      req: false, notes: '' },
-    { col: 'is_active',        req: false, notes: 'true / false (default: true)' },
-  ],
-  pricing_matrix: [
-    ID_COL,
-    { col: 'client_name_or_code',  req: true,  notes: 'Client name or client code (e.g. SSM001) — or raw client_id UUID' },
-    { col: 'service_name',         req: true,  notes: 'Must match service name exactly — or raw service_id UUID' },
-    { col: 'price',                req: false, notes: 'Fixed price per creative (for fixed_per_creative services)' },
-    { col: 'percentage_rate',      req: false, notes: '% of spend (for percentage_of_spend services)' },
-    { col: 'commission_percentage',req: true,  notes: '% of billing that goes to employee pool (e.g. 75)' },
-    { col: 'currency',             req: false, notes: 'INR / AED / USD etc. (default: INR)' },
-    { col: 'is_active',            req: false, notes: 'true / false (default: true)' },
-  ],
-  jobs: [
-    ID_COL,
-    { col: 'task_number',         req: false, notes: 'Optional · leave blank to auto-assign next number (1, 2, 3…)' },
-    { col: 'title',               req: true,  notes: 'Task name' },
-    { col: 'client_name_or_code', req: false, notes: 'Client name or client code' },
-    { col: 'service_name',        req: false, notes: 'Must match service name exactly' },
-    { col: 'task_date',           req: true,  notes: 'DD-MM-YYYY (also accepts YYYY-MM-DD or M/D/YYYY)' },
-    { col: 'billing_amount_inr',  req: false, notes: 'INR amount; no ₹ symbol' },
-    { col: 'billing_amount',      req: false, notes: 'Amount in task currency (defaults to billing_amount_inr if blank)' },
-    { col: 'currency',            req: false, notes: 'INR / USD / AED etc. (default: INR)' },
-    { col: 'quantity',            req: false, notes: 'Hours / items / spend (default: 1)' },
-    { col: 'status',              req: false, notes: 'pending / in_progress / done / invoiced / cancelled (default: done)' },
-    { col: 'description',         req: false, notes: '' },
-    { col: 'is_recurring',        req: false, notes: 'true / false' },
-    { col: 'recurring_interval',  req: false, notes: 'daily / weekly / biweekly / monthly' },
-    { col: 'recurring_end_date',  req: false, notes: 'DD-MM-YYYY when the recurrence stops (also accepts YYYY-MM-DD)' },
-  ],
-  contributions: [
-    ID_COL,
-    { col: 'task_id',          req: false, notes: 'Optional · use raw task UUID if available (faster lookup)' },
-    { col: 'task_title',       req: true,  notes: 'Exact task title in DB — import jobs first (ignored if task_id is provided)' },
-    { col: 'task_date',        req: true,  notes: 'DD-MM-YYYY (also accepts YYYY-MM-DD) — used to find the task (with task_title)' },
-    { col: 'employee_cqid',    req: true,  notes: 'e.g. CQ001' },
-    { col: 'score_percentage', req: true,  notes: '0–100' },
-    { col: 'earnings',         req: true,  notes: 'INR amount' },
-  ],
-  cashbook_entries: [
-    ID_COL,
-    { col: 'entry_date',        req: true,  notes: 'DD-MM-YYYY (also accepts YYYY-MM-DD)' },
-    { col: 'type',              req: true,  notes: 'inflow / outflow' },
-    { col: 'category_name',     req: false, notes: 'Must match a category name in Cash Categories settings' },
-    { col: 'bank_account_name', req: false, notes: 'Must match a bank account name in Bank Accounts settings' },
-    { col: 'amount',            req: true,  notes: 'Amount in the transaction currency' },
-    { col: 'currency',          req: false, notes: 'INR / AED / USD etc. (default: INR)' },
-    { col: 'amount_inr',        req: false, notes: 'INR equivalent (defaults to amount if currency is INR)' },
-    { col: 'description',       req: false, notes: 'Description / notes' },
-    { col: 'reference',         req: false, notes: 'Reference number, invoice number, etc.' },
-  ],
-  invoices: [
-    ID_COL,
-    { col: 'invoice_number',        req: true,  notes: 'Unique invoice number e.g. INV-2024-001' },
-    { col: 'client_name_or_code',   req: true,  notes: 'Client name or client code' },
-    { col: 'issue_date',            req: true,  notes: 'DD-MM-YYYY' },
-    { col: 'due_date',              req: false, notes: 'DD-MM-YYYY (default: issue_date + 14 days)' },
-    { col: 'billing_period_start',  req: false, notes: 'DD-MM-YYYY — month/period start' },
-    { col: 'billing_period_end',    req: false, notes: 'DD-MM-YYYY — month/period end' },
-    { col: 'currency',              req: false, notes: 'INR / AED / USD etc. (default: INR)' },
-    { col: 'subtotal',              req: false, notes: 'Invoice subtotal amount' },
-    { col: 'tax_rate',              req: false, notes: 'Tax % (default: 0)' },
-    { col: 'discount_amount',       req: false, notes: 'Discount amount (default: 0)' },
-    { col: 'notes',                 req: false, notes: 'Invoice notes' },
-    { col: 'status',                req: false, notes: 'draft / reviewed / sent / partial / paid / cancelled (default: draft)' },
-  ],
-  invoice_status: [
-    { col: 'invoice_number_or_id', req: true,  notes: 'Invoice number (e.g. INV-2024-001) or raw UUID' },
-    { col: 'status',               req: true,  notes: 'draft / reviewed / sent / partial / paid / cancelled / bad_debt / overdue' },
-    { col: 'paid_amount',          req: false, notes: 'Amount paid — required when status is partial or paid' },
-    { col: 'payment_date',         req: false, notes: 'DD-MM-YYYY' },
-    { col: 'payment_method',       req: false, notes: 'bank_transfer / cheque / cash / upi / other' },
-    { col: 'notes',                req: false, notes: 'Payment or status change notes' },
-  ],
-  discounts: [
-    ID_COL,
-    { col: 'invoice_number_or_id', req: false, notes: 'Invoice number (e.g. INV-2024-001) or UUID — optional. Leave blank for client-level/standalone discount' },
-    { col: 'client_name_or_code',  req: true,  notes: 'Client name or code (e.g. SSM001) — required when no invoice ref' },
-    { col: 'discount_amount',      req: false, notes: 'Flat discount in INR — either this or discount_percentage is required' },
-    { col: 'discount_percentage',  req: false, notes: '% discount applied — either this or discount_amount is required' },
-    { col: 'invoice_total',        req: false, notes: 'Invoice total at the time of discount (for record-keeping; defaults to 0 if no invoice ref)' },
-    { col: 'reason',               req: false, notes: 'Reason / note for the discount' },
-    { col: 'discount_date',        req: false, notes: 'DD-MM-YYYY when the discount was given (defaults to today)' },
-  ],
-}
+const COLUMNS: Record<ImportMode, ColDef[]> = Object.fromEntries(
+  (Object.keys(FIELD_SCHEMA) as ImportMode[]).map(m => [m, buildColumnDefs(FIELD_SCHEMA[m])])
+) as Record<ImportMode, ColDef[]>
 
 // ─── CSV helpers ──────────────────────────────────────────────────────────────
 function parseCSV(text: string): string[][] {
@@ -537,31 +296,52 @@ export default function ImportClient({ clients, services, employees, groups, par
   const bankAccountMap = useMemo(() => { const m: Record<string, string> = {}; bankAccounts.forEach(b => { m[norm(b.name)] = b.id }); return m }, [bankAccounts])
   const cashCategoryMap = useMemo(() => { const m: Record<string, string> = {}; cashCategories.forEach(c => { m[norm(c.name)] = c.id }); return m }, [cashCategories])
 
+  // ── ParseContext builder ────────────────────────────────────────────────────
+  // Passes all reference data and lookup maps to the schema engine.
+  function buildParseCtx(): ParseContext {
+    return {
+      clients, services, employees,
+      groups: groups as ParseContext['groups'],
+      parameters: parameters as ParseContext['parameters'],
+      bankAccounts, cashCategories,
+      clientMap, serviceMap, empMap, groupMap, bankAccountMap, cashCategoryMap,
+    }
+  }
+
   // ── Export current data ────────────────────────────────────────────────────
   async function exportCurrentData(m: ImportMode) {
     const cfg = EXPORT_CONFIG[m]
-    // Try ordered first; if the orderBy column is missing on this DB schema,
-    // retry without ordering so the export still works.
-    let data: any[] | null = null
+    // Supabase caps each response at 1000 rows server-side regardless of any
+    // client .limit() call. We paginate with .range() in 1000-row chunks until
+    // we receive a partial page, guaranteeing all rows are exported.
+    const PAGE = 1000
+    const allData: any[] = []
     let lastError: any = null
-    if (cfg.orderBy) {
-      const ordered = await supabase.from(cfg.table).select('*').order(cfg.orderBy, { ascending: true, nullsFirst: false })
-      if (ordered.error) lastError = ordered.error
-      else data = ordered.data as any[]
-    }
-    if (!data) {
-      const plain = await supabase.from(cfg.table).select('*')
-      if (plain.error) {
-        toastError(`Export failed: ${plain.error.message}`)
+    let orderingWorks = !!cfg.orderBy
+
+    for (let page = 0; page < 100; page++) {   // hard ceiling: 100k rows
+      let q = supabase.from(cfg.table).select('*').range(page * PAGE, (page + 1) * PAGE - 1)
+      if (orderingWorks && cfg.orderBy) q = q.order(cfg.orderBy, { ascending: true, nullsFirst: false })
+
+      const { data, error } = await q
+      if (error) {
+        if (page === 0 && orderingWorks) {
+          // orderBy column may not exist — retry this page without ordering
+          orderingWorks = false
+          lastError = error
+          page--   // retry same page
+          continue
+        }
+        toastError(`Export failed: ${error.message}`)
         return
       }
-      data = plain.data as any[]
-      if (lastError) {
-        // Silent fallback worked — let the user know ordering was skipped
-        console.warn(`Export ordering by "${cfg.orderBy}" skipped: ${lastError.message}`)
-      }
+      if (data) allData.push(...data)
+      if (!data || data.length < PAGE) break   // last page reached
     }
-    if (!data || data.length === 0) { toastError('No data to export'); return }
+
+    if (lastError) console.warn(`Export ordering by "${cfg.orderBy}" skipped: ${lastError.message}`)
+    if (allData.length === 0) { toastError('No data to export'); return }
+    let data = allData
 
     // ── Enrichment per mode ──
     // Services: append a `group_names` column (pipe-separated) so the export
@@ -618,55 +398,22 @@ export default function ImportClient({ clients, services, employees, groups, par
   }
 
   function parseEmployees(lines: string[][]): ParsedRow[] {
-    const h = lines[0].map(norm)
-    const idx = (k: string) => h.findIndex(c => c.includes(k))
-    const iId = h.findIndex(c => c === 'id')
-    const iCqid = idx('cqid'), iName = idx('name'), iEmail = idx('email')
-    const iPhone = idx('phone'), iRole = idx('role'), iSalType = idx('salary')
-    const iBase = idx('base'), iRating = idx('rating'), iJoined = idx('joined')
-
-    return lines.slice(1).map((c, i) => {
-      const g = (j: number) => j >= 0 ? c[j]?.trim() || '' : ''
-      const r: ParsedRow = { ...baseRow(i), row_id: g(iId), cqid: g(iCqid), name: g(iName), email: g(iEmail),
-        phone: g(iPhone), role: g(iRole) || 'employee', salary_type: g(iSalType) || 'fixed',
-        base_salary: g(iBase), performance_rating: g(iRating) || '70', joined_date: normalizeDate(g(iJoined)) }
-      if (!r.cqid)  r.errors.push('cqid is required')
-      if (!r.name)  r.errors.push('name is required')
-      if (!r.email) r.errors.push('email is required')
-      else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email)) r.errors.push('email format invalid')
-      const validRoles = ['super_admin','accounts','team_lead','employee','view_only']
-      if (r.role && !validRoles.includes(r.role)) r.errors.push(`role "${r.role}" invalid`)
-      const validSalTypes = ['fixed','commission_only','fixed_plus_commission','pure_commission','base_plus_commission','fixed_plus_bonus','hourly']
-      if (r.salary_type && !validSalTypes.includes(r.salary_type)) r.errors.push(`salary_type "${r.salary_type}" invalid`)
-      if (r.joined_date && !/^\d{4}-\d{2}-\d{2}$/.test(r.joined_date)) r.errors.push('joined_date must be DD-MM-YYYY (e.g. 18-05-2026)')
-      return finalize(r)
+    const headers = lines[0]
+    const ctx = buildParseCtx()
+    return lines.slice(1).map((cells, i) => {
+      const r = parseRowFromSchema(EMPLOYEE_FIELDS, cells, headers, i + 2, ctx)
+      r.row_id = r.id  // preserve row_id alias for update/delete operations
+      return r
     })
   }
 
   function parseClients(lines: string[][]): ParsedRow[] {
-    const h = lines[0].map(norm)
-    const idx = (k: string) => h.findIndex(c => c.includes(k))
-    const iId = h.findIndex(c => c === 'id')
-    const iCode = idx('code'), iName = idx('name'), iContact = idx('contact')
-    const iPhone = idx('phone'), iEmail = idx('email'), iAddr = idx('address')
-    const iGst = idx('gst'), iCurr = idx('currency')
-    const iBillingCycle = h.findIndex(c => c === 'billing_cycle' || c === 'billingcycle')
-    const iBillingDay   = h.findIndex(c => c === 'billing_day'   || c === 'billingday')
-
-    return lines.slice(1).map((c, i) => {
-      const g = (j: number) => j >= 0 ? c[j]?.trim() || '' : ''
-      const billingCycle = g(iBillingCycle) || 'monthly'
-      const r: ParsedRow = { ...baseRow(i), row_id: g(iId), code: g(iCode), name: g(iName), contact_name: g(iContact),
-        phone: g(iPhone), email: g(iEmail), address: g(iAddr), gstin: g(iGst),
-        default_currency: g(iCurr) || 'INR',
-        billing_cycle: billingCycle,
-        billing_day: g(iBillingDay) || '1',
-      }
-      if (!r.code) r.errors.push('code is required')
-      if (!r.name) r.errors.push('name is required')
-      const validCycles = ['monthly','weekly','daily','none']
-      if (r.billing_cycle && !validCycles.includes(r.billing_cycle)) r.errors.push(`billing_cycle "${r.billing_cycle}" invalid — use monthly/weekly/daily/none`)
-      return finalize(r)
+    const headers = lines[0]
+    const ctx = buildParseCtx()
+    return lines.slice(1).map((cells, i) => {
+      const r = parseRowFromSchema(CLIENT_FIELDS, cells, headers, i + 2, ctx)
+      r.row_id = r.id
+      return r
     })
   }
 
@@ -714,68 +461,36 @@ export default function ImportClient({ clients, services, employees, groups, par
   }
 
   function parseGroups(lines: string[][]): ParsedRow[] {
-    const h = lines[0].map(norm)
-    const idx = (k: string) => h.findIndex(c => c.includes(k))
-    const iId = h.findIndex(c => c === 'id')
-    const iName = idx('name'), iWeight = idx('weight'), iDesc = idx('desc'), iOrd = idx('order')
-
-    return lines.slice(1).map((c, i) => {
-      const g = (j: number) => j >= 0 ? c[j]?.trim() || '' : ''
-      const r: ParsedRow = { ...baseRow(i), row_id: g(iId), name: g(iName), weight: g(iWeight),
-        description: g(iDesc), display_order: g(iOrd) || '0' }
-      if (!r.name) r.errors.push('name is required')
-      if (!r.weight) r.errors.push('weight is required')
-      else if (isNaN(parseFloat(r.weight))) r.errors.push('weight must be a number')
-      return finalize(r)
+    const headers = lines[0]
+    const ctx = buildParseCtx()
+    return lines.slice(1).map((cells, i) => {
+      const r = parseRowFromSchema(GROUP_FIELDS, cells, headers, i + 2, ctx)
+      r.row_id = r.id
+      return r
     })
   }
 
   function parseParameters(lines: string[][]): ParsedRow[] {
-    const h = lines[0].map(norm)
-    // Use EXACT match for 'name' to avoid matching 'group_name'
-    const iId      = h.findIndex(c => c === 'id')
-    const iGroup   = h.findIndex(c => c === 'group_name' || c === 'group')
-    const iName    = h.findIndex(c => c === 'name')          // exact — not group_name
-    const iWeight  = h.findIndex(c => c.includes('weight'))
-    const iDesc    = h.findIndex(c => c.includes('desc'))
-    const iOrd     = h.findIndex(c => c.includes('order'))
-    const iMaster  = h.findIndex(c => c.includes('master') || c.includes('is_master'))
-
-    return lines.slice(1).map((c, i) => {
-      const g = (j: number) => j >= 0 ? c[j]?.trim() || '' : ''
-      const masterVal = g(iMaster)
-      const is_master = masterVal === 'TRUE' || masterVal === 'true' || masterVal === '1' || masterVal === 'yes'
-      const r: ParsedRow = { ...baseRow(i), row_id: g(iId), group_name: g(iGroup), name: g(iName),
-        weight: g(iWeight) || '1', description: g(iDesc), display_order: g(iOrd) || '0', is_master }
-      if (!r.name)       r.errors.push('name is required')
-      if (!r.group_name) r.errors.push('group_name is required')
-      else {
-        r.group_id = groupMap[norm(r.group_name)]
-        if (!r.group_id) r.errors.push(`Group "${r.group_name}" not found — create the group first`)
-      }
-      return finalize(r)
+    const headers = lines[0]
+    const ctx = buildParseCtx()
+    return lines.slice(1).map((cells, i) => {
+      const r = parseRowFromSchema(PARAMETER_FIELDS, cells, headers, i + 2, ctx)
+      r.row_id = r.id
+      // Resolve group_id from group_name for downstream insert logic
+      if (r.group_name) r.group_id = groupMap[norm(r.group_name)]
+      return r
     })
   }
 
   function parseTools(lines: string[][]): ParsedRow[] {
-    const h = lines[0].map(norm)
-    const idx = (k: string) => h.findIndex(c => c.includes(k))
-    const iId = h.findIndex(c => c === 'id')
-    const iName = idx('name'), iPct = h.findIndex(c => c.includes('percent') || c.includes('pct') || c === 'fixed_percentage')
-    const iGroup = idx('group'), iDesc = idx('desc')
-
-    return lines.slice(1).map((c, i) => {
-      const g = (j: number) => j >= 0 ? c[j]?.trim() || '' : ''
-      const r: ParsedRow = { ...baseRow(i), row_id: g(iId), name: g(iName), fixed_percentage: g(iPct),
-        group_name: g(iGroup), description: g(iDesc) }
-      if (!r.name) r.errors.push('name is required')
-      if (!r.fixed_percentage) r.errors.push('fixed_percentage is required')
-      else if (isNaN(parseFloat(r.fixed_percentage))) r.errors.push('fixed_percentage must be a number')
-      if (r.group_name) {
-        r.group_id = groupMap[norm(r.group_name)]
-        if (!r.group_id) r.warnings.push(`Group "${r.group_name}" not found — tool will be saved without group`)
-      }
-      return finalize(r)
+    const headers = lines[0]
+    const ctx = buildParseCtx()
+    return lines.slice(1).map((cells, i) => {
+      const r = parseRowFromSchema(TOOL_FIELDS, cells, headers, i + 2, ctx)
+      r.row_id = r.id
+      // Resolve group_id from group_name for downstream insert logic
+      if (r.group_name) r.group_id = groupMap[norm(r.group_name)]
+      return r
     })
   }
 
@@ -1258,19 +973,13 @@ export default function ImportClient({ clients, services, employees, groups, par
         }
         const recs = valid.map(r => ({
           row_id: r.row_id,
-          fields: {
-            cqid: r.cqid, name: r.name, email: r.email, phone: r.phone || null,
-            role: r.role || 'employee', salary_type: r.salary_type || 'fixed',
-            base_salary: parseFloat(r.base_salary) || 0,
-            performance_rating: parseFloat(r.performance_rating) || 70,
-            joined_date: r.joined_date || null,
-          },
+          fields: buildInsertRecord(EMPLOYEE_FIELDS, r),
         }))
         if (operation === 'update') {
           await backupBeforeUpdate(table, recs.map(r => r.row_id))
           await batchUpdate(table, recs)
         } else {
-          await batchInsert(table, recs.map(r => ({ ...r.fields, is_active: true })))
+          await batchInsert(table, recs.map(r => ({ ...r.fields, is_active: r.fields.is_active ?? true })))
         }
         break
       }
@@ -1284,19 +993,13 @@ export default function ImportClient({ clients, services, employees, groups, par
         }
         const recs = valid.map(r => ({
           row_id: r.row_id,
-          fields: {
-            code: r.code, name: r.name, contact_name: r.contact_name || null,
-            phone: r.phone || null, email: r.email || null, address: r.address || null,
-            gstin: r.gstin || null, default_currency: r.default_currency || 'INR',
-            billing_cycle: r.billing_cycle || 'monthly',
-            billing_day: parseInt(r.billing_day) || 1,
-          },
+          fields: buildInsertRecord(CLIENT_FIELDS, r),
         }))
         if (operation === 'update') {
           await backupBeforeUpdate(table, recs.map(r => r.row_id))
           await batchUpdate(table, recs)
         } else {
-          await batchInsert(table, recs.map(r => ({ ...r.fields, is_active: true })))
+          await batchInsert(table, recs.map(r => ({ ...r.fields, is_active: r.fields.is_active ?? true })))
         }
         break
       }
@@ -1362,16 +1065,13 @@ export default function ImportClient({ clients, services, employees, groups, par
         }
         const recs = valid.map(r => ({
           row_id: r.row_id,
-          fields: {
-            name: r.name, weight: parseFloat(r.weight), description: r.description || null,
-            display_order: parseInt(r.display_order) || 0,
-          },
+          fields: buildInsertRecord(GROUP_FIELDS, r),
         }))
         if (operation === 'update') {
           await backupBeforeUpdate(table, recs.map(r => r.row_id))
           await batchUpdate(table, recs)
         } else {
-          await batchInsert(table, recs.map(r => ({ ...r.fields, is_active: true })))
+          await batchInsert(table, recs.map(r => ({ ...r.fields, is_active: r.fields.is_active ?? true })))
         }
         break
       }
@@ -1385,22 +1085,19 @@ export default function ImportClient({ clients, services, employees, groups, par
         }
         const recs = valid.map(r => ({
           row_id: r.row_id,
-          fields: {
-            group_id: r.group_id, name: r.name, is_master: r.is_master === true,
-            weight: parseFloat(r.weight) || 1,
-            description: r.description || null, display_order: parseInt(r.display_order) || 0,
-          },
+          // buildInsertRecord skips group_name (db:false); add resolved group_id manually
+          fields: { ...buildInsertRecord(PARAMETER_FIELDS, r), group_id: r.group_id } as Record<string, any>,
         }))
         if (operation === 'update') {
           await backupBeforeUpdate(table, recs.map(r => r.row_id))
           await batchUpdate(table, recs)
         } else {
-          const paramRows = recs.map(r => ({ ...r.fields, is_active: true }))
+          const paramRows = recs.map(r => ({ ...r.fields, is_active: r.fields.is_active ?? true }))
           // Try with is_master first; fall back without it if column doesn't exist yet
           const firstBatch = await supabase.from('parameters').insert(paramRows.slice(0, 1)).select('id')
           if (firstBatch.error?.message?.includes('is_master')) {
             // Column not in schema yet — strip is_master and import without it
-            const rowsWithout = paramRows.map(({ is_master: _m, ...rest }) => rest)
+            const rowsWithout = (paramRows as any[]).map(({ is_master: _m, ...rest }: any) => rest)
             await batchInsert('parameters', rowsWithout)
             res.errors.push('⚠️ is_master column not found — run the SQL migration in Supabase to enable master parameter tracking. All other fields imported successfully.')
           } else {
@@ -1421,16 +1118,14 @@ export default function ImportClient({ clients, services, employees, groups, par
         }
         const recs = valid.map(r => ({
           row_id: r.row_id,
-          fields: {
-            name: r.name, fixed_percentage: parseFloat(r.fixed_percentage),
-            group_id: r.group_id || null, description: r.description || null,
-          },
+          // buildInsertRecord skips group_name (db:false); add resolved group_id manually
+          fields: { ...buildInsertRecord(TOOL_FIELDS, r), group_id: r.group_id || null } as Record<string, any>,
         }))
         if (operation === 'update') {
           await backupBeforeUpdate(table, recs.map(r => r.row_id))
           await batchUpdate(table, recs)
         } else {
-          await batchInsert(table, recs.map(r => ({ ...r.fields, is_active: true })))
+          await batchInsert(table, recs.map(r => ({ ...r.fields, is_active: r.fields.is_active ?? true })))
         }
         break
       }

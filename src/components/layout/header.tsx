@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { ChevronRight, Home } from 'lucide-react'
+import { forwardRef } from 'react'
 
 interface HeaderProps {
   title: string
@@ -59,9 +60,15 @@ function Breadcrumbs() {
   )
 }
 
-export default function Header({ title, subtitle, actions }: HeaderProps) {
+const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
+  { title, subtitle, actions },
+  ref,
+) {
   return (
-    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pl-14 sm:pl-16 pr-4 py-3 sm:py-4 md:px-6 border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-30">
+    <div
+      ref={ref}
+      className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pl-14 sm:pl-16 pr-4 py-3 sm:py-4 md:px-6 border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-30"
+    >
       <div className="w-full sm:w-auto">
         <Breadcrumbs />
         <h1 className="text-lg font-semibold text-foreground truncate">{title}</h1>
@@ -70,4 +77,6 @@ export default function Header({ title, subtitle, actions }: HeaderProps) {
       {actions && <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 sm:pb-0 w-full sm:w-auto hide-scrollbar">{actions}</div>}
     </div>
   )
-}
+})
+
+export default Header
