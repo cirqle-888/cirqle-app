@@ -3322,14 +3322,27 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                         {isExpanded && (
                           <div className="border-t border-border/30 px-3 pb-3 pt-2.5 space-y-3">
 
-                            {/* A. Tasks */}
+                            {/* A. Line Items / Tasks */}
                             <div>
                               <div className="flex items-center gap-1.5 mb-1.5">
-                                <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Tasks</span>
+                                <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">
+                                  {taskCount > 0 && items.some(it => it.task?.task_date) ? 'Tasks' : 'Line Items'}
+                                </span>
                                 <span className="text-[9px] text-muted-foreground/40">({taskCount})</span>
                               </div>
                               {taskCount === 0 ? (
-                                <p className="text-[10px] text-muted-foreground/50 italic px-1">No task items on this invoice</p>
+                                /* No invoice_items rows — invoice total was set directly (e.g. imported from Sheets) */
+                                <div className="px-2 py-2 rounded-lg bg-foreground/[0.03] border border-border/20">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[10px] text-muted-foreground/60 italic">
+                                      No line-item breakdown available
+                                    </span>
+                                    <span className="text-[11px] font-bold tabular-nums">{fmt(inv.total_amount || 0)}</span>
+                                  </div>
+                                  <p className="text-[9px] text-muted-foreground/40 mt-0.5">
+                                    Total was set directly — add items via invoice detail to see breakdown
+                                  </p>
+                                </div>
                               ) : (
                                 <div className="space-y-1">
                                   {items.map((it, i) => (
@@ -3341,7 +3354,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                                         <div className="text-[9px] text-muted-foreground mt-0.5">
                                           {it.task?.task_date
                                             ? new Date(it.task.task_date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })
-                                            : '—'}
+                                            : it.task?.title ? it.task.title : '—'}
                                           {it.service?.name && <span className="ml-1.5 opacity-60">· {it.service.name}</span>}
                                         </div>
                                       </div>
@@ -3354,7 +3367,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                                   ))}
                                   {/* Subtotal row */}
                                   <div className="flex justify-between items-center px-2 pt-1.5 border-t border-border/20">
-                                    <span className="text-[10px] text-muted-foreground">{taskCount} task{taskCount !== 1 ? 's' : ''}</span>
+                                    <span className="text-[10px] text-muted-foreground">{taskCount} item{taskCount !== 1 ? 's' : ''}</span>
                                     <span className="text-[11px] font-bold tabular-nums">{fmt(inv.total_amount || 0)}</span>
                                   </div>
                                 </div>
