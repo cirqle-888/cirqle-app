@@ -3,6 +3,13 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useCopy } from '@/lib/hooks/use-copy'
 import Header from '@/components/layout/header'
+import {
+  generateInvoiceNumber,
+  getInvoiceDateForTaskMonth,
+  buildBillingPeriod,
+  toSequenceMonth,
+  formatInvoiceNumber,
+} from '@/lib/invoices/numbering'
 import { createClient } from '@/lib/supabase/client'
 import {
   getStatusColor, getStatusLabel, isOverdue,
@@ -666,21 +673,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   const createManualInvoice = useCallback(async function createManualInvoiceImpl() {
     if (!newForm.client_id) { toastError('Select a client'); return }
     setSaving(true)
-    const client = clients.find(c => c.id === newForm.client_id)
-    const d = new Date(newForm.issue_date)
-    const yy = String(d.getFullYear()).slice(-2)
-    const mm = String(d.getMonth() + 1).padStart(2, '0')
-    const baseNum = `INV-${yy}${mm}-${client?.code || 'CLI'}`
-
-    // Check DB for existing numbers with this prefix (avoids conflicts with auto-generated invoices)
-    const { data: existingNums } = await supabase
-      .from('invoices').select('invoice_number').like('invoice_number', `${baseNum}%`)
-    const takenNums = new Set((existingNums || []).map((r: any) => r.invoice_number))
-    let invNum = baseNum
-    let suffix = 2
-    while (takenNums.has(invNum)) {
-      invNum = `${baseNum}-${suffix++}`
-    }
+    const invoiceDate = new Date(newForm.issue_date)
+    const { invoiceNumber: invNum, sequenceMonth, sequenceNumber } =
+      await generateInvoiceNumber(supabase, invoiceDate)
 
     const validItems = newForm.items.filter(it => it.description.trim())
     const subtotal = validItems.reduce((s, it) => s + it.total, 0)
@@ -698,6 +693,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     // Update extended columns if migration has been run (silently ignored if not)
     await supabase.from('invoices').update({
       subtotal, tax_rate: 0, tax_amount: 0, discount_amount: 0, previous_balance: 0,
+      invoice_sequence_month: sequenceMonth, invoice_sequence_number: sequenceNumber,
     }).eq('id', inv.id)
 
     if (validItems.length) {
@@ -779,21 +775,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const client = clients.find(c => c.id === genForm.client_id)
     const from   = genForm.mode === 'day' ? genForm.specific_date : genForm.date_from
     const to     = genForm.mode === 'day' ? genForm.specific_date : genForm.date_to
-    const d      = new Date(from)
-    const yy     = String(d.getFullYear()).slice(-2)
-    const mm     = String(d.getMonth() + 1).padStart(2, '0')
-    const dd2    = String(d.getDate()).padStart(2, '0')
 
-    const baseNum = genForm.mode === 'day'
-      ? `INV-${yy}${mm}${dd2}-${client?.code || 'CLI'}`
-      : `INV-${yy}${mm}-${client?.code || 'CLI'}`
-
-    // Check DB for existing numbers (avoids conflicts with auto-generated drafts)
-    const { data: takenNums$ } = await supabase
-      .from('invoices').select('invoice_number').like('invoice_number', `${baseNum}%`)
-    const takenNums = new Set((takenNums$ || []).map((r: any) => r.invoice_number))
-    let invNum = baseNum; let suffix = 2
-    while (takenNums.has(invNum)) invNum = `${baseNum}-${suffix++}`
+    const { invoiceNumber: invNum, sequenceMonth, sequenceNumber } =
+      await generateInvoiceNumber(supabase, new Date())
 
     const subtotal = selected.reduce((s, t) => s + (t.billing_amount_inr || 0), 0)
     // Base insert — columns that always exist
@@ -810,6 +794,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     await supabase.from('invoices').update({
       billing_period_start: from, billing_period_end: to,
       subtotal, tax_rate: 0, tax_amount: 0, discount_amount: 0, previous_balance: 0,
+      invoice_sequence_month: sequenceMonth, invoice_sequence_number: sequenceNumber,
     }).eq('id', inv.id)
 
     await supabase.from('invoice_items').insert(
@@ -928,24 +913,17 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
     for (const group of toGenerate) {
       try {
-        const [year2, mm] = group.month.split('-')
-        const yy = year2.slice(-2)
-        const baseNum = `INV-${yy}${mm}-${group.client_code}`
-        const { data: takenNums$ } = await supabase
-          .from('invoices').select('invoice_number').like('invoice_number', `${baseNum}%`)
-        const takenNums = new Set((takenNums$ || []).map((r: any) => r.invoice_number))
-        let invNum = baseNum; let suffix = 2
-        while (takenNums.has(invNum)) invNum = `${baseNum}-${suffix++}`
-
-        const periodStart = `${group.month}-01`
-        const lastDay = new Date(parseInt(year2), parseInt(mm), 0).getDate()
-        const periodEnd = `${group.month}-${String(lastDay).padStart(2, '0')}`
+        // Use proper billing cycle: tasks in Aug → invoice issued Sep 1
+        const invoiceDate = getInvoiceDateForTaskMonth(group.month)
+        const billingPeriod = buildBillingPeriod(group.month)
+        const { invoiceNumber: invNum, sequenceMonth, sequenceNumber } =
+          await generateInvoiceNumber(supabase, invoiceDate)
 
         const { data: inv, error } = await supabase.from('invoices').insert({
           invoice_number: invNum,
           client_id: group.client_id,
           status: 'draft',
-          issue_date: new Date().toISOString().split('T')[0],
+          issue_date: invoiceDate.toISOString().split('T')[0],
           total_amount: group.total,
           paid_amount: 0,
           currency: group.currency || 'INR',
@@ -955,7 +933,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
         // Extended columns (ignore if not migrated)
         await supabase.from('invoices').update({
-          billing_period_start: periodStart, billing_period_end: periodEnd,
+          billing_period_start: billingPeriod.billing_period_start,
+          billing_period_end: billingPeriod.billing_period_end,
+          billing_period_label: billingPeriod.billing_period_label,
+          invoice_sequence_month: sequenceMonth,
+          invoice_sequence_number: sequenceNumber,
           subtotal: group.total, tax_rate: 0, tax_amount: 0, discount_amount: 0, previous_balance: 0,
         }).eq('id', inv.id)
 
@@ -2990,6 +2972,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 const expanded = batchExpandedKey === group.key
                 const [year, mon] = group.month.split('-')
                 const monthLabel = new Date(`${group.month}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
+                // Invoice is issued on the 1st of the NEXT month (billing cycle)
+                const invoiceIssueDate = getInvoiceDateForTaskMonth(group.month)
+                const invoiceYYMM = toSequenceMonth(invoiceIssueDate)
                 const groupTasks = group.tasks || []
                 return (
                   <div key={group.key}
@@ -3011,7 +2996,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                       </div>
                       <div className="text-right shrink-0">
                         <div className="text-xs font-semibold text-emerald-300">{fmt(group.total, group.currency as any)}</div>
-                        <div className="text-[10px] text-muted-foreground font-mono">INV-{year.slice(-2)}{mon}-{group.client_code}</div>
+                        <div className="text-[10px] text-muted-foreground font-mono">INV-{invoiceYYMM}-NNN</div>
                       </div>
                       {/* Expand toggle */}
                       <button
