@@ -3267,7 +3267,14 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                     const statusLbl   = overdue && inv.status !== 'paid' ? 'Overdue' : getStatusLabel(inv.status)
                     const isPaid      = inv.status === 'paid' || balance === 0
                     const isOver      = (overdue && inv.status !== 'paid') || inv.status === 'overdue'
-                    const items       = [...(inv.items || [])].sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0))
+                    const items       = [...(inv.items || [])].sort((a, b) => {
+                      const da = a.task?.task_date || ''
+                      const db = b.task?.task_date || ''
+                      if (da && db) return da.localeCompare(db)
+                      if (da) return -1
+                      if (db) return 1
+                      return (a.display_order ?? 0) - (b.display_order ?? 0)
+                    })
                     const pmts        = inv.payments || []
                     const taskCount   = items.length
 
