@@ -77,8 +77,7 @@ export const INVOICE_STATUS_FIELDS: FieldDef[] = [
 
 // ── Discount History ──────────────────────────────────────────────────────────
 export const DISCOUNT_FIELDS: FieldDef[] = [
-  { col: 'id',                  db: 'id',                  example: '', notes: 'Leave blank for new rows' },
-  { col: 'invoice_number',      db: false,                 example: 'INV-2026-001', notes: 'Invoice this discount applies to', req: true,
+  { col: 'invoice_number',      db: false,                 example: 'INV-2026-001', notes: 'Invoice this discount applies to — used as the upsert key', req: true,
     aliases: ['invoice_ref'],
     validate: (_v, _row, _ctx) => null /* validated async in post-process */ },
   { col: 'client_name_or_code', db: false,                 example: 'Sea Star Supermarket', notes: 'Client (optional — inferred from invoice if blank)',

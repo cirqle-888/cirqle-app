@@ -281,6 +281,31 @@ export default function ImportClient({ clients, services, employees, groups, par
   // ── Contribution sub-mode ──────────────────────────────────────────────────
   const [contribSubMode, setContribSubMode] = useState<ContribSubMode>('score_pct')
 
+  // ── Discount template generator ────────────────────────────────────────────
+  const [discountFilter, setDiscountFilter] = useState({
+    clientId:  '',
+    dateFrom:  '',
+    dateTo:    '',
+    status:    '',
+  })
+  const [discountTemplateLoading, setDiscountTemplateLoading] = useState(false)
+
+  // ── Export filters (per-mode, shared state — reset on mode change) ──────────
+  const [exportFilterOpen, setExportFilterOpen] = useState(false)
+  const [exportFilters, setExportFilters] = useState({
+    clientId:   '',
+    status:     '',
+    dateFrom:   '',
+    dateTo:     '',
+    isActive:   '',    // '' | 'true' | 'false'
+    entryType:  '',    // cashbook: 'income' | 'expense'
+  })
+  // Reset export filters when mode changes
+  useEffect(() => {
+    setExportFilters({ clientId: '', status: '', dateFrom: '', dateTo: '', isActive: '', entryType: '' })
+    setExportFilterOpen(false)
+  }, [mode])
+
   // ── Clean-up state ─────────────────────────────────────────────────────────
   const [cleanupMode, setCleanupMode] = useState<ImportMode>('employees')
   const [cleanupRecords, setCleanupRecords] = useState<any[]>([])
@@ -311,17 +336,40 @@ export default function ImportClient({ clients, services, employees, groups, par
   // ── Export current data ────────────────────────────────────────────────────
   async function exportCurrentData(m: ImportMode) {
     const cfg = EXPORT_CONFIG[m]
-    // Supabase caps each response at 1000 rows server-side regardless of any
-    // client .limit() call. We paginate with .range() in 1000-row chunks until
-    // we receive a partial page, guaranteeing all rows are exported.
     const PAGE = 1000
     const allData: any[] = []
     let lastError: any = null
     let orderingWorks = !!cfg.orderBy
 
+    // Date column per mode — used for dateFrom/dateTo filters
+    const dateColMap: Partial<Record<ImportMode, string>> = {
+      jobs:             'task_date',
+      invoices:         'issue_date',
+      invoice_status:   'issue_date',
+      cashbook_entries: 'entry_date',
+      discounts:        'created_at',
+      contributions:    'created_at',
+    }
+    const dateCol = dateColMap[m]
+
+    // Modes that have client_id column directly
+    const hasClientId: ImportMode[] = ['jobs', 'invoices', 'invoice_status', 'discounts', 'pricing_matrix', 'contributions']
+    // Modes that have status column
+    const hasStatus: ImportMode[] = ['jobs', 'invoices', 'invoice_status']
+    // Modes that have is_active column
+    const hasIsActive: ImportMode[] = ['employees', 'clients', 'services']
+
     for (let page = 0; page < 100; page++) {   // hard ceiling: 100k rows
       let q = supabase.from(cfg.table).select('*').range(page * PAGE, (page + 1) * PAGE - 1)
       if (orderingWorks && cfg.orderBy) q = q.order(cfg.orderBy, { ascending: true, nullsFirst: false })
+
+      // Apply export filters
+      if (exportFilters.clientId  && hasClientId.includes(m))  q = q.eq('client_id', exportFilters.clientId)
+      if (exportFilters.status    && hasStatus.includes(m))    q = q.eq('status', exportFilters.status)
+      if (exportFilters.dateFrom  && dateCol)                  q = q.gte(dateCol, exportFilters.dateFrom)
+      if (exportFilters.dateTo    && dateCol)                  q = q.lte(dateCol, exportFilters.dateTo)
+      if (exportFilters.isActive !== '' && hasIsActive.includes(m)) q = q.eq('is_active', exportFilters.isActive === 'true')
+      if (exportFilters.entryType && m === 'cashbook_entries') q = q.eq('type', exportFilters.entryType)
 
       const { data, error } = await q
       if (error) {
@@ -388,6 +436,48 @@ export default function ImportClient({ clients, services, employees, groups, par
     const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
     downloadCsv(`${m}_export_${ts}.csv`, csv)
     success(`Exported ${data.length} row${data.length !== 1 ? 's' : ''}`)
+  }
+
+  // ── Discount template generator ────────────────────────────────────────────
+  async function generateDiscountTemplate() {
+    setDiscountTemplateLoading(true)
+    try {
+      let q = supabase
+        .from('invoices')
+        .select('invoice_number, issue_date, total_amount, status, client:clients(name, code)')
+        .order('issue_date', { ascending: true })
+
+      if (discountFilter.clientId) q = q.eq('client_id', discountFilter.clientId)
+      if (discountFilter.dateFrom)  q = q.gte('issue_date', discountFilter.dateFrom)
+      if (discountFilter.dateTo)    q = q.lte('issue_date', discountFilter.dateTo)
+      if (discountFilter.status)    q = q.eq('status', discountFilter.status)
+
+      const { data, error } = await q.limit(1000)
+      if (error) { toastError(`Failed to load invoices: ${error.message}`); return }
+      if (!data || data.length === 0) { toastError('No invoices match the selected filters'); return }
+
+      const today = new Date().toISOString().slice(0, 10)
+      const header = 'invoice_number,client_name_or_code,invoice_total,discount_amount,discount_percentage,reason,discount_date'
+      const rows = data.map((inv: any) => {
+        const clientCode = inv.client?.code || inv.client?.name || ''
+        const total = inv.total_amount || ''
+        return [
+          inv.invoice_number,
+          clientCode,
+          total,
+          '',   // discount_amount — to be filled
+          '',   // discount_percentage — to be filled
+          '',   // reason — to be filled
+          today,
+        ].map(v => (String(v).includes(',') ? `"${v}"` : v)).join(',')
+      })
+
+      const ts = new Date().toISOString().slice(0, 10)
+      downloadCsv(`discount_template_${ts}.csv`, header + '\n' + rows.join('\n'))
+      success(`Generated template with ${data.length} invoice${data.length !== 1 ? 's' : ''}`)
+    } finally {
+      setDiscountTemplateLoading(false)
+    }
   }
 
   // ── Parsers ────────────────────────────────────────────────────────────────
@@ -888,7 +978,7 @@ export default function ImportClient({ clients, services, employees, groups, par
       case 'invoice_status':   parsed = await parseInvoiceStatus(lines);    break
       case 'discounts':        parsed = await parseDiscounts(lines);        break
     }
-    if (operation === 'update' || operation === 'delete') {
+    if (mode !== 'discounts' && (operation === 'update' || operation === 'delete')) {
       parsed.forEach(p => {
         if (!p.row_id) {
           p.errors.push('id is required in ' + operation + ' mode')
@@ -1359,40 +1449,89 @@ export default function ImportClient({ clients, services, employees, groups, par
       }
 
       case 'discounts': {
-        const table = 'discount_logs'
-        if (operation === 'delete') {
-          const ids = valid.map(r => r.row_id).filter(Boolean) as string[]
-          await backupBeforeUpdate(table, ids)
-          await batchDelete(table, ids)
-          break
-        }
-        const recs = valid.map(r => {
+        // Upsert by invoice_id — no id column needed in CSV.
+        // Also syncs invoices.discount_amount + recalculates invoices.total_amount
+        // so the discount is reflected in the invoice detail view.
+        const invoiceIds = valid.map(r => r.invoice_id).filter(Boolean) as string[]
+
+        // Fetch existing discount_logs and invoice financials in parallel
+        const [existingLogsRes, invoiceDataRes] = await Promise.all([
+          invoiceIds.length
+            ? supabase.from('discount_logs').select('id, invoice_id').in('invoice_id', invoiceIds)
+            : Promise.resolve({ data: [] as any[] }),
+          invoiceIds.length
+            ? supabase.from('invoices').select('id, subtotal, tax_amount, previous_balance, total_amount, discount_amount').in('id', invoiceIds)
+            : Promise.resolve({ data: [] as any[] }),
+        ])
+
+        const existingByInvoice = new Map<string, string>()
+        ;((existingLogsRes as any).data || []).forEach((row: any) => existingByInvoice.set(row.invoice_id, row.id))
+
+        const invoiceFinancials = new Map<string, { subtotal: number; tax_amount: number; previous_balance: number; total_amount: number; discount_amount: number }>()
+        ;((invoiceDataRes as any).data || []).forEach((inv: any) => invoiceFinancials.set(inv.id, {
+          subtotal:         inv.subtotal         || 0,
+          tax_amount:       inv.tax_amount       || 0,
+          previous_balance: inv.previous_balance || 0,
+          total_amount:     inv.total_amount     || 0,
+          discount_amount:  inv.discount_amount  || 0,
+        }))
+
+        for (const r of valid) {
+          if (!r.invoice_id) { res.skipped += 1; continue }
           const amount = parseFloat(r.discount_amount) || 0
           const pct    = parseFloat(r.discount_percentage) || 0
           const total  = parseFloat(r.invoice_total) || 0
-          // Derive whichever wasn't provided
           let finalAmount     = amount
           let finalPercentage = pct
           if (!finalAmount && finalPercentage && total > 0)     finalAmount     = (finalPercentage / 100) * total
           if (!finalPercentage && finalAmount && total > 0)     finalPercentage = (finalAmount   / total) * 100
-          return {
-            row_id: r.row_id,
-            fields: {
-              invoice_id:          r.invoice_id || null,
-              client_id:           r.client_id,
-              discount_amount:     finalAmount,
-              discount_percentage: finalPercentage,
-              invoice_total:       total,
-              reason:              r.reason || 'Bulk import',
-              created_at:          r.discount_date ? new Date(r.discount_date).toISOString() : new Date().toISOString(),
-            },
+
+          const logFields = {
+            invoice_id:          r.invoice_id,
+            client_id:           r.client_id || null,
+            discount_amount:     finalAmount,
+            discount_percentage: finalPercentage,
+            invoice_total:       total,
+            reason:              r.reason || 'Bulk import',
+            created_at:          r.discount_date ? new Date(r.discount_date).toISOString() : new Date().toISOString(),
           }
-        })
-        if (operation === 'update') {
-          await backupBeforeUpdate(table, recs.map(r => r.row_id).filter(Boolean) as string[])
-          await batchUpdate(table, recs.filter(r => r.row_id) as any)
-        } else {
-          await batchInsert(table, recs.map(r => r.fields))
+
+          // Upsert discount_logs
+          const existingId = existingByInvoice.get(r.invoice_id)
+          const { error: logErr } = existingId
+            ? await supabase.from('discount_logs').update(logFields).eq('id', existingId)
+            : await supabase.from('discount_logs').insert(logFields)
+
+          if (logErr) { res.errors.push(`${r.invoice_ref}: ${logErr.message}`); res.skipped += 1; continue }
+
+          // Sync invoices.discount_amount + recalculate total_amount.
+          // For historical invoices (subtotal=0), derive the pre-discount base
+          // from current total_amount + current discount_amount (delta approach).
+          const fin = invoiceFinancials.get(r.invoice_id)
+          const sub      = fin?.subtotal || 0
+          const tax      = fin?.tax_amount || 0
+          const prevBal  = fin?.previous_balance || 0
+          const oldTotal = fin?.total_amount || 0
+          const oldDisc  = fin?.discount_amount || 0
+
+          let newTotal: number
+          if (sub > 0) {
+            // Full financials available — recalculate properly
+            newTotal = Math.max(0, sub + tax - finalAmount + prevBal)
+          } else {
+            // Historical import: only total_amount is set, no subtotal breakdown.
+            // Derive pre-discount base and apply new discount delta.
+            const preDiscountBase = oldTotal + oldDisc
+            newTotal = Math.max(0, preDiscountBase - finalAmount)
+          }
+
+          const { error: invErr } = await supabase
+            .from('invoices')
+            .update({ discount_amount: finalAmount, total_amount: newTotal })
+            .eq('id', r.invoice_id)
+
+          if (invErr) { res.errors.push(`${r.invoice_ref} (invoice sync): ${invErr.message}`); res.skipped += 1 }
+          else res.inserted += 1
         }
         break
       }
@@ -1947,6 +2086,27 @@ export default function ImportClient({ clients, services, employees, groups, par
         </tr>))}</tbody></table>
     )
 
+    if (mode === 'discounts') return (
+      <table className="w-full text-xs"><thead><tr className="border-b border-border bg-background/40">
+        <th className={thCls}>#</th><th className={thCls}>St</th><th className={thCls}>Invoice #</th>
+        <th className={thCls}>Client</th><th className={thCls+' text-right'}>Invoice Total</th>
+        <th className={thCls+' text-right'}>Discount ₹</th><th className={thCls+' text-right'}>Discount %</th>
+        <th className={thCls}>Reason</th><th className={thCls}>Date</th><th className={thCls}>Issues</th>
+      </tr></thead><tbody>{rows.map(r => (
+        <tr key={r._line} className={`border-b border-border/40 ${r.status==='error'?'bg-red-500/5':r.status==='warn'?'bg-yellow-500/5':''}`}>
+          <td className={tdCls+' text-muted-foreground'}>{r._line}</td>
+          <td className={tdCls}><StatusBadge status={r.status}/></td>
+          <td className={tdCls+' font-mono text-violet-300'}>{r.invoice_id?<span className="text-green-400">{r.invoice_ref}</span>:<span className="text-red-400">{r.invoice_ref||'—'}</span>}</td>
+          <td className={tdCls}>{r.client_id?<span className="text-green-400">{r.client_ref||'✓'}</span>:<span className="text-red-400">{r.client_ref||'—'}</span>}</td>
+          <td className={tdCls+' text-right font-mono'}>{r.invoice_total?`₹${parseFloat(r.invoice_total).toLocaleString('en-IN')}`:'—'}</td>
+          <td className={tdCls+' text-right font-mono'}>{r.discount_amount?`₹${parseFloat(r.discount_amount).toLocaleString('en-IN')}`:'—'}</td>
+          <td className={tdCls+' text-right font-mono'}>{r.discount_percentage?`${r.discount_percentage}%`:'—'}</td>
+          <td className={tdCls+' text-muted-foreground max-w-[120px] truncate'}>{r.reason||'—'}</td>
+          <td className={tdCls+' font-mono'}>{r.discount_date||'—'}</td>
+          <IssueCell row={r}/>
+        </tr>))}</tbody></table>
+    )
+
     // contributions
     const visibleParams = contribSubMode === 'param_detail' ? parameters.slice(0, 6) : []
     return (
@@ -2155,27 +2315,35 @@ export default function ImportClient({ clients, services, employees, groups, par
           {/* Drop zone + operation toggle */}
           <div className="space-y-3">
             <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">Operation:</span>
-              <div className="flex items-center border border-foreground/15 rounded-lg overflow-hidden h-[30px]">
-                <button onClick={() => setOperation('insert')} className={`px-3 text-xs flex items-center gap-1.5 transition-colors h-full ${operation === 'insert' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-                  + Insert new
-                </button>
-                <button onClick={() => setOperation('update')} className={`px-3 text-xs flex items-center gap-1.5 transition-colors border-l border-foreground/15 h-full ${operation === 'update' ? 'bg-amber-500/15 text-amber-300' : 'text-muted-foreground hover:text-foreground'}`}>
-                  ✎ Update existing
-                </button>
-                <button onClick={() => setOperation('delete')} className={`px-3 text-xs flex items-center gap-1.5 transition-colors border-l border-foreground/15 ${operation === 'delete' ? 'bg-red-500/15 text-red-300' : 'text-muted-foreground hover:text-foreground'}`}>
-                  🗑 Delete
-                </button>
-              </div>
-              {operation === 'update' && (
-                <span className="text-[10px] text-amber-400/80 ml-2">
-                  Requires <code className="font-mono">id</code> column. Auto-backs up before applying.
+              {mode === 'discounts' ? (
+                <span className="text-xs text-muted-foreground px-2 py-1 rounded-lg border border-foreground/15 bg-foreground/[0.04]">
+                  ↕ Auto upsert by invoice number
                 </span>
-              )}
-              {operation === 'delete' && (
-                <span className="text-[10px] text-red-400/80 ml-2">
-                  ⚠ Destructive. Requires <code className="font-mono">id</code> column. Backup auto-downloaded before delete. Only the <code className="font-mono">id</code> column is read.
-                </span>
+              ) : (
+                <>
+                  <span className="text-xs text-muted-foreground">Operation:</span>
+                  <div className="flex items-center border border-foreground/15 rounded-lg overflow-hidden h-[30px]">
+                    <button onClick={() => setOperation('insert')} className={`px-3 text-xs flex items-center gap-1.5 transition-colors h-full ${operation === 'insert' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                      + Insert new
+                    </button>
+                    <button onClick={() => setOperation('update')} className={`px-3 text-xs flex items-center gap-1.5 transition-colors border-l border-foreground/15 h-full ${operation === 'update' ? 'bg-amber-500/15 text-amber-300' : 'text-muted-foreground hover:text-foreground'}`}>
+                      ✎ Update existing
+                    </button>
+                    <button onClick={() => setOperation('delete')} className={`px-3 text-xs flex items-center gap-1.5 transition-colors border-l border-foreground/15 ${operation === 'delete' ? 'bg-red-500/15 text-red-300' : 'text-muted-foreground hover:text-foreground'}`}>
+                      🗑 Delete
+                    </button>
+                  </div>
+                  {operation === 'update' && (
+                    <span className="text-[10px] text-amber-400/80 ml-2">
+                      Requires <code className="font-mono">id</code> column. Auto-backs up before applying.
+                    </span>
+                  )}
+                  {operation === 'delete' && (
+                    <span className="text-[10px] text-red-400/80 ml-2">
+                      ⚠ Destructive. Requires <code className="font-mono">id</code> column. Backup auto-downloaded before delete. Only the <code className="font-mono">id</code> column is read.
+                    </span>
+                  )}
+                </>
               )}
             </div>
             <div
@@ -2205,7 +2373,98 @@ export default function ImportClient({ clients, services, employees, groups, par
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                 Download {MODES.find(m => m.key === mode)?.label} Template
               </button>
-              <div className="mt-2 flex">
+              {/* Export with optional filters */}
+              <div className="mt-3 space-y-2">
+                {/* Filter toggle */}
+                <button
+                  type="button"
+                  onClick={() => setExportFilterOpen(o => !o)}
+                  className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z"/></svg>
+                  {exportFilterOpen ? 'Hide filters' : 'Filter export'}
+                  {(() => {
+                    const n = [exportFilters.clientId, exportFilters.status, exportFilters.dateFrom, exportFilters.dateTo, exportFilters.isActive, exportFilters.entryType].filter(Boolean).length
+                    return n > 0 ? <span className="ml-1 px-1.5 py-0.5 rounded-full bg-violet-500/20 text-violet-400 text-[10px] font-semibold">{n}</span> : null
+                  })()}
+                </button>
+
+                {exportFilterOpen && (
+                  <div className="bg-foreground/[0.03] border border-border/40 rounded-lg p-3 space-y-2">
+                    {/* is_active — employees, clients, services */}
+                    {['employees','clients','services'].includes(mode) && (
+                      <div>
+                        <label className="text-[10px] text-muted-foreground mb-1 block">Status</label>
+                        <select value={exportFilters.isActive} onChange={e => setExportFilters(f => ({ ...f, isActive: e.target.value }))}
+                          className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60">
+                          <option value="">All</option>
+                          <option value="true">Active only</option>
+                          <option value="false">Inactive only</option>
+                        </select>
+                      </div>
+                    )}
+                    {/* Client — jobs, invoices, invoice_status, discounts, pricing_matrix */}
+                    {['jobs','invoices','invoice_status','discounts','pricing_matrix'].includes(mode) && (
+                      <div>
+                        <label className="text-[10px] text-muted-foreground mb-1 block">Client</label>
+                        <select value={exportFilters.clientId} onChange={e => setExportFilters(f => ({ ...f, clientId: e.target.value }))}
+                          className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60">
+                          <option value="">All clients</option>
+                          {clients.map(c => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
+                        </select>
+                      </div>
+                    )}
+                    {/* Status — jobs, invoices, invoice_status */}
+                    {['jobs','invoices','invoice_status'].includes(mode) && (
+                      <div>
+                        <label className="text-[10px] text-muted-foreground mb-1 block">Status</label>
+                        <select value={exportFilters.status} onChange={e => setExportFilters(f => ({ ...f, status: e.target.value }))}
+                          className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60">
+                          <option value="">All statuses</option>
+                          {mode === 'jobs'
+                            ? ['pending','in_progress','done','invoiced','cancelled'].map(s => <option key={s} value={s}>{s.replace('_',' ')}</option>)
+                            : ['draft','reviewed','sent','partial','paid','overdue','cancelled','bad_debt'].map(s => <option key={s} value={s}>{s}</option>)
+                          }
+                        </select>
+                      </div>
+                    )}
+                    {/* Entry type — cashbook */}
+                    {mode === 'cashbook_entries' && (
+                      <div>
+                        <label className="text-[10px] text-muted-foreground mb-1 block">Type</label>
+                        <select value={exportFilters.entryType} onChange={e => setExportFilters(f => ({ ...f, entryType: e.target.value }))}
+                          className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60">
+                          <option value="">All</option>
+                          <option value="income">Income</option>
+                          <option value="expense">Expense</option>
+                        </select>
+                      </div>
+                    )}
+                    {/* Date range — transactional modes */}
+                    {['jobs','invoices','invoice_status','cashbook_entries','discounts','contributions'].includes(mode) && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] text-muted-foreground mb-1 block">Date from</label>
+                          <input type="date" value={exportFilters.dateFrom} onChange={e => setExportFilters(f => ({ ...f, dateFrom: e.target.value }))}
+                            className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground mb-1 block">Date to</label>
+                          <input type="date" value={exportFilters.dateTo} onChange={e => setExportFilters(f => ({ ...f, dateTo: e.target.value }))}
+                            className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60" />
+                        </div>
+                      </div>
+                    )}
+                    {/* Clear filters */}
+                    {[exportFilters.clientId, exportFilters.status, exportFilters.dateFrom, exportFilters.dateTo, exportFilters.isActive, exportFilters.entryType].some(Boolean) && (
+                      <button type="button" onClick={() => setExportFilters({ clientId: '', status: '', dateFrom: '', dateTo: '', isActive: '', entryType: '' })}
+                        className="text-[10px] text-red-400 hover:text-red-300 transition-colors">
+                        × Clear filters
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 <button
                   type="button"
                   onClick={() => exportCurrentData(mode)}
@@ -2299,6 +2558,82 @@ export default function ImportClient({ clients, services, employees, groups, par
                 {(contribSubMode === 'score_pct' || contribSubMode === 'earnings_only') && (
                   <p className="text-[11px] text-blue-400">💡 <strong>task_id</strong> column: paste the Supabase task ID directly to skip title+date matching. Leave blank to match by title+date.</p>
                 )}
+              </div>
+            )}
+
+            {/* Discount template generator from invoices */}
+            {mode === 'discounts' && (
+              <div className="bg-card border border-border rounded-xl p-4 space-y-3">
+                <div>
+                  <p className="text-sm font-semibold">Generate from invoices</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">Filter your invoices and download a pre-filled discount template — just add the discount amount and reason.</p>
+                </div>
+
+                {/* Client filter */}
+                <div>
+                  <label className="text-[11px] text-muted-foreground mb-1 block">Client</label>
+                  <select
+                    value={discountFilter.clientId}
+                    onChange={e => setDiscountFilter(f => ({ ...f, clientId: e.target.value }))}
+                    className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus:border-violet-500/60"
+                  >
+                    <option value="">All clients</option>
+                    {clients.map(c => (
+                      <option key={c.id} value={c.id}>{c.name} ({c.code})</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Date range */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[11px] text-muted-foreground mb-1 block">Issue date from</label>
+                    <input
+                      type="date"
+                      value={discountFilter.dateFrom}
+                      onChange={e => setDiscountFilter(f => ({ ...f, dateFrom: e.target.value }))}
+                      className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus:border-violet-500/60"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-muted-foreground mb-1 block">Issue date to</label>
+                    <input
+                      type="date"
+                      value={discountFilter.dateTo}
+                      onChange={e => setDiscountFilter(f => ({ ...f, dateTo: e.target.value }))}
+                      className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus:border-violet-500/60"
+                    />
+                  </div>
+                </div>
+
+                {/* Status filter */}
+                <div>
+                  <label className="text-[11px] text-muted-foreground mb-1 block">Status</label>
+                  <select
+                    value={discountFilter.status}
+                    onChange={e => setDiscountFilter(f => ({ ...f, status: e.target.value }))}
+                    className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus:border-violet-500/60"
+                  >
+                    <option value="">All statuses</option>
+                    {['draft','reviewed','sent','partial','paid','overdue','cancelled','bad_debt'].map(s => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={generateDiscountTemplate}
+                  disabled={discountTemplateLoading}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 text-sm font-medium hover:bg-emerald-600/30 transition-colors disabled:opacity-50"
+                >
+                  <Download className="w-4 h-4" />
+                  {discountTemplateLoading ? 'Loading invoices…' : 'Download Pre-filled Template'}
+                </button>
+
+                <p className="text-[10px] text-muted-foreground/60">
+                  The CSV will have one row per invoice with <code className="font-mono">invoice_number</code>, <code className="font-mono">invoice_total</code>, and <code className="font-mono">client_name_or_code</code> pre-filled. Add <code className="font-mono">discount_amount</code> or <code className="font-mono">discount_percentage</code> and import it back.
+                </p>
               </div>
             )}
 

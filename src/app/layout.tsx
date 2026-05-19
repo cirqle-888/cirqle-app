@@ -1,6 +1,5 @@
 import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
-import Script from 'next/script'
 import './globals.css'
 import { ThemeProvider } from '@/contexts/theme-context'
 import { DynamicFavicon } from '@/components/ui/dynamic-favicon'
@@ -21,11 +20,14 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
+      <head>
+        {/* Plain <script> in a Server Component renders to HTML on the server —
+            no React 19 client-side script-tag warning. Runs before hydration
+            to set the correct theme class without a flash. */}
+        {/* eslint-disable-next-line @next/next/no-sync-scripts */}
+        <script src="/theme-init.js" />
+      </head>
       <body className="h-full bg-background text-foreground">
-        {/* Theme init — loaded before hydration so the first paint is always the
-            correct theme (no flash). Using an external file + next/script
-            beforeInteractive avoids the React 19 dangerouslySetInnerHTML warning. */}
-        <Script id="theme-init" src="/theme-init.js" strategy="beforeInteractive" />
         <DynamicFavicon />
         <ThemeProvider>{children}</ThemeProvider>
       </body>

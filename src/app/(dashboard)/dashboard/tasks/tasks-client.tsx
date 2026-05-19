@@ -9,6 +9,8 @@ import { formatCurrency } from '@/lib/calculations/currency'
 import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
+import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
+import type { DateFilterValue } from '@/components/ui/date-filter'
 import type { Currency } from '@/types'
 import { getNextOccurrence, shouldGenerateNext } from '@/lib/utils/recurring'
 import { taskCode, taskCodeMatches, nextTaskNumber } from '@/lib/utils/task-code'
@@ -379,6 +381,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
   // View mode & assignee filter
   const [viewMode, setViewMode] = useState<'table' | 'board' | 'calendar'>('table')
   const [filterAssignee, setFilterAssignee] = useState('')
+  const [filterDate, setFilterDate] = useState<DateFilterValue>(null)
   // Calendar view state
   const [calViewYear, setCalViewYear] = useState(() => new Date().getFullYear())
   const [calViewMonth, setCalViewMonth] = useState(() => new Date().getMonth())
@@ -1140,6 +1143,9 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
         t = [...exact, ...rest]
       }
     }
+    if (filterDate) {
+      t = t.filter(task => matchesDateFilter(task.task_date, filterDate))
+    }
     if (filterAssignee) {
       t = t.filter(task =>
         localAssignments.some(a => a.task_id === task.id && a.employee_id === filterAssignee) ||
@@ -1169,7 +1175,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
     if (sortBy === 'amount_desc') t = [...t].sort((a, b) => (b.billing_amount_inr || 0) - (a.billing_amount_inr || 0))
     if (sortBy === 'client')      t = [...t].sort((a, b) => (a.client?.name || '').localeCompare(b.client?.name || ''))
     return t
-  }, [tasks, filterStatus, filterClient, filterService, searchQ, sortBy, filterAssignee, localAssignments, localGroupAssignments, localParamAssignments])
+  }, [tasks, filterStatus, filterClient, filterService, searchQ, sortBy, filterAssignee, filterDate, localAssignments, localGroupAssignments, localParamAssignments])
 
   // For employee role, only show their assigned tasks
   const visibleTasks = useMemo(() => {
@@ -1181,7 +1187,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
   }, [role, currentEmployee, localAssignments, filteredTasks])
 
   // Reset to page 0 and clear DB search results when filters/search/sort change
-  useEffect(() => { setTablePage(0); setDbSearchResults(null); exitDbMode() }, [filterStatus, filterClient, filterService, searchQ, sortBy, filterAssignee])
+  useEffect(() => { setTablePage(0); setDbSearchResults(null); exitDbMode() }, [filterStatus, filterClient, filterService, searchQ, sortBy, filterAssignee, filterDate])
 
   // ── Auto-fallback to database search ──────────────────────────────────────
   // When the user types a query (especially #number) and finds nothing in the
@@ -1215,8 +1221,27 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
       ? visibleTasks              // when searching locally, show all matches on one page
       : visibleTasks.slice(tablePage * tablePageSize, (tablePage + 1) * tablePageSize)
 
-  const hasActiveFilters = !!(filterStatus || filterClient || filterService || searchQ || sortBy !== 'today_first' || !!filterAssignee)
+  const hasActiveFilters = !!(filterStatus || filterClient || filterService || searchQ || sortBy !== 'today_first' || !!filterAssignee || !!filterDate)
   const activeFilterCount = [filterClient, filterService, filterAssignee, sortBy !== 'today_first' ? 'sort' : ''].filter(Boolean).length
+
+  // Status counts — computed from tasks before status filter is applied so all tabs show real numbers
+  const statusCounts = useMemo(() => {
+    const base = tasks.filter(t => {
+      if (filterClient  && t.client?.id  !== filterClient)  return false
+      if (filterService && t.service?.id !== filterService) return false
+      if (filterAssignee) {
+        const has = localAssignments.some(a => a.task_id === t.id && a.employee_id === filterAssignee) ||
+                    localGroupAssignments.some(a => a.task_id === t.id && a.employee_id === filterAssignee) ||
+                    localParamAssignments.some(a => a.task_id === t.id && a.employee_id === filterAssignee)
+        if (!has) return false
+      }
+      if (filterDate && !matchesDateFilter(t.task_date, filterDate)) return false
+      return true
+    })
+    const counts: Record<string, number> = { all: base.length }
+    STATUSES.forEach(s => { counts[s] = base.filter(t => t.status === s).length })
+    return counts
+  }, [tasks, filterClient, filterService, filterAssignee, filterDate, localAssignments, localGroupAssignments, localParamAssignments])
 
   // Client filter options: merge active clients (from props) with any unique clients
   // found in loaded tasks — this ensures inactive clients like old imported ones still appear
@@ -1404,7 +1429,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                 <button
                   onClick={() => setInlineEditMode(m => !m)}
                   title="Toggle inline edit"
-                  className={`flex items-center gap-1.5 h-[34px] px-3 rounded-xl text-xs font-semibold transition-all shadow-sm cursor-pointer ${
+                  className={`hidden sm:flex items-center gap-1.5 h-[34px] px-3 rounded-xl text-xs font-semibold transition-all shadow-sm cursor-pointer ${
                     inlineEditMode
                       ? 'bg-blue-500 text-white shadow-blue-500/30'
                       : 'bg-secondary border border-border text-foreground hover:bg-secondary/60'
@@ -1435,7 +1460,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                 {([
                   { key: 'table',    Icon: List,         label: 'Table',    hideOnMobile: false },
                   { key: 'board',    Icon: LayoutGrid,   label: 'Board',    hideOnMobile: false },
-                  { key: 'calendar', Icon: CalendarDays, label: 'Calendar', hideOnMobile: true  },
+                  { key: 'calendar', Icon: CalendarDays, label: 'Calendar', hideOnMobile: false },
                 ] as const).map(({ key, Icon, label, hideOnMobile }) => (
                   <span key={key} className={`flex items-center ${hideOnMobile ? 'hidden sm:flex' : ''}`}>
                     <button
@@ -1495,7 +1520,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
             </div>
           </div>
 
-          {/* Row 2: Filters → divider → Status chips → Clear all */}
+          {/* Row 2: Dropdowns — Client · Service · Assignee · Sort · Date · Search DB */}
           <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
             {/* Client — merged list: active clients + any inactive clients found in loaded tasks */}
             <FilterDropdown
@@ -1535,6 +1560,9 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
               placeholder="Sort by"
             />
 
+            {/* Date filter */}
+            <DateFilter value={filterDate} onChange={setFilterDate} />
+
             {/* ── Search Database button ──
                 Only shown when not all tasks are loaded (i.e. DB has more rows
                 than memory). With ≤10K tasks total this never appears since
@@ -1563,23 +1591,50 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                 </button>
               )
             })()}
+          </div>
 
-            {/* Divider */}
-            <span className="w-px h-5 bg-foreground/10 shrink-0" />
-            {/* Status chips */}
-            <button onClick={() => setFilterStatus('')} className={`h-[34px] px-3 rounded-xl text-xs font-medium transition-colors cursor-pointer ${!filterStatus ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}>All</button>
-            {STATUSES.map(s => (
-              <button key={s} onClick={() => setFilterStatus(s === filterStatus ? '' : s)} className={`h-[34px] px-3 rounded-xl text-xs font-medium transition-colors cursor-pointer ${filterStatus === s ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}>
-                {getStatusLabel(s)}
-              </button>
-            ))}
-            {/* Clear all — only when any filter active, at end of row */}
+          {/* Row 3: Status chips (desktop) / dropdown (mobile) · Clear all · Pagination */}
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+            {/* Mobile: compact dropdown */}
+            <select
+              value={filterStatus}
+              onChange={e => setFilterStatus(e.target.value)}
+              className="sm:hidden h-[34px] px-2 rounded-xl text-xs font-medium bg-secondary border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer"
+            >
+              <option value="">All ({statusCounts.all})</option>
+              {STATUSES.map(s => (
+                <option key={s} value={s}>{getStatusLabel(s)} ({statusCounts[s] ?? 0})</option>
+              ))}
+            </select>
+            {/* Desktop: pill chips with counts — same pattern as Contributions page */}
+            {([
+              { key: '',           label: 'All' },
+              ...STATUSES.map(s => ({ key: s, label: getStatusLabel(s) })),
+            ]).map(({ key, label }) => {
+              const count = key === '' ? statusCounts.all : (statusCounts[key] ?? 0)
+              const active = filterStatus === key
+              return (
+                <button
+                  key={key}
+                  onClick={() => setFilterStatus(key)}
+                  className={`hidden sm:flex h-[34px] px-3 rounded-xl text-xs font-medium transition-colors cursor-pointer items-center gap-1.5 ${
+                    active ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {label}
+                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
+                    active ? 'bg-foreground/20 text-white' : 'bg-border/50 opacity-60'
+                  }`}>{count}</span>
+                </button>
+              )
+            })}
+            {/* Clear all — only when any filter active */}
             {hasActiveFilters && (
               <button
-                onClick={() => { setFilterStatus(''); setFilterClient(''); setFilterService(''); setSearchQ(''); setSortBy('today_first'); setFilterAssignee('') }}
-                className="ml-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20 transition-colors flex items-center gap-1"
+                onClick={() => { setFilterStatus(''); setFilterClient(''); setFilterService(''); setSearchQ(''); setSortBy('today_first'); setFilterAssignee(''); setFilterDate(null) }}
+                className="ml-1 text-xs text-muted-foreground hover:text-foreground px-2 py-1.5 rounded-md hover:bg-foreground/[0.04] transition-colors flex items-center gap-1 shrink-0"
               >
-                <X size={11} /> Clear all
+                <X size={12} /> Clear all
               </button>
             )}
 
