@@ -8,7 +8,6 @@ import {
   getInvoiceDateForTaskMonth,
   buildBillingPeriod,
   toSequenceMonth,
-  formatInvoiceNumber,
 } from '@/lib/invoices/numbering'
 import { createClient } from '@/lib/supabase/client'
 import {
@@ -673,9 +672,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   const createManualInvoice = useCallback(async function createManualInvoiceImpl() {
     if (!newForm.client_id) { toastError('Select a client'); return }
     setSaving(true)
+    const client = clients.find(c => c.id === newForm.client_id)
+    const clientCode = client?.code || 'CLI'
     const invoiceDate = new Date(newForm.issue_date)
-    const { invoiceNumber: invNum, sequenceMonth, sequenceNumber } =
-      await generateInvoiceNumber(supabase, invoiceDate)
+    const { invoiceNumber: invNum, sequenceMonth } =
+      await generateInvoiceNumber(supabase, invoiceDate, clientCode)
 
     const validItems = newForm.items.filter(it => it.description.trim())
     const subtotal = validItems.reduce((s, it) => s + it.total, 0)
@@ -693,7 +694,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     // Update extended columns if migration has been run (silently ignored if not)
     await supabase.from('invoices').update({
       subtotal, tax_rate: 0, tax_amount: 0, discount_amount: 0, previous_balance: 0,
-      invoice_sequence_month: sequenceMonth, invoice_sequence_number: sequenceNumber,
+      invoice_sequence_month: sequenceMonth,
     }).eq('id', inv.id)
 
     if (validItems.length) {
@@ -776,14 +777,16 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const from   = genForm.mode === 'day' ? genForm.specific_date : genForm.date_from
     const to     = genForm.mode === 'day' ? genForm.specific_date : genForm.date_to
 
-    const { invoiceNumber: invNum, sequenceMonth, sequenceNumber } =
-      await generateInvoiceNumber(supabase, new Date())
+    const clientCode = client?.code || 'CLI'
+    const today = new Date()
+    const { invoiceNumber: invNum, sequenceMonth } =
+      await generateInvoiceNumber(supabase, today, clientCode)
 
     const subtotal = selected.reduce((s, t) => s + (t.billing_amount_inr || 0), 0)
     // Base insert — columns that always exist
     const { data: inv, error } = await supabase.from('invoices').insert({
       invoice_number: invNum, client_id: genForm.client_id, status: 'draft',
-      issue_date: new Date().toISOString().split('T')[0],
+      issue_date: today.toISOString().split('T')[0],
       total_amount: subtotal, paid_amount: 0,
       currency: client?.default_currency || 'INR',
     }).select('*, client:clients(id,name,code,phone,email,address)').single()
@@ -794,7 +797,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     await supabase.from('invoices').update({
       billing_period_start: from, billing_period_end: to,
       subtotal, tax_rate: 0, tax_amount: 0, discount_amount: 0, previous_balance: 0,
-      invoice_sequence_month: sequenceMonth, invoice_sequence_number: sequenceNumber,
+      invoice_sequence_month: sequenceMonth,
     }).eq('id', inv.id)
 
     await supabase.from('invoice_items').insert(
@@ -916,8 +919,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         // Use proper billing cycle: tasks in Aug → invoice issued Sep 1
         const invoiceDate = getInvoiceDateForTaskMonth(group.month)
         const billingPeriod = buildBillingPeriod(group.month)
-        const { invoiceNumber: invNum, sequenceMonth, sequenceNumber } =
-          await generateInvoiceNumber(supabase, invoiceDate)
+        const { invoiceNumber: invNum, sequenceMonth } =
+          await generateInvoiceNumber(supabase, invoiceDate, group.client_code)
 
         const { data: inv, error } = await supabase.from('invoices').insert({
           invoice_number: invNum,
@@ -937,7 +940,6 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           billing_period_end: billingPeriod.billing_period_end,
           billing_period_label: billingPeriod.billing_period_label,
           invoice_sequence_month: sequenceMonth,
-          invoice_sequence_number: sequenceNumber,
           subtotal: group.total, tax_rate: 0, tax_amount: 0, discount_amount: 0, previous_balance: 0,
         }).eq('id', inv.id)
 
