@@ -32,6 +32,17 @@ import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { ClientEditModal } from '@/components/ui/client-edit-modal'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+interface StatementLedgerRow {
+  invoiceNumber?: string
+  client?: string
+  date?: string
+  type?: string
+  description?: string
+  details?: string
+  amount?: number
+  balance?: number
+}
+
 interface TaskRef {
   id: string; title: string; task_date: string
   status: string; billing_amount_inr: number; currency: string
@@ -1388,6 +1399,185 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
     const w = window.open('', '_blank', 'width=900,height=900')
     if (w) { w.document.write(html); w.document.close(); setTimeout(() => w.print(), 400) }
+  }
+
+  function exportDetailedStatementCSV() {
+    // Determine date range (same logic as printDetailedStatement)
+    let from = '', to = '', periodLabel = ''
+    if (stmtForm.mode === 'month') {
+      from = stmtForm.month + '-01'
+      const d = new Date(stmtForm.month + '-01')
+      const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
+      to = `${stmtForm.month}-${lastDay}`
+      periodLabel = new Date(from + 'T00:00:00').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
+    } else if (stmtForm.mode === 'year') {
+      from = `${stmtForm.year}-01-01`; to = `${stmtForm.year}-12-31`
+      periodLabel = stmtForm.year
+    } else if (stmtForm.mode === 'day') {
+      from = to = stmtForm.specific_date
+      periodLabel = fmtDate(stmtForm.specific_date)
+    } else {
+      from = stmtForm.date_from; to = stmtForm.date_to
+      periodLabel = from && to ? `${fmtDate(from)} – ${fmtDate(to)}` : 'Custom range'
+    }
+
+    const client = stmtForm.client_id ? clients.find(c => c.id === stmtForm.client_id) : null
+    const stmtInvoices = invoices.filter(inv => {
+      if (stmtForm.client_id && inv.client_id !== stmtForm.client_id) return false
+      const d = inv.issue_date || inv.created_at?.slice(0, 10) || ''
+      return d >= from && d <= to
+    }).sort((a, b) => (a.issue_date || '').localeCompare(b.issue_date || ''))
+
+    // Normalize ledger rows into custom array structure
+    const ledgerRows: StatementLedgerRow[] = []
+    let runningBalance = 0
+
+    for (const inv of stmtInvoices) {
+      const invTotal = inv.total_amount || 0
+      const discount = inv.discount_amount || 0
+      const prevBal = inv.previous_balance || 0
+      const sortedItems = [...(inv.items || [])].sort((a, b) => a.display_order - b.display_order)
+      const clientName = inv.client?.name || ''
+
+      // Invoice Header Info Row
+      ledgerRows.push({
+        invoiceNumber: inv.invoice_number,
+        client: clientName,
+        date: inv.issue_date ? inv.issue_date : undefined,
+        type: 'Invoice Header',
+        description: `Invoice ${inv.invoice_number} Issued`,
+        details: inv.due_date ? `Due ${inv.due_date}` : '',
+        amount: invTotal,
+        balance: runningBalance
+      })
+
+      // Previous Balance Carry-over
+      if (prevBal > 0) {
+        runningBalance += prevBal
+        ledgerRows.push({
+          invoiceNumber: inv.invoice_number,
+          client: clientName,
+          date: inv.issue_date ? inv.issue_date : undefined,
+          type: 'Prev. Balance',
+          description: '↩ Carry-over balance',
+          details: 'Previous balance carry-over',
+          amount: prevBal,
+          balance: runningBalance
+        })
+      }
+
+      // Line items (tasks)
+      for (const it of sortedItems) {
+        runningBalance += it.total
+        const isCancelled = it.task?.status === 'cancelled'
+        
+        ledgerRows.push({
+          invoiceNumber: inv.invoice_number,
+          client: clientName,
+          date: it.task?.task_date || inv.issue_date || undefined,
+          type: isCancelled ? 'Cancelled' : 'Billed',
+          description: (isCancelled ? '✗ ' : '') + it.description,
+          details: it.service?.name || '',
+          amount: isCancelled ? 0 : it.total,
+          balance: isCancelled ? runningBalance - it.total : runningBalance
+        })
+
+        if (isCancelled) {
+          runningBalance -= it.total
+        }
+      }
+
+      // Discount
+      if (discount > 0) {
+        runningBalance -= discount
+        ledgerRows.push({
+          invoiceNumber: inv.invoice_number,
+          client: clientName,
+          date: inv.issue_date || undefined,
+          type: 'Discount',
+          description: '🏷 Discount applied',
+          details: '',
+          amount: -discount,
+          balance: runningBalance
+        })
+      }
+
+      // Payments
+      for (const pmt of (inv.payments || [])) {
+        runningBalance -= pmt.amount
+        const methodLabels: Record<string, string> = { 
+          bank_transfer: 'Bank Transfer', cash: 'Cash', upi: 'UPI', 
+          cheque: 'Cheque', online: 'Online', other: 'Other' 
+        }
+        const detailsText = [
+          methodLabels[pmt.payment_method] || pmt.payment_method,
+          pmt.reference ? pmt.reference : null
+        ].filter(Boolean).join(' · ')
+
+        ledgerRows.push({
+          invoiceNumber: inv.invoice_number,
+          client: clientName,
+          date: pmt.payment_date || undefined,
+          type: 'Payment',
+          description: '✓ Payment received',
+          details: detailsText,
+          amount: -pmt.amount,
+          balance: Math.max(0, runningBalance)
+        })
+      }
+    }
+
+    // Escape CSV utility
+    function escapeCSVValue(val: any): string {
+      if (val === undefined || val === null) return ''
+      let str = String(val)
+      str = str.replace(/"/g, '""')
+      if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+        return `"${str}"`
+      }
+      return str
+    }
+
+    // Compile CSV Content
+    const headers = ['Invoice Number', 'Client', 'Date', 'Type', 'Description', 'Details', 'Amount', 'Balance']
+    const csvLines = [headers.join(',')]
+
+    for (const row of ledgerRows) {
+      const line = [
+        escapeCSVValue(row.invoiceNumber),
+        escapeCSVValue(row.client),
+        escapeCSVValue(row.date),
+        escapeCSVValue(row.type),
+        escapeCSVValue(row.description),
+        escapeCSVValue(row.details),
+        row.amount !== undefined ? row.amount.toFixed(2) : '',
+        row.balance !== undefined ? row.balance.toFixed(2) : ''
+      ]
+      csvLines.push(line.join(','))
+    }
+
+    // Append closing balance row for clarity if invoices exist
+    if (ledgerRows.length > 0) {
+      csvLines.push([
+        '', '', '', 'Summary', 'Closing Balance', '', '', runningBalance.toFixed(2)
+      ].map(escapeCSVValue).join(','))
+    }
+
+    const csvString = csvLines.join('\n')
+    
+    // Auto-download attachment with UTF-8 BOM
+    const blob = new Blob(['\uFEFF' + csvString], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    const finalClientName = client?.name || 'All_Clients'
+    const cleanClientName = finalClientName.replace(/[^a-z0-9]/gi, '_').toLowerCase()
+    const cleanPeriodLabel = periodLabel.replace(/[^a-z0-9\-_]/gi, '_').toLowerCase()
+    
+    link.setAttribute('href', url)
+    link.setAttribute('download', `statement_${cleanClientName}_${cleanPeriodLabel}.csv`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
   }
 
   async function loadDiscountAnalytics() {
@@ -3456,6 +3646,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               className="w-full py-2.5 px-4 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 disabled:opacity-40 disabled:cursor-not-allowed border border-blue-500/30 text-blue-300 text-sm font-medium transition-colors flex items-center justify-center gap-2">
               <FileText className="w-4 h-4" />Print Detailed Statement
               <span className="text-[10px] opacity-60">(tasks · payments)</span>
+            </button>
+            <button type="button" onClick={exportDetailedStatementCSV} disabled={sInvoices.length === 0}
+              className="w-full py-2.5 px-4 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 disabled:opacity-40 disabled:cursor-not-allowed border border-emerald-500/30 text-emerald-300 text-sm font-medium transition-colors flex items-center justify-center gap-2">
+              <Download className="w-4 h-4" />Export CSV
+              <span className="text-[10px] opacity-60">(ledger worksheet)</span>
             </button>
           </div>
 

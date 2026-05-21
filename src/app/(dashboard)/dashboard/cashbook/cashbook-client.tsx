@@ -4,11 +4,12 @@ import { useState, useMemo } from 'react'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { formatCompact } from '@/lib/calculations/currency'
-import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2 } from 'lucide-react'
+import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save } from 'lucide-react'
 import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
 import type { Currency } from '@/types'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import AllocationModal from '@/components/cashbook/allocation-modal'
 
 import Link from 'next/link'
 
@@ -27,6 +28,7 @@ interface Entry {
   deleted_at?: string | null
   category?: { id: string; name: string; type: string }
   bank_account?: { id: string; name: string }
+  allocations?: { id: string; invoice_id: string; allocated_amount: number; deleted_at?: string | null }[]
 }
 
 interface DueInvoice {
@@ -72,6 +74,13 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   const [filterType, setFilterType] = useState('')
   const [filterMonth, setFilterMonth] = useState('')
   const [recurringMonths, setRecurringMonths] = useState(0) // 0 = not recurring
+
+  // Inline edit state
+  const [editingRow, setEditingRow] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState<Partial<Entry>>({})
+  
+  // Allocations modal state
+  const [allocatingEntry, setAllocatingEntry] = useState<Entry | null>(null)
 
   const invoiceCategoryId = categories.find(c => c.name?.toLowerCase() === 'invoice' && (c.type === 'inflow' || c.type === 'both'))?.id || ''
 
@@ -179,6 +188,30 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       setShowForm(false)
       setRecurringMonths(0)
       setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: '', amount: '', currency: 'INR', entry_date: new Date().toISOString().split('T')[0], description: '', reference: '', linked_invoice_id: '', fully_paid: false })
+    }
+    setSaving(false)
+  }
+
+  async function handleInlineSave() {
+    if (!editingRow) return
+    setSaving(true)
+    const { error } = await supabase
+      .from('cashbook_entries')
+      .update({
+        entry_date: editForm.entry_date,
+        amount: editForm.amount,
+        amount_inr: getInrAmount(Number(editForm.amount) || 0, editForm.currency as Currency),
+        currency: editForm.currency,
+        category_id: editForm.category_id,
+        bank_account_id: editForm.bank_account_id || null,
+        description: editForm.description,
+        reference: editForm.reference,
+      })
+      .eq('id', editingRow)
+
+    if (!error) {
+      setEntries(prev => prev.map(e => e.id === editingRow ? { ...e, ...editForm, amount_inr: getInrAmount(Number(editForm.amount) || 0, editForm.currency as Currency) } : e))
+      setEditingRow(null)
     }
     setSaving(false)
   }
@@ -315,32 +348,106 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               {filteredEntries.length === 0 && (
                 <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-muted-foreground">No entries found</td></tr>
               )}
-              {filteredEntries.map(entry => (
-                <tr key={entry.id} className="hover:bg-secondary/20 transition-colors group">
-                  <td className="px-4 py-3 text-muted-foreground text-xs">{entry.entry_date}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-1.5 h-1.5 rounded-full ${entry.type === 'inflow' ? 'bg-green-400' : 'bg-red-400'}`} />
-                      <span className="text-sm">{entry.category?.name || '—'}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-sm text-muted-foreground">{entry.description || '—'}</td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground">{entry.bank_account?.name || 'Cash'}</td>
-                  <td className={`px-4 py-3 text-right font-semibold ${entry.type === 'inflow' ? 'text-green-400' : 'text-red-400'}`}>
-                    {entry.type === 'inflow' ? '+' : '-'}₹{(entry.amount_inr || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                    {entry.currency !== 'INR' && <span className="text-xs text-muted-foreground ml-1">({entry.currency} {entry.amount?.toLocaleString()})</span>}
-                  </td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => handleSoftDelete(entry.id)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
-                      title="Delete entry (reversible)"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {filteredEntries.map(entry => {
+                const totalAlloc = entry.allocations?.filter(a => !a.deleted_at).reduce((s, a) => s + Number(a.allocated_amount), 0) || 0
+                const isInvoice = entry.category_id === invoiceCategoryId
+                const unallocated = (entry.amount_inr || 0) - totalAlloc
+                const allocStatus = !isInvoice ? null : unallocated <= 0.01 && unallocated >= -0.01 ? 'fully' : unallocated > 0.01 && totalAlloc > 0 ? 'partial' : unallocated < -0.01 ? 'over' : 'none'
+                const isEditing = editingRow === entry.id
+
+                return (
+                  <tr key={entry.id} className="hover:bg-secondary/20 transition-colors group">
+                    <td className="px-4 py-3 text-muted-foreground text-xs">
+                      {isEditing ? (
+                        <input type="date" value={editForm.entry_date || ''} onChange={e => setEditForm(p => ({...p, entry_date: e.target.value}))} className="bg-background border rounded px-2 py-1" />
+                      ) : (
+                        entry.entry_date
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-1.5 h-1.5 rounded-full ${entry.type === 'inflow' ? 'bg-green-400' : 'bg-red-400'}`} />
+                        {isEditing ? (
+                          <select value={editForm.category_id || ''} onChange={e => setEditForm(p => ({...p, category_id: e.target.value}))} className="bg-background border rounded px-2 py-1 text-xs">
+                            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
+                        ) : (
+                          <span className="text-sm">{entry.category?.name || '—'}</span>
+                        )}
+                      </div>
+                      {/* Allocation Badges */}
+                      {allocStatus === 'none' && <span className="inline-block mt-1 bg-amber-500/10 text-amber-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Unallocated</span>}
+                      {allocStatus === 'partial' && <span className="inline-block mt-1 bg-blue-500/10 text-blue-400 text-[9px] px-1.5 py-0.5 rounded font-medium">Partially Allocated</span>}
+                      {allocStatus === 'over' && <span className="inline-block mt-1 bg-red-500/10 text-red-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Over-allocated!</span>}
+                      {allocStatus === 'fully' && <span className="inline-block mt-1 bg-green-500/10 text-green-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Fully Allocated</span>}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">
+                      {isEditing ? (
+                        <input type="text" value={editForm.description || ''} onChange={e => setEditForm(p => ({...p, description: e.target.value}))} className="bg-background border rounded px-2 py-1 w-full text-xs" />
+                      ) : (
+                        entry.description || '—'
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                      {isEditing ? (
+                        <select value={editForm.bank_account_id || ''} onChange={e => setEditForm(p => ({...p, bank_account_id: e.target.value}))} className="bg-background border rounded px-2 py-1">
+                          <option value="">Cash</option>
+                          {bankAccounts.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                        </select>
+                      ) : (
+                        entry.bank_account?.name || 'Cash'
+                      )}
+                    </td>
+                    <td className={`px-4 py-3 text-right font-semibold ${entry.type === 'inflow' ? 'text-green-400' : 'text-red-400'}`}>
+                      {isEditing ? (
+                        <div className="flex gap-1 justify-end">
+                          <input type="number" value={editForm.amount || ''} onChange={e => setEditForm(p => ({...p, amount: Number(e.target.value)}))} className="bg-background border rounded px-2 py-1 w-20 text-xs" />
+                          <select value={editForm.currency || ''} onChange={e => setEditForm(p => ({...p, currency: e.target.value as Currency}))} className="bg-background border rounded px-1 py-1 text-xs">
+                            {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                        </div>
+                      ) : (
+                        <>
+                          {entry.type === 'inflow' ? '+' : '-'}₹{(entry.amount_inr || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          {entry.currency !== 'INR' && <span className="text-xs text-muted-foreground ml-1">({entry.currency} {entry.amount?.toLocaleString()})</span>}
+                        </>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        {isEditing ? (
+                          <>
+                            <button onClick={handleInlineSave} disabled={saving} className="p-1.5 rounded-md hover:bg-primary/20 text-primary transition-colors" title="Save changes"><Save className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => setEditingRow(null)} disabled={saving} className="p-1.5 rounded-md hover:bg-secondary/80 text-muted-foreground transition-colors" title="Cancel"><X className="w-3.5 h-3.5" /></button>
+                          </>
+                        ) : (
+                          <>
+                            {isInvoice && (
+                              <button
+                                onClick={() => setAllocatingEntry(entry)}
+                                className={`opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-blue-500/10 ${allocStatus === 'fully' ? 'text-blue-500' : 'text-muted-foreground hover:text-blue-400'}`}
+                                title="Manage allocations"
+                              >
+                                <LinkIcon className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            <button onClick={() => { setEditingRow(entry.id); setEditForm(entry); }} className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary" title="Edit entry">
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleSoftDelete(entry.id)}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+                              title="Delete entry (reversible)"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
           </div>
@@ -656,6 +763,21 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             </form>
           </div>
         </ModalOverlay>
+      )}
+
+      {/* Allocation Modal */}
+      {allocatingEntry && (
+        <AllocationModal
+          entryId={allocatingEntry.id}
+          amountInr={allocatingEntry.amount_inr}
+          dueInvoices={sortedDueInvoices}
+          onClose={() => setAllocatingEntry(null)}
+          onUpdate={() => {
+            // In a real app we'd refetch or invalidate here. 
+            // For now, reloading page is simplest to get fresh nested relations safely without complex state updates.
+            window.location.reload()
+          }}
+        />
       )}
     </div>
   )

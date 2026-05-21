@@ -7,7 +7,17 @@ export default async function CashBookPage() {
   const [entriesRes, categoriesRes, bankAccountsRes, exchangeRatesRes, dueInvoicesRes, employeesRes, clientsRes, creditsRes] = await Promise.all([
     supabase
       .from('cashbook_entries')
-      .select(`*, category:cashbook_categories(id, name, type), bank_account:bank_accounts(id, name)`)
+      .select(`
+        *, 
+        category:cashbook_categories(id, name, type), 
+        bank_account:bank_accounts(id, name),
+        allocations:cashbook_invoice_allocations(
+          id, 
+          invoice_id, 
+          allocated_amount, 
+          invoice:invoices(invoice_number, status, due_date, total_amount, paid_amount, client:clients(name))
+        )
+      `)
       .is('deleted_at', null)
       .order('entry_date', { ascending: false })
       .limit(200),
