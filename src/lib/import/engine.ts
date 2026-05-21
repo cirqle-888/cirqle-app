@@ -5,13 +5,60 @@ export function norm(s: string): string {
   return s.toLowerCase().replace(/[\s_-]+/g, '_').replace(/[^a-z0-9_]/g, '').trim()
 }
 
-/** Normalize a date string to YYYY-MM-DD. Accepts DD-MM-YYYY or YYYY-MM-DD. */
+/** Normalize a date string to YYYY-MM-DD. Accepts DD-MM-YYYY, MM/DD/YYYY, and M/D/YY. */
 export function normalizeDate(s: string): string {
   if (!s) return ''
-  const ddmm = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/)
-  if (ddmm) return `${ddmm[3]}-${ddmm[2].padStart(2,'0')}-${ddmm[1].padStart(2,'0')}`
+  
+  // 1. Already YYYY-MM-DD
   const yyyymm = s.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/)
   if (yyyymm) return `${yyyymm[1]}-${yyyymm[2].padStart(2,'0')}-${yyyymm[3].padStart(2,'0')}`
+
+  // 2. Contains 3 parts
+  const parts = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2}|\d{4})$/)
+  if (parts) {
+    let p1 = parseInt(parts[1], 10)
+    let p2 = parseInt(parts[2], 10)
+    let y  = parseInt(parts[3], 10)
+    
+    if (y < 100) {
+      // 2-digit year (assume 2000+)
+      y += 2000
+    }
+    
+    let month: number
+    let day: number
+
+    if (p1 > 12) {
+      // p1 must be Day (e.g., 25/12/2023)
+      day = p1
+      month = p2
+    } else if (p2 > 12) {
+      // p2 must be Day (e.g., 12/25/2023)
+      month = p1
+      day = p2
+    } else {
+      // Ambiguous (e.g. 12/04/2023)
+      // Check separator: Excel often uses / for MM/DD/YYYY in US locales, - for DD-MM-YYYY
+      if (s.includes('/')) {
+        month = p1
+        day = p2
+      } else {
+        day = p1
+        month = p2
+      }
+    }
+
+    if (month > 12 || day > 31) return s
+
+    return `${y}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`
+  }
+
+  // 3. Native fallback
+  const d = new Date(s)
+  if (!isNaN(d.getTime())) {
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+  }
+
   return s
 }
 

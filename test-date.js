@@ -1,0 +1,10 @@
+const taskMonth = '2023-12';
+const [year, month] = taskMonth.split('-').map(Number);
+const invoiceYear  = month === 12 ? year + 1 : year;
+const invoiceMonth = month === 12 ? 1 : month + 1;
+const invoiceDate = new Date(invoiceYear, invoiceMonth - 1, 1);
+const yy = String(invoiceDate.getFullYear()).slice(-2);
+const mm = String(invoiceDate.getMonth() + 1).padStart(2, '0');
+const seq = `${yy}${mm}`;
+const iso = invoiceDate.toISOString().split('T')[0];
+console.log(`taskMonth: ${taskMonth}, local seq: ${seq}, iso string: ${iso}`);

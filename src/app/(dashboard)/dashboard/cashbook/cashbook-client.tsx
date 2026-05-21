@@ -4,11 +4,13 @@ import { useState, useMemo } from 'react'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { formatCompact } from '@/lib/calculations/currency'
-import { Plus, X, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2 } from 'lucide-react'
 import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
 import type { Currency } from '@/types'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+
+import Link from 'next/link'
 
 interface Entry {
   id: string
@@ -21,6 +23,8 @@ interface Entry {
   entry_date: string
   description?: string
   reference?: string
+  invoice_id?: string
+  deleted_at?: string | null
   category?: { id: string; name: string; type: string }
   bank_account?: { id: string; name: string }
 }
@@ -127,6 +131,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         ? `${form.description}${form.description ? ' ' : ''}(recurring ${i + 1}/${baseDates.length})`
         : form.description,
       reference: form.reference,
+      invoice_id: form.linked_invoice_id || null, // Storing strict database link
     }))
 
     const { data, error } = await supabase
@@ -165,17 +170,9 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         })
       }
 
-      // Mark invoice as paid/partial if linked (only on base entry)
-      if (form.linked_invoice_id) {
-        const inv = dueInvoices.find(i => i.id === form.linked_invoice_id)
-        if (inv) {
-          const newPaid = form.fully_paid
-            ? inv.total_amount
-            : (inv.paid_amount || 0) + (parseFloat(form.amount) || 0)
-          const newStatus = form.fully_paid || newPaid >= inv.total_amount ? 'paid' : 'partial'
-          await supabase.from('invoices').update({ paid_amount: newPaid, status: newStatus }).eq('id', form.linked_invoice_id)
-        }
-      }
+      // NOTE: Invoice paid_amount and status are now synchronized automatically 
+      // by the PostgreSQL trigger `sync_invoice_payments()` on cashbook_entries.
+      // We no longer manually update invoices here.
 
       // Add all inserted entries to local state (sorted newest first)
       setEntries(prev => [...[...allInserted].reverse(), ...prev])
@@ -184,6 +181,18 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: '', amount: '', currency: 'INR', entry_date: new Date().toISOString().split('T')[0], description: '', reference: '', linked_invoice_id: '', fully_paid: false })
     }
     setSaving(false)
+  }
+
+  async function handleSoftDelete(entryId: string) {
+    if (!confirm('Delete this entry? It can be restored from the Reconciliation Toolkit.')) return
+    const { error } = await supabase
+      .from('cashbook_entries')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', entryId)
+    if (!error) {
+      // Remove from local list immediately (soft-deleted entries are hidden)
+      setEntries(prev => prev.filter(e => e.id !== entryId))
+    }
   }
 
   const today = new Date().toISOString().split('T')[0]
@@ -227,10 +236,20 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         title="Cash Book"
         subtitle="Track all income and expenses"
         actions={
-          <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90 transition-opacity">
-            <Plus className="w-4 h-4" />
-            Add Entry
-          </button>
+          <div className="flex gap-3">
+            <Link href="/dashboard/cashbook/reconciliation" className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-4 py-2 rounded-lg hover:bg-secondary/80 transition-colors">
+              <ShieldAlert className="h-4 w-4" />
+              Reconciliation
+            </Link>
+            <Link href="/dashboard/import?tab=cashbook_entries" className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-4 py-2 rounded-lg hover:bg-secondary/80 transition-colors">
+              <Upload className="w-4 h-4" />
+              Import
+            </Link>
+            <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90 transition-opacity">
+              <Plus className="w-4 h-4" />
+              Add Entry
+            </button>
+          </div>
         }
       />
 
@@ -289,14 +308,15 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Description</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Account</th>
                 <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground">Amount</th>
+                <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {filteredEntries.length === 0 && (
-                <tr><td colSpan={5} className="px-4 py-10 text-center text-sm text-muted-foreground">No entries found</td></tr>
+                <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-muted-foreground">No entries found</td></tr>
               )}
               {filteredEntries.map(entry => (
-                <tr key={entry.id} className="hover:bg-secondary/20 transition-colors">
+                <tr key={entry.id} className="hover:bg-secondary/20 transition-colors group">
                   <td className="px-4 py-3 text-muted-foreground text-xs">{entry.entry_date}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
@@ -309,6 +329,15 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                   <td className={`px-4 py-3 text-right font-semibold ${entry.type === 'inflow' ? 'text-green-400' : 'text-red-400'}`}>
                     {entry.type === 'inflow' ? '+' : '-'}₹{(entry.amount_inr || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                     {entry.currency !== 'INR' && <span className="text-xs text-muted-foreground ml-1">({entry.currency} {entry.amount?.toLocaleString()})</span>}
+                  </td>
+                  <td className="px-4 py-3">
+                    <button
+                      onClick={() => handleSoftDelete(entry.id)}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+                      title="Delete entry (reversible)"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </td>
                 </tr>
               ))}

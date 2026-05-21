@@ -104,7 +104,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   // ── State ──────────────────────────────────────────────────────────────────
   const [invoices, setInvoices] = useState<Invoice[]>(initialInvoices.map(inv => ({
     ...inv,
-    subtotal: inv.subtotal ?? inv.total_amount ?? 0,
+    subtotal: (inv as any).subtotal || ((inv.total_amount || 0) + ((inv as any).discount_amount || 0) - ((inv as any).tax_amount || 0) - ((inv as any).previous_balance || 0)),
     tax_rate: inv.tax_rate ?? 0,
     tax_amount: inv.tax_amount ?? 0,
     discount_amount: inv.discount_amount ?? 0,
@@ -973,7 +973,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
     if (newInvoices) setInvoices(newInvoices.map(inv => ({
       ...inv,
-      subtotal: (inv as any).subtotal ?? inv.total_amount ?? 0,
+      subtotal: (inv as any).subtotal || ((inv.total_amount || 0) + ((inv as any).discount_amount || 0) - ((inv as any).tax_amount || 0) - ((inv as any).previous_balance || 0)),
       tax_rate: (inv as any).tax_rate ?? 0,
       tax_amount: (inv as any).tax_amount ?? 0,
       discount_amount: (inv as any).discount_amount ?? 0,
@@ -1485,12 +1485,12 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const NAVY_LIGHT = companySettings.invoice_accent_color  || '#243459'
     const FONT       = companySettings.invoice_font          || 'Arial, Helvetica, sans-serif'
     const sortedItems = [...(inv.items || [])].sort((a, b) => a.display_order - b.display_order)
-    const subtotal = inv.subtotal || inv.total_amount || 0
+    const subtotal = inv.subtotal || ((inv.total_amount || 0) + (inv.discount_amount || 0) - (inv.tax_amount || 0) - (inv.previous_balance || 0))
     const prevBal  = inv.previous_balance || 0
     const totalDue = subtotal + prevBal
     const discount = inv.discount_amount || 0
     const taxAmt   = inv.tax_amount || 0
-    const totalPayable = totalDue + taxAmt - discount
+    const totalPayable = inv.total_amount || 0
 
     // Format date as DD/MM/YYYY
     function dd(d?: string) {
@@ -1659,27 +1659,24 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         <!-- Totals box -->
         <table style="width:100%;border-collapse:collapse">
           <tr style="border-bottom:1px solid #e8edf5">
-            <td style="padding:7px 12px;font-size:12px;color:#555">Total Amount</td>
+            <td style="padding:7px 12px;font-size:12px;color:#555">Subtotal</td>
             <td style="padding:7px 12px;text-align:right;font-size:12px;font-weight:600">${inr(subtotal)}</td>
           </tr>
+          ${discount > 0 ? `
+          <tr style="border-bottom:1px solid #e8edf5">
+            <td style="padding:7px 12px;font-size:12px;color:#555">Discount</td>
+            <td style="padding:7px 12px;text-align:right;font-size:12px;color:#27ae60;font-weight:600">- ${inr(discount)}</td>
+          </tr>` : ''}
+          ${taxAmt > 0 ? `
+          <tr style="border-bottom:1px solid #e8edf5">
+            <td style="padding:7px 12px;font-size:12px;color:#555">Tax (${inv.tax_rate || 0}%)</td>
+            <td style="padding:7px 12px;text-align:right;font-size:12px;font-weight:600">+ ${inr(taxAmt)}</td>
+          </tr>` : ''}
           ${prevBal > 0 ? `
           <tr style="border-bottom:1px solid #e8edf5">
             <td style="padding:7px 12px;font-size:12px;color:#c0392b">Previous Balance</td>
             <td style="padding:7px 12px;text-align:right;font-size:12px;color:#c0392b;font-weight:600">+ ${inr(prevBal)}</td>
           </tr>` : ''}
-          <tr style="border-bottom:1px solid #e8edf5">
-            <td style="padding:7px 12px;font-size:12px;color:#555">Total Amount Due</td>
-            <td style="padding:7px 12px;text-align:right;font-size:12px;font-weight:600">${inr(totalDue)}</td>
-          </tr>
-          ${taxAmt > 0 ? `
-          <tr style="border-bottom:1px solid #e8edf5">
-            <td style="padding:7px 12px;font-size:12px;color:#555">Tax (${inv.tax_rate || 0}%)</td>
-            <td style="padding:7px 12px;text-align:right;font-size:12px">${inr(taxAmt)}</td>
-          </tr>` : ''}
-          <tr style="border-bottom:1px solid #e8edf5">
-            <td style="padding:7px 12px;font-size:12px;color:#555">Discount (if applicable)</td>
-            <td style="padding:7px 12px;text-align:right;font-size:12px;color:#27ae60">${discount > 0 ? '- ' + inr(discount) : '—'}</td>
-          </tr>
           <tr style="background:${NAVY}">
             <td style="padding:10px 12px;font-size:13px;font-weight:700;color:white">Total Payable</td>
             <td style="padding:10px 12px;text-align:right;font-size:14px;font-weight:900;color:white">: &nbsp;${inr(totalPayable)}</td>

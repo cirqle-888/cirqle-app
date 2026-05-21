@@ -25,6 +25,9 @@ export const CASHBOOK_FIELDS: FieldDef[] = [
     parse: (v) => v ? parseFloat(v) : null },
   { col: 'description',  db: 'description',  example: 'Monthly payment from Sea Star', notes: 'Description', default: null },
   { col: 'reference',    db: 'reference',    example: '',           notes: 'Reference number or note', default: null },
+  { col: 'invoice_number', db: false,        example: 'INV-2503-001', notes: 'Recommended for invoice-linked payments', default: null },
+  { col: 'client_name',  db: false,          example: 'Sea Star Logistics', notes: 'For reference only', default: null },
+  { col: 'notes',        db: false,          example: 'Paid in full', notes: 'Additional notes', default: null },
 ]
 
 // ── Invoices ─────────────────────────────────────────────────────────────────

@@ -19,9 +19,9 @@ export const JOB_FIELDS: FieldDef[] = [
   { col: 'service_name',         db: false,                  example: 'Offer Flyer',           notes: 'Service name',
     aliases: ['service'],
     validate: (v, _row, ctx) => v && !ctx.serviceMap[norm(v)] ? { warn: `Service "${v}" not found` } : null },
-  { col: 'task_date',            db: 'task_date',            example: '2026-05-01',            notes: 'DD-MM-YYYY or YYYY-MM-DD', req: true,
+  { col: 'task_date',            db: 'task_date',            example: '04-Dec-2023',            notes: 'DD-MMM-YYYY (e.g. 04-Dec-2023) or DD-MM-YYYY', req: true,
     parse: (v) => normalizeDate(v),
-    validate: (v) => v && !/^\d{4}-\d{2}-\d{2}$/.test(v) ? 'task_date must be DD-MM-YYYY (e.g. 18-05-2026)' : null },
+    validate: (v) => v && !/^\d{4}-\d{2}-\d{2}$/.test(v) ? 'task_date must be DD-MMM-YYYY (e.g. 04-Dec-2023)' : null },
   { col: 'billing_amount',       db: 'billing_amount',       example: '500', notes: 'Amount in task currency',
     parse: (v) => parseFloat(v) || 0, default: 0 },
   { col: 'billing_amount_inr',   db: 'billing_amount_inr',   example: '500', notes: 'Amount in INR (if currency ≠ INR, set both)',
@@ -38,11 +38,11 @@ export const JOB_FIELDS: FieldDef[] = [
     parse: (v) => ['true','TRUE','1'].includes(v) },
   { col: 'recurring_interval',   db: 'recurring_interval',   example: '',    notes: VALID_INTERVALS.join(' | '), default: null,
     validate: (v) => v && !VALID_INTERVALS.includes(v as any) ? `recurring_interval "${v}" invalid` : null },
-  { col: 'recurring_end_date',   db: 'recurring_end_date',   example: '',    notes: 'DD-MM-YYYY — when the recurring series ends', default: null,
+  { col: 'recurring_end_date',   db: 'recurring_end_date',   example: '',    notes: 'DD-MMM-YYYY — when the recurring series ends', default: null,
     parse: (v) => v ? normalizeDate(v) : null,
-    validate: (v) => v && !/^\d{4}-\d{2}-\d{2}$/.test(v) ? 'recurring_end_date must be DD-MM-YYYY' : null },
+    validate: (v) => v && !/^\d{4}-\d{2}-\d{2}$/.test(v) ? 'recurring_end_date must be DD-MMM-YYYY (e.g. 31-Dec-2026)' : null },
 ]
 
 export const JOB_EXTRA_EXAMPLES = [
-  '"","","Branding Kit","B.N. Mart Supermarket","Revised Offer Flyer","2026-04-15","200","200","INR","1","done","","false","",""',
+  '"","","Branding Kit","B.N. Mart Supermarket","Revised Offer Flyer","15-Apr-2026","200","200","INR","1","done","","false","",""',
 ]

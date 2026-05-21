@@ -228,6 +228,16 @@ function normalizeDate(raw: string): string {
     const [, d, m, y] = dmy
     return `${y}-${m}-${d}`
   }
+  
+  // Attempt standard JS Date parse (handles "04-December-2023, Monday")
+  const parsed = new Date(s)
+  if (!isNaN(parsed.getTime())) {
+    const y = parsed.getFullYear()
+    const m = String(parsed.getMonth() + 1).padStart(2, '0')
+    const d = String(parsed.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }
+
   return s  // return as-is; validation will catch it
 }
 
@@ -765,7 +775,7 @@ export default function ImportClient({ clients, services, employees, groups, par
     })
   }
 
-  function parseCashbookEntries(lines: string[][]): ParsedRow[] {
+  async function parseCashbookEntries(lines: string[][]): Promise<ParsedRow[]> {
     const h = lines[0].map(norm)
     const iId       = h.findIndex(c => c === 'id')
     const iDate     = h.findIndex(c => c.includes('entry_date') || c.includes('date'))
@@ -777,6 +787,11 @@ export default function ImportClient({ clients, services, employees, groups, par
     const iAmtInr   = h.findIndex(c => c.includes('amount_inr') || c.includes('inr'))
     const iDesc     = h.findIndex(c => c.includes('description') || c.includes('desc'))
     const iRef      = h.findIndex(c => c.includes('reference') || c.includes('ref'))
+    const iInvNum   = h.findIndex(c => c.includes('invoicenumber') || c.includes('invoice_number'))
+
+    const { data: invRows } = await supabase.from('invoices').select('id, invoice_number')
+    const invMap: Record<string, string> = {}
+    ;(invRows || []).forEach(inv => { invMap[inv.invoice_number.toUpperCase()] = inv.id })
 
     return lines.slice(1).map((c, i) => {
       const g = (j: number) => j >= 0 ? c[j]?.trim() || '' : ''
@@ -795,6 +810,32 @@ export default function ImportClient({ clients, services, employees, groups, par
         bank_account_id: bankName ? bankAccountMap[norm(bankName)] : undefined,
         amount, currency, amount_inr: amtInr,
         description: g(iDesc), reference: g(iRef),
+      }
+      
+      const providedInvNum = g(iInvNum)
+      
+      if (providedInvNum) {
+        // Strict lookup
+        const strictMatch = invMap[providedInvNum.toUpperCase()]
+        if (strictMatch) {
+          r.invoice_id = strictMatch
+        } else {
+          r.errors.push(`Invoice number "${providedInvNum}" not found in database. Cannot auto-link.`)
+        }
+      } else {
+        // Legacy fallback to reference parsing
+        if (r.reference) {
+          const refUpper = r.reference.toUpperCase()
+          const matchedInv = Object.keys(invMap).find(num => refUpper.includes(num))
+          if (matchedInv) {
+            r.invoice_id = invMap[matchedInv]
+          }
+        }
+        
+        // Warn if invoice category but no invoice number provided
+        if (norm(catName) === 'invoice' && !r.invoice_id) {
+          r.warnings.push('Invoice payment detected without invoice_number. Auto-linking may be unreliable.')
+        }
       }
       if (!r.entry_date) r.errors.push('entry_date is required')
       else if (!/^\d{4}-\d{2}-\d{2}$/.test(r.entry_date)) r.errors.push('entry_date must be DD-MM-YYYY')
@@ -973,7 +1014,7 @@ export default function ImportClient({ clients, services, employees, groups, par
       case 'pricing_matrix': parsed = parsePricingMatrix(lines);     break
       case 'jobs':           parsed = parseJobs(lines);              break
       case 'contributions': parsed = await parseContributions(lines); break
-      case 'cashbook_entries': parsed = parseCashbookEntries(lines);        break
+      case 'cashbook_entries': parsed = await parseCashbookEntries(lines);  break
       case 'invoices':         parsed = parseInvoices(lines);               break
       case 'invoice_status':   parsed = await parseInvoiceStatus(lines);    break
       case 'discounts':        parsed = await parseDiscounts(lines);        break
@@ -1401,6 +1442,7 @@ export default function ImportClient({ clients, services, employees, groups, par
             amount_inr:      parseFloat(r.amount_inr || r.amount) || 0,
             description:     r.description || null,
             reference:       r.reference || null,
+            invoice_id:      r.invoice_id || null,
           },
         }))
         if (operation === 'update') {

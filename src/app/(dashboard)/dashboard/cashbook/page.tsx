@@ -8,6 +8,7 @@ export default async function CashBookPage() {
     supabase
       .from('cashbook_entries')
       .select(`*, category:cashbook_categories(id, name, type), bank_account:bank_accounts(id, name)`)
+      .is('deleted_at', null)
       .order('entry_date', { ascending: false })
       .limit(200),
     supabase.from('cashbook_categories').select('*').order('type').order('name'),
