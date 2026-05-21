@@ -28,7 +28,20 @@ interface Entry {
   deleted_at?: string | null
   category?: { id: string; name: string; type: string }
   bank_account?: { id: string; name: string }
-  allocations?: { id: string; invoice_id: string; allocated_amount: number; deleted_at?: string | null }[]
+  allocations?: { 
+    id: string; 
+    invoice_id: string; 
+    allocated_amount: number; 
+    deleted_at?: string | null;
+    invoice?: {
+      invoice_number: string;
+      status: string;
+      due_date: string;
+      total_amount: number;
+      paid_amount: number;
+      client?: { name: string }
+    }
+  }[]
 }
 
 interface DueInvoice {
@@ -73,6 +86,9 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   const [saving, setSaving] = useState(false)
   const [filterType, setFilterType] = useState('')
   const [filterMonth, setFilterMonth] = useState('')
+  const [filterSearch, setFilterSearch] = useState('')
+  const [filterCategory, setFilterCategory] = useState('')
+  const [filterAllocStatus, setFilterAllocStatus] = useState('')
   const [recurringMonths, setRecurringMonths] = useState(0) // 0 = not recurring
 
   // Inline edit state
@@ -252,8 +268,37 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     let result = entries
     if (filterType) result = result.filter(e => e.type === filterType)
     if (filterMonth) result = result.filter(e => e.entry_date?.startsWith(filterMonth))
+    if (filterCategory) result = result.filter(e => e.category_id === filterCategory)
+    
+    if (filterSearch) {
+      const q = filterSearch.toLowerCase()
+      result = result.filter(e => 
+        e.description?.toLowerCase().includes(q) ||
+        e.reference?.toLowerCase().includes(q) ||
+        e.category?.name.toLowerCase().includes(q) ||
+        e.bank_account?.name.toLowerCase().includes(q) ||
+        e.allocations?.some(a => 
+          a.invoice?.invoice_number.toLowerCase().includes(q) || 
+          a.invoice?.client?.name.toLowerCase().includes(q)
+        )
+      )
+    }
+
+    if (filterAllocStatus) {
+      result = result.filter(e => {
+        if (e.category_id !== invoiceCategoryId) return false
+        const totalAlloc = e.allocations?.filter(a => !a.deleted_at).reduce((s, a) => s + Number(a.allocated_amount), 0) || 0
+        const unallocated = (e.amount_inr || 0) - totalAlloc
+        if (filterAllocStatus === 'unallocated') return unallocated > 0.01 && totalAlloc === 0
+        if (filterAllocStatus === 'partial') return unallocated > 0.01 && totalAlloc > 0
+        if (filterAllocStatus === 'fully') return unallocated <= 0.01 && unallocated >= -0.01
+        if (filterAllocStatus === 'over') return unallocated < -0.01
+        return true
+      })
+    }
+
     return result
-  }, [entries, filterType, filterMonth])
+  }, [entries, filterType, filterMonth, filterSearch, filterCategory, filterAllocStatus, invoiceCategoryId])
 
   const totalInflow = filteredEntries.filter(e => e.type === 'inflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
   const totalOutflow = filteredEntries.filter(e => e.type === 'outflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
@@ -313,21 +358,56 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         </div>
 
         {/* Filters */}
-        <div className="flex gap-3 flex-wrap items-center">
-          <div className="flex gap-2">
+        <div className="flex gap-3 flex-wrap items-center bg-secondary/20 p-3 rounded-xl border border-border">
+          <div className="flex gap-1.5">
             {['', 'inflow', 'outflow'].map(t => (
-              <button key={t} onClick={() => setFilterType(t)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filterType === t ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}>
+              <button key={t} onClick={() => setFilterType(t)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filterType === t ? 'gradient-bg text-white' : 'bg-background text-muted-foreground border hover:text-foreground'}`}>
                 {t ? (t === 'inflow' ? 'Income' : 'Expense') : 'All'}
               </button>
             ))}
           </div>
+          
+          <div className="h-5 w-px bg-border hidden sm:block"></div>
+
           <input
             type="month"
             value={filterMonth}
             onChange={e => setFilterMonth(e.target.value)}
-            className="bg-secondary border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50"
+            className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50"
           />
-          {filterMonth && <button onClick={() => setFilterMonth('')} className="text-xs text-muted-foreground hover:text-foreground">Clear</button>}
+          
+          <select 
+            value={filterCategory} 
+            onChange={e => setFilterCategory(e.target.value)}
+            className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 max-w-[150px]"
+          >
+            <option value="">All Categories</option>
+            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+
+          <select 
+            value={filterAllocStatus} 
+            onChange={e => setFilterAllocStatus(e.target.value)}
+            className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50"
+          >
+            <option value="">All Allocations</option>
+            <option value="unallocated">Unallocated</option>
+            <option value="partial">Partially Allocated</option>
+            <option value="fully">Fully Allocated</option>
+            <option value="over">Over-allocated</option>
+          </select>
+
+          <input
+            type="text"
+            placeholder="Search descriptions, clients..."
+            value={filterSearch}
+            onChange={e => setFilterSearch(e.target.value)}
+            className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 w-full sm:w-auto flex-1 min-w-[200px]"
+          />
+
+          {(filterMonth || filterCategory || filterSearch || filterAllocStatus) && (
+            <button onClick={() => { setFilterMonth(''); setFilterCategory(''); setFilterSearch(''); setFilterAllocStatus('') }} className="text-xs text-muted-foreground hover:text-foreground px-2">Clear</button>
+          )}
         </div>
 
         {/* Entries */}
