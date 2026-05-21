@@ -33,7 +33,7 @@ export default function ReconciliationClient() {
           .is('deleted_at', null),
         supabase
           .from('invoices')
-          .select('id, invoice_number, total_amount, paid_amount, status, currency'),
+          .select('id, invoice_number, total_amount, paid_amount, status, currency, due_date'),
         supabase
           .from('cashbook_entries')
           .select('id, amount, currency, reference, invoice_id, entry_date, description, deleted_at')
