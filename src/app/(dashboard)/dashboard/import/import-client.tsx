@@ -820,7 +820,7 @@ export default function ImportClient({ clients, services, employees, groups, par
         if (strictMatch) {
           r.invoice_id = strictMatch
         } else {
-          r.errors.push(`Invoice number "${providedInvNum}" not found in database. Cannot auto-link.`)
+          r.warnings.push(`Invoice number "${providedInvNum}" not found in database. Entry will be imported unlinked.`)
         }
       } else {
         // Legacy fallback to reference parsing
