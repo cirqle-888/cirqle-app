@@ -1735,6 +1735,10 @@ export default function ImportClient({ clients, services, employees, groups, par
         await batchDelete('contribution_scores', 'employee_id', ids)
         await batchDelete('contributions', 'employee_id', ids)
       }
+      if (cleanupMode === 'cashbook_entries') {
+        // Delete any related allocations before deleting the entries to satisfy foreign key constraint
+        await batchDelete('cashbook_invoice_allocations', 'cashbook_entry_id', ids)
+      }
 
       // ── Main delete ─────────────────────────────────────────────────────────
       await batchDelete(TABLE_FOR_MODE[cleanupMode], 'id', ids)
