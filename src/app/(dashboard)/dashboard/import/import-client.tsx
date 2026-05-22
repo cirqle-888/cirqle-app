@@ -1097,7 +1097,7 @@ export default function ImportClient({ clients, services, employees, groups, par
     setRows(parsed)
     setStep('preview')
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, operation, clientMap, serviceMap, empMap, groupMap, bankAccountMap, cashCategoryMap])
+  }, [mode, operation, contribSubMode, parameters, clientMap, serviceMap, empMap, groupMap, bankAccountMap, cashCategoryMap])
 
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; if (f) handleFile(f) }
   const onDrop = (e: React.DragEvent) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f) }
