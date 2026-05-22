@@ -299,6 +299,7 @@ export default function ImportClient({ clients, services, employees, groups, par
     status:    '',
   })
   const [discountTemplateLoading, setDiscountTemplateLoading] = useState(false)
+  const [contribTemplateLoading, setContribTemplateLoading] = useState(false)
 
   // ── Export filters (per-mode, shared state — reset on mode change) ──────────
   const [exportFilterOpen, setExportFilterOpen] = useState(false)
@@ -446,6 +447,57 @@ export default function ImportClient({ clients, services, employees, groups, par
     const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
     downloadCsv(`${m}_export_${ts}.csv`, csv)
     success(`Exported ${data.length} row${data.length !== 1 ? 's' : ''}`)
+  }
+
+  // ── Contributions template generator ───────────────────────────────────────
+  async function generateContribTemplate() {
+    setContribTemplateLoading(true)
+    try {
+      const q = supabase
+        .from('tasks')
+        .select('id, title, task_date')
+        .neq('status', 'cancelled')
+        .order('task_date', { ascending: true })
+
+      const { data, error } = await q.limit(5000)
+      if (error) { toastError(`Failed to load tasks: ${error.message}`); return }
+      if (!data || data.length === 0) { toastError('No tasks available'); return }
+
+      let header = ''
+      let paramHeaders: string[] = []
+      if (contribSubMode === 'earnings_only') {
+        header = 'id,task_id,task_title,task_date,employee_cqid,earnings_inr'
+      } else if (contribSubMode === 'score_pct') {
+        header = 'id,task_id,task_title,task_date,employee_cqid,score_percentage,earnings_inr'
+      } else {
+        paramHeaders = parameters.map(p => p.name)
+        header = `id,task_id,task_title,task_date,employee_cqid,${paramHeaders.join(',')}`
+      }
+
+      const rows = data.map((t: any) => {
+        let baseRow = [
+          '', // id
+          t.id, // task_id
+          t.title || '',
+          t.task_date || '',
+          '', // employee_cqid
+        ]
+        if (contribSubMode === 'earnings_only') {
+          baseRow.push('') 
+        } else if (contribSubMode === 'score_pct') {
+          baseRow.push('', '') 
+        } else {
+          paramHeaders.forEach(() => baseRow.push(''))
+        }
+        return baseRow.map(v => (String(v).includes(',') ? `"${v}"` : v)).join(',')
+      })
+
+      const ts = new Date().toISOString().slice(0, 10)
+      downloadCsv(`contributions_${contribSubMode}_prefilled_${ts}.csv`, header + '\n' + rows.join('\n'))
+      success(`Generated pre-filled template with ${data.length} task${data.length !== 1 ? 's' : ''}`)
+    } finally {
+      setContribTemplateLoading(false)
+    }
   }
 
   // ── Discount template generator ────────────────────────────────────────────
@@ -2560,32 +2612,42 @@ export default function ImportClient({ clients, services, employees, groups, par
                 ))}
 
                 {/* Dynamic template download for this sub-mode */}
-                <button
-                  onClick={() => {
-                    let header = '', example = ''
-                    if (contribSubMode === 'earnings_only') {
-                      header = 'id,task_id,task_title,task_date,employee_cqid,earnings_inr'
-                      example = ['"","","Social Media Pack Jun","2026-05-01","CQ001","3000"', '"","","Social Media Pack Jun","2026-05-01","CQ002","2000"'].join('\n')
-                    } else if (contribSubMode === 'score_pct') {
-                      header = 'id,task_id,task_title,task_date,employee_cqid,score_percentage,earnings_inr'
-                      example = ['"","","Social Media Pack Jun","2026-05-01","CQ001","60","3000"', '"","","Social Media Pack Jun","2026-05-01","CQ002","40","2000"'].join('\n')
-                    } else {
-                      const paramZeros = parameters.map(() => '0').join(',')
-                      header = `id,task_id,task_title,task_date,employee_cqid,${parameters.map(p => p.name).join(',')}`
-                      example = `"","","Social Media Pack Jun","2026-05-01","CQ001",${paramZeros}\n"","","Social Media Pack Jun","2026-05-01","CQ002",${paramZeros}`
-                    }
-                    const blob = new Blob([header + '\n' + example], { type: 'text/csv;charset=utf-8;' })
-                    const a = document.createElement('a')
-                    a.href = URL.createObjectURL(blob)
-                    a.download = `contributions_${contribSubMode}_template.csv`
-                    a.click()
-                    URL.revokeObjectURL(a.href)
-                  }}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-600/20 border border-violet-500/30 text-violet-300 text-xs font-medium hover:bg-violet-600/30 transition-colors"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                  Download {contribSubMode === 'earnings_only' ? 'Earnings-Only' : contribSubMode === 'score_pct' ? 'Score %' : 'Parameter Detail'} Template
-                </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => {
+                      let header = '', example = ''
+                      if (contribSubMode === 'earnings_only') {
+                        header = 'id,task_id,task_title,task_date,employee_cqid,earnings_inr'
+                        example = ['"","","Social Media Pack Jun","2026-05-01","CQ001","3000"', '"","","Social Media Pack Jun","2026-05-01","CQ002","2000"'].join('\n')
+                      } else if (contribSubMode === 'score_pct') {
+                        header = 'id,task_id,task_title,task_date,employee_cqid,score_percentage,earnings_inr'
+                        example = ['"","","Social Media Pack Jun","2026-05-01","CQ001","60","3000"', '"","","Social Media Pack Jun","2026-05-01","CQ002","40","2000"'].join('\n')
+                      } else {
+                        const paramZeros = parameters.map(() => '0').join(',')
+                        header = `id,task_id,task_title,task_date,employee_cqid,${parameters.map(p => p.name).join(',')}`
+                        example = `"","","Social Media Pack Jun","2026-05-01","CQ001",${paramZeros}\n"","","Social Media Pack Jun","2026-05-01","CQ002",${paramZeros}`
+                      }
+                      const blob = new Blob([header + '\n' + example], { type: 'text/csv;charset=utf-8;' })
+                      const a = document.createElement('a')
+                      a.href = URL.createObjectURL(blob)
+                      a.download = `contributions_${contribSubMode}_template.csv`
+                      a.click()
+                      URL.revokeObjectURL(a.href)
+                    }}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-foreground/[0.04] border border-border/40 text-foreground text-xs font-medium hover:bg-foreground/[0.08] transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                    Blank Template
+                  </button>
+                  <button
+                    onClick={generateContribTemplate}
+                    disabled={contribTemplateLoading}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-violet-600/20 border border-violet-500/30 text-violet-300 text-xs font-medium hover:bg-violet-600/30 transition-colors disabled:opacity-50"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    {contribTemplateLoading ? 'Generating…' : 'Pre-fill with Jobs'}
+                  </button>
+                </div>
 
                 {contribSubMode === 'param_detail' && (
                   <div className="text-[11px] text-muted-foreground bg-background/40 rounded-lg p-2 space-y-0.5">
