@@ -453,15 +453,23 @@ export default function ImportClient({ clients, services, employees, groups, par
   async function generateContribTemplate() {
     setContribTemplateLoading(true)
     try {
-      const q = supabase
-        .from('tasks')
-        .select('id, title, task_date')
-        .neq('status', 'cancelled')
-        .order('task_date', { ascending: true })
-
-      const { data, error } = await q.limit(5000)
-      if (error) { toastError(`Failed to load tasks: ${error.message}`); return }
-      if (!data || data.length === 0) { toastError('No tasks available'); return }
+      const allData: any[] = []
+      const PAGE = 1000
+      for (let page = 0; page < 100; page++) {
+        const q = supabase
+          .from('tasks')
+          .select('id, title, task_date')
+          .neq('status', 'cancelled')
+          .order('task_date', { ascending: true })
+          .range(page * PAGE, (page + 1) * PAGE - 1)
+        
+        const { data, error } = await q
+        if (error) { toastError(`Failed to load tasks: ${error.message}`); return }
+        if (data) allData.push(...data)
+        if (!data || data.length < PAGE) break
+      }
+      if (allData.length === 0) { toastError('No tasks available'); return }
+      const data = allData
 
       let header = ''
       let paramHeaders: string[] = []
@@ -504,19 +512,26 @@ export default function ImportClient({ clients, services, employees, groups, par
   async function generateDiscountTemplate() {
     setDiscountTemplateLoading(true)
     try {
-      let q = supabase
-        .from('invoices')
-        .select('invoice_number, issue_date, total_amount, status, client:clients(name, code)')
-        .order('issue_date', { ascending: true })
+      const allData: any[] = []
+      const PAGE = 1000
+      for (let page = 0; page < 100; page++) {
+        let q = supabase
+          .from('invoices')
+          .select('invoice_number, issue_date, total_amount, status, client:clients(name, code)')
+          .order('issue_date', { ascending: true })
 
-      if (discountFilter.clientId) q = q.eq('client_id', discountFilter.clientId)
-      if (discountFilter.dateFrom)  q = q.gte('issue_date', discountFilter.dateFrom)
-      if (discountFilter.dateTo)    q = q.lte('issue_date', discountFilter.dateTo)
-      if (discountFilter.status)    q = q.eq('status', discountFilter.status)
+        if (discountFilter.clientId) q = q.eq('client_id', discountFilter.clientId)
+        if (discountFilter.dateFrom)  q = q.gte('issue_date', discountFilter.dateFrom)
+        if (discountFilter.dateTo)    q = q.lte('issue_date', discountFilter.dateTo)
+        if (discountFilter.status)    q = q.eq('status', discountFilter.status)
 
-      const { data, error } = await q.limit(1000)
-      if (error) { toastError(`Failed to load invoices: ${error.message}`); return }
-      if (!data || data.length === 0) { toastError('No invoices match the selected filters'); return }
+        const { data, error } = await q.range(page * PAGE, (page + 1) * PAGE - 1)
+        if (error) { toastError(`Failed to load invoices: ${error.message}`); return }
+        if (data) allData.push(...data)
+        if (!data || data.length < PAGE) break
+      }
+      if (allData.length === 0) { toastError('No invoices match the selected filters'); return }
+      const data = allData
 
       const today = new Date().toISOString().slice(0, 10)
       const header = 'invoice_number,client_name_or_code,invoice_total,discount_amount,discount_percentage,reason,discount_date'
