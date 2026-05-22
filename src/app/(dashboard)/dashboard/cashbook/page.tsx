@@ -20,7 +20,7 @@ export default async function CashBookPage() {
       `)
       .is('deleted_at', null)
       .order('entry_date', { ascending: false })
-      .limit(200),
+      .limit(5000),
     supabase.from('cashbook_categories').select('*').order('type').order('name'),
     supabase.from('bank_accounts').select('id, name, type, is_active').order('name'),
     supabase.from('exchange_rates').select('*'),
