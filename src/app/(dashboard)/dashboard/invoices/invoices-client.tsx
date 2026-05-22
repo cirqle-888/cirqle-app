@@ -1651,7 +1651,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     setDiscAnalyticsLoading(true)
     const { data } = await supabase
       .from('discount_logs')
-      .select('*, invoice:invoices(invoice_number, total_amount, status), client:clients(id, name, code)')
+      .select('*, invoice:invoices(invoice_number, total_amount, status, currency), client:clients(id, name, code, default_currency)')
       .order('created_at', { ascending: false })
     setDiscAnalytics(data || [])
     setDiscAnalyticsLoading(false)
@@ -3799,7 +3799,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const bdByClient      = Object.values(
       badDebtInvoices.reduce((map: any, inv) => {
         const id = inv.client_id
-        if (!map[id]) map[id] = { name: inv.client?.name || '—', total: 0, unpaid: 0, count: 0, invoices: [] }
+        if (!map[id]) map[id] = { name: inv.client?.name || '—', total: 0, unpaid: 0, count: 0, invoices: [], currency: inv.currency || 'INR' }
         map[id].total  += inv.total_amount || 0
         map[id].unpaid += Math.max(0, (inv.total_amount || 0) - (inv.paid_amount || 0))
         map[id].count  += 1
@@ -3917,7 +3917,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 options={discClients.map((c: any) => {
                   const cnt = discAnalytics.filter((d: any) => d.client?.id === c.id).length
                   const tot = discAnalytics.filter((d: any) => d.client?.id === c.id).reduce((s: number, d: any) => s + (d.discount_amount || 0), 0)
-                  return { value: c.id, label: `${c.name} — ${cnt} · ${fmt(tot)}` }
+                  return { value: c.id, label: `${c.name} — ${cnt} · ${fmt(tot, c.default_currency || 'INR')}` }
                 })}
                 value={discFilterClient}
                 onChange={setDiscFilterClient}
@@ -3944,7 +3944,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                             <div className="text-xs font-medium">{c.name}</div>
                             <div className="text-[10px] text-muted-foreground">{cRows.length} discount{cRows.length !== 1 ? 's' : ''} · avg {cAvg.toFixed(1)}%</div>
                           </div>
-                          <div className="text-sm font-semibold text-orange-400">{fmt(cTotal)}</div>
+                          <div className="text-sm font-semibold text-orange-400">{fmt(cTotal, c.default_currency || 'INR')}</div>
                         </div>
                         <div className="h-1 bg-foreground/[0.06] rounded-full overflow-hidden">
                           <div className="h-full bg-orange-400/60 rounded-full" style={{ width: `${pct}%` }} />
@@ -3959,7 +3959,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <div className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">
-                    {discFilterClient ? `${discRows.length} entries · ${fmt(totalDiscGiven)} total` : 'All Entries'}
+                    {discFilterClient ? `${discRows.length} entries · ${fmt(totalDiscGiven, discRows[0]?.client?.default_currency || 'INR')} total` : 'All Entries'}
                   </div>
                   {discFilterClient && (
                     <button onClick={() => setDiscFilterClient('')} className="text-[10px] text-orange-400 hover:text-orange-300">Clear ×</button>
@@ -3979,7 +3979,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                             <div className="text-[10px] text-muted-foreground font-mono">{d.invoice?.invoice_number || '—'}</div>
                           </div>
                           <div className="text-right shrink-0">
-                            <div className="text-sm font-bold text-orange-400">{fmt(d.discount_amount || 0)}</div>
+                            <div className="text-sm font-bold text-orange-400">{fmt(d.discount_amount || 0, d.client?.default_currency || d.invoice?.currency || 'INR')}</div>
                             {(d.discount_percentage || 0) > 0 && (
                               <div className="text-[10px] text-muted-foreground">{(d.discount_percentage || 0).toFixed(1)}% off</div>
                             )}
@@ -4038,9 +4038,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                                 <div className="text-[10px] text-muted-foreground">{c.count} invoice{c.count !== 1 ? 's' : ''}</div>
                               </div>
                               <div className="text-right">
-                                <div className="text-sm font-bold text-red-400">{fmt(c.unpaid)}</div>
+                                <div className="text-sm font-bold text-red-400">{fmt(c.unpaid, c.currency)}</div>
                                 {c.total !== c.unpaid && (
-                                  <div className="text-[10px] text-muted-foreground">of {fmt(c.total)} billed</div>
+                                  <div className="text-[10px] text-muted-foreground">of {fmt(c.total, c.currency)} billed</div>
                                 )}
                               </div>
                             </div>
