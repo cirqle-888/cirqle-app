@@ -49,17 +49,22 @@ export function formatINR(amount: number): string {
   }).format(amount)
 }
 
+const CURRENCY_DISPLAY_SYMBOLS: Record<Currency, string> = {
+  INR: '₹',
+  AED: 'AED ',
+  SAR: 'SAR ',
+  USD: '$',
+  QAR: 'QAR ',
+  GBP: '£',
+  EUR: '€',
+}
+
+export function getCurrencySymbol(currency: Currency = 'INR'): string {
+  return CURRENCY_DISPLAY_SYMBOLS[currency] || currency
+}
+
 export function formatCurrency(amount: number, currency: Currency = 'INR'): string {
-  const symbols: Record<Currency, string> = {
-    INR: '₹',
-    AED: 'AED ',
-    SAR: 'SAR ',
-    USD: '$',
-    QAR: 'QAR ',
-    GBP: '£',
-    EUR: '€',
-  }
-  return `${symbols[currency]}${amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+  return `${getCurrencySymbol(currency)}${amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
 }
 
 export function formatCompact(amount: number): string {

@@ -14,7 +14,7 @@ import {
   getStatusColor, getStatusLabel, isOverdue,
   isEditable, formatBillingPeriod, getNextAction,
 } from '@/lib/utils/invoice'
-import { formatCurrency } from '@/lib/calculations/currency'
+import { formatCurrency, getCurrencySymbol } from '@/lib/calculations/currency'
 import {
   FileText, Plus, X, ChevronRight, CheckCircle, Send, CreditCard,
   Trash2, AlertTriangle, Clock, Eye, Lock, Zap, Download, RefreshCw,
@@ -851,14 +851,20 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
     const clientCode = client?.code || 'CLI'
     const today = new Date()
+
+    // Determine the invoice date based on the billing period, same as historical batch generate
+    const fromDateObj = new Date(from || today.toISOString())
+    const taskMonth = `${fromDateObj.getFullYear()}-${String(fromDateObj.getMonth() + 1).padStart(2, '0')}`
+    const invoiceDate = getInvoiceDateForTaskMonth(taskMonth)
+
     const { invoiceNumber: invNum, sequenceMonth } =
-      await generateInvoiceNumber(supabase, today, clientCode)
+      await generateInvoiceNumber(supabase, invoiceDate, clientCode)
 
     const subtotal = selected.reduce((s, t) => s + (t.billing_amount_inr || 0), 0)
     // Base insert — columns that always exist
     const { data: inv, error } = await supabase.from('invoices').insert({
       invoice_number: invNum, client_id: genForm.client_id, status: 'draft',
-      issue_date: today.toISOString().split('T')[0],
+      issue_date: invoiceDate.toISOString().split('T')[0],
       total_amount: subtotal, paid_amount: 0,
       currency: client?.default_currency || 'INR',
     }).select('*, client:clients(id,name,code,phone,email,address)').single()
@@ -1111,8 +1117,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       const dt = new Date(d + 'T00:00:00')
       return `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}`
     }
-    function inr(n: number) {
-      return '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    function inr(n: number, c = client?.default_currency || 'INR') {
+      return getCurrencySymbol(c as Currency) + ' ' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     }
 
     const totalBilled  = stmtInvoices.reduce((s, i) => s + (i.total_amount || 0), 0)
@@ -1275,8 +1281,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       const dt = new Date(d + 'T00:00:00')
       return `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}`
     }
-    function inr(n: number) {
-      return '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    function inr(n: number, c = client?.default_currency || 'INR') {
+      return getCurrencySymbol(c as Currency) + ' ' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     }
 
     const logoBlock = logoUrl
@@ -1748,8 +1754,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       const dt = new Date(d + 'T00:00:00')
       return `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}`
     }
-    function inr(n: number) {
-      return '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    function inr(n: number, c = inv.currency || 'INR') {
+      return getCurrencySymbol(c as Currency) + ' ' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     }
 
     // Build table rows
@@ -2311,7 +2317,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 <span className="text-muted-foreground">Discount</span>
                 {editable ? (
                   <div className="flex items-center gap-1">
-                    <span className="text-muted-foreground text-xs">−₹</span>
+                    <span className="text-muted-foreground text-xs">−{getCurrencySymbol(inv.currency)}</span>
                     <input
                       type="number" min="0"
                       key={`disc-${inv.id}-${inv.discount_amount}`}
@@ -2341,7 +2347,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               </div>
               {editable ? (
                 <div className="flex items-center gap-1">
-                  <span className="text-muted-foreground text-xs text-red-400/70">+₹</span>
+                  <span className="text-muted-foreground text-xs text-red-400/70">+{getCurrencySymbol(inv.currency)}</span>
                   <input
                     type="number" min="0"
                     key={`prevbal-${inv.id}-${inv.previous_balance}`}
@@ -2460,7 +2466,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                       className="flex-1 bg-transparent text-xs border-b border-dashed border-border/40 focus:border-violet-500/50 focus:outline-none py-1 placeholder:text-muted-foreground/40"
                     />
                     <input
-                      type="number" min="0" placeholder="₹"
+                      type="number" min="0" placeholder={getCurrencySymbol(inv.currency)}
                       onChange={e => { addPrice = parseFloat(e.target.value) || 0 }}
                       className="w-16 bg-background border border-border/40 rounded px-1.5 py-1 text-xs text-right focus:outline-none focus:border-violet-500/50"
                     />
@@ -2542,7 +2548,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                         <div className="space-y-2">
                           <div className="flex gap-2">
                             <div className="flex-1">
-                              <label className="text-[10px] text-muted-foreground mb-1 block">Discount Amount (₹)</label>
+                              <label className="text-[10px] text-muted-foreground mb-1 block">Discount Amount ({getCurrencySymbol(inv.currency)})</label>
                               <input
                                 type="number" min="0" max={discountCalc.thisTotal}
                                 value={manualDiscount}
@@ -2899,7 +2905,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                     className="flex-1 bg-background border border-border/40 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-violet-500/50"
                   />
                   <input type="number" value={item.unit_price || ''} onChange={e => updateNewItem(idx, 'unit_price', parseFloat(e.target.value) || 0)}
-                    placeholder="₹"
+                    placeholder={getCurrencySymbol(newForm.currency as any)}
                     className="w-20 bg-background border border-border/40 rounded-lg px-2 py-1.5 text-xs text-right focus:outline-none focus:border-violet-500/50"
                   />
                   {newForm.items.length > 1 && (
