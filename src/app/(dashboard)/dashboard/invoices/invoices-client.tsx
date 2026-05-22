@@ -133,6 +133,10 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
+  // Bulk actions
+  const [selectedForBulk, setSelectedForBulk] = useState<Set<string>>(new Set())
+  const [isUpdatingBulk, setIsUpdatingBulk] = useState(false)
+
   // Confirmation modal
   const [confirmModal, setConfirmModal] = useState<{
     title: string; body: string; confirmLabel: string; danger?: boolean; onConfirm: () => void
@@ -678,6 +682,62 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     if (selectedId === invoiceId) setSelectedId(null)
     success('Invoice deleted')
     setDeleting(false)
+  }
+
+  // ── Bulk Status Update ─────────────────────────────────────────────────────
+  async function handleBulkStatusUpdate(newStatus: string) {
+    if (selectedForBulk.size === 0) return
+    setIsUpdatingBulk(true)
+    
+    const idsToUpdate = Array.from(selectedForBulk)
+    
+    // For 'sent' status, ensure all have due dates
+    if (newStatus === 'sent') {
+      const missingDue = invoices.filter(i => idsToUpdate.includes(i.id) && !i.due_date)
+      if (missingDue.length > 0) {
+        toastError(`Cannot mark as sent: ${missingDue.length} invoice(s) missing a due date.`)
+        setIsUpdatingBulk(false)
+        return
+      }
+    }
+
+    const updates = { status: newStatus }
+    if (newStatus === 'sent') (updates as any).sent_at = new Date().toISOString()
+    
+    const { error } = await supabase.from('invoices').update(updates).in('id', idsToUpdate)
+    
+    if (error) {
+      toastError(error.message)
+    } else {
+      setInvoices(prev => prev.map(i => idsToUpdate.includes(i.id) ? { ...i, ...updates } : i))
+      setSelectedForBulk(new Set())
+      success(`Updated ${idsToUpdate.length} invoice(s) to ${newStatus}`)
+    }
+    setIsUpdatingBulk(false)
+  }
+  
+  function toggleBulkSelection(e: React.MouseEvent, id: string) {
+    e.stopPropagation()
+    setSelectedForBulk(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectAllBulk() {
+    const visibleIds = filtered.map(i => i.id)
+    setSelectedForBulk(prev => {
+      const allSelected = visibleIds.length > 0 && visibleIds.every(id => prev.has(id))
+      const next = new Set(prev)
+      if (allSelected) {
+        visibleIds.forEach(id => next.delete(id))
+      } else {
+        visibleIds.forEach(id => next.add(id))
+      }
+      return next
+    })
   }
 
   // Keep ref in sync so Cmd+S can call it
@@ -1942,14 +2002,56 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               className="w-full bg-background/60 border border-border/40 rounded-lg pl-8 pr-3 py-1.5 text-xs focus:outline-none focus:border-violet-500/50"
             />
           </div>
-          <div className="flex gap-1.5 flex-wrap">
-            {['', 'draft', 'reviewed', 'sent', 'partial', 'overdue'].map(s => (
-              <button key={s}
-                onClick={() => setFilterStatus(s)}
-                className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${filterStatus === s ? 'bg-violet-500/20 border-violet-500/50 text-violet-300' : 'border-border/40 text-muted-foreground hover:border-border'}`}
-              >{s ? getStatusLabel(s) : 'All'}</button>
-            ))}
+          <div className="flex gap-1.5 flex-wrap items-center justify-between w-full">
+            <div className="flex gap-1.5 flex-wrap">
+              {['', 'draft', 'reviewed', 'sent', 'partial', 'overdue'].map(s => (
+                <button key={s}
+                  onClick={() => setFilterStatus(s)}
+                  className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${filterStatus === s ? 'bg-violet-500/20 border-violet-500/50 text-violet-300' : 'border-border/40 text-muted-foreground hover:border-border'}`}
+                >{s ? getStatusLabel(s) : 'All'}</button>
+              ))}
+            </div>
+            {filtered.length > 0 && (
+              <label className="flex items-center gap-1.5 cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                <input 
+                  type="checkbox" 
+                  className="rounded border-border/40 bg-transparent text-violet-500 focus:ring-0 cursor-pointer h-3 w-3"
+                  checked={filtered.length > 0 && filtered.every(i => selectedForBulk.has(i.id))}
+                  onChange={toggleSelectAllBulk}
+                />
+                Select All
+              </label>
+            )}
           </div>
+          
+          {/* Bulk Action Bar */}
+          {selectedForBulk.size > 0 && (
+            <div className="flex items-center justify-between bg-violet-500/10 border border-violet-500/30 rounded-lg px-3 py-2 mt-2 animate-in slide-in-from-top-2">
+              <span className="text-xs font-medium text-violet-300">{selectedForBulk.size} selected</span>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => handleBulkStatusUpdate('reviewed')}
+                  disabled={isUpdatingBulk}
+                  className="text-[10px] font-medium bg-background border border-border hover:bg-secondary px-2 py-1 rounded transition-colors disabled:opacity-50"
+                >
+                  Mark Reviewed
+                </button>
+                <button 
+                  onClick={() => handleBulkStatusUpdate('sent')}
+                  disabled={isUpdatingBulk}
+                  className="text-[10px] font-medium bg-violet-500 text-white hover:bg-violet-600 px-2 py-1 rounded transition-colors disabled:opacity-50"
+                >
+                  Mark Sent
+                </button>
+                <button 
+                  onClick={() => setSelectedForBulk(new Set())}
+                  className="p-1 text-muted-foreground hover:text-foreground rounded"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* List */}
@@ -1967,11 +2069,20 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               <div
                 key={inv.id}
                 onClick={() => selectInvoice(inv.id)}
-                className={`px-3 py-3 cursor-pointer hover:bg-foreground/[0.02] transition-colors ${isSelected ? 'bg-violet-500/10 border-l-2 border-l-violet-500' : 'border-l-2 border-l-transparent'}`}
+                className={`px-3 py-3 cursor-pointer hover:bg-foreground/[0.02] transition-colors ${isSelected ? 'bg-violet-500/10 border-l-2 border-l-violet-500' : 'border-l-2 border-l-transparent'} ${selectedForBulk.has(inv.id) ? 'bg-violet-500/5' : ''}`}
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5 mb-0.5">
+                <div className="flex items-start gap-3">
+                  <div className="pt-0.5" onClick={e => e.stopPropagation()}>
+                    <input 
+                      type="checkbox" 
+                      className="rounded border-border/40 bg-transparent text-violet-500 focus:ring-0 cursor-pointer h-3.5 w-3.5"
+                      checked={selectedForBulk.has(inv.id)}
+                      onChange={(e) => toggleBulkSelection(e as unknown as React.MouseEvent, inv.id)}
+                    />
+                  </div>
+                  <div className="flex items-start justify-between gap-2 flex-1 min-w-0">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 mb-0.5">
                       <button
                         type="button"
                         onClick={e => { e.stopPropagation(); copyInvNum(inv.invoice_number) }}
@@ -2014,6 +2125,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                     )}
                   </div>
                 </div>
+              </div>
               </div>
             )
           })}
