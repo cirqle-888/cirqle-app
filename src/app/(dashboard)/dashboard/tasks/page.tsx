@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, fetchAll, stablePaginationQuery } from '@/lib/supabase/server'
 import TasksClient from './tasks-client'
 
 export const dynamic = 'force-dynamic'
@@ -16,6 +16,7 @@ async function fetchAllTasks(supabase: Awaited<ReturnType<typeof createClient>>,
       .from('tasks')
       .select(`*, client:clients(id, name, code), service:services(id, name)`)
       .order('task_number', { ascending: false, nullsFirst: false })
+      .order('id', { ascending: true })
       .range(page * PAGE, (page + 1) * PAGE - 1)
     if (hasDeletedAt) q = q.is('deleted_at', null)
     const { data, error } = await q
@@ -82,14 +83,17 @@ export default async function TasksPage() {
   ])
 
   // Fetch trash only if column exists
-  const trashRes = hasDeletedAt
-    ? await supabase
-        .from('tasks')
-        .select(`*, client:clients(id, name, code), service:services(id, name)`)
-        .not('deleted_at', 'is', null)
-        .gte('deleted_at', cutoff)
-        .order('deleted_at', { ascending: false })
-    : { data: [] }
+  let trashRes = { data: [] as any[] }
+  if (hasDeletedAt) {
+    const q = supabase
+      .from('tasks')
+      .select(`*, client:clients(id, name, code), service:services(id, name)`)
+      .not('deleted_at', 'is', null)
+      .gte('deleted_at', cutoff)
+      .order('deleted_at', { ascending: false })
+    
+    trashRes = await fetchAll(stablePaginationQuery(q)) as any
+  }
 
   return (
     <TasksClient

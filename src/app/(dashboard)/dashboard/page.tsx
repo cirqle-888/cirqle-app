@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, fetchAll, stablePaginationQuery } from '@/lib/supabase/server'
 import DashboardClient from './dashboard-client'
 
 export const dynamic = 'force-dynamic'
@@ -6,52 +6,54 @@ export const dynamic = 'force-dynamic'
 export default async function DashboardPage() {
   const supabase = await createClient()
 
-  const todayStr = new Date().toISOString().split('T')[0]
+  const todayStr = new Date().toISOString().slice(0, 10)
 
   const [
     invoicesRes,
-    cashbookRes,         // ALL entries with date (for trends, weekday, bank balance)
-    allAnalyticsTasksRes, // ALL tasks for analytics (top clients, work type, trends)
-    displayTasksRes,     // recent tasks for display widgets
+    cashbookRes,
+    allAnalyticsTasksRes,
+    displayTasksRes,
     employeesRes,
     scoredTaskIdsRes,
     todayTasksRes,
     scoresRes,
     payrollRes,
   ] = await Promise.all([
-    supabase
+    fetchAll(supabase
       .from('invoices')
       .select('id, invoice_number, total_amount, paid_amount, status, currency, due_date, client:clients(id, name)')
-      .order('due_date', { ascending: true }),
+      .order('due_date', { ascending: true })
+      .order('id', { ascending: true })),
 
     // ALL cashbook — for bank balance, trends, weekday analysis
-    supabase
+    fetchAll(supabase
       .from('cashbook_entries')
       .select('type, amount_inr, entry_date, description')
-      .order('entry_date', { ascending: true }),
+      .order('entry_date', { ascending: true })
+      .order('id', { ascending: true })),
 
     // ALL tasks for analytics (no status filter, no limit)
-    supabase
+    fetchAll(supabase
       .from('tasks')
       .select('id, billing_amount_inr, task_date, status, service_id, client:clients(id, name), service:services(id, name)')
       .not('status', 'eq', 'cancelled')
-      .order('task_date', { ascending: true }),
+      .order('task_date', { ascending: true })
+      .order('id', { ascending: true })),
 
     // Recent tasks for display widgets
-    supabase
+    fetchAll(stablePaginationQuery(supabase
       .from('tasks')
       .select('id, title, status, billing_amount_inr, task_date, client:clients(id, name), service:services(id, name)')
-      .in('status', ['done', 'pending', 'in_progress', 'invoiced'])
-      .order('task_date', { ascending: false })
-      .limit(200),
+      .not('status', 'eq', 'cancelled')
+      .order('task_date', { ascending: false }))),
 
-    supabase
+    fetchAll(stablePaginationQuery(supabase
       .from('employees')
       .select('id, cqid, name, performance_rating, role')
       .eq('is_active', true)
-      .order('cqid'),
+      .order('cqid'))),
 
-    supabase.from('contribution_scores').select('task_id'),
+    fetchAll(stablePaginationQuery(supabase.from('contribution_scores').select('task_id').order('id', { ascending: true }))),
 
     supabase
       .from('tasks')
@@ -59,10 +61,11 @@ export default async function DashboardPage() {
       .eq('task_date', todayStr)
       .order('status'),
 
-    supabase
+    fetchAll(supabase
       .from('contribution_scores')
       .select('employee_id, earnings_inr, calculated_at, task:tasks(task_date)')
-      .order('calculated_at', { ascending: false }),
+      .order('calculated_at', { ascending: false })
+      .order('id', { ascending: true })),
 
     // Payroll for Jobs vs Payroll table
     supabase

@@ -5,7 +5,9 @@ import { normalizeDate, norm } from '../engine'
 export const CONTRIB_BASE_FIELDS: FieldDef[] = [
   { col: 'id',            db: 'id',            example: '', notes: 'Leave blank for new rows · REQUIRED in Update mode' },
   { col: 'task_id',       db: false,           example: '', notes: 'Optional · use raw task UUID if available (faster lookup)', default: '' },
-  { col: 'task_title',    db: false,           example: 'Social Media Pack Jun', notes: 'Exact task title in DB — import jobs first (ignored if task_id is provided)', req: false },
+  { col: 'task_number',   db: false,           example: '1042', notes: 'Task Number (e.g. 1042) — alternative to task_title', req: false,
+    parse: (v) => v ? parseInt(v, 10) : null },
+  { col: 'task_title',    db: false,           example: 'Social Media Pack Jun', notes: 'Exact task title in DB (ignored if task_id or task_number provided)', req: false },
   { col: 'task_date',     db: false,           example: '2026-05-01', notes: 'DD-MM-YYYY (also accepts YYYY-MM-DD) — used to find the task (with task_title)',
     parse: (v) => normalizeDate(v) },
   { col: 'employee_cqid', db: false,           example: 'CQ001', notes: 'e.g. CQ001', req: true,

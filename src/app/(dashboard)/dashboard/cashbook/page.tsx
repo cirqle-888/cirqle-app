@@ -16,6 +16,12 @@ export default async function CashBookPage() {
           invoice_id, 
           allocated_amount, 
           invoice:invoices(invoice_number, status, due_date, total_amount, paid_amount, client:clients(name))
+        ),
+        payroll_allocations:cashbook_payroll_allocations(
+          id,
+          payroll_id,
+          allocated_amount,
+          payroll:payroll(employee_id, net_salary, status, employee:employees(cqid, name))
         )
       `)
       .is('deleted_at', null)

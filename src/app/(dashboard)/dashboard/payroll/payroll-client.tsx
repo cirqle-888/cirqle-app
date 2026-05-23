@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Header from '@/components/layout/header'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, safeFetchAll } from '@/lib/supabase/client'
 import { formatCompact } from '@/lib/calculations/currency'
 import { usePrivacy } from '@/contexts/privacy-context'
 import {
@@ -15,6 +15,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import BulkGenerateModal from '@/components/payroll/bulk-generate-modal'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -112,6 +113,7 @@ export default function PayrollClient({
     title: string; body: string; confirmLabel: string; onConfirm: () => void
   } | null>(null)
   const [saving, setSaving] = useState(false)
+  const [showBulkGenerate, setShowBulkGenerate] = useState(false)
 
   // ── Live scores state (starts from server data, updated by realtime + refresh) ──
   const [liveScores, setLiveScores]   = useState(contributionScores)
@@ -147,10 +149,12 @@ export default function PayrollClient({
   // ── Refresh commission scores from DB (client-side fetch) ─────────────────
   const refreshScores = useCallback(async () => {
     setRefreshing(true)
-    const { data } = await supabase
+    const query = supabase
       .from('contribution_scores')
-      .select('task_id, employee_id, earnings, calculated_at, task:tasks(id, task_date, title, status)')
+      .select('task_id, employee_id, earnings_inr, calculated_at, task:tasks(id, task_date, title, status)')
       .order('calculated_at', { ascending: false })
+      .order('id', { ascending: true })
+    const { data } = await safeFetchAll(query)
     if (data) {
       setLiveScores(data as any)
       setLastRefresh(new Date())
@@ -515,6 +519,11 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                 <Plus className="w-4 h-4" /> Add Manual
               </button>
             </>}
+            {tab === 'Overview' && (
+              <button onClick={() => setShowBulkGenerate(true)} className="flex items-center gap-1.5 bg-secondary border border-border text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 text-muted-foreground hover:text-foreground transition-colors">
+                <Zap className="w-4 h-4" /> Bulk Generate
+              </button>
+            )}
             {tab === 'Advances' && <>
               <button onClick={exportAdvancesCSV} className="flex items-center gap-1.5 bg-secondary border border-border text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 text-muted-foreground hover:text-foreground transition-colors">
                 <Download className="w-4 h-4" /> Export CSV
@@ -848,10 +857,20 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                 <tbody className="divide-y divide-border">
                   {empList.filter(e => e.is_active).map(emp => {
                     const monthNets = last6Months.map(m => {
+                      const mk = `${m.year}-${String(m.month).padStart(2, '0')}`
                       const rec = payroll.find(r => r.employee_id === emp.id && r.month === m.month && r.year === m.year)
-                      return { ...m, net: rec?.net_salary || 0, status: rec?.status, commission: rec?.commission_earned || 0 }
+                      const rawComm = Math.round(commissionByEmpMonth[emp.id]?.[mk] || 0)
+                      return { 
+                        ...m, 
+                        net: rec?.net_salary || 0, 
+                        status: rec?.status, 
+                        commission: rec?.commission_earned ?? rawComm,
+                        hasRecord: !!rec
+                      }
                     })
-                    const total = monthNets.reduce((s, m) => s + m.net, 0)
+                    const totalNet = monthNets.reduce((s, m) => s + m.net, 0)
+                    const totalComm = monthNets.reduce((s, m) => s + (!m.hasRecord ? m.commission : 0), 0)
+                    const displayTotal = totalNet + totalComm
                     return (
                       <tr key={emp.id} className="hover:bg-secondary/20 cursor-pointer" onClick={() => setSelectedEmp(emp)}>
                         <td className="px-4 py-3 sticky left-0 bg-card">
@@ -867,7 +886,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                         </td>
                         {monthNets.map(m => (
                           <td key={`${m.year}-${m.month}`} className="px-4 py-3 text-right">
-                            {m.net > 0 ? (
+                            {m.hasRecord ? (
                               <div>
                                 <p className={`text-xs font-semibold ${m.status === 'paid' ? 'text-green-400' : 'text-amber-400'}`}>
                                   ₹{formatCompact(m.net)}
@@ -876,13 +895,20 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                                   <p className="text-[10px] text-muted-foreground">+₹{formatCompact(m.commission)} comm</p>
                                 )}
                               </div>
+                            ) : m.commission > 0 ? (
+                              <div>
+                                <p className="text-xs font-semibold text-amber-500/80">
+                                  ₹{formatCompact(m.commission)}
+                                </p>
+                                <p className="text-[10px] text-muted-foreground">pending gen</p>
+                              </div>
                             ) : (
                               <span className="text-[11px] text-muted-foreground/30">—</span>
                             )}
                           </td>
                         ))}
                         <td className="px-4 py-3 text-right">
-                          <p className="text-xs font-bold">{total > 0 ? `₹${formatCompact(total)}` : '—'}</p>
+                          <p className="text-xs font-bold">{displayTotal > 0 ? `₹${formatCompact(displayTotal)}` : '—'}</p>
                         </td>
                       </tr>
                     )
@@ -892,9 +918,11 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                   <tr className="bg-secondary/40 border-t-2 border-border">
                     <td className="px-4 py-3 text-xs font-semibold text-muted-foreground sticky left-0 bg-secondary/40">Monthly Total</td>
                     {last6Months.map(m => {
+                      const mk = `${m.year}-${String(m.month).padStart(2, '0')}`
                       const total = empList.filter(e => e.is_active).reduce((s, emp) => {
                         const rec = payroll.find(r => r.employee_id === emp.id && r.month === m.month && r.year === m.year)
-                        return s + (rec?.net_salary || 0)
+                        const rawComm = Math.round(commissionByEmpMonth[emp.id]?.[mk] || 0)
+                        return s + (rec?.net_salary || rawComm)
                       }, 0)
                       return (
                         <td key={`${m.year}-${m.month}`} className="px-4 py-3 text-right text-xs font-bold">
@@ -904,8 +932,13 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                     })}
                     <td className="px-4 py-3 text-right text-xs font-bold gradient-text">
                       ₹{formatCompact(empList.filter(e => e.is_active).reduce((total, emp) =>
-                        total + payroll.filter(r => r.employee_id === emp.id).reduce((s, r) => s + (r.net_salary || 0), 0), 0
-                      ))}
+                        total + payroll.filter(r => r.employee_id === emp.id).reduce((s, r) => s + (r.net_salary || 0), 0) + 
+                        Object.entries(commissionByEmpMonth[emp.id] || {}).reduce((s, [mk, val]) => {
+                          const [y, mm] = mk.split('-')
+                          const rec = payroll.find(r => r.employee_id === emp.id && r.year === parseInt(y) && r.month === parseInt(mm))
+                          return s + (rec ? 0 : val)
+                        }, 0)
+                      , 0))}
                     </td>
                   </tr>
                 </tfoot>
@@ -921,8 +954,11 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
           {/* Employee cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {empList.map(emp => {
-              const allTimeNet   = payroll.filter(r => r.employee_id === emp.id).reduce((s, r) => s + (r.net_salary || 0), 0)
+              const allTimeBase  = payroll.filter(r => r.employee_id === emp.id).reduce((s, r) => s + (r.base_salary || 0), 0)
+              const allTimeComm  = liveScores.filter(s => s.employee_id === emp.id).reduce((s, sc) => s + (sc.earnings_inr || 0), 0)
+              const allTimeEarned = allTimeBase + allTimeComm
               const recordCount  = payroll.filter(r => r.employee_id === emp.id).length
+              const taskCount    = liveScores.filter(s => s.employee_id === emp.id).length
               const latestRecord = payroll.find(r => r.employee_id === emp.id) // already sorted desc
               const hist         = getEmpHistory(emp.id)
               const trend        = hist.length >= 2 ? hist[hist.length - 1].commission - hist[hist.length - 2].commission : 0
@@ -954,8 +990,8 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                   <div className="grid grid-cols-3 gap-2 text-sm mb-4">
                     {[
                       { label: 'Base/mo', value: `₹${formatCompact(emp.base_salary || 0)}` },
-                      { label: 'All-time paid', value: `₹${formatCompact(allTimeNet)}` },
-                      { label: 'Records', value: String(recordCount) },
+                      { label: 'All-time earned', value: `₹${formatCompact(allTimeEarned)}` },
+                      { label: 'Tasks', value: String(taskCount) },
                     ].map(s => (
                       <div key={s.label} className="bg-secondary/50 rounded-lg p-2.5">
                         <p className="text-[10px] text-muted-foreground uppercase font-medium mb-0.5">{s.label}</p>
@@ -1530,6 +1566,23 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
             </div>
           </div>
         </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════
+          BULK GENERATE MODAL
+      ════════════════════════════════════════════════════ */}
+      {showBulkGenerate && (
+        <BulkGenerateModal
+          employees={empList}
+          existingPayroll={payroll.map(p => ({ employee_id: p.employee_id, month: p.month, year: p.year }))}
+          contributionScores={liveScores}
+          allTasks={allTasks}
+          onClose={() => setShowBulkGenerate(false)}
+          onGenerated={newRecords => {
+            setPayroll(prev => [...newRecords, ...prev])
+            setShowBulkGenerate(false)
+          }}
+        />
       )}
     </div>
   )

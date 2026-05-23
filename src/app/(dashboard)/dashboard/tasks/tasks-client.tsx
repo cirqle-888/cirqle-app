@@ -225,7 +225,8 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
       else if (sortBy === 'client')      q = q.order('client_id',      { ascending: true,  nullsFirst: false })
       else                               q = q.order('task_number',    { ascending: false, nullsFirst: false })
 
-      // Paginate
+      // Paginate (Add deterministic stable sort for non-unique sorts)
+      q = q.order('id', { ascending: true })
       q = q.range(page * DB_PAGE_SIZE, (page + 1) * DB_PAGE_SIZE - 1)
 
       const { data, count, error } = await q

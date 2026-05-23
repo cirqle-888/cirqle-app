@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { Download } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useToast, ToastContainer } from '@/components/ui/toast'
@@ -271,6 +272,7 @@ function IssueCell({ row }: { row: ParsedRow }) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function ImportClient({ clients, services, employees, groups, parameters, bankAccounts, cashCategories }: Props) {
+  const router = useRouter()
   const supabase = createClient()
   const { toasts, dismiss, success, error: toastError } = useToast()
 
@@ -458,7 +460,7 @@ export default function ImportClient({ clients, services, employees, groups, par
       for (let page = 0; page < 100; page++) {
         const q = supabase
           .from('tasks')
-          .select('id, title, task_date')
+          .select('id, task_number, title, task_date')
           .neq('status', 'cancelled')
           .order('task_date', { ascending: true })
           .range(page * PAGE, (page + 1) * PAGE - 1)
@@ -474,18 +476,19 @@ export default function ImportClient({ clients, services, employees, groups, par
       let header = ''
       let paramHeaders: string[] = []
       if (contribSubMode === 'earnings_only') {
-        header = 'id,task_id,task_title,task_date,employee_cqid,earnings_inr'
+        header = 'id,task_id,task_number,task_title,task_date,employee_cqid,earnings_inr'
       } else if (contribSubMode === 'score_pct') {
-        header = 'id,task_id,task_title,task_date,employee_cqid,score_percentage,earnings_inr'
+        header = 'id,task_id,task_number,task_title,task_date,employee_cqid,score_percentage,earnings_inr'
       } else {
         paramHeaders = parameters.map(p => p.name)
-        header = `id,task_id,task_title,task_date,employee_cqid,${paramHeaders.join(',')}`
+        header = `id,task_id,task_number,task_title,task_date,employee_cqid,${paramHeaders.join(',')}`
       }
 
       const rows = data.map((t: any) => {
         let baseRow = [
           '', // id
           t.id, // task_id
+          t.task_number || '', // task_number
           t.title || '',
           t.task_date || '',
           '', // employee_cqid
@@ -760,20 +763,35 @@ export default function ImportClient({ clients, services, employees, groups, par
     const h = lines[0].map(norm)
     const iRowId = h.findIndex(c => c === 'id')
     const iId    = h.findIndex(c => c === 'task_id')
-    const iTask  = h.findIndex(c => c.includes('task') && c !== 'task_id' && c !== 'id')
+    const iTaskNum = h.findIndex(c => c === 'task_number')
+    const iTaskTitle = h.findIndex(c => c === 'task_title')
+    const iTask  = h.findIndex(c => c.includes('task') && !['task_id', 'id', 'task_number', 'task_title', 'task_date'].includes(c))
     const iDate  = h.findIndex(c => c.includes('date'))
     const iCqid  = h.findIndex(c => c.includes('cqid') || c === 'employee_cqid')
     const iScore = h.findIndex(c => c.includes('score') || c.includes('pct') || c.includes('percent'))
     const iEarn  = h.findIndex(c => c.includes('earn'))
 
-    // Build task lookup from title+date for rows without direct task_id
-    const titlesToFetch = [...new Set(
-      lines.slice(1).filter(c => !c[iId]?.trim()).map(c => c[iTask]?.trim()).filter(Boolean)
+    // Build task lookup from number or title+date for rows without direct task_id
+    const numsToFetch = [...new Set(
+      lines.slice(1).filter(c => !c[iId]?.trim()).map(c => iTaskNum >= 0 ? c[iTaskNum]?.trim() : '').filter(Boolean)
     )]
-    const taskMap: Record<string, string> = {}
+    const titlesToFetch = [...new Set(
+      lines.slice(1)
+        .filter(c => !c[iId]?.trim() && (iTaskNum < 0 || !c[iTaskNum]?.trim()))
+        .map(c => (iTaskTitle >= 0 ? c[iTaskTitle] : (iTask >= 0 ? c[iTask] : ''))?.trim())
+        .filter(Boolean)
+    )]
+
+    const taskMapNum: Record<string, string> = {}
+    if (numsToFetch.length) {
+      const { data: tasksData } = await supabase.from('tasks').select('id, task_number').in('task_number', numsToFetch)
+      ;(tasksData || []).forEach(t => { taskMapNum[String(t.task_number)] = t.id })
+    }
+
+    const taskMapTitle: Record<string, string> = {}
     if (titlesToFetch.length) {
       const { data: tasksData } = await supabase.from('tasks').select('id, title, task_date').in('title', titlesToFetch)
-      ;(tasksData || []).forEach(t => { taskMap[`${t.title}|||${t.task_date}`] = t.id })
+      ;(tasksData || []).forEach(t => { taskMapTitle[`${t.title}|||${t.task_date}`] = t.id })
     }
 
     // For param_detail: map CSV column → parameter
@@ -792,7 +810,8 @@ export default function ImportClient({ clients, services, employees, groups, par
         ...baseRow(i),
         row_id: g(iRowId),
         task_id_direct: g(iId),
-        task_ref: g(iTask),
+        task_number: iTaskNum >= 0 ? g(iTaskNum) : '',
+        task_ref: iTaskTitle >= 0 ? g(iTaskTitle) : (iTask >= 0 ? g(iTask) : ''),
         task_date: taskDate,
         employee_cqid: g(iCqid),
         score_percentage: g(iScore),
@@ -803,12 +822,15 @@ export default function ImportClient({ clients, services, employees, groups, par
       // ── Resolve task ──────────────────────────────────────────────────────
       if (r.task_id_direct) {
         r.task_id = r.task_id_direct
+      } else if (r.task_number) {
+        r.task_id = taskMapNum[r.task_number]
+        if (!r.task_id) r.warnings.push(`Task not matched — check task_number`)
       } else {
-        if (!r.task_ref)  r.errors.push('task_title is required (or provide task_id column)')
+        if (!r.task_ref)  r.errors.push('task_number or task_title is required (or provide task_id column)')
         if (!r.task_date) r.errors.push('task_date is required')
         else if (!/^\d{4}-\d{2}-\d{2}$/.test(r.task_date)) r.errors.push('task_date must be DD-MM-YYYY (e.g. 18-05-2026)')
         if (r.task_ref && r.task_date) {
-          r.task_id = taskMap[`${r.task_ref}|||${r.task_date}`]
+          r.task_id = taskMapTitle[`${r.task_ref}|||${r.task_date}`]
           if (!r.task_id) r.warnings.push(`Task not matched — check title & date match exactly`)
         }
       }
@@ -1516,7 +1538,62 @@ export default function ImportClient({ clients, services, employees, groups, par
           await backupBeforeUpdate(table, recs.map(r => r.row_id).filter(Boolean) as string[])
           await batchUpdate(table, recs.filter(r => r.row_id) as any)
         } else {
-          await batchInsert(table, recs.map(r => r.fields))
+          // Custom batch insert to handle auto-allocation of Salary entries
+          const salaryCatId = Object.entries(cashCategoryMap).find(([k]) => k.includes('salary') || k.includes('salaries'))?.[1]
+          
+          for (let i = 0; i < recs.length; i += BATCH) {
+            const b = recs.slice(i, i + BATCH).map(r => r.fields)
+            const { data, error } = await supabase.from(table).insert(b).select('id, category_id, reference, amount_inr')
+            if (error) { 
+              res.errors.push(`Batch ${Math.floor(i/BATCH)+1}: ${error.message}`)
+              res.skipped += b.length 
+            } else {
+              res.inserted += data?.length || 0
+              
+              if (data && salaryCatId) {
+                const salaryEntries = data.filter(d => d.category_id === salaryCatId && d.reference)
+                for (const entry of salaryEntries) {
+                  const match = entry.reference.match(/(CQID\d{3})/i)
+                  if (match) {
+                    const cqid = match[1].toUpperCase()
+                    const empId = empMap[cqid] // Using the map that maps upper CQID to ID
+                    if (empId) {
+                      // Fetch pending payrolls for employee (oldest first)
+                      const { data: payrolls } = await supabase.from('payroll')
+                        .select('id, net_salary')
+                        .eq('employee_id', empId)
+                        .eq('status', 'pending')
+                        .order('created_at', { ascending: true })
+                      
+                      let remaining = Number(entry.amount_inr)
+                      for (const p of (payrolls || [])) {
+                        if (remaining <= 0.01) break
+                        
+                        const pNet = Number(p.net_salary)
+                        const { data: allocs } = await supabase.from('cashbook_payroll_allocations')
+                          .select('allocated_amount')
+                          .eq('payroll_id', p.id)
+                          .is('deleted_at', null)
+                        
+                        const alreadyAllocated = allocs?.reduce((sum, a) => sum + Number(a.allocated_amount), 0) || 0
+                        const needed = Math.max(0, pNet - alreadyAllocated)
+                        
+                        if (needed > 0.01) {
+                          const allocAmt = Math.min(remaining, needed)
+                          await supabase.from('cashbook_payroll_allocations').insert({
+                            cashbook_entry_id: entry.id,
+                            payroll_id: p.id,
+                            allocated_amount: allocAmt
+                          })
+                          remaining -= allocAmt
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
         break
       }
@@ -2632,15 +2709,15 @@ export default function ImportClient({ clients, services, employees, groups, par
                     onClick={() => {
                       let header = '', example = ''
                       if (contribSubMode === 'earnings_only') {
-                        header = 'id,task_id,task_title,task_date,employee_cqid,earnings_inr'
-                        example = ['"","","Social Media Pack Jun","2026-05-01","CQ001","3000"', '"","","Social Media Pack Jun","2026-05-01","CQ002","2000"'].join('\n')
+                        header = 'id,task_id,task_number,task_title,task_date,employee_cqid,earnings_inr'
+                        example = ['"","","1042","Social Media Pack Jun","2026-05-01","CQ001","3000"', '"","","1042","Social Media Pack Jun","2026-05-01","CQ002","2000"'].join('\n')
                       } else if (contribSubMode === 'score_pct') {
-                        header = 'id,task_id,task_title,task_date,employee_cqid,score_percentage,earnings_inr'
-                        example = ['"","","Social Media Pack Jun","2026-05-01","CQ001","60","3000"', '"","","Social Media Pack Jun","2026-05-01","CQ002","40","2000"'].join('\n')
+                        header = 'id,task_id,task_number,task_title,task_date,employee_cqid,score_percentage,earnings_inr'
+                        example = ['"","","1042","Social Media Pack Jun","2026-05-01","CQ001","60","3000"', '"","","1042","Social Media Pack Jun","2026-05-01","CQ002","40","2000"'].join('\n')
                       } else {
                         const paramZeros = parameters.map(() => '0').join(',')
-                        header = `id,task_id,task_title,task_date,employee_cqid,${parameters.map(p => p.name).join(',')}`
-                        example = `"","","Social Media Pack Jun","2026-05-01","CQ001",${paramZeros}\n"","","Social Media Pack Jun","2026-05-01","CQ002",${paramZeros}`
+                        header = `id,task_id,task_number,task_title,task_date,employee_cqid,${parameters.map(p => p.name).join(',')}`
+                        example = `"","","1042","Social Media Pack Jun","2026-05-01","CQ001",${paramZeros}\n"","","1042","Social Media Pack Jun","2026-05-01","CQ002",${paramZeros}`
                       }
                       const blob = new Blob([header + '\n' + example], { type: 'text/csv;charset=utf-8;' })
                       const a = document.createElement('a')

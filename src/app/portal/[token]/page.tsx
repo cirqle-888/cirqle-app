@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { fetchAll, stablePaginationQuery } from '@/lib/supabase/server'
 import PortalClient from './portal-client'
 
 export const dynamic = 'force-dynamic'
@@ -34,22 +35,32 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
   }
 
   // 2. Fetch all data in parallel
+  // TODO [SCALABILITY SAFEGUARD]: Future optional date-window filtering
+  // TODO [SCALABILITY SAFEGUARD]: Lazy loading support
+  // TODO [SCALABILITY SAFEGUARD]: Cursor pagination preparation
+  // TODO [SCALABILITY SAFEGUARD]: Optional "last 12 months" optimization later if needed
   const [
     assignmentsRes, tasksRes, contribsRes, scoresRes,
     paramsRes, groupsRes, paramServicesRes, groupServicesRes,
   ] = await Promise.all([
-    supabase.from('task_assignments').select('task_id').eq('employee_id', employee.id),
-    supabase.from('tasks')
-      .select('id, title, service_id, billing_amount_inr, status, task_date, client:clients(id, name), service:services(id, name)')
-      .in('status', ['pending', 'in_progress', 'done', 'delivered', 'invoiced', 'paid'])
-      .order('task_date', { ascending: false }),
-    supabase.from('contributions')
-      .select('task_id, parameter_id, value')
-      .eq('employee_id', employee.id)
-      .gt('value', 0),
-    supabase.from('contribution_scores')
-      .select('task_id, score_percentage, earnings_inr')
-      .eq('employee_id', employee.id),
+    fetchAll(stablePaginationQuery(supabase.from('task_assignments').select('task_id').eq('employee_id', employee.id))),
+    fetchAll(stablePaginationQuery(
+      supabase.from('tasks')
+        .select('id, title, service_id, billing_amount_inr, status, task_date, client:clients(id, name), service:services(id, name)')
+        .in('status', ['pending', 'in_progress', 'done', 'delivered', 'invoiced', 'paid'])
+        .order('task_date', { ascending: false })
+    )),
+    fetchAll(stablePaginationQuery(
+      supabase.from('contributions')
+        .select('task_id, parameter_id, value')
+        .eq('employee_id', employee.id)
+        .gt('value', 0)
+    )),
+    fetchAll(stablePaginationQuery(
+      supabase.from('contribution_scores')
+        .select('task_id, score_percentage, earnings_inr')
+        .eq('employee_id', employee.id)
+    )),
     supabase.from('parameters').select('*').eq('is_active', true).order('display_order'),
     supabase.from('contribution_groups').select('*').eq('is_active', true).order('display_order'),
     supabase.from('parameter_services').select('parameter_id, service_id'),

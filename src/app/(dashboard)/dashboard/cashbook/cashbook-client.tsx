@@ -10,6 +10,7 @@ import AppSelect from '@/components/ui/app-select'
 import type { Currency } from '@/types'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import AllocationModal from '@/components/cashbook/allocation-modal'
+import PayrollAllocationModal from '@/components/cashbook/payroll-allocation-modal'
 
 import Link from 'next/link'
 
@@ -40,6 +41,17 @@ interface Entry {
       total_amount: number;
       paid_amount: number;
       client?: { name: string }
+    }
+  }[]
+  payroll_allocations?: {
+    id: string;
+    payroll_id: string;
+    allocated_amount: number;
+    deleted_at?: string | null;
+    payroll?: {
+      net_salary: number;
+      status: string;
+      employee?: { name: string; cqid: string }
     }
   }[]
 }
@@ -97,8 +109,10 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   
   // Allocations modal state
   const [allocatingEntry, setAllocatingEntry] = useState<Entry | null>(null)
+  const [allocatingPayrollEntry, setAllocatingPayrollEntry] = useState<Entry | null>(null)
 
-  const invoiceCategoryId = categories.find(c => c.name?.toLowerCase() === 'invoice' && (c.type === 'inflow' || c.type === 'both'))?.id || ''
+  const invoiceCategoryId = useMemo(() => categories.find(c => c.name.toLowerCase().includes('invoice'))?.id, [categories])
+  const salaryCategoryId = useMemo(() => categories.find(c => c.name.toLowerCase().includes('salary'))?.id, [categories])
 
   const [form, setForm] = useState({
     type: 'inflow' as 'inflow' | 'outflow',
@@ -162,7 +176,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     const { data, error } = await supabase
       .from('cashbook_entries')
       .insert(payload)
-      .select(`*, category:cashbook_categories(id, name, type), bank_account:bank_accounts(id, name)`)
+      .select(`*, category:cashbook_categories(id, name, type), bank_account:bank_accounts(id, name), allocations:cashbook_allocations(id, invoice_id, allocated_amount, deleted_at, invoice:invoices(invoice_number, status, due_date, total_amount, paid_amount, client:clients(name))), payroll_allocations:payroll_allocations(id, payroll_id, allocated_amount, deleted_at, payroll:payrolls(net_salary, status, employee:employees(name, cqid)))`)
 
     // Use first entry as "data" for legacy code below, all entries for list update
     const firstEntry = Array.isArray(data) ? data[0] : data
@@ -194,10 +208,6 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
           notes: form.description || null,
         })
       }
-
-      // NOTE: Invoice paid_amount and status are now synchronized automatically 
-      // by the PostgreSQL trigger `sync_invoice_payments()` on cashbook_entries.
-      // We no longer manually update invoices here.
 
       // Add all inserted entries to local state (sorted newest first)
       setEntries(prev => [...[...allInserted].reverse(), ...prev])
@@ -286,8 +296,14 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
 
     if (filterAllocStatus) {
       result = result.filter(e => {
-        if (e.category_id !== invoiceCategoryId) return false
-        const totalAlloc = e.allocations?.filter(a => !a.deleted_at).reduce((s, a) => s + Number(a.allocated_amount), 0) || 0
+        const isInv = e.category_id === invoiceCategoryId
+        const isSal = e.category_id === salaryCategoryId
+        if (!isInv && !isSal) return false
+        
+        const totalAlloc = isInv 
+          ? (e.allocations?.filter(a => !a.deleted_at).reduce((s, a) => s + Number(a.allocated_amount), 0) || 0)
+          : (e.payroll_allocations?.filter(a => !a.deleted_at).reduce((s, a) => s + Number(a.allocated_amount), 0) || 0)
+        
         const unallocated = (e.amount_inr || 0) - totalAlloc
         if (filterAllocStatus === 'unallocated') return unallocated > 0.01 && totalAlloc === 0
         if (filterAllocStatus === 'partial') return unallocated > 0.01 && totalAlloc > 0
@@ -298,7 +314,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     }
 
     return result
-  }, [entries, filterType, filterMonth, filterSearch, filterCategory, filterAllocStatus, invoiceCategoryId])
+  }, [entries, filterType, filterMonth, filterSearch, filterCategory, filterAllocStatus, invoiceCategoryId, salaryCategoryId])
 
   const totalInflow = filteredEntries.filter(e => e.type === 'inflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
   const totalOutflow = filteredEntries.filter(e => e.type === 'outflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
@@ -429,10 +445,15 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-muted-foreground">No entries found</td></tr>
               )}
               {filteredEntries.map(entry => {
-                const totalAlloc = entry.allocations?.filter(a => !a.deleted_at).reduce((s, a) => s + Number(a.allocated_amount), 0) || 0
                 const isInvoice = entry.category_id === invoiceCategoryId
+                const isSalary = entry.category_id === salaryCategoryId
+                
+                let totalAlloc = 0
+                if (isInvoice) totalAlloc = entry.allocations?.filter(a => !a.deleted_at).reduce((s, a) => s + Number(a.allocated_amount), 0) || 0
+                if (isSalary) totalAlloc = entry.payroll_allocations?.filter(a => !a.deleted_at).reduce((s, a) => s + Number(a.allocated_amount), 0) || 0
+                
                 const unallocated = (entry.amount_inr || 0) - totalAlloc
-                const allocStatus = !isInvoice ? null : unallocated <= 0.01 && unallocated >= -0.01 ? 'fully' : unallocated > 0.01 && totalAlloc > 0 ? 'partial' : unallocated < -0.01 ? 'over' : 'none'
+                const allocStatus = (!isInvoice && !isSalary) ? null : unallocated <= 0.01 && unallocated >= -0.01 ? 'fully' : unallocated > 0.01 && totalAlloc > 0 ? 'partial' : unallocated < -0.01 ? 'over' : 'none'
                 const isEditing = editingRow === entry.id
 
                 return (
@@ -507,6 +528,15 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                                 onClick={() => setAllocatingEntry(entry)}
                                 className={`opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-blue-500/10 ${allocStatus === 'fully' ? 'text-blue-500' : 'text-muted-foreground hover:text-blue-400'}`}
                                 title="Manage allocations"
+                              >
+                                <LinkIcon className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {isSalary && (
+                              <button
+                                onClick={() => setAllocatingPayrollEntry(entry)}
+                                className={`opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-violet-500/10 ${allocStatus === 'fully' ? 'text-violet-500' : 'text-muted-foreground hover:text-violet-400'}`}
+                                title="Manage salary allocations"
                               >
                                 <LinkIcon className="w-3.5 h-3.5" />
                               </button>
@@ -849,14 +879,20 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       {allocatingEntry && (
         <AllocationModal
           entryId={allocatingEntry.id}
-          amountInr={allocatingEntry.amount_inr}
+          amountInr={allocatingEntry.amount_inr || 0}
           dueInvoices={sortedDueInvoices}
           onClose={() => setAllocatingEntry(null)}
-          onUpdate={() => {
-            // In a real app we'd refetch or invalidate here. 
-            // For now, reloading page is simplest to get fresh nested relations safely without complex state updates.
-            window.location.reload()
-          }}
+          onUpdate={() => window.location.reload()}
+        />
+      )}
+      {allocatingPayrollEntry && (
+        <PayrollAllocationModal
+          entryId={allocatingPayrollEntry.id}
+          amountInr={allocatingPayrollEntry.amount_inr || 0}
+          employees={employees}
+          reference={allocatingPayrollEntry.reference}
+          onClose={() => setAllocatingPayrollEntry(null)}
+          onUpdate={() => window.location.reload()}
         />
       )}
     </div>

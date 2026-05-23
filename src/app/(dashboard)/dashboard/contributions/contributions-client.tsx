@@ -144,6 +144,7 @@ export default function ContributionsClient({
   const [serviceCommPct, setServiceCommPct] = useState(50)
   const [predefinedCommPct, setPredefinedCommPct] = useState<number | null>(null) // from pricing matrix
   const [commOverrideReason, setCommOverrideReason] = useState('')
+  const [importedScores, setImportedScores] = useState<any[]>([])
   const [showCommOverride, setShowCommOverride] = useState(false)
   const [saving, setSaving] = useState(false)
   const [expandedEmployees, setExpandedEmployees] = useState<Set<string>>(new Set())
@@ -208,6 +209,8 @@ export default function ContributionsClient({
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
   }, [])
+
+  const rawContribTaskIds = useMemo(() => new Set(contributorRecords.map(c => c.task_id)), [contributorRecords])
 
   // ── Auto-save draft to localStorage ──────────────────
   useEffect(() => {
@@ -361,8 +364,10 @@ export default function ContributionsClient({
   const taskScoreMap = useMemo(() => {
     const m: Record<string, Set<string>> = {}
     scores.forEach(s => {
-      if (!m[s.task_id]) m[s.task_id] = new Set()
-      m[s.task_id].add(s.employee_id)
+      if (s.score_percentage > 0 || s.earnings_inr > 0) {
+        if (!m[s.task_id]) m[s.task_id] = new Set()
+        m[s.task_id].add(s.employee_id)
+      }
     })
     contributorRecords.forEach(c => {
       if (!m[c.task_id]) m[c.task_id] = new Set()
@@ -575,11 +580,17 @@ export default function ContributionsClient({
 
     setView('entry')
 
+    setImportedScores([])
     // Fetch any previously saved contributions + tools for this task
-    const [contribRes, toolRes] = await Promise.all([
+    const [contribRes, toolRes, scoreRes] = await Promise.all([
       supabase.from('contributions').select('parameter_id, employee_id, value').eq('task_id', task.id),
       supabase.from('task_tools').select('tool_id').eq('task_id', task.id),
+      supabase.from('contribution_scores').select('employee_id, score_percentage, earnings_inr').eq('task_id', task.id),
     ])
+
+    if (scoreRes.data?.length && (!contribRes.data || contribRes.data.length === 0)) {
+      setImportedScores(scoreRes.data)
+    }
 
     if (contribRes.data?.length) {
       // Build group lookup inline (can't use groupedParams useMemo — selectedTask state not flushed yet)
@@ -1401,9 +1412,10 @@ export default function ContributionsClient({
                                   {contributorIds.map(eId => {
                                     const e = employees.find(x => x.id === eId)
                                     if (!e) return null
+                                    const isBulkImported = !rawContribTaskIds.has(task.id)
                                     return (
-                                      <span key={'c' + eId} className="text-[9px] bg-green-500/10 text-green-400 border border-green-500/20 px-1.5 py-0.5 rounded-full">
-                                        ✓ {e.cqid}
+                                      <span key={'c' + eId} className={`text-[9px] ${isBulkImported ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' : 'bg-green-500/10 text-green-400 border-green-500/20'} border px-1.5 py-0.5 rounded-full`} title={isBulkImported ? 'Imported via Bulk Import' : ''}>
+                                        ✓ {e.cqid} {isBulkImported && '(Imported)'}
                                       </span>
                                     )
                                   })}
@@ -1883,6 +1895,30 @@ export default function ContributionsClient({
               <input value={commOverrideReason} onChange={e => setCommOverrideReason(e.target.value)}
                 className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50"
                 placeholder="e.g. Special project rate, client negotiation…" />
+            </div>
+          </div>
+        )}
+
+        {/* Bulk imported scores notice */}
+        {importedScores.length > 0 && !Object.keys(contributions).length && (
+          <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl p-4 space-y-3">
+            <h3 className="text-orange-400 font-semibold text-sm flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-orange-400" /> Imported via Bulk Import
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              This task has pre-calculated contribution percentages from a bulk import. No parameters were filled out.
+              Saving new parameters below will overwrite these imported scores.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {importedScores.map((s, i) => {
+                const emp = employees.find((e: any) => e.id === s.employee_id)
+                return (
+                  <span key={i} className="bg-secondary border border-border px-3 py-1.5 rounded-lg text-xs font-medium">
+                    {emp ? dn(emp) : s.employee_id.slice(0, 4)} <span className="text-primary ml-1">{s.score_percentage}%</span>
+                    {showFinancials && s.earnings_inr > 0 && <span className="opacity-60 ml-1">(₹{Math.round(s.earnings_inr)})</span>}
+                  </span>
+                )
+              })}
             </div>
           </div>
         )}
