@@ -31,6 +31,71 @@ import {
 } from 'lucide-react'
 import { CommandPaletteTrigger } from '@/components/ui/command-palette'
 import { EmployeeAvatar } from '@/components/ui/employee-avatar'
+import { ModalOverlay } from '@/components/ui/modal-overlay'
+
+// ─────────────────────────────────────────────────────
+// Change Password Modal
+// ─────────────────────────────────────────────────────
+function ChangePasswordModal({ onClose }: { onClose: () => void }) {
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [success, setSuccess] = useState(false)
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (password.length < 8) return setError('Password must be at least 8 characters')
+    if (password !== confirm) return setError('Passwords do not match')
+    setLoading(true)
+    setError('')
+    const supabase = createClient()
+    const { error } = await supabase.auth.updateUser({ password })
+    if (error) {
+      setError(error.message)
+      setLoading(false)
+    } else {
+      setSuccess(true)
+      setTimeout(onClose, 2000)
+    }
+  }
+
+  return (
+    <ModalOverlay onClose={onClose} zIndex="z-[100]">
+      <div className="w-full max-w-sm bg-card border border-border rounded-2xl p-6 shadow-xl relative" onClick={e => e.stopPropagation()}>
+        <button onClick={onClose} className="absolute top-4 right-4 text-muted-foreground hover:text-foreground">
+          <X className="w-4 h-4" />
+        </button>
+        <h2 className="text-lg font-semibold mb-1">Change Password</h2>
+        <p className="text-sm text-muted-foreground mb-5">Update your account password</p>
+        
+        {success ? (
+          <div className="text-center py-6">
+            <div className="w-12 h-12 mx-auto rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mb-3">
+              <span className="text-2xl">✓</span>
+            </div>
+            <p className="font-medium text-emerald-500">Password updated successfully!</p>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1.5">New password</label>
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} required minLength={8} autoFocus className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 text-foreground" placeholder="At least 8 characters" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1.5">Confirm password</label>
+              <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} required minLength={8} className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 text-foreground" placeholder="Re-enter password" />
+            </div>
+            {error && <div className="text-sm text-destructive bg-destructive/10 border border-destructive/30 rounded-lg px-3 py-2">{error}</div>}
+            <button type="submit" disabled={loading} className="w-full gradient-bg text-white font-medium py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50">
+              {loading ? 'Updating…' : 'Update password'}
+            </button>
+          </form>
+        )}
+      </div>
+    </ModalOverlay>
+  )
+}
 
 // ─────────────────────────────────────────────────────
 // Nav definition — grouped by workflow (top = most used)
@@ -102,6 +167,7 @@ const roleLabel: Record<Role, string> = {
 // Sidebar content (shared between desktop and mobile)
 // ─────────────────────────────────────────────────────
 function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () => void; isCollapsed?: boolean }) {
+  const [showPwdModal, setShowPwdModal] = useState(false)
   const pathname = usePathname()
   const router = useRouter()
   const { isUnlocked, openUnlockModal, lock } = usePrivacy()
@@ -284,13 +350,13 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
             )}
 
             {/* Change password */}
-            <a
-              href="/forgot-password"
-              className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-all duration-300"
+            <button
+              onClick={() => setShowPwdModal(true)}
+              className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-all duration-300 w-full text-left"
             >
               <KeyRound className="w-4 h-4 shrink-0" />
               <span className="truncate whitespace-nowrap">Change password</span>
-            </a>
+            </button>
 
             {/* Sign out */}
             <button
@@ -303,6 +369,7 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
           </div>
         )}
       </div>
+      {showPwdModal && <ChangePasswordModal onClose={() => setShowPwdModal(false)} />}
     </div>
   )
 }
