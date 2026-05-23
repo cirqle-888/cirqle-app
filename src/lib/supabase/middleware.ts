@@ -51,8 +51,8 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // Signed-in users hitting login/forgot/reset are bounced to dashboard (but /register stays — they may be invited)
-  if (user && (pathname.startsWith('/login') || pathname.startsWith('/forgot-password'))) {
+  // Signed-in users hitting login are bounced to dashboard (forgot/reset/register stay accessible)
+  if (user && pathname.startsWith('/login')) {
     const url = request.nextUrl.clone()
     url.pathname = '/dashboard'
     return NextResponse.redirect(url)
