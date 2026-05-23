@@ -1223,21 +1223,21 @@ export default function ContributionsClient({
                                   href={`/dashboard/tasks?highlight=${task.id}`}
                                   title={`Open "${task.title}" in Tasks`}
                                   onClick={e => e.stopPropagation()}
-                                  className="p-1.5 rounded-md text-muted-foreground/0 group-hover:text-violet-400/50 hover:!text-violet-400 hover:bg-violet-500/10 transition-all">
+                                  className="p-1.5 rounded-md lg:text-muted-foreground/0 text-muted-foreground/50 group-hover:text-violet-400/50 hover:!text-violet-400 hover:bg-violet-500/10 transition-all">
                                   <ExternalLink className="w-3.5 h-3.5" />
                                 </a>
                               )}
                               <button type="button"
                                 onClick={() => openEditTask(task)}
                                 title="Edit task details"
-                                className="p-1.5 rounded-md text-muted-foreground/0 group-hover:text-muted-foreground/40 hover:!text-foreground hover:bg-secondary transition-all">
+                                className="p-1.5 rounded-md lg:text-muted-foreground/0 text-muted-foreground/50 group-hover:text-muted-foreground/40 hover:!text-foreground hover:bg-secondary transition-all">
                                 <Edit2 className="w-3.5 h-3.5" />
                               </button>
                               <button type="button"
                                 onClick={() => handleDuplicateTask(task)}
                                 title="Duplicate task to today"
                                 disabled={duplicatingTaskId === task.id}
-                                className="p-1.5 rounded-md text-muted-foreground/0 group-hover:text-muted-foreground/40 hover:!text-foreground hover:bg-secondary transition-all disabled:opacity-40">
+                                className="p-1.5 rounded-md lg:text-muted-foreground/0 text-muted-foreground/50 group-hover:text-muted-foreground/40 hover:!text-foreground hover:bg-secondary transition-all disabled:opacity-40">
                                 {duplicatingTaskId === task.id
                                   ? <span className="w-3.5 h-3.5 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin inline-block" />
                                   : <Copy className="w-3.5 h-3.5" />

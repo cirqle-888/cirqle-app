@@ -427,8 +427,141 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         </div>
 
         {/* Entries */}
-        <div className="bg-card border border-border rounded-xl">
-          <div className="overflow-x-auto">
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          {/* Mobile / Tablet Card View */}
+          <div className="grid grid-cols-1 divide-y divide-border lg:hidden">
+            {filteredEntries.length === 0 && (
+              <div className="px-4 py-10 text-center text-sm text-muted-foreground">No entries found</div>
+            )}
+            {filteredEntries.map(entry => {
+              const isInvoice = entry.category_id === invoiceCategoryId
+              const isSalary = entry.category_id === salaryCategoryId
+              
+              let totalAlloc = 0
+              if (isInvoice) totalAlloc = entry.allocations?.filter(a => !a.deleted_at).reduce((s, a) => s + Number(a.allocated_amount), 0) || 0
+              if (isSalary) totalAlloc = entry.payroll_allocations?.filter(a => !a.deleted_at).reduce((s, a) => s + Number(a.allocated_amount), 0) || 0
+              
+              const unallocated = (entry.amount_inr || 0) - totalAlloc
+              const allocStatus = (!isInvoice && !isSalary) ? null : unallocated <= 0.01 && unallocated >= -0.01 ? 'fully' : unallocated > 0.01 && totalAlloc > 0 ? 'partial' : unallocated < -0.01 ? 'over' : 'none'
+              const isEditing = editingRow === entry.id
+
+              return (
+                <div key={entry.id} className="p-4 flex flex-col gap-3 hover:bg-secondary/20 transition-colors group">
+                  <div className="flex justify-between items-start gap-4">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-1.5 h-1.5 rounded-full ${entry.type === 'inflow' ? 'bg-green-400' : 'bg-red-400'}`} />
+                      {isEditing ? (
+                        <select value={editForm.category_id || ''} onChange={e => setEditForm(p => ({...p, category_id: e.target.value}))} className="bg-background border rounded px-2 py-1 text-xs">
+                          {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                      ) : (
+                        <span className="text-sm font-medium">{entry.category?.name || '—'}</span>
+                      )}
+                    </div>
+                    <div className={`text-right font-semibold ${entry.type === 'inflow' ? 'text-green-400' : 'text-red-400'}`}>
+                      {isEditing ? (
+                        <div className="flex gap-1 justify-end">
+                          <input type="number" value={editForm.amount || ''} onChange={e => setEditForm(p => ({...p, amount: Number(e.target.value)}))} className="bg-background border rounded px-2 py-1 w-20 text-xs" />
+                          <select value={editForm.currency || ''} onChange={e => setEditForm(p => ({...p, currency: e.target.value as Currency}))} className="bg-background border rounded px-1 py-1 text-xs">
+                            {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                        </div>
+                      ) : (
+                        <>
+                          {entry.type === 'inflow' ? '+' : '-'}₹{(entry.amount_inr || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          {entry.currency !== 'INR' && <span className="text-xs text-muted-foreground ml-1">({entry.currency} {entry.amount?.toLocaleString()})</span>}
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="text-sm text-muted-foreground">
+                    {isEditing ? (
+                      <input type="text" value={editForm.description || ''} onChange={e => setEditForm(p => ({...p, description: e.target.value}))} className="bg-background border rounded px-2 py-1 w-full text-xs" />
+                    ) : (
+                      entry.description || '—'
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 mt-1">
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                      <span>
+                        {isEditing ? (
+                          <input type="date" value={editForm.entry_date || ''} onChange={e => setEditForm(p => ({...p, entry_date: e.target.value}))} className="bg-background border rounded px-2 py-1" />
+                        ) : (
+                          entry.entry_date
+                        )}
+                      </span>
+                      <span>•</span>
+                      <span>
+                        {isEditing ? (
+                          <select value={editForm.bank_account_id || ''} onChange={e => setEditForm(p => ({...p, bank_account_id: e.target.value}))} className="bg-background border rounded px-2 py-1">
+                            <option value="">Cash</option>
+                            {bankAccounts.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                          </select>
+                        ) : (
+                          entry.bank_account?.name || 'Cash'
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2">
+                      {isEditing ? (
+                        <>
+                          <button onClick={handleInlineSave} disabled={saving} className="p-1.5 rounded-md hover:bg-primary/20 text-primary transition-colors" title="Save changes"><Save className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => setEditingRow(null)} disabled={saving} className="p-1.5 rounded-md hover:bg-secondary/80 text-muted-foreground transition-colors" title="Cancel"><X className="w-3.5 h-3.5" /></button>
+                        </>
+                      ) : (
+                        <>
+                          {isInvoice && (
+                            <button
+                              onClick={() => setAllocatingEntry(entry)}
+                              className={`p-1.5 rounded-md hover:bg-blue-500/10 transition-colors ${allocStatus === 'fully' ? 'text-blue-500' : 'text-muted-foreground hover:text-blue-400'}`}
+                              title="Manage allocations"
+                            >
+                              <LinkIcon className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {isSalary && (
+                            <button
+                              onClick={() => setAllocatingPayrollEntry(entry)}
+                              className={`p-1.5 rounded-md hover:bg-violet-500/10 transition-colors ${allocStatus === 'fully' ? 'text-violet-500' : 'text-muted-foreground hover:text-violet-400'}`}
+                              title="Manage salary allocations"
+                            >
+                              <LinkIcon className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          <button onClick={() => { setEditingRow(entry.id); setEditForm(entry); }} className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors" title="Edit entry">
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleSoftDelete(entry.id)}
+                            className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                            title="Delete entry (reversible)"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Allocation Badges */}
+                  {allocStatus && allocStatus !== 'none' && (
+                    <div className="mt-1">
+                      {allocStatus === 'partial' && <span className="inline-block bg-blue-500/10 text-blue-400 text-[9px] px-1.5 py-0.5 rounded font-medium">Partially Allocated</span>}
+                      {allocStatus === 'over' && <span className="inline-block bg-red-500/10 text-red-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Over-allocated!</span>}
+                      {allocStatus === 'fully' && <span className="inline-block bg-green-500/10 text-green-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Fully Allocated</span>}
+                    </div>
+                  )}
+                  {allocStatus === 'none' && <div className="mt-1"><span className="inline-block bg-amber-500/10 text-amber-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Unallocated</span></div>}
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Desktop Table View */}
+          <div className="hidden lg:block overflow-x-auto">
             <table className="w-full text-sm min-w-[600px]">
             <thead>
               <tr className="border-b border-border bg-secondary/50">
@@ -526,7 +659,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                             {isInvoice && (
                               <button
                                 onClick={() => setAllocatingEntry(entry)}
-                                className={`opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-blue-500/10 ${allocStatus === 'fully' ? 'text-blue-500' : 'text-muted-foreground hover:text-blue-400'}`}
+                                className={`lg:opacity-0 opacity-100 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-blue-500/10 ${allocStatus === 'fully' ? 'text-blue-500' : 'text-muted-foreground hover:text-blue-400'}`}
                                 title="Manage allocations"
                               >
                                 <LinkIcon className="w-3.5 h-3.5" />
@@ -535,18 +668,18 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                             {isSalary && (
                               <button
                                 onClick={() => setAllocatingPayrollEntry(entry)}
-                                className={`opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-violet-500/10 ${allocStatus === 'fully' ? 'text-violet-500' : 'text-muted-foreground hover:text-violet-400'}`}
+                                className={`lg:opacity-0 opacity-100 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-violet-500/10 ${allocStatus === 'fully' ? 'text-violet-500' : 'text-muted-foreground hover:text-violet-400'}`}
                                 title="Manage salary allocations"
                               >
                                 <LinkIcon className="w-3.5 h-3.5" />
                               </button>
                             )}
-                            <button onClick={() => { setEditingRow(entry.id); setEditForm(entry); }} className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary" title="Edit entry">
+                            <button onClick={() => { setEditingRow(entry.id); setEditForm(entry); }} className="lg:opacity-0 opacity-100 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary" title="Edit entry">
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
                             <button
                               onClick={() => handleSoftDelete(entry.id)}
-                              className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+                              className="lg:opacity-0 opacity-100 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
                               title="Delete entry (reversible)"
                             >
                               <Trash2 className="w-3.5 h-3.5" />

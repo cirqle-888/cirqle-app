@@ -762,7 +762,8 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
         ════════════════════════════════════════════════════ */}
         {tab === 'Records' && (
           <div className="bg-card border border-border rounded-xl">
-            <div className="overflow-x-auto">
+            {/* Desktop Table View */}
+            <div className="hidden lg:block overflow-x-auto">
             <table className="w-full text-sm min-w-[700px]">
               <thead>
                 <tr className="border-b border-border bg-secondary/50">
@@ -818,6 +819,57 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
               </tbody>
             </table>
             </div>
+
+            {/* Mobile Card View */}
+            <div className="lg:hidden flex flex-col p-2 gap-2">
+              {payroll.length === 0 && (
+                <div className="px-4 py-10 text-center text-sm text-muted-foreground">No payroll records yet. Use Generate on the Overview tab.</div>
+              )}
+              {payroll.map(record => {
+                const emp = empList.find(e => e.id === record.employee_id)
+                const ded = (record.advances_deducted || 0) + (record.other_deductions || 0)
+                return (
+                  <div key={record.id} className="bg-background rounded-lg border border-border p-3 flex flex-col gap-2">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="font-semibold text-sm">{dn(emp || record.employee)}</p>
+                        <p className="text-[11px] text-muted-foreground">{(emp || record.employee)?.cqid} • {MONTHS[record.month - 1]} {record.year}</p>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => printSalarySlip(record)} title="Print salary slip" className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+                          <Printer className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs mt-1">
+                      <div className="text-muted-foreground">Base Salary</div>
+                      <div className="text-right">₹{(record.base_salary || 0).toLocaleString('en-IN')}</div>
+                      
+                      <div className="text-muted-foreground">Commission</div>
+                      <div className="text-right text-green-400">+₹{(record.commission_earned || 0).toLocaleString('en-IN')}</div>
+                      
+                      <div className="text-muted-foreground">Deductions</div>
+                      <div className="text-right text-red-400">{ded > 0 ? `-₹${ded.toLocaleString('en-IN')}` : '—'}</div>
+                      
+                      <div className="font-medium pt-1 mt-1 border-t border-border">Net Salary</div>
+                      <div className="text-right font-bold pt-1 mt-1 border-t border-border">₹{(record.net_salary || 0).toLocaleString('en-IN')}</div>
+                    </div>
+                    <div className="mt-2 flex justify-end">
+                      {record.status === 'paid'
+                        ? <div className="flex items-center gap-1.5">
+                            <span className="text-xs px-2 py-0.5 rounded-md bg-green-500/15 text-green-400">Paid {record.paid_date}</span>
+                            <button onClick={() => confirmMarkUnpaid(record.id)} title="Undo payment"
+                              className="text-xs px-2 py-1 rounded-md text-muted-foreground/50 hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                              Undo
+                            </button>
+                          </div>
+                        : <button onClick={() => confirmMarkPaid(record.id)} className="text-xs px-3 py-1.5 rounded-md bg-yellow-500/15 text-yellow-400 hover:bg-yellow-500/25 transition-colors font-medium">Mark Paid</button>
+                      }
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           </div>
         )}
 
@@ -841,7 +893,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                 <p className="text-xs text-muted-foreground mt-0.5">Net salary paid per employee · last 6 months</p>
               </div>
             </div>
-            <div className="overflow-auto">
+            <div className="hidden lg:block overflow-auto">
               <table className="w-full text-sm border-collapse">
                 <thead>
                   <tr className="bg-secondary/60 border-b border-border">
@@ -942,7 +994,95 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                     </td>
                   </tr>
                 </tfoot>
-              </table>
+            </table>
+            </div>
+
+            {/* Mobile Card View */}
+            <div className="lg:hidden flex flex-col p-2 gap-2">
+              {empList.filter(e => e.is_active).map(emp => {
+                const monthNets = last6Months.map(m => {
+                  const mk = `${m.year}-${String(m.month).padStart(2, '0')}`
+                  const rec = payroll.find(r => r.employee_id === emp.id && r.month === m.month && r.year === m.year)
+                  const rawComm = Math.round(commissionByEmpMonth[emp.id]?.[mk] || 0)
+                  return { 
+                    ...m, 
+                    net: rec?.net_salary || 0, 
+                    status: rec?.status, 
+                    commission: rec?.commission_earned ?? rawComm,
+                    hasRecord: !!rec
+                  }
+                })
+                const totalNet = monthNets.reduce((s, m) => s + m.net, 0)
+                const totalComm = monthNets.reduce((s, m) => s + (!m.hasRecord ? m.commission : 0), 0)
+                const displayTotal = totalNet + totalComm
+                return (
+                  <div key={emp.id} className="bg-background rounded-lg border border-border p-3 cursor-pointer hover:border-primary/30 transition-colors" onClick={() => setSelectedEmp(emp)}>
+                    <div className="flex items-center justify-between mb-3 pb-3 border-b border-border/50">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-lg gradient-bg flex items-center justify-center shrink-0">
+                          <span className="text-white text-[10px] font-bold">{emp.cqid.replace('CQID','')}</span>
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold">{dn(emp)}</p>
+                          <p className="text-[11px] text-muted-foreground">{emp.cqid}</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] text-muted-foreground mb-0.5">6mo Total</p>
+                        <p className="text-sm font-bold">{displayTotal > 0 ? `₹${formatCompact(displayTotal)}` : '—'}</p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {monthNets.map(m => (
+                        <div key={`${m.year}-${m.month}`} className="bg-secondary/40 rounded p-2 flex justify-between items-center">
+                          <span className="text-[11px] font-medium text-muted-foreground">{m.label}</span>
+                          <div className="text-right">
+                            {m.hasRecord ? (
+                              <div>
+                                <p className={`text-xs font-semibold ${m.status === 'paid' ? 'text-green-400' : 'text-amber-400'}`}>
+                                  ₹{formatCompact(m.net)}
+                                </p>
+                                {m.commission > 0 && (
+                                  <p className="text-[9px] text-muted-foreground">+₹{formatCompact(m.commission)} comm</p>
+                                )}
+                              </div>
+                            ) : m.commission > 0 ? (
+                              <div>
+                                <p className="text-xs font-semibold text-amber-500/80">
+                                  ₹{formatCompact(m.commission)}
+                                </p>
+                                <p className="text-[9px] text-muted-foreground">pending gen</p>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-muted-foreground/30">—</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+
+              <div className="bg-secondary/40 rounded-lg border border-border p-3 mt-1">
+                <p className="text-xs font-semibold text-muted-foreground mb-2">Company Monthly Totals</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {last6Months.map(m => {
+                    const mk = `${m.year}-${String(m.month).padStart(2, '0')}`
+                    const total = empList.filter(e => e.is_active).reduce((s, emp) => {
+                      const rec = payroll.find(r => r.employee_id === emp.id && r.month === m.month && r.year === m.year)
+                      const rawComm = Math.round(commissionByEmpMonth[emp.id]?.[mk] || 0)
+                      return s + (rec?.net_salary || rawComm)
+                    }, 0)
+                    return (
+                      <div key={`${m.year}-${m.month}`} className="flex justify-between items-center bg-background/60 rounded p-2 border border-border/30">
+                        <span className="text-[11px] font-medium text-muted-foreground">{m.label}</span>
+                        {total > 0 ? <span className="text-xs font-bold gradient-text">₹{formatCompact(total)}</span> : <span className="text-[11px] text-muted-foreground/30">—</span>}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
             <div className="px-5 py-2.5 border-t border-border/40 flex gap-4 text-[11px] text-muted-foreground">
               <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-400" /> Paid</span>

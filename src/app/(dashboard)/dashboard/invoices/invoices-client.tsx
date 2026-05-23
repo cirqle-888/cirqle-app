@@ -2096,7 +2096,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                         className="flex items-center gap-0.5 text-[11px] font-mono text-muted-foreground hover:text-foreground transition-colors group/copy"
                       >
                         {inv.invoice_number}
-                        <Copy className="w-2.5 h-2.5 ml-0.5 opacity-0 group-hover/copy:opacity-50 transition-opacity" />
+                        <Copy className="w-2.5 h-2.5 ml-0.5 lg:opacity-0 opacity-50 group-hover/copy:opacity-50 transition-opacity" />
                       </button>
                       <StatusBadge status={overdue && inv.status !== 'paid' ? 'overdue' : inv.status} />
                     </div>
@@ -2164,7 +2164,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 className="flex items-center gap-1 font-mono text-xs text-muted-foreground hover:text-foreground transition-colors group"
               >
                 <span>{inv.invoice_number}</span>
-                <Copy className={`w-3 h-3 shrink-0 transition-colors ${copiedInvNum ? 'text-green-400' : 'opacity-0 group-hover:opacity-60'}`} />
+                <Copy className={`w-3 h-3 shrink-0 transition-colors ${copiedInvNum ? 'text-green-400' : 'lg:opacity-0 opacity-60 group-hover:opacity-60'}`} />
               </button>
               <StatusBadge status={overdue && inv.status !== 'paid' ? 'overdue' : inv.status} />
               {editable && (
@@ -2448,7 +2448,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                     <button
                       onClick={e => { e.stopPropagation(); removeItem(inv.id, item.id) }}
                       disabled={removingItemId === item.id}
-                      className="opacity-0 group-hover:opacity-100 p-0.5 text-muted-foreground hover:text-red-400 transition-all">
+                      className="lg:opacity-0 opacity-100 group-hover:opacity-100 p-0.5 text-muted-foreground hover:text-red-400 transition-all">
                       <X className="w-3 h-3" />
                     </button>
                   )}
