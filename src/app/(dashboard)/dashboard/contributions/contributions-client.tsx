@@ -453,16 +453,12 @@ export default function ContributionsClient({
   }, [localTasks, search, filterClient, filterService, filterDate, filterEmployee, filterEmployeeMode, statusFilter, taskScoreMap, taskAssignmentMap, employees])
 
   // canSeeFinancials: respects visibility settings (contributions + billing both gate this panel)
-  const canSeeFinancials = showContribs && showBilling
+  const canSeeFinancials = role !== 'employee' && showContribs && showBilling
 
   // For employee/view_only role, only show their assigned tasks
   const myVisibleTasks = useMemo(() => {
-    if ((role === 'employee' || role === 'view_only') && currentEmployee) {
-      const myIds = new Set(assignments.filter(a => a.employee_id === currentEmployee.id).map(a => a.task_id))
-      return filteredTasks.filter((t: any) => myIds.has(t.id))
-    }
     return filteredTasks
-  }, [role, currentEmployee, filteredTasks, assignments])
+  }, [filteredTasks])
 
   const tasksByDate = useMemo(() => {
     const map: Record<string, any[]> = {}

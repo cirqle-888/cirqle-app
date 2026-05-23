@@ -31,6 +31,7 @@ interface Props {
   todayTasks: any[]; unscoredDoneTasks: any[]; activeTasks: any[]; toBeInvoiced: any[]
   employees: any[]; scores: any[]; payrollRecords: any[]
   todayStr: string
+  isAdmin?: boolean
 }
 
 type Granularity = 'daily' | 'monthly' | 'quarterly' | 'yearly'
@@ -214,13 +215,23 @@ function Drawer({ type, onClose, todayTasks, unscoredDoneTasks, overdueInvoices,
 export default function DashboardClient({
   stats, invoices, overdueInvoices, dueInvoices, allCashbook,
   displayTasks, allAnalyticsTasks, todayTasks, unscoredDoneTasks,
-  activeTasks, toBeInvoiced, employees, scores, payrollRecords, todayStr,
+  activeTasks, toBeInvoiced, employees, scores, payrollRecords, todayStr, isAdmin = true
 }: Props) {
   const { dn } = usePrivacy()
   const [dateFilter, setDateFilter] = useState<DateFilterValue>(null)
   const [granularity, setGranularity] = useState<Granularity>('monthly')
   const [pulseTab, setPulseTab] = useState<PulseTab>('trends')
   const [drawer, setDrawer] = useState<DrawerType>(null)
+
+  if (!isAdmin) {
+    return (
+      <EmployeeDashboard 
+        todayStr={todayStr} 
+        scores={scores} 
+        payrollRecords={payrollRecords} 
+      />
+    )
+  }
 
   const today = new Date(todayStr + 'T12:00:00')
   const todayLabel = today.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
@@ -1087,6 +1098,137 @@ function RankTable({ title, icon, rows }: { title: string; icon: React.ReactNode
             {row.sub && <p className="text-[10px] text-muted-foreground ml-6 mt-0.5">{row.sub}</p>}
           </div>
         ))}
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Employee Dashboard (Restricted View)
+// ─────────────────────────────────────────────────────────────────────────────
+function EmployeeDashboard({ todayStr, scores, payrollRecords }: { todayStr: string; scores: any[]; payrollRecords: any[] }) {
+  const [dateFilter, setDateFilter] = useState<DateFilterValue>(null)
+  const [granularity, setGranularity] = useState<Granularity>('monthly')
+
+  const today = new Date(todayStr + 'T12:00:00')
+  const todayLabel = today.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+
+  // Stats calculation
+  const totalCredited = payrollRecords.reduce((sum, p) => sum + (p.net_salary || 0), 0)
+  const lastCredited = payrollRecords.length > 0 ? payrollRecords[0].net_salary : 0
+  const tasksCompleted = new Set(scores.map(s => s.task?.id || s.task_id)).size
+  const totalContributions = scores.length
+
+  // Contribution Range Breakdown (Counts only)
+  function getPeriodKey(dateStr: string, g: Granularity): string {
+    if (!dateStr) return ''
+    const d = new Date(dateStr + 'T12:00:00')
+    if (g === 'daily')     return dateStr
+    if (g === 'monthly')   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+    if (g === 'quarterly') { const q = Math.ceil((d.getMonth()+1)/3); return `${d.getFullYear()}-Q${q}` }
+    return `${d.getFullYear()}`
+  }
+  function getPeriodLabel(key: string, g: Granularity): string {
+    if (g === 'daily')   return key ? fmtDate(key) : key
+    if (g === 'monthly') { const [y,m] = key.split('-'); return `${MONTH_NAMES[parseInt(m)-1]} ${y?.slice(2)}` }
+    return key
+  }
+
+  const trendData = useMemo(() => {
+    const map: Record<string, number> = {}
+    const filteredScores = dateFilter ? scores.filter(s => {
+      const d = s.task?.task_date || s.calculated_at?.slice(0,10) || ''
+      return matchesDateFilter(d, dateFilter)
+    }) : scores
+
+    filteredScores.forEach(s => {
+      const d = s.task?.task_date || s.calculated_at?.slice(0,10) || ''
+      const k = getPeriodKey(d, granularity)
+      if (!k) return
+      map[k] = (map[k] || 0) + 1
+    })
+
+    return Object.entries(map)
+      .sort(([a],[b]) => a.localeCompare(b))
+      .map(([k, count]) => ({
+        period: getPeriodLabel(k, granularity),
+        count,
+      }))
+      .slice(-24)
+  }, [scores, dateFilter, granularity])
+
+  return (
+    <div>
+      <Header title="My Workspace" subtitle={todayLabel} />
+      <div className="p-4 md:p-6 space-y-6">
+        
+        {/* KPI Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="bg-card border border-border rounded-xl p-4 flex flex-col justify-between hover:border-green-500/30 transition-colors">
+            <p className="text-[11px] text-muted-foreground font-medium">Total Credited</p>
+            <p className="text-xl font-bold text-green-400 mt-2">{fmtFull(totalCredited)}</p>
+          </div>
+          <div className="bg-card border border-border rounded-xl p-4 flex flex-col justify-between hover:border-blue-500/30 transition-colors">
+            <p className="text-[11px] text-muted-foreground font-medium">Last Credited</p>
+            <p className="text-xl font-bold text-blue-400 mt-2">{fmtFull(lastCredited)}</p>
+          </div>
+          <div className="bg-card border border-border rounded-xl p-4 flex flex-col justify-between hover:border-purple-500/30 transition-colors">
+            <p className="text-[11px] text-muted-foreground font-medium">Contributions</p>
+            <p className="text-xl font-bold text-foreground mt-2">{totalContributions}</p>
+          </div>
+          <div className="bg-card border border-border rounded-xl p-4 flex flex-col justify-between hover:border-orange-500/30 transition-colors">
+            <p className="text-[11px] text-muted-foreground font-medium">Unique Tasks</p>
+            <p className="text-xl font-bold text-foreground mt-2">{tasksCompleted}</p>
+          </div>
+        </div>
+
+        {/* Filters */}
+        <div className="flex items-center gap-2 flex-wrap bg-secondary/30 p-2 rounded-xl">
+          <DateFilter value={dateFilter} onChange={setDateFilter} />
+          {dateFilter && (
+            <button onClick={() => setDateFilter(null)} className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded-md hover:bg-secondary transition-colors">
+              <X className="w-3 h-3 inline mr-1" /> Clear
+            </button>
+          )}
+          <div className="h-4 w-px bg-border mx-1" />
+          <div className="flex items-center gap-0.5">
+            {(['daily','monthly','quarterly','yearly'] as Granularity[]).map(g => (
+              <button key={g} onClick={() => setGranularity(g)}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium capitalize transition-all ${granularity === g ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                {g}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Contribution Chart */}
+        <div className="bg-card border border-border rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-4">
+            <ClipboardList className="w-4 h-4 text-purple-400" />
+            <h2 className="text-sm font-semibold">Contribution Activity</h2>
+          </div>
+          
+          {trendData.length === 0 ? (
+            <div className="h-48 flex items-center justify-center border-t border-border/50">
+              <p className="text-sm text-muted-foreground">No contributions in this period</p>
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={trendData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                <XAxis dataKey="period" tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                <Tooltip 
+                  contentStyle={{ background: '#1a1f2e', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, fontSize: 12 }}
+                  labelStyle={{ color: '#9ca3af', marginBottom: 4 }}
+                  cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                  formatter={(val) => [`${val} tasks`, 'Contributed to']} 
+                />
+                <Bar dataKey="count" fill="#a855f7" radius={[4,4,0,0]} maxBarSize={40} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
       </div>
     </div>
   )

@@ -1180,12 +1180,8 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
 
   // For employee role, only show their assigned tasks
   const visibleTasks = useMemo(() => {
-    if (role === 'employee' && currentEmployee) {
-      const myTaskIds = new Set(localAssignments.filter(a => a.employee_id === currentEmployee.id).map(a => a.task_id))
-      return filteredTasks.filter(t => myTaskIds.has(t.id))
-    }
     return filteredTasks
-  }, [role, currentEmployee, localAssignments, filteredTasks])
+  }, [filteredTasks])
 
   // Reset to page 0 and clear DB search results when filters/search/sort change
   useEffect(() => { setTablePage(0); setDbSearchResults(null); exitDbMode() }, [filterStatus, filterClient, filterService, searchQ, sortBy, filterAssignee, filterDate])
@@ -2456,7 +2452,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                                   <button
                                     onClick={e => { e.stopPropagation(); openAssignModal(task) }}
                                     title="Assign team"
-                                    className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-blue-400 transition-all p-1 rounded hover:bg-blue-500/10 shrink-0"
+                                    className="lg:opacity-0 opacity-100 group-hover:opacity-100 text-muted-foreground hover:text-blue-400 transition-all p-1 rounded hover:bg-blue-500/10 shrink-0"
                                   >
                                     <Users className="w-3.5 h-3.5" />
                                   </button>
@@ -3196,13 +3192,17 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
       {showWorkload && (() => {
         // Build per-employee stats from local state
         const report = employees.map(emp => {
-          const myTaskIds = new Set(localAssignments.filter(a => a.employee_id === emp.id).map(a => a.task_id))
+          const myTaskIds = new Set([
+            ...localAssignments.filter(a => a.employee_id === emp.id).map(a => a.task_id),
+            ...localGroupAssignments.filter(a => a.employee_id === emp.id).map(a => a.task_id),
+            ...localParamAssignments.filter(a => a.employee_id === emp.id).map(a => a.task_id)
+          ])
           const myTasks = tasks.filter(t => myTaskIds.has(t.id))
           const groupCount = localGroupAssignments.filter(a => a.employee_id === emp.id).length
           const paramCount = localParamAssignments.filter(a => a.employee_id === emp.id).length
           const pending = myTasks.filter(t => t.status === 'pending').length
           const inProgress = myTasks.filter(t => t.status === 'in_progress').length
-          const done = myTasks.filter(t => t.status === 'done' || t.status === 'invoiced').length
+          const done = myTasks.filter(t => t.status === 'done' || t.status === 'invoiced' || t.status === 'delivered' || t.status === 'paid').length
           const total = myTasks.length
           return { emp, total, pending, inProgress, done, groupCount, paramCount }
         }).filter(r => r.total > 0 || r.groupCount > 0 || r.paramCount > 0)

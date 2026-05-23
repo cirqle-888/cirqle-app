@@ -198,12 +198,14 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
         </div>
 
         {/* Role badge */}
-        <div className={`overflow-hidden transition-all duration-300 ${isCollapsed ? 'max-h-0 opacity-0 mt-0' : 'max-h-10 opacity-100 mt-3'}`}>
-          <span className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap ${roleBadgeClass[role]}`}>
-            {roleLabel[role]}
-            {employee?.name ? ` · ${employee.name.split(' ')[0]}` : ''}
-          </span>
-        </div>
+        {role !== 'employee' && (
+          <div className={`overflow-hidden transition-all duration-300 ${isCollapsed ? 'max-h-0 opacity-0 mt-0' : 'max-h-10 opacity-100 mt-3'}`}>
+            <span className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap ${roleBadgeClass[role]}`}>
+              {roleLabel[role]}
+              {employee?.name ? ` · ${employee.name.split(' ')[0]}` : ''}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Search trigger */}
@@ -292,29 +294,31 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
       </div>
 
       {/* Privacy lock */}
-      <div className={`pt-1 transition-all duration-300 ${isCollapsed ? 'px-2 pb-2' : 'px-3'}`}>
-        <button
-          onClick={isUnlocked ? lock : openUnlockModal}
-          title={isUnlocked ? 'Employee names visible — click to lock' : 'Employee names hidden — click to unlock'}
-          className={`flex items-center rounded-lg text-sm font-medium transition-all duration-300 ${
-            isCollapsed ? 'justify-center p-2.5' : 'gap-3 w-full px-3 py-2.5'
-          } ${
-            isUnlocked
-              ? 'text-green-400 hover:bg-green-500/10 hover:text-green-300'
-              : 'text-muted-foreground hover:bg-sidebar-accent hover:text-amber-400'
-          }`}
-        >
-          {isUnlocked
-            ? <Unlock className="w-4 h-4 shrink-0 transition-colors" />
-            : <Lock className="w-4 h-4 shrink-0 transition-colors" />}
-          <div className={`text-left overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0' : 'flex-1 opacity-100'}`}>
-            <span className="block leading-tight truncate whitespace-nowrap">{isUnlocked ? 'Privacy unlocked' : 'Privacy locked'}</span>
-            <span className="block text-[10px] opacity-60 leading-tight truncate whitespace-nowrap">
-              {isUnlocked ? 'Names visible — tap to hide' : 'Names hidden — tap to reveal'}
-            </span>
-          </div>
-        </button>
-      </div>
+      {role !== 'employee' && (
+        <div className={`pt-1 transition-all duration-300 ${isCollapsed ? 'px-2 pb-2' : 'px-3'}`}>
+          <button
+            onClick={isUnlocked ? lock : openUnlockModal}
+            title={isUnlocked ? 'Employee names visible — click to lock' : 'Employee names hidden — click to unlock'}
+            className={`flex items-center rounded-lg text-sm font-medium transition-all duration-300 ${
+              isCollapsed ? 'justify-center p-2.5' : 'gap-3 w-full px-3 py-2.5'
+            } ${
+              isUnlocked
+                ? 'text-green-400 hover:bg-green-500/10 hover:text-green-300'
+                : 'text-muted-foreground hover:bg-sidebar-accent hover:text-amber-400'
+            }`}
+          >
+            {isUnlocked
+              ? <Unlock className="w-4 h-4 shrink-0 transition-colors" />
+              : <Lock className="w-4 h-4 shrink-0 transition-colors" />}
+            <div className={`text-left overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0' : 'flex-1 opacity-100'}`}>
+              <span className="block leading-tight truncate whitespace-nowrap">{isUnlocked ? 'Privacy unlocked' : 'Privacy locked'}</span>
+              <span className="block text-[10px] opacity-60 leading-tight truncate whitespace-nowrap">
+                {isUnlocked ? 'Names visible — tap to hide' : 'Names hidden — tap to reveal'}
+              </span>
+            </div>
+          </button>
+        </div>
+      )}
 
       {/* User profile card + sign out */}
       <div className={`border-t border-sidebar-border pb-3 transition-all duration-300 ${isCollapsed ? 'px-2 pt-2' : 'px-3 pt-3'}`}>
@@ -334,17 +338,19 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
               <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg">
                 <EmployeeAvatar
                   avatarUrl={(employee as any).avatar_url}
-                  name={employee.name}
+                  name={employee.cqid} // Fallback to CQID for initials
                   cqid={employee.cqid}
                   size={30}
                   rounded="full"
                   className="shrink-0"
                 />
-                <div className="flex-1 min-w-0">
+                <div className="flex-1 min-w-0 flex flex-col justify-center">
                   <div className="text-sm font-medium text-sidebar-foreground truncate">
-                    {employee.name || employee.cqid || 'You'}
+                    {employee.cqid || 'Employee'}
                   </div>
-                  <div className="text-[11px] text-muted-foreground truncate">{employee.cqid}</div>
+                  {role !== 'employee' && employee.name && (
+                    <div className="text-[11px] text-muted-foreground truncate">{employee.name}</div>
+                  )}
                 </div>
               </div>
             )}
@@ -380,6 +386,10 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
 export default function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [isCollapsed, setIsCollapsed] = useState(false)
+  const { role } = useRole()
+  const pathname = usePathname()
+
+  const isEmployee = role === 'employee'
 
   return (
     <>
@@ -396,7 +406,7 @@ export default function Sidebar() {
       </aside>
 
       {/* ── Mobile: hamburger button (shown when sidebar is closed) ── */}
-      {!mobileOpen && (
+      {!mobileOpen && !isEmployee && (
         <button
           onClick={() => setMobileOpen(true)}
           aria-label="Open menu"
@@ -407,7 +417,7 @@ export default function Sidebar() {
       )}
 
       {/* ── Mobile: backdrop ── */}
-      {mobileOpen && (
+      {mobileOpen && !isEmployee && (
         <div
           className="md:hidden fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
           onClick={() => setMobileOpen(false)}
@@ -416,22 +426,49 @@ export default function Sidebar() {
       )}
 
       {/* ── Mobile: slide-out drawer ── */}
-      <aside
-        className={`md:hidden fixed top-0 left-0 z-50 h-full w-72 bg-sidebar border-r border-sidebar-border shadow-2xl flex flex-col
-          transition-transform duration-300 ease-in-out
-          ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}
-      >
-        {/* Close button inside drawer */}
-        <button
-          onClick={() => setMobileOpen(false)}
-          aria-label="Close menu"
-          className="absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent transition-colors"
+      {!isEmployee && (
+        <aside
+          className={`md:hidden fixed top-0 left-0 z-50 h-full w-72 bg-sidebar border-r border-sidebar-border shadow-2xl flex flex-col
+            transition-transform duration-300 ease-in-out
+            ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}
         >
-          <X className="w-4 h-4" />
-        </button>
+          {/* Close button inside drawer */}
+          <button
+            onClick={() => setMobileOpen(false)}
+            aria-label="Close menu"
+            className="absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
 
-        <SidebarContent onNavClick={() => setMobileOpen(false)} isCollapsed={false} />
-      </aside>
+          <SidebarContent onNavClick={() => setMobileOpen(false)} isCollapsed={false} />
+        </aside>
+      )}
+
+      {/* ── Mobile: Employee Bottom Nav Bar ── */}
+      {isEmployee && (
+        <div className="md:hidden fixed bottom-0 left-0 w-full z-50 bg-sidebar border-t border-sidebar-border pb-safe pt-1 px-2 flex items-center justify-around shadow-[0_-4px_20px_rgba(0,0,0,0.2)]">
+          {[
+            { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+            { href: '/dashboard/tasks', label: 'Tasks', icon: CheckSquare },
+            { href: '/dashboard/contributions', label: 'Activity', icon: TrendingUp },
+            { href: '/dashboard/settings', label: 'Settings', icon: Settings },
+          ].map(item => {
+            const active = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href))
+            const Icon = item.icon
+            return (
+              <Link key={item.href} href={item.href} className="flex flex-col items-center justify-center py-2 px-1 w-1/4">
+                <div className={`w-10 h-8 flex items-center justify-center rounded-full transition-all ${active ? 'bg-primary/20 text-primary' : 'text-muted-foreground'}`}>
+                  <Icon className="w-5 h-5" />
+                </div>
+                <span className={`text-[10px] mt-1 font-medium transition-colors ${active ? 'text-foreground' : 'text-muted-foreground'}`}>
+                  {item.label}
+                </span>
+              </Link>
+            )
+          })}
+        </div>
+      )}
     </>
   )
 }

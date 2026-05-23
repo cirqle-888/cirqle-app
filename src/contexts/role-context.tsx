@@ -125,6 +125,14 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     fetchRole()
   }, [])
 
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <span className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+
   return (
     <RoleContext.Provider value={{ role, employee, loading }}>
       {children}

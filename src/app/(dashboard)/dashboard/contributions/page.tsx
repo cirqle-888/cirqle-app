@@ -12,6 +12,7 @@ export default async function ContributionsPage() {
     scoresRes, clientsRes, servicesRes, assignmentsRes,
     contributorRecordsRes, taskToolRecordsRes, pricingRes,
     visibilityBillingRes, visibilityContribRes, visibilityNamesRes,
+    taskGroupAssignmentsRes, taskParamAssignmentsRes
   ] = await Promise.all([
     fetchAll(supabase
       .from('tasks')
@@ -36,7 +37,26 @@ export default async function ContributionsPage() {
     supabase.from('company_settings').select('value').eq('key', 'visibility_billing').maybeSingle(),
     supabase.from('company_settings').select('value').eq('key', 'visibility_contributions').maybeSingle(),
     supabase.from('company_settings').select('value').eq('key', 'visibility_employee_names').maybeSingle(),
+    // additional fetches for group and param assignments
+    fetchAll(supabase.from('task_group_assignments').select('task_id, employee_id')),
+    fetchAll(supabase.from('task_parameter_assignments').select('task_id, employee_id')),
   ])
+
+  // Merge all assignment types into a unique list for visibility filtering
+  const allAssignments = [
+    ...(assignmentsRes.data || []),
+    ...(taskGroupAssignmentsRes.data || []),
+    ...(taskParamAssignmentsRes.data || [])
+  ]
+
+  // De-duplicate assignments by task_id and employee_id
+  const uniqueAssignmentsMap = new Map<string, { task_id: string; employee_id: string }>()
+  for (const a of allAssignments) {
+    if (a && a.task_id && a.employee_id) {
+      uniqueAssignmentsMap.set(`${a.task_id}-${a.employee_id}`, a)
+    }
+  }
+  const mergedAssignments = Array.from(uniqueAssignmentsMap.values())
 
   return (
     <ContributionsClient
@@ -51,7 +71,7 @@ export default async function ContributionsPage() {
       scores={scoresRes.data || []}
       clients={clientsRes.data || []}
       services={servicesRes.data || []}
-      taskAssignments={assignmentsRes.data || []}
+      taskAssignments={mergedAssignments}
       contributorRecords={contributorRecordsRes.data || []}
       taskToolRecords={taskToolRecordsRes.data || []}
       pricingMatrix={pricingRes.data || []}

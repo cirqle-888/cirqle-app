@@ -14,6 +14,8 @@ const ROUTE_PERMS: Array<[RegExp, string]> = [
   [/^\/dashboard\/settings\/change-requests/, 'employees.review_change_requests'],
   [/^\/dashboard\/settings/,                'settings.access'],
   [/^\/dashboard\/import/,                  'tasks.create'],
+  // Root dashboard permission check (must be last so specific subroutes match first if we used find, but actually `find` returns first match, so we put it at the very end or use exact match)
+  [/^\/dashboard$/,                         'dashboard.view'],
 ]
 
 export async function updateSession(request: NextRequest) {
@@ -118,8 +120,12 @@ export async function updateSession(request: NextRequest) {
 
     if (!allowed) {
       const url = request.nextUrl.clone()
-      url.pathname = '/dashboard'
-      url.searchParams.set('denied', '1')
+      if (pathname === '/dashboard') {
+        url.pathname = '/dashboard/tasks'
+      } else {
+        url.pathname = '/dashboard'
+        url.searchParams.set('denied', '1')
+      }
       return NextResponse.redirect(url)
     }
   }

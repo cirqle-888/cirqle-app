@@ -1,4 +1,5 @@
 import { createClient, fetchAll, stablePaginationQuery } from '@/lib/supabase/server'
+import { loadCurrentUser } from '@/lib/permissions/check'
 import DashboardClient from './dashboard-client'
 
 export const dynamic = 'force-dynamic'
@@ -8,6 +9,11 @@ export default async function DashboardPage() {
 
   const todayStr = new Date().toISOString().slice(0, 10)
 
+  const me = await loadCurrentUser().catch(() => null)
+  const isAdmin = me?.isAdmin ?? true
+  const employeeId = me?.employeeId
+
+  // Only fetch invoices, cashbook, and all payroll history if admin
   const [
     invoicesRes,
     cashbookRes,
@@ -19,20 +25,23 @@ export default async function DashboardPage() {
     scoresRes,
     payrollRes,
   ] = await Promise.all([
-    fetchAll(supabase
-      .from('invoices')
-      .select('id, invoice_number, total_amount, paid_amount, status, currency, due_date, client:clients(id, name)')
-      .order('due_date', { ascending: true })
-      .order('id', { ascending: true })),
+    isAdmin
+      ? fetchAll(supabase
+          .from('invoices')
+          .select('id, invoice_number, total_amount, paid_amount, status, currency, due_date, client:clients(id, name)')
+          .order('due_date', { ascending: true })
+          .order('id', { ascending: true }))
+      : Promise.resolve({ data: [] }),
 
-    // ALL cashbook — for bank balance, trends, weekday analysis
-    fetchAll(supabase
-      .from('cashbook_entries')
-      .select('type, amount_inr, entry_date, description')
-      .order('entry_date', { ascending: true })
-      .order('id', { ascending: true })),
+    isAdmin
+      ? fetchAll(supabase
+          .from('cashbook_entries')
+          .select('type, amount_inr, entry_date, description')
+          .order('entry_date', { ascending: true })
+          .order('id', { ascending: true }))
+      : Promise.resolve({ data: [] }),
 
-    // ALL tasks for analytics (no status filter, no limit)
+    // ALL tasks for analytics (we only need the employee's tasks if not admin, but for now we fetch all since we might need total counts, actually we can just fetch all tasks since tasks are not explicitly private by count, but let's fetch all tasks since it's used for display)
     fetchAll(supabase
       .from('tasks')
       .select('id, billing_amount_inr, task_date, status, service_id, client:clients(id, name), service:services(id, name)')
@@ -47,33 +56,53 @@ export default async function DashboardPage() {
       .not('status', 'eq', 'cancelled')
       .order('task_date', { ascending: false }))),
 
-    fetchAll(stablePaginationQuery(supabase
-      .from('employees')
-      .select('id, cqid, name, performance_rating, role')
-      .eq('is_active', true)
-      .order('cqid'))),
+    isAdmin
+      ? fetchAll(stablePaginationQuery(supabase
+          .from('employees')
+          .select('id, cqid, name, performance_rating, role')
+          .eq('is_active', true)
+          .order('cqid')))
+      : Promise.resolve({ data: [] }),
 
     fetchAll(stablePaginationQuery(supabase.from('contribution_scores').select('task_id').order('id', { ascending: true }))),
 
-    supabase
-      .from('tasks')
-      .select('id, title, status, billing_amount_inr, task_date, client:clients(id, name), service:services(id, name)')
-      .eq('task_date', todayStr)
-      .order('status'),
+    isAdmin
+      ? supabase
+          .from('tasks')
+          .select('id, title, status, billing_amount_inr, task_date, client:clients(id, name), service:services(id, name)')
+          .eq('task_date', todayStr)
+          .order('status')
+      : Promise.resolve({ data: [] }),
 
-    fetchAll(supabase
-      .from('contribution_scores')
-      .select('employee_id, earnings_inr, calculated_at, task:tasks(task_date)')
-      .order('calculated_at', { ascending: false })
-      .order('id', { ascending: true })),
+    // Fetch scores (if employee, only fetch their own)
+    isAdmin 
+      ? fetchAll(supabase
+          .from('contribution_scores')
+          .select('employee_id, earnings_inr, calculated_at, task:tasks(task_date)')
+          .order('calculated_at', { ascending: false })
+          .order('id', { ascending: true }))
+      : fetchAll(supabase
+          .from('contribution_scores')
+          .select('employee_id, earnings_inr, calculated_at, task:tasks(task_date)')
+          .eq('employee_id', employeeId)
+          .order('calculated_at', { ascending: false })
+          .order('id', { ascending: true })),
 
-    // Payroll for Jobs vs Payroll table
-    supabase
-      .from('payroll')
-      .select('month, year, base_salary, commission_earned, net_salary, status')
-      .order('year', { ascending: false })
-      .order('month', { ascending: false })
-      .limit(24),
+    // Payroll: if employee, only their own, otherwise limit 24 for admin
+    isAdmin
+      ? supabase
+          .from('payroll')
+          .select('month, year, base_salary, commission_earned, net_salary, status')
+          .order('year', { ascending: false })
+          .order('month', { ascending: false })
+          .limit(24)
+      : supabase
+          .from('payroll')
+          .select('month, year, base_salary, commission_earned, net_salary, status')
+          .eq('employee_id', employeeId)
+          .eq('status', 'paid')
+          .order('year', { ascending: false })
+          .order('month', { ascending: false })
   ])
 
   const invoices           = invoicesRes.data || []
@@ -144,6 +173,7 @@ export default async function DashboardPage() {
         totalExpectedCash:   bankBalance + outstanding + toBeInvoicedAmount,
         totalDues:           overdueInvoices.length + dueInvoices.length + toBeInvoiced.length,
       }}
+      isAdmin={isAdmin}
     />
   )
 }
