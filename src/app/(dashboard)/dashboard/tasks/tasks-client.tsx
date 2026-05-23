@@ -276,7 +276,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
 
   const [sortBy, setSortBy] = useState<'today_first' | 'date_desc' | 'date_asc' | 'amount_desc' | 'client'>('today_first')
   const [tablePage, setTablePage] = useState(0)
-  const [tablePageSize, setTablePageSize] = useState(100)
+  const [tablePageSize, setTablePageSize] = useState(50)
   const [form, setForm] = useState(EMPTY_FORM)
   const [previewTaskNumber, setPreviewTaskNumber] = useState<number | null>(null)
 
@@ -1447,19 +1447,16 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
               {searchQ && <button onClick={() => setSearchQ('')} className="shrink-0 cursor-pointer"><X size={12} className="text-muted-foreground" /></button>}
             </div>
 
-            {/* Inline view segment: Table · Board · ⚙(board-only) · Calendar
-                Calendar hidden below sm — limited utility on phones and the
-                three-button row otherwise overflows out of the viewport.
-                order-3 keeps it directly next to Select/Edit on mobile — no
-                ml-auto so the buttons flow naturally with a single gap. */}
+            {/* View segment */}
             <div ref={viewRef} className="relative shrink-0 order-3 sm:order-none">
-              <div className="flex items-center bg-secondary border border-foreground/15 rounded-xl p-1 gap-0.5">
+              {/* Desktop View Buttons */}
+              <div className="hidden sm:flex items-center bg-secondary border border-foreground/15 rounded-xl p-1 gap-0.5">
                 {([
-                  { key: 'table',    Icon: List,         label: 'Table',    hideOnMobile: false },
-                  { key: 'board',    Icon: LayoutGrid,   label: 'Board',    hideOnMobile: false },
-                  { key: 'calendar', Icon: CalendarDays, label: 'Calendar', hideOnMobile: false },
-                ] as const).map(({ key, Icon, label, hideOnMobile }) => (
-                  <span key={key} className={`flex items-center ${hideOnMobile ? 'hidden sm:flex' : ''}`}>
+                  { key: 'table',    Icon: List,         label: 'Table' },
+                  { key: 'board',    Icon: LayoutGrid,   label: 'Board' },
+                  { key: 'calendar', Icon: CalendarDays, label: 'Calendar' },
+                ] as const).map(({ key, Icon, label }) => (
+                  <span key={key} className="flex items-center">
                     <button
                       onClick={() => setViewMode(key)}
                       className={`cursor-pointer px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
@@ -1535,6 +1532,21 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
               placeholder="Service"
               sortKey="services"
             />
+            
+            {/* My Tasks toggle for employees */}
+            {role === 'employee' && currentEmployee && (
+              <button
+                onClick={() => setFilterAssignee(filterAssignee === currentEmployee.id ? '' : currentEmployee.id)}
+                className={`h-[34px] px-3 rounded-xl text-xs font-medium border transition-colors cursor-pointer shrink-0 ${
+                  filterAssignee === currentEmployee.id
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-secondary text-muted-foreground border-foreground/15 hover:text-foreground hover:bg-foreground/5'
+                }`}
+              >
+                My Tasks
+              </button>
+            )}
+
             {/* Assignee — FilterDropdown for consistent pill style with built-in × */}
             <FilterDropdown
               options={employees.map(emp => ({ value: emp.id, label: dn(emp) }))}
@@ -2081,10 +2093,10 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
 
         {/* Mobile: stacked card list — visible below sm. Same data, denser tap-friendly layout. */}
         <div className="sm:hidden space-y-2">
-          {visibleTasks.length === 0 && (
+          {pagedTasks.length === 0 && (
             <div className="bg-card border border-border rounded-xl px-4 py-10 text-center text-sm text-muted-foreground">No tasks found</div>
           )}
-          {visibleTasks.map(task => {
+          {pagedTasks.map(task => {
             const isSelected = bulkMode && selectedTasks.has(task.id)
             return (
               <div

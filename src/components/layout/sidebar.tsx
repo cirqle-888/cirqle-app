@@ -449,10 +449,8 @@ export default function Sidebar() {
       {isEmployee && (
         <div className="md:hidden fixed bottom-0 left-0 w-full z-50 bg-sidebar border-t border-sidebar-border pb-safe pt-1 px-2 flex items-center justify-around shadow-[0_-4px_20px_rgba(0,0,0,0.2)]">
           {[
-            { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
             { href: '/dashboard/tasks', label: 'Tasks', icon: CheckSquare },
             { href: '/dashboard/contributions', label: 'Activity', icon: TrendingUp },
-            { href: '/dashboard/settings', label: 'Settings', icon: Settings },
           ].map(item => {
             const active = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href))
             const Icon = item.icon

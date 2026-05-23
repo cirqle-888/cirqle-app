@@ -462,13 +462,19 @@ export default function ContributionsClient({
 
   const tasksByDate = useMemo(() => {
     const map: Record<string, any[]> = {}
-    myVisibleTasks.forEach(t => {
+    
+    // To prevent massive DOM lag on mobile, we limit the initial render to 100 tasks 
+    // unless they are explicitly searching or filtering by employee.
+    const hasTightFilter = search.length > 0 || !!filterEmployee
+    const tasksToRender = hasTightFilter ? myVisibleTasks : myVisibleTasks.slice(0, 100)
+    
+    tasksToRender.forEach(t => {
       const d = t.task_date || 'Unknown'
       if (!map[d]) map[d] = []
       map[d].push(t)
     })
     return Object.entries(map).sort(([a], [b]) => b.localeCompare(a))
-  }, [myVisibleTasks])
+  }, [myVisibleTasks, search, filterEmployee])
 
   // ── Entry-view derived data ───────────────────────────
   const filteredGroups = useMemo(() => {
@@ -967,6 +973,24 @@ export default function ContributionsClient({
           <StickyToolbar.Row className="flex-wrap">
             {/* Date — leads the row, sets the time scope before other filters */}
             <DateFilter value={filterDate} onChange={setFilterDate} />
+            {/* My Tasks toggle for employees */}
+            {role === 'employee' && currentEmployee && (
+              <button
+                onClick={() => {
+                  const isActive = filterEmployee === currentEmployee.id;
+                  setFilterEmployee(isActive ? '' : currentEmployee.id);
+                  if (!isActive) setFilterEmployeeMode('any'); // By default show tasks they contributed to or are assigned to
+                }}
+                className={`h-[34px] px-3 rounded-xl text-xs font-medium border transition-colors cursor-pointer shrink-0 ${
+                  filterEmployee === currentEmployee.id
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-secondary text-muted-foreground border-foreground/15 hover:text-foreground hover:bg-foreground/5'
+                }`}
+              >
+                My Tasks
+              </button>
+            )}
+            
             {/* Employee */}
             <FilterDropdown
               options={employees.map(emp => ({ value: emp.id, label: dn(emp) }))}
