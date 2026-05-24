@@ -4,6 +4,8 @@ import SettingsClient from './settings-client'
 const ALL_TABS = ['Company', 'Privacy & Security', 'Employees', 'Clients', 'Pricing Matrix', 'Services', 'Groups & Params', 'Tools', 'Bank Accounts', 'Cash Categories', 'Exchange Rates']
 const normalizeTab = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-')
 
+export const dynamic = 'force-dynamic'
+
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string; editClient?: string; returnTo?: string }> }) {
   const { tab: rawTab, editClient, returnTo } = await searchParams
   const initialTab = ALL_TABS.find(t => normalizeTab(t) === normalizeTab(rawTab ?? '')) ?? 'Company'

@@ -3,6 +3,8 @@ import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility, stripCashbookList } from '@/lib/permissions/strip'
 import CashBookClient from './cashbook-client'
 
+export const dynamic = 'force-dynamic'
+
 export default async function CashBookPage() {
   // Route is permission-gated by middleware (`cashbook.view`). Per-field ₹
   // visibility is gated below by the `cashbook.view_amounts` perm — users

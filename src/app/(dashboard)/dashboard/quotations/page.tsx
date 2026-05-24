@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import QuotationsClient from './quotations-client'
 
+export const dynamic = 'force-dynamic'
+
 export default async function QuotationsPage() {
   const supabase = await createClient()
 
