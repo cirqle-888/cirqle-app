@@ -1,13 +1,22 @@
-import { createClient, fetchAll, stablePaginationQuery } from '@/lib/supabase/server'
+import { createAdminClient, fetchAll, stablePaginationQuery } from '@/lib/supabase/server'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import DashboardClient from './dashboard-client'
 
 export const dynamic = 'force-dynamic'
 
 export default async function DashboardPage() {
-  const supabase = await createClient()
+  // Service-role client for data — every query below is explicitly gated by
+  // `isAdmin` or scoped by `employee_id = employeeId` at the application layer,
+  // matching what RLS previously enforced. Saves the async cookies() hop and
+  // the per-query RLS planning overhead on the database side.
+  const supabase = createAdminClient()
 
   const todayStr = new Date().toISOString().slice(0, 10)
+  // Analytics window: last 36 months — prevents unbounded 50K+ row fetches.
+  // The dashboard "best month" insight operates within this window.
+  const analyticsFrom = new Date()
+  analyticsFrom.setMonth(analyticsFrom.getMonth() - 36)
+  const analyticsFromStr = analyticsFrom.toISOString().slice(0, 10)
 
   const me = await loadCurrentUser().catch(() => null)
   const isAdmin = me?.isAdmin ?? true
@@ -33,6 +42,7 @@ export default async function DashboardPage() {
           .order('id', { ascending: true }))
       : Promise.resolve({ data: [] }),
 
+    // Cashbook — admin only, all-time for accurate bank balance calculation.
     isAdmin
       ? fetchAll(supabase
           .from('cashbook_entries')
@@ -41,20 +51,25 @@ export default async function DashboardPage() {
           .order('id', { ascending: true }))
       : Promise.resolve({ data: [] }),
 
-    // ALL tasks for analytics (we only need the employee's tasks if not admin, but for now we fetch all since we might need total counts, actually we can just fetch all tasks since tasks are not explicitly private by count, but let's fetch all tasks since it's used for display)
-    fetchAll(supabase
-      .from('tasks')
-      .select('id, billing_amount_inr, task_date, status, service_id, client:clients(id, name), service:services(id, name)')
-      .not('status', 'eq', 'cancelled')
-      .order('task_date', { ascending: true })
-      .order('id', { ascending: true })),
+    // Analytics tasks — admin only, last 36 months. Employees receive [].
+    isAdmin
+      ? fetchAll(supabase
+          .from('tasks')
+          .select('id, billing_amount_inr, task_date, status, service_id, client:clients(id, name), service:services(id, name)')
+          .not('status', 'eq', 'cancelled')
+          .gte('task_date', analyticsFromStr)
+          .order('task_date', { ascending: true })
+          .order('id', { ascending: true }))
+      : Promise.resolve({ data: [] }),
 
-    // Recent tasks for display widgets
-    fetchAll(stablePaginationQuery(supabase
-      .from('tasks')
-      .select('id, title, status, billing_amount_inr, task_date, client:clients(id, name), service:services(id, name)')
-      .not('status', 'eq', 'cancelled')
-      .order('task_date', { ascending: false }))),
+    // Display tasks (used for widgets: active, overdue, to-be-invoiced) — admin only
+    isAdmin
+      ? fetchAll(stablePaginationQuery(supabase
+          .from('tasks')
+          .select('id, title, status, billing_amount_inr, task_date, client:clients(id, name), service:services(id, name)')
+          .not('status', 'eq', 'cancelled')
+          .order('task_date', { ascending: false })))
+      : Promise.resolve({ data: [] }),
 
     isAdmin
       ? fetchAll(stablePaginationQuery(supabase
@@ -64,8 +79,20 @@ export default async function DashboardPage() {
           .order('cqid')))
       : Promise.resolve({ data: [] }),
 
-    fetchAll(stablePaginationQuery(supabase.from('contribution_scores').select('task_id').order('id', { ascending: true }))),
+    // Scored task IDs — used to detect "unscored done tasks" in displayTasks
+    // (the latter is ordered by task_date desc and shown only as a widget hint,
+    // so 36-month window is enough). Bounds an otherwise unbounded scan of all
+    // historical scores.
+    isAdmin
+      ? fetchAll(stablePaginationQuery(
+          supabase.from('contribution_scores')
+            .select('task_id')
+            .gte('calculated_at', analyticsFromStr)
+            .order('id', { ascending: true })
+        ))
+      : Promise.resolve({ data: [] }),
 
+    // Today's tasks — admin dashboard widget only
     isAdmin
       ? supabase
           .from('tasks')
@@ -74,21 +101,25 @@ export default async function DashboardPage() {
           .order('status')
       : Promise.resolve({ data: [] }),
 
-    // Fetch scores (if employee, only fetch their own)
-    isAdmin 
+    // Fetch scores — capped to the same 36-month analytics window so payload
+    // is bounded. The dashboard's teamEarnings widget only operates within
+    // any user-selected DateFilter, which itself can't exceed the loaded data.
+    isAdmin
       ? fetchAll(supabase
           .from('contribution_scores')
-          .select('employee_id, earnings_inr, calculated_at, task:tasks(task_date)')
+          .select('task_id, employee_id, score_percentage, earnings_inr, calculated_at, task:tasks(id, task_date)')
+          .gte('calculated_at', analyticsFromStr)
           .order('calculated_at', { ascending: false })
           .order('id', { ascending: true }))
       : fetchAll(supabase
           .from('contribution_scores')
-          .select('employee_id, earnings_inr, calculated_at, task:tasks(task_date)')
+          .select('task_id, employee_id, score_percentage, earnings_inr, calculated_at, task:tasks(id, task_date)')
           .eq('employee_id', employeeId)
+          .gte('calculated_at', analyticsFromStr)
           .order('calculated_at', { ascending: false })
           .order('id', { ascending: true })),
 
-    // Payroll: if employee, only their own, otherwise limit 24 for admin
+    // Payroll: if employee, only their own (last 36 months); admin gets 24 most recent.
     isAdmin
       ? supabase
           .from('payroll')
@@ -103,6 +134,7 @@ export default async function DashboardPage() {
           .eq('status', 'paid')
           .order('year', { ascending: false })
           .order('month', { ascending: false })
+          .limit(36)
   ])
 
   const invoices           = invoicesRes.data || []

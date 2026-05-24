@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect, useRef } from 'react'
+import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import Header from '@/components/layout/header'
@@ -21,10 +22,16 @@ import { useToast, ToastContainer } from '@/components/ui/toast'
 import AppSelect from '@/components/ui/app-select'
 import { useRole } from '@/contexts/role-context'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
-import { TaskEditModal } from '@/components/ui/task-edit-modal'
 import { PageShell, PageContent, StickyToolbar, PageChrome } from '@/components/layout/page-shell'
 
-interface Score { task_id: string; employee_id: string; earnings_inr: number; score_percentage: number }
+// Heavy task editor — only mount when opened; bundle splits off the
+// contributions route chunk.
+const TaskEditModal = dynamic(
+  () => import('@/components/ui/task-edit-modal').then(m => m.TaskEditModal),
+  { ssr: false },
+)
+
+interface Score { task_id: string; employee_id: string; earnings_inr?: number; score_percentage: number }
 interface Assignment { task_id: string; employee_id: string }
 
 interface VisibilitySettings {
@@ -50,6 +57,17 @@ interface Props {
   taskToolRecords: { task_id: string; tool_id: string }[]
   pricingMatrix: { client_id: string; service_id: string; commission_percentage: number | null; price: number | null; currency: string | null }[]
   visibilitySettings?: VisibilitySettings
+  /**
+   * Per-field financial visibility from the server. earnings = user holds
+   * `contributions.view_earnings`; pricing = user holds `tasks.view_pricing`.
+   * When false, the corresponding ₹ fields are absent from `scores` and
+   * `tasks` props (stripped server-side) — the client only uses these flags
+   * to suppress UI cells/columns that would otherwise render '—'.
+   */
+  permissionFlags: {
+    earnings: boolean
+    pricing:  boolean
+  }
 }
 
 // ─────────────────────────────────────────────────────
@@ -88,6 +106,7 @@ export default function ContributionsClient({
   parameterServices, toolServices, groupServices: groupServicesFromDB,
   scores, clients, services, taskAssignments: taskAssignmentsFromDB,
   contributorRecords, taskToolRecords, pricingMatrix, visibilitySettings,
+  permissionFlags,
 }: Props) {
 
   // ── Toast ───────────────────────────────────────────
@@ -129,6 +148,8 @@ export default function ContributionsClient({
   const [filterEmployeeMode, setFilterEmployeeMode] = useState<'worked' | 'solo' | 'any'>('worked')
   const [filterDate, setFilterDate] = useState<DateFilterValue>(null)
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'done' | 'missing'>('all')
+  const [showMobileFilters, setShowMobileFilters] = useState(false)
+  const [mobileLimit, setMobileLimit] = useState(100)
 
   const router = useRouter()
   const autoRecalcRan = useRef(false)
@@ -364,7 +385,7 @@ export default function ContributionsClient({
   const taskScoreMap = useMemo(() => {
     const m: Record<string, Set<string>> = {}
     scores.forEach(s => {
-      if (s.score_percentage > 0 || s.earnings_inr > 0) {
+      if (s.score_percentage > 0 || (s.earnings_inr ?? 0) > 0) {
         if (!m[s.task_id]) m[s.task_id] = new Set()
         m[s.task_id].add(s.employee_id)
       }
@@ -452,8 +473,11 @@ export default function ContributionsClient({
     })
   }, [localTasks, search, filterClient, filterService, filterDate, filterEmployee, filterEmployeeMode, statusFilter, taskScoreMap, taskAssignmentMap, employees])
 
-  // canSeeFinancials: respects visibility settings (contributions + billing both gate this panel)
-  const canSeeFinancials = role !== 'employee' && showContribs && showBilling
+  // canSeeFinancials: requires (a) the legacy visibility-settings gate AND
+  // (b) the new granular `contributions.view_earnings` permission. Both
+  // conditions must hold; permissionFlags is sourced from the server and
+  // tells the client whether earnings_inr is even present in the payload.
+  const canSeeFinancials = role !== 'employee' && showContribs && showBilling && permissionFlags.earnings
 
   // For employee/view_only role, only show their assigned tasks
   const myVisibleTasks = useMemo(() => {
@@ -463,10 +487,10 @@ export default function ContributionsClient({
   const tasksByDate = useMemo(() => {
     const map: Record<string, any[]> = {}
     
-    // To prevent massive DOM lag on mobile, we limit the initial render to 100 tasks 
+    // To prevent massive DOM lag on mobile, we limit the initial render to mobileLimit tasks 
     // unless they are explicitly searching or filtering by employee.
     const hasTightFilter = search.length > 0 || !!filterEmployee
-    const tasksToRender = hasTightFilter ? myVisibleTasks : myVisibleTasks.slice(0, 100)
+    const tasksToRender = hasTightFilter ? myVisibleTasks : myVisibleTasks.slice(0, mobileLimit)
     
     tasksToRender.forEach(t => {
       const d = t.task_date || 'Unknown'
@@ -856,45 +880,45 @@ export default function ContributionsClient({
           />
 
           <StickyToolbar>
-          {/* Row 1: [Select] · [Search flex-1] · [List|Board|Calendar] · [⚙ board-only]
-              flex-wrap + order-* so Search jumps to top on mobile and gets full width. */}
-          <StickyToolbar.Row className="flex-wrap">
-            {/* Left group: Select (toggles bulk mode) · All (toggles select/deselect all when active) */}
-            <div className="flex items-center gap-1.5 shrink-0 order-2 sm:order-none">
-              <button
-                onClick={() => { setBulkMode(m => !m); setSelectedTasks(new Set()) }}
-                className={`h-[34px] px-3 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer ${
-                  bulkMode
-                    ? 'bg-violet-500 text-white shadow-violet-500/30'
-                    : 'bg-secondary border border-border text-foreground hover:bg-secondary/60'
-                }`}>
-                <CheckCircle className="w-3 h-3" /> Select
-              </button>
-              {bulkMode && (() => {
-                const allSelected = myVisibleTasks.length > 0 && myVisibleTasks.every(t => selectedTasks.has(t.id))
-                return (
-                  <button
-                    onClick={() => {
-                      if (allSelected) setSelectedTasks(new Set())
-                      else setSelectedTasks(new Set(myVisibleTasks.map(t => t.id)))
-                    }}
-                    title={allSelected ? 'Deselect all visible tasks' : 'Select all visible tasks'}
-                    className={`h-[34px] px-3 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer ${
-                      allSelected
-                        ? 'bg-violet-500/20 border border-violet-500/40 text-violet-200'
-                        : 'bg-secondary border border-border text-foreground hover:bg-secondary/60'
-                    }`}
-                  >
-                    {allSelected ? <Check className="w-3 h-3" /> : <span className="w-3 h-3 rounded-sm border border-current opacity-60" />}
-                    All ({myVisibleTasks.length})
-                  </button>
-                )
-              })()}
-            </div>
+          {/* Row 1: [Select] · [Search flex-1] · [List|Board|Calendar] · [⚙ board-only] */}
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 w-full">
+            {/* Left group: Select */}
+            {canSeeFinancials && (
+              <div className="flex items-center gap-1.5 shrink-0 order-2 sm:order-none hidden sm:flex">
+                <button
+                  onClick={() => { setBulkMode(m => !m); setSelectedTasks(new Set()) }}
+                  className={`h-[34px] px-3 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer ${
+                    bulkMode
+                      ? 'bg-violet-500 text-white shadow-violet-500/30'
+                      : 'bg-secondary border border-border text-foreground hover:bg-secondary/60'
+                  }`}>
+                  <CheckCircle className="w-3 h-3" /> Select
+                </button>
+                {bulkMode && (() => {
+                  const allSelected = myVisibleTasks.length > 0 && myVisibleTasks.every(t => selectedTasks.has(t.id))
+                  return (
+                    <button
+                      onClick={() => {
+                        if (allSelected) setSelectedTasks(new Set())
+                        else setSelectedTasks(new Set(myVisibleTasks.map(t => t.id)))
+                      }}
+                      title={allSelected ? 'Deselect all visible tasks' : 'Select all visible tasks'}
+                      className={`h-[34px] px-3 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer ${
+                        allSelected
+                          ? 'bg-violet-500/20 border border-violet-500/40 text-violet-200'
+                          : 'bg-secondary border border-border text-foreground hover:bg-secondary/60'
+                      }`}
+                    >
+                      {allSelected ? <Check className="w-3 h-3" /> : <span className="w-3 h-3 rounded-sm border border-current opacity-60" />}
+                      All ({myVisibleTasks.length})
+                    </button>
+                  )
+                })()}
+              </div>
+            )}
 
-            {/* Search — full-width on mobile (order-1), flex-1 on desktop.
-                h-[34px] matches the other toolbar buttons for visual rhythm. */}
-            <div className="order-1 sm:order-none w-full sm:w-auto flex items-center gap-2 bg-secondary border border-foreground/15 rounded-xl h-[34px] px-3 sm:flex-1 sm:basis-0 min-w-0">
+            {/* Search */}
+            <div className="order-1 sm:order-none w-full sm:w-auto flex items-center gap-2 bg-secondary border border-foreground/15 rounded-xl h-[34px] px-3 flex-1 min-w-0">
               <Search size={14} className="text-muted-foreground shrink-0" />
               <input value={search} onChange={e => setSearch(e.target.value)}
                 placeholder="Search tasks, clients, services, code…"
@@ -902,10 +926,42 @@ export default function ContributionsClient({
               {search && <button onClick={() => setSearch('')} className="shrink-0 cursor-pointer"><X size={12} className="text-muted-foreground" /></button>}
             </div>
 
-            {/* Inline view segment: List · Board · ⚙(board-only) · Calendar
-                No ml-auto on mobile — flows directly after Select with a single gap. */}
-            <div ref={boardSettingsRef} className="relative shrink-0 order-3 sm:order-none">
-              <div className="flex items-center bg-secondary border border-foreground/15 rounded-xl p-1 gap-0.5">
+            {/* Top Row My Tasks & Filters (Mobile focused) */}
+            <div className="order-2 flex items-center gap-1.5 shrink-0">
+              {/* My Tasks toggle for employees */}
+              {role === 'employee' && currentEmployee && (
+                <button
+                  onClick={() => {
+                    const isActive = filterEmployee === currentEmployee.id;
+                    setFilterEmployee(isActive ? '' : currentEmployee.id);
+                    if (!isActive) setFilterEmployeeMode('any');
+                  }}
+                  className={`h-[34px] px-3 rounded-xl text-xs font-medium border transition-colors cursor-pointer shrink-0 ${
+                    filterEmployee === currentEmployee.id
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'bg-secondary text-muted-foreground border-foreground/15 hover:text-foreground hover:bg-foreground/5'
+                  }`}
+                >
+                  My Tasks
+                </button>
+              )}
+
+              {/* Mobile Filters Toggle */}
+              <button
+                onClick={() => setShowMobileFilters(f => !f)}
+                className={`sm:hidden h-[34px] px-3 rounded-xl text-xs font-medium border transition-colors cursor-pointer flex items-center gap-1.5 ${
+                  showMobileFilters || hasAnyFilter
+                    ? 'bg-foreground/10 border-foreground/20 text-foreground'
+                    : 'bg-secondary border-foreground/15 text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <MoreVertical size={14} /> Filters
+              </button>
+            </div>
+
+            {/* View segment */}
+            <div ref={boardSettingsRef} className={`relative shrink-0 order-3 sm:order-none ${role === 'employee' ? 'hidden sm:block' : ''}`}>
+              <div className="hidden sm:flex items-center bg-secondary border border-foreground/15 rounded-xl p-1 gap-0.5">
                 {([
                   { key: 'list',     Icon: List,         label: 'List',     hideOnMobile: false },
                   { key: 'board',    Icon: LayoutGrid,   label: 'Board',    hideOnMobile: false },
@@ -923,7 +979,6 @@ export default function ContributionsClient({
                       <Icon className="w-3.5 h-3.5" />
                       {label}
                     </button>
-                    {/* Board settings ⚙ — sits immediately after the Board button, only visible when Board is active */}
                     {key === 'board' && listViewMode === 'board' && (
                       <button
                         onClick={() => setShowBoardSettings(v => !v)}
@@ -940,7 +995,6 @@ export default function ContributionsClient({
                   </span>
                 ))}
               </div>
-              {/* Group By popover */}
               {listViewMode === 'board' && showBoardSettings && (
                 <div className="absolute right-0 top-full mt-1.5 z-50 bg-secondary border border-foreground/15 rounded-xl shadow-2xl p-3 min-w-[220px] space-y-3">
                   <div>
@@ -967,119 +1021,116 @@ export default function ContributionsClient({
                 </div>
               )}
             </div>
-          </StickyToolbar.Row>
+          </div>
 
-          {/* Row 2: Filters → divider → Status chips → Clear all */}
-          <StickyToolbar.Row className="flex-wrap">
-            {/* Date — leads the row, sets the time scope before other filters */}
-            <DateFilter value={filterDate} onChange={setFilterDate} />
-            {/* My Tasks toggle for employees */}
-            {role === 'employee' && currentEmployee && (
-              <button
-                onClick={() => {
-                  const isActive = filterEmployee === currentEmployee.id;
-                  setFilterEmployee(isActive ? '' : currentEmployee.id);
-                  if (!isActive) setFilterEmployeeMode('any'); // By default show tasks they contributed to or are assigned to
-                }}
-                className={`h-[34px] px-3 rounded-xl text-xs font-medium border transition-colors cursor-pointer shrink-0 ${
-                  filterEmployee === currentEmployee.id
-                    ? 'bg-primary text-primary-foreground border-primary'
-                    : 'bg-secondary text-muted-foreground border-foreground/15 hover:text-foreground hover:bg-foreground/5'
-                }`}
+          {/* Advanced Filters Container (Collapsible on mobile) */}
+          <div className={`${showMobileFilters ? 'flex flex-col gap-2 pt-2' : 'hidden'} sm:flex sm:flex-col sm:gap-2 sm:pt-0 w-full`}>
+            {/* Row 2: Dropdowns */}
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+              <DateFilter value={filterDate} onChange={setFilterDate} />
+              
+              <FilterDropdown
+                options={employees.map(emp => ({ value: emp.id, label: dn(emp) }))}
+                value={filterEmployee}
+                onChange={v => { setFilterEmployee(v); setFilterEmployeeMode('worked') }}
+                placeholder="Employee"
+                sortKey="employees"
+              />
+              {filterEmployee && (
+                <div className="flex items-center bg-secondary rounded-lg p-0.5 gap-0.5 border border-border/50 shrink-0">
+                  <button type="button" onClick={() => setFilterEmployeeMode('worked')}
+                    title="Tasks this employee worked on"
+                    className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition-all ${filterEmployeeMode === 'worked' ? 'bg-primary text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                    Worked
+                  </button>
+                  <button type="button" onClick={() => setFilterEmployeeMode('solo')}
+                    title="Sole contributor"
+                    className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition-all ${filterEmployeeMode === 'solo' ? 'bg-amber-500 text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                    Solo
+                  </button>
+                  <button type="button" onClick={() => setFilterEmployeeMode('any')}
+                    title="Contributed or assigned"
+                    className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition-all ${filterEmployeeMode === 'any' ? 'bg-primary text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                    + Assigned
+                  </button>
+                </div>
+              )}
+              <FilterDropdown
+                options={clients.map(c => ({ value: c.id, label: c.name }))}
+                value={filterClient}
+                onChange={setFilterClient}
+                placeholder="Client"
+                sortKey="clients"
+              />
+              <FilterDropdown
+                options={services.map(s => ({ value: s.id, label: s.name }))}
+                value={filterService}
+                onChange={setFilterService}
+                placeholder="Service"
+                sortKey="services"
+              />
+            </div>
+
+            {/* Row 3: Status chips & Clear */}
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+              {/* Mobile: compact dropdown */}
+              <select
+                value={statusFilter}
+                onChange={e => setStatusFilter(e.target.value as any)}
+                className="sm:hidden h-[34px] px-2 rounded-xl text-xs font-medium bg-secondary border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer w-full"
               >
-                My Tasks
-              </button>
-            )}
-            
-            {/* Employee */}
-            <FilterDropdown
-              options={employees.map(emp => ({ value: emp.id, label: dn(emp) }))}
-              value={filterEmployee}
-              onChange={v => { setFilterEmployee(v); setFilterEmployeeMode('worked') }}
-              placeholder="Employee"
-              sortKey="employees"
-            />
-            {/* Employee mode (Worked / Solo / +Assigned) — appears only when employee selected */}
-            {filterEmployee && (
-              <div className="flex items-center bg-secondary rounded-lg p-0.5 gap-0.5 border border-border/50 shrink-0">
-                <button type="button" onClick={() => setFilterEmployeeMode('worked')}
-                  title="Tasks this employee worked on"
-                  className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition-all ${filterEmployeeMode === 'worked' ? 'bg-primary text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
-                  Worked
-                </button>
-                <button type="button" onClick={() => setFilterEmployeeMode('solo')}
-                  title="Sole contributor"
-                  className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition-all ${filterEmployeeMode === 'solo' ? 'bg-amber-500 text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
-                  Solo
-                </button>
-                <button type="button" onClick={() => setFilterEmployeeMode('any')}
-                  title="Contributed or assigned"
-                  className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition-all ${filterEmployeeMode === 'any' ? 'bg-primary text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
-                  + Assigned
-                </button>
+                <option value="all">All ({localTasks.length})</option>
+                <option value="pending">Pending ({pendingCount})</option>
+                <option value="done">Scored ({doneCount})</option>
+                <option value="missing">Missing ({missingCount})</option>
+              </select>
+              
+              {/* Desktop: chips */}
+              <div className="hidden sm:flex items-center gap-1.5 flex-wrap">
+                {([
+                  { key: 'all',     label: 'All',     count: localTasks.length },
+                  { key: 'pending', label: 'Pending', count: pendingCount     },
+                  { key: 'done',    label: 'Scored',  count: doneCount        },
+                  { key: 'missing', label: 'Missing', count: missingCount     },
+                ] as const).map(({ key, label, count }) => (
+                  <button key={key} onClick={() => setStatusFilter(key as any)}
+                    className={`h-[34px] px-3 rounded-xl text-xs font-medium transition-colors flex items-center gap-1.5 cursor-pointer ${
+                      statusFilter === key
+                        ? key === 'missing'
+                          ? 'bg-orange-500/20 text-orange-300 border border-orange-500/30'
+                          : 'gradient-bg text-white'
+                        : 'bg-secondary text-muted-foreground hover:text-foreground'
+                    }`}>
+                    {label}
+                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
+                      statusFilter === key && key === 'missing' ? 'bg-orange-500/30 text-orange-300' :
+                      statusFilter === key ? 'bg-foreground/20 text-white' : 'bg-border/50 opacity-60'
+                    }`}>{count}</span>
+                    {key === 'missing' && count > 0 && statusFilter !== 'missing' && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-orange-400 shrink-0" />
+                    )}
+                  </button>
+                ))}
               </div>
-            )}
-            {/* Client */}
-            <FilterDropdown
-              options={clients.map(c => ({ value: c.id, label: c.name }))}
-              value={filterClient}
-              onChange={setFilterClient}
-              placeholder="Client"
-              sortKey="clients"
-            />
-            {/* Service */}
-            <FilterDropdown
-              options={services.map(s => ({ value: s.id, label: s.name }))}
-              value={filterService}
-              onChange={setFilterService}
-              placeholder="Service"
-              sortKey="services"
-            />
-            {/* Divider */}
-            <span className="w-px h-5 bg-foreground/10 shrink-0" />
-            {/* Status chips */}
-            {([
-              { key: 'all',     label: 'All',     count: localTasks.length },
-              { key: 'pending', label: 'Pending', count: pendingCount     },
-              { key: 'done',    label: 'Scored',  count: doneCount        },
-              { key: 'missing', label: 'Missing', count: missingCount     },
-            ] as const).map(({ key, label, count }) => (
-              <button key={key} onClick={() => setStatusFilter(key as any)}
-                className={`h-[34px] px-3 rounded-xl text-xs font-medium transition-colors flex items-center gap-1.5 cursor-pointer ${
-                  statusFilter === key
-                    ? key === 'missing'
-                      ? 'bg-orange-500/20 text-orange-300 border border-orange-500/30'
-                      : 'gradient-bg text-white'
-                    : 'bg-secondary text-muted-foreground hover:text-foreground'
-                }`}>
-                {label}
-                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
-                  statusFilter === key && key === 'missing' ? 'bg-orange-500/30 text-orange-300' :
-                  statusFilter === key ? 'bg-foreground/20 text-white' : 'bg-border/50 opacity-60'
-                }`}>{count}</span>
-                {key === 'missing' && count > 0 && statusFilter !== 'missing' && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-orange-400 shrink-0" />
-                )}
-              </button>
-            ))}
-            {/* Clear all */}
-            {hasAnyFilter && (
-              <button
-                onClick={() => {
-                  setSearch('')
-                  setFilterClient('')
-                  setFilterService('')
-                  setFilterEmployee('')
-                  setFilterEmployeeMode('worked')
-                  setFilterDate(null)
-                  setStatusFilter('all')
-                }}
-                className="ml-1 text-xs text-muted-foreground hover:text-foreground px-2 py-1.5 rounded-md hover:bg-foreground/[0.04] transition-colors flex items-center gap-1 shrink-0"
-              >
-                <X size={12} /> Clear all
-              </button>
-            )}
-          </StickyToolbar.Row>
+
+              {hasAnyFilter && (
+                <button
+                  onClick={() => {
+                    setSearch('')
+                    setFilterClient('')
+                    setFilterService('')
+                    setFilterEmployee('')
+                    setFilterEmployeeMode('worked')
+                    setFilterDate(null)
+                    setStatusFilter('all')
+                  }}
+                  className="ml-1 text-xs text-muted-foreground hover:text-foreground px-2 py-1.5 rounded-md hover:bg-foreground/[0.04] transition-colors flex items-center gap-1 shrink-0"
+                >
+                  <X size={12} /> Clear all
+                </button>
+              )}
+            </div>
+          </div>
         </StickyToolbar>
         </PageChrome>
 
@@ -1272,6 +1323,16 @@ export default function ContributionsClient({
                   </div>
                 </div>
               ))}
+              
+              {/* Load More Button for Mobile */}
+              {myVisibleTasks.length > mobileLimit && !search && !filterEmployee && (
+                <button
+                  onClick={() => setMobileLimit(l => l + 100)}
+                  className="sm:hidden w-full mt-4 h-[44px] bg-secondary border border-border text-foreground hover:bg-secondary/60 rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-2"
+                >
+                  Load More
+                </button>
+              )}
             </div>
           )
           )}
@@ -1930,15 +1991,26 @@ export default function ContributionsClient({
               Saving new parameters below will overwrite these imported scores.
             </p>
             <div className="flex flex-wrap gap-2">
-              {importedScores.map((s, i) => {
-                const emp = employees.find((e: any) => e.id === s.employee_id)
-                return (
-                  <span key={i} className="bg-secondary border border-border px-3 py-1.5 rounded-lg text-xs font-medium">
-                    {emp ? dn(emp) : s.employee_id.slice(0, 4)} <span className="text-primary ml-1">{s.score_percentage}%</span>
-                    {showFinancials && s.earnings_inr > 0 && <span className="opacity-60 ml-1">(₹{Math.round(s.earnings_inr)})</span>}
-                  </span>
-                )
-              })}
+              {importedScores
+                // Employees only see their own contribution row here. The full
+                // distribution is admin-only — leaking other contributors'
+                // names or percentages would breach privacy hardening, and
+                // the server only loads the current user's employee row for
+                // employees so unresolved rows would render as a 4-char ID
+                // hash, which is both ugly and a fragment leak.
+                .filter(s => role !== 'employee' || s.employee_id === currentEmployee?.id)
+                .map((s, i) => {
+                  const emp = employees.find((e: any) => e.id === s.employee_id)
+                  // For admins: any unresolved row points to a deleted/archived
+                  // employee — render a clean placeholder, not an id fragment.
+                  const label = emp ? dn(emp) : 'Unknown member'
+                  return (
+                    <span key={i} className="bg-secondary border border-border px-3 py-1.5 rounded-lg text-xs font-medium">
+                      {label} <span className="text-primary ml-1">{s.score_percentage}%</span>
+                      {showFinancials && s.earnings_inr > 0 && <span className="opacity-60 ml-1">(₹{Math.round(s.earnings_inr)})</span>}
+                    </span>
+                  )
+                })}
             </div>
           </div>
         )}

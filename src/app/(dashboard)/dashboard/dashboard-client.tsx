@@ -1,19 +1,36 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
 import { DateFilter, matchesDateFilter, getDateFilterLabel } from '@/components/ui/date-filter'
 import type { DateFilterValue } from '@/components/ui/date-filter'
 import {
-  BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
-} from 'recharts'
-import {
   TrendingUp, TrendingDown, DollarSign, Clock, AlertTriangle,
   ClipboardList, ArrowRight, CheckCircle, X, ChevronRight,
-  FileText, BarChart2, Calendar, Star, Users, Trophy, Briefcase,
+  FileText, BarChart2, BarChart3, Calendar, Star, Users, Trophy, Briefcase,
 } from 'lucide-react'
 import { usePrivacy } from '@/contexts/privacy-context'
+
+// ─── Recharts is lazy-loaded — only fetched when a chart is rendered. ──────
+// Saves ~95 KB on initial bundle & TTI for the (employee) dashboard, where
+// charts may never even appear above the fold.
+const ChartSkeleton = ({ h = 200 }: { h?: number }) => (
+  <div className="w-full bg-secondary/30 rounded animate-pulse" style={{ height: h }} />
+)
+const IncomeOutflowBar = dynamic(
+  () => import('./_charts').then(m => m.IncomeOutflowBar),
+  { ssr: false, loading: () => <ChartSkeleton h={200} /> },
+)
+const JobsDoneBar = dynamic(
+  () => import('./_charts').then(m => m.JobsDoneBar),
+  { ssr: false, loading: () => <ChartSkeleton h={180} /> },
+)
+const ContributionActivityBar = dynamic(
+  () => import('./_charts').then(m => m.ContributionActivityBar),
+  { ssr: false, loading: () => <ChartSkeleton h={240} /> },
+)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -67,14 +84,6 @@ function daysToGo(due: string): number {
 const WEEKDAY = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const FULL_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
-
-const TOOLTIP_STYLE = {
-  contentStyle: { background: '#1a1f2e', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, fontSize: 11 },
-  labelStyle: { color: '#9ca3af' },
-  // Makes tooltips work on mobile tap (not just desktop hover)
-  trigger: 'click' as const,
-  wrapperStyle: { zIndex: 50 },
-}
 
 const STATUS_COLOR: Record<string, string> = {
   pending: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/20',
@@ -309,66 +318,78 @@ export default function DashboardClient({
     return allAnalyticsTasks.filter(t => matchesDateFilter(t.task_date, dateFilter))
   }, [allAnalyticsTasks, dateFilter])
 
-  // Best month (by cashbook inflow)
-  const bestMonth = useMemo(() => {
-    const map: Record<string, number> = {}
-    allCashbook.filter(e => e.type === 'inflow').forEach(e => {
-      const k = e.entry_date?.slice(0, 7)
-      if (!k) return
-      map[k] = (map[k] || 0) + (e.amount_inr || 0)
-    })
-    const best = Object.entries(map).sort(([,a],[,b]) => b - a)[0]
-    if (!best) return null
-    const [y, m] = best[0].split('-')
-    return { label: `${MONTH_NAMES[parseInt(m)-1]} ${y}`, amount: best[1] }
-  }, [allCashbook])
+  // ── Cashbook insights (one-pass replacement for bestMonth + bestWeekday + avgDailyIncome) ──
+  // Previously this section ran 3 separate full scans of `allCashbook` (which
+  // can be thousands of rows). Collapsing to one pass keeps render time linear
+  // in the input regardless of how many derived stats we surface.
+  const cashbookInsights = useMemo(() => {
+    const monthInflow:   Record<string, number> = {}
+    const weekdayInflow: Record<number, number> = {}
+    const inflowDays = new Set<string>()
+    let totalInflow = 0
 
-  // Best weekday (by cashbook inflow)
-  const bestWeekday = useMemo(() => {
-    const map: Record<number, number> = {}
-    allCashbook.filter(e => e.type === 'inflow').forEach(e => {
-      if (!e.entry_date) return
-      const d = new Date(e.entry_date + 'T12:00:00').getDay()
-      map[d] = (map[d] || 0) + (e.amount_inr || 0)
-    })
-    const best = Object.entries(map).sort(([,a],[,b]) => b - a)[0]
-    if (!best) return null
-    return { label: WEEKDAY[parseInt(best[0])], amount: best[1] }
-  }, [allCashbook])
+    for (const e of allCashbook) {
+      if (e.type !== 'inflow') continue
+      const amt = e.amount_inr || 0
+      if (amt > 0) inflowDays.add(e.entry_date)
+      totalInflow += amt
+      const monthKey = e.entry_date?.slice(0, 7)
+      if (monthKey) monthInflow[monthKey] = (monthInflow[monthKey] || 0) + amt
+      if (e.entry_date) {
+        const wd = new Date(e.entry_date + 'T12:00:00').getDay()
+        weekdayInflow[wd] = (weekdayInflow[wd] || 0) + amt
+      }
+    }
 
-  // Average daily income
-  const avgDailyIncome = useMemo(() => {
-    const days = new Set(allCashbook.filter(e => e.type === 'inflow' && e.amount_inr > 0).map(e => e.entry_date))
-    if (!days.size) return 0
-    const total = allCashbook.filter(e => e.type === 'inflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
-    return total / days.size
-  }, [allCashbook])
+    let bestMonth: { label: string; amount: number } | null = null
+    let topMonth: [string, number] | null = null
+    for (const entry of Object.entries(monthInflow)) {
+      if (!topMonth || entry[1] > topMonth[1]) topMonth = entry as [string, number]
+    }
+    if (topMonth) {
+      const [y, m] = topMonth[0].split('-')
+      bestMonth = { label: `${MONTH_NAMES[parseInt(m) - 1]} ${y}`, amount: topMonth[1] }
+    }
 
-  // Top clients by task billing
-  const topClients = useMemo(() => {
-    const map: Record<string, { name: string; revenue: number; count: number }> = {}
-    analyticsTasks.forEach(t => {
-      const id = t.client?.id; const name = t.client?.name
-      if (!id || !name) return
-      if (!map[id]) map[id] = { name, revenue: 0, count: 0 }
-      map[id].revenue += t.billing_amount_inr || 0
-      map[id].count++
-    })
-    return Object.values(map).sort((a, b) => b.revenue - a.revenue).slice(0, 10)
+    let bestWeekday: { label: string; amount: number } | null = null
+    let topWd: [string, number] | null = null
+    for (const entry of Object.entries(weekdayInflow)) {
+      if (!topWd || entry[1] > topWd[1]) topWd = entry as [string, number]
+    }
+    if (topWd) bestWeekday = { label: WEEKDAY[parseInt(topWd[0])], amount: topWd[1] }
+
+    const avgDailyIncome = inflowDays.size > 0 ? totalInflow / inflowDays.size : 0
+
+    return { bestMonth, bestWeekday, avgDailyIncome }
+  }, [allCashbook])
+  const { bestMonth, bestWeekday, avgDailyIncome } = cashbookInsights
+
+  // ── Task insights (one-pass replacement for topClients + revenueByWorkType) ──
+  // Previously two separate scans over `analyticsTasks`. Single pass collapses
+  // both maps into one walk.
+  const taskInsights = useMemo(() => {
+    const byClient:  Record<string, { name: string; revenue: number; count: number }> = {}
+    const byService: Record<string, { name: string; revenue: number; count: number }> = {}
+    for (const t of analyticsTasks) {
+      const rev = t.billing_amount_inr || 0
+      const cid = t.client?.id; const cname = t.client?.name
+      if (cid && cname) {
+        if (!byClient[cid]) byClient[cid] = { name: cname, revenue: 0, count: 0 }
+        byClient[cid].revenue += rev
+        byClient[cid].count++
+      }
+      const sid = t.service_id; const sname = t.service?.name
+      if (sid && sname) {
+        if (!byService[sid]) byService[sid] = { name: sname, revenue: 0, count: 0 }
+        byService[sid].revenue += rev
+        byService[sid].count++
+      }
+    }
+    const topClients       = Object.values(byClient).sort((a, b) => b.revenue - a.revenue).slice(0, 10)
+    const revenueByWorkType = Object.values(byService).sort((a, b) => b.revenue - a.revenue).slice(0, 10)
+    return { topClients, revenueByWorkType }
   }, [analyticsTasks])
-
-  // Revenue by work type (service)
-  const revenueByWorkType = useMemo(() => {
-    const map: Record<string, { name: string; revenue: number; count: number }> = {}
-    analyticsTasks.forEach(t => {
-      const id = t.service_id; const name = t.service?.name
-      if (!id || !name) return
-      if (!map[id]) map[id] = { name, revenue: 0, count: 0 }
-      map[id].revenue += t.billing_amount_inr || 0
-      map[id].count++
-    })
-    return Object.values(map).sort((a, b) => b.revenue - a.revenue).slice(0, 10)
-  }, [analyticsTasks])
+  const { topClients, revenueByWorkType } = taskInsights
 
   // Revenue by season/month (calendar month, all-time)
   const revenueByMonth = useMemo(() => {
@@ -470,10 +491,11 @@ export default function DashboardClient({
   return (
     <div>
       <Header title="Dashboard" subtitle={todayLabel} />
-      <div className="p-6 space-y-6">
+      <div className="p-4 sm:p-6 space-y-5 sm:space-y-6">
 
         {/* ── Period Selector ──────────────────────────────── */}
-        <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="space-y-2">
+          {/* Row 1: date filter */}
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs text-muted-foreground font-medium">Period:</span>
             <DateFilter value={dateFilter} onChange={setDateFilter} />
@@ -482,7 +504,9 @@ export default function DashboardClient({
                 <X className="w-3 h-3" /> Clear
               </button>
             )}
-            <div className="h-4 w-px bg-border mx-1" />
+          </div>
+          {/* Row 2: granularity + period label */}
+          <div className="flex items-center justify-between gap-2">
             <div className="flex items-center bg-secondary rounded-lg p-0.5 gap-0.5">
               {(['daily','monthly','quarterly','yearly'] as Granularity[]).map(g => (
                 <button key={g} onClick={() => setGranularity(g)}
@@ -491,8 +515,8 @@ export default function DashboardClient({
                 </button>
               ))}
             </div>
+            <p className="text-xs text-muted-foreground shrink-0">{periodLabel}</p>
           </div>
-          <p className="text-xs text-muted-foreground">{periodLabel}</p>
         </div>
 
         {/* ── Today's Focus ──────────────────────────────── */}
@@ -596,34 +620,13 @@ export default function DashboardClient({
               {/* Income vs Outflow chart */}
               <div className="bg-card border border-border rounded-xl p-4">
                 <p className="text-xs font-semibold text-muted-foreground mb-3 uppercase tracking-wider">Income vs Outflow ({granularity})</p>
-                <ResponsiveContainer width="100%" height={200}>
-                  <BarChart data={trendData} barGap={2}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                    <XAxis dataKey="period" tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} tickFormatter={v => fmt(v)} width={50} />
-                    <Tooltip {...TOOLTIP_STYLE} formatter={(v: any, name: any) => [fmt(v), name]} />
-                    <Legend wrapperStyle={{ fontSize: 11 }} />
-                    <Bar dataKey="inflow"  name="Income"  fill="#7c3aed" radius={[3,3,0,0]} maxBarSize={24} />
-                    <Bar dataKey="outflow" name="Outflow" fill="#f87171" radius={[3,3,0,0]} maxBarSize={24} />
-                  </BarChart>
-                </ResponsiveContainer>
+                <IncomeOutflowBar data={trendData} fmt={fmt} />
               </div>
 
               {/* Job value + count chart */}
               <div className="bg-card border border-border rounded-xl p-4">
                 <p className="text-xs font-semibold text-muted-foreground mb-3 uppercase tracking-wider">Jobs Done ({granularity})</p>
-                <ResponsiveContainer width="100%" height={180}>
-                  <BarChart data={trendData} barGap={2}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                    <XAxis dataKey="period" tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} />
-                    <YAxis yAxisId="val" tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} tickFormatter={v => fmt(v)} width={50} />
-                    <YAxis yAxisId="cnt" orientation="right" tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} width={30} />
-                    <Tooltip {...TOOLTIP_STYLE} formatter={(v: any, name: any) => [name === 'Count' ? v : fmt(v), name]} />
-                    <Legend wrapperStyle={{ fontSize: 11 }} />
-                    <Bar yAxisId="val" dataKey="taskValue" name="Value"  fill="#34d399" radius={[3,3,0,0]} maxBarSize={20} />
-                    <Bar yAxisId="cnt" dataKey="taskCount" name="Count"  fill="#60a5fa" radius={[3,3,0,0]} maxBarSize={10} />
-                  </BarChart>
-                </ResponsiveContainer>
+                <JobsDoneBar data={trendData} fmt={fmt} />
               </div>
 
               {/* Trend data table */}
@@ -1106,18 +1109,51 @@ function RankTable({ title, icon, rows }: { title: string; icon: React.ReactNode
 // ─────────────────────────────────────────────────────────────────────────────
 // Employee Dashboard (Restricted View)
 // ─────────────────────────────────────────────────────────────────────────────
-function EmployeeDashboard({ todayStr, scores, payrollRecords }: { todayStr: string; scores: any[]; payrollRecords: any[] }) {
+function EmployeeDashboard({ todayStr, scores, payrollRecords: _payrollRecords }: { todayStr: string; scores: any[]; payrollRecords: any[] }) {
+  // payrollRecords intentionally unused — the employee dashboard no longer
+  // surfaces monetary credit info. All KPIs are count-based per privacy req.
   const [dateFilter, setDateFilter] = useState<DateFilterValue>(null)
   const [granularity, setGranularity] = useState<Granularity>('monthly')
 
   const today = new Date(todayStr + 'T12:00:00')
   const todayLabel = today.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 
-  // Stats calculation
-  const totalCredited = payrollRecords.reduce((sum, p) => sum + (p.net_salary || 0), 0)
-  const lastCredited = payrollRecords.length > 0 ? payrollRecords[0].net_salary : 0
-  const tasksCompleted = new Set(scores.map(s => s.task?.id || s.task_id)).size
-  const totalContributions = scores.length
+  // Count-only stats. Money fields like earnings_inr stay server-side; we never
+  // surface them to the employee dashboard.
+  // - myContributions: total contribution_scores rows belonging to this employee
+  // - avgScore: mean score_percentage across those rows (an attribution metric,
+  //   not money — safe to show)
+  const myContributions = scores.length
+  const avgScore = scores.length > 0
+    ? Math.round(scores.reduce((sum, s) => sum + (s.score_percentage ?? 0), 0) / scores.length)
+    : 0
+
+  // Filter scores by date (used for both the activity chart and the band breakdown).
+  const filteredScores = useMemo(() => {
+    if (!dateFilter) return scores
+    return scores.filter(s => {
+      const d = s.task?.task_date || s.calculated_at?.slice(0, 10) || ''
+      return matchesDateFilter(d, dateFilter)
+    })
+  }, [scores, dateFilter])
+
+  // Contribution Range Breakdown — per-band task counts, NO money columns.
+  // Mirrors the Reports band view but strips earnings/company splits.
+  const bandBreakdown = useMemo(() => {
+    const bands: { label: string; min: number; max: number; color: string }[] = [
+      { label: '100%',   min: 100, max: 100, color: 'text-emerald-400' },
+      { label: '76-99%', min: 76,  max: 99,  color: 'text-blue-400' },
+      { label: '51-75%', min: 51,  max: 75,  color: 'text-purple-400' },
+      { label: '26-50%', min: 26,  max: 50,  color: 'text-amber-400' },
+      { label: '0-25%',  min: 0,   max: 25,  color: 'text-rose-400' },
+    ]
+    const counts = bands.map(b => ({
+      ...b,
+      tasks: filteredScores.filter(s => (s.score_percentage ?? 0) >= b.min && (s.score_percentage ?? 0) <= b.max).length,
+    }))
+    const total = counts.reduce((sum, b) => sum + b.tasks, 0)
+    return { bands: counts, total }
+  }, [filteredScores])
 
   // Contribution Range Breakdown (Counts only)
   function getPeriodKey(dateStr: string, g: Granularity): string {
@@ -1136,11 +1172,6 @@ function EmployeeDashboard({ todayStr, scores, payrollRecords }: { todayStr: str
 
   const trendData = useMemo(() => {
     const map: Record<string, number> = {}
-    const filteredScores = dateFilter ? scores.filter(s => {
-      const d = s.task?.task_date || s.calculated_at?.slice(0,10) || ''
-      return matchesDateFilter(d, dateFilter)
-    }) : scores
-
     filteredScores.forEach(s => {
       const d = s.task?.task_date || s.calculated_at?.slice(0,10) || ''
       const k = getPeriodKey(d, granularity)
@@ -1155,30 +1186,24 @@ function EmployeeDashboard({ todayStr, scores, payrollRecords }: { todayStr: str
         count,
       }))
       .slice(-24)
-  }, [scores, dateFilter, granularity])
+  }, [filteredScores, granularity])
 
   return (
     <div>
       <Header title="My Workspace" subtitle={todayLabel} />
       <div className="p-4 md:p-6 space-y-6">
         
-        {/* KPI Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="bg-card border border-border rounded-xl p-4 flex flex-col justify-between hover:border-green-500/30 transition-colors">
-            <p className="text-[11px] text-muted-foreground font-medium">Total Credited</p>
-            <p className="text-xl font-bold text-green-400 mt-2">{fmtFull(totalCredited)}</p>
-          </div>
-          <div className="bg-card border border-border rounded-xl p-4 flex flex-col justify-between hover:border-blue-500/30 transition-colors">
-            <p className="text-[11px] text-muted-foreground font-medium">Last Credited</p>
-            <p className="text-xl font-bold text-blue-400 mt-2">{fmtFull(lastCredited)}</p>
-          </div>
+        {/* KPI Cards — counts only, no monetary fields */}
+        <div className="grid grid-cols-2 md:grid-cols-2 gap-3">
           <div className="bg-card border border-border rounded-xl p-4 flex flex-col justify-between hover:border-purple-500/30 transition-colors">
-            <p className="text-[11px] text-muted-foreground font-medium">Contributions</p>
-            <p className="text-xl font-bold text-foreground mt-2">{totalContributions}</p>
+            <p className="text-[11px] text-muted-foreground font-medium">My Contributions</p>
+            <p className="text-xl font-bold text-foreground mt-2">{myContributions}</p>
+            <p className="text-[10px] text-muted-foreground/70 mt-0.5">tasks you've contributed on</p>
           </div>
           <div className="bg-card border border-border rounded-xl p-4 flex flex-col justify-between hover:border-orange-500/30 transition-colors">
-            <p className="text-[11px] text-muted-foreground font-medium">Unique Tasks</p>
-            <p className="text-xl font-bold text-foreground mt-2">{tasksCompleted}</p>
+            <p className="text-[11px] text-muted-foreground font-medium">Avg Score</p>
+            <p className="text-xl font-bold text-foreground mt-2">{avgScore}%</p>
+            <p className="text-[10px] text-muted-foreground/70 mt-0.5">mean contribution percentage</p>
           </div>
         </div>
 
@@ -1201,32 +1226,50 @@ function EmployeeDashboard({ todayStr, scores, payrollRecords }: { todayStr: str
           </div>
         </div>
 
+        {/* Contribution Range Breakdown — task counts per contribution band.
+            Money columns intentionally omitted; this is the count-only mirror
+            of the Reports breakdown. */}
+        <div className="bg-card border border-border rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-4">
+            <BarChart3 className="w-4 h-4 text-purple-400" />
+            <h2 className="text-sm font-semibold">Contribution Range Breakdown</h2>
+            <span className="ml-auto text-[11px] text-muted-foreground">{bandBreakdown.total} task{bandBreakdown.total === 1 ? '' : 's'}</span>
+          </div>
+          {bandBreakdown.total === 0 ? (
+            <div className="h-32 flex items-center justify-center border-t border-border/50">
+              <p className="text-sm text-muted-foreground">No contributions in this period</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {bandBreakdown.bands.map(b => {
+                const pct = bandBreakdown.total > 0 ? (b.tasks / bandBreakdown.total) * 100 : 0
+                return (
+                  <div key={b.label} className="flex items-center gap-3">
+                    <span className={`text-xs font-semibold w-16 shrink-0 ${b.color}`}>{b.label}</span>
+                    <div className="flex-1 h-2 rounded-full bg-secondary overflow-hidden">
+                      <div className={`h-full rounded-full ${b.color.replace('text-', 'bg-')}`} style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="text-xs font-medium text-foreground w-12 text-right tabular-nums">{b.tasks}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
         {/* Contribution Chart */}
         <div className="bg-card border border-border rounded-xl p-4">
           <div className="flex items-center gap-2 mb-4">
             <ClipboardList className="w-4 h-4 text-purple-400" />
             <h2 className="text-sm font-semibold">Contribution Activity</h2>
           </div>
-          
+
           {trendData.length === 0 ? (
             <div className="h-48 flex items-center justify-center border-t border-border/50">
               <p className="text-sm text-muted-foreground">No contributions in this period</p>
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={trendData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
-                <XAxis dataKey="period" tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} allowDecimals={false} />
-                <Tooltip 
-                  contentStyle={{ background: '#1a1f2e', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, fontSize: 12 }}
-                  labelStyle={{ color: '#9ca3af', marginBottom: 4 }}
-                  cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-                  formatter={(val) => [`${val} tasks`, 'Contributed to']} 
-                />
-                <Bar dataKey="count" fill="#a855f7" radius={[4,4,0,0]} maxBarSize={40} />
-              </BarChart>
-            </ResponsiveContainer>
+            <ContributionActivityBar data={trendData} />
           )}
         </div>
       </div>

@@ -1,11 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { usePrivacy } from '@/contexts/privacy-context'
-import { useRole, Role, roleRoutes } from '@/contexts/role-context'
+import { usePermissions } from '@/contexts/permission-context'
 import { useTheme } from '@/contexts/theme-context'
 import {
   LayoutDashboard,
@@ -28,6 +28,8 @@ import {
   Sun,
   Moon,
   KeyRound,
+  UserCircle,
+  ChevronDown,
 } from 'lucide-react'
 import { CommandPaletteTrigger } from '@/components/ui/command-palette'
 import { EmployeeAvatar } from '@/components/ui/employee-avatar'
@@ -68,7 +70,7 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
         </button>
         <h2 className="text-lg font-semibold mb-1">Change Password</h2>
         <p className="text-sm text-muted-foreground mb-5">Update your account password</p>
-        
+
         {success ? (
           <div className="text-center py-6">
             <div className="w-12 h-12 mx-auto rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mb-3">
@@ -100,67 +102,135 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
 // ─────────────────────────────────────────────────────
 // Nav definition — grouped by workflow (top = most used)
 // ─────────────────────────────────────────────────────
-type NavItem = { label: string; href: string; icon: typeof LayoutDashboard }
+type NavItem = { label: string; href: string; icon: typeof LayoutDashboard; requiredPerm?: string; adminOnly?: boolean }
 type NavSection = { label?: string; items: NavItem[] }
 
 const navSections: NavSection[] = [
   {
-    // Daily ops — no label needed (always on top)
     items: [
-      { label: 'Dashboard',     href: '/dashboard',              icon: LayoutDashboard },
-      { label: 'Tasks',         href: '/dashboard/tasks',        icon: CheckSquare },
-      { label: 'Contributions', href: '/dashboard/contributions',icon: TrendingUp },
+      { label: 'Dashboard',     href: '/dashboard',               icon: LayoutDashboard, requiredPerm: 'dashboard.view' },
+      { label: 'Tasks',         href: '/dashboard/tasks',         icon: CheckSquare },
+      { label: 'Contributions', href: '/dashboard/contributions', icon: TrendingUp },
     ],
   },
   {
     label: 'Money',
     items: [
-      { label: 'Quotations',    href: '/dashboard/quotations',   icon: BookOpen },
-      { label: 'Invoices',      href: '/dashboard/invoices',     icon: FileText },
-      { label: 'Cash Book',     href: '/dashboard/cashbook',     icon: Wallet },
+      { label: 'Quotations',  href: '/dashboard/quotations', icon: BookOpen, requiredPerm: 'billing.view_quotations' },
+      { label: 'Invoices',    href: '/dashboard/invoices',   icon: FileText, requiredPerm: 'billing.view_invoices' },
+      { label: 'Cash Book',   href: '/dashboard/cashbook',   icon: Wallet,   requiredPerm: 'cashbook.view' },
     ],
   },
   {
     label: 'Team',
     items: [
-      { label: 'HR & Payroll',  href: '/dashboard/payroll',      icon: Users2 },
+      { label: 'HR & Payroll', href: '/dashboard/payroll', icon: Users2, requiredPerm: 'payroll.view' },
     ],
   },
   {
     label: 'Insights',
     items: [
-      { label: 'Reports',       href: '/dashboard/reports',      icon: BarChart3 },
+      // Admin-only — Reports surfaces team-wide earnings, billing bands, and
+      // company splits. Employees get their own view via the Dashboard.
+      { label: 'Reports', href: '/dashboard/reports', icon: BarChart3, adminOnly: true },
     ],
   },
   {
     label: 'System',
     items: [
-      { label: 'Bulk Import',   href: '/dashboard/import',       icon: Upload },
-      { label: 'Settings',      href: '/dashboard/settings',     icon: Settings },
+      // Bulk Import is strictly admin-only — it can mass-create tasks,
+      // contributions, and cashbook entries, so it shouldn't surface to
+      // non-admin team members who might happen to hold `tasks.create`.
+      { label: 'Bulk Import', href: '/dashboard/import',   icon: Upload,   adminOnly: true },
+      { label: 'Settings',    href: '/dashboard/settings', icon: Settings, requiredPerm: 'settings.access' },
     ],
   },
 ]
 
-// Flat list for role-filtering and other code that needs a list
-const allNav: NavItem[] = navSections.flatMap(s => s.items)
-
 // ─────────────────────────────────────────────────────
-// Role badge colours
+// Profile action menu items (shared between sidebar + employee sheet)
 // ─────────────────────────────────────────────────────
-const roleBadgeClass: Record<Role, string> = {
-  super_admin: 'bg-purple-500/15 text-purple-400 border-purple-500/25',
-  accounts:    'bg-blue-500/15   text-blue-400   border-blue-500/25',
-  team_lead:   'bg-green-500/15  text-green-400  border-green-500/25',
-  employee:    'bg-gray-500/15   text-gray-400   border-gray-500/25',
-  view_only:   'bg-orange-500/15 text-orange-400 border-orange-500/25',
-}
+function ProfileActions({
+  onChangePassword,
+  compact = false,
+}: {
+  onChangePassword: () => void
+  compact?: boolean
+}) {
+  const router = useRouter()
+  const { isUnlocked, openUnlockModal, lock } = usePrivacy()
+  const { user } = usePermissions()
+  const { toggleTheme } = useTheme()
 
-const roleLabel: Record<Role, string> = {
-  super_admin: 'Super Admin',
-  accounts:    'Accounts',
-  team_lead:   'Team Lead',
-  employee:    'Employee',
-  view_only:   'View Only',
+  async function handleSignOut() {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    router.push('/login')
+  }
+
+  const itemCls = compact
+    ? 'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors w-full text-left'
+    : 'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors w-full text-left'
+
+  return (
+    <div className="space-y-0.5">
+      {/* Dark / Light mode
+          ─ Both icons + labels are rendered in the DOM; CSS picks the visible
+            one via the `dark:` Tailwind variant, which reads the `.dark` class
+            on <html> set by /public/theme-init.js before first paint.
+          ─ This means server + client emit identical markup → zero hydration
+            mismatch. The toggle button needs no `suppressHydrationWarning`. */}
+      <button
+        onClick={toggleTheme}
+        aria-label="Toggle theme"
+        className={`${itemCls} text-muted-foreground hover:bg-sidebar-accent hover:text-foreground`}
+      >
+        <span className="relative w-4 h-4 shrink-0" aria-hidden="true">
+          <Sun  className="block dark:hidden w-4 h-4 text-amber-500" />
+          <Moon className="hidden dark:block w-4 h-4 text-blue-300" />
+        </span>
+        <span className="truncate whitespace-nowrap">
+          <span className="block dark:hidden">Light mode</span>
+          <span className="hidden dark:block">Dark mode</span>
+        </span>
+      </button>
+
+      {/* Privacy lock — all users */}
+      <button
+        onClick={isUnlocked ? lock : openUnlockModal}
+        className={`${itemCls} ${
+          isUnlocked
+            ? 'text-green-400 hover:bg-green-500/10 hover:text-green-300'
+            : 'text-muted-foreground hover:bg-sidebar-accent hover:text-amber-400'
+        }`}
+      >
+        {isUnlocked
+          ? <Unlock className="w-4 h-4 shrink-0" />
+          : <Lock className="w-4 h-4 shrink-0" />}
+        <span className="truncate whitespace-nowrap">
+          {isUnlocked ? 'Privacy unlocked' : 'Privacy locked'}
+        </span>
+      </button>
+
+      {/* Change password */}
+      <button
+        onClick={onChangePassword}
+        className={`${itemCls} text-muted-foreground hover:bg-sidebar-accent hover:text-foreground`}
+      >
+        <KeyRound className="w-4 h-4 shrink-0" />
+        <span className="truncate whitespace-nowrap">Change password</span>
+      </button>
+
+      {/* Sign out */}
+      <button
+        onClick={handleSignOut}
+        className={`${itemCls} text-muted-foreground hover:bg-sidebar-accent hover:text-destructive`}
+      >
+        <LogOut className="w-4 h-4 shrink-0" />
+        <span className="whitespace-nowrap">Sign out</span>
+      </button>
+    </div>
+  )
 }
 
 // ─────────────────────────────────────────────────────
@@ -168,14 +238,27 @@ const roleLabel: Record<Role, string> = {
 // ─────────────────────────────────────────────────────
 function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () => void; isCollapsed?: boolean }) {
   const [showPwdModal, setShowPwdModal] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
   const pathname = usePathname()
   const router = useRouter()
-  const { isUnlocked, openUnlockModal, lock } = usePrivacy()
-  const { role, employee } = useRole()
-  const { theme, toggleTheme } = useTheme()
+  const { user, can } = usePermissions()
+  const { isUnlocked } = usePrivacy()
 
-  const allowedRoutes = roleRoutes[role]
-  const nav = allNav.filter(item => allowedRoutes.includes(item.href))
+  // Pre-compute visible sections once per permission change — avoids re-filtering on
+  // every route transition (pathname is the only thing changing in the common case).
+  const visibleNavSections = useMemo(
+    () =>
+      navSections
+        .map(s => ({
+          ...s,
+          items: s.items.filter(i =>
+            (!i.requiredPerm || can(i.requiredPerm)) &&
+            (!i.adminOnly || user.isAdmin)
+          ),
+        }))
+        .filter(s => s.items.length > 0),
+    [can, user.isAdmin],
+  )
 
   async function handleSignOut() {
     const supabase = createClient()
@@ -197,12 +280,16 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
           </div>
         </div>
 
-        {/* Role badge */}
-        {role !== 'employee' && (
+        {/* Designation badge */}
+        {(user.isAdmin || user.designationName) && (
           <div className={`overflow-hidden transition-all duration-300 ${isCollapsed ? 'max-h-0 opacity-0 mt-0' : 'max-h-10 opacity-100 mt-3'}`}>
-            <span className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap ${roleBadgeClass[role]}`}>
-              {roleLabel[role]}
-              {employee?.name ? ` · ${employee.name.split(' ')[0]}` : ''}
+            <span className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap ${
+              user.isAdmin
+                ? 'bg-purple-500/15 text-purple-400 border-purple-500/25'
+                : 'bg-secondary text-muted-foreground border-border'
+            }`}>
+              {user.designationName || (user.isAdmin ? 'Admin' : 'Member')}
+              {isUnlocked && user.name ? ` · ${user.name.split(' ')[0]}` : ''}
             </span>
           </div>
         )}
@@ -213,12 +300,10 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
         <CommandPaletteTrigger className={isCollapsed ? '' : 'w-full'} isCollapsed={isCollapsed} />
       </div>
 
-      {/* Nav — grouped by workflow */}
+      {/* Nav */}
       <nav className={`flex-1 py-4 overflow-y-auto ${isCollapsed ? 'px-2' : 'px-3'}`}>
-        {navSections.map((section, sIdx) => {
-          // Filter section items by role
-          const visibleItems = section.items.filter(it => nav.some(n => n.href === it.href))
-          if (visibleItems.length === 0) return null
+        {visibleNavSections.map((section, sIdx) => {
+          const visibleItems = section.items
           return (
             <div key={sIdx} className={sIdx > 0 ? 'mt-4' : ''}>
               {section.label && (
@@ -264,65 +349,17 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
         })}
       </nav>
 
-      {/* Theme toggle.
-          suppressHydrationWarning: the SSR-rendered theme is the default ('dark') because
-          the server can't read localStorage. The themeInitScript synchronously sets the
-          real theme on <html> before React hydrates, so by the time this button renders
-          client-side, the theme state may differ from the server output. The mismatch is
-          intentional and local — silence the warning on the elements that swap. */}
-      <div className={`pt-2 border-t border-sidebar-border transition-all duration-300 ${isCollapsed ? 'px-2' : 'px-3'}`}>
-        <button
-          onClick={toggleTheme}
-          suppressHydrationWarning
-          title={theme === 'dark' ? 'Dark mode — click for light' : 'Light mode — click for dark'}
-          className={`flex items-center rounded-lg text-sm font-medium transition-all duration-300 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground ${
-            isCollapsed ? 'justify-center p-2.5' : 'gap-3 w-full px-3 py-2.5'
-          }`}
-        >
-          <span suppressHydrationWarning>
-            {theme === 'dark'
-              ? <Moon className="w-4 h-4 shrink-0 text-blue-300 transition-colors" />
-              : <Sun className="w-4 h-4 shrink-0 text-amber-500 transition-colors" />}
-          </span>
-          <div className={`text-left overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0' : 'flex-1 opacity-100'}`}>
-            <span suppressHydrationWarning className="block leading-tight truncate whitespace-nowrap">{theme === 'dark' ? 'Dark mode' : 'Light mode'}</span>
-            <span className="block text-[10px] opacity-60 leading-tight truncate whitespace-nowrap">
-              Tap to switch theme
-            </span>
+      {/* ── Profile actions — in-flow, above the border, so never clipped ── */}
+      {!isCollapsed && profileOpen && (
+        <div className={`transition-all duration-200 ${isCollapsed ? 'px-2' : 'px-3'} pb-1`}>
+          <div className="bg-sidebar-accent/50 border border-sidebar-border rounded-xl p-1">
+            <ProfileActions onChangePassword={() => setShowPwdModal(true)} />
           </div>
-        </button>
-      </div>
-
-      {/* Privacy lock */}
-      {role !== 'employee' && (
-        <div className={`pt-1 transition-all duration-300 ${isCollapsed ? 'px-2 pb-2' : 'px-3'}`}>
-          <button
-            onClick={isUnlocked ? lock : openUnlockModal}
-            title={isUnlocked ? 'Employee names visible — click to lock' : 'Employee names hidden — click to unlock'}
-            className={`flex items-center rounded-lg text-sm font-medium transition-all duration-300 ${
-              isCollapsed ? 'justify-center p-2.5' : 'gap-3 w-full px-3 py-2.5'
-            } ${
-              isUnlocked
-                ? 'text-green-400 hover:bg-green-500/10 hover:text-green-300'
-                : 'text-muted-foreground hover:bg-sidebar-accent hover:text-amber-400'
-            }`}
-          >
-            {isUnlocked
-              ? <Unlock className="w-4 h-4 shrink-0 transition-colors" />
-              : <Lock className="w-4 h-4 shrink-0 transition-colors" />}
-            <div className={`text-left overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0' : 'flex-1 opacity-100'}`}>
-              <span className="block leading-tight truncate whitespace-nowrap">{isUnlocked ? 'Privacy unlocked' : 'Privacy locked'}</span>
-              <span className="block text-[10px] opacity-60 leading-tight truncate whitespace-nowrap">
-                {isUnlocked ? 'Names visible — tap to hide' : 'Names hidden — tap to reveal'}
-              </span>
-            </div>
-          </button>
         </div>
       )}
 
-      {/* User profile card + sign out */}
-      <div className={`border-t border-sidebar-border pb-3 transition-all duration-300 ${isCollapsed ? 'px-2 pt-2' : 'px-3 pt-3'}`}>
-        {/* Collapsed: just sign-out icon */}
+      {/* ── Profile row + sign-out (collapsed) ── */}
+      <div className={`border-t border-sidebar-border pb-3 transition-all duration-300 ${isCollapsed ? 'px-2 pt-2' : 'px-3 pt-2'}`}>
         {isCollapsed ? (
           <button
             onClick={handleSignOut}
@@ -332,51 +369,90 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
             <LogOut className="w-4 h-4 shrink-0" />
           </button>
         ) : (
-          <div className="space-y-1">
-            {/* User row */}
-            {employee && (
-              <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg">
-                <EmployeeAvatar
-                  avatarUrl={(employee as any).avatar_url}
-                  name={employee.cqid} // Fallback to CQID for initials
-                  cqid={employee.cqid}
-                  size={30}
-                  rounded="full"
-                  className="shrink-0"
-                />
-                <div className="flex-1 min-w-0 flex flex-col justify-center">
-                  <div className="text-sm font-medium text-sidebar-foreground truncate">
-                    {employee.cqid || 'Employee'}
-                  </div>
-                  {role !== 'employee' && employee.name && (
-                    <div className="text-[11px] text-muted-foreground truncate">{employee.name}</div>
-                  )}
-                </div>
-              </div>
+          <button
+            onClick={() => setProfileOpen(o => !o)}
+            className={`flex items-center gap-2.5 px-3 py-2 rounded-lg w-full transition-colors group ${profileOpen ? 'bg-sidebar-accent' : 'hover:bg-sidebar-accent'}`}
+          >
+            {user.cqid ? (
+              <EmployeeAvatar
+                avatarUrl={null}
+                name={user.cqid}
+                cqid={user.cqid}
+                size={28}
+                rounded="full"
+                className="shrink-0"
+              />
+            ) : (
+              <UserCircle className="w-7 h-7 text-muted-foreground shrink-0" />
             )}
-
-            {/* Change password */}
-            <button
-              onClick={() => setShowPwdModal(true)}
-              className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-all duration-300 w-full text-left"
-            >
-              <KeyRound className="w-4 h-4 shrink-0" />
-              <span className="truncate whitespace-nowrap">Change password</span>
-            </button>
-
-            {/* Sign out */}
-            <button
-              onClick={handleSignOut}
-              className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-sidebar-accent hover:text-destructive transition-all duration-300 w-full"
-            >
-              <LogOut className="w-4 h-4 shrink-0 transition-colors" />
-              <span className="whitespace-nowrap">Sign out</span>
-            </button>
-          </div>
+            <div className="flex-1 min-w-0 text-left">
+              <div className="text-sm font-medium text-sidebar-foreground truncate leading-tight">
+                {user.cqid ?? 'Account'}
+              </div>
+              {isUnlocked && user.name && (
+                <div className="text-[11px] text-muted-foreground truncate leading-tight">{user.name}</div>
+              )}
+            </div>
+            <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground shrink-0 transition-transform duration-200 ${profileOpen ? 'rotate-180' : ''}`} />
+          </button>
         )}
       </div>
+
       {showPwdModal && <ChangePasswordModal onClose={() => setShowPwdModal(false)} />}
     </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────
+// Employee Profile Sheet (slide-up from bottom nav)
+// ─────────────────────────────────────────────────────
+function EmployeeProfileSheet({ onClose, onChangePassword }: { onClose: () => void; onChangePassword: () => void }) {
+  const { user } = usePermissions()
+  const { isUnlocked } = usePrivacy()
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      {/* Sheet */}
+      <div className="fixed bottom-[57px] left-0 right-0 z-50 bg-sidebar border-t border-sidebar-border rounded-t-2xl shadow-2xl px-4 pt-4 pb-3 animate-in slide-in-from-bottom-4 duration-200">
+        {/* Handle */}
+        <div className="w-10 h-1 bg-border rounded-full mx-auto mb-4" />
+
+        {/* Profile row */}
+        <div className="flex items-center gap-3 px-1 mb-3">
+          {user.cqid ? (
+            <EmployeeAvatar
+              avatarUrl={null}
+              name={user.cqid}
+              cqid={user.cqid}
+              size={36}
+              rounded="full"
+              className="shrink-0"
+            />
+          ) : (
+            <UserCircle className="w-9 h-9 text-muted-foreground shrink-0" />
+          )}
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-foreground truncate">{user.cqid ?? 'Account'}</div>
+            {isUnlocked && user.name && <div className="text-xs text-muted-foreground truncate">{user.name}</div>}
+            {user.designationName && (
+              <span className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border whitespace-nowrap mt-0.5">
+                {user.designationName}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="h-px bg-border mb-2" />
+
+        <ProfileActions onChangePassword={() => { onClose(); onChangePassword() }} compact />
+      </div>
+    </>
   )
 }
 
@@ -385,18 +461,19 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
 // ─────────────────────────────────────────────────────
 export default function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [showPwdModal, setShowPwdModal] = useState(false)
+  const [profileSheetOpen, setProfileSheetOpen] = useState(false)
   const [isCollapsed, setIsCollapsed] = useState(false)
-  const { role } = useRole()
+  const { user } = usePermissions()
   const pathname = usePathname()
 
-  const isEmployee = role === 'employee'
+  const isEmployee = !user.isAdmin
 
   return (
     <>
-      {/* ── Desktop sidebar (always visible ≥ 768px) ── */}
+      {/* ── Desktop sidebar ── */}
       <aside className={`hidden md:flex shrink-0 h-screen flex-col bg-sidebar border-r border-sidebar-border transition-all duration-300 ease-in-out relative ${isCollapsed ? 'w-[72px]' : 'w-60'}`}>
-        {/* Toggle Button */}
-        <button 
+        <button
           onClick={() => setIsCollapsed(!isCollapsed)}
           className="absolute -right-3 top-6 z-50 flex items-center justify-center w-6 h-6 bg-sidebar border border-sidebar-border rounded-full text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-colors shadow-sm"
         >
@@ -405,7 +482,7 @@ export default function Sidebar() {
         <SidebarContent isCollapsed={isCollapsed} />
       </aside>
 
-      {/* ── Mobile: hamburger button (shown when sidebar is closed) ── */}
+      {/* ── Mobile: hamburger (admin only) ── */}
       {!mobileOpen && !isEmployee && (
         <button
           onClick={() => setMobileOpen(true)}
@@ -416,7 +493,7 @@ export default function Sidebar() {
         </button>
       )}
 
-      {/* ── Mobile: backdrop ── */}
+      {/* ── Mobile: backdrop (admin drawer) ── */}
       {mobileOpen && !isEmployee && (
         <div
           className="md:hidden fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
@@ -425,14 +502,13 @@ export default function Sidebar() {
         />
       )}
 
-      {/* ── Mobile: slide-out drawer ── */}
+      {/* ── Mobile: slide-out drawer (admin) ── */}
       {!isEmployee && (
         <aside
           className={`md:hidden fixed top-0 left-0 z-50 h-full w-72 bg-sidebar border-r border-sidebar-border shadow-2xl flex flex-col
             transition-transform duration-300 ease-in-out
             ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}
         >
-          {/* Close button inside drawer */}
           <button
             onClick={() => setMobileOpen(false)}
             aria-label="Close menu"
@@ -440,7 +516,6 @@ export default function Sidebar() {
           >
             <X className="w-4 h-4" />
           </button>
-
           <SidebarContent onNavClick={() => setMobileOpen(false)} isCollapsed={false} />
         </aside>
       )}
@@ -465,8 +540,32 @@ export default function Sidebar() {
               </Link>
             )
           })}
+
+          {/* Profile tab */}
+          <button
+            onClick={() => setProfileSheetOpen(o => !o)}
+            className="flex flex-col items-center justify-center py-2 px-1 w-1/4"
+          >
+            <div className={`w-10 h-8 flex items-center justify-center rounded-full transition-all ${profileSheetOpen ? 'bg-primary/20 text-primary' : 'text-muted-foreground'}`}>
+              <UserCircle className="w-5 h-5" />
+            </div>
+            <span className={`text-[10px] mt-1 font-medium transition-colors ${profileSheetOpen ? 'text-foreground' : 'text-muted-foreground'}`}>
+              Me
+            </span>
+          </button>
         </div>
       )}
+
+      {/* ── Employee profile sheet ── */}
+      {isEmployee && profileSheetOpen && (
+        <EmployeeProfileSheet
+          onClose={() => setProfileSheetOpen(false)}
+          onChangePassword={() => setShowPwdModal(true)}
+        />
+      )}
+
+      {/* Change password modal (employee path) */}
+      {showPwdModal && <ChangePasswordModal onClose={() => setShowPwdModal(false)} />}
     </>
   )
 }

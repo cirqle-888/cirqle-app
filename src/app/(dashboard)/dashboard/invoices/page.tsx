@@ -1,10 +1,18 @@
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
+import { loadCurrentUser } from '@/lib/permissions/check'
+import { financialVisibility, stripInvoiceList } from '@/lib/permissions/strip'
 import InvoicesClient from './invoices-client'
 
 export const dynamic = 'force-dynamic'
 
 export default async function InvoicesPage() {
-  const supabase = await createClient()
+  // Route is permission-gated by middleware (`billing.view_invoices`).
+  // Per-field financial visibility (totals, line pricing, payments) is gated
+  // below by stripping fields from the payload when the user lacks the
+  // corresponding `billing.view_amounts` / `billing.view_line_pricing` perm.
+  const me = await loadCurrentUser().catch(() => null)
+  const vis = financialVisibility(me)
+  const supabase = createAdminClient()
 
   const [invoicesRes, clientsRes, bankRes, servicesRes, settingsRes] = await Promise.all([
     supabase
@@ -44,13 +52,25 @@ export default async function InvoicesPage() {
   const settings: Record<string, string> = {}
   ;(settingsRes.data || []).forEach(s => { settings[s.key] = s.value })
 
+  // Server-side strip: when the user lacks view_amounts and/or view_line_pricing,
+  // the corresponding ₹ fields are deleted from the payload BEFORE serialisation
+  // so they never appear in the RSC stream, network response, or DevTools state.
+  const initialInvoices = stripInvoiceList(
+    (invoicesRes.data || []) as any[],
+    { amounts: vis.billingAmounts, linePricing: vis.billingLinePricing },
+  )
+
   return (
     <InvoicesClient
-      initialInvoices={(invoicesRes.data || []) as any[]}
+      initialInvoices={initialInvoices}
       clients={clientsRes.data || []}
       bankAccounts={bankRes.data || []}
       services={servicesRes.data || []}
       companySettings={settings}
+      visibility={{
+        amounts:     vis.billingAmounts,
+        linePricing: vis.billingLinePricing,
+      }}
     />
   )
 }

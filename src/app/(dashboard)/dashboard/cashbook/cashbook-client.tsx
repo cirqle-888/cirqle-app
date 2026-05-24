@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import dynamic from 'next/dynamic'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { formatCompact } from '@/lib/calculations/currency'
@@ -9,19 +10,31 @@ import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
 import type { Currency } from '@/types'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
-import AllocationModal from '@/components/cashbook/allocation-modal'
-import PayrollAllocationModal from '@/components/cashbook/payroll-allocation-modal'
 
 import Link from 'next/link'
+
+// Allocation modals (253 + 313 lines) only mount when an admin clicks Allocate
+// on an entry. Split off the initial cashbook chunk.
+const AllocationModal = dynamic(
+  () => import('@/components/cashbook/allocation-modal'),
+  { ssr: false },
+)
+const PayrollAllocationModal = dynamic(
+  () => import('@/components/cashbook/payroll-allocation-modal'),
+  { ssr: false },
+)
 
 interface Entry {
   id: string
   type: 'inflow' | 'outflow'
   category_id: string
   bank_account_id?: string
-  amount: number
+  // Monetary fields are optional because they are stripped from the payload
+  // for viewers without `cashbook.view_amounts`. UI must coalesce or gate on
+  // `showAmounts` before rendering.
+  amount?: number
   currency: Currency
-  amount_inr: number
+  amount_inr?: number
   entry_date: string
   description?: string
   reference?: string
@@ -88,11 +101,18 @@ interface Props {
   employees: any[]
   clients: any[]
   outstandingCredits: any[]
+  /**
+   * True when the viewer holds `cashbook.view_amounts`. When false, amount
+   * and amount_inr are already absent from `initialEntries` (stripped
+   * server-side); the client uses this flag to suppress the totals row,
+   * inflow/outflow KPI cards, and the entry-row amount column.
+   */
+  showAmounts: boolean
 }
 
 const CURRENCIES: Currency[] = ['INR', 'AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
 
-export default function CashBookClient({ initialEntries, categories, bankAccounts, exchangeRates, dueInvoices, employees, clients, outstandingCredits }: Props) {
+export default function CashBookClient({ initialEntries, categories, bankAccounts, exchangeRates, dueInvoices, employees, clients, outstandingCredits, showAmounts }: Props) {
   const [entries, setEntries] = useState<Entry[]>(initialEntries)
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -330,17 +350,20 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         title="Cash Book"
         subtitle="Track all income and expenses"
         actions={
-          <div className="flex gap-3">
-            <Link href="/dashboard/cashbook/reconciliation" className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-4 py-2 rounded-lg hover:bg-secondary/80 transition-colors">
-              <ShieldAlert className="h-4 w-4" />
-              Reconciliation
+          <div className="flex items-center gap-2">
+            <Link href="/dashboard/cashbook/reconciliation"
+              className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap">
+              <ShieldAlert className="h-4 w-4 shrink-0" />
+              <span className="hidden sm:inline">Reconciliation</span>
             </Link>
-            <Link href="/dashboard/import?tab=cashbook_entries" className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-4 py-2 rounded-lg hover:bg-secondary/80 transition-colors">
-              <Upload className="w-4 h-4" />
-              Import
+            <Link href="/dashboard/import?tab=cashbook_entries"
+              className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap">
+              <Upload className="w-4 h-4 shrink-0" />
+              <span className="hidden sm:inline">Import</span>
             </Link>
-            <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90 transition-opacity">
-              <Plus className="w-4 h-4" />
+            <button onClick={() => setShowForm(true)}
+              className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-3 py-2 rounded-lg hover:opacity-90 transition-opacity whitespace-nowrap">
+              <Plus className="w-4 h-4 shrink-0" />
               Add Entry
             </button>
           </div>
@@ -348,30 +371,33 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       />
 
       <div className="p-6 space-y-5">
-        {/* Summary */}
-        <div className="grid grid-cols-3 gap-4">
-          <div className="bg-card border border-border rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <TrendingUp className="w-4 h-4 text-green-400" />
-              <p className="text-xs text-muted-foreground">Inflow</p>
+        {/* Summary — only rendered when the viewer can see ₹ amounts. Without
+            cashbook.view_amounts the totals would collapse to ₹0 and mislead. */}
+        {showAmounts && (
+          <div className="grid grid-cols-3 gap-4">
+            <div className="bg-card border border-border rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <TrendingUp className="w-4 h-4 text-green-400" />
+                <p className="text-xs text-muted-foreground">Inflow</p>
+              </div>
+              <p className="text-xl font-bold text-green-400">{formatCompact(totalInflow)}</p>
             </div>
-            <p className="text-xl font-bold text-green-400">{formatCompact(totalInflow)}</p>
-          </div>
-          <div className="bg-card border border-border rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <TrendingDown className="w-4 h-4 text-red-400" />
-              <p className="text-xs text-muted-foreground">Outflow</p>
+            <div className="bg-card border border-border rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <TrendingDown className="w-4 h-4 text-red-400" />
+                <p className="text-xs text-muted-foreground">Outflow</p>
+              </div>
+              <p className="text-xl font-bold text-red-400">{formatCompact(totalOutflow)}</p>
             </div>
-            <p className="text-xl font-bold text-red-400">{formatCompact(totalOutflow)}</p>
-          </div>
-          <div className="bg-card border border-border rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Minus className="w-4 h-4 text-primary" />
-              <p className="text-xs text-muted-foreground">Net</p>
+            <div className="bg-card border border-border rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <Minus className="w-4 h-4 text-primary" />
+                <p className="text-xs text-muted-foreground">Net</p>
+              </div>
+              <p className={`text-xl font-bold ${net >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatCompact(Math.abs(net))}</p>
             </div>
-            <p className={`text-xl font-bold ${net >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatCompact(Math.abs(net))}</p>
           </div>
-        </div>
+        )}
 
         {/* Filters */}
         <div className="flex gap-3 flex-wrap items-center bg-secondary/20 p-3 rounded-xl border border-border">

@@ -1,5 +1,17 @@
 import { createServerClient } from '@supabase/ssr'
+import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
+
+/**
+ * Service-role client that bypasses RLS — use ONLY in server components/routes.
+ * Never import or expose this in client-side code.
+ */
+export function createAdminClient() {
+  return createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+}
 
 export async function createClient() {
   const cookieStore = await cookies()
@@ -34,10 +46,16 @@ export async function fetchAll(query: any) {
     if (data) allData.push(...data)
     if (!data || data.length < PAGE) break
   }
-  
+
   if (allData.length >= 5000) {
-    console.warn(`[PERF WARNING] fetchAll/safeFetchAll fetched a very large dataset: ${allData.length} rows. Consider adding date filters or cursor pagination if this grows further.`)
+    console.warn(`[PERF WARNING] fetchAll fetched ${allData.length} rows — consider adding date filters or cursor pagination.`)
   }
+
+  // Dev-only duplicate detection: catches unstable ordering bugs early
+  if (process.env.NODE_ENV === 'development' && hasDuplicateRows(allData)) {
+    console.warn('[fetchAll] Duplicate rows detected — ensure query has a stable .order("id") before calling fetchAll.')
+  }
+
   return { data: allData }
 }
 

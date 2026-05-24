@@ -40,13 +40,17 @@ export async function convertToINR(
   return amount * rate
 }
 
+// Hoisted formatter — instantiating Intl.NumberFormat is expensive (~50-200μs
+// per call). When a table renders 1000+ rows each calling this 2-3 times,
+// reusing one instance saves ~100-600ms of pure allocation.
+const INR_FORMATTER = new Intl.NumberFormat('en-IN', {
+  style: 'currency',
+  currency: 'INR',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
 export function formatINR(amount: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount)
+  return INR_FORMATTER.format(amount)
 }
 
 const CURRENCY_DISPLAY_SYMBOLS: Record<Currency, string> = {

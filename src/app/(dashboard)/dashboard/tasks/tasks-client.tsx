@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect, useRef } from 'react'
+import dynamic from 'next/dynamic'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { getStatusColor, getStatusLabel } from '@/lib/utils/invoice'
@@ -18,10 +19,20 @@ import { seedFromTasks } from '@/lib/hooks/use-smart-sort'
 import { useRole } from '@/contexts/role-context'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { formatTaskDate, fullTaskDate } from '@/lib/utils/format-date'
-import { ClientEditModal } from '@/components/ui/client-edit-modal'
-import { TaskEditModal } from '@/components/ui/task-edit-modal'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { usePrivacy } from '@/contexts/privacy-context'
+
+// Heavy modals — only mount when opened. Bundle is split off the tasks route
+// chunk so the initial page download stays leaner. ssr:false because modals
+// never render on the server pass (their state starts closed).
+const TaskEditModal = dynamic(
+  () => import('@/components/ui/task-edit-modal').then(m => m.TaskEditModal),
+  { ssr: false },
+)
+const ClientEditModal = dynamic(
+  () => import('@/components/ui/client-edit-modal').then(m => m.ClientEditModal),
+  { ssr: false },
+)
 
 interface Task {
   id: string
@@ -31,10 +42,10 @@ interface Task {
   client_id: string
   service_id: string
   status: string
-  billing_amount: number
-  billing_amount_inr: number
+  billing_amount?: number       // stripped from employee payloads; present only for admins
+  billing_amount_inr?: number   // stripped from employee payloads; present only for admins
   quantity?: number
-  currency: string
+  currency?: string             // stripped from employee payloads; present only for admins
   task_date: string
   created_at: string
   is_recurring?: boolean
@@ -89,7 +100,21 @@ interface Props {
   taskGroups: { task_id: string; group_id: string }[]
   taskGroupAssignments: { task_id: string; group_id: string; employee_id: string }[]
   taskParamAssignments: { task_id: string; parameter_id: string; employee_id: string }[]
+  /**
+   * For employees: the union of task ids they personally have any history on
+   * (assignments + group/param assignments + scores + contributions). The
+   * "My Tasks" toggle uses this Set to scope the visible list to their own
+   * work. Empty for admins (who don't need this lookup).
+   */
+  myTaskIds?: string[]
   visibilitySettings?: VisibilitySettings
+  /**
+   * Per-field financial visibility from the server. `pricing` = user holds
+   * `tasks.view_pricing`. When false, billing_amount/billing_amount_inr/
+   * currency/loss_amount fields are absent from `initialTasks` (stripped
+   * server-side) — this flag tells the client to suppress the column.
+   */
+  permissionFlags?: { pricing: boolean }
 }
 
 // 'invoiced' is system-managed (set automatically when invoice is sent) — excluded from manual dropdown
@@ -130,7 +155,7 @@ const EMPTY_FORM = {
   manual_billing_amount: '',                                                     // user-typed override amount
 }
 
-export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, visibilitySettings }: Props) {
+export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, myTaskIds, visibilitySettings, permissionFlags }: Props) {
   const { role, employee: currentEmployee } = useRole()
   const { toasts, dismiss, success, error: toastError } = useToast()
   const { dn } = usePrivacy()
@@ -143,7 +168,12 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
     if (setting === 'team_lead') return role === 'super_admin' || role === 'accounts' || role === 'team_lead'
     return true
   }
-  const showBilling     = canSee(visibilitySettings?.billing)
+  // Billing visibility requires (a) the new granular `tasks.view_pricing`
+  // perm AND (b) the legacy visibility-settings gate. The server has already
+  // stripped financial fields for users without view_pricing; this flag
+  // additionally suppresses the column header / cells so the UI doesn't render
+  // '—' placeholders for hidden columns.
+  const showBilling     = (permissionFlags?.pricing ?? false) && canSee(visibilitySettings?.billing)
   const showEmpNames    = canSee(visibilitySettings?.employee_names)
   const [editClientId, setEditClientId] = useState<string | null>(null)
   const [editClientServiceId, setEditClientServiceId] = useState<string | null>(null)
@@ -181,6 +211,12 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
   const [dbModePage, setDbModePage]       = useState(0)
 
   async function runDbSearch(page = 0) {
+    // Employee task lists are fully loaded server-side via the admin client. DB search
+    // would use the anon client (RLS), which cannot safely scope results to the employee.
+    // Since dbTaskTotal is undefined for employees, the auto-trigger and "Search DB" button
+    // never fire — this guard is a belt-and-suspenders safety net.
+    if (role === 'employee') return
+
     setDbModeLoading(true)
     try {
       // Detect soft-delete support once per call
@@ -231,10 +267,16 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
 
       const { data, count, error } = await q
       if (!error) {
-        // Post-filter by assignee client-side (task_assignments is loaded)
+        // Post-filter by assignee client-side (task_assignments is loaded).
+        // Employees are blocked from reaching this code by the early return above,
+        // so this filter only runs for admin/team_lead roles.
         let rows: Task[] = (data || []) as Task[]
         if (filterAssignee) {
-          const assignedIds = new Set(localAssignments.filter(a => a.employee_id === filterAssignee).map(a => a.task_id))
+          const assignedIds = new Set([
+            ...localAssignments.filter(a => a.employee_id === filterAssignee).map(a => a.task_id),
+            ...localGroupAssignments.filter(a => a.employee_id === filterAssignee).map(a => a.task_id),
+            ...localParamAssignments.filter(a => a.employee_id === filterAssignee).map(a => a.task_id),
+          ])
           rows = rows.filter(t => assignedIds.has(t.id))
         }
         setDbModeResults(rows)
@@ -277,6 +319,8 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
   const [sortBy, setSortBy] = useState<'today_first' | 'date_desc' | 'date_asc' | 'amount_desc' | 'client'>('today_first')
   const [tablePage, setTablePage] = useState(0)
   const [tablePageSize, setTablePageSize] = useState(50)
+  const [mobileLimit, setMobileLimit] = useState(50)
+  const [showMobileFilters, setShowMobileFilters] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [previewTaskNumber, setPreviewTaskNumber] = useState<number | null>(null)
 
@@ -1113,6 +1157,28 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
     setCancelSaving(false)
   }
 
+  // Pre-compute the task-id Set the assignee filter resolves to.
+  // - null → no filter active
+  // - Set  → filter by membership
+  // For the "My Tasks" path (employee filtering by their own id), we use the
+  // server-provided `myTaskIds` which includes ALL contribution history
+  // (assignments + group/param assignments + scores + contributions); without
+  // this we'd miss tasks the employee has scored on but isn't an assignee of.
+  const myTaskIdSet = useMemo(
+    () => new Set(myTaskIds ?? []),
+    [myTaskIds],
+  )
+  const assigneeTaskIdSet = useMemo(() => {
+    if (!filterAssignee) return null
+    const isOwnFilter = role === 'employee' && currentEmployee && filterAssignee === currentEmployee.id
+    if (isOwnFilter) return myTaskIdSet
+    const s = new Set<string>()
+    for (const a of localAssignments)      if (a.employee_id === filterAssignee) s.add(a.task_id)
+    for (const a of localGroupAssignments) if (a.employee_id === filterAssignee) s.add(a.task_id)
+    for (const a of localParamAssignments) if (a.employee_id === filterAssignee) s.add(a.task_id)
+    return s
+  }, [filterAssignee, localAssignments, localGroupAssignments, localParamAssignments, role, currentEmployee, myTaskIdSet])
+
   const filteredTasks = useMemo(() => {
     let t = tasks
     if (filterStatus)  t = t.filter(x => x.status === filterStatus)
@@ -1147,12 +1213,9 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
     if (filterDate) {
       t = t.filter(task => matchesDateFilter(task.task_date, filterDate))
     }
-    if (filterAssignee) {
-      t = t.filter(task =>
-        localAssignments.some(a => a.task_id === task.id && a.employee_id === filterAssignee) ||
-        localGroupAssignments.some(a => a.task_id === task.id && a.employee_id === filterAssignee) ||
-        localParamAssignments.some(a => a.task_id === task.id && a.employee_id === filterAssignee)
-      )
+    if (assigneeTaskIdSet) {
+      const ids = assigneeTaskIdSet
+      t = t.filter(task => ids.has(task.id))
     }
     if (sortBy === 'today_first') {
       // Today at top → upcoming ascending (soonest next) → past descending (most recent first)
@@ -1173,12 +1236,13 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
     }
     if (sortBy === 'date_asc')    t = [...t].sort((a, b) => (a.task_date || '').localeCompare(b.task_date || ''))
     if (sortBy === 'date_desc')   t = [...t].sort((a, b) => (b.task_date || '').localeCompare(a.task_date || ''))
-    if (sortBy === 'amount_desc') t = [...t].sort((a, b) => (b.billing_amount_inr || 0) - (a.billing_amount_inr || 0))
+    if (sortBy === 'amount_desc') t = [...t].sort((a, b) => ((b.billing_amount_inr ?? 0)) - ((a.billing_amount_inr ?? 0)))
     if (sortBy === 'client')      t = [...t].sort((a, b) => (a.client?.name || '').localeCompare(b.client?.name || ''))
     return t
-  }, [tasks, filterStatus, filterClient, filterService, searchQ, sortBy, filterAssignee, filterDate, localAssignments, localGroupAssignments, localParamAssignments])
+  }, [tasks, filterStatus, filterClient, filterService, searchQ, sortBy, filterDate, assigneeTaskIdSet])
 
-  // For employee role, only show their assigned tasks
+  // visibleTasks is a passthrough — filtering is fully handled by filteredTasks above.
+  // (The comment "only show their assigned tasks" was stale — server already scopes the array.)
   const visibleTasks = useMemo(() => {
     return filteredTasks
   }, [filteredTasks])
@@ -1217,28 +1281,33 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
     : searchQ
       ? visibleTasks              // when searching locally, show all matches on one page
       : visibleTasks.slice(tablePage * tablePageSize, (tablePage + 1) * tablePageSize)
+  
+  const mobileTasks = dbMode
+    ? dbModeResults.slice(0, mobileLimit)
+    : visibleTasks.slice(0, mobileLimit)
 
   const hasActiveFilters = !!(filterStatus || filterClient || filterService || searchQ || sortBy !== 'today_first' || !!filterAssignee || !!filterDate)
   const activeFilterCount = [filterClient, filterService, filterAssignee, sortBy !== 'today_first' ? 'sort' : ''].filter(Boolean).length
 
-  // Status counts — computed from tasks before status filter is applied so all tabs show real numbers
+  // Status counts — computed from tasks before status filter is applied so all
+  // tabs show real numbers. Reuses the same assigneeTaskIdSet so the inner
+  // loop is O(1) per task instead of O(assignments × 3 tables) per task.
   const statusCounts = useMemo(() => {
     const base = tasks.filter(t => {
       if (filterClient  && t.client?.id  !== filterClient)  return false
       if (filterService && t.service?.id !== filterService) return false
-      if (filterAssignee) {
-        const has = localAssignments.some(a => a.task_id === t.id && a.employee_id === filterAssignee) ||
-                    localGroupAssignments.some(a => a.task_id === t.id && a.employee_id === filterAssignee) ||
-                    localParamAssignments.some(a => a.task_id === t.id && a.employee_id === filterAssignee)
-        if (!has) return false
-      }
+      if (assigneeTaskIdSet && !assigneeTaskIdSet.has(t.id)) return false
       if (filterDate && !matchesDateFilter(t.task_date, filterDate)) return false
       return true
     })
     const counts: Record<string, number> = { all: base.length }
-    STATUSES.forEach(s => { counts[s] = base.filter(t => t.status === s).length })
+    // Single pass over `base` to fill all status counts instead of N filter() calls.
+    for (const s of STATUSES) counts[s] = 0
+    for (const t of base) {
+      if (counts[t.status] !== undefined) counts[t.status]++
+    }
     return counts
-  }, [tasks, filterClient, filterService, filterAssignee, filterDate, localAssignments, localGroupAssignments, localParamAssignments])
+  }, [tasks, filterClient, filterService, filterDate, assigneeTaskIdSet])
 
   // Client filter options: merge active clients (from props) with any unique clients
   // found in loaded tasks — this ensures inactive clients like old imported ones still appear
@@ -1412,43 +1481,74 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
               toggle drop below on the second wrap-line. Tighter gap on mobile. */}
           <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 w-full">
             {/* Left group: Select + Inline Edit — solid action-mode toggles */}
-            <div className="flex items-center gap-1.5 shrink-0 order-2 sm:order-none">
-              <button
-                onClick={() => { setBulkMode(m => !m); setSelectedTasks(new Set()) }}
-                className={`h-[34px] px-3 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer ${
-                  bulkMode
-                    ? 'bg-violet-500 text-white shadow-violet-500/30'
-                    : 'bg-secondary border border-border text-foreground hover:bg-secondary/60'
-                }`}>
-                {bulkMode ? <><X size={12} /> Exit Select</> : <>Select</>}
-              </button>
-              {viewMode === 'table' && (
+            {(role !== 'employee' || bulkMode) && (
+              <div className="flex items-center gap-1.5 shrink-0 order-2 sm:order-none hidden sm:flex">
                 <button
-                  onClick={() => setInlineEditMode(m => !m)}
-                  title="Toggle inline edit"
-                  className={`hidden sm:flex items-center gap-1.5 h-[34px] px-3 rounded-xl text-xs font-semibold transition-all shadow-sm cursor-pointer ${
-                    inlineEditMode
-                      ? 'bg-blue-500 text-white shadow-blue-500/30'
+                  onClick={() => { setBulkMode(m => !m); setSelectedTasks(new Set()) }}
+                  className={`h-[34px] px-3 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer ${
+                    bulkMode
+                      ? 'bg-violet-500 text-white shadow-violet-500/30'
                       : 'bg-secondary border border-border text-foreground hover:bg-secondary/60'
-                  }`}
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                  {inlineEditMode ? 'Editing' : 'Edit'}
+                  }`}>
+                  {bulkMode ? <><X size={12} /> Exit Select</> : <>Select</>}
                 </button>
-              )}
-            </div>
+                {viewMode === 'table' && (
+                  <button
+                    onClick={() => setInlineEditMode(m => !m)}
+                    title="Toggle inline edit"
+                    className={`hidden sm:flex items-center gap-1.5 h-[34px] px-3 rounded-xl text-xs font-semibold transition-all shadow-sm cursor-pointer ${
+                      inlineEditMode
+                        ? 'bg-blue-500 text-white shadow-blue-500/30'
+                        : 'bg-secondary border border-border text-foreground hover:bg-secondary/60'
+                    }`}
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    {inlineEditMode ? 'Editing' : 'Edit'}
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Search — full-width on mobile (order-first so it sits at top of wrapped row),
                 flex-1 on desktop so it fills the gap between action group and view toggle.
                 h-[34px] matches the other toolbar buttons for visual rhythm. */}
-            <div className="order-1 sm:order-none w-full sm:w-auto flex items-center gap-2 bg-secondary border border-foreground/15 rounded-xl h-[34px] px-3 sm:flex-1 sm:basis-0 min-w-0">
+            <div className="order-1 sm:order-none w-full sm:w-auto flex items-center gap-2 bg-secondary border border-foreground/15 rounded-xl h-[34px] px-3 flex-1 min-w-0">
               <Search size={14} className="text-muted-foreground shrink-0" />
               <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search title, client, service, #number…" className="flex-1 min-w-0 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60" />
               {searchQ && <button onClick={() => setSearchQ('')} className="shrink-0 cursor-pointer"><X size={12} className="text-muted-foreground" /></button>}
             </div>
 
-            {/* View segment */}
-            <div ref={viewRef} className="relative shrink-0 order-3 sm:order-none">
+            {/* Top Row My Tasks & Filters (Mobile focused) */}
+            <div className="order-2 flex items-center gap-1.5 shrink-0">
+              {/* My Tasks toggle for employees */}
+              {role === 'employee' && currentEmployee && (
+                <button
+                  onClick={() => setFilterAssignee(filterAssignee === currentEmployee.id ? '' : currentEmployee.id)}
+                  className={`h-[34px] px-3 rounded-xl text-xs font-medium border transition-colors cursor-pointer shrink-0 ${
+                    filterAssignee === currentEmployee.id
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'bg-secondary text-muted-foreground border-foreground/15 hover:text-foreground hover:bg-foreground/5'
+                  }`}
+                >
+                  My Tasks
+                </button>
+              )}
+
+              {/* Mobile Filters Toggle */}
+              <button
+                onClick={() => setShowMobileFilters(f => !f)}
+                className={`sm:hidden h-[34px] px-3 rounded-xl text-xs font-medium border transition-colors cursor-pointer flex items-center gap-1.5 ${
+                  showMobileFilters || hasActiveFilters
+                    ? 'bg-foreground/10 border-foreground/20 text-foreground'
+                    : 'bg-secondary border-foreground/15 text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <MoreVertical size={14} /> Filters
+              </button>
+            </div>
+
+            {/* View segment (Hidden on mobile for employees) */}
+            <div ref={viewRef} className={`relative shrink-0 order-3 sm:order-none ${role === 'employee' ? 'hidden sm:block' : ''}`}>
               {/* Desktop View Buttons */}
               <div className="hidden sm:flex items-center bg-secondary border border-foreground/15 rounded-xl p-1 gap-0.5">
                 {([
@@ -1514,138 +1614,128 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
             </div>
           </div>
 
-          {/* Row 2: Dropdowns — Client · Service · Assignee · Sort · Date · Search DB */}
-          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-            {/* Client — merged list: active clients + any inactive clients found in loaded tasks */}
-            <FilterDropdown
-              options={clientFilterOptions}
-              value={filterClient}
-              onChange={setFilterClient}
-              placeholder="Client"
-              sortKey="clients"
-            />
-            {/* Service — use pre-fetched services list */}
-            <FilterDropdown
-              options={services.map(s => ({ value: s.id, label: s.name }))}
-              value={filterService}
-              onChange={setFilterService}
-              placeholder="Service"
-              sortKey="services"
-            />
-            
-            {/* My Tasks toggle for employees */}
-            {role === 'employee' && currentEmployee && (
-              <button
-                onClick={() => setFilterAssignee(filterAssignee === currentEmployee.id ? '' : currentEmployee.id)}
-                className={`h-[34px] px-3 rounded-xl text-xs font-medium border transition-colors cursor-pointer shrink-0 ${
-                  filterAssignee === currentEmployee.id
-                    ? 'bg-primary text-primary-foreground border-primary'
-                    : 'bg-secondary text-muted-foreground border-foreground/15 hover:text-foreground hover:bg-foreground/5'
-                }`}
+          {/* Advanced Filters Container (Collapsible on mobile) */}
+          <div className={`${showMobileFilters ? 'flex flex-col gap-2 pt-2' : 'hidden'} sm:flex sm:flex-col sm:gap-2 sm:pt-0 w-full`}>
+            {/* Row 2: Dropdowns — Client · Service · Assignee · Sort · Date · Search DB */}
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+              {/* Client — merged list: active clients + any inactive clients found in loaded tasks */}
+              <FilterDropdown
+                options={clientFilterOptions}
+                value={filterClient}
+                onChange={setFilterClient}
+                placeholder="Client"
+                sortKey="clients"
+              />
+              {/* Service — use pre-fetched services list */}
+              <FilterDropdown
+                options={services.map(s => ({ value: s.id, label: s.name }))}
+                value={filterService}
+                onChange={setFilterService}
+                placeholder="Service"
+                sortKey="services"
+              />
+
+              {/* Assignee — FilterDropdown for consistent pill style with built-in × */}
+              <FilterDropdown
+                options={employees.map(emp => ({ value: emp.id, label: dn(emp) }))}
+                value={filterAssignee}
+                onChange={setFilterAssignee}
+                placeholder="Assignee"
+                sortKey="employees"
+              />
+              {/* Sort by */}
+              <FilterDropdown
+                options={[
+                  { value: 'today_first', label: 'Today First' },
+                  { value: 'date_desc',   label: 'Newest First' },
+                  { value: 'date_asc',    label: 'Oldest First' },
+                  { value: 'amount_desc', label: 'Amount (High→Low)' },
+                  { value: 'client',      label: 'Client A→Z' },
+                ]}
+                value={sortBy === 'today_first' ? '' : sortBy}
+                onChange={v => setSortBy((v || 'today_first') as typeof sortBy)}
+                placeholder="Sort by"
+              />
+
+              {/* Date filter */}
+              <DateFilter value={filterDate} onChange={setFilterDate} />
+
+              {/* ── Search Database button ──
+                  Only shown when not all tasks are loaded (i.e. DB has more rows
+                  than memory). With ≤10K tasks total this never appears since
+                  page.tsx now paginates the full set into memory. */}
+              {(() => {
+                const allLoaded = dbTaskTotal != null && dbTaskTotal <= tasks.length
+                if (allLoaded && !dbMode) return null   // hide button entirely when redundant
+                return !dbMode ? (
+                  <button
+                    onClick={() => runDbSearch(0)}
+                    disabled={dbModeLoading}
+                    title="Search all tasks directly in the database — bypasses the in-memory loaded set"
+                    className="flex items-center gap-1.5 h-[34px] px-3 rounded-xl text-xs font-medium border border-violet-500/30 bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 transition-colors disabled:opacity-50 shrink-0"
+                  >
+                    {dbModeLoading
+                      ? <><RefreshCw size={12} className="animate-spin" /> Searching…</>
+                      : <><Search size={12} /> Search DB</>}
+                  </button>
+                ) : (
+                  <button
+                    onClick={exitDbMode}
+                    title="Exit database search mode — go back to in-memory loaded tasks"
+                    className="flex items-center gap-1.5 h-[34px] px-3 rounded-xl text-xs font-medium border border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors shrink-0"
+                  >
+                    <X size={12} /> Exit DB mode
+                  </button>
+                )
+              })()}
+            </div>
+
+            {/* Row 3: Status chips (desktop) / dropdown (mobile) · Clear all · Pagination */}
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+              {/* Mobile: compact dropdown */}
+              <select
+                value={filterStatus}
+                onChange={e => setFilterStatus(e.target.value)}
+                className="sm:hidden h-[34px] px-2 rounded-xl text-xs font-medium bg-secondary border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer w-full"
               >
-                My Tasks
-              </button>
-            )}
-
-            {/* Assignee — FilterDropdown for consistent pill style with built-in × */}
-            <FilterDropdown
-              options={employees.map(emp => ({ value: emp.id, label: dn(emp) }))}
-              value={filterAssignee}
-              onChange={setFilterAssignee}
-              placeholder="Assignee"
-              sortKey="employees"
-            />
-            {/* Sort by */}
-            <FilterDropdown
-              options={[
-                { value: 'today_first', label: 'Today First' },
-                { value: 'date_desc',   label: 'Newest First' },
-                { value: 'date_asc',    label: 'Oldest First' },
-                { value: 'amount_desc', label: 'Amount (High→Low)' },
-                { value: 'client',      label: 'Client A→Z' },
-              ]}
-              value={sortBy === 'today_first' ? '' : sortBy}
-              onChange={v => setSortBy((v || 'today_first') as typeof sortBy)}
-              placeholder="Sort by"
-            />
-
-            {/* Date filter */}
-            <DateFilter value={filterDate} onChange={setFilterDate} />
-
-            {/* ── Search Database button ──
-                Only shown when not all tasks are loaded (i.e. DB has more rows
-                than memory). With ≤10K tasks total this never appears since
-                page.tsx now paginates the full set into memory. */}
-            {(() => {
-              const allLoaded = dbTaskTotal != null && dbTaskTotal <= tasks.length
-              if (allLoaded && !dbMode) return null   // hide button entirely when redundant
-              return !dbMode ? (
+                <option value="">All ({statusCounts.all})</option>
+                {STATUSES.map(s => (
+                  <option key={s} value={s}>{getStatusLabel(s)} ({statusCounts[s] ?? 0})</option>
+                ))}
+              </select>
+              {/* Desktop: pill chips with counts — same pattern as Contributions page */}
+              {([
+                { key: '',           label: 'All' },
+                ...STATUSES.map(s => ({ key: s, label: getStatusLabel(s) })),
+              ]).map(({ key, label }) => {
+                const count = key === '' ? statusCounts.all : (statusCounts[key] ?? 0)
+                const active = filterStatus === key
+                return (
+                  <button
+                    key={key}
+                    onClick={() => setFilterStatus(key)}
+                    className={`hidden sm:flex h-[34px] px-3 rounded-xl text-xs font-medium transition-colors cursor-pointer items-center gap-1.5 ${
+                      active ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {label}
+                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
+                      active ? 'bg-foreground/20 text-white' : 'bg-border/50 opacity-60'
+                    }`}>{count}</span>
+                  </button>
+                )
+              })}
+              {/* Clear all — only when any filter active */}
+              {hasActiveFilters && (
                 <button
-                  onClick={() => runDbSearch(0)}
-                  disabled={dbModeLoading}
-                  title="Search all tasks directly in the database — bypasses the in-memory loaded set"
-                  className="flex items-center gap-1.5 h-[34px] px-3 rounded-xl text-xs font-medium border border-violet-500/30 bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 transition-colors disabled:opacity-50 shrink-0"
+                  onClick={() => { setFilterStatus(''); setFilterClient(''); setFilterService(''); setSearchQ(''); setSortBy('today_first'); setFilterAssignee(''); setFilterDate(null) }}
+                  className="ml-1 text-xs text-muted-foreground hover:text-foreground px-2 py-1.5 rounded-md hover:bg-foreground/[0.04] transition-colors flex items-center gap-1 shrink-0"
                 >
-                  {dbModeLoading
-                    ? <><RefreshCw size={12} className="animate-spin" /> Searching…</>
-                    : <><Search size={12} /> Search DB</>}
+                  <X size={12} /> Clear all
                 </button>
-              ) : (
-                <button
-                  onClick={exitDbMode}
-                  title="Exit database search mode — go back to in-memory loaded tasks"
-                  className="flex items-center gap-1.5 h-[34px] px-3 rounded-xl text-xs font-medium border border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors shrink-0"
-                >
-                  <X size={12} /> Exit DB mode
-                </button>
-              )
-            })()}
+              )}
+            </div>
           </div>
-
-          {/* Row 3: Status chips (desktop) / dropdown (mobile) · Clear all · Pagination */}
-          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-            {/* Mobile: compact dropdown */}
-            <select
-              value={filterStatus}
-              onChange={e => setFilterStatus(e.target.value)}
-              className="sm:hidden h-[34px] px-2 rounded-xl text-xs font-medium bg-secondary border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer"
-            >
-              <option value="">All ({statusCounts.all})</option>
-              {STATUSES.map(s => (
-                <option key={s} value={s}>{getStatusLabel(s)} ({statusCounts[s] ?? 0})</option>
-              ))}
-            </select>
-            {/* Desktop: pill chips with counts — same pattern as Contributions page */}
-            {([
-              { key: '',           label: 'All' },
-              ...STATUSES.map(s => ({ key: s, label: getStatusLabel(s) })),
-            ]).map(({ key, label }) => {
-              const count = key === '' ? statusCounts.all : (statusCounts[key] ?? 0)
-              const active = filterStatus === key
-              return (
-                <button
-                  key={key}
-                  onClick={() => setFilterStatus(key)}
-                  className={`hidden sm:flex h-[34px] px-3 rounded-xl text-xs font-medium transition-colors cursor-pointer items-center gap-1.5 ${
-                    active ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  {label}
-                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
-                    active ? 'bg-foreground/20 text-white' : 'bg-border/50 opacity-60'
-                  }`}>{count}</span>
-                </button>
-              )
-            })}
-            {/* Clear all — only when any filter active */}
-            {hasActiveFilters && (
-              <button
-                onClick={() => { setFilterStatus(''); setFilterClient(''); setFilterService(''); setSearchQ(''); setSortBy('today_first'); setFilterAssignee(''); setFilterDate(null) }}
-                className="ml-1 text-xs text-muted-foreground hover:text-foreground px-2 py-1.5 rounded-md hover:bg-foreground/[0.04] transition-colors flex items-center gap-1 shrink-0"
-              >
-                <X size={12} /> Clear all
-              </button>
-            )}
 
             {/* ── Inline pagination — table view only ── */}
             {viewMode === 'table' && totalPages > 1 && (
@@ -1717,7 +1807,6 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                 </div>
               </>
             )}
-          </div>
 
           {/* ── DB mode banner ── */}
           {dbMode && (
@@ -1781,14 +1870,16 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                     </span>
                   </button>
                 </th>
-                <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm">
-                  <button
-                    onClick={() => setSortBy(s => s === 'amount_desc' ? 'date_desc' : 'amount_desc')}
-                    className={`flex items-center gap-1 ml-auto hover:text-foreground transition-colors ${sortBy === 'amount_desc' ? 'text-violet-400' : ''}`}>
-                    Billing
-                    <span className={`text-[10px] ${sortBy === 'amount_desc' ? 'opacity-100' : 'opacity-30'}`}>↓</span>
-                  </button>
-                </th>
+                {showBilling && (
+                  <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm">
+                    <button
+                      onClick={() => setSortBy(s => s === 'amount_desc' ? 'date_desc' : 'amount_desc')}
+                      className={`flex items-center gap-1 ml-auto hover:text-foreground transition-colors ${sortBy === 'amount_desc' ? 'text-violet-400' : ''}`}>
+                      Billing
+                      <span className={`text-[10px] ${sortBy === 'amount_desc' ? 'opacity-100' : 'opacity-30'}`}>↓</span>
+                    </button>
+                  </th>
+                )}
                 <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm">Status</th>
                 <th className="w-16 px-4 py-3 bg-secondary/95 backdrop-blur-sm"></th>
               </tr>
@@ -1993,12 +2084,12 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                       <span title={fullTaskDate(task.task_date)}>{formatTaskDate(task.task_date)}</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right font-medium" onClick={e => inlineEditMode && e.stopPropagation()}>
-                    {showBilling && (
-                      (role !== 'employee' && role !== 'team_lead') && inlineEditMode ? (
+                  {showBilling && (
+                    <td className="px-4 py-3 text-right font-medium" onClick={e => inlineEditMode && e.stopPropagation()}>
+                      {role !== 'team_lead' && inlineEditMode ? (
                         <input
                           type="number"
-                          defaultValue={task.billing_amount}
+                          defaultValue={task.billing_amount ?? 0}
                           onBlur={async e => {
                             const val = parseFloat(e.target.value) || 0
                             if (val !== task.billing_amount) {
@@ -2010,12 +2101,12 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                         />
                       ) : (
                         <>
-                          {formatCurrency(task.billing_amount, task.currency as Currency)}
+                          {formatCurrency(task.billing_amount ?? 0, task.currency as Currency)}
                           {task.quantity && task.quantity > 1 && <span className="text-xs text-muted-foreground ml-1">×{task.quantity}</span>}
                         </>
-                      )
-                    )}
-                  </td>
+                      )}
+                    </td>
+                  )}
                   <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                     <select value={task.status} onChange={e => updateStatus(task.id, e.target.value)} className={`text-xs px-2 py-1 rounded-md border-0 cursor-pointer ${getStatusColor(task.status)}`} style={{ background: 'transparent' }}>
                       {MANUAL_STATUSES.map(s => <option key={s} value={s} className="bg-card text-foreground">{getStatusLabel(s)}</option>)}
@@ -2029,7 +2120,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                         {(task.completion_pct || 0) > 0 && (
                           <span className="text-[9px] text-muted-foreground">{task.completion_pct}% done</span>
                         )}
-                        {(task.loss_amount || 0) > 0 && (
+                        {showBilling && (task.loss_amount || 0) > 0 && (
                           <span className="text-[9px] text-red-400 font-medium">
                             Loss {formatCurrency(task.loss_amount!, task.currency as Currency)}
                           </span>
@@ -2093,10 +2184,10 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
 
         {/* Mobile: stacked card list — visible below sm. Same data, denser tap-friendly layout. */}
         <div className="sm:hidden space-y-2">
-          {pagedTasks.length === 0 && (
+          {mobileTasks.length === 0 && (
             <div className="bg-card border border-border rounded-xl px-4 py-10 text-center text-sm text-muted-foreground">No tasks found</div>
           )}
-          {pagedTasks.map(task => {
+          {mobileTasks.map(task => {
             const isSelected = bulkMode && selectedTasks.has(task.id)
             return (
               <div
@@ -2157,7 +2248,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                   </span>
                   {showBilling && (
                     <span className="text-[11px] font-semibold text-foreground tabular-nums">
-                      {formatCurrency(task.billing_amount, task.currency as Currency)}
+                      {formatCurrency(task.billing_amount ?? 0, task.currency as Currency)}
                       {(task.quantity ?? 1) > 1 && <span className="text-muted-foreground/60 font-normal ml-1">×{task.quantity}</span>}
                     </span>
                   )}
@@ -2165,6 +2256,16 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
               </div>
             )
           })}
+          
+          {/* Mobile Load More Button */}
+          {mobileTasks.length < (dbMode ? dbModeResults.length : visibleTasks.length) && (
+            <button
+              onClick={() => setMobileLimit(l => l + 50)}
+              className="w-full mt-4 h-[44px] bg-secondary border border-border text-foreground hover:bg-secondary/60 rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-2"
+            >
+              Load More
+            </button>
+          )}
         </div>
         </>
         )}
@@ -2650,7 +2751,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                 </div>
                 <div className="flex-1">
                   <span className="text-muted-foreground">Billed Value</span>
-                  <div className="font-medium mt-0.5">{formatCurrency(cancelModal.billing_amount, cancelModal.currency as Currency)}</div>
+                  <div className="font-medium mt-0.5">{formatCurrency(cancelModal.billing_amount ?? 0, cancelModal.currency as Currency)}</div>
                 </div>
                 <div className="flex-1">
                   <span className="text-muted-foreground">Current Status</span>
@@ -2695,8 +2796,8 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                       ...p,
                       completion_pct: pct,
                       // Auto-suggest loss = billing × completion%
-                      loss_amount: cancelModal.billing_amount_inr > 0
-                        ? String(Math.round(cancelModal.billing_amount_inr * pct / 100))
+                      loss_amount: (cancelModal.billing_amount_inr ?? 0) > 0
+                        ? String(Math.round((cancelModal.billing_amount_inr ?? 0) * pct / 100))
                         : p.loss_amount,
                     }))
                   }}
@@ -2744,7 +2845,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                       className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500/30"
                     />
                     <div className="text-[10px] text-muted-foreground mt-1">
-                      Auto-suggested: {formatCurrency(cancelModal.billing_amount_inr * cancelForm.completion_pct / 100, cancelModal.currency as Currency)} ({cancelForm.completion_pct}% of billing value)
+                      Auto-suggested: {formatCurrency((cancelModal.billing_amount_inr ?? 0) * cancelForm.completion_pct / 100, cancelModal.currency as Currency)} ({cancelForm.completion_pct}% of billing value)
                     </div>
                   </div>
                 )}

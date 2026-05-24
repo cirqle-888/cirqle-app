@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
+import dynamic from 'next/dynamic'
+import { usePrivacy } from '@/contexts/privacy-context'
 import { useCopy } from '@/lib/hooks/use-copy'
 import Header from '@/components/layout/header'
 import {
@@ -29,7 +31,13 @@ import { useToast, ToastContainer } from '@/components/ui/toast'
 import { useRole } from '@/contexts/role-context'
 import type { Currency } from '@/types'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
-import { ClientEditModal } from '@/components/ui/client-edit-modal'
+
+// Client edit modal only mounts when the user opens it from an invoice's
+// client menu. Split off the invoices chunk.
+const ClientEditModal = dynamic(
+  () => import('@/components/ui/client-edit-modal').then(m => m.ClientEditModal),
+  { ssr: false },
+)
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface StatementLedgerRow {
@@ -56,16 +64,21 @@ interface InvoiceItem {
   task?: TaskRef; service?: ServiceRef
 }
 interface Payment {
-  id: string; amount: number; payment_date: string
+  id: string; amount?: number; payment_date: string
   payment_method: string; reference?: string; notes?: string
 }
 interface Invoice {
   id: string; invoice_number: string; client_id: string
   status: string; issue_date: string; due_date?: string
   billing_period_start?: string; billing_period_end?: string
-  currency: Currency; total_amount: number; paid_amount: number
-  subtotal: number; tax_rate: number; tax_amount: number
-  discount_amount: number; previous_balance: number
+  currency: Currency
+  // Monetary fields are optional because they are stripped from the server
+  // payload for users without `billing.view_amounts` /
+  // `billing.view_line_pricing`. UI helpers (fmt, balanceDue) must tolerate
+  // the missing values and render a neutral placeholder.
+  total_amount?: number; paid_amount?: number
+  subtotal?: number; tax_rate?: number; tax_amount?: number
+  discount_amount?: number; previous_balance?: number
   notes?: string; created_at: string; updated_at: string
   client?: { id: string; name: string; code: string; phone?: string; email?: string; address?: string }
   items?: InvoiceItem[]
@@ -78,6 +91,16 @@ interface Props {
   bankAccounts: { id: string; name: string }[]
   services: { id: string; name: string }[]
   companySettings: Record<string, string>
+  /**
+   * Per-field financial visibility resolved server-side from the user's
+   * permission set. When `amounts` is false, total_amount/paid_amount and
+   * payment.amount have already been stripped from `initialInvoices`; the
+   * client uses this flag to suppress the corresponding UI cells/columns.
+   */
+  visibility: {
+    amounts:     boolean
+    linePricing: boolean
+  }
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -94,22 +117,39 @@ const STATUS_GROUPS = {
 }
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
-function fmt(n: number, currency: Currency = 'INR') {
+// Tolerant formatter: returns a neutral placeholder when the value was
+// stripped server-side (user lacks billing.view_amounts or .view_line_pricing).
+// This is the ONLY display path for invoice money in this file, so a single
+// `n == null` check guarantees the UI never tries to render hidden values.
+function fmt(n: number | undefined | null, currency: Currency = 'INR') {
+  if (n == null) return '—'
   return formatCurrency(n, currency)
 }
 function fmtDate(d?: string) {
   if (!d) return '—'
   return new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })
 }
-function balanceDue(inv: Invoice) {
-  return Math.max(0, (inv.total_amount || 0) - (inv.paid_amount || 0))
+function balanceDue(inv: Invoice): number {
+  // For users without `billing.view_amounts` the server strips both fields,
+  // so this evaluates to 0. Display sites use `fmt()` which already returns
+  // '—' for undefined values, so the user sees a neutral placeholder rather
+  // than a misleading "₹0".
+  return Math.max(0, (inv.total_amount ?? 0) - (inv.paid_amount ?? 0))
+}
+/** Display variant — returns the field-stripped sentinel so fmt() can show '—'. */
+function balanceDueDisplay(inv: Invoice): number | undefined {
+  if (inv.total_amount == null || inv.paid_amount == null) return undefined
+  return Math.max(0, inv.total_amount - inv.paid_amount)
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export default function InvoicesClient({ initialInvoices, clients, bankAccounts, services, companySettings }: Props) {
+export default function InvoicesClient({ initialInvoices, clients, bankAccounts, services, companySettings, visibility }: Props) {
+  const showAmounts     = visibility.amounts
+  const showLinePricing = visibility.linePricing
   const supabase = createClient()
   const { toasts, dismiss, success, error: toastError } = useToast()
   const { role } = useRole()
+  const { dn } = usePrivacy()
   const [copiedInvNum, copyInvNum] = useCopy()
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -1356,14 +1396,15 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
       // Payments
       for (const pmt of (inv.payments || [])) {
-        runningBalance -= pmt.amount
+        const pmtAmt = pmt.amount ?? 0
+        runningBalance -= pmtAmt
         const methodLabels: Record<string, string> = { bank_transfer: 'Bank Transfer', cash: 'Cash', upi: 'UPI', cheque: 'Cheque', online: 'Online', other: 'Other' }
         allRows += `
           <tr style="background:#f0fff4">
             <td style="padding:5px 10px 5px 24px;border-bottom:1px solid #c3e6cb;font-size:11px;color:#27ae60">✓ Payment received</td>
             <td style="padding:5px 10px;border-bottom:1px solid #c3e6cb;font-size:11px;color:#888;white-space:nowrap">${dd(pmt.payment_date)}</td>
             <td style="padding:5px 10px;border-bottom:1px solid #c3e6cb;font-size:11px;color:#888">${methodLabels[pmt.payment_method] || pmt.payment_method}${pmt.reference ? ' · ' + pmt.reference : ''}</td>
-            <td style="padding:5px 10px;border-bottom:1px solid #c3e6cb;text-align:right;font-size:11px;color:#27ae60">−${inr(pmt.amount)}</td>
+            <td style="padding:5px 10px;border-bottom:1px solid #c3e6cb;text-align:right;font-size:11px;color:#27ae60">−${inr(pmtAmt)}</td>
             <td style="padding:5px 10px;border-bottom:1px solid #c3e6cb;text-align:right;font-size:11px;font-weight:600;color:${runningBalance > 0 ? '#c0392b' : '#27ae60'}">${inr(Math.max(0, runningBalance))}</td>
             <td style="padding:5px 10px;border-bottom:1px solid #c3e6cb;font-size:10px;color:#27ae60">Paid</td>
           </tr>`
@@ -1570,10 +1611,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
       // Payments
       for (const pmt of (inv.payments || [])) {
-        runningBalance -= pmt.amount
-        const methodLabels: Record<string, string> = { 
-          bank_transfer: 'Bank Transfer', cash: 'Cash', upi: 'UPI', 
-          cheque: 'Cheque', online: 'Online', other: 'Other' 
+        const pmtAmt = pmt.amount ?? 0
+        runningBalance -= pmtAmt
+        const methodLabels: Record<string, string> = {
+          bank_transfer: 'Bank Transfer', cash: 'Cash', upi: 'UPI',
+          cheque: 'Cheque', online: 'Online', other: 'Other'
         }
         const detailsText = [
           methodLabels[pmt.payment_method] || pmt.payment_method,
@@ -1587,7 +1629,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           type: 'Payment',
           description: '✓ Payment received',
           details: detailsText,
-          amount: -pmt.amount,
+          amount: -pmtAmt,
           balance: Math.max(0, runningBalance)
         })
       }
@@ -2114,7 +2156,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                     <div className={`text-sm font-semibold ${balance > 0 && overdue ? 'text-red-400' : 'text-foreground'}`}>
                       {fmt(inv.total_amount, inv.currency)}
                     </div>
-                    {inv.paid_amount > 0 && inv.status !== 'paid' && (
+                    {(inv.paid_amount ?? 0) > 0 && inv.status !== 'paid' && (
                       <div className="text-[10px] text-green-400">
                         Paid {fmt(inv.paid_amount, inv.currency)}
                       </div>
@@ -2357,8 +2399,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                   />
                 </div>
               ) : (
-                <span className={inv.previous_balance > 0 ? 'text-red-400' : 'text-muted-foreground'}>
-                  {inv.previous_balance > 0 ? `+${fmt(inv.previous_balance, inv.currency)}` : '—'}
+                <span className={(inv.previous_balance ?? 0) > 0 ? 'text-red-400' : 'text-muted-foreground'}>
+                  {(inv.previous_balance ?? 0) > 0 ? `+${fmt(inv.previous_balance, inv.currency)}` : '—'}
                 </span>
               )}
             </div>
@@ -2367,7 +2409,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               <span className="font-semibold">Total</span>
               <span className="font-bold text-base">{fmt(inv.total_amount, inv.currency)}</span>
             </div>
-            {inv.paid_amount > 0 && (
+            {(inv.paid_amount ?? 0) > 0 && (
               <>
                 <div className="flex justify-between text-sm text-green-400">
                   <span>Paid</span>
@@ -2482,7 +2524,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           </div>
 
           {/* ── Discount Calculator ─────────────────────────────────────────────── */}
-          {(editable || inv.discount_amount > 0) && (
+          {(editable || (inv.discount_amount ?? 0) > 0) && (
             <div className="bg-foreground/[0.03] rounded-xl border border-border/40 overflow-hidden">
               <button
                 onClick={() => {
@@ -2493,7 +2535,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 <span className="flex items-center gap-1.5">
                   <Percent className="w-3.5 h-3.5 text-orange-400" />
                   Discount Calculator
-                  {inv.discount_amount > 0 && (
+                  {(inv.discount_amount ?? 0) > 0 && (
                     <span className="text-orange-400 font-medium">({fmt(inv.discount_amount, inv.currency)} applied)</span>
                   )}
                 </span>
@@ -4221,8 +4263,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                                 {(job.contributions || []).map((c: any, ci: number) => (
                                   <div key={ci} className="flex items-center justify-between text-[10px] px-2 py-1 bg-foreground/[0.03] rounded">
                                     <span className="text-foreground font-medium">
-                                      {c.employee?.name || '—'}
-                                      {c.employee?.cqid && <span className="text-muted-foreground ml-1">#{c.employee.cqid}</span>}
+                                      {dn(c.employee) || '—'}
                                     </span>
                                     <span className={job.honor_contributions ? 'text-green-400 font-semibold' : 'text-muted-foreground line-through'}>
                                       {fmt(c.earnings_inr || 0)}

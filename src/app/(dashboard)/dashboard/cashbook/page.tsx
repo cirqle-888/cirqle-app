@@ -1,8 +1,16 @@
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
+import { loadCurrentUser } from '@/lib/permissions/check'
+import { financialVisibility, stripCashbookList } from '@/lib/permissions/strip'
 import CashBookClient from './cashbook-client'
 
 export default async function CashBookPage() {
-  const supabase = await createClient()
+  // Route is permission-gated by middleware (`cashbook.view`). Per-field ₹
+  // visibility is gated below by the `cashbook.view_amounts` perm — users
+  // without it can still browse entries, categories, dates, descriptions
+  // but the amount column is stripped server-side.
+  const me = await loadCurrentUser().catch(() => null)
+  const vis = financialVisibility(me)
+  const supabase = createAdminClient()
 
   const [entriesRes, categoriesRes, bankAccountsRes, exchangeRatesRes, dueInvoicesRes, employeesRes, clientsRes, creditsRes] = await Promise.all([
     supabase
@@ -40,9 +48,14 @@ export default async function CashBookPage() {
     supabase.from('credit_ledger').select('*, employee:employees(cqid)').eq('credit_type', 'given').order('credit_date', { ascending: false }),
   ])
 
+  // Strip amount + amount_inr from cashbook entries (plus nested allocation
+  // totals + invoice/payroll totals on the join) when the viewer lacks
+  // `cashbook.view_amounts`. The data never reaches the client's JS state.
+  const initialEntries = stripCashbookList((entriesRes.data || []) as any[], vis.cashbookAmounts)
+
   return (
     <CashBookClient
-      initialEntries={entriesRes.data || []}
+      initialEntries={initialEntries}
       categories={categoriesRes.data || []}
       bankAccounts={bankAccountsRes.data || []}
       exchangeRates={exchangeRatesRes.data || []}
@@ -50,6 +63,7 @@ export default async function CashBookPage() {
       employees={(employeesRes.data || []) as any[]}
       clients={(clientsRes.data || []) as any[]}
       outstandingCredits={(creditsRes.data || []) as any[]}
+      showAmounts={vis.cashbookAmounts}
     />
   )
 }

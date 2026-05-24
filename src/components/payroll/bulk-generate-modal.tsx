@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { createClient, safeFetchAll } from '@/lib/supabase/client'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { usePrivacy } from '@/contexts/privacy-context'
 import {
   X, ChevronRight, Zap, AlertTriangle, CheckCircle2,
   RefreshCw, SkipForward, Users, Calendar, BarChart2,
@@ -90,6 +91,7 @@ export default function BulkGenerateModal({
   employees, existingPayroll, contributionScores, allTasks, onClose, onGenerated,
 }: Props) {
   const supabase = createClient()
+  const { dn } = usePrivacy()
   const now = new Date()
 
   // ── Smart default start month ─────────────────────────────────────────────
@@ -444,7 +446,7 @@ export default function BulkGenerateModal({
                       className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-colors text-left ${selectedEmpIds.includes(emp.id) ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-secondary text-muted-foreground hover:text-foreground'}`}>
                       <div className={`w-2 h-2 rounded-full shrink-0 ${selectedEmpIds.includes(emp.id) ? 'bg-primary' : 'bg-muted-foreground/40'}`} />
                       <span className="font-mono font-bold">{emp.cqid}</span>
-                      {emp.name && <span className="truncate opacity-70">{emp.name.split(' ')[0]}</span>}
+                      {emp.name && <span className="truncate opacity-70">{dn(emp)}</span>}
                     </button>
                   ))}
                 </div>
@@ -520,7 +522,7 @@ export default function BulkGenerateModal({
                             <tr key={s.employee.id} className="hover:bg-secondary/20">
                               <td className="px-4 py-3">
                                 <span className="font-mono font-bold text-foreground">{s.employee.cqid}</span>
-                                {s.employee.name && <span className="text-muted-foreground ml-2">{s.employee.name}</span>}
+                                {s.employee.name && <span className="text-muted-foreground ml-2">{dn(s.employee)}</span>}
                               </td>
                               <td className="px-3 py-3 text-center font-semibold">{s.missingMonths}</td>
                               <td className="px-3 py-3 text-right text-muted-foreground">{fmtMoney(s.totalBase)}</td>
@@ -595,7 +597,7 @@ export default function BulkGenerateModal({
                           <tr key={es.employee.id} className="hover:bg-secondary/20">
                             <td className="px-4 py-3 sticky left-0 bg-card z-10">
                               <span className="font-mono font-bold">{es.employee.cqid}</span>
-                              {es.employee.name && <span className="text-muted-foreground ml-1.5">{es.employee.name.split(' ')[0]}</span>}
+                              {es.employee.name && <span className="text-muted-foreground ml-1.5">{dn(es.employee)}</span>}
                             </td>
                             {matrixMonths.map(mk => {
                               const val = matrixLookup[`${es.employee.id}__${mk}`]

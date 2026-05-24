@@ -1,23 +1,35 @@
-import { createClient, fetchAll, stablePaginationQuery } from '@/lib/supabase/server'
+import { createAdminClient, fetchAll, stablePaginationQuery } from '@/lib/supabase/server'
 import PayrollClient from './payroll-client'
 
 export const dynamic = 'force-dynamic'
 
 export default async function PayrollPage() {
-  const supabase = await createClient()
+  // Route is permission-gated by middleware (`payroll.view`); only authorized
+  // users reach this code path. Service-role client skips the async cookies()
+  // hop and RLS planning overhead.
+  const supabase = createAdminClient()
   const now = new Date()
   const currentYear = now.getFullYear()
+
+  // 24-month window for scores history. Payroll's 6-month employee chart only
+  // ever looks at viewMonth ± 5 months, so anything beyond 24 is dead weight.
+  const scoresWindowFrom = new Date()
+  scoresWindowFrom.setMonth(scoresWindowFrom.getMonth() - 24)
+  const scoresWindowFromStr = scoresWindowFrom.toISOString()
 
   const [employeesRes, payrollRes, advancesRes, creditRes, deductionsRes, scoresRes, tasksRes] = await Promise.all([
     fetchAll(stablePaginationQuery(
       supabase.from('employees').select('*').order('cqid')
     )),
+    // Payroll: cap at 60 months (5 years) — older months can't be navigated to
+    // via the UI's prev/next chevrons within a reasonable session.
     fetchAll(stablePaginationQuery(
       supabase
         .from('payroll')
         .select('*, employee:employees(id, cqid, name)')
         .order('year', { ascending: false })
         .order('month', { ascending: false })
+        .limit(60 * 30) // worst-case 30 employees × 60 months
     )),
     fetchAll(stablePaginationQuery(
       supabase
@@ -37,14 +49,16 @@ export default async function PayrollPage() {
         .select('*, employee:employees(id, cqid)')
         .order('created_at', { ascending: false })
     )),
-    // Include task_id so we can detect missing contributions
+    // Scores within the analytics window (24 months). Older scores can never
+    // surface in the UI which only navigates ±5 months from current.
     fetchAll(stablePaginationQuery(
       supabase
         .from('contribution_scores')
         .select('task_id, employee_id, earnings_inr, calculated_at, task:tasks(id, task_date, title, status)')
+        .gte('calculated_at', scoresWindowFromStr)
         .order('calculated_at', { ascending: false })
     )),
-    // Done/delivered tasks for missing-contributions detection
+    // Done/delivered tasks for missing-contributions detection — already bounded.
     fetchAll(stablePaginationQuery(
       supabase
         .from('tasks')

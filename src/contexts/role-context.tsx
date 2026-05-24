@@ -19,6 +19,16 @@ export interface Employee {
   avatar_url?: string | null
 }
 
+/** Shape passed from the Server Component layout to pre-populate role context. */
+export interface ServerEmployee {
+  id: string
+  authId: string
+  name: string
+  email: string
+  cqid: string
+  isAdmin: boolean
+}
+
 interface RoleContextType {
   role: Role
   employee: Employee | null
@@ -83,19 +93,51 @@ export function useRole() {
 // ─────────────────────────────────────────────────────
 // Provider
 // ─────────────────────────────────────────────────────
-export function RoleProvider({ children }: { children: ReactNode }) {
-  const [role, setRole] = useState<Role>('super_admin')
-  const [employee, setEmployee] = useState<Employee | null>(null)
-  const [loading, setLoading] = useState(true)
+
+interface RoleProviderProps {
+  children: ReactNode
+  /**
+   * When provided (from a Server Component layout), the role is
+   * pre-populated on first render — eliminating the async-fetch flash.
+   * Without this, the provider falls back to an async client fetch.
+   */
+  initialEmployee?: ServerEmployee | null
+}
+
+function serverToEmployee(s: ServerEmployee): Employee {
+  return {
+    id: s.id,
+    auth_id: s.authId,
+    name: s.name,
+    email: s.email,
+    role: s.isAdmin ? 'super_admin' : 'employee',
+    cqid: s.cqid,
+    is_active: true,
+  }
+}
+
+export function RoleProvider({ children, initialEmployee }: RoleProviderProps) {
+  // If pre-loaded from server, initialise synchronously — no flash.
+  const preloaded = initialEmployee !== undefined
+  const initRole: Role = initialEmployee
+    ? (initialEmployee.isAdmin ? 'super_admin' : 'employee')
+    : 'super_admin'
+  const initEmp: Employee | null = initialEmployee ? serverToEmployee(initialEmployee) : null
+
+  const [role, setRole] = useState<Role>(initRole)
+  const [employee, setEmployee] = useState<Employee | null>(initEmp)
+  const [loading, setLoading] = useState(!preloaded)
 
   useEffect(() => {
+    // Skip async fetch when server already provided the data
+    if (preloaded) return
+
     async function fetchRole() {
       try {
         const supabase = createClient()
         const { data: { user } } = await supabase.auth.getUser()
 
         if (!user) {
-          // Not logged in — default to super_admin (auth guard handles redirect)
           setRole('super_admin')
           setLoading(false)
           return
@@ -108,7 +150,6 @@ export function RoleProvider({ children }: { children: ReactNode }) {
           .maybeSingle()
 
         if (error || !emp) {
-          // No employee record → assume super_admin (e.g. Farooq)
           setRole('super_admin')
           setEmployee(null)
         } else {
@@ -123,6 +164,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     }
 
     fetchRole()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   if (loading) {

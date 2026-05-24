@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { ChevronRight, Home } from 'lucide-react'
 import { forwardRef } from 'react'
+import { usePermissions } from '@/contexts/permission-context'
 
 interface HeaderProps {
   title: string
@@ -24,7 +25,7 @@ const ROUTE_LABELS: Record<string, string> = {
   settings:      'Settings',
 }
 
-function Breadcrumbs() {
+function Breadcrumbs({ isEmployee }: { isEmployee: boolean }) { // eslint-disable-line @typescript-eslint/no-unused-vars
   const pathname = usePathname()
   // e.g. /dashboard/tasks  →  ['dashboard', 'tasks']
   const segments = pathname.split('/').filter(Boolean)
@@ -40,7 +41,7 @@ function Breadcrumbs() {
   if (crumbs.length <= 1) return null
 
   return (
-    <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-[11px] text-muted-foreground/50 mb-0.5">
+    <nav aria-label="Breadcrumb" className={`flex items-center gap-1 text-[11px] text-muted-foreground/50 mb-0.5 ${isEmployee ? 'hidden sm:flex' : ''}`}>
       <Link href="/dashboard" className="hover:text-muted-foreground transition-colors">
         <Home className="w-3 h-3" />
       </Link>
@@ -64,17 +65,32 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
   { title, subtitle, actions },
   ref,
 ) {
+  const { user } = usePermissions()
+  const isEmployee = !user.isAdmin
+
   return (
     <div
       ref={ref}
-      className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 pl-14 sm:pl-16 pr-4 py-3 sm:py-4 md:px-6 border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-30"
+      className={`flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3 pl-14 sm:pl-16 pr-4 md:px-6 border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-30 ${isEmployee ? 'py-1.5 sm:py-4' : 'py-3 sm:py-4'}`}
     >
-      <div className="w-full sm:w-auto">
-        <Breadcrumbs />
-        <h1 className="text-lg font-semibold text-foreground truncate">{title}</h1>
-        {subtitle && <div className="text-sm text-muted-foreground truncate">{subtitle}</div>}
+      {/* Title + breadcrumb */}
+      <div className="min-w-0 flex-1">
+        <Breadcrumbs isEmployee={isEmployee} />
+        <h1 className={`font-semibold text-foreground truncate ${isEmployee ? 'text-base sm:text-lg hidden sm:block' : 'text-lg'}`}>
+          {title}
+        </h1>
+        {subtitle && (
+          <div className={`text-muted-foreground truncate ${isEmployee ? 'text-xs sm:text-sm hidden sm:block' : 'text-sm'}`}>
+            {subtitle}
+          </div>
+        )}
       </div>
-      {actions && <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 sm:pb-0 w-full sm:w-auto hide-scrollbar">{actions}</div>}
+      {/* Action buttons — scrollable on mobile so they never wrap or overflow */}
+      {actions && (
+        <div className="flex items-center gap-2 overflow-x-auto shrink-0 pb-0.5 sm:pb-0 max-w-full hide-scrollbar">
+          {actions}
+        </div>
+      )}
     </div>
   )
 })

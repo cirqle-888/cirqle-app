@@ -413,9 +413,9 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
         actions={
           <button
             onClick={() => setShowForm(true)}
-            className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90 transition-opacity"
+            className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-3 py-2 rounded-lg hover:opacity-90 transition-opacity whitespace-nowrap"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4 shrink-0" />
             New Quotation
           </button>
         }

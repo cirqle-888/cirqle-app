@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { X, Plus, Trash2, CheckCircle2, ShieldAlert } from 'lucide-react'
 import Combobox from '@/components/ui/combobox'
+import { usePrivacy } from '@/contexts/privacy-context'
 
 interface Allocation {
   id: string
@@ -36,6 +37,7 @@ export default function PayrollAllocationModal({ entryId, amountInr, employees, 
   const [error, setError] = useState('')
   const [payrolls, setPayrolls] = useState<any[]>([])
   const supabase = createClient()
+  const { dn } = usePrivacy()
 
   // Try to pre-select employee based on reference
   const initialEmployeeId = employees.find(e => reference?.toUpperCase().includes(e.cqid))?.id || ''
@@ -197,7 +199,7 @@ export default function PayrollAllocationModal({ entryId, amountInr, employees, 
                           {a.payroll?.payslip_number || 'PAY'}
                         </span>
                         <span className="font-medium text-sm">
-                          {a.payroll?.employee?.cqid} — {a.payroll?.employee?.name}
+                          {dn(a.payroll?.employee)}
                         </span>
                         {a.payroll?.status === 'paid' && <CheckCircle2 className="w-3.5 h-3.5 text-green-400" />}
                       </div>
@@ -238,7 +240,7 @@ export default function PayrollAllocationModal({ entryId, amountInr, employees, 
                 >
                   <option value="">-- Choose Employee --</option>
                   {employees.map(e => (
-                    <option key={e.id} value={e.id}>{e.name} ({e.cqid})</option>
+                    <option key={e.id} value={e.id}>{dn(e)}</option>
                   ))}
                 </select>
               </div>

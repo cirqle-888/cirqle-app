@@ -30,12 +30,13 @@ export function PermissionProvider({ user, children }: { user: PermissionUser; c
   const [revealNames, setRevealNames] = useState(false)
   const perms = useMemo(() => new Set(user.permissions), [user.permissions])
 
-  const value: PermissionContextValue = {
+  // Stable value reference — without useMemo every consumer re-renders on every Provider tick.
+  const value = useMemo<PermissionContextValue>(() => ({
     user,
     can: (key) => (user.isAdmin ? true : perms.has(key)),
     revealNames: user.isAdmin && revealNames,
     setRevealNames,
-  }
+  }), [user, perms, revealNames])
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

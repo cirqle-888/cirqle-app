@@ -1,13 +1,33 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import dynamic from 'next/dynamic'
 import Header from '@/components/layout/header'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { calculatePerformanceScore, getQualityBand } from '@/lib/calculations/commission'
-import {
-  BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
-} from 'recharts'
 import { DateFilter, matchesDateFilter, getDateFilterLabel } from '@/components/ui/date-filter'
+
+// ─── Recharts is lazy-loaded — only fetched when a chart is rendered. ──────
+// Saves ~95 KB on initial bundle and TTI for routes that never view a chart.
+const ChartSkeleton = ({ h = 180 }: { h?: number }) => (
+  <div className="w-full bg-secondary/30 rounded animate-pulse" style={{ height: h }} />
+)
+const MonthlyEarningsBar = dynamic(
+  () => import('./_charts').then(m => m.MonthlyEarningsBar),
+  { ssr: false, loading: () => <ChartSkeleton h={176} /> },
+)
+const ScoreTrendLine = dynamic(
+  () => import('./_charts').then(m => m.ScoreTrendLine),
+  { ssr: false, loading: () => <ChartSkeleton h={176} /> },
+)
+const TeamEarningsBar = dynamic(
+  () => import('./_charts').then(m => m.TeamEarningsBar),
+  { ssr: false, loading: () => <ChartSkeleton h={200} /> },
+)
+const TeamScoreBar = dynamic(
+  () => import('./_charts').then(m => m.TeamScoreBar),
+  { ssr: false, loading: () => <ChartSkeleton h={180} /> },
+)
 import type { DateFilterValue } from '@/components/ui/date-filter'
 import { TrendingUp, TrendingDown, Award, Target, ChevronDown, ChevronUp, ExternalLink, Download, Printer } from 'lucide-react'
 
@@ -47,13 +67,6 @@ const BAND_ORDER = ['100', '76-99', '51-75', '26-50', '0-25']
 const EMP_COLORS = ['#7c3aed', '#60a5fa', '#34d399', '#fbbf24', '#f87171', '#c084fc']
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-
-const TOOLTIP_STYLE = {
-  contentStyle: { background: '#1a1f2e', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, fontSize: 12 },
-  labelStyle: { color: '#9ca3af' },
-  trigger: 'click' as const,
-  wrapperStyle: { zIndex: 50 },
-}
 
 function fmt(n: number) {
   if (n >= 100000) return `₹${(n/100000).toFixed(2)}L`
@@ -503,18 +516,10 @@ export default function ReportsClient({ employees, scores, tasks }: Props) {
                     {monthlyData.length === 0
                       ? <div className="h-44 flex items-center justify-center text-sm text-muted-foreground">No data</div>
                       : (
-                        <ResponsiveContainer width="100%" height={176}>
-                          <BarChart data={monthlyData} barSize={18}>
-                            <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#6b7280' }} />
-                            <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} tickFormatter={v => `₹${(v/1000).toFixed(0)}K`} />
-                            <Tooltip {...TOOLTIP_STYLE} formatter={(v: any) => [`₹${v.toLocaleString('en-IN')}`, 'Earnings']} />
-                            <Bar dataKey="earnings" radius={[4, 4, 0, 0]}>
-                              {monthlyData.map((_, i) => (
-                                <Cell key={i} fill={EMP_COLORS[employees.findIndex(e => e.id === selectedEmp) % EMP_COLORS.length]} fillOpacity={0.85} />
-                              ))}
-                            </Bar>
-                          </BarChart>
-                        </ResponsiveContainer>
+                        <MonthlyEarningsBar
+                          data={monthlyData}
+                          color={EMP_COLORS[employees.findIndex(e => e.id === selectedEmp) % EMP_COLORS.length]}
+                        />
                       )}
                   </div>
 
@@ -524,16 +529,7 @@ export default function ReportsClient({ employees, scores, tasks }: Props) {
                     {scoreTrend.length === 0
                       ? <div className="h-44 flex items-center justify-center text-sm text-muted-foreground">No data</div>
                       : (
-                        <ResponsiveContainer width="100%" height={176}>
-                          <LineChart data={scoreTrend}>
-                            <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} />
-                            <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} tickFormatter={v => `${v}%`} />
-                            <Tooltip {...TOOLTIP_STYLE} formatter={(v: any) => [`${v}%`, 'Score']} />
-                            <Line type="monotone" dataKey="score" stroke="#7c3aed" strokeWidth={2}
-                              dot={{ r: 3, fill: '#7c3aed' }}
-                              activeDot={{ r: 5 }} />
-                          </LineChart>
-                        </ResponsiveContainer>
+                        <ScoreTrendLine data={scoreTrend} />
                       )}
                   </div>
                 </div>
@@ -737,18 +733,7 @@ export default function ReportsClient({ employees, scores, tasks }: Props) {
                   {monthlyData.length === 0
                     ? <div className="h-48 flex items-center justify-center text-sm text-muted-foreground">No data</div>
                     : (
-                      <ResponsiveContainer width="100%" height={200}>
-                        <BarChart data={monthlyData} barSize={20}>
-                          <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#6b7280' }} />
-                          <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} tickFormatter={v => `₹${(v/1000).toFixed(0)}K`} />
-                          <Tooltip {...TOOLTIP_STYLE}
-                            formatter={(v: any, name: any) => [
-                              name === 'earnings' ? `₹${v.toLocaleString('en-IN')}` : v,
-                              name === 'earnings' ? 'Earnings' : 'Tasks',
-                            ]} />
-                          <Bar dataKey="earnings" radius={[4, 4, 0, 0]} fill="#7c3aed" fillOpacity={0.85} />
-                        </BarChart>
-                      </ResponsiveContainer>
+                      <MonthlyEarningsBar data={monthlyData} color="#7c3aed" height={200} barSize={20} />
                     )}
                 </div>
               </div>
@@ -818,38 +803,13 @@ export default function ReportsClient({ employees, scores, tasks }: Props) {
                 {/* Team earnings bar chart */}
                 <div className="bg-card border border-border rounded-xl p-5">
                   <h3 className="text-sm font-semibold mb-4">Earnings Comparison</h3>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <BarChart data={teamComparison} barSize={32}>
-                      <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#6b7280' }} />
-                      <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} tickFormatter={v => `₹${(v/1000).toFixed(0)}K`} />
-                      <Tooltip {...TOOLTIP_STYLE} formatter={(v: any, name: any) => [
-                        name === 'totalEarnings' ? `₹${Number(v).toLocaleString('en-IN')}` : `${v}%`,
-                        name === 'totalEarnings' ? 'Earnings' : 'Avg Score',
-                      ]} />
-                      <Bar dataKey="totalEarnings" radius={[5, 5, 0, 0]}>
-                        {teamComparison.map((row, i) => (
-                          <Cell key={i} fill={row.color} fillOpacity={0.85} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
+                  <TeamEarningsBar data={teamComparison} />
                 </div>
 
                 {/* Score comparison */}
                 <div className="bg-card border border-border rounded-xl p-5">
                   <h3 className="text-sm font-semibold mb-4">Avg Score Comparison</h3>
-                  <ResponsiveContainer width="100%" height={180}>
-                    <BarChart data={teamComparison} barSize={32}>
-                      <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#6b7280' }} />
-                      <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#6b7280' }} tickFormatter={v => `${v}%`} />
-                      <Tooltip {...TOOLTIP_STYLE} formatter={(v: any) => [`${v}%`, 'Avg Score']} />
-                      <Bar dataKey="avgScore" radius={[5, 5, 0, 0]}>
-                        {teamComparison.map((row, i) => (
-                          <Cell key={i} fill={BAND_COLORS[getQualityBand(row.avgScore)]} fillOpacity={0.85} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
+                  <TeamScoreBar data={teamComparison} bandColorFor={avg => BAND_COLORS[getQualityBand(avg)]} />
                 </div>
               </div>
             )}

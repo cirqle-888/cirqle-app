@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import { useRouter } from 'next/navigation'
 import Header from '@/components/layout/header'
 import { createClient, safeFetchAll } from '@/lib/supabase/client'
@@ -11,11 +12,21 @@ import {
   ChevronLeft, ChevronRight, AlertTriangle, Calendar, BarChart2,
   FileText, ArrowRight, TrendingUp, TrendingDown, RefreshCw,
 } from 'lucide-react'
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-} from 'recharts'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
-import BulkGenerateModal from '@/components/payroll/bulk-generate-modal'
+
+// Heavy bulk-generate modal (773 lines) — only mounts when an admin clicks
+// the action. Splitting it off the initial payroll chunk reduces the entry
+// payload meaningfully; for users who never trigger it, it never downloads.
+const BulkGenerateModal = dynamic(
+  () => import('@/components/payroll/bulk-generate-modal'),
+  { ssr: false },
+)
+
+// Recharts is lazy-loaded — only fetched when the employee history chart renders.
+const PayrollHistoryBar = dynamic(
+  () => import('./_charts').then(m => m.PayrollHistoryBar),
+  { ssr: false, loading: () => <div className="w-full h-full bg-secondary/30 rounded animate-pulse" /> },
+)
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -147,11 +158,16 @@ export default function PayrollClient({
   const supabase = createClient()
 
   // ── Refresh commission scores from DB (client-side fetch) ─────────────────
+  // Scope: matches the server payload — last 24 months. The UI only navigates
+  // ±5 months from the current view, so anything older is unreachable.
   const refreshScores = useCallback(async () => {
     setRefreshing(true)
+    const windowFrom = new Date()
+    windowFrom.setMonth(windowFrom.getMonth() - 24)
     const query = supabase
       .from('contribution_scores')
       .select('task_id, employee_id, earnings_inr, calculated_at, task:tasks(id, task_date, title, status)')
+      .gte('calculated_at', windowFrom.toISOString())
       .order('calculated_at', { ascending: false })
       .order('id', { ascending: true })
     const { data } = await safeFetchAll(query)
@@ -163,14 +179,24 @@ export default function PayrollClient({
   }, [supabase])
 
   // ── Supabase Realtime: auto-update when any score changes ─────────────────
+  // Debounced: a single batch contribution save can fire dozens of row events.
+  // Without debouncing we'd refetch the entire scores table for each event,
+  // saturating the connection. 1500 ms is long enough to coalesce a typical
+  // save burst, short enough to feel live.
   useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const trigger = () => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => { timer = null; refreshScores() }, 1500)
+    }
     const channel = supabase
       .channel('payroll-scores-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'contribution_scores' }, () => {
-        refreshScores()
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'contribution_scores' }, trigger)
       .subscribe()
-    return () => { supabase.removeChannel(channel) }
+    return () => {
+      if (timer) clearTimeout(timer)
+      supabase.removeChannel(channel)
+    }
   }, [refreshScores, supabase])
 
   // ── Computed ──────────────────────────────────────────────────────────────
@@ -389,7 +415,7 @@ export default function PayrollClient({
     const header = ['Employee', 'CQID', 'Month', 'Year', 'Base Salary', 'Commission', 'Deductions', 'Net Salary', 'Status', 'Paid Date']
     const rows = payroll.map(r => {
       const emp = empList.find(e => e.id === r.employee_id)
-      return [emp?.name || '', emp?.cqid || r.employee?.cqid || '', MONTHS[r.month - 1], r.year,
+      return [dn(emp) || '', emp?.cqid || r.employee?.cqid || '', MONTHS[r.month - 1], r.year,
         r.base_salary, r.commission_earned, (r.advances_deducted || 0) + (r.other_deductions || 0),
         r.net_salary, r.status, r.paid_date || '']
     })
@@ -400,7 +426,7 @@ export default function PayrollClient({
     const header = ['Employee', 'Amount', 'Date', 'Reason', 'Type', 'Status']
     const rows = advList.map((a: any) => {
       const emp = empList.find(e => e.id === a.employee_id)
-      return [emp?.name || emp?.cqid || '', a.amount, a.advance_date, a.reason || '', a.repayment_type || '', a.status || '']
+      return [dn(emp) || '', a.amount, a.advance_date, a.reason || '', a.repayment_type || '', a.status || '']
     })
     dl([header, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n'), `advances-${now.toISOString().split('T')[0]}.csv`)
   }
@@ -510,31 +536,31 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
         title="HR & Payroll"
         subtitle="Smart payroll with automatic commission calculation"
         actions={
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
             {tab === 'Records' && <>
-              <button onClick={exportPayrollCSV} className="flex items-center gap-1.5 bg-secondary border border-border text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 text-muted-foreground hover:text-foreground transition-colors">
-                <Download className="w-4 h-4" /> Export CSV
+              <button onClick={exportPayrollCSV} className="flex items-center gap-1.5 bg-secondary border border-border text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap">
+                <Download className="w-4 h-4 shrink-0" /><span className="hidden sm:inline">Export CSV</span>
               </button>
-              <button onClick={() => setShowPayrollForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90">
-                <Plus className="w-4 h-4" /> Add Manual
+              <button onClick={() => setShowPayrollForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-3 py-2 rounded-lg hover:opacity-90 whitespace-nowrap">
+                <Plus className="w-4 h-4 shrink-0" /> Add Manual
               </button>
             </>}
             {tab === 'Overview' && (
-              <button onClick={() => setShowBulkGenerate(true)} className="flex items-center gap-1.5 bg-secondary border border-border text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 text-muted-foreground hover:text-foreground transition-colors">
-                <Zap className="w-4 h-4" /> Bulk Generate
+              <button onClick={() => setShowBulkGenerate(true)} className="flex items-center gap-1.5 bg-secondary border border-border text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap">
+                <Zap className="w-4 h-4 shrink-0" /> Bulk Generate
               </button>
             )}
             {tab === 'Advances' && <>
-              <button onClick={exportAdvancesCSV} className="flex items-center gap-1.5 bg-secondary border border-border text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 text-muted-foreground hover:text-foreground transition-colors">
-                <Download className="w-4 h-4" /> Export CSV
+              <button onClick={exportAdvancesCSV} className="flex items-center gap-1.5 bg-secondary border border-border text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap">
+                <Download className="w-4 h-4 shrink-0" /><span className="hidden sm:inline">Export CSV</span>
               </button>
-              <button onClick={() => setShowAdvanceForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90">
-                <Plus className="w-4 h-4" /> Add Advance
+              <button onClick={() => setShowAdvanceForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-3 py-2 rounded-lg hover:opacity-90 whitespace-nowrap">
+                <Plus className="w-4 h-4 shrink-0" /> Add Advance
               </button>
             </>}
             {tab === 'Credits' && (
-              <button onClick={() => setShowCreditForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90">
-                <Plus className="w-4 h-4" /> Add Credit
+              <button onClick={() => setShowCreditForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-3 py-2 rounded-lg hover:opacity-90 whitespace-nowrap">
+                <Plus className="w-4 h-4 shrink-0" /> Add Credit
               </button>
             )}
           </div>
@@ -1315,19 +1341,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                     <BarChart2 className="w-3.5 h-3.5" /> 6-Month Earnings (Base + Commission)
                   </h3>
                   <div className="h-44">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={history} margin={{ top: 0, right: 0, bottom: 0, left: 0 }} barSize={20}>
-                        <XAxis dataKey="month" tick={{ fill: '#6b7280', fontSize: 11 }} axisLine={false} tickLine={false} />
-                        <YAxis tick={{ fill: '#6b7280', fontSize: 10 }} axisLine={false} tickLine={false}
-                          tickFormatter={v => `₹${(v / 1000).toFixed(0)}k`} width={38} />
-                        <Tooltip
-                          contentStyle={{ background: '#0d1117', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: 12 }}
-                          formatter={(v: any, name: any) => [`₹${Number(v).toLocaleString('en-IN')}`, name === 'base' ? 'Base' : 'Commission']}
-                        />
-                        <Bar dataKey="base"       name="base"       stackId="a" fill="#6366f1" radius={[0, 0, 2, 2]} />
-                        <Bar dataKey="commission" name="commission" stackId="a" fill="#22c55e" radius={[3, 3, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
+                    <PayrollHistoryBar data={history} />
                   </div>
                   <div className="flex gap-4 mt-1">
                     <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><span className="w-2.5 h-2.5 rounded-sm bg-indigo-500/80" />Base</span>
