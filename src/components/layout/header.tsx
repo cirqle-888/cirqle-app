@@ -71,20 +71,29 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
   return (
     <div
       ref={ref}
-      className={`flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3 pl-14 sm:pl-16 pr-4 md:px-6 border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-30 ${isEmployee ? 'py-1.5 sm:py-4' : 'py-3 sm:py-4'}`}
+      className={`flex flex-row items-center justify-between gap-2 sm:gap-3 pr-4 md:px-6 border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-30 ${isEmployee ? 'pl-3 py-2 sm:pl-16 sm:py-4' : 'pl-14 sm:pl-16 py-3 sm:py-4'}`}
     >
-      {/* Title + breadcrumb */}
-      <div className="min-w-0 flex-1">
-        <Breadcrumbs isEmployee={isEmployee} />
-        <h1 className={`font-semibold text-foreground truncate ${isEmployee ? 'text-base sm:text-lg hidden sm:block' : 'text-lg'}`}>
-          {title}
-        </h1>
-        {subtitle && (
-          <div className={`text-muted-foreground truncate ${isEmployee ? 'text-xs sm:text-sm hidden sm:block' : 'text-sm'}`}>
-            {subtitle}
+      {/* Employee mobile: compact left branding strip (hidden on sm+) */}
+      {isEmployee && (
+        <div className="flex items-center gap-2 shrink-0 sm:hidden">
+          {/* Cirqle brand dot */}
+          <div className="w-7 h-7 rounded-lg gradient-bg flex items-center justify-center shrink-0">
+            <span className="text-white font-bold text-xs">C</span>
           </div>
+          {/* Current section name */}
+          <span className="text-sm font-semibold text-foreground leading-none">{title}</span>
+        </div>
+      )}
+
+      {/* Title + breadcrumb — full display on sm+ (and always for admin) */}
+      <div className={`min-w-0 flex-1 ${isEmployee ? 'hidden sm:block' : ''}`}>
+        <Breadcrumbs isEmployee={isEmployee} />
+        <h1 className="text-lg font-semibold text-foreground truncate">{title}</h1>
+        {subtitle && (
+          <div className="text-sm text-muted-foreground truncate">{subtitle}</div>
         )}
       </div>
+
       {/* Action buttons — scrollable on mobile so they never wrap or overflow */}
       {actions && (
         <div className="flex items-center gap-2 overflow-x-auto shrink-0 pb-0.5 sm:pb-0 max-w-full hide-scrollbar">

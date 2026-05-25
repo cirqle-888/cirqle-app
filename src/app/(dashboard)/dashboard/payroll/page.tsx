@@ -1,12 +1,23 @@
 import { createAdminClient, fetchAll, stablePaginationQuery } from '@/lib/supabase/server'
+import { loadCurrentUser } from '@/lib/permissions/check'
+import {
+  financialVisibility,
+  stripPayrollListAmounts,
+  stripAmountList,
+  stripScoreListEarnings,
+} from '@/lib/permissions/strip'
 import PayrollClient from './payroll-client'
 
 export const dynamic = 'force-dynamic'
 
 export default async function PayrollPage() {
   // Route is permission-gated by middleware (`payroll.view`); only authorized
-  // users reach this code path. Service-role client skips the async cookies()
-  // hop and RLS planning overhead.
+  // users reach this code path. Per-field ₹ visibility is governed by the
+  // `payroll.view_amounts` perm — viewers without it can still see the
+  // payroll status flow (Draft / Reviewed / Paid) and approve transitions,
+  // but salary/commission/advance/deduction amounts are stripped server-side.
+  const me = await loadCurrentUser().catch(() => null)
+  const vis = financialVisibility(me)
   const supabase = createAdminClient()
   const now = new Date()
   const currentYear = now.getFullYear()
@@ -70,15 +81,33 @@ export default async function PayrollPage() {
   ])
 
 
+  // Server-side strip when the viewer lacks `payroll.view_amounts`. Money
+  // fields (base_salary, commission_earned, net_salary, advance amounts,
+  // credit amounts, deduction amounts, contribution earnings_inr) are
+  // removed from the payload before it ever reaches the client. The viewer
+  // still sees employee + status data so they can manage workflow.
+  const payrollRecords = stripPayrollListAmounts(payrollRes.data || [], vis.payrollAmounts)
+  const advances       = stripAmountList(advancesRes.data || [], vis.payrollAmounts)
+  const credits        = stripAmountList(creditRes.data || [], vis.payrollAmounts)
+  const deductions     = stripAmountList(deductionsRes.data || [], vis.payrollAmounts)
+  // Scores' earnings_inr is gated by contributions.view_earnings (orthogonal
+  // perm — a payroll-amount viewer might or might not also see contribution
+  // earnings, depending on designation).
+  const contributionScores = stripScoreListEarnings(
+    (scoresRes.data || []) as any[],
+    vis.contributionEarnings,
+  )
+
   return (
     <PayrollClient
       employees={employeesRes.data || []}
-      payrollRecords={payrollRes.data || []}
-      advances={advancesRes.data || []}
-      credits={creditRes.data || []}
-      deductions={deductionsRes.data || []}
-      contributionScores={(scoresRes.data || []) as any[]}
+      payrollRecords={payrollRecords}
+      advances={advances}
+      credits={credits}
+      deductions={deductions}
+      contributionScores={contributionScores}
       allTasks={(tasksRes.data || []) as any[]}
+      showAmounts={vis.payrollAmounts}
     />
   )
 }

@@ -130,9 +130,9 @@ const navSections: NavSection[] = [
   {
     label: 'Insights',
     items: [
-      // Admin-only — Reports surfaces team-wide earnings, billing bands, and
-      // company splits. Employees get their own view via the Dashboard.
-      { label: 'Reports', href: '/dashboard/reports', icon: BarChart3, adminOnly: true },
+      // Reports is gated by reports.view — admins always have it; non-admins
+      // see the tab only when their designation grants it in Settings → Designations.
+      { label: 'Reports', href: '/dashboard/reports', icon: BarChart3, requiredPerm: 'reports.view' },
     ],
   },
   {
@@ -524,10 +524,14 @@ export default function Sidebar() {
       {isEmployee && (
         <div className="md:hidden fixed bottom-0 left-0 w-full z-50 bg-sidebar border-t border-sidebar-border pb-safe pt-1 px-2 flex items-center justify-around shadow-[0_-4px_20px_rgba(0,0,0,0.2)]">
           {[
-            { href: '/dashboard/tasks', label: 'Tasks', icon: CheckSquare },
-            { href: '/dashboard/contributions', label: 'Activity', icon: TrendingUp },
+            { href: '/dashboard',              label: 'Home',     icon: LayoutDashboard },
+            { href: '/dashboard/tasks',        label: 'Tasks',    icon: CheckSquare },
+            { href: '/dashboard/contributions',label: 'Activity', icon: TrendingUp },
           ].map(item => {
-            const active = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href))
+            // Dashboard root: exact match only so Tasks/Contributions don't highlight it
+            const active = item.href === '/dashboard'
+              ? pathname === '/dashboard'
+              : pathname.startsWith(item.href)
             const Icon = item.icon
             return (
               <Link key={item.href} href={item.href} className="flex flex-col items-center justify-center py-2 px-1 w-1/4">

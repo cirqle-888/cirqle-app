@@ -4,7 +4,20 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Header from '@/components/layout/header'
 import AppSelect from '@/components/ui/app-select'
-import { createClient } from '@/lib/supabase/client'
+import { createClient as createSupabaseClient } from '@/lib/supabase/client'
+import {
+  upsertCompanySettings,
+  createEmployee, updateEmployee,
+  createClient, updateClient, upsertClientServicePricings, deactivateClient, quickEditClient,
+  createService, updateService, deactivateService, quickEditService,
+  createGroup, updateGroup, deactivateGroup,
+  createParameter, updateParameter, deactivateParameter,
+  createTool, updateTool, deactivateTool, quickEditTool,
+  createBankAccount, updateBankAccount, deactivateBankAccount,
+  createCashbookCategory, updateCashbookCategory, deactivateCashbookCategory,
+  upsertExchangeRate,
+  upsertMatrixCell,
+} from './actions'
 import { Plus, X, Edit2, Archive, ArchiveRestore, Save, ChevronDown, ChevronLeft, ChevronRight, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Mail, Send, RotateCcw as ResetKey, RefreshCw } from 'lucide-react'
 import type { Currency } from '@/types'
 import InfoTip from '@/components/ui/info-tip'
@@ -103,7 +116,7 @@ export default function SettingsClient(props: Props) {
   })
   const [tab, setTab] = useState(props.initialTab ?? 'Company')
   const router = useRouter()
-  const supabase = createClient()
+  const supabase = createSupabaseClient()
   const { dn, ds, isUnlocked, forceLock, setForceLockMode } = usePrivacy()
   const [forceLockState, setForceLockState] = useState<boolean>(false)
   useEffect(() => { setForceLockState(isForceLocked()) }, [])
@@ -137,17 +150,9 @@ export default function SettingsClient(props: Props) {
   // Local state for each section
   const [groups, setGroups] = useState(props.groups)
 
-  // Merge DB params with any locally-persisted overrides (is_master, input_type)
-  // so these fields work immediately even before the SQL migration is run.
-  const [params, setParams] = useState<any[]>(() => {
-    if (typeof window === 'undefined') return props.parameters
-    try {
-      const meta: Record<string, any> = JSON.parse(localStorage.getItem('cirqle_param_meta') || '{}')
-      return props.parameters.map((p: any) =>
-        meta[p.id] ? { ...p, is_master: meta[p.id].is_master, input_type: meta[p.id].input_type } : p
-      )
-    } catch { return props.parameters }
-  })
+  // is_master and input_type now live in the DB (migration 008).
+  // Props already include them; no localStorage merge needed.
+  const [params, setParams] = useState<any[]>(props.parameters)
   const [tools, setTools] = useState(props.tools)
   const [services, setServices] = useState(props.services)
 
@@ -294,9 +299,9 @@ export default function SettingsClient(props: Props) {
     setResetPwdModal({ cqid: emp.cqid, tempPassword: res.data.tempPassword })
   }
 
-  /** Save a single field directly to any table and patch the local state array */
+  /** Save a single field via a server action and patch the local state array */
   async function qeSave<T extends { id: string }>(
-    table: string,
+    action: (id: string, field: string, value: unknown) => Promise<{ ok: boolean; error?: string }>,
     id: string,
     field: string,
     rawValue: string,
@@ -304,7 +309,7 @@ export default function SettingsClient(props: Props) {
     transform: (v: string) => any = v => v,
   ) {
     const value = transform(rawValue)
-    await supabase.from(table).update({ [field]: value }).eq('id', id)
+    await action(id, field, value)
     setter(prev => prev.map(row => row.id === id ? { ...row, [field]: value } : row))
   }
 
@@ -373,14 +378,13 @@ export default function SettingsClient(props: Props) {
   async function saveMatrixCell(clientId: string, serviceId: string, cell: MatrixCell) {
     const key = `${clientId}::${serviceId}`
     setMatrixSaving(key)
-    await supabase.from('client_service_pricing').upsert({
-      client_id: clientId,
-      service_id: serviceId,
-      price: parseFloat(cell.price) || 0,
-      commission_percentage: parseFloat(cell.commission_percentage) || 0,
-      currency: cell.currency || 'INR',
-      is_active: true,
-    }, { onConflict: 'client_id,service_id' })
+    await upsertMatrixCell(
+      clientId,
+      serviceId,
+      parseFloat(cell.price) || 0,
+      parseFloat(cell.commission_percentage) || 0,
+      cell.currency || 'INR',
+    )
     setMatrixSaving(null)
   }
 
@@ -434,25 +438,27 @@ export default function SettingsClient(props: Props) {
 
   async function saveCompanySettings() {
     setSaving(true)
-    const updates = Object.entries(companySettings).map(([key, value]) =>
-      supabase.from('company_settings').upsert({ key, value }, { onConflict: 'key' })
-    )
-    await Promise.all(updates)
+    const entries = Object.entries(companySettings).map(([key, value]) => ({ key, value }))
+    const res = await upsertCompanySettings(entries)
     setSaving(false)
+    if (!res.ok) { alert(res.error || 'Failed to save'); return }
     alert('Saved!')
   }
 
   // --- Employees ---
   async function saveEmployee(e: React.FormEvent) {
     e.preventDefault(); setSaving(true)
+    let res: Awaited<ReturnType<typeof createEmployee>>
     if (editingId) {
-      const { data } = await supabase.from('employees').update(form).eq('id', editingId).select().single()
-      if (data) setEmployees(prev => prev.map(emp => emp.id === editingId ? data : emp))
+      res = await updateEmployee(editingId, form)
+      if (res.ok && res.data) setEmployees(prev => prev.map(emp => emp.id === editingId ? res.data : emp))
     } else {
-      const { data } = await supabase.from('employees').insert(form).select().single()
-      if (data) setEmployees(prev => [...prev, data])
+      res = await createEmployee(form)
+      if (res.ok && res.data) setEmployees(prev => [...prev, res.data])
     }
-    setSaving(false); setShowForm(null)
+    setSaving(false)
+    if (!res.ok) { alert(res.error || 'Failed to save employee'); return }
+    setShowForm(null)
   }
 
   function closeClientForm() {
@@ -464,27 +470,29 @@ export default function SettingsClient(props: Props) {
   async function saveClient(e: React.FormEvent) {
     e.preventDefault(); setSaving(true)
     let clientId = editingId
+    let res: Awaited<ReturnType<typeof createClient>>
     if (editingId) {
-      const { data } = await supabase.from('clients').update(form).eq('id', editingId).select().single()
-      if (data) setClients(prev => prev.map(c => c.id === editingId ? { ...data, service_pricings: c.service_pricings } : c))
+      res = await updateClient(editingId, form)
+      if (res.ok && res.data) setClients(prev => prev.map(c => c.id === editingId ? { ...res.data, service_pricings: c.service_pricings } : c))
     } else {
-      const { data } = await supabase.from('clients').insert(form).select().single()
-      if (data) { clientId = data.id; setClients(prev => [...prev, { ...data, service_pricings: [] }]) }
+      res = await createClient(form)
+      if (res.ok && res.data) { clientId = res.data.id; setClients(prev => [...prev, { ...res.data, service_pricings: [] }]) }
     }
+    if (!res.ok) { setSaving(false); alert(res.error || 'Failed to save client'); return }
     // Save service pricings
     if (clientId) {
       const pricingRows = Object.entries(clientPricings)
         .filter(([, v]) => v.price !== '' || v.commission_percentage !== '')
         .map(([service_id, v]) => ({
-          client_id: clientId,
+          client_id: clientId!,
           service_id,
           price: parseFloat(v.price) || 0,
           commission_percentage: parseFloat(v.commission_percentage) || 0,
           currency: v.currency || 'INR',
-          is_active: true,
+          is_active: true as const,
         }))
       if (pricingRows.length > 0) {
-        await supabase.from('client_service_pricing').upsert(pricingRows, { onConflict: 'client_id,service_id' })
+        await upsertClientServicePricings(pricingRows)
       }
     }
     setSaving(false)
@@ -499,48 +507,29 @@ export default function SettingsClient(props: Props) {
     const { _groupIds, ...servicePayload } = form
     const selectedGroupIds: string[] = _groupIds || []
 
-    let serviceId = editingId
+    let res: Awaited<ReturnType<typeof createService>>
     if (editingId) {
-      const { data } = await supabase.from('services').update(servicePayload).eq('id', editingId).select().single()
-      if (data) setServices(prev => prev.map(s => s.id === editingId ? data : s))
+      res = await updateService(editingId, servicePayload, selectedGroupIds)
+      if (res.ok && res.data?.service) setServices(prev => prev.map(s => s.id === editingId ? res.data!.service : s))
     } else {
-      const { data } = await supabase.from('services').insert({ ...servicePayload, is_active: true }).select().single()
-      if (data) { serviceId = data.id; setServices(prev => [...prev, data]) }
+      res = await createService(servicePayload, selectedGroupIds)
+      if (res.ok && res.data?.service) setServices(prev => [...prev, res.data!.service])
     }
 
-    // Save group-service links
+    if (!res.ok) { setSaving(false); alert(res.error || 'Failed to save service'); return }
+
+    const serviceId = editingId || res.data?.service?.id
     if (serviceId) {
-      // Try DB first (requires migration), fall back to localStorage
-      const { error } = await supabase
-        .from('group_services')
-        .delete()
-        .eq('service_id', serviceId)
-
-      if (!error) {
-        // DB table exists — save properly
-        if (selectedGroupIds.length > 0) {
-          await supabase.from('group_services').insert(
-            selectedGroupIds.map(gid => ({ group_id: gid, service_id: serviceId }))
-          )
-        }
-        // Update local state from DB pattern
-        setGroupServices(prev => [
-          ...prev.filter(gs => gs.service_id !== serviceId),
-          ...selectedGroupIds.map(gid => ({ group_id: gid, service_id: serviceId! }))
-        ])
-      } else {
-        // DB table doesn't exist yet — persist in localStorage only
-        setGroupServices(prev => [
-          ...prev.filter(gs => gs.service_id !== serviceId),
-          ...selectedGroupIds.map(gid => ({ group_id: gid, service_id: serviceId! }))
-        ])
-      }
-
-      // Always persist to localStorage as fallback
+      // Update local group-service state
+      setGroupServices(prev => [
+        ...prev.filter(gs => gs.service_id !== serviceId),
+        ...selectedGroupIds.map(gid => ({ group_id: gid, service_id: serviceId }))
+      ])
+      // Always persist to localStorage as fallback (for pre-migration installs)
       try {
         const updated = [
           ...groupServices.filter(gs => gs.service_id !== serviceId),
-          ...selectedGroupIds.map(gid => ({ group_id: gid, service_id: serviceId! }))
+          ...selectedGroupIds.map(gid => ({ group_id: gid, service_id: serviceId }))
         ]
         localStorage.setItem('cirqle_group_services', JSON.stringify(updated))
       } catch {}
@@ -552,116 +541,98 @@ export default function SettingsClient(props: Props) {
   // --- Groups ---
   async function saveGroup(e: React.FormEvent) {
     e.preventDefault(); setSaving(true)
+    let res: Awaited<ReturnType<typeof createGroup>>
     if (editingId) {
-      const { data } = await supabase.from('contribution_groups').update(form).eq('id', editingId).select().single()
-      if (data) setGroups(prev => prev.map(g => g.id === editingId ? data : g))
+      res = await updateGroup(editingId, form)
+      if (res.ok && res.data) setGroups(prev => prev.map(g => g.id === editingId ? res.data : g))
     } else {
-      const { data } = await supabase.from('contribution_groups').insert({ ...form, is_active: true }).select().single()
-      if (data) setGroups(prev => [...prev, data])
+      res = await createGroup(form)
+      if (res.ok && res.data) setGroups(prev => [...prev, res.data])
     }
-    setSaving(false); setShowForm(null)
+    setSaving(false)
+    if (!res.ok) { alert(res.error || 'Failed to save group'); return }
+    setShowForm(null)
   }
 
   // --- Parameters ---
   async function saveParam(e: React.FormEvent) {
     e.preventDefault(); setSaving(true)
 
-    const isMaster   = form.is_master  ?? false
-    const inputType  = form.input_type ?? 'count'
-    const fullPayload  = { ...form, is_master: isMaster, input_type: inputType }
-    // Payload without new columns — used as fallback if DB hasn't been migrated yet
-    const safePayload  = Object.fromEntries(
-      Object.entries(fullPayload).filter(([k]) => k !== 'is_master' && k !== 'input_type')
-    )
-
-    // Helper: persist overrides to localStorage so they survive page refreshes
-    // even before the SQL migration has been applied.
-    function persistMeta(id: string) {
-      try {
-        const meta = JSON.parse(localStorage.getItem('cirqle_param_meta') || '{}')
-        meta[id] = { is_master: isMaster, input_type: inputType }
-        localStorage.setItem('cirqle_param_meta', JSON.stringify(meta))
-      } catch {}
+    // is_master and input_type live in DB since migration 008 — include directly.
+    const payload = {
+      ...form,
+      is_master:  form.is_master  ?? false,
+      input_type: form.input_type ?? 'count',
     }
 
+    let res: Awaited<ReturnType<typeof createParameter>>
     if (editingId) {
-      let { data, error } = await supabase
-        .from('parameters').update(fullPayload).eq('id', editingId).select().single()
-
-      // If update failed (likely missing columns), retry without new fields
-      if (error || !data) {
-        const res = await supabase
-          .from('parameters').update(safePayload).eq('id', editingId).select().single()
-        data = res.data
+      res = await updateParameter(editingId, payload, payload)
+      if (res.ok) {
+        setParams(prev => prev.map(p => p.id === editingId ? { ...(res.data ?? p), ...payload } : p))
       }
-
-      // Always update local state — merge new fields regardless of DB result
-      setParams(prev => prev.map(p => p.id === editingId
-        ? { ...(data ?? p), is_master: isMaster, input_type: inputType }
-        : p
-      ))
-      persistMeta(editingId)
     } else {
-      let { data, error } = await supabase
-        .from('parameters').insert({ ...fullPayload, is_active: true }).select().single()
-
-      if (error || !data) {
-        const res = await supabase
-          .from('parameters').insert({ ...safePayload, is_active: true }).select().single()
-        data = res.data
-      }
-
-      if (data) {
-        setParams(prev => [...prev, { ...data, is_master: isMaster, input_type: inputType }])
-        persistMeta(data.id)
-      }
+      res = await createParameter(payload, payload)
+      if (res.ok && res.data) setParams(prev => [...prev, res.data])
     }
 
-    setSaving(false); setShowForm(null)
+    setSaving(false)
+    if (!res.ok) { alert(res.error || 'Failed to save parameter'); return }
+    setShowForm(null)
   }
 
   // --- Tools ---
   async function saveTool(e: React.FormEvent) {
     e.preventDefault(); setSaving(true)
+    let res: Awaited<ReturnType<typeof createTool>>
     if (editingId) {
-      const { data } = await supabase.from('tools').update(form).eq('id', editingId).select().single()
-      if (data) setTools(prev => prev.map(t => t.id === editingId ? data : t))
+      res = await updateTool(editingId, form)
+      if (res.ok && res.data) setTools(prev => prev.map(t => t.id === editingId ? res.data : t))
     } else {
-      const { data } = await supabase.from('tools').insert({ ...form, is_active: true }).select().single()
-      if (data) setTools(prev => [...prev, data])
+      res = await createTool(form)
+      if (res.ok && res.data) setTools(prev => [...prev, res.data])
     }
-    setSaving(false); setShowForm(null)
+    setSaving(false)
+    if (!res.ok) { alert(res.error || 'Failed to save tool'); return }
+    setShowForm(null)
   }
 
   // --- Bank accounts ---
   async function saveBank(e: React.FormEvent) {
     e.preventDefault(); setSaving(true)
+    let res: Awaited<ReturnType<typeof createBankAccount>>
     if (editingId) {
-      const { data } = await supabase.from('bank_accounts').update(form).eq('id', editingId).select().single()
-      if (data) setBankAccounts(prev => prev.map(b => b.id === editingId ? data : b))
+      res = await updateBankAccount(editingId, form)
+      if (res.ok && res.data) setBankAccounts(prev => prev.map(b => b.id === editingId ? res.data : b))
     } else {
-      const { data } = await supabase.from('bank_accounts').insert({ ...form, is_active: true }).select().single()
-      if (data) setBankAccounts(prev => [...prev, data])
+      res = await createBankAccount(form)
+      if (res.ok && res.data) setBankAccounts(prev => [...prev, res.data])
     }
-    setSaving(false); setShowForm(null)
+    setSaving(false)
+    if (!res.ok) { alert(res.error || 'Failed to save bank account'); return }
+    setShowForm(null)
   }
 
   // --- Cash Categories ---
   async function saveCategory(e: React.FormEvent) {
     e.preventDefault(); setSaving(true)
+    let res: Awaited<ReturnType<typeof createCashbookCategory>>
     if (editingId) {
-      const { data } = await supabase.from('cashbook_categories').update(form).eq('id', editingId).select().single()
-      if (data) setCategories((prev: any[]) => prev.map(c => c.id === editingId ? data : c))
+      res = await updateCashbookCategory(editingId, form)
+      if (res.ok && res.data) setCategories((prev: any[]) => prev.map(c => c.id === editingId ? res.data : c))
     } else {
-      const { data } = await supabase.from('cashbook_categories').insert(form).select().single()
-      if (data) setCategories((prev: any[]) => [...prev, data])
+      res = await createCashbookCategory(form)
+      if (res.ok && res.data) setCategories((prev: any[]) => [...prev, res.data])
     }
-    setSaving(false); setShowForm(null)
+    setSaving(false)
+    if (!res.ok) { alert(res.error || 'Failed to save category'); return }
+    setShowForm(null)
   }
 
   // --- Exchange rates ---
   async function saveRate(currency: Currency, rate: number) {
-    await supabase.from('exchange_rates').upsert({ currency, rate_to_inr: rate }, { onConflict: 'currency' })
+    const res = await upsertExchangeRate(currency, rate)
+    if (!res.ok) return
     setRates(prev => {
       const existing = prev.find(r => r.currency === currency)
       if (existing) return prev.map(r => r.currency === currency ? { ...r, rate_to_inr: rate } : r)
@@ -1368,28 +1339,28 @@ export default function SettingsClient(props: Props) {
                     <input
                       key={`${client.id}-name`}
                       defaultValue={client.name}
-                      onBlur={e => qeSave('clients', client.id, 'name', e.target.value.trim(), setClients as any)}
+                      onBlur={e => qeSave(quickEditClient, client.id, 'name', e.target.value.trim(), setClients as any)}
                       className="flex-1 bg-secondary border border-border/0 hover:border-border focus:border-primary rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:bg-background transition-colors"
                       placeholder="Name"
                     />
                     <input
                       key={`${client.id}-code`}
                       defaultValue={client.code}
-                      onBlur={e => qeSave('clients', client.id, 'code', e.target.value.trim().toUpperCase(), setClients as any)}
+                      onBlur={e => qeSave(quickEditClient, client.id, 'code', e.target.value.trim().toUpperCase(), setClients as any)}
                       className="w-16 bg-secondary border border-border/0 hover:border-border focus:border-primary rounded-lg px-2 py-1.5 text-sm font-mono text-center focus:outline-none focus:bg-background transition-colors"
                       placeholder="Code"
                     />
                     <input
                       key={`${client.id}-phone`}
                       defaultValue={client.phone || ''}
-                      onBlur={e => qeSave('clients', client.id, 'phone', e.target.value.trim(), setClients as any)}
+                      onBlur={e => qeSave(quickEditClient, client.id, 'phone', e.target.value.trim(), setClients as any)}
                       className="w-36 bg-secondary border border-border/0 hover:border-border focus:border-primary rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:bg-background transition-colors"
                       placeholder="Phone"
                     />
                     <input
                       key={`${client.id}-email`}
                       defaultValue={client.email || ''}
-                      onBlur={e => qeSave('clients', client.id, 'email', e.target.value.trim(), setClients as any)}
+                      onBlur={e => qeSave(quickEditClient, client.id, 'email', e.target.value.trim(), setClients as any)}
                       className="w-44 bg-secondary border border-border/0 hover:border-border focus:border-primary rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:bg-background transition-colors"
                       placeholder="Email"
                     />
@@ -1429,7 +1400,7 @@ export default function SettingsClient(props: Props) {
                         <Edit2 className="w-4 h-4" />
                       </button>
                       <button onClick={() => requestDelete('Client', client.id, client.name, async () => {
-                        await supabase.from('clients').update({ is_active: false }).eq('id', client.id)
+                        await deactivateClient(client.id)
                         setClients(prev => prev.filter((x: any) => x.id !== client.id))
                       })} className="p-2 rounded-lg hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400 transition-colors" title="Archive client">
                         <Archive className="w-4 h-4" />
@@ -1475,14 +1446,14 @@ export default function SettingsClient(props: Props) {
                       <input
                         key={`${svc.id}-name`}
                         defaultValue={svc.name}
-                        onBlur={e => qeSave('services', svc.id, 'name', e.target.value.trim(), setServices as any)}
+                        onBlur={e => qeSave(quickEditService, svc.id, 'name', e.target.value.trim(), setServices as any)}
                         className="flex-1 bg-secondary border border-border/0 hover:border-border focus:border-primary rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:bg-background transition-colors"
                         placeholder="Service name"
                       />
                       <input
                         key={`${svc.id}-desc`}
                         defaultValue={svc.description || ''}
-                        onBlur={e => qeSave('services', svc.id, 'description', e.target.value.trim(), setServices as any)}
+                        onBlur={e => qeSave(quickEditService, svc.id, 'description', e.target.value.trim(), setServices as any)}
                         className="w-52 bg-secondary border border-border/0 hover:border-border focus:border-primary rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:bg-background transition-colors text-muted-foreground"
                         placeholder="Description (optional)"
                       />
@@ -1518,7 +1489,7 @@ export default function SettingsClient(props: Props) {
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <button onClick={() => requestDelete('Service', svc.id, svc.name, async () => {
-                          await supabase.from('services').update({ is_active: false }).eq('id', svc.id)
+                          await deactivateService(svc.id)
                           setServices(prev => prev.filter((x: any) => x.id !== svc.id))
                         })} className="p-2 rounded-lg hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400 transition-colors" title="Archive service">
                           <Archive className="w-4 h-4" />
@@ -1568,7 +1539,7 @@ export default function SettingsClient(props: Props) {
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
                         <button onClick={() => requestDelete('Group', g.id, g.name, async () => {
-                          await supabase.from('contribution_groups').update({ is_active: false }).eq('id', g.id)
+                          await deactivateGroup(g.id)
                           setGroups(prev => prev.filter((x: any) => x.id !== g.id))
                         })} className="p-2 rounded-lg hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400 transition-colors" title="Archive group">
                           <Archive className="w-3.5 h-3.5" />
@@ -1624,7 +1595,7 @@ export default function SettingsClient(props: Props) {
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
                           <button onClick={() => requestDelete('Parameter', p.id, p.name, async () => {
-                            await supabase.from('parameters').update({ is_active: false }).eq('id', p.id)
+                            await deactivateParameter(p.id)
                             setParams(prev => prev.filter((x: any) => x.id !== p.id))
                           })} className="p-2 rounded-lg hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400 transition-colors" title="Archive parameter">
                             <Archive className="w-3.5 h-3.5" />
@@ -1664,7 +1635,7 @@ export default function SettingsClient(props: Props) {
                       <input
                         key={`${tool.id}-name`}
                         defaultValue={tool.name}
-                        onBlur={e => qeSave('tools', tool.id, 'name', e.target.value.trim(), setTools as any)}
+                        onBlur={e => qeSave(quickEditTool, tool.id, 'name', e.target.value.trim(), setTools as any)}
                         className="flex-1 bg-secondary border border-border/0 hover:border-border focus:border-primary rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:bg-background transition-colors"
                         placeholder="Tool name"
                       />
@@ -1674,7 +1645,7 @@ export default function SettingsClient(props: Props) {
                           key={`${tool.id}-pct`}
                           defaultValue={tool.fixed_percentage}
                           type="number" min="0" max="100" step="0.1"
-                          onBlur={e => qeSave('tools', tool.id, 'fixed_percentage', e.target.value, setTools as any, v => parseFloat(v) || 0)}
+                          onBlur={e => qeSave(quickEditTool, tool.id, 'fixed_percentage', e.target.value, setTools as any, v => parseFloat(v) || 0)}
                           className="w-14 bg-secondary border border-border/0 hover:border-border focus:border-primary rounded-lg px-2 py-1.5 text-sm text-center focus:outline-none focus:bg-background transition-colors"
                         />
                         <span className="text-xs text-muted-foreground">% from {group?.name || '—'}</span>
@@ -1696,7 +1667,7 @@ export default function SettingsClient(props: Props) {
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
                         <button onClick={() => requestDelete('Tool', tool.id, tool.name, async () => {
-                          await supabase.from('tools').update({ is_active: false }).eq('id', tool.id)
+                          await deactivateTool(tool.id)
                           setTools(prev => prev.filter((x: any) => x.id !== tool.id))
                         })} className="p-2 rounded-lg hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400 transition-colors" title="Archive tool">
                           <Archive className="w-3.5 h-3.5" />
@@ -1731,7 +1702,7 @@ export default function SettingsClient(props: Props) {
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
                       <button onClick={() => requestDelete('Bank Account', b.id, b.name, async () => {
-                        await supabase.from('bank_accounts').update({ is_active: false }).eq('id', b.id)
+                        await deactivateBankAccount(b.id)
                         setBankAccounts(prev => prev.filter((x: any) => x.id !== b.id))
                       })} className="p-2 rounded-lg hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400 transition-colors" title="Archive bank account">
                         <Archive className="w-3.5 h-3.5" />
@@ -1781,8 +1752,7 @@ export default function SettingsClient(props: Props) {
                               </button>
                               <button
                                 onClick={() => requestDelete('Category', c.id, c.name, async () => {
-                                  // Archive instead of hard-delete — past cashbook entries keep their category reference
-                                  await supabase.from('cashbook_categories').update({ is_active: false }).eq('id', c.id)
+                                  await deactivateCashbookCategory(c.id)
                                   setCategories((prev: any[]) => prev.filter((x: any) => x.id !== c.id))
                                 })}
                                 title="Archive category (past entries are preserved)"

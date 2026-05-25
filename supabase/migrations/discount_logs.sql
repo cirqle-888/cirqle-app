@@ -10,7 +10,7 @@
 
 CREATE TABLE IF NOT EXISTS discount_logs (
   id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  invoice_id          UUID REFERENCES invoices(id) ON DELETE SET NULL,
+  invoice_id          UUID UNIQUE REFERENCES invoices(id) ON DELETE SET NULL,
   client_id           UUID REFERENCES clients(id)  ON DELETE SET NULL,
   discount_amount     DECIMAL(12,2) DEFAULT 0,
   discount_percentage DECIMAL(7,4)  DEFAULT 0,

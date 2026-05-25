@@ -5,6 +5,10 @@ import dynamic from 'next/dynamic'
 import { useRouter } from 'next/navigation'
 import Header from '@/components/layout/header'
 import { createClient, safeFetchAll } from '@/lib/supabase/client'
+import {
+  bulkGeneratePayroll, createPayrollRecord, markPayrollPaid, markPayrollUnpaid,
+  toggleRevealSalary, createSalaryAdvance, createCreditEntry,
+} from './actions'
 import { formatCompact } from '@/lib/calculations/currency'
 import { usePrivacy } from '@/contexts/privacy-context'
 import {
@@ -26,6 +30,12 @@ const BulkGenerateModal = dynamic(
 const PayrollHistoryBar = dynamic(
   () => import('./_charts').then(m => m.PayrollHistoryBar),
   { ssr: false, loading: () => <div className="w-full h-full bg-secondary/30 rounded animate-pulse" /> },
+)
+
+// Activity timeline — lazy-loaded so it only fetches when the modal opens.
+const EmployeeActivityTimeline = dynamic(
+  () => import('./_activity-timeline').then(m => m.EmployeeActivityTimeline),
+  { ssr: false, loading: () => <div className="h-16 bg-secondary/30 rounded-xl animate-pulse" /> },
 )
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -50,11 +60,14 @@ interface PayrollRecord {
   employee_id: string
   month: number
   year: number
-  base_salary: number
-  commission_earned: number
-  advances_deducted: number
-  other_deductions: number
-  net_salary: number
+  // Monetary fields are stripped for viewers without `payroll.view_amounts`,
+  // so they're optional at the type level. Workflow fields (status, paid_date,
+  // employee join) remain available.
+  base_salary?: number
+  commission_earned?: number
+  advances_deducted?: number
+  other_deductions?: number
+  net_salary?: number
   status: string
   paid_date?: string
   employee?: { id: string; cqid: string; name?: string }
@@ -69,7 +82,8 @@ interface Props {
   contributionScores: {
     task_id: string | null
     employee_id: string
-    earnings_inr: number
+    /** Stripped from payload when viewer lacks `contributions.view_earnings`. */
+    earnings_inr?: number
     calculated_at: string
     task?: { id?: string; task_date: string; title?: string; status?: string } | null
   }[]
@@ -81,6 +95,14 @@ interface Props {
     client?: { name: string } | null
     service?: { name: string } | null
   }[]
+  /**
+   * True when the viewer holds `payroll.view_amounts`. When false, base_salary,
+   * commission_earned, net_salary, advance amounts, credit amounts, and
+   * deduction amounts are absent from the props (stripped server-side); the
+   * client uses this flag to suppress ₹ cards and totals so the UI doesn't
+   * render misleading "₹0" placeholders.
+   */
+  showAmounts: boolean
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -109,7 +131,12 @@ function daysUntil(date: Date): number {
 
 export default function PayrollClient({
   employees, payrollRecords, advances, credits, deductions, contributionScores, allTasks,
+  showAmounts,
 }: Props) {
+  // Suppress to '—' for fields that may have been stripped server-side. Math
+  // that uses these fields coalesces to 0 so calculations remain stable.
+  const amt = (n: number | undefined | null) => (showAmounts && n != null ? n : null)
+  void amt   // kept available for callers that prefer this over inline conditionals
   const now    = new Date()
   const router = useRouter()
   const { dn, isUnlocked } = usePrivacy()
@@ -318,10 +345,10 @@ export default function PayrollClient({
       employee_id: p.employee.id, month: viewMonth, year: viewYear,
       base_salary: p.base_salary, commission_earned: p.commission_earned,
       advances_deducted: p.advances_deducted, other_deductions: p.other_deductions,
-      net_salary: p.net_salary, status: 'pending',
+      net_salary: p.net_salary, status: 'pending' as const,
     }))
-    const { data, error } = await supabase.from('payroll').insert(records).select('*, employee:employees(id, cqid, name)')
-    if (!error && data) { setPayroll(p => [...data, ...p]); setGeneratePreview(null) }
+    const result = await bulkGeneratePayroll(records)
+    if (result.ok && result.data) { setPayroll(p => [...result.data!.rows, ...p]); setGeneratePreview(null) }
     setSaving(false)
   }
 
@@ -345,36 +372,24 @@ export default function PayrollClient({
 
   async function markPaid(id: string) {
     setConfirmModal(null)
-    const today  = new Date().toISOString().split('T')[0]
     const record = payroll.find(r => r.id === id)
     if (!record) return
-    // Always sync the latest commission from contribution_scores before marking paid
     const liveCommission = monthCommissions[record.employee_id] || 0
     const liveNet = Math.max(0, (record.base_salary || 0) + liveCommission - (record.advances_deducted || 0) - (record.other_deductions || 0))
     const finalNet = liveNet || record.net_salary || 0
-    const updates: any = { status: 'paid', paid_date: today }
-    if (liveCommission > 0) {
-      updates.commission_earned = liveCommission
-      updates.net_salary = finalNet
-    }
-    await supabase.from('payroll').update(updates).eq('id', id)
-    setPayroll(p => p.map(r => r.id === id ? { ...r, ...updates } : r))
-
-    // Auto-create a Cash Book outflow entry under "Salary" category
-    if (finalNet > 0) {
-      const emp       = empList.find(e => e.id === record.employee_id)
-      const monthName = MONTHS[record.month - 1]
-      await supabase.from('cashbook_entries').insert({
-        entry_date:   today,
-        type:         'outflow',
-        category_id:  '001480fa-6ea1-47e5-9461-aef7a914fac5', // Salary category
-        employee_id:  record.employee_id,
-        description:  `Salary — ${emp?.cqid || 'Employee'} — ${monthName} ${record.year}`,
-        amount:       finalNet,
-        amount_inr:   finalNet,
-        currency:     'INR',
-        reference:    `payroll:${id}`,
-      })
+    const emp = empList.find(e => e.id === record.employee_id)
+    const result = await markPayrollPaid({
+      id,
+      employeeId: record.employee_id,
+      employeeCqid: emp?.cqid || 'Employee',
+      month: record.month,
+      year: record.year,
+      finalNet,
+      liveCommission,
+      salaryCategory: '001480fa-6ea1-47e5-9461-aef7a914fac5',
+    })
+    if (result.ok && result.data) {
+      setPayroll(p => p.map(r => r.id === id ? { ...r, ...result.data!.updates } : r))
     }
   }
 
@@ -392,15 +407,17 @@ export default function PayrollClient({
 
   async function markUnpaid(id: string) {
     setConfirmModal(null)
-    await supabase.from('payroll').update({ status: 'pending', paid_date: null }).eq('id', id)
-    setPayroll(p => p.map(r => r.id === id ? { ...r, status: 'pending', paid_date: undefined } : r))
-    // Remove the matching cashbook entry (matched by reference)
-    await supabase.from('cashbook_entries').delete().eq('reference', `payroll:${id}`)
+    const result = await markPayrollUnpaid(id)
+    if (result.ok) {
+      setPayroll(p => p.map(r => r.id === id ? { ...r, status: 'pending', paid_date: undefined } : r))
+    }
   }
 
   async function toggleReveal(empId: string, current: boolean) {
-    await supabase.from('employees').update({ reveal_salary: !current }).eq('id', empId)
-    setEmpList(e => e.map(emp => emp.id === empId ? { ...emp, reveal_salary: !current } : emp))
+    const result = await toggleRevealSalary(empId, current)
+    if (result.ok) {
+      setEmpList(e => e.map(emp => emp.id === empId ? { ...emp, reveal_salary: !current } : emp))
+    }
   }
 
   // ── Exports ───────────────────────────────────────────────────────────────
@@ -457,10 +474,10 @@ export default function PayrollClient({
 <table><tr><th>Employee</th><th>CQID</th><th>Period</th></tr>
 <tr><td>${empName}</td><td>${emp?.cqid || '—'}</td><td>${mon} ${record.year}</td></tr></table>
 <table><tr><th>Component</th><th>Amount</th></tr>
-<tr><td>Base Salary</td><td>${inr(record.base_salary)}</td></tr>
-<tr class="green"><td>Commission Earned</td><td class="green">+ ${inr(record.commission_earned)}</td></tr>
+<tr><td>Base Salary</td><td>${inr(record.base_salary ?? 0)}</td></tr>
+<tr class="green"><td>Commission Earned</td><td class="green">+ ${inr(record.commission_earned ?? 0)}</td></tr>
 ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red">− ${inr(ded)}</td></tr>` : ''}
-<tr class="total"><td>Net Salary</td><td>${inr(record.net_salary)}</td></tr></table>
+<tr class="total"><td>Net Salary</td><td>${inr(record.net_salary ?? 0)}</td></tr></table>
 <div>${record.status === 'paid' ? `<span class="stamp">✓ Paid — ${record.paid_date || ''}</span>` : `<span class="stamp pending">Pending</span>`}</div>
 <p style="margin-top:32px;font-size:11px;color:#999">Generated by Cirqle ERP on ${new Date().toLocaleDateString('en-GB')}</p>
 <script>window.print()</script></body></html>`
@@ -492,37 +509,37 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
 
   async function savePayroll(e: React.FormEvent) {
     e.preventDefault(); setSaving(true)
-    const { data, error } = await supabase.from('payroll').insert({
+    const result = await createPayrollRecord({
       employee_id: payForm.employee_id, month: payForm.month, year: payForm.year,
       base_salary: parseFloat(payForm.base_salary) || 0,
       commission_earned: parseFloat(payForm.commission_earned) || 0,
       advances_deducted: parseFloat(payForm.advances_deducted) || 0,
       other_deductions:  parseFloat(payForm.other_deductions) || 0,
-      net_salary: netSalary, status: 'pending',
-    }).select('*, employee:employees(id, cqid, name)').single()
-    if (!error && data) { setPayroll(p => [data, ...p]); setShowPayrollForm(false) }
+      net_salary: netSalary,
+    })
+    if (result.ok && result.data) { setPayroll(p => [result.data!.row, ...p]); setShowPayrollForm(false) }
     setSaving(false)
   }
 
   async function saveAdvance(e: React.FormEvent) {
     e.preventDefault(); setSaving(true)
-    const { data, error } = await supabase.from('salary_advances').insert({
+    const result = await createSalaryAdvance({
       employee_id: advForm.employee_id, amount: parseFloat(advForm.amount) || 0,
       advance_date: advForm.advance_date, reason: advForm.reason,
-      repayment_type: advForm.repayment_type, status: 'pending',
-    }).select('*, employee:employees(id, cqid)').single()
-    if (!error && data) { setAdvList((a: any[]) => [data, ...a]); setShowAdvanceForm(false) }
+      repayment_type: advForm.repayment_type,
+    })
+    if (result.ok && result.data) { setAdvList((a: any[]) => [result.data!.row, ...a]); setShowAdvanceForm(false) }
     setSaving(false)
   }
 
   async function saveCredit(e: React.FormEvent) {
     e.preventDefault(); setSaving(true)
-    const { data, error } = await supabase.from('credit_ledger').insert({
+    const result = await createCreditEntry({
       entity_type: creditForm.entity_type, entity_id: creditForm.entity_id,
       credit_type: creditForm.credit_type, amount: parseFloat(creditForm.amount) || 0,
       credit_date: creditForm.credit_date, notes: creditForm.notes,
-    }).select('*, employee:employees(id, cqid)').single()
-    if (!error && data) { setCreditList((c: any[]) => [data, ...c]); setShowCreditForm(false) }
+    })
+    if (result.ok && result.data) { setCreditList((c: any[]) => [result.data!.row, ...c]); setShowCreditForm(false) }
     setSaving(false)
   }
 
@@ -1409,6 +1426,11 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                     </div>
                   </div>
                 )}
+
+                {/* Activity timeline */}
+                <div className="bg-foreground/[0.02] border border-foreground/[0.06] rounded-xl p-4">
+                  <EmployeeActivityTimeline employeeId={emp.id} />
+                </div>
 
                 {/* Footer actions */}
                 <div className="flex gap-2 pt-2 border-t border-foreground/15">

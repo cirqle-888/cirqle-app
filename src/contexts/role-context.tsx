@@ -121,7 +121,7 @@ export function RoleProvider({ children, initialEmployee }: RoleProviderProps) {
   const preloaded = initialEmployee !== undefined
   const initRole: Role = initialEmployee
     ? (initialEmployee.isAdmin ? 'super_admin' : 'employee')
-    : 'super_admin'
+    : 'employee'
   const initEmp: Employee | null = initialEmployee ? serverToEmployee(initialEmployee) : null
 
   const [role, setRole] = useState<Role>(initRole)
@@ -138,7 +138,7 @@ export function RoleProvider({ children, initialEmployee }: RoleProviderProps) {
         const { data: { user } } = await supabase.auth.getUser()
 
         if (!user) {
-          setRole('super_admin')
+          setRole('employee')
           setLoading(false)
           return
         }
@@ -150,14 +150,14 @@ export function RoleProvider({ children, initialEmployee }: RoleProviderProps) {
           .maybeSingle()
 
         if (error || !emp) {
-          setRole('super_admin')
+          setRole('employee')
           setEmployee(null)
         } else {
-          setRole((emp.role as Role) || 'super_admin')
+          setRole((emp.role as Role) || 'employee')
           setEmployee(emp as Employee)
         }
       } catch {
-        setRole('super_admin')
+        setRole('employee')
       } finally {
         setLoading(false)
       }

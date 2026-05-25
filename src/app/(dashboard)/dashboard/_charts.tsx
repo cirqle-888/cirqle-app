@@ -60,11 +60,15 @@ export function JobsDoneBar({
 }
 
 // ── Employee contribution activity (employee dashboard) ────────────────────
+// Overlays tasks (purple bar) and creatives (teal bar) per period — see the
+// "Tasks vs. Creatives" distinction: tasks = jobs contributed to, creatives =
+// production output credited (qty × score% share).
 export function ContributionActivityBar({
   data,
 }: {
-  data: { period: string; count: number }[]
+  data: { period: string; count: number; creatives?: number }[]
 }) {
+  const hasCreatives = data.some(d => (d.creatives ?? 0) > 0)
   return (
     <ResponsiveContainer width="100%" height={240}>
       <BarChart data={data} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
@@ -75,9 +79,12 @@ export function ContributionActivityBar({
           contentStyle={{ background: '#1a1f2e', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, fontSize: 12 }}
           labelStyle={{ color: '#9ca3af', marginBottom: 4 }}
           cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-          formatter={val => [`${val} tasks`, 'Contributed to']}
+          formatter={(val, name) => [val, name === 'count' ? 'Tasks' : 'Creatives']}
         />
-        <Bar dataKey="count" fill="#a855f7" radius={[4, 4, 0, 0]} maxBarSize={40} />
+        <Bar dataKey="count"     fill="#a855f7" radius={[4, 4, 0, 0]} maxBarSize={28} name="Tasks" />
+        {hasCreatives && (
+          <Bar dataKey="creatives" fill="#14b8a6" radius={[4, 4, 0, 0]} maxBarSize={28} name="Creatives" />
+        )}
       </BarChart>
     </ResponsiveContainer>
   )

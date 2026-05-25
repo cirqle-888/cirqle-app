@@ -49,7 +49,7 @@ interface Props {
 // Module order — controls the section order in the right pane.
 const MODULE_ORDER = [
   'dashboard', 'tasks', 'contributions', 'employees',
-  'payroll', 'billing', 'cashbook', 'settings',
+  'payroll', 'billing', 'cashbook', 'reports', 'settings',
 ] as const
 
 const MODULE_LABELS: Record<string, string> = {
@@ -60,6 +60,7 @@ const MODULE_LABELS: Record<string, string> = {
   payroll:       'Payroll',
   billing:       'Billing',
   cashbook:      'Cashbook',
+  reports:       'Reports',
   settings:      'Settings',
 }
 
@@ -628,7 +629,12 @@ function NewDesignationModal({
               ))}
             </select>
             <p className="text-[11px] text-muted-foreground mt-1.5">
-              Tip: copy from “Employee” to get the standard view-only baseline.
+              Tip — pre-built role presets are available to copy from:
+              <br />• <b>Operations</b> — tasks + contributions, no ₹
+              <br />• <b>Accounts</b> — full finance access incl. amounts
+              <br />• <b>HR</b> — payroll workflow without salary figures
+              <br />• <b>Reviewer</b> — read-only across all modules
+              <br />• <b>Management</b> — sees everything, no settings access
             </p>
           </div>
 

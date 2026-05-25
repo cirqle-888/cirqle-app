@@ -17,6 +17,16 @@ import { getNextOccurrence, shouldGenerateNext } from '@/lib/utils/recurring'
 import { taskCode, taskCodeMatches, nextTaskNumber } from '@/lib/utils/task-code'
 import { seedFromTasks } from '@/lib/hooks/use-smart-sort'
 import { useRole } from '@/contexts/role-context'
+import { usePermissions } from '@/contexts/permission-context'
+import {
+  serverDeleteTask,
+  serverRestoreTask,
+  serverPermanentDeleteTask,
+  serverUpdateTaskStatus,
+  serverBulkUpdateStatus,
+  serverCancelTask,
+  logTaskCreated,
+} from './actions'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { formatTaskDate, fullTaskDate } from '@/lib/utils/format-date'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
@@ -157,6 +167,7 @@ const EMPTY_FORM = {
 
 export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, myTaskIds, visibilitySettings, permissionFlags }: Props) {
   const { role, employee: currentEmployee } = useRole()
+  const { can } = usePermissions()
   const { toasts, dismiss, success, error: toastError } = useToast()
   const { dn } = usePrivacy()
 
@@ -723,42 +734,50 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
 
   async function handleDelete(id: string) {
     setDeleting(true)
-    const deletedAt = new Date().toISOString()
-    await supabase.from('tasks').update({ deleted_at: deletedAt }).eq('id', id)
-    // Move from active list to trash
     const task = tasks.find(t => t.id === id)
-    if (task) setTrash(prev => [{ ...task, deleted_at: deletedAt }, ...prev])
-    setTasks(prev => prev.filter(t => t.id !== id))
+    const res  = await serverDeleteTask(id, task?.title ?? '')
+    if (res.ok && res.data) {
+      const deletedAt = res.data.deleted_at
+      if (task) setTrash(prev => [{ ...task, deleted_at: deletedAt }, ...prev])
+      setTasks(prev => prev.filter(t => t.id !== id))
+    }
     setDeleteConfirm(null)
     setEditTask(null)
     setDeleting(false)
   }
 
   async function handleRestore(id: string) {
-    await supabase.from('tasks').update({ deleted_at: null }).eq('id', id)
     const task = trash.find(t => t.id === id)
-    if (task) {
-      const { deleted_at, ...restored } = task
-      setTasks(prev => [restored as Task, ...prev])
+    const res  = await serverRestoreTask(id, task?.title ?? '')
+    if (res.ok) {
+      if (task) {
+        const { deleted_at, ...restored } = task
+        setTasks(prev => [restored as Task, ...prev])
+      }
+      setTrash(prev => prev.filter(t => t.id !== id))
     }
-    setTrash(prev => prev.filter(t => t.id !== id))
   }
 
   async function handlePermanentDelete(id: string) {
     setDeleting(true)
-    await supabase.from('tasks').delete().eq('id', id)
-    setTrash(prev => prev.filter(t => t.id !== id))
+    const task = trash.find(t => t.id === id)
+    const res  = await serverPermanentDeleteTask(id, task?.title ?? '')
+    if (res.ok) setTrash(prev => prev.filter(t => t.id !== id))
     setDeleteConfirm(null)
     setDeleting(false)
   }
 
   async function bulkUpdateStatus(status: string) {
     const ids = [...selectedTasks]
-    await Promise.all(ids.map(id => supabase.from('tasks').update({ status }).eq('id', id)))
-    setTasks(prev => prev.map(t => selectedTasks.has(t.id) ? { ...t, status } : t))
-    setSelectedTasks(new Set())
-    setBulkMode(false)
-    success(`${ids.length} task${ids.length !== 1 ? 's' : ''} updated to ${getStatusLabel(status)}`)
+    const res = await serverBulkUpdateStatus(ids, status)
+    if (res.ok) {
+      setTasks(prev => prev.map(t => selectedTasks.has(t.id) ? { ...t, status } : t))
+      setSelectedTasks(new Set())
+      setBulkMode(false)
+      success(`${ids.length} task${ids.length !== 1 ? 's' : ''} updated to ${getStatusLabel(status)}`)
+    } else {
+      toastError('Bulk update failed', res.error)
+    }
   }
 
   async function duplicateTask(task: Task) {
@@ -927,6 +946,9 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
     if (!error && data) {
       setTasks(prev => [data, ...prev])
 
+      // Log task created (fire-and-forget server action — doesn't block UI)
+      void logTaskCreated(data.id, data.title, data.task_number ?? null)
+
       // ── Auto-create contribution slots from the selected billable parameters ──
       // One-way sync: billing parameters → contribution rows. Each row inherits the value
       // entered at billing time. Employees fill in who did each part later; editing
@@ -990,8 +1012,9 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
       }
       return
     }
-    await supabase.from('tasks').update({ status }).eq('id', id)
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t))
+    const task = tasks.find(t => t.id === id)
+    const res  = await serverUpdateTaskStatus(id, task?.title ?? '', task?.status ?? '', status)
+    if (res.ok) setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t))
   }
 
   function openAssignModal(task: { id: string; task_number?: number | null; title: string; service_id?: string }) {
@@ -1110,39 +1133,26 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
     setCancelSaving(true)
     const lossAmt = parseFloat(cancelForm.loss_amount) || 0
 
-    // 1. Update task with cancellation metadata
-    await supabase.from('tasks').update({
-      status:               'cancelled',
-      cancelled_by:         cancelForm.cancelled_by,
-      cancellation_notes:   cancelForm.notes || null,
-      honor_contributions:  cancelForm.honor_contributions,
-      loss_amount:          lossAmt,
-      completion_pct:       cancelForm.completion_pct,
-    }).eq('id', cancelModal.id)
-
-    // 2. If NOT honoring contributions → remove contribution scores for this task
-    if (!cancelForm.honor_contributions) {
-      await supabase.from('contribution_scores').delete().eq('task_id', cancelModal.id)
+    // Delegate to server action (DB + log + cashbook entry in one place)
+    const res = await serverCancelTask({
+      taskId:             cancelModal.id,
+      taskTitle:          cancelModal.title,
+      cancelledBy:        cancelForm.cancelled_by,
+      notes:              cancelForm.notes || null,
+      honorContributions: cancelForm.honor_contributions,
+      lossAmount:         lossAmt,
+      completionPct:      cancelForm.completion_pct,
+      recordCashbook:     cancelForm.record_cashbook,
+      taskDate:           cancelModal.task_date,
+      clientName:         cancelModal.client?.name ?? null,
+    })
+    if (!res.ok) {
+      toastError('Cancel failed', res.error)
+      setCancelSaving(false)
+      return
     }
 
-    // 3. Optionally record as company loss in cashbook
-    if (cancelForm.record_cashbook && lossAmt > 0) {
-      const who = cancelForm.cancelled_by === 'client' ? 'Client cancellation'
-        : cancelForm.cancelled_by === 'no_show' ? 'No-show'
-        : 'Company decision'
-      const desc = `[JOB LOSS] ${cancelModal.title}` +
-        (cancelModal.client?.name ? ` — ${cancelModal.client.name}` : '') +
-        ` (${cancelForm.completion_pct}% done, ${who})` +
-        (cancelForm.notes ? ` — ${cancelForm.notes}` : '')
-      await supabase.from('cashbook_entries').insert({
-        type:        'outflow',
-        amount_inr:  lossAmt,
-        entry_date:  cancelModal.task_date,
-        description: desc,
-      })
-    }
-
-    // 4. Update local state
+    // Update local state
     setTasks(prev => prev.map(t => t.id === cancelModal.id ? {
       ...t,
       status:               'cancelled',
@@ -1349,17 +1359,19 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
               </button>
             ) : (
               <>
-                {/* Workload Report */}
-                <button
-                  onClick={() => setShowWorkload(true)}
-                  title="Workload Report"
-                  className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-2 bg-secondary hover:bg-secondary/80 transition-colors"
-                >
-                  <Users className="w-4 h-4 text-blue-400" />
-                  <span className="hidden sm:inline">Workload</span>
-                </button>
-                {/* Trash */}
-                {(() => {
+                {/* Workload Report — requires tasks.workload permission */}
+                {can('tasks.workload') && (
+                  <button
+                    onClick={() => setShowWorkload(true)}
+                    title="Workload Report"
+                    className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-2 bg-secondary hover:bg-secondary/80 transition-colors"
+                  >
+                    <Users className="w-4 h-4 text-blue-400" />
+                    <span className="hidden sm:inline">Workload</span>
+                  </button>
+                )}
+                {/* Trash — requires tasks.trash permission */}
+                {can('tasks.trash') && (() => {
                   // Use live DB count (covers all soft-deleted, not just last 45 days)
                   // Fall back to local list count while DB count is loading
                   const liveCount = trashDbCount ?? trash.length
@@ -1385,8 +1397,8 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                     </button>
                   )
                 })()}
-                {/* Add Task */}
-                {(role === 'super_admin' || role === 'accounts' || role === 'team_lead') && (
+                {/* Add Task — requires tasks.create permission */}
+                {can('tasks.create') && (
                   <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90 transition-opacity">
                     <Plus className="w-4 h-4" /> Add Task
                   </button>
@@ -2135,7 +2147,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                   </td>
                   <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                     <div className="flex items-center gap-1 lg:opacity-0 opacity-100 group-hover:opacity-100 transition-opacity">
-                      {(role === 'super_admin' || role === 'accounts' || role === 'team_lead') && (
+                      {can('tasks.assign') && (
                         <button
                           onClick={e => { e.stopPropagation(); openAssignModal(task) }}
                           title="Assign team"
@@ -2561,7 +2573,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                                   <p className="text-sm font-medium text-foreground leading-tight truncate">{task.title}</p>
                                   {section.paramName && <p className="text-[10px] text-purple-400 mt-0.5">{section.paramName}</p>}
                                 </div>
-                                {(role === 'super_admin' || role === 'accounts' || role === 'team_lead') && (
+                                {can('tasks.assign') && (
                                   <button
                                     onClick={e => { e.stopPropagation(); openAssignModal(task) }}
                                     title="Assign team"

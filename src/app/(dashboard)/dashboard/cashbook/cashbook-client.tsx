@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react'
 import dynamic from 'next/dynamic'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
+import { insertCashbookEntries, updateCashbookEntry, softDeleteCashbookEntry } from './actions'
 import { formatCompact } from '@/lib/calculations/currency'
 import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save } from 'lucide-react'
 import Combobox from '@/components/ui/combobox'
@@ -193,42 +194,31 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       invoice_id: form.linked_invoice_id || null, // Storing strict database link
     }))
 
-    const { data, error } = await supabase
-      .from('cashbook_entries')
-      .insert(payload)
-      .select(`*, category:cashbook_categories(id, name, type), bank_account:bank_accounts(id, name), allocations:cashbook_allocations(id, invoice_id, allocated_amount, deleted_at, invoice:invoices(invoice_number, status, due_date, total_amount, paid_amount, client:clients(name))), payroll_allocations:payroll_allocations(id, payroll_id, allocated_amount, deleted_at, payroll:payrolls(net_salary, status, employee:employees(name, cqid)))`)
+    const result = await insertCashbookEntries(
+      baseDates,
+      {
+        type: form.type,
+        category_id: form.category_id,
+        bank_account_id: form.bank_account_id || null,
+        amount,
+        currency: form.currency,
+        amount_inr: amountInr,
+        description: form.description,
+        reference: form.reference,
+        invoice_id: form.linked_invoice_id || null,
+      },
+      form.description,
+      {
+        mode: (smartMode as 'credit_given' | 'credit_return' | null),
+        entity_type: smartExtra.entity_type,
+        entity_id: smartExtra.entity_id || null,
+        entity_other: smartExtra.entity_other,
+        credit_id: smartExtra.credit_id,
+      },
+    )
 
-    // Use first entry as "data" for legacy code below, all entries for list update
-    const firstEntry = Array.isArray(data) ? data[0] : data
-    const allInserted = Array.isArray(data) ? data : data ? [data] : []
-
-    if (!error && firstEntry) {
-      // Smart side-effects only run on base (first) entry
-      if (smartMode === 'credit_given' && (smartExtra.entity_id || smartExtra.entity_other)) {
-        await supabase.from('credit_ledger').insert({
-          entity_type: smartExtra.entity_type || 'employee',
-          entity_id: smartExtra.entity_id || null,
-          credit_type: 'given',
-          amount: parseFloat(form.amount) || 0,
-          credit_date: form.entry_date,
-          bank_account_id: form.bank_account_id || null,
-          notes: smartExtra.entity_other
-            ? `${form.description || ''}${smartExtra.entity_other ? ` (${smartExtra.entity_other})` : ''}`.trim()
-            : form.description || null,
-        })
-      }
-      if (smartMode === 'credit_return' && smartExtra.credit_id) {
-        await supabase.from('credit_ledger').insert({
-          entity_type: smartExtra.entity_type || 'employee',
-          entity_id: smartExtra.entity_id || null,
-          credit_type: 'returned',
-          amount: parseFloat(form.amount) || 0,
-          credit_date: form.entry_date,
-          bank_account_id: form.bank_account_id || null,
-          notes: form.description || null,
-        })
-      }
-
+    if (result.ok && result.data) {
+      const allInserted = result.data.entries
       // Add all inserted entries to local state (sorted newest first)
       setEntries(prev => [...[...allInserted].reverse(), ...prev])
       setShowForm(false)
@@ -241,22 +231,19 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   async function handleInlineSave() {
     if (!editingRow) return
     setSaving(true)
-    const { error } = await supabase
-      .from('cashbook_entries')
-      .update({
-        entry_date: editForm.entry_date,
-        amount: editForm.amount,
-        amount_inr: getInrAmount(Number(editForm.amount) || 0, editForm.currency as Currency),
-        currency: editForm.currency,
-        category_id: editForm.category_id,
-        bank_account_id: editForm.bank_account_id || null,
-        description: editForm.description,
-        reference: editForm.reference,
-      })
-      .eq('id', editingRow)
-
-    if (!error) {
-      setEntries(prev => prev.map(e => e.id === editingRow ? { ...e, ...editForm, amount_inr: getInrAmount(Number(editForm.amount) || 0, editForm.currency as Currency) } : e))
+    const amount_inr = getInrAmount(Number(editForm.amount) || 0, (editForm.currency ?? 'INR') as Currency)
+    const result = await updateCashbookEntry(editingRow, {
+      entry_date: editForm.entry_date ?? new Date().toISOString().split('T')[0],
+      amount: editForm.amount ?? 0,
+      amount_inr,
+      currency: editForm.currency ?? 'INR',
+      category_id: editForm.category_id,
+      bank_account_id: editForm.bank_account_id || null,
+      description: editForm.description ?? '',
+      reference: editForm.reference ?? '',
+    })
+    if (result.ok) {
+      setEntries(prev => prev.map(e => e.id === editingRow ? { ...e, ...editForm, amount_inr } : e))
       setEditingRow(null)
     }
     setSaving(false)
@@ -264,11 +251,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
 
   async function handleSoftDelete(entryId: string) {
     if (!confirm('Delete this entry? It can be restored from the Reconciliation Toolkit.')) return
-    const { error } = await supabase
-      .from('cashbook_entries')
-      .update({ deleted_at: new Date().toISOString() })
-      .eq('id', entryId)
-    if (!error) {
+    const result = await softDeleteCashbookEntry(entryId)
+    if (result.ok) {
       // Remove from local list immediately (soft-deleted entries are hidden)
       setEntries(prev => prev.filter(e => e.id !== entryId))
     }
@@ -494,8 +478,14 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                         </div>
                       ) : (
                         <>
-                          {entry.type === 'inflow' ? '+' : '-'}₹{(entry.amount_inr || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          {entry.currency !== 'INR' && <span className="text-xs text-muted-foreground ml-1">({entry.currency} {entry.amount?.toLocaleString()})</span>}
+                          {showAmounts ? (
+                            <>
+                              {entry.type === 'inflow' ? '+' : '-'}₹{(entry.amount_inr ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                              {entry.currency !== 'INR' && <span className="text-xs text-muted-foreground ml-1">({entry.currency} {entry.amount?.toLocaleString()})</span>}
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground/50">—</span>
+                          )}
                         </>
                       )}
                     </div>
@@ -668,8 +658,14 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                         </div>
                       ) : (
                         <>
-                          {entry.type === 'inflow' ? '+' : '-'}₹{(entry.amount_inr || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          {entry.currency !== 'INR' && <span className="text-xs text-muted-foreground ml-1">({entry.currency} {entry.amount?.toLocaleString()})</span>}
+                          {showAmounts ? (
+                            <>
+                              {entry.type === 'inflow' ? '+' : '-'}₹{(entry.amount_inr ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                              {entry.currency !== 'INR' && <span className="text-xs text-muted-foreground ml-1">({entry.currency} {entry.amount?.toLocaleString()})</span>}
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground/50">—</span>
+                          )}
                         </>
                       )}
                     </td>

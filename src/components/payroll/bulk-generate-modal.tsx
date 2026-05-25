@@ -76,7 +76,7 @@ function monthLabel(year: number, month: number) {
 interface Props {
   employees: Employee[]
   existingPayroll: ExistingPayroll[]
-  contributionScores: { employee_id: string; earnings_inr: number; task?: { task_date?: string } | null; calculated_at?: string }[]
+  contributionScores: { employee_id: string; earnings_inr?: number; task?: { task_date?: string } | null; calculated_at?: string }[]
   allTasks: { id: string; task_date?: string; status?: string }[]
   onClose: () => void
   onGenerated: (records: any[]) => void

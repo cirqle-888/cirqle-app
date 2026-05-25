@@ -47,6 +47,7 @@ interface Props {
   allCashbook: any[]; displayTasks: any[]; allAnalyticsTasks: any[]
   todayTasks: any[]; unscoredDoneTasks: any[]; activeTasks: any[]; toBeInvoiced: any[]
   employees: any[]; scores: any[]; payrollRecords: any[]
+  pendingContribCount?: number
   todayStr: string
   isAdmin?: boolean
 }
@@ -224,7 +225,8 @@ function Drawer({ type, onClose, todayTasks, unscoredDoneTasks, overdueInvoices,
 export default function DashboardClient({
   stats, invoices, overdueInvoices, dueInvoices, allCashbook,
   displayTasks, allAnalyticsTasks, todayTasks, unscoredDoneTasks,
-  activeTasks, toBeInvoiced, employees, scores, payrollRecords, todayStr, isAdmin = true
+  activeTasks, toBeInvoiced, employees, scores, payrollRecords,
+  pendingContribCount = 0, todayStr, isAdmin = true
 }: Props) {
   const { dn } = usePrivacy()
   const [dateFilter, setDateFilter] = useState<DateFilterValue>(null)
@@ -234,10 +236,11 @@ export default function DashboardClient({
 
   if (!isAdmin) {
     return (
-      <EmployeeDashboard 
-        todayStr={todayStr} 
-        scores={scores} 
-        payrollRecords={payrollRecords} 
+      <EmployeeDashboard
+        todayStr={todayStr}
+        scores={scores}
+        payrollRecords={payrollRecords}
+        pendingContribCount={pendingContribCount}
       />
     )
   }
@@ -476,14 +479,57 @@ export default function DashboardClient({
   }, [allAnalyticsTasks, payrollRecords, allCashbook])
 
   // ── Team earnings for period ───────────────────────────────────────────────
-  const teamEarnings = useMemo(() => employees.map(emp => {
-    const empScores = scores.filter(s => {
-      if (s.employee_id !== emp.id) return false
-      const taskDate = s.task?.task_date || s.calculated_at?.slice(0,10) || ''
-      return dateFilter ? matchesDateFilter(taskDate, dateFilter) : true
+  // Dedup first: scores are ordered calculated_at DESC by the server, so the
+  // first row seen per (employee_id, task.id) pair is the most recent
+  // calculation. We never fall back to calculated_at as a date — if task_date
+  // is absent the row is excluded to prevent recalculation history leakage.
+  const teamEarnings = useMemo(() => {
+    // Build per-employee maps: task.id → score row (newest calculation wins)
+    const byEmp = new Map<string, Map<string, typeof scores[0]>>()
+    for (const s of scores) {
+      const tid = s.task?.id
+      if (!tid) continue                                // !inner guarantees present; belt-and-suspenders
+      const empMap = byEmp.get(s.employee_id) ?? new Map<string, typeof scores[0]>()
+      if (!empMap.has(tid)) empMap.set(tid, s)         // first = newest
+      byEmp.set(s.employee_id, empMap)
+    }
+    return employees.map(emp => {
+      const all = [...(byEmp.get(emp.id)?.values() ?? [])]
+      const filtered = dateFilter
+        ? all.filter(s => {
+            const d = s.task?.task_date ?? ''
+            return d && matchesDateFilter(d, dateFilter) // task_date ONLY — never calculated_at
+          })
+        : all
+      // Creatives credited = Σ (task.quantity × score_percentage / 100).
+      // Mirrors how earnings are split — same source-of-truth score% from
+      // commission.ts, inherits all group/parameter/tool weighting automatically.
+      const creatives = filtered.reduce((acc, e) => {
+        const qty   = Number(e.task?.quantity ?? 1)
+        const share = (e.score_percentage ?? 0) / 100
+        return acc + qty * share
+      }, 0)
+      return {
+        ...emp,
+        earnings:  filtered.reduce((acc, e) => acc + (e.earnings_inr  || 0), 0),
+        taskCount: filtered.length,
+        creatives,
+      }
     })
-    return { ...emp, earnings: empScores.reduce((s, e) => s + (e.earnings_inr||0), 0), taskCount: empScores.length }
-  }), [employees, scores, dateFilter])
+  }, [employees, scores, dateFilter])
+
+  // ── Admin production totals (per-period across the whole company) ──────────
+  // Counts every task once (no dedup needed — analytics tasks query is canonical)
+  // and sums their quantity. Independent of contribution scores: this is studio
+  // output, not employee credit.
+  const productionTotals = useMemo(() => {
+    const src = dateFilter
+      ? allAnalyticsTasks.filter(t => matchesDateFilter(t.task_date, dateFilter))
+      : allAnalyticsTasks
+    let creatives = 0
+    for (const t of src) creatives += Number(t.quantity ?? 1)
+    return { tasks: src.length, creatives }
+  }, [allAnalyticsTasks, dateFilter])
 
   const urgentCount = unscoredDoneTasks.length + overdueInvoices.length
 
@@ -586,6 +632,16 @@ export default function DashboardClient({
           <KpiCard label="Outstanding"     value={fmt(stats.outstanding)}        icon={<Clock className="w-3.5 h-3.5"/>}       color={stats.outstanding > 0 ? 'orange' : 'green'} trend={stats.outstanding > 0 ? { pct: null } : null} />
           <KpiCard label="Overdue"         value={fmt(stats.overdueAmount)}      icon={<AlertTriangle className="w-3.5 h-3.5"/>} color="red"    badge={stats.overdueCount} trend={stats.overdueCount > 0 ? { pct: null, invert: true } : null} clickable onClick={() => setDrawer('overdue')} />
           <KpiCard label="To Be Invoiced"  value={fmt(stats.toBeInvoicedAmount)} icon={<FileText className="w-3.5 h-3.5"/>}  color="yellow" badge={stats.toBeInvoicedCount} clickable onClick={() => setDrawer('toBeInvoiced')} />
+        </div>
+
+        {/* ── Production Output ─────────────────────────── */}
+        {/* Distinct from financial KPIs — measures studio output (volume), not money. */}
+        {/* Tasks = job count. Creatives = sum of task.quantity (pages/posts produced). */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <KpiCard label="Tasks"      value={productionTotals.tasks.toLocaleString('en-IN')}                                              icon={<ClipboardList className="w-3.5 h-3.5"/>} color="purple" sub="in period" />
+          <KpiCard label="Creatives"  value={productionTotals.creatives.toLocaleString('en-IN', { maximumFractionDigits: 0 })}            icon={<BarChart3 className="w-3.5 h-3.5"/>}      color="teal"   sub="pages/posts produced" />
+          <KpiCard label="Avg/Task"   value={productionTotals.tasks > 0 ? (productionTotals.creatives/productionTotals.tasks).toFixed(1) : '—'} icon={<BarChart2 className="w-3.5 h-3.5"/>}     color="orange" sub="creatives per task" />
+          <KpiCard label="Per Day"    value={productionTotals.tasks > 0 ? (productionTotals.creatives / Math.max(1, Math.ceil((dateFilter ? 30 : 365) * (productionTotals.tasks > 0 ? 1 : 0)))).toFixed(1) : '—'} icon={<TrendingUp className="w-3.5 h-3.5"/>} color="green" sub={dateFilter ? '~per day in window' : '~per day this year'} />
         </div>
 
         {/* ── Business Pulse tabs ───────────────────────── */}
@@ -885,6 +941,11 @@ export default function DashboardClient({
                           <p className={`text-[11px] font-semibold leading-tight ${emp.earnings > 0 ? 'text-green-400' : 'text-muted-foreground'}`}>
                             {emp.earnings > 0 ? fmt(emp.earnings) : emp.taskCount > 0 ? `${emp.taskCount} tasks` : 'No data'}
                           </p>
+                          {emp.taskCount > 0 && (
+                            <p className="text-[10px] text-muted-foreground/70 leading-tight mt-0.5">
+                              {emp.taskCount} task{emp.taskCount === 1 ? '' : 's'} · {emp.creatives.toLocaleString('en-IN', { maximumFractionDigits: 1 })} creative{emp.creatives === 1 ? '' : 's'}
+                            </p>
+                          )}
                         </div>
                       </div>
                     )
@@ -1109,110 +1170,252 @@ function RankTable({ title, icon, rows }: { title: string; icon: React.ReactNode
 // ─────────────────────────────────────────────────────────────────────────────
 // Employee Dashboard (Restricted View)
 // ─────────────────────────────────────────────────────────────────────────────
-function EmployeeDashboard({ todayStr, scores, payrollRecords: _payrollRecords }: { todayStr: string; scores: any[]; payrollRecords: any[] }) {
-  // payrollRecords intentionally unused — the employee dashboard no longer
-  // surfaces monetary credit info. All KPIs are count-based per privacy req.
-  const [dateFilter, setDateFilter] = useState<DateFilterValue>(null)
+
+const SCORE_BANDS = [
+  { label: '100%',   min: 100, max: 100, color: 'text-emerald-400', bg: 'bg-emerald-400' },
+  { label: '76-99%', min: 76,  max: 99,  color: 'text-blue-400',    bg: 'bg-blue-400' },
+  { label: '51-75%', min: 51,  max: 75,  color: 'text-purple-400',  bg: 'bg-purple-400' },
+  { label: '26-50%', min: 26,  max: 50,  color: 'text-amber-400',   bg: 'bg-amber-400' },
+  { label: '0-25%',  min: 0,   max: 25,  color: 'text-rose-400',    bg: 'bg-rose-400' },
+] as const
+
+const PAGE_SIZE = 25
+
+function getPeriodKey(dateStr: string, g: Granularity): string {
+  if (!dateStr) return ''
+  const d = new Date(dateStr + 'T12:00:00')
+  if (g === 'daily')     return dateStr
+  if (g === 'monthly')   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+  if (g === 'quarterly') { const q = Math.ceil((d.getMonth()+1)/3); return `${d.getFullYear()}-Q${q}` }
+  return `${d.getFullYear()}`
+}
+function getPeriodLabel(key: string, g: Granularity): string {
+  if (g === 'daily')   return key ? fmtDate(key) : key
+  if (g === 'monthly') { const [y,m] = key.split('-'); return `${MONTH_NAMES[parseInt(m)-1]} ${y?.slice(2)}` }
+  return key
+}
+
+function statusBadgeClass(status: string) {
+  switch (status) {
+    case 'done':      return 'bg-emerald-500/15 text-emerald-400'
+    case 'delivered': return 'bg-blue-500/15 text-blue-400'
+    case 'invoiced':  return 'bg-purple-500/15 text-purple-400'
+    case 'paid':      return 'bg-green-500/15 text-green-400'
+    case 'cancelled': return 'bg-rose-500/15 text-rose-400'
+    default:          return 'bg-secondary text-muted-foreground'
+  }
+}
+
+function EmployeeDashboard({
+  todayStr, scores, payrollRecords: _payrollRecords, pendingContribCount = 0,
+}: {
+  todayStr: string; scores: any[]; payrollRecords: any[]; pendingContribCount?: number
+}) {
+  // ── Analytics filter state (controls KPI cards + breakdown + chart) ────────
+  const [dateFilter, setDateFilter]   = useState<DateFilterValue>(null)
   const [granularity, setGranularity] = useState<Granularity>('monthly')
 
-  const today = new Date(todayStr + 'T12:00:00')
+  // ── Recent contributions filter state (independent of analytics filter) ────
+  const [histSearch,    setHistSearch]    = useState('')
+  const [histStatus,    setHistStatus]    = useState('all')
+  const [histBand,      setHistBand]      = useState('all')
+  const [histPage,      setHistPage]      = useState(1)
+  const [histExpanded,  setHistExpanded]  = useState(false)
+
+  const today     = new Date(todayStr + 'T12:00:00')
   const todayLabel = today.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 
-  // Count-only stats. Money fields like earnings_inr stay server-side; we never
-  // surface them to the employee dashboard.
-  // - myContributions: total contribution_scores rows belonging to this employee
-  // - avgScore: mean score_percentage across those rows (an attribution metric,
-  //   not money — safe to show)
-  const myContributions = scores.length
-  const avgScore = scores.length > 0
-    ? Math.round(scores.reduce((sum, s) => sum + (s.score_percentage ?? 0), 0) / scores.length)
-    : 0
-
-  // Filter scores by date (used for both the activity chart and the band breakdown).
-  const filteredScores = useMemo(() => {
-    if (!dateFilter) return scores
+  // ── STEP 1: Deduplicate by task.id ─────────────────────────────────────────
+  //
+  // Server uses `!inner` join on tasks, so every row has task.id set.
+  // Rows with NULL task_id (orphaned imports) are excluded automatically
+  // by the inner join — they never reach the client.
+  //
+  // Server returns ordered by calculated_at DESC, so the first occurrence
+  // of each task.id is the MOST RECENT calculation — the correct score.
+  //
+  // This is O(n) using a Set — safe for 50K+ rows.
+  const dedupedScores = useMemo(() => {
+    const seen = new Set<string>()
     return scores.filter(s => {
-      const d = s.task?.task_date || s.calculated_at?.slice(0, 10) || ''
+      const tid = s.task?.id  // guaranteed non-null with !inner join
+      if (!tid || seen.has(tid)) return false
+      seen.add(tid)
+      return true
+    })
+  }, [scores])
+
+  // ── STEP 2: Sort by real task_date descending ──────────────────────────────
+  // All downstream consumers need newest-first order by actual work date.
+  const sortedByDate = useMemo(() =>
+    [...dedupedScores].sort((a, b) =>
+      (b.task?.task_date ?? '').localeCompare(a.task?.task_date ?? '')
+    ),
+  [dedupedScores])
+
+  // ── STEP 3: Filter by REAL task_date only — never fall back to calculated_at
+  //
+  // This is the critical fix for the 2023 phantom data:
+  // - calculated_at is when the score was COMPUTED, not when the task was done
+  // - A 2025 recalculation of a 2023 task has calculated_at in 2025 but
+  //   task_date in 2023. With !inner join, task_date is always present.
+  // - If task_date is somehow missing, the row is excluded rather than
+  //   fallback to calculated_at (which would pull in wrong historical dates)
+  const filteredScores = useMemo(() => {
+    if (!dateFilter) return sortedByDate
+    return sortedByDate.filter(s => {
+      const d = s.task?.task_date ?? ''
+      if (!d) return false           // exclude if no date — never use calculated_at
       return matchesDateFilter(d, dateFilter)
     })
-  }, [scores, dateFilter])
+  }, [sortedByDate, dateFilter])
 
-  // Contribution Range Breakdown — per-band task counts, NO money columns.
-  // Mirrors the Reports band view but strips earnings/company splits.
+  // ── KPI numbers (from filteredScores) ─────────────────────────────────────
+  // My Contributions = unique tasks touched
+  // My Creatives     = production output credited to me, computed as
+  //                    Σ (task.quantity × score_percentage / 100). The score
+  //                    already incorporates all group/parameter/tool weighting
+  //                    from commission.ts, so this attribution is consistent
+  //                    with how earnings are split.
+  // Avg Creatives/Task = production density (>1 means catalogs/multi-page jobs)
+  const myContributions = filteredScores.length
+  const myCreatives = useMemo(() => {
+    let total = 0
+    for (const s of filteredScores) {
+      const qty   = Number(s.task?.quantity ?? 1)
+      const share = (s.score_percentage ?? 0) / 100
+      total += qty * share
+    }
+    return total
+  }, [filteredScores])
+  const avgScore = filteredScores.length > 0
+    ? Math.round(
+        filteredScores.reduce((s, r) => s + (r.score_percentage ?? 0), 0) / filteredScores.length
+      )
+    : 0
+  const avgCreativesPerTask = myContributions > 0 ? myCreatives / myContributions : 0
+
+  // ── Band breakdown ─────────────────────────────────────────────────────────
+  // Single-pass O(n) — one reduce instead of 5 separate .filter() calls
   const bandBreakdown = useMemo(() => {
-    const bands: { label: string; min: number; max: number; color: string }[] = [
-      { label: '100%',   min: 100, max: 100, color: 'text-emerald-400' },
-      { label: '76-99%', min: 76,  max: 99,  color: 'text-blue-400' },
-      { label: '51-75%', min: 51,  max: 75,  color: 'text-purple-400' },
-      { label: '26-50%', min: 26,  max: 50,  color: 'text-amber-400' },
-      { label: '0-25%',  min: 0,   max: 25,  color: 'text-rose-400' },
-    ]
-    const counts = bands.map(b => ({
-      ...b,
-      tasks: filteredScores.filter(s => (s.score_percentage ?? 0) >= b.min && (s.score_percentage ?? 0) <= b.max).length,
-    }))
-    const total = counts.reduce((sum, b) => sum + b.tasks, 0)
-    return { bands: counts, total }
+    const counts = SCORE_BANDS.map(b => ({ ...b, tasks: 0 }))
+    for (const s of filteredScores) {
+      const pct = s.score_percentage ?? 0
+      for (const b of counts) {
+        if (pct >= b.min && pct <= b.max) { b.tasks++; break }
+      }
+    }
+    return { bands: counts, total: filteredScores.length }
   }, [filteredScores])
 
-  // Contribution Range Breakdown (Counts only)
-  function getPeriodKey(dateStr: string, g: Granularity): string {
-    if (!dateStr) return ''
-    const d = new Date(dateStr + 'T12:00:00')
-    if (g === 'daily')     return dateStr
-    if (g === 'monthly')   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
-    if (g === 'quarterly') { const q = Math.ceil((d.getMonth()+1)/3); return `${d.getFullYear()}-Q${q}` }
-    return `${d.getFullYear()}`
-  }
-  function getPeriodLabel(key: string, g: Granularity): string {
-    if (g === 'daily')   return key ? fmtDate(key) : key
-    if (g === 'monthly') { const [y,m] = key.split('-'); return `${MONTH_NAMES[parseInt(m)-1]} ${y?.slice(2)}` }
-    return key
-  }
-
+  // ── Activity chart data ────────────────────────────────────────────────────
+  // Bucketed by task_date (real work date), capped to last 24 periods.
+  // Tracks both tasks (count of contributions) and creatives (qty × score%)
+  // so the chart can overlay production density over time.
   const trendData = useMemo(() => {
-    const map: Record<string, number> = {}
-    filteredScores.forEach(s => {
-      const d = s.task?.task_date || s.calculated_at?.slice(0,10) || ''
+    const map: Record<string, { count: number; creatives: number }> = {}
+    for (const s of filteredScores) {
+      const d = s.task?.task_date ?? ''
       const k = getPeriodKey(d, granularity)
-      if (!k) return
-      map[k] = (map[k] || 0) + 1
-    })
-
+      if (!k) continue
+      if (!map[k]) map[k] = { count: 0, creatives: 0 }
+      map[k].count += 1
+      const qty   = Number(s.task?.quantity ?? 1)
+      const share = (s.score_percentage ?? 0) / 100
+      map[k].creatives += qty * share
+    }
     return Object.entries(map)
-      .sort(([a],[b]) => a.localeCompare(b))
-      .map(([k, count]) => ({
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => ({
         period: getPeriodLabel(k, granularity),
-        count,
+        count: v.count,
+        creatives: Math.round(v.creatives * 10) / 10,   // 1 decimal
       }))
       .slice(-24)
   }, [filteredScores, granularity])
+
+  // ── Recent contributions list (independent filter state) ──────────────────
+  // Uses sortedByDate (all deduped scores, not analytics-date-filtered) so
+  // the user can browse full history while the analytics section is filtered.
+  const histFiltered = useMemo(() => {
+    const q = histSearch.trim().toLowerCase()
+    return sortedByDate.filter(s => {
+      const t = s.task
+      if (!t) return false
+      // Status
+      if (histStatus !== 'all' && t.status !== histStatus) return false
+      // Score band
+      if (histBand !== 'all') {
+        const band = SCORE_BANDS.find(b => b.label === histBand)
+        if (band) {
+          const pct = s.score_percentage ?? 0
+          if (pct < band.min || pct > band.max) return false
+        }
+      }
+      // Search: task_number or title (case-insensitive)
+      if (q) {
+        const num  = String(t.task_number ?? '').toLowerCase()
+        const title = (t.title ?? '').toLowerCase()
+        const client = (t.client?.name ?? '').toLowerCase()
+        const svc   = (t.service?.name ?? '').toLowerCase()
+        if (!num.includes(q) && !title.includes(q) && !client.includes(q) && !svc.includes(q)) return false
+      }
+      return true
+    })
+  }, [sortedByDate, histStatus, histBand, histSearch])
+
+  // Reset page when filters change
+  const resetPage = () => setHistPage(1)
+
+  const histPageCount = Math.max(1, Math.ceil(histFiltered.length / PAGE_SIZE))
+  const histPage1     = Math.min(histPage, histPageCount)
+  const histVisible   = histFiltered.slice((histPage1 - 1) * PAGE_SIZE, histPage1 * PAGE_SIZE)
+
+  // Unique clients + services for filter labels (computed once from all deduped scores)
+  const { uniqueStatuses, uniqueClients, uniqueServices } = useMemo(() => {
+    const statuses = new Set<string>()
+    const clients  = new Set<string>()
+    const services = new Set<string>()
+    for (const s of sortedByDate) {
+      if (s.task?.status)         statuses.add(s.task.status)
+      if (s.task?.client?.name)   clients.add(s.task.client.name)
+      if (s.task?.service?.name)  services.add(s.task.service.name)
+    }
+    return {
+      uniqueStatuses: [...statuses].sort(),
+      uniqueClients:  [...clients].sort(),
+      uniqueServices: [...services].sort(),
+    }
+  }, [sortedByDate])
 
   return (
     <div>
       <Header title="My Workspace" subtitle={todayLabel} />
       <div className="p-4 md:p-6 space-y-6">
-        
-        {/* KPI Cards — counts only, no monetary fields */}
-        <div className="grid grid-cols-2 md:grid-cols-2 gap-3">
-          <div className="bg-card border border-border rounded-xl p-4 flex flex-col justify-between hover:border-purple-500/30 transition-colors">
-            <p className="text-[11px] text-muted-foreground font-medium">My Contributions</p>
-            <p className="text-xl font-bold text-foreground mt-2">{myContributions}</p>
-            <p className="text-[10px] text-muted-foreground/70 mt-0.5">tasks you've contributed on</p>
-          </div>
-          <div className="bg-card border border-border rounded-xl p-4 flex flex-col justify-between hover:border-orange-500/30 transition-colors">
-            <p className="text-[11px] text-muted-foreground font-medium">Avg Score</p>
-            <p className="text-xl font-bold text-foreground mt-2">{avgScore}%</p>
-            <p className="text-[10px] text-muted-foreground/70 mt-0.5">mean contribution percentage</p>
-          </div>
-        </div>
 
-        {/* Filters */}
+        {/* ── Pending-contributions nudge ──────────────────────────────────── */}
+        {pendingContribCount > 0 && (
+          <Link
+            href="/dashboard/contributions"
+            className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 hover:bg-amber-500/15 transition-colors group"
+          >
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-amber-300">
+                {pendingContribCount} task{pendingContribCount !== 1 ? 's' : ''} awaiting your contribution
+              </p>
+              <p className="text-[11px] text-amber-400/70 mt-0.5">Tap to open Contributions and log your work</p>
+            </div>
+            <ChevronRight className="w-4 h-4 text-amber-400/60 shrink-0 group-hover:translate-x-0.5 transition-transform" />
+          </Link>
+        )}
+
+        {/* ── Analytics filters (control KPI + breakdown + chart) ───────────── */}
         <div className="flex items-center gap-2 flex-wrap bg-secondary/30 p-2 rounded-xl">
-          <DateFilter value={dateFilter} onChange={setDateFilter} />
+          <DateFilter value={dateFilter} onChange={v => { setDateFilter(v) }} />
           {dateFilter && (
             <button onClick={() => setDateFilter(null)} className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded-md hover:bg-secondary transition-colors">
-              <X className="w-3 h-3 inline mr-1" /> Clear
+              <X className="w-3 h-3 inline mr-1" />Clear
             </button>
           )}
           <div className="h-4 w-px bg-border mx-1" />
@@ -1226,17 +1429,53 @@ function EmployeeDashboard({ todayStr, scores, payrollRecords: _payrollRecords }
           </div>
         </div>
 
-        {/* Contribution Range Breakdown — task counts per contribution band.
-            Money columns intentionally omitted; this is the count-only mirror
-            of the Reports breakdown. */}
+        {/* ── KPI cards ─────────────────────────────────────────────────────── */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="bg-card border border-border rounded-xl p-4 flex flex-col justify-between hover:border-purple-500/30 transition-colors">
+            <p className="text-[11px] text-muted-foreground font-medium">My Contributions</p>
+            <p className="text-xl font-bold text-foreground mt-2">{myContributions}</p>
+            <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+              {dateFilter ? 'tasks in selected period' : 'unique tasks contributed on'}
+            </p>
+          </div>
+          <div className="bg-card border border-border rounded-xl p-4 flex flex-col justify-between hover:border-emerald-500/30 transition-colors">
+            <p className="text-[11px] text-muted-foreground font-medium">My Creatives</p>
+            <p className="text-xl font-bold text-foreground mt-2">
+              {myCreatives > 0 ? myCreatives.toLocaleString('en-IN', { maximumFractionDigits: 1 }) : '—'}
+            </p>
+            <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+              attributed by score % share
+            </p>
+          </div>
+          <div className="bg-card border border-border rounded-xl p-4 flex flex-col justify-between hover:border-orange-500/30 transition-colors">
+            <p className="text-[11px] text-muted-foreground font-medium">Avg Score</p>
+            <p className="text-xl font-bold text-foreground mt-2">{avgScore > 0 ? `${avgScore}%` : '—'}</p>
+            <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+              {dateFilter ? 'mean score in period' : 'mean attribution percentage'}
+            </p>
+          </div>
+          <div className="bg-card border border-border rounded-xl p-4 flex flex-col justify-between hover:border-blue-500/30 transition-colors">
+            <p className="text-[11px] text-muted-foreground font-medium">Avg Creatives / Task</p>
+            <p className="text-xl font-bold text-foreground mt-2">
+              {avgCreativesPerTask > 0 ? avgCreativesPerTask.toLocaleString('en-IN', { maximumFractionDigits: 1 }) : '—'}
+            </p>
+            <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+              production density per task
+            </p>
+          </div>
+        </div>
+
+        {/* ── Contribution Range Breakdown ──────────────────────────────────── */}
         <div className="bg-card border border-border rounded-xl p-4">
           <div className="flex items-center gap-2 mb-4">
             <BarChart3 className="w-4 h-4 text-purple-400" />
             <h2 className="text-sm font-semibold">Contribution Range Breakdown</h2>
-            <span className="ml-auto text-[11px] text-muted-foreground">{bandBreakdown.total} task{bandBreakdown.total === 1 ? '' : 's'}</span>
+            <span className="ml-auto text-[11px] text-muted-foreground">
+              {bandBreakdown.total} task{bandBreakdown.total === 1 ? '' : 's'}
+            </span>
           </div>
           {bandBreakdown.total === 0 ? (
-            <div className="h-32 flex items-center justify-center border-t border-border/50">
+            <div className="h-28 flex items-center justify-center border-t border-border/50">
               <p className="text-sm text-muted-foreground">No contributions in this period</p>
             </div>
           ) : (
@@ -1247,7 +1486,7 @@ function EmployeeDashboard({ todayStr, scores, payrollRecords: _payrollRecords }
                   <div key={b.label} className="flex items-center gap-3">
                     <span className={`text-xs font-semibold w-16 shrink-0 ${b.color}`}>{b.label}</span>
                     <div className="flex-1 h-2 rounded-full bg-secondary overflow-hidden">
-                      <div className={`h-full rounded-full ${b.color.replace('text-', 'bg-')}`} style={{ width: `${pct}%` }} />
+                      <div className={`h-full rounded-full ${b.bg}`} style={{ width: `${pct}%` }} />
                     </div>
                     <span className="text-xs font-medium text-foreground w-12 text-right tabular-nums">{b.tasks}</span>
                   </div>
@@ -1257,13 +1496,12 @@ function EmployeeDashboard({ todayStr, scores, payrollRecords: _payrollRecords }
           )}
         </div>
 
-        {/* Contribution Chart */}
+        {/* ── Contribution Activity chart ────────────────────────────────────── */}
         <div className="bg-card border border-border rounded-xl p-4">
           <div className="flex items-center gap-2 mb-4">
             <ClipboardList className="w-4 h-4 text-purple-400" />
             <h2 className="text-sm font-semibold">Contribution Activity</h2>
           </div>
-
           {trendData.length === 0 ? (
             <div className="h-48 flex items-center justify-center border-t border-border/50">
               <p className="text-sm text-muted-foreground">No contributions in this period</p>
@@ -1272,6 +1510,168 @@ function EmployeeDashboard({ todayStr, scores, payrollRecords: _payrollRecords }
             <ContributionActivityBar data={trendData} />
           )}
         </div>
+
+        {/* ── My Recent Contributions ────────────────────────────────────────── */}
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          {/* Section header + collapse toggle */}
+          <button
+            onClick={() => setHistExpanded(e => !e)}
+            className="w-full flex items-center gap-2 px-4 py-3 border-b border-border hover:bg-secondary/30 transition-colors"
+          >
+            <FileText className="w-4 h-4 text-purple-400 shrink-0" />
+            <h2 className="text-sm font-semibold flex-1 text-left">My Recent Contributions</h2>
+            <span className="text-[11px] text-muted-foreground mr-2">
+              {histFiltered.length} of {sortedByDate.length}
+            </span>
+            <ChevronRight className={`w-4 h-4 text-muted-foreground transition-transform ${histExpanded ? 'rotate-90' : ''}`} />
+          </button>
+
+          {histExpanded && (
+            <>
+              {/* Filter bar */}
+              <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 border-b border-border bg-secondary/20">
+                {/* Search */}
+                <div className="relative flex-1 min-w-[140px]">
+                  <input
+                    type="text"
+                    placeholder="Search #, title, client…"
+                    value={histSearch}
+                    onChange={e => { setHistSearch(e.target.value); resetPage() }}
+                    className="w-full bg-background border border-border rounded-lg pl-3 pr-8 py-1.5 text-xs placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                  />
+                  {histSearch && (
+                    <button
+                      onClick={() => { setHistSearch(''); resetPage() }}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+                {/* Status */}
+                <select
+                  value={histStatus}
+                  onChange={e => { setHistStatus(e.target.value); resetPage() }}
+                  className="bg-background border border-border rounded-lg px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+                >
+                  <option value="all">All statuses</option>
+                  {uniqueStatuses.map(s => (
+                    <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+                  ))}
+                </select>
+                {/* Score band */}
+                <select
+                  value={histBand}
+                  onChange={e => { setHistBand(e.target.value); resetPage() }}
+                  className="bg-background border border-border rounded-lg px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+                >
+                  <option value="all">All scores</option>
+                  {SCORE_BANDS.map(b => (
+                    <option key={b.label} value={b.label}>{b.label}</option>
+                  ))}
+                </select>
+                {/* Clear */}
+                {(histSearch || histStatus !== 'all' || histBand !== 'all') && (
+                  <button
+                    onClick={() => { setHistSearch(''); setHistStatus('all'); setHistBand('all'); resetPage() }}
+                    className="text-[11px] text-muted-foreground hover:text-foreground px-2 py-1 rounded-md hover:bg-secondary transition-colors whitespace-nowrap"
+                  >
+                    <X className="w-3 h-3 inline mr-1" />Clear
+                  </button>
+                )}
+              </div>
+
+              {/* List */}
+              {histVisible.length === 0 ? (
+                <div className="flex items-center justify-center py-10 text-sm text-muted-foreground">
+                  No contributions match the current filters
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {histVisible.map(s => {
+                    const t = s.task
+                    const pct = s.score_percentage ?? 0
+                    const band = SCORE_BANDS.find(b => pct >= b.min && pct <= b.max)
+                    return (
+                      <Link
+                        key={s.task_id}
+                        href={`/dashboard/tasks`}
+                        className="flex items-start gap-3 px-4 py-3 hover:bg-secondary/20 transition-colors group"
+                      >
+                        {/* Task number */}
+                        <span className="text-[10px] font-mono text-muted-foreground/60 mt-0.5 shrink-0 min-w-[38px]">
+                          {t.task_number ? `#${t.task_number}` : '—'}
+                        </span>
+
+                        {/* Main info */}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-foreground truncate leading-tight">
+                            {t.title || '—'}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground/70 mt-0.5 truncate">
+                            {[
+                              t.client?.name,
+                              t.service?.name,
+                              (Number(t.quantity ?? 1) > 1) ? `${t.quantity} creatives` : null,
+                            ].filter(Boolean).join(' · ')}
+                          </p>
+                        </div>
+
+                        {/* Right meta */}
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <span className={`text-[11px] font-semibold ${band?.color ?? 'text-muted-foreground'}`}>
+                            {pct}%
+                          </span>
+                          {/* My share of this task's creatives */}
+                          {Number(t.quantity ?? 1) > 1 && (
+                            <span className="text-[10px] text-teal-400 font-medium tabular-nums">
+                              {(Number(t.quantity) * pct / 100).toLocaleString('en-IN', { maximumFractionDigits: 1 })} cr.
+                            </span>
+                          )}
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${statusBadgeClass(t.status)}`}>
+                            {t.status}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground/50">
+                            {t.task_date ? fmtDate(t.task_date) : '—'}
+                          </span>
+                        </div>
+                      </Link>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Pagination */}
+              {histPageCount > 1 && (
+                <div className="flex items-center justify-between px-4 py-2.5 border-t border-border bg-secondary/10">
+                  <span className="text-[11px] text-muted-foreground">
+                    {(histPage1 - 1) * PAGE_SIZE + 1}–{Math.min(histPage1 * PAGE_SIZE, histFiltered.length)} of {histFiltered.length}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setHistPage(p => Math.max(1, p - 1))}
+                      disabled={histPage1 === 1}
+                      className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-secondary disabled:opacity-30 transition-colors"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5 rotate-180" />
+                    </button>
+                    <span className="text-[11px] text-muted-foreground px-1">
+                      {histPage1} / {histPageCount}
+                    </span>
+                    <button
+                      onClick={() => setHistPage(p => Math.min(histPageCount, p + 1))}
+                      disabled={histPage1 === histPageCount}
+                      className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-secondary disabled:opacity-30 transition-colors"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
       </div>
     </div>
   )

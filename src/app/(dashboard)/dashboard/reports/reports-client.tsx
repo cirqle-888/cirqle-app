@@ -6,6 +6,19 @@ import Header from '@/components/layout/header'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { calculatePerformanceScore, getQualityBand } from '@/lib/calculations/commission'
 import { DateFilter, matchesDateFilter, getDateFilterLabel } from '@/components/ui/date-filter'
+import type { ContribWithDate } from './_skills/SkillsTab'
+import type { Param, Group } from '@/lib/analytics/performance'
+
+const SkillsTab = dynamic(() => import('./_skills/SkillsTab'), {
+  ssr: false,
+  loading: () => (
+    <div className="space-y-4">
+      {[1, 2].map(i => (
+        <div key={i} className="h-48 rounded-xl bg-secondary/30 animate-pulse" />
+      ))}
+    </div>
+  ),
+})
 
 // ─── Recharts is lazy-loaded — only fetched when a chart is rendered. ──────
 // Saves ~95 KB on initial bundle and TTI for routes that never view a chart.
@@ -45,16 +58,25 @@ interface Score {
     task_date: string
     billing_amount_inr: number
     service_id: string
+    quantity?: number
     client?: { id: string; name: string }
   }
 }
 interface Task {
   id: string; title: string; task_date: string; status: string
   billing_amount_inr: number; service_id: string
+  quantity?: number
   client?: { id: string; name: string } | null
 }
 
-interface Props { employees: Employee[]; scores: Score[]; tasks: Task[] }
+interface Props {
+  employees:     Employee[]
+  scores:        Score[]
+  tasks:         Task[]
+  contributions: ContribWithDate[]
+  parameters:    Param[]
+  groups:        Group[]
+}
 
 const BAND_COLORS: Record<string, string> = {
   '100':   '#34d399',
@@ -74,14 +96,16 @@ function fmt(n: number) {
   return `₹${Math.round(n)}`
 }
 
-export default function ReportsClient({ employees, scores, tasks }: Props) {
+export default function ReportsClient({
+  employees, scores, tasks, contributions, parameters, groups,
+}: Props) {
   const { dn, isUnlocked } = usePrivacy()
   const [selectedEmp, setSelectedEmp] = useState<string>(employees[0]?.id || '')
   const [dateFilter, setDateFilter] = useState<DateFilterValue>(null)
   const [expandedTask, setExpandedTask] = useState<string | null>(null)
   const [taskSortKey, setTaskSortKey] = useState<'date' | 'earnings' | 'score'>('date')
   const [taskSortDir, setTaskSortDir] = useState<'desc' | 'asc'>('desc')
-  const [activeTab, setActiveTab] = useState<'overview' | 'tasks' | 'monthly' | 'team' | 'clients'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'tasks' | 'monthly' | 'team' | 'clients' | 'skills'>('overview')
   const [showAllMonths, setShowAllMonths] = useState(false)
   const MONTHS_PREVIEW = 6
 
@@ -100,9 +124,42 @@ export default function ReportsClient({ employees, scores, tasks }: Props) {
   )
 
   // ── Summary stats ──────────────────────────────────────────────────────────
+  // Creatives credited = Σ (task.quantity × score% / 100). Mirrors how earnings
+  // are split. Inherits all group/parameter/tool weighting via the score_percentage
+  // already calculated by commission.ts.
   const taskCount    = empScores.length
   const totalEarnings = empScores.reduce((s, e) => s + (e.earnings_inr || 0), 0)
   const avgScore      = taskCount ? empScores.reduce((s, e) => s + (e.score_percentage || 0), 0) / taskCount : 0
+  const totalCreatives = empScores.reduce((acc, s) => {
+    const qty   = Number(s.task?.quantity ?? 1)
+    const share = (s.score_percentage ?? 0) / 100
+    return acc + qty * share
+  }, 0)
+  const avgCreativesPerTask = taskCount > 0 ? totalCreatives / taskCount : 0
+
+  // ── Production totals across all employees in the period ────────────────────
+  // Independent of contribution scores — counts the canonical task list.
+  const productionTotals = useMemo(() => {
+    const src = dateFilter ? tasks.filter(t => matchesDateFilter(t.task_date, dateFilter)) : tasks
+    let creatives = 0
+    for (const t of src) creatives += Number(t.quantity ?? 1)
+    return { tasks: src.length, creatives }
+  }, [tasks, dateFilter])
+
+  // ── Creatives per client (top 10 by output volume) ──────────────────────────
+  const creativesByClient = useMemo(() => {
+    const src = dateFilter ? tasks.filter(t => matchesDateFilter(t.task_date, dateFilter)) : tasks
+    const map = new Map<string, { name: string; tasks: number; creatives: number }>()
+    for (const t of src) {
+      const cid = t.client?.id ?? '__unknown'
+      const name = t.client?.name ?? 'Unknown'
+      const row = map.get(cid) ?? { name, tasks: 0, creatives: 0 }
+      row.tasks    += 1
+      row.creatives += Number(t.quantity ?? 1)
+      map.set(cid, row)
+    }
+    return [...map.values()].sort((a, b) => b.creatives - a.creatives).slice(0, 10)
+  }, [tasks, dateFilter])
 
   // ── Quality band breakdown ─────────────────────────────────────────────────
   const bandBreakdown = useMemo(() => {
@@ -409,13 +466,15 @@ export default function ReportsClient({ employees, scores, tasks }: Props) {
         {emp && !hasNoScores && (
           <>
             {/* ── Tab bar ── */}
-            <div className="flex items-center gap-1 bg-secondary/60 rounded-xl p-1 w-fit">
-              {(['overview', 'tasks', 'monthly', 'team', 'clients'] as const).map(t => (
+            <div className="flex items-center gap-1 bg-secondary/60 rounded-xl p-1 w-fit flex-wrap">
+              {(['overview', 'tasks', 'monthly', 'team', 'clients', 'skills'] as const).map(t => (
                 <button key={t} onClick={() => setActiveTab(t)}
-                  className={`px-4 py-2 rounded-lg text-sm font-semibold capitalize transition-all ${
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
                     activeTab === t ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
                   }`}>
-                  {t === 'monthly' ? 'Month-wise' : t === 'team' ? 'Team' : t === 'clients' ? 'Clients' : t.charAt(0).toUpperCase() + t.slice(1)}
+                  {t === 'monthly' ? 'Month-wise'
+                   : t === 'skills'  ? '✦ Skills'
+                   : t.charAt(0).toUpperCase() + t.slice(1)}
                 </button>
               ))}
             </div>
@@ -425,13 +484,13 @@ export default function ReportsClient({ employees, scores, tasks }: Props) {
             ══════════════════════════════════════════ */}
             {activeTab === 'overview' && (
               <div className="space-y-5">
-                {/* Stats row */}
+                {/* Performance stats (employee-specific) */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                   {[
-                    { label: 'Tasks Scored', value: taskCount, sub: dateFilter ? getDateFilterLabel(dateFilter) : 'All time' },
-                    { label: 'Avg Score', value: `${avgScore.toFixed(1)}%`, sub: `Perf. rating ${emp.performance_rating}%`, highlight: avgScore >= 75 ? 'green' : avgScore >= 50 ? 'yellow' : 'red' },
-                    { label: 'Total Earnings', value: fmt(totalEarnings), sub: `₹${Math.round(totalEarnings).toLocaleString('en-IN')}` },
-                    { label: 'Solo Tasks', value: soloTaskCount, sub: '100% solo contribution', highlight: soloTaskCount > 0 ? 'purple' : undefined },
+                    { label: 'Tasks Scored',  value: taskCount, sub: dateFilter ? getDateFilterLabel(dateFilter) : 'All time' },
+                    { label: 'Avg Score',     value: `${avgScore.toFixed(1)}%`, sub: `Perf. rating ${emp.performance_rating}%`, highlight: avgScore >= 75 ? 'green' : avgScore >= 50 ? 'yellow' : 'red' },
+                    { label: 'Total Earnings',value: fmt(totalEarnings), sub: `₹${Math.round(totalEarnings).toLocaleString('en-IN')}` },
+                    { label: 'Solo Tasks',    value: soloTaskCount, sub: '100% solo contribution', highlight: soloTaskCount > 0 ? 'purple' : undefined },
                   ].map(s => (
                     <div key={s.label} className="bg-card border border-border rounded-xl p-4">
                       <p className="text-xs text-muted-foreground mb-1">{s.label}</p>
@@ -445,6 +504,48 @@ export default function ReportsClient({ employees, scores, tasks }: Props) {
                     </div>
                   ))}
                 </div>
+
+                {/* Production stats (creative output — distinct from financial) */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  {[
+                    { label: 'My Creatives',       value: totalCreatives.toLocaleString('en-IN', { maximumFractionDigits: 1 }), sub: 'pages/posts credited (qty × share)', highlight: 'teal' as const },
+                    { label: 'Avg Creatives/Task', value: avgCreativesPerTask.toLocaleString('en-IN', { maximumFractionDigits: 1 }), sub: 'production density per task' },
+                    { label: 'Studio Tasks',       value: productionTotals.tasks.toLocaleString('en-IN'), sub: 'all tasks in period (whole studio)' },
+                    { label: 'Studio Creatives',   value: productionTotals.creatives.toLocaleString('en-IN'), sub: 'total output (qty sum, whole studio)' },
+                  ].map(s => (
+                    <div key={s.label} className="bg-card border border-border rounded-xl p-4">
+                      <p className="text-xs text-muted-foreground mb-1">{s.label}</p>
+                      <p className={`text-2xl font-bold mb-1 ${s.highlight === 'teal' ? 'text-teal-400' : ''}`}>{s.value}</p>
+                      <p className="text-[11px] text-muted-foreground truncate">{s.sub}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Creatives by Client (top 10 by output volume) */}
+                {creativesByClient.length > 0 && (
+                  <div className="bg-card border border-border rounded-xl p-5">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-sm font-semibold">Top Clients by Production Volume</h3>
+                      <p className="text-[11px] text-muted-foreground">Output, not revenue — separate signal</p>
+                    </div>
+                    <div className="grid grid-cols-[1fr_80px_80px_80px] gap-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider pb-2 border-b border-border/40">
+                      <span>Client</span>
+                      <span className="text-right">Tasks</span>
+                      <span className="text-right">Creatives</span>
+                      <span className="text-right">Per Task</span>
+                    </div>
+                    <div className="divide-y divide-border/40">
+                      {creativesByClient.map((c, i) => (
+                        <div key={c.name + i} className="grid grid-cols-[1fr_80px_80px_80px] gap-2 py-2 text-xs">
+                          <span className="truncate">{c.name}</span>
+                          <span className="text-right tabular-nums">{c.tasks}</span>
+                          <span className="text-right tabular-nums text-teal-400 font-medium">{c.creatives}</span>
+                          <span className="text-right tabular-nums text-muted-foreground">{(c.creatives / Math.max(1, c.tasks)).toFixed(1)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Quality band breakdown with company vs employee split */}
                 <div className="bg-card border border-border rounded-xl p-5">
@@ -686,7 +787,7 @@ export default function ReportsClient({ employees, scores, tasks }: Props) {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border">
-                          {(showAllMonths ? monthWiseTable : monthWiseTable.slice(-MONTHS_PREVIEW)).map(row => (
+                          {(showAllMonths ? monthWiseTable : monthWiseTable.slice(0, MONTHS_PREVIEW)).map(row => (
                             <tr key={row.month} className="hover:bg-secondary/20 transition-colors">
                               <td className="px-4 py-3 font-medium sticky left-0 bg-card text-sm">{row.label}</td>
                               {employees.map(e => (
@@ -913,6 +1014,17 @@ export default function ReportsClient({ employees, scores, tasks }: Props) {
                   </div>
                 </div>
               </div>
+            )}
+            {/* ══════════════════════════════════════════
+                TAB: SKILLS & PERFORMANCE
+            ══════════════════════════════════════════ */}
+            {activeTab === 'skills' && (
+              <SkillsTab
+                employees={employees}
+                contributions={contributions}
+                parameters={parameters}
+                groups={groups}
+              />
             )}
           </>
         )}

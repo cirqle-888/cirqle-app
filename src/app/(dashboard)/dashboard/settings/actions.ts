@@ -1,0 +1,529 @@
+'use server'
+
+import { createAdminClient } from '@/lib/supabase/admin'
+import { requirePermission } from '@/lib/auth/enforce'
+import { logActivity } from '@/lib/activity/log'
+
+interface ActionResult<T = void> {
+  ok: boolean
+  error?: string
+  data?: T
+}
+
+// ── Company Settings ──────────────────────────────────────────────────────────
+
+export async function upsertCompanySettings(
+  entries: { key: string; value: string }[],
+): Promise<ActionResult> {
+  const auth = await requirePermission('settings.manage_company')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  await Promise.all(
+    entries.map(({ key, value }) =>
+      admin.from('company_settings').upsert({ key, value }, { onConflict: 'key' }),
+    ),
+  )
+  return { ok: true }
+}
+
+// ── Employees ─────────────────────────────────────────────────────────────────
+
+export async function createEmployee(form: Record<string, unknown>): Promise<ActionResult<any>> {
+  const auth = await requirePermission('employees.create')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { data, error } = await admin.from('employees').insert(form).select().single()
+  if (error) return { ok: false, error: error.message }
+
+  // Log: new employee created (fire-and-forget)
+  void logActivity({
+    actorId:    auth.employeeId,
+    subjectId:  data?.id ?? null,
+    entityType: 'employee',
+    entityId:   data?.id ?? null,
+    action:     'employee_created',
+    detail:     { cqid: data?.cqid ?? null, name: data?.name ?? null },
+  })
+
+  return { ok: true, data }
+}
+
+export async function updateEmployee(
+  id: string,
+  form: Record<string, unknown>,
+): Promise<ActionResult<any>> {
+  const auth = await requirePermission('employees.edit')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { data, error } = await admin.from('employees').update(form).eq('id', id).select().single()
+  if (error) return { ok: false, error: error.message }
+
+  // Log: employee record edited (fire-and-forget)
+  // Log designation changes specifically so the timeline shows them clearly
+  const action = form.designation_id ? 'designation_changed' : 'edited'
+  void logActivity({
+    actorId:    auth.employeeId,
+    subjectId:  id,
+    entityType: 'employee',
+    entityId:   id,
+    action,
+    detail:     Object.keys(form).filter(k => k !== 'updated_at').reduce<Record<string, unknown>>(
+                  (acc, k) => { acc[k] = form[k]; return acc }, {}
+                ),
+  })
+
+  return { ok: true, data }
+}
+
+// ── Clients ───────────────────────────────────────────────────────────────────
+
+export async function createClient(form: Record<string, unknown>): Promise<ActionResult<any>> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { data, error } = await admin.from('clients').insert(form).select().single()
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data }
+}
+
+export async function updateClient(
+  id: string,
+  form: Record<string, unknown>,
+): Promise<ActionResult<any>> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { data, error } = await admin.from('clients').update(form).eq('id', id).select().single()
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data }
+}
+
+export async function upsertClientServicePricings(
+  pricingRows: {
+    client_id: string
+    service_id: string
+    price: number
+    commission_percentage: number
+    currency: string
+    is_active: boolean
+  }[],
+): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  if (pricingRows.length === 0) return { ok: true }
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('client_service_pricing')
+    .upsert(pricingRows, { onConflict: 'client_id,service_id' })
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
+export async function deactivateClient(id: string): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('clients').update({ is_active: false }).eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
+export async function quickEditClient(
+  id: string,
+  field: string,
+  value: unknown,
+): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('clients').update({ [field]: value }).eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
+// ── Services ──────────────────────────────────────────────────────────────────
+
+export async function createService(
+  payload: Record<string, unknown>,
+  groupIds: string[],
+): Promise<ActionResult<{ service: any; dbGroupServicesOk: boolean }>> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { data: service, error } = await admin
+    .from('services')
+    .insert({ ...payload, is_active: true })
+    .select()
+    .single()
+  if (error) return { ok: false, error: error.message }
+
+  let dbGroupServicesOk = true
+  if (groupIds.length > 0) {
+    const { error: gsError } = await admin
+      .from('group_services')
+      .insert(groupIds.map(gid => ({ group_id: gid, service_id: service.id })))
+    if (gsError) dbGroupServicesOk = false
+  }
+
+  return { ok: true, data: { service, dbGroupServicesOk } }
+}
+
+export async function updateService(
+  id: string,
+  payload: Record<string, unknown>,
+  groupIds: string[],
+): Promise<ActionResult<{ service: any; dbGroupServicesOk: boolean }>> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { data: service, error } = await admin
+    .from('services')
+    .update(payload)
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) return { ok: false, error: error.message }
+
+  const { error: delError } = await admin.from('group_services').delete().eq('service_id', id)
+  let dbGroupServicesOk = !delError
+  if (!delError && groupIds.length > 0) {
+    const { error: insError } = await admin
+      .from('group_services')
+      .insert(groupIds.map(gid => ({ group_id: gid, service_id: id })))
+    if (insError) dbGroupServicesOk = false
+  }
+
+  return { ok: true, data: { service, dbGroupServicesOk } }
+}
+
+export async function deactivateService(id: string): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('services').update({ is_active: false }).eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
+export async function quickEditService(
+  id: string,
+  field: string,
+  value: unknown,
+): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('services').update({ [field]: value }).eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
+// ── Contribution Groups ───────────────────────────────────────────────────────
+
+export async function createGroup(form: Record<string, unknown>): Promise<ActionResult<any>> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from('contribution_groups')
+    .insert({ ...form, is_active: true })
+    .select()
+    .single()
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data }
+}
+
+export async function updateGroup(
+  id: string,
+  form: Record<string, unknown>,
+): Promise<ActionResult<any>> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from('contribution_groups')
+    .update(form)
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data }
+}
+
+export async function deactivateGroup(id: string): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('contribution_groups')
+    .update({ is_active: false })
+    .eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
+// ── Parameters ────────────────────────────────────────────────────────────────
+
+export async function createParameter(
+  fullForm: Record<string, unknown>,
+  safeForm: Record<string, unknown>,
+): Promise<ActionResult<any>> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  let { data, error } = await admin
+    .from('parameters')
+    .insert({ ...fullForm, is_active: true })
+    .select()
+    .single()
+  if (error || !data) {
+    const res = await admin
+      .from('parameters')
+      .insert({ ...safeForm, is_active: true })
+      .select()
+      .single()
+    if (res.error) return { ok: false, error: res.error.message }
+    data = res.data
+  }
+  return { ok: true, data }
+}
+
+export async function updateParameter(
+  id: string,
+  fullForm: Record<string, unknown>,
+  safeForm: Record<string, unknown>,
+): Promise<ActionResult<any>> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  let { data } = await admin
+    .from('parameters')
+    .update(fullForm)
+    .eq('id', id)
+    .select()
+    .single()
+  if (!data) {
+    const res = await admin
+      .from('parameters')
+      .update(safeForm)
+      .eq('id', id)
+      .select()
+      .single()
+    data = res.data
+  }
+  return { ok: true, data }
+}
+
+export async function deactivateParameter(id: string): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('parameters').update({ is_active: false }).eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
+// ── Tools ─────────────────────────────────────────────────────────────────────
+
+export async function createTool(form: Record<string, unknown>): Promise<ActionResult<any>> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from('tools')
+    .insert({ ...form, is_active: true })
+    .select()
+    .single()
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data }
+}
+
+export async function updateTool(
+  id: string,
+  form: Record<string, unknown>,
+): Promise<ActionResult<any>> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { data, error } = await admin.from('tools').update(form).eq('id', id).select().single()
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data }
+}
+
+export async function deactivateTool(id: string): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('tools').update({ is_active: false }).eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
+export async function quickEditTool(
+  id: string,
+  field: string,
+  value: unknown,
+): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('tools').update({ [field]: value }).eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
+// ── Bank Accounts ─────────────────────────────────────────────────────────────
+
+export async function createBankAccount(form: Record<string, unknown>): Promise<ActionResult<any>> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from('bank_accounts')
+    .insert({ ...form, is_active: true })
+    .select()
+    .single()
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data }
+}
+
+export async function updateBankAccount(
+  id: string,
+  form: Record<string, unknown>,
+): Promise<ActionResult<any>> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from('bank_accounts')
+    .update(form)
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data }
+}
+
+export async function deactivateBankAccount(id: string): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('bank_accounts').update({ is_active: false }).eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
+// ── Cashbook Categories ───────────────────────────────────────────────────────
+
+export async function createCashbookCategory(
+  form: Record<string, unknown>,
+): Promise<ActionResult<any>> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { data, error } = await admin.from('cashbook_categories').insert(form).select().single()
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data }
+}
+
+export async function updateCashbookCategory(
+  id: string,
+  form: Record<string, unknown>,
+): Promise<ActionResult<any>> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from('cashbook_categories')
+    .update(form)
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data }
+}
+
+export async function deactivateCashbookCategory(id: string): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('cashbook_categories')
+    .update({ is_active: false })
+    .eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
+// ── Exchange Rates ────────────────────────────────────────────────────────────
+
+export async function upsertExchangeRate(
+  currency: string,
+  rate: number,
+): Promise<ActionResult> {
+  const auth = await requirePermission('settings.manage_company')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('exchange_rates')
+    .upsert({ currency, rate_to_inr: rate }, { onConflict: 'currency' })
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
+// ── Pricing Matrix ────────────────────────────────────────────────────────────
+
+export async function upsertMatrixCell(
+  clientId: string,
+  serviceId: string,
+  price: number,
+  commissionPercentage: number,
+  currency: string,
+): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('client_service_pricing').upsert(
+    {
+      client_id: clientId,
+      service_id: serviceId,
+      price,
+      commission_percentage: commissionPercentage,
+      currency: currency || 'INR',
+      is_active: true,
+    },
+    { onConflict: 'client_id,service_id' },
+  )
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}

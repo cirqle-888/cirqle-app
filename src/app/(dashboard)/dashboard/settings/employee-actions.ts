@@ -3,75 +3,13 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { headers } from 'next/headers'
+import { requirePermission } from '@/lib/auth/enforce'
+import { logActivity } from '@/lib/activity/log'
 
 interface ActionResult<T = void> {
   ok: boolean
   error?: string
   data?: T
-}
-
-/**
- * Auth guard — fail OPEN for legacy super_admin until the designations migration is applied.
- * Matches the employee row by auth_id OR (as a fallback) email, then backfills auth_id when
- * found by email so the link sticks for future calls.
- */
-async function requirePermission(key: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { ok: false, error: 'Not signed in.' }
-
-  const lookupAndBackfill = async (selectCols: string) => {
-    let { data: e } = await supabase.from('employees').select(selectCols).eq('auth_id', user.id).maybeSingle()
-    if (!e && user.email) {
-      const byEmail = await supabase.from('employees').select(selectCols).eq('email', user.email).maybeSingle()
-      e = byEmail.data
-      if (e) {
-        // Backfill auth_id so this is fast next time
-        const empAny = e as any
-        await supabase.from('employees').update({ auth_id: user.id }).eq('id', empAny.id)
-      }
-    }
-    return e as any
-  }
-
-  // First, try the new shape (designation-based)
-  let emp: any = null
-  try {
-    emp = await lookupAndBackfill('id, role, is_archived, designation:designation_id(id, is_admin)')
-  } catch {}
-
-  // Fallback to legacy shape if the new query fails
-  if (!emp) {
-    emp = await lookupAndBackfill('id, role')
-    if (emp && emp.role === 'super_admin') return { ok: true }
-    if (!emp) return { ok: false, error: 'No employee record linked to your account.' }
-    return { ok: false, error: 'Permission denied.' }
-  }
-
-  if (emp.is_archived) return { ok: false, error: 'Your account is archived.' }
-
-  const designation = Array.isArray(emp.designation) ? emp.designation[0] : emp.designation
-
-  // No designation assigned yet — fall back to legacy role check
-  if (!designation) {
-    if (emp.role === 'super_admin') return { ok: true }
-    return { ok: false, error: 'Permission denied (no designation assigned yet — run the SQL migration).' }
-  }
-
-  if (designation.is_admin === true) return { ok: true }
-
-  // Designation assigned and not admin — check permission key
-  const { data: dp } = await supabase
-    .from('designation_permissions')
-    .select('allowed, permission:permission_id(key)')
-    .eq('designation_id', designation.id)
-    .eq('allowed', true)
-  const has = (dp ?? []).some((r: any) => {
-    const perm = Array.isArray(r.permission) ? r.permission[0] : r.permission
-    return perm?.key === key
-  })
-  if (!has) return { ok: false, error: 'Permission denied.' }
-  return { ok: true }
 }
 
 /**
@@ -147,6 +85,16 @@ export async function archiveEmployee(employeeId: string): Promise<ActionResult>
       ban_duration: '876600h', // ~100 years
     }).catch(() => {})
   }
+
+  // Log: employee archived (fire-and-forget)
+  void logActivity({
+    actorId:    auth.employeeId,
+    subjectId:  employeeId,
+    entityType: 'employee',
+    entityId:   employeeId,
+    action:     'employee_archived',
+  })
+
   return { ok: true }
 }
 
@@ -173,6 +121,17 @@ export async function restoreEmployee(employeeId: string): Promise<ActionResult>
       ban_duration: 'none',
     }).catch(() => {})
   }
+
+  // Log: employee restored (fire-and-forget)
+  void logActivity({
+    actorId:    auth.employeeId,
+    subjectId:  employeeId,
+    entityType: 'employee',
+    entityId:   employeeId,
+    action:     'employee_created',
+    detail:     { event: 'restored_from_archive' },
+  })
+
   return { ok: true }
 }
 

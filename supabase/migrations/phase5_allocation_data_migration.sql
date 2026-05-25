@@ -1,25 +1,31 @@
 -- phase5_allocation_data_migration.sql
+-- IDEMPOTENT: safe to re-run. Uses INSERT ... WHERE NOT EXISTS to avoid
+-- duplicating allocations if the migration is accidentally applied twice.
 
 BEGIN;
 
--- 1. Insert allocations from existing cashbook entries
+-- 1. Insert allocations from existing cashbook entries (skip already-migrated rows)
 INSERT INTO cashbook_invoice_allocations (
-    cashbook_entry_id, 
-    invoice_id, 
-    allocated_amount, 
-    created_at, 
+    cashbook_entry_id,
+    invoice_id,
+    allocated_amount,
+    created_at,
     updated_at,
     deleted_at
 )
-SELECT 
-    id AS cashbook_entry_id,
-    invoice_id,
-    amount_inr AS allocated_amount,
-    entry_date::timestamp AS created_at, -- using entry_date or fallback to now()
+SELECT
+    ce.id AS cashbook_entry_id,
+    ce.invoice_id,
+    ce.amount_inr AS allocated_amount,
+    ce.entry_date::timestamp AS created_at,
     now() AS updated_at,
-    deleted_at
-FROM cashbook_entries
-WHERE invoice_id IS NOT NULL;
+    ce.deleted_at
+FROM cashbook_entries ce
+WHERE ce.invoice_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM cashbook_invoice_allocations cia
+    WHERE cia.cashbook_entry_id = ce.id
+  );
 
 -- The triggers we added in phase 4 will automatically start calculating invoices based on these.
 -- Since the trigger on cashbook_invoice_allocations runs AFTER INSERT FOR EACH ROW, it will recalculate

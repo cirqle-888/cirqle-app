@@ -2,45 +2,12 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { createClient } from '@/lib/supabase/server'
+import { requirePermission } from '@/lib/auth/enforce'
 
 interface ActionResult<T = void> {
   ok: boolean
   error?: string
   data?: T
-}
-
-/**
- * Auth guard — must hold the given permission key (admins always pass).
- * Mirrors employee-actions.ts.
- */
-async function requirePermission(key: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { ok: false, error: 'Not signed in.' }
-
-  const { data: emp } = await supabase
-    .from('employees')
-    .select('is_archived, designation:designation_id(id, is_admin)')
-    .eq('auth_id', user.id)
-    .maybeSingle()
-  if (!emp || emp.is_archived) return { ok: false, error: 'Not authorized.' }
-
-  const designation = Array.isArray(emp.designation) ? emp.designation[0] : emp.designation
-  if (designation?.is_admin) return { ok: true }
-  if (!designation?.id) return { ok: false, error: 'No designation.' }
-
-  const { data: dp } = await supabase
-    .from('designation_permissions')
-    .select('allowed, permission:permission_id(key)')
-    .eq('designation_id', designation.id)
-    .eq('allowed', true)
-  const has = (dp ?? []).some((r: any) => {
-    const perm = Array.isArray(r.permission) ? r.permission[0] : r.permission
-    return perm?.key === key
-  })
-  if (!has) return { ok: false, error: 'Permission denied.' }
-  return { ok: true }
 }
 
 const REVALIDATE_PATH = '/dashboard/settings/designations'

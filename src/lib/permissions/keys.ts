@@ -1,12 +1,15 @@
 /**
  * Permission keys — single source of truth.
- * Keep in sync with the permissions catalog seeded by migrations/001 and 005.
+ * Keep in sync with the permissions catalog seeded by migrations/001, 005, 009.
  * Use these constants in client/server code instead of raw strings.
  */
 export const PERMS = {
   // Dashboard
   DASHBOARD_VIEW:           'dashboard.view',
   DASHBOARD_VIEW_ANALYTICS: 'dashboard.view_analytics',
+
+  // Reports
+  REPORTS_VIEW: 'reports.view',
 
   // Tasks
   TASKS_VIEW_OWN:     'tasks.view_own',
@@ -16,6 +19,8 @@ export const PERMS = {
   TASKS_DELETE:       'tasks.delete',
   TASKS_ASSIGN:       'tasks.assign',
   TASKS_EXPORT:       'tasks.export',
+  TASKS_WORKLOAD:     'tasks.workload',
+  TASKS_TRASH:        'tasks.trash',
   /** See billing_amount / billing_amount_inr / loss_amount / currency / billing_mode on tasks. */
   TASKS_VIEW_PRICING: 'tasks.view_pricing',
 
@@ -37,13 +42,17 @@ export const PERMS = {
 
   // Payroll
   PAYROLL_VIEW:         'payroll.view',
+  /** Create / update / delete payroll records, advances, credits. */
   PAYROLL_EDIT:         'payroll.edit',
+  /** Mark a payroll record as Paid or revert to Pending. */
+  PAYROLL_MARK_PAID:    'payroll.mark_paid',
   /** See ₹ base/commission/net/advances/credits/deductions amounts on payroll rows. */
   PAYROLL_VIEW_AMOUNTS: 'payroll.view_amounts',
 
   // Billing — split into workflow + amounts + line pricing
   BILLING_VIEW_INVOICES:     'billing.view_invoices',
   BILLING_VIEW_QUOTATIONS:   'billing.view_quotations',
+  /** Create / update / delete invoices and their line items. */
   BILLING_EDIT:              'billing.edit',
   /** Legacy: see billing_amount / commission % on tasks (kept for backwards compat). */
   BILLING_VIEW_PRICING:      'billing.view_pricing',
@@ -56,6 +65,7 @@ export const PERMS = {
 
   // Cashbook
   CASHBOOK_VIEW:         'cashbook.view',
+  /** Create / update / delete cashbook entries. */
   CASHBOOK_EDIT:         'cashbook.edit',
   /** See ₹ inflow/outflow values and bank balance figures. */
   CASHBOOK_VIEW_AMOUNTS: 'cashbook.view_amounts',
