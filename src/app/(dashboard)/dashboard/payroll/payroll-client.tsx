@@ -584,22 +584,25 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
         }
       />
 
-      <div className="p-6 space-y-4">
+      <div className="p-4 sm:p-6 space-y-4">
 
-        {/* ── Tab bar ── */}
-        <div className="flex gap-1 bg-secondary rounded-xl p-1 w-fit">
-          {TABS.map(t => (
-            <button key={t} onClick={() => setTab(t)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors relative ${tab === t ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
-              {t}
-              {t === 'Overview' && missingContribTasks.length > 0 &&
-                viewMonth === now.getMonth() + 1 && viewYear === now.getFullYear() && (
-                <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[9px] font-bold flex items-center justify-center leading-none">
-                  {missingContribTasks.length > 99 ? '99+' : missingContribTasks.length}
-                </span>
-              )}
-            </button>
-          ))}
+        {/* ── Sticky tab bar — stays pinned just below the Header as the
+              page scrolls (top offset matches Header height: 68/72px). ── */}
+        <div className="sticky top-[68px] sm:top-[72px] z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 py-2 bg-background/95 backdrop-blur-sm border-b border-border">
+          <div className="flex gap-1 bg-secondary rounded-xl p-1 w-fit overflow-x-auto max-w-full hide-scrollbar">
+            {TABS.map(t => (
+              <button key={t} onClick={() => setTab(t)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors relative whitespace-nowrap ${tab === t ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                {t}
+                {t === 'Overview' && missingContribTasks.length > 0 &&
+                  viewMonth === now.getMonth() + 1 && viewYear === now.getFullYear() && (
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[9px] font-bold flex items-center justify-center leading-none">
+                    {missingContribTasks.length > 99 ? '99+' : missingContribTasks.length}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* ════════════════════════════════════════════════════
@@ -984,16 +987,16 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                             {m.hasRecord ? (
                               <div>
                                 <p className={`text-xs font-semibold ${m.status === 'paid' ? 'text-green-400' : 'text-amber-400'}`}>
-                                  ₹{formatCompact(m.net)}
+                                  {formatCompact(m.net)}
                                 </p>
                                 {m.commission > 0 && (
-                                  <p className="text-[10px] text-muted-foreground">+₹{formatCompact(m.commission)} comm</p>
+                                  <p className="text-[10px] text-muted-foreground">+{formatCompact(m.commission)} comm</p>
                                 )}
                               </div>
                             ) : m.commission > 0 ? (
                               <div>
                                 <p className="text-xs font-semibold text-amber-500/80">
-                                  ₹{formatCompact(m.commission)}
+                                  {formatCompact(m.commission)}
                                 </p>
                                 <p className="text-[10px] text-muted-foreground">pending gen</p>
                               </div>
@@ -1003,7 +1006,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                           </td>
                         ))}
                         <td className="px-4 py-3 text-right">
-                          <p className="text-xs font-bold">{displayTotal > 0 ? `₹${formatCompact(displayTotal)}` : '—'}</p>
+                          <p className="text-xs font-bold">{displayTotal > 0 ? `${formatCompact(displayTotal)}` : '—'}</p>
                         </td>
                       </tr>
                     )
@@ -1021,12 +1024,12 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                       }, 0)
                       return (
                         <td key={`${m.year}-${m.month}`} className="px-4 py-3 text-right text-xs font-bold">
-                          {total > 0 ? <span className="gradient-text">₹{formatCompact(total)}</span> : <span className="text-muted-foreground/30">—</span>}
+                          {total > 0 ? <span className="gradient-text">{formatCompact(total)}</span> : <span className="text-muted-foreground/30">—</span>}
                         </td>
                       )
                     })}
                     <td className="px-4 py-3 text-right text-xs font-bold gradient-text">
-                      ₹{formatCompact(empList.filter(e => e.is_active).reduce((total, emp) =>
+                      {formatCompact(empList.filter(e => e.is_active).reduce((total, emp) =>
                         total + payroll.filter(r => r.employee_id === emp.id).reduce((s, r) => s + (r.net_salary || 0), 0) + 
                         Object.entries(commissionByEmpMonth[emp.id] || {}).reduce((s, [mk, val]) => {
                           const [y, mm] = mk.split('-')
@@ -1072,7 +1075,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                       </div>
                       <div className="text-right">
                         <p className="text-[10px] text-muted-foreground mb-0.5">6mo Total</p>
-                        <p className="text-sm font-bold">{displayTotal > 0 ? `₹${formatCompact(displayTotal)}` : '—'}</p>
+                        <p className="text-sm font-bold">{displayTotal > 0 ? `${formatCompact(displayTotal)}` : '—'}</p>
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
@@ -1083,16 +1086,16 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                             {m.hasRecord ? (
                               <div>
                                 <p className={`text-xs font-semibold ${m.status === 'paid' ? 'text-green-400' : 'text-amber-400'}`}>
-                                  ₹{formatCompact(m.net)}
+                                  {formatCompact(m.net)}
                                 </p>
                                 {m.commission > 0 && (
-                                  <p className="text-[9px] text-muted-foreground">+₹{formatCompact(m.commission)} comm</p>
+                                  <p className="text-[9px] text-muted-foreground">+{formatCompact(m.commission)} comm</p>
                                 )}
                               </div>
                             ) : m.commission > 0 ? (
                               <div>
                                 <p className="text-xs font-semibold text-amber-500/80">
-                                  ₹{formatCompact(m.commission)}
+                                  {formatCompact(m.commission)}
                                 </p>
                                 <p className="text-[9px] text-muted-foreground">pending gen</p>
                               </div>
@@ -1120,7 +1123,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                     return (
                       <div key={`${m.year}-${m.month}`} className="flex justify-between items-center bg-background/60 rounded p-2 border border-border/30">
                         <span className="text-[11px] font-medium text-muted-foreground">{m.label}</span>
-                        {total > 0 ? <span className="text-xs font-bold gradient-text">₹{formatCompact(total)}</span> : <span className="text-[11px] text-muted-foreground/30">—</span>}
+                        {total > 0 ? <span className="text-xs font-bold gradient-text">{formatCompact(total)}</span> : <span className="text-[11px] text-muted-foreground/30">—</span>}
                       </div>
                     )
                   })}
@@ -1172,8 +1175,8 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                   {/* Mini stats */}
                   <div className="grid grid-cols-3 gap-2 text-sm mb-4">
                     {[
-                      { label: 'Base/mo', value: `₹${formatCompact(emp.base_salary || 0)}` },
-                      { label: 'All-time earned', value: `₹${formatCompact(allTimeEarned)}` },
+                      { label: 'Base/mo', value: `${formatCompact(emp.base_salary || 0)}` },
+                      { label: 'All-time earned', value: `${formatCompact(allTimeEarned)}` },
                       { label: 'Tasks', value: String(taskCount) },
                     ].map(s => (
                       <div key={s.label} className="bg-secondary/50 rounded-lg p-2.5">

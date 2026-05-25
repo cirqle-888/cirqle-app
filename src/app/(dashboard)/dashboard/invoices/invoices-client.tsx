@@ -209,6 +209,24 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   const [changeLogsLoading, setChangeLogsLoading] = useState(false)
   const [showChangeLogs, setShowChangeLogs] = useState(false)
 
+  // Stats bar collapse — initialised lazily so the first paint matches the
+  // user's saved preference (or "collapsed on mobile" as a sensible default).
+  // Saves vertical space on phones where the 6 action tiles dominate the screen.
+  const [statsCollapsed, setStatsCollapsed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false
+    const saved = window.localStorage.getItem('invoices-stats-collapsed')
+    if (saved === '1') return true
+    if (saved === '0') return false
+    return window.innerWidth < 640 // default: collapsed on mobile, expanded on sm+
+  })
+  function toggleStats() {
+    setStatsCollapsed(prev => {
+      const next = !prev
+      try { window.localStorage.setItem('invoices-stats-collapsed', next ? '1' : '0') } catch {}
+      return next
+    })
+  }
+
   // Discount calculator
   const [showDiscount, setShowDiscount]         = useState(false)
   const [discountCalc, setDiscountCalc]         = useState<any | null>(null)
@@ -4513,64 +4531,109 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         </div>
       )}
 
-      {/* ── Stats bar ── */}
-      <div className="border-b border-border/40 px-4 py-2.5 grid grid-cols-2 sm:grid-cols-6 gap-3">
-        <div className="bg-foreground/[0.03] rounded-xl p-3 border border-border/30">
-          <div className="text-[10px] text-muted-foreground mb-0.5">Outstanding</div>
-          <div className="text-sm font-bold text-foreground">{fmt(stats.outstanding)}</div>
+      {/* ── Stats bar (collapsible) ──
+          When collapsed: a single compact summary row showing the key counts.
+          When expanded: the full 2/6-col grid of stat tiles + action tiles. */}
+      {statsCollapsed ? (
+        <button
+          onClick={toggleStats}
+          className="w-full border-b border-border/40 px-4 py-2.5 flex items-center justify-between text-left hover:bg-foreground/[0.02] transition-colors"
+        >
+          <div className="flex items-center gap-2.5 text-xs flex-wrap min-w-0">
+            <span className="flex items-center gap-1.5">
+              <span className="text-muted-foreground">Outstanding</span>
+              <span className="font-bold text-foreground">{fmt(stats.outstanding)}</span>
+            </span>
+            {stats.overdueCount > 0 && (
+              <>
+                <span className="text-muted-foreground/30">·</span>
+                <span className="font-semibold text-red-400">{stats.overdueCount} overdue</span>
+              </>
+            )}
+            {stats.draftCount > 0 && (
+              <>
+                <span className="text-muted-foreground/30">·</span>
+                <span className="font-semibold text-amber-400 flex items-center gap-1">
+                  <Zap className="w-2.5 h-2.5" />{stats.draftCount} drafts
+                </span>
+              </>
+            )}
+          </div>
+          <span className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground shrink-0 ml-2">
+            <span className="hidden sm:inline">Show actions</span>
+            <ChevronDown className="w-3.5 h-3.5" />
+          </span>
+        </button>
+      ) : (
+        <div className="border-b border-border/40">
+          <div className="flex items-center justify-end px-4 pt-1.5">
+            <button
+              onClick={toggleStats}
+              className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <span className="hidden sm:inline">Hide</span>
+              <ChevronUp className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="px-4 pt-1 pb-2.5 grid grid-cols-2 sm:grid-cols-6 gap-3">
+            <div className="bg-foreground/[0.03] rounded-xl p-3 border border-border/30">
+              <div className="text-[10px] text-muted-foreground mb-0.5">Outstanding</div>
+              <div className="text-sm font-bold text-foreground">{fmt(stats.outstanding)}</div>
+            </div>
+            <div className={`bg-foreground/[0.03] rounded-xl p-3 border ${stats.overdueCount > 0 ? 'border-red-500/30' : 'border-border/30'}`}>
+              <div className="text-[10px] text-muted-foreground mb-0.5">Overdue</div>
+              <div className={`text-sm font-bold ${stats.overdueCount > 0 ? 'text-red-400' : 'text-foreground'}`}>
+                {fmt(stats.overdueAmt)}
+                {stats.overdueCount > 0 && <span className="ml-1 text-[10px]">({stats.overdueCount})</span>}
+              </div>
+            </div>
+            <div className={`bg-foreground/[0.03] rounded-xl p-3 border ${stats.draftCount > 0 ? 'border-amber-500/30' : 'border-border/30'}`}>
+              <div className="text-[10px] text-muted-foreground mb-0.5 flex items-center gap-1">
+                <Zap className="w-2.5 h-2.5" />Auto Drafts
+              </div>
+              <div className={`text-sm font-bold ${stats.draftCount > 0 ? 'text-amber-400' : 'text-muted-foreground'}`}>
+                {stats.draftCount > 0 ? `${stats.draftCount} · ${fmt(stats.draftTotal)}` : '—'}
+              </div>
+            </div>
+            <button
+              onClick={() => { setPanelMode('generate'); setSelectedId(null); setGenTasks([]) }}
+              className={`rounded-xl p-3 border flex items-center gap-2 text-left transition-colors ${panelMode === 'generate' ? 'bg-amber-500/20 border-amber-500/40' : 'bg-amber-600/10 hover:bg-amber-600/20 border-amber-500/20'}`}>
+              <Calendar className="w-4 h-4 text-amber-400 shrink-0" />
+              <div>
+                <div className="text-[10px] text-amber-300/70">Add-on</div>
+                <div className="text-xs font-semibold text-amber-300">Generate</div>
+              </div>
+            </button>
+            <button
+              onClick={() => { setPanelMode('batch_generate'); setSelectedId(null); setBatchGroups([]); setBatchDone(0) }}
+              className={`rounded-xl p-3 border flex items-center gap-2 text-left transition-colors ${panelMode === 'batch_generate' ? 'bg-emerald-500/20 border-emerald-500/40' : 'bg-emerald-600/10 hover:bg-emerald-600/20 border-emerald-500/20'}`}>
+              <History className="w-4 h-4 text-emerald-400 shrink-0" />
+              <div>
+                <div className="text-[10px] text-emerald-300/70">Batch</div>
+                <div className="text-xs font-semibold text-emerald-300">Historical</div>
+              </div>
+            </button>
+            <button
+              onClick={() => { setPanelMode('statement'); setSelectedId(null) }}
+              className={`rounded-xl p-3 border flex items-center gap-2 text-left transition-colors ${panelMode === 'statement' ? 'bg-blue-500/20 border-blue-500/40' : 'bg-blue-600/10 hover:bg-blue-600/20 border-blue-500/20'}`}>
+              <Receipt className="w-4 h-4 text-blue-400 shrink-0" />
+              <div>
+                <div className="text-[10px] text-blue-300/70">Account</div>
+                <div className="text-xs font-semibold text-blue-300">Statement</div>
+              </div>
+            </button>
+            <button
+              onClick={() => { setPanelMode('discounts'); setSelectedId(null); loadDiscountAnalytics() }}
+              className={`rounded-xl p-3 border flex items-center gap-2 text-left transition-colors ${panelMode === 'discounts' ? 'bg-violet-500/20 border-violet-500/40' : 'bg-violet-600/10 hover:bg-violet-600/20 border-violet-500/20'}`}>
+              <TrendingUp className="w-4 h-4 text-violet-400 shrink-0" />
+              <div>
+                <div className="text-[10px] text-violet-300/70">Financial</div>
+                <div className="text-xs font-semibold text-violet-300">Analytics</div>
+              </div>
+            </button>
+          </div>
         </div>
-        <div className={`bg-foreground/[0.03] rounded-xl p-3 border ${stats.overdueCount > 0 ? 'border-red-500/30' : 'border-border/30'}`}>
-          <div className="text-[10px] text-muted-foreground mb-0.5">Overdue</div>
-          <div className={`text-sm font-bold ${stats.overdueCount > 0 ? 'text-red-400' : 'text-foreground'}`}>
-            {fmt(stats.overdueAmt)}
-            {stats.overdueCount > 0 && <span className="ml-1 text-[10px]">({stats.overdueCount})</span>}
-          </div>
-        </div>
-        <div className={`bg-foreground/[0.03] rounded-xl p-3 border ${stats.draftCount > 0 ? 'border-amber-500/30' : 'border-border/30'}`}>
-          <div className="text-[10px] text-muted-foreground mb-0.5 flex items-center gap-1">
-            <Zap className="w-2.5 h-2.5" />Auto Drafts
-          </div>
-          <div className={`text-sm font-bold ${stats.draftCount > 0 ? 'text-amber-400' : 'text-muted-foreground'}`}>
-            {stats.draftCount > 0 ? `${stats.draftCount} · ${fmt(stats.draftTotal)}` : '—'}
-          </div>
-        </div>
-        <button
-          onClick={() => { setPanelMode('generate'); setSelectedId(null); setGenTasks([]) }}
-          className={`rounded-xl p-3 border flex items-center gap-2 text-left transition-colors ${panelMode === 'generate' ? 'bg-amber-500/20 border-amber-500/40' : 'bg-amber-600/10 hover:bg-amber-600/20 border-amber-500/20'}`}>
-          <Calendar className="w-4 h-4 text-amber-400 shrink-0" />
-          <div>
-            <div className="text-[10px] text-amber-300/70">Add-on</div>
-            <div className="text-xs font-semibold text-amber-300">Generate</div>
-          </div>
-        </button>
-        <button
-          onClick={() => { setPanelMode('batch_generate'); setSelectedId(null); setBatchGroups([]); setBatchDone(0) }}
-          className={`rounded-xl p-3 border flex items-center gap-2 text-left transition-colors ${panelMode === 'batch_generate' ? 'bg-emerald-500/20 border-emerald-500/40' : 'bg-emerald-600/10 hover:bg-emerald-600/20 border-emerald-500/20'}`}>
-          <History className="w-4 h-4 text-emerald-400 shrink-0" />
-          <div>
-            <div className="text-[10px] text-emerald-300/70">Batch</div>
-            <div className="text-xs font-semibold text-emerald-300">Historical</div>
-          </div>
-        </button>
-        <button
-          onClick={() => { setPanelMode('statement'); setSelectedId(null) }}
-          className={`rounded-xl p-3 border flex items-center gap-2 text-left transition-colors ${panelMode === 'statement' ? 'bg-blue-500/20 border-blue-500/40' : 'bg-blue-600/10 hover:bg-blue-600/20 border-blue-500/20'}`}>
-          <Receipt className="w-4 h-4 text-blue-400 shrink-0" />
-          <div>
-            <div className="text-[10px] text-blue-300/70">Account</div>
-            <div className="text-xs font-semibold text-blue-300">Statement</div>
-          </div>
-        </button>
-        <button
-          onClick={() => { setPanelMode('discounts'); setSelectedId(null); loadDiscountAnalytics() }}
-          className={`rounded-xl p-3 border flex items-center gap-2 text-left transition-colors ${panelMode === 'discounts' ? 'bg-violet-500/20 border-violet-500/40' : 'bg-violet-600/10 hover:bg-violet-600/20 border-violet-500/20'}`}>
-          <TrendingUp className="w-4 h-4 text-violet-400 shrink-0" />
-          <div>
-            <div className="text-[10px] text-violet-300/70">Financial</div>
-            <div className="text-xs font-semibold text-violet-300">Analytics</div>
-          </div>
-        </button>
-      </div>
+      )}
 
       {/* ── Tab bar ── */}
       <div className="flex items-center gap-0 border-b border-border/40 px-4 pt-1">
