@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Trash2, Save, Check, X, ChevronDown } from 'lucide-react'
+import { Plus, Trash2, Save, Check, X, ChevronDown, ChevronLeft } from 'lucide-react'
 import { usePermissions } from '@/contexts/permission-context'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { useToast, ToastContainer } from '@/components/ui/toast'
@@ -91,6 +91,12 @@ export default function DesignationsClient(props: Props) {
   })
 
   const [showNewModal, setShowNewModal] = useState(false)
+
+  // Mobile-only pane switcher. The desktop layout always shows both panes
+  // side by side; on phones we show one at a time so neither gets squeezed
+  // into ~50% of an already-narrow screen. Defaults to 'list' so users see
+  // the directory first, not the auto-selected detail.
+  const [mobileView, setMobileView] = useState<'list' | 'detail'>('list')
 
   const selected = designations.find(d => d.id === selectedId) ?? null
 
@@ -184,10 +190,18 @@ export default function DesignationsClient(props: Props) {
   }
 
   // ─── Render ────────────────────────────────────────────────────────────────
+  // Layout:
+  //   - md+ : original 2-column (list rail + detail pane), fixed height.
+  //   - <md : single-pane stack. `mobileView` decides which pane is visible.
   return (
-    <div className="flex h-[calc(100vh-4rem)] min-h-[600px]">
+    <div className="md:flex md:h-[calc(100vh-4rem)] md:min-h-[600px]">
       {/* ── Left rail ──────────────────────────────────────────────────────── */}
-      <aside className="w-72 shrink-0 border-r border-border bg-sidebar/50 flex flex-col">
+      <aside
+        className={
+          'md:w-72 md:shrink-0 md:border-r md:border-border md:bg-sidebar/50 md:flex md:flex-col md:h-full ' +
+          (mobileView === 'list' ? 'flex flex-col' : 'hidden md:flex')
+        }
+      >
         <div className="px-4 py-4 border-b border-border flex items-center justify-between">
           <h2 className="font-semibold text-foreground">Designations</h2>
           {canManage && (
@@ -200,7 +214,7 @@ export default function DesignationsClient(props: Props) {
           )}
         </div>
 
-        <div className="flex-1 overflow-y-auto py-2 px-2 space-y-1">
+        <div className="md:flex-1 md:overflow-y-auto py-2 px-2 space-y-1">
           {designations.length === 0 && (
             <p className="text-xs text-muted-foreground px-3 py-4">No designations yet.</p>
           )}
@@ -210,7 +224,7 @@ export default function DesignationsClient(props: Props) {
             return (
               <button
                 key={d.id}
-                onClick={() => setSelectedId(d.id)}
+                onClick={() => { setSelectedId(d.id); setMobileView('detail') }}
                 className={
                   'w-full text-left px-3 py-2.5 rounded-lg transition-colors flex items-start gap-2 ' +
                   (isSelected
@@ -247,7 +261,19 @@ export default function DesignationsClient(props: Props) {
       </aside>
 
       {/* ── Right pane ─────────────────────────────────────────────────────── */}
-      <main className="flex-1 overflow-y-auto">
+      <main
+        className={
+          'md:flex-1 md:overflow-y-auto md:h-full md:block ' +
+          (mobileView === 'detail' ? 'block' : 'hidden md:block')
+        }
+      >
+        {/* Mobile-only back button to return to the list pane. */}
+        <button
+          onClick={() => setMobileView('list')}
+          className="md:hidden w-full flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium text-primary border-b border-border bg-sidebar/40"
+        >
+          <ChevronLeft className="w-4 h-4" /> Back to designations
+        </button>
         {selected ? (
           <DesignationDetail
             key={selected.id}
