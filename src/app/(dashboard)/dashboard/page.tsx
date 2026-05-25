@@ -4,7 +4,7 @@ import DashboardClient from './dashboard-client'
 
 export const dynamic = 'force-dynamic'
 
-export default async function DashboardPage() {
+async function DashboardPageInner() {
   // Service-role client for data — every query below is explicitly gated by
   // `isAdmin` or scoped by `employee_id = employeeId` at the application layer,
   // matching what RLS previously enforced. Saves the async cookies() hop and
@@ -208,4 +208,23 @@ export default async function DashboardPage() {
       isAdmin={isAdmin}
     />
   )
+}
+
+// Wrap with verbose error logging so the actual cause shows up in Vercel
+// runtime logs (instead of just the opaque ERROR digest hash). Remove once
+// the underlying crash is identified and fixed.
+export default async function DashboardPage() {
+  try {
+    return await DashboardPageInner()
+  } catch (err: any) {
+    console.error('[DASHBOARD CRASH]', {
+      name: err?.name,
+      message: err?.message,
+      stack: err?.stack,
+      code: err?.code,
+      details: err?.details,
+      hint: err?.hint,
+    })
+    throw err
+  }
 }
