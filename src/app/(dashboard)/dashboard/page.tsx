@@ -55,7 +55,7 @@ export default async function DashboardPage() {
     isAdmin
       ? fetchAll(supabase
           .from('tasks')
-          .select('id, billing_amount_inr, task_date, status, service_id, quantity, client:clients(id, name), service:services(id, name)')
+          .select('id, billing_amount_inr, task_date, status, service_id, client:clients(id, name), service:services(id, name)')
           .not('status', 'eq', 'cancelled')
           .gte('task_date', analyticsFromStr)
           .order('task_date', { ascending: true })
@@ -66,7 +66,7 @@ export default async function DashboardPage() {
     isAdmin
       ? fetchAll(stablePaginationQuery(supabase
           .from('tasks')
-          .select('id, title, status, billing_amount_inr, task_date, quantity, client:clients(id, name), service:services(id, name)')
+          .select('id, title, status, billing_amount_inr, task_date, client:clients(id, name), service:services(id, name)')
           .not('status', 'eq', 'cancelled')
           .order('task_date', { ascending: false })))
       : Promise.resolve({ data: [] }),
@@ -96,50 +96,26 @@ export default async function DashboardPage() {
     isAdmin
       ? supabase
           .from('tasks')
-          .select('id, title, status, billing_amount_inr, task_date, quantity, client:clients(id, name), service:services(id, name)')
+          .select('id, title, status, billing_amount_inr, task_date, client:clients(id, name), service:services(id, name)')
           .eq('task_date', todayStr)
           .order('status')
       : Promise.resolve({ data: [] }),
 
-    // Fetch scores:
-    //
-    // BOTH paths use !inner join so every row is guaranteed to have a real
-    // tasks row. Orphaned rows where task_id IS NULL are automatically excluded
-    // (a NULL foreign key can never match any tasks.id in an inner join).
-    //
-    // ADMIN path — analytics window bounded by tasks.task_date (the actual work
-    // date), NOT calculated_at. Using calculated_at as the window would silently
-    // exclude tasks worked in the period but recalculated outside it, and would
-    // include scores that were recalculated inside the window but belong to tasks
-    // that predate it. calculated_at is kept in the select only for sort order
-    // (newest calculation first → client dedup keeps the most recent score).
-    //
-    // EMPLOYEE path — no server-side date window; the client filters by
-    // task.task_date exclusively and never falls back to calculated_at.
-    // The richer select powers the "My Recent Contributions" history list.
-    // Ordered by calculated_at DESC → first occurrence of each task.id in JS
-    // is the most recent calculation (dedup keeps first = most recent).
+    // Fetch scores — capped to the same 36-month analytics window so payload
+    // is bounded. The dashboard's teamEarnings widget only operates within
+    // any user-selected DateFilter, which itself can't exceed the loaded data.
     isAdmin
       ? fetchAll(supabase
           .from('contribution_scores')
-          .select('task_id, employee_id, score_percentage, earnings_inr, calculated_at, task:tasks!inner(id, task_date, quantity)')
-          .not('task_id', 'is', null)
-          .gt('score_percentage', 0)
+          .select('task_id, employee_id, score_percentage, earnings_inr, calculated_at, task:tasks(id, task_date)')
           .gte('calculated_at', analyticsFromStr)
           .order('calculated_at', { ascending: false })
           .order('id', { ascending: true }))
       : fetchAll(supabase
           .from('contribution_scores')
-          .select(`
-            task_id, employee_id, score_percentage, earnings_inr, calculated_at,
-            task:tasks!inner(
-              id, task_number, task_date, title, status, quantity,
-              client:clients(name),
-              service:services(name)
-            )
-          `)
+          .select('task_id, employee_id, score_percentage, earnings_inr, calculated_at, task:tasks(id, task_date)')
           .eq('employee_id', employeeId)
-          .gt('score_percentage', 0)          // exclude 0% rows: assigned but no contribution made
+          .gte('calculated_at', analyticsFromStr)
           .order('calculated_at', { ascending: false })
           .order('id', { ascending: true })),
 
@@ -160,32 +136,6 @@ export default async function DashboardPage() {
           .order('month', { ascending: false })
           .limit(36)
   ])
-
-  // For employees: count done/delivered tasks assigned to them that have NO
-  // contribution_score yet — this powers the "pending contributions" nudge.
-  // Cheap: two lightweight queries, no large joins.
-  // NOTE: PostgREST does not support .in() on embedded-join column aliases
-  // (e.g. 'task.status') — filter status values in JS after fetching.
-  let pendingContribCount = 0
-  if (!isAdmin && employeeId) {
-    const COMPLETE_STATUSES = ['done', 'delivered', 'invoiced', 'paid']
-    const [assignedRes, scoredRes] = await Promise.all([
-      supabase
-        .from('task_assignments')
-        .select('task_id, task:tasks!inner(status)')
-        .eq('employee_id', employeeId),
-      supabase
-        .from('contribution_scores')
-        .select('task_id')
-        .eq('employee_id', employeeId)
-        .gt('score_percentage', 0),
-    ])
-    const scoredSet = new Set((scoredRes.data || []).map((r: any) => r.task_id))
-    pendingContribCount = (assignedRes.data || []).filter((r: any) => {
-      const status = (Array.isArray(r.task) ? r.task[0] : r.task)?.status
-      return COMPLETE_STATUSES.includes(status) && !scoredSet.has(r.task_id)
-    }).length
-  }
 
   const invoices           = invoicesRes.data || []
   const allCashbook        = cashbookRes.data || []
@@ -240,7 +190,6 @@ export default async function DashboardPage() {
       employees={employees as any[]}
       scores={scores as any[]}
       payrollRecords={payrollRecords as any[]}
-      pendingContribCount={pendingContribCount}
       todayStr={todayStr}
       stats={{
         totalBilled,
