@@ -46,3 +46,26 @@ export async function resolveLoginEmail(
   }
   return { ok: true, email: data.email }
 }
+
+/**
+ * Returns the company logo URL from the `company_settings` key/value table.
+ * Used on the login page (where no user is authenticated yet) so the
+ * workspace's own logo replaces the default Cirqle placeholder.
+ *
+ * Returns `null` if no logo has been uploaded — caller should fall back
+ * to the default brand placeholder gracefully.
+ */
+export async function getCompanyLogo(): Promise<string | null> {
+  try {
+    const admin = createAdminClient()
+    const { data } = await admin
+      .from('company_settings')
+      .select('value')
+      .eq('key', 'logo_url')
+      .maybeSingle()
+    const url = (data?.value || '').trim()
+    return url || null
+  } catch {
+    return null
+  }
+}
