@@ -644,9 +644,44 @@ export default function SettingsClient(props: Props) {
     <div>
       <Header title="Settings" subtitle="Configure your Cirqle workspace" />
 
-      <div className="flex h-[calc(100vh-73px)]">
-        {/* Settings sidebar — grouped */}
-        <div className="w-52 border-r border-border bg-sidebar/50 py-4 px-2 shrink-0 overflow-y-auto">
+      {/* On mobile this stacks: section picker → content (full width).
+          On md+ it's the original 2-column layout with a left sidebar. */}
+      <div className="md:flex md:h-[calc(100vh-73px)]">
+        {/* ── Section picker — MOBILE ONLY ──
+            A native <select> with <optgroup> so users can jump to any
+            settings section without the left nav eating ~half the screen. */}
+        <div className="md:hidden border-b border-border bg-sidebar/40 px-4 py-2.5 sticky top-[68px] z-10 backdrop-blur-sm">
+          <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1">Section</label>
+          <select
+            value={tab}
+            onChange={e => {
+              const t = e.target.value as SettingsTab
+              setTab(t); setQuickEdit(false)
+              window.history.replaceState(null, '', `?tab=${t.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`)
+            }}
+            className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+          >
+            {SETTINGS_GROUPS.map(group => (
+              <optgroup key={group.label} label={`${group.emoji}  ${group.label}`}>
+                {group.tabs.map(t => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <a
+            href="/dashboard/settings/designations"
+            className="mt-2 flex items-center justify-between text-xs text-muted-foreground hover:text-foreground bg-secondary/60 rounded-lg px-3 py-1.5 border border-border"
+          >
+            <span>🔐  Access & Roles</span>
+            <svg className="w-3 h-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+            </svg>
+          </a>
+        </div>
+
+        {/* ── Settings sidebar — DESKTOP ONLY (md+) ── */}
+        <div className="hidden md:block w-52 border-r border-border bg-sidebar/50 py-4 px-2 shrink-0 overflow-y-auto">
           {SETTINGS_GROUPS.map((group, gIdx) => (
             <div key={group.label} className={gIdx > 0 ? 'mt-4' : ''}>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/40 px-3 mb-1.5 flex items-center gap-1.5">
@@ -682,8 +717,8 @@ export default function SettingsClient(props: Props) {
           </div>
         </div>
 
-        {/* Settings content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        {/* Settings content — full width on mobile, flex-1 next to sidebar on md+ */}
+        <div className="flex-1 overflow-y-auto p-4 md:p-6">
 
           {/* Company */}
           {tab === 'Company' && (

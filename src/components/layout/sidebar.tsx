@@ -274,24 +274,30 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
       {/* Logo */}
       <div className={`py-5 border-b border-sidebar-border transition-all duration-300 ${isCollapsed ? 'flex flex-col items-center px-0' : 'px-5'}`}>
         <div className={`flex items-center transition-all duration-300 ${isCollapsed ? 'justify-center gap-0' : 'gap-2.5'}`}>
-          {/* Workspace logo (favicon-style) — falls back to the gradient
-              "C" tile when no logo is configured or the URL fails to load. */}
+          {/* When a workspace logo is configured, show ONLY the logo — it
+              already contains the brand wordmark, so the "Cirqle / Design
+              Agency" text is redundant. Falls back to the gradient "C" tile
+              + brand text only when no logo exists (first-run installs). */}
           {logoUrl && !logoBroken ? (
             <img
               src={logoUrl}
               alt="Workspace logo"
               onError={() => setLogoBroken(true)}
-              className="w-8 h-8 rounded-lg object-contain shrink-0 bg-sidebar"
+              className={`object-contain transition-all duration-300 ${
+                isCollapsed ? 'w-8 h-8' : 'h-10 max-w-[160px]'
+              }`}
             />
           ) : (
-            <div className="w-8 h-8 rounded-lg gradient-bg flex items-center justify-center shrink-0">
-              <span className="text-white font-bold text-sm">C</span>
-            </div>
+            <>
+              <div className="w-8 h-8 rounded-lg gradient-bg flex items-center justify-center shrink-0">
+                <span className="text-white font-bold text-sm">C</span>
+              </div>
+              <div className={`overflow-hidden transition-all duration-300 flex flex-col justify-center ${isCollapsed ? 'w-0 opacity-0' : 'w-[120px] opacity-100'}`}>
+                <div className="font-bold text-sidebar-foreground text-sm leading-tight gradient-text whitespace-nowrap">Cirqle</div>
+                <div className="text-[10px] text-muted-foreground leading-tight whitespace-nowrap">Design Agency</div>
+              </div>
+            </>
           )}
-          <div className={`overflow-hidden transition-all duration-300 flex flex-col justify-center ${isCollapsed ? 'w-0 opacity-0' : 'w-[120px] opacity-100'}`}>
-            <div className="font-bold text-sidebar-foreground text-sm leading-tight gradient-text whitespace-nowrap">Cirqle</div>
-            <div className="text-[10px] text-muted-foreground leading-tight whitespace-nowrap">Design Agency</div>
-          </div>
         </div>
 
         {/* Designation badge */}
