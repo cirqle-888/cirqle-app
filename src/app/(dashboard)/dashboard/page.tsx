@@ -164,24 +164,27 @@ export default async function DashboardPage() {
   // For employees: count done/delivered tasks assigned to them that have NO
   // contribution_score yet — this powers the "pending contributions" nudge.
   // Cheap: two lightweight queries, no large joins.
+  // NOTE: PostgREST does not support .in() on embedded-join column aliases
+  // (e.g. 'task.status') — filter status values in JS after fetching.
   let pendingContribCount = 0
   if (!isAdmin && employeeId) {
+    const COMPLETE_STATUSES = ['done', 'delivered', 'invoiced', 'paid']
     const [assignedRes, scoredRes] = await Promise.all([
       supabase
         .from('task_assignments')
         .select('task_id, task:tasks!inner(status)')
-        .eq('employee_id', employeeId)
-        .in('task.status', ['done', 'delivered', 'invoiced', 'paid']),
+        .eq('employee_id', employeeId),
       supabase
         .from('contribution_scores')
         .select('task_id')
         .eq('employee_id', employeeId)
-        .gt('score_percentage', 0),   // 0% = not yet contributed; still counts as pending
+        .gt('score_percentage', 0),
     ])
     const scoredSet = new Set((scoredRes.data || []).map((r: any) => r.task_id))
-    pendingContribCount = (assignedRes.data || []).filter(
-      (r: any) => !scoredSet.has(r.task_id)
-    ).length
+    pendingContribCount = (assignedRes.data || []).filter((r: any) => {
+      const status = (Array.isArray(r.task) ? r.task[0] : r.task)?.status
+      return COMPLETE_STATUSES.includes(status) && !scoredSet.has(r.task_id)
+    }).length
   }
 
   const invoices           = invoicesRes.data || []
