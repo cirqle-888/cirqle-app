@@ -124,8 +124,8 @@ export default async function DashboardPage() {
           .from('contribution_scores')
           .select('task_id, employee_id, score_percentage, earnings_inr, calculated_at, task:tasks!inner(id, task_date, quantity)')
           .not('task_id', 'is', null)
-          .gt('score_percentage', 0)          // exclude bulk-import placeholder rows (0% = no real contribution)
-          .gte('tasks.task_date', analyticsFromStr)
+          .gt('score_percentage', 0)
+          .gte('calculated_at', analyticsFromStr)
           .order('calculated_at', { ascending: false })
           .order('id', { ascending: true }))
       : fetchAll(supabase
