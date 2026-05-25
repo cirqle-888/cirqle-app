@@ -6,10 +6,32 @@ import { CommandPalette } from '@/components/ui/command-palette'
 import { BirthdayCelebration } from '@/components/ui/birthday-celebration'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { isBirthdayToday } from '@/lib/utils/birthday'
+import { createAdminClient } from '@/lib/supabase/admin'
+
+// Workspace logo URL fetch. Service-role client so RLS on company_settings
+// can't block it. Returns null on any failure so the Sidebar falls back to
+// the default brand mark — never crashes the dashboard layout.
+async function fetchLogoUrl(): Promise<string | null> {
+  try {
+    const admin = createAdminClient()
+    const { data } = await admin
+      .from('company_settings')
+      .select('value')
+      .eq('key', 'logo_url')
+      .maybeSingle()
+    const url = (data?.value || '').trim()
+    return url || null
+  } catch {
+    return null
+  }
+}
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  // Best-effort load — graceful when migration hasn't been run yet
-  const me = await loadCurrentUser().catch(() => null)
+  // Best-effort loads — both graceful so the dashboard always renders.
+  const [me, logoUrl] = await Promise.all([
+    loadCurrentUser().catch(() => null),
+    fetchLogoUrl(),
+  ])
 
   // Default to a permissive admin shape if no employee record / migration not yet applied,
   // so the existing single-admin app keeps working until the migration runs.
@@ -52,7 +74,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   return (
     <PrivacyProvider>
       <RoleProvider initialEmployee={serverEmployee}>
-        <PermissionProvider user={user}>
+        <PermissionProvider user={user} logoUrl={logoUrl}>
           <div className="flex h-screen overflow-hidden">
             <Sidebar />
             {/* pb-16 on mobile gives clearance above the employee bottom nav bar.

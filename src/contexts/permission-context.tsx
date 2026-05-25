@@ -22,11 +22,15 @@ interface PermissionContextValue {
   /** Admin-only: temporary session toggle to reveal real names instead of CQID. Defaults to OFF on every page load. */
   revealNames: boolean
   setRevealNames: (v: boolean) => void
+  /** Workspace-level logo URL (from company_settings.logo_url). null = no logo configured; render the default brand mark. */
+  logoUrl: string | null
 }
 
 const Ctx = createContext<PermissionContextValue | null>(null)
 
-export function PermissionProvider({ user, children }: { user: PermissionUser; children: ReactNode }) {
+export function PermissionProvider(
+  { user, logoUrl = null, children }: { user: PermissionUser; logoUrl?: string | null; children: ReactNode },
+) {
   const [revealNames, setRevealNames] = useState(false)
   const perms = useMemo(() => new Set(user.permissions), [user.permissions])
 
@@ -36,7 +40,8 @@ export function PermissionProvider({ user, children }: { user: PermissionUser; c
     can: (key) => (user.isAdmin ? true : perms.has(key)),
     revealNames: user.isAdmin && revealNames,
     setRevealNames,
-  }), [user, perms, revealNames])
+    logoUrl,
+  }), [user, perms, revealNames, logoUrl])
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
