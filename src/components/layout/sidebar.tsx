@@ -27,6 +27,7 @@ import {
   ChevronLeft,
   Sun,
   Moon,
+  Monitor,
   KeyRound,
   UserCircle,
   ChevronDown,
@@ -160,7 +161,7 @@ function ProfileActions({
   const router = useRouter()
   const { isUnlocked, openUnlockModal, lock } = usePrivacy()
   const { user } = usePermissions()
-  const { toggleTheme } = useTheme()
+  const { theme, cycleTheme, mounted: themeMounted } = useTheme()
 
   async function handleSignOut() {
     const supabase = createClient()
@@ -174,24 +175,37 @@ function ProfileActions({
 
   return (
     <div className="space-y-0.5">
-      {/* Dark / Light mode
-          ─ Both icons + labels are rendered in the DOM; CSS picks the visible
-            one via the `dark:` Tailwind variant, which reads the `.dark` class
-            on <html> set by /public/theme-init.js before first paint.
-          ─ This means server + client emit identical markup → zero hydration
-            mismatch. The toggle button needs no `suppressHydrationWarning`. */}
+      {/* Theme cycle button — Light → Dark → System → Light.
+          ─ Until `themeMounted` flips, we render the SSR-safe "System" label
+            with a Monitor icon so the server + first client render match.
+            After mount, the actual user choice + icon take over. */}
       <button
-        onClick={toggleTheme}
-        aria-label="Toggle theme"
+        onClick={cycleTheme}
+        aria-label="Cycle theme (light / dark / system)"
+        title={
+          !themeMounted ? 'Theme' :
+          theme === 'light' ? 'Light mode — click for Dark' :
+          theme === 'dark'  ? 'Dark mode — click for System' :
+                              'System mode — click for Light'
+        }
         className={`${itemCls} text-muted-foreground hover:bg-sidebar-accent hover:text-foreground`}
       >
-        <span className="relative w-4 h-4 shrink-0" aria-hidden="true">
-          <Sun  className="block dark:hidden w-4 h-4 text-amber-500" />
-          <Moon className="hidden dark:block w-4 h-4 text-blue-300" />
+        <span className="w-4 h-4 shrink-0" aria-hidden="true">
+          {!themeMounted ? (
+            <Monitor className="w-4 h-4 text-muted-foreground" />
+          ) : theme === 'light' ? (
+            <Sun className="w-4 h-4 text-amber-500" />
+          ) : theme === 'dark' ? (
+            <Moon className="w-4 h-4 text-blue-300" />
+          ) : (
+            <Monitor className="w-4 h-4 text-violet-300" />
+          )}
         </span>
         <span className="truncate whitespace-nowrap">
-          <span className="block dark:hidden">Light mode</span>
-          <span className="hidden dark:block">Dark mode</span>
+          {!themeMounted ? 'Theme' :
+            theme === 'light' ? 'Light mode' :
+            theme === 'dark'  ? 'Dark mode'  :
+                                'System mode'}
         </span>
       </button>
 
