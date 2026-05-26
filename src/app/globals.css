@@ -160,6 +160,23 @@
     -ms-overflow-style: none;  /* IE and Edge */
     scrollbar-width: none;  /* Firefox */
   }
+
+  /* ── Prevent iOS / iPadOS auto-zoom on input focus ──
+     Mobile Safari zooms in whenever a form field's font-size is below
+     16px. Lots of our inputs use Tailwind's `text-sm` (14px) for visual
+     density, which triggers the zoom every time the user taps a field.
+
+     `pointer: coarse` matches touch-primary devices (iPhone, iPad,
+     Android tablets/phones) without affecting mouse-pointer desktops,
+     so the compact 14px sizing is preserved on actual desktop. The
+     `!important` is required to override Tailwind utility classes. */
+  @media (pointer: coarse) {
+    input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']),
+    select,
+    textarea {
+      font-size: 16px !important;
+    }
+  }
 }
 
 @layer utilities {
