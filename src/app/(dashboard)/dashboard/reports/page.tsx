@@ -47,10 +47,14 @@ export default async function ReportsPage() {
 
   // Skills analytics: contributions with task_date. No date cap — sparse today
   // but grows organically; data is small (<50k rows at 3-year horizon).
+  // `.order('id')` is essential here — without a stable secondary sort, paginated
+  // ranges can skip or duplicate rows whenever many contributions share the same
+  // task_id (which is common since contributions are scoped to tasks).
   const contributionsQuery = supabase
     .from('contributions')
     .select('task_id, employee_id, parameter_id, value, task:tasks!inner(task_date)')
     .order('task_id')
+    .order('id', { ascending: true })
 
   const [employeesRes, scoresRes, tasksRes, contributionsRes, parametersRes, groupsRes] =
     await Promise.all([

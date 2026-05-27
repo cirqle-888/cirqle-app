@@ -17,6 +17,13 @@ export default async function DashboardPage() {
   const analyticsFrom = new Date()
   analyticsFrom.setMonth(analyticsFrom.getMonth() - 36)
   const analyticsFromStr = analyticsFrom.toISOString().slice(0, 10)
+  // Display-widget window: last 90 days. Used by the active-tasks / to-be-invoiced
+  // / unscored-done widgets which are intentionally "recent work" lists — older
+  // rows would never surface in the UI anyway. Caps an otherwise unbounded fetch
+  // of every non-cancelled task ever created.
+  const displayFrom = new Date()
+  displayFrom.setDate(displayFrom.getDate() - 90)
+  const displayFromStr = displayFrom.toISOString().slice(0, 10)
 
   const me = await loadCurrentUser().catch(() => null)
   const isAdmin = me?.isAdmin ?? true
@@ -62,12 +69,16 @@ export default async function DashboardPage() {
           .order('id', { ascending: true }))
       : Promise.resolve({ data: [] }),
 
-    // Display tasks (used for widgets: active, overdue, to-be-invoiced) — admin only
+    // Display tasks (used for widgets: active, overdue, to-be-invoiced) — admin only.
+    // Bounded to 90 days because the widgets surface "recent work" and would never
+    // show older rows in the UI anyway. Without this cap, the query was pulling
+    // every non-cancelled task ever — easily 10k+ rows on a mature account.
     isAdmin
       ? fetchAll(stablePaginationQuery(supabase
           .from('tasks')
           .select('id, title, status, billing_amount_inr, task_date, client:clients(id, name), service:services(id, name)')
           .not('status', 'eq', 'cancelled')
+          .gte('task_date', displayFromStr)
           .order('task_date', { ascending: false })))
       : Promise.resolve({ data: [] }),
 

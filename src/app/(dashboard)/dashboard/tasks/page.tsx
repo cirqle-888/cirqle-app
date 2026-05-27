@@ -1,4 +1,4 @@
-import { createAdminClient, fetchAll, stablePaginationQuery } from '@/lib/supabase/server'
+import { createAdminClient, fetchAll, stablePaginationQuery, safeQuery, columnExists } from '@/lib/supabase/server'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility, stripTaskListPricing } from '@/lib/permissions/strip'
 import TasksClient from './tasks-client'
@@ -95,23 +95,21 @@ export default async function TasksPage() {
   const isEmployee = !isAdmin
   const vis = financialVisibility(me)
 
-  // Check if deleted_at column exists by probing with a limit-0 query
-  const probe = await supabase
-    .from('tasks')
-    .select('deleted_at')
-    .limit(0)
-
-  const hasDeletedAt = !probe.error
+  // Process-level cached probe (HAR showed this 400'd on every load).
+  // Now: one round-trip per server lifetime instead of per page nav.
+  // (Whole try-and-fallback dance exists because legacy installs may pre-date
+  // the soft-delete migration. After the column lands universally, both this
+  // and the `hasDeletedAt` branches below can be deleted.)
+  const hasDeletedAt = await columnExists(supabase, 'tasks', 'deleted_at')
 
   const cutoff = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString()
 
-  // Only use soft-delete filters if the column exists
+  // Auto-purge tasks deleted more than 45 days ago. Fire-and-forget so the page
+  // render doesn't wait on a write query that doesn't affect what we display
+  // (purged rows are >45d old anyway, far outside the visible window).
   if (hasDeletedAt) {
-    // Auto-purge tasks deleted more than 45 days ago
-    await supabase.from('tasks').delete().not('deleted_at', 'is', null).lt('deleted_at', cutoff)
+    void supabase.from('tasks').delete().not('deleted_at', 'is', null).lt('deleted_at', cutoff)
   }
-
-  const fallback = <T,>() => ({ data: [] as T[], error: null })
 
   // Pricing-aware select: viewers with `tasks.view_pricing` get the full row;
   // viewers without it get the explicit financial-stripped column list so
@@ -121,10 +119,12 @@ export default async function TasksPage() {
   const selectClause = vis.tasksPricing ? ADMIN_TASK_SELECT : EMPLOYEE_TASK_SELECT
 
   // Fetch tasks via pagination (bypasses Supabase's 1000-row response cap)
-  // in parallel with all the smaller reference-data queries.
+  // in parallel with all the smaller reference-data queries, including the
+  // three visibility_* settings rows (used to be a separate sequential await).
   const [allTasks, dbCountRes, clientsRes, servicesRes, clientPricingsRes, employeesRes, taskAssignmentsRes,
     groupsRes, paramsRes, groupServicesRes, paramServicesRes,
-    taskGroupsRes, taskGroupAssignmentsRes, taskParamAssignmentsRes, myTaskIds] = await Promise.all([
+    taskGroupsRes, taskGroupAssignmentsRes, taskParamAssignmentsRes, myTaskIds,
+    visibilityBillingRes, visibilityContribRes, visibilityNamesRes] = await Promise.all([
     fetchAllTasks(supabase, hasDeletedAt, selectClause),
     // Real DB count of all tasks (used for the "DB search" fallback in the UI).
     hasDeletedAt
@@ -145,7 +145,8 @@ export default async function TasksPage() {
     supabase.from('employees').select('id, cqid, name, is_active').eq('is_active', true).order('cqid'),
     // Global task_assignments so employees can see who is on each task and
     // filter by any teammate. Just (task_id, employee_id) — no extra data.
-    supabase.from('task_assignments').select('task_id, employee_id'),
+    // safeQuery short-circuits the round-trip once the table is known missing.
+    safeQuery('task_assignments', supabase.from('task_assignments').select('task_id, employee_id')),
     isAdmin
       ? supabase.from('contribution_groups').select('*').order('display_order')
       : Promise.resolve({ data: [] as any[], error: null }),
@@ -160,24 +161,17 @@ export default async function TasksPage() {
       : Promise.resolve({ data: [] as any[], error: null }),
     // task_groups: group-category mapping. Admin-only — employees have no board group UI.
     isAdmin
-      ? supabase.from('task_groups').select('task_id, group_id')
-          .then(r => r, () => fallback<{ task_id: string; group_id: string }>())
+      ? safeQuery('task_groups', supabase.from('task_groups').select('task_id, group_id'))
       : Promise.resolve({ data: [] as any[], error: null }),
     // Group/param assignments are part of the assignment graph; surfaced to all
     // so the "My Tasks" toggle plus assignee filter can resolve full history.
-    supabase.from('task_group_assignments').select('task_id, group_id, employee_id')
-        .then(r => r, () => fallback<{ task_id: string; group_id: string; employee_id: string }>()),
-    supabase.from('task_parameter_assignments').select('task_id, parameter_id, employee_id')
-        .then(r => r, () => fallback<{ task_id: string; parameter_id: string; employee_id: string }>()),
+    safeQuery('task_group_assignments', supabase.from('task_group_assignments').select('task_id, group_id, employee_id')),
+    safeQuery('task_parameter_assignments', supabase.from('task_parameter_assignments').select('task_id, parameter_id, employee_id')),
     // myTaskIds — the ids the current employee personally has any history on.
     // Lightweight join; only used by the "My Tasks" filter on the client.
     isEmployee && me?.employeeId
       ? fetchEmployeeOwnTaskIds(supabase, me.employeeId)
       : Promise.resolve([] as string[]),
-  ])
-
-  // Fetch visibility settings
-  const [visibilityBillingRes, visibilityContribRes, visibilityNamesRes] = await Promise.all([
     supabase.from('company_settings').select('value').eq('key', 'visibility_billing').maybeSingle(),
     supabase.from('company_settings').select('value').eq('key', 'visibility_contributions').maybeSingle(),
     supabase.from('company_settings').select('value').eq('key', 'visibility_employee_names').maybeSingle(),

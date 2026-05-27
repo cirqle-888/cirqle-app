@@ -16,6 +16,28 @@ export interface CurrentUser {
   dateOfBirth: string | null
 }
 
+// ── Process-level cache ──────────────────────────────────────────────────────
+// Across-request cache for the employee + permissions lookup. Keyed by auth
+// user id (extracted on every call so we can never serve user A's perms to
+// user B). 30-second TTL — long enough to make rapid page navigation feel
+// instant, short enough that designation/permission changes are picked up
+// without a server restart.
+//
+// React's built-in `cache()` only dedupes within ONE request; this Map
+// persists across requests in the same Node process. In dev mode (single
+// long-running process) this gives consistent gains. In serverless prod,
+// each cold start resets it — still beneficial because hot processes serve
+// many requests before being recycled.
+type CacheEntry = { user: CurrentUser | null; expiresAt: number }
+const USER_CACHE = new Map<string, CacheEntry>()
+const USER_CACHE_TTL_MS = 30_000
+
+function pruneCache() {
+  if (USER_CACHE.size < 200) return
+  const now = Date.now()
+  for (const [k, v] of USER_CACHE) if (v.expiresAt <= now) USER_CACHE.delete(k)
+}
+
 /**
  * Load the currently-authenticated user with their effective permission set.
  * Returns null when not signed in. Gracefully degrades to admin-like access when the
@@ -23,11 +45,26 @@ export interface CurrentUser {
  *
  * Wrapped with React `cache()` so multiple server components calling this within
  * the same request share a single DB round-trip instead of each running their own.
+ * Additionally backed by a 30-second process-level Map keyed by auth user id, so
+ * rapid back-and-forth navigation only pays for the auth.getUser() round-trip,
+ * not the full employee + permissions lookup.
  */
 export const loadCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
+
+  // Process-level cache hit — skips the two follow-up DB round-trips.
+  const cached = USER_CACHE.get(user.id)
+  if (cached && cached.expiresAt > Date.now()) return cached.user
+
+  // Helper: store the result before returning so the next page nav in this
+  // ~30s window only pays for auth.getUser() (~50ms) instead of full lookup.
+  const cacheAndReturn = (result: CurrentUser | null): CurrentUser | null => {
+    pruneCache()
+    USER_CACHE.set(user.id, { user: result, expiresAt: Date.now() + USER_CACHE_TTL_MS })
+    return result
+  }
 
   // Try the new shape first (with designation_id + new columns)
   let emp: any = null
@@ -52,8 +89,8 @@ export const loadCurrentUser = cache(async (): Promise<CurrentUser | null> => {
       .select('id, cqid, name, email, role')
       .eq('auth_id', user.id)
       .maybeSingle()
-    if (!data) return null
-    return {
+    if (!data) return cacheAndReturn(null)
+    return cacheAndReturn({
       authId: user.id,
       employeeId: data.id,
       cqid: data.cqid ?? '',
@@ -65,11 +102,15 @@ export const loadCurrentUser = cache(async (): Promise<CurrentUser | null> => {
       isArchived: false,
       permissions: new Set(),
       dateOfBirth: null,
-    }
+    })
   }
 
   const designation = Array.isArray(emp.designation) ? emp.designation[0] : emp.designation
-  const isAdmin = designation?.is_admin === true
+  // Pre-migration fallback: employees with no designation assigned are treated
+  // as admin. This matches the layout sidebar (`me.isAdmin || me.designationId
+  // === null`) and the server-action guard in `enforce.ts`, so every page sees
+  // the same notion of "admin" without each consumer re-implementing it.
+  const isAdmin = designation?.is_admin === true || !designation?.id
 
   let permissions = new Set<string>()
   if (isAdmin) {
@@ -96,7 +137,7 @@ export const loadCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     }
   }
 
-  return {
+  return cacheAndReturn({
     authId: user.id,
     employeeId: emp.id,
     cqid: emp.cqid ?? '',
@@ -108,7 +149,7 @@ export const loadCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     isArchived: emp.is_archived === true,
     permissions,
     dateOfBirth: emp.date_of_birth ?? null,
-  }
+  })
 })
 
 export function hasPermission(user: CurrentUser | null, key: PermKey | string): boolean {

@@ -15,6 +15,10 @@ export default async function InvoicesPage() {
   const supabase = createAdminClient()
 
   const [invoicesRes, clientsRes, bankRes, servicesRes, settingsRes] = await Promise.all([
+    // Note: this is the biggest single query on the page (HAR shows 7.5s cold).
+    // The nested task+service joins inside `items` are needed by the editor,
+    // PDF generator, and invoice rows — can't safely drop them without a
+    // client refactor. Caps at 500 most-recent invoices to bound the payload.
     supabase
       .from('invoices')
       .select(`
