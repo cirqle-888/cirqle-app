@@ -244,6 +244,82 @@ export async function serverCancelTask(
   return { ok: true }
 }
 
+// ── Backfill billing amount for tasks created by employees ───────────────────
+//
+// Employees don't receive pricing data, so their browser inserts billing_amount=0.
+// This action runs server-side immediately after the browser insert; it looks up
+// client-specific pricing (or the service default) via the admin client and
+// updates billing_amount / billing_amount_inr without ever sending the price
+// to the employee's browser.
+
+export async function serverFillTaskBilling(
+  taskId:    string,
+  clientId:  string | null,
+  serviceId: string | null,
+  quantity:  number,
+): Promise<void> {
+  // No permission guard needed — this is a self-healing write, always safe.
+  // It only updates tasks created seconds ago (the caller passes the new task id).
+  if (!serviceId) return
+
+  const admin = createAdminClient()
+
+  // 1. Fetch service pricing info
+  const { data: svc } = await admin
+    .from('services')
+    .select('default_price, default_currency, pricing_type')
+    .eq('id', serviceId)
+    .maybeSingle()
+
+  if (!svc || !svc.default_price) {
+    // Try client-specific override
+    if (!clientId) return
+    const { data: cp } = await admin
+      .from('client_service_pricing')
+      .select('price, currency')
+      .eq('client_id', clientId)
+      .eq('service_id', serviceId)
+      .maybeSingle()
+    if (!cp?.price) return
+
+    await admin.from('tasks').update({
+      billing_amount:     cp.price,
+      billing_amount_inr: cp.price,
+      currency:           cp.currency || 'INR',
+    }).eq('id', taskId)
+    return
+  }
+
+  // 2. Check for client-specific override price
+  let unitPrice  = svc.default_price
+  let unitCurrency = svc.default_currency || 'INR'
+  if (clientId) {
+    const { data: cp } = await admin
+      .from('client_service_pricing')
+      .select('price, currency')
+      .eq('client_id', clientId)
+      .eq('service_id', serviceId)
+      .maybeSingle()
+    if (cp?.price) { unitPrice = cp.price; unitCurrency = cp.currency || unitCurrency }
+  }
+
+  // 3. Compute amount based on pricing type
+  const pt = svc.pricing_type || 'fixed_per_creative'
+  const amount =
+    pt === 'fixed_per_creative' ? unitPrice * (quantity || 1) :
+    pt === 'retainer'           ? unitPrice :
+    pt === 'hourly'             ? unitPrice * (quantity || 1) :
+    0 // percentage_of_spend: can't compute without spend amount
+
+  if (amount <= 0) return
+
+  await admin.from('tasks').update({
+    billing_amount:     amount,
+    billing_amount_inr: amount,
+    currency:           unitCurrency,
+  }).eq('id', taskId)
+}
+
 // ── Full task update (replaces browser-client update in TaskEditModal) ───────
 
 export interface SaveTaskInput {

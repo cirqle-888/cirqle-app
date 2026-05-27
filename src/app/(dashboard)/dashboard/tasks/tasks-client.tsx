@@ -25,6 +25,7 @@ import {
   serverUpdateTaskStatus,
   serverBulkUpdateStatus,
   serverCancelTask,
+  serverFillTaskBilling,
   logTaskCreated,
 } from './actions'
 import { useToast, ToastContainer } from '@/components/ui/toast'
@@ -948,6 +949,18 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
 
       // Log task created (fire-and-forget server action — doesn't block UI)
       void logTaskCreated(data.id, data.title, data.task_number ?? null)
+
+      // If the user can't see pricing, billing_amount was inserted as 0.
+      // Backfill the correct price server-side (admin client reads pricing tables).
+      // Fire-and-forget — the employee's UI intentionally never sees the price.
+      if (!showBilling && form.service_id) {
+        void serverFillTaskBilling(
+          data.id,
+          form.client_id || null,
+          form.service_id,
+          pricingType === 'fixed_per_creative' ? (parseFloat(form.quantity) || 1) : 1,
+        )
+      }
 
       // ── Auto-create contribution slots from the selected billable parameters ──
       // One-way sync: billing parameters → contribution rows. Each row inherits the value
