@@ -3454,6 +3454,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
           clients={clients}
           services={services}
           clientPricings={clientPricings}
+          showFinancials={showBilling}
           onSaved={(data) => setTasks(prev => prev.map(t => t.id === data.id ? data : t))}
           onDeleted={(id) => {
             const t = tasks.find(t => t.id === id)
@@ -3908,8 +3909,8 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                 </div>
               </div>
 
-              {/* Smart billing section — only shown when service is selected */}
-              {selectedService && (
+              {/* Smart billing section — only shown to users with pricing access */}
+              {showBilling && selectedService && (
                 <div className={`rounded-xl border p-4 space-y-3 ${
                   pricingType === 'fixed_per_creative' ? 'bg-blue-500/5 border-blue-500/20' :
                   pricingType === 'retainer'           ? 'bg-green-500/5 border-green-500/20' :
@@ -4047,7 +4048,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
               )}
 
               {/* Pricing summary card */}
-              {selectedService && (
+              {showBilling && selectedService && (
                 <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-3 flex items-center justify-between">
                   <div className="text-xs text-muted-foreground">
                     <span className="font-medium text-foreground">{selectedService.name}</span>
