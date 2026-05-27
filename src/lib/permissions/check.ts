@@ -1,3 +1,4 @@
+import { cache } from 'react'
 import { createClient } from '@/lib/supabase/server'
 import type { PermKey } from './keys'
 
@@ -19,8 +20,11 @@ export interface CurrentUser {
  * Load the currently-authenticated user with their effective permission set.
  * Returns null when not signed in. Gracefully degrades to admin-like access when the
  * designations migration has not yet been applied (so the app keeps working pre-migration).
+ *
+ * Wrapped with React `cache()` so multiple server components calling this within
+ * the same request share a single DB round-trip instead of each running their own.
  */
-export async function loadCurrentUser(): Promise<CurrentUser | null> {
+export const loadCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
@@ -105,7 +109,7 @@ export async function loadCurrentUser(): Promise<CurrentUser | null> {
     permissions,
     dateOfBirth: emp.date_of_birth ?? null,
   }
-}
+})
 
 export function hasPermission(user: CurrentUser | null, key: PermKey | string): boolean {
   if (!user) return false

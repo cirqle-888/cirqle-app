@@ -1013,8 +1013,15 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
       return
     }
     const task = tasks.find(t => t.id === id)
-    const res  = await serverUpdateTaskStatus(id, task?.title ?? '', task?.status ?? '', status)
-    if (res.ok) setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t))
+    const prevStatus = task?.status ?? ''
+    // Optimistic update — show new status immediately, revert on failure
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t))
+    const res = await serverUpdateTaskStatus(id, task?.title ?? '', prevStatus, status)
+    if (!res.ok) {
+      // Revert optimistic update and show error
+      setTasks(prev => prev.map(t => t.id === id ? { ...t, status: prevStatus } : t))
+      toastError('Status update failed', res.error)
+    }
   }
 
   function openAssignModal(task: { id: string; task_number?: number | null; title: string; service_id?: string }) {
