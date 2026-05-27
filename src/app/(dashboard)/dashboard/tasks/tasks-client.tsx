@@ -323,6 +323,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
   }, [])
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [addError, setAddError] = useState<string | null>(null)
   const [filterStatus, setFilterStatus] = useState('')
   const [filterClient, setFilterClient] = useState('')
   const [filterService, setFilterService] = useState('')
@@ -869,6 +870,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
+    setAddError(null)
     const qty = pricingType === 'fixed_per_creative' ? (parseFloat(form.quantity) || 1) :
                 pricingType === 'hourly' ? (parseFloat(form.hours) || 1) :
                 pricingType === 'percentage_of_spend' ? (parseFloat(form.spend) || 0) : 1
@@ -1001,8 +1003,8 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
       const err = error as { message?: string; details?: string; hint?: string; code?: string }
       const parts = [err.message, err.details, err.hint, err.code && `(${err.code})`].filter(Boolean)
       const detail = parts.join(' · ') || 'Unknown database error'
-      // Use console.warn instead of console.error to avoid Next.js dev overlay
       console.warn('Add task failed:', { message: err.message, details: err.details, hint: err.hint, code: err.code })
+      setAddError(detail)
       toastError(`Add task failed: ${detail}`)
     }
     setSaving(false)
@@ -4136,8 +4138,11 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
               {/* Sticky action footer — always reachable while scrolling.
                   -mx-5/-mx-6 + px-5/px-6 lets the bar span the full width of
                   the scroll container and sit on top of a backdrop-blur surface. */}
+              {addError && (
+                <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 -mb-1">{addError}</p>
+              )}
               <div className="sticky bottom-0 -mx-5 sm:-mx-6 px-5 sm:px-6 -mb-4 pb-4 pt-3 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/85 border-t border-border flex gap-3">
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 bg-secondary text-sm font-medium py-3 sm:py-2.5 rounded-lg hover:bg-secondary/80 transition-colors">Cancel</button>
+                <button type="button" onClick={() => { setShowForm(false); setAddError(null) }} className="flex-1 bg-secondary text-sm font-medium py-3 sm:py-2.5 rounded-lg hover:bg-secondary/80 transition-colors">Cancel</button>
                 <button type="submit" disabled={saving || !selectedService} className="flex-1 gradient-bg text-white text-sm font-medium py-3 sm:py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1.5">
                   {saving ? 'Saving…' : <>Add Task {previewTaskNumber != null && <span className="opacity-70">#{previewTaskNumber}</span>}</>}
                 </button>
