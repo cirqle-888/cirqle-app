@@ -244,6 +244,62 @@ export async function serverCancelTask(
   return { ok: true }
 }
 
+// ── Full task update (replaces browser-client update in TaskEditModal) ───────
+
+export interface SaveTaskInput {
+  taskId:       string
+  taskNumber?:  number | null
+  title:        string
+  description:  string | null
+  clientId:     string | null
+  serviceId:    string | null
+  status:       string
+  billingAmount: number
+  billingAmountInr: number
+  quantity:     number
+  currency:     string
+  taskDate:     string | null
+}
+
+export async function serverSaveTask(
+  input: SaveTaskInput,
+): Promise<ActionResult<any>> {
+  const guard = await requirePermission(PERMS.TASKS_EDIT)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from('tasks')
+    .update({
+      ...(input.taskNumber != null ? { task_number: input.taskNumber } : {}),
+      title:              input.title,
+      description:        input.description,
+      client_id:          input.clientId || null,
+      service_id:         input.serviceId || null,
+      status:             input.status,
+      billing_amount:     input.billingAmount,
+      billing_amount_inr: input.billingAmountInr,
+      quantity:           input.quantity,
+      currency:           input.currency,
+      task_date:          input.taskDate || null,
+    })
+    .eq('id', input.taskId)
+    .select('*, client:clients(id, name, code), service:services(id, name)')
+    .single()
+
+  if (error) return { ok: false, error: error.message }
+
+  void logActivity({
+    actorId:    guard.employeeId,
+    entityType: 'task',
+    entityId:   input.taskId,
+    action:     'updated',
+    detail:     { title: input.title },
+  })
+
+  return { ok: true, data }
+}
+
 // ── Log task created (called from browser after insert) ───────────────────────
 // Task create has complex billing math done browser-side, so the DB insert
 // stays there. This lightweight action just writes the log row.

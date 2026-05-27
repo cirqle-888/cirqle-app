@@ -65,10 +65,17 @@ async function resolveUser(): Promise<ResolvedUser | null> {
     ? (emp as any).designation[0]
     : (emp as any).designation
 
+  const designationId: string | null = designation?.id ?? null
+
+  // Pre-migration fallback: employees with no designation are treated as admin.
+  // Mirrors the layout's `me.isAdmin || me.designationId === null` guard so
+  // server actions don't block users the UI correctly shows as Admin.
+  const isAdmin = designation?.is_admin === true || designationId === null
+
   return {
     employeeId: (emp as any).id,
-    designationId: designation?.id ?? null,
-    isAdmin: designation?.is_admin === true,
+    designationId,
+    isAdmin,
     isArchived: (emp as any).is_archived === true,
   }
 }

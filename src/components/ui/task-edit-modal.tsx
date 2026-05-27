@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { X, Trash2, CalendarDays } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
+import { serverSaveTask, serverDeleteTask } from '@/app/(dashboard)/dashboard/tasks/actions'
 import { ModalOverlay } from './modal-overlay'
 import AppSelect from './app-select'
 import Combobox from './combobox'
@@ -33,7 +33,6 @@ const inputCls = 'w-full bg-secondary border border-border rounded-lg px-3 py-2 
 export function TaskEditModal({
   task, clients, services, clientPricings = [], showFinancials = true, onSaved, onDeleted, onClose,
 }: TaskEditModalProps) {
-  const supabase = createClient()
   const [form, setForm] = useState({
     task_number: String(task.task_number ?? ''),
     title: task.title ?? '',
@@ -47,6 +46,7 @@ export function TaskEditModal({
     status: task.status ?? 'pending',
   })
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
@@ -59,6 +59,7 @@ export function TaskEditModal({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
+    setSaveError(null)
 
     let amount = unitPrice
     let qty = 1
@@ -66,36 +67,31 @@ export function TaskEditModal({
     else if (pt === 'hourly') { qty = parseFloat(form.hours) || 1; amount = unitPrice * qty }
     else if (pt === 'percentage_of_spend') { qty = parseFloat(form.spend) || 0; amount = qty * (unitPrice / 100) }
 
-    const { data, error } = await supabase
-      .from('tasks')
-      .update({
-        ...(form.task_number ? { task_number: parseInt(form.task_number, 10) } : {}),
-        title: form.title,
-        description: form.description || null,
-        client_id: form.client_id || null,
-        service_id: form.service_id || null,
-        status: form.status,
-        billing_amount: amount,
-        billing_amount_inr: amount,
-        quantity: qty,
-        currency: unitCurrency,
-        task_date: form.task_date || null,
-      })
-      .eq('id', task.id)
-      .select('*, client:clients(id, name, code), service:services(id, name)')
-      .single()
+    const res = await serverSaveTask({
+      taskId:           task.id,
+      taskNumber:       form.task_number ? parseInt(form.task_number, 10) : null,
+      title:            form.title,
+      description:      form.description || null,
+      clientId:         form.client_id || null,
+      serviceId:        form.service_id || null,
+      status:           form.status,
+      billingAmount:    amount,
+      billingAmountInr: amount,
+      quantity:         qty,
+      currency:         unitCurrency,
+      taskDate:         form.task_date || null,
+    })
 
     setSaving(false)
-    if (!error && data) { onSaved(data); onClose() }
+    if (res.ok && res.data) { onSaved(res.data); onClose() }
+    else setSaveError(res.error ?? 'Save failed. Please try again.')
   }
 
   async function handleDelete() {
     setDeleting(true)
-    const deletedAt = new Date().toISOString()
-    await supabase.from('tasks').update({ deleted_at: deletedAt }).eq('id', task.id)
+    const res = await serverDeleteTask(task.id, task.title ?? '')
     setDeleting(false)
-    onDeleted(task.id)
-    onClose()
+    if (res.ok) { onDeleted(task.id); onClose() }
   }
 
   return (
@@ -214,6 +210,10 @@ export function TaskEditModal({
             <button type="button" onClick={() => setConfirmDelete(true)} className="text-xs text-red-400/60 hover:text-red-400 flex items-center gap-1 transition-colors">
               <Trash2 className="w-3 h-3" /> Delete this task
             </button>
+          )}
+
+          {saveError && (
+            <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{saveError}</p>
           )}
 
           <div className="flex gap-3 pt-2 border-t border-border">
