@@ -2276,8 +2276,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                     value={task.status}
                     onChange={e => { e.stopPropagation(); updateStatus(task.id, e.target.value) }}
                     onClick={e => e.stopPropagation()}
-                    className={`shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap border-0 cursor-pointer appearance-none ${getStatusColor(task.status)}`}
-                    style={{ background: 'transparent' }}
+                    className={`shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap cursor-pointer appearance-none ${getStatusColor(task.status)}`}
                   >
                     {MANUAL_STATUSES.map(s => <option key={s} value={s} className="bg-card text-foreground text-sm">{getStatusLabel(s)}</option>)}
                     {task.status === 'invoiced' && <option value="invoiced" className="bg-card text-foreground text-sm" disabled>🔒 Invoiced (system)</option>}
