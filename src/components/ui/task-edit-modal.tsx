@@ -99,7 +99,7 @@ export function TaskEditModal({
       {/* flex-col with max-h-[90vh] so the form body can scroll while the
           header and footer (Cancel/Save) stay pinned. Previously the whole
           modal scrolled, pushing the action buttons off-screen on mobile. */}
-      <div className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] flex flex-col">
+      <div className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl max-h-[90dvh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-card rounded-t-2xl shrink-0">
           <div>
             <h2 className="font-semibold">Edit Task</h2>
