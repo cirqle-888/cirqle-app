@@ -2135,8 +2135,10 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                         />
                       ) : (
                         <>
-                          {formatCurrency(task.billing_amount ?? 0, task.currency as Currency)}
-                          {task.quantity && task.quantity > 1 && <span className="text-xs text-muted-foreground ml-1">×{task.quantity}</span>}
+                          {task.quantity && task.quantity > 1
+                            ? <>{formatCurrency((task.billing_amount ?? 0) / task.quantity, task.currency as Currency)}<span className="text-xs text-muted-foreground ml-1">×{task.quantity}</span></>
+                            : formatCurrency(task.billing_amount ?? 0, task.currency as Currency)
+                          }
                         </>
                       )}
                     </td>
@@ -2270,9 +2272,16 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                       {task.client?.name || '—'} <span className="text-muted-foreground/40">·</span> {task.service?.name || '—'}
                     </p>
                   </div>
-                  <span className={`shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${getStatusColor(task.status)}`}>
-                    {getStatusLabel(task.status)}
-                  </span>
+                  <select
+                    value={task.status}
+                    onChange={e => { e.stopPropagation(); updateStatus(task.id, e.target.value) }}
+                    onClick={e => e.stopPropagation()}
+                    className={`shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap border-0 cursor-pointer appearance-none ${getStatusColor(task.status)}`}
+                    style={{ background: 'transparent' }}
+                  >
+                    {MANUAL_STATUSES.map(s => <option key={s} value={s} className="bg-card text-foreground text-sm">{getStatusLabel(s)}</option>)}
+                    {task.status === 'invoiced' && <option value="invoiced" className="bg-card text-foreground text-sm" disabled>🔒 Invoiced (system)</option>}
+                  </select>
                 </div>
 
                 {/* Bottom row — date · billing · assignees */}
@@ -2282,8 +2291,10 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                   </span>
                   {showBilling && (
                     <span className="text-[11px] font-semibold text-foreground tabular-nums">
-                      {formatCurrency(task.billing_amount ?? 0, task.currency as Currency)}
-                      {(task.quantity ?? 1) > 1 && <span className="text-muted-foreground/60 font-normal ml-1">×{task.quantity}</span>}
+                      {(task.quantity ?? 1) > 1
+                        ? <>{formatCurrency((task.billing_amount ?? 0) / (task.quantity ?? 1), task.currency as Currency)}<span className="text-muted-foreground/60 font-normal ml-1">×{task.quantity}</span></>
+                        : formatCurrency(task.billing_amount ?? 0, task.currency as Currency)
+                      }
                     </span>
                   )}
                 </div>

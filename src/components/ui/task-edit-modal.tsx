@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { X, Trash2, CalendarDays } from 'lucide-react'
+import { X, Trash2 } from 'lucide-react'
 import { serverSaveTask, serverDeleteTask } from '@/app/(dashboard)/dashboard/tasks/actions'
 import { ModalOverlay } from './modal-overlay'
 import AppSelect from './app-select'
@@ -96,8 +96,11 @@ export function TaskEditModal({
 
   return (
     <ModalOverlay onClose={onClose}>
-      <div className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-card rounded-t-2xl z-10">
+      {/* flex-col with max-h-[90vh] so the form body can scroll while the
+          header and footer (Cancel/Save) stay pinned. Previously the whole
+          modal scrolled, pushing the action buttons off-screen on mobile. */}
+      <div className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-card rounded-t-2xl shrink-0">
           <div>
             <h2 className="font-semibold">Edit Task</h2>
             <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-72">{task.title}</p>
@@ -105,7 +108,8 @@ export function TaskEditModal({
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
+          <div className="overflow-y-auto p-6 space-y-4 flex-1">
           {/* Task # + Title */}
           <div className="flex flex-col sm:grid sm:grid-cols-[110px_1fr] gap-3">
             <div>
@@ -146,10 +150,11 @@ export function TaskEditModal({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-muted-foreground mb-1.5">Task Date</label>
-              <div className="relative">
-                <CalendarDays className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-                <input type="date" value={form.task_date} onChange={e => setForm(p => ({ ...p, task_date: e.target.value }))} className={inputCls + ' pl-9'} />
-              </div>
+              {/* No custom overlay icon: iOS Safari + Chrome both render their
+                  own native date picker indicator. Layering `pl-9` + a custom
+                  CalendarDays icon caused the field to render visibly wider
+                  than its siblings on iPhone. Native chrome is enough. */}
+              <input type="date" value={form.task_date} onChange={e => setForm(p => ({ ...p, task_date: e.target.value }))} className={inputCls} />
             </div>
             <div>
               <label className="block text-xs font-medium text-muted-foreground mb-1.5">Status</label>
@@ -215,8 +220,12 @@ export function TaskEditModal({
           {saveError && (
             <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{saveError}</p>
           )}
+          </div>
 
-          <div className="flex gap-3 pt-2 border-t border-border">
+          {/* Sticky footer — buttons stay visible on mobile while the form
+              body scrolls above. shrink-0 prevents the flex parent from
+              squashing it; the border-t reads as a visual divider. */}
+          <div className="flex gap-3 px-6 py-3 border-t border-border bg-card rounded-b-2xl shrink-0">
             <button type="button" onClick={onClose} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80">Cancel</button>
             <button type="submit" disabled={saving} className="flex-1 gradient-bg text-white text-sm font-medium py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50">
               {saving ? 'Saving…' : 'Save Changes'}
