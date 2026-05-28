@@ -211,4 +211,27 @@
   .stat-card {
     @apply bg-card border border-border rounded-xl p-5;
   }
+
+  /* Normalize iOS Safari date input to match all other text inputs.
+     Safari renders type="date" with its own larger internal padding and
+     line-height, making it taller than sibling inputs. appearance: none
+     strips the system chrome; explicit height/padding/line-height then
+     re-applies the same values as the Tailwind inputCls (py-2 text-sm). */
+  input[type="date"] {
+    -webkit-appearance: none;
+    appearance: none;
+    line-height: normal;
+    /* Prevent Safari from adding extra internal min-height */
+    min-height: 0;
+  }
+  /* Remove the inner spin / calendar pseudo-element extra padding on WebKit */
+  input[type="date"]::-webkit-date-and-time-value {
+    text-align: left;
+    margin: 0;
+    padding: 0;
+  }
+  input[type="date"]::-webkit-calendar-picker-indicator {
+    opacity: 0.5;
+    cursor: pointer;
+  }
 }
