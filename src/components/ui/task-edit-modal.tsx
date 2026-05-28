@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { X, Trash2 } from 'lucide-react'
 import { serverSaveTask, serverDeleteTask } from '@/app/(dashboard)/dashboard/tasks/actions'
 import { ModalOverlay } from './modal-overlay'
@@ -50,6 +50,19 @@ export function TaskEditModal({
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
+  // Shift the modal above the on-screen keyboard on iOS/Android.
+  // visualViewport.height shrinks when the keyboard appears; the difference
+  // between window.innerHeight and visualViewport.height is the keyboard height.
+  const [kbOffset, setKbOffset] = useState(0)
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    const update = () => setKbOffset(Math.max(0, window.innerHeight - vv.height - vv.offsetTop))
+    vv.addEventListener('resize', update)
+    vv.addEventListener('scroll', update)
+    return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update) }
+  }, [])
+
   const svc = services.find(s => s.id === form.service_id)
   const pt = svc?.pricing_type || 'fixed_per_creative'
   const cp = clientPricings.find(p => p.client_id === form.client_id && p.service_id === form.service_id)
@@ -96,10 +109,10 @@ export function TaskEditModal({
 
   return (
     <ModalOverlay onClose={onClose}>
-      {/* flex-col with max-h-[90vh] so the form body can scroll while the
-          header and footer (Cancel/Save) stay pinned. Previously the whole
-          modal scrolled, pushing the action buttons off-screen on mobile. */}
-      <div className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl max-h-[90dvh] flex flex-col">
+      {/* marginBottom shifts the modal above the on-screen keyboard.
+          max-h-[90dvh] shrinks the modal height to fit the visible viewport. */}
+      <div style={kbOffset > 0 ? { marginBottom: kbOffset } : undefined} className="w-full max-w-lg">
+      <div className="bg-card border border-border rounded-2xl w-full shadow-2xl max-h-[90dvh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-card rounded-t-2xl shrink-0">
           <div>
             <h2 className="font-semibold">Edit Task</h2>
@@ -154,7 +167,7 @@ export function TaskEditModal({
                   own native date picker indicator. Layering `pl-9` + a custom
                   CalendarDays icon caused the field to render visibly wider
                   than its siblings on iPhone. Native chrome is enough. */}
-              <input type="date" value={form.task_date} onChange={e => setForm(p => ({ ...p, task_date: e.target.value }))} className={inputCls} />
+              <input type="date" value={form.task_date} onChange={e => setForm(p => ({ ...p, task_date: e.target.value }))} className={inputCls + ' cursor-pointer'} />
             </div>
             <div>
               <label className="block text-xs font-medium text-muted-foreground mb-1.5">Status</label>
@@ -232,6 +245,7 @@ export function TaskEditModal({
             </button>
           </div>
         </form>
+      </div>
       </div>
     </ModalOverlay>
   )
