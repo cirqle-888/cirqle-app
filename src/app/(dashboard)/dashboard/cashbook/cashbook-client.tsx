@@ -328,6 +328,26 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   const outflowCategories = categories.filter(c => c.type === 'outflow' || c.type === 'both')
   const relevantCategories = form.type === 'inflow' ? inflowCategories : outflowCategories
 
+  // Sort categories by most recently used — looks up the latest entry_date for
+  // each category_id across all entries. Categories with no usage sort last.
+  const categoriesByRecentUse = useMemo(() => {
+    const lastUsed: Record<string, string> = {}
+    for (const e of entries) {
+      if (e.category_id && e.entry_date) {
+        if (!lastUsed[e.category_id] || e.entry_date > lastUsed[e.category_id]) {
+          lastUsed[e.category_id] = e.entry_date
+        }
+      }
+    }
+    return [...categories].sort((a, b) => {
+      const aDate = lastUsed[a.id] ?? ''
+      const bDate = lastUsed[b.id] ?? ''
+      if (bDate && !aDate) return 1
+      if (aDate && !bDate) return -1
+      return bDate.localeCompare(aDate)
+    })
+  }, [categories, entries])
+
   return (
     <div>
       <Header
@@ -408,7 +428,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 max-w-[150px]"
           >
             <option value="">All Categories</option>
-            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {categoriesByRecentUse.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
 
           <select 
