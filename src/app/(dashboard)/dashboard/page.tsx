@@ -29,16 +29,47 @@ export default async function DashboardPage() {
   const isAdmin = me?.isAdmin ?? true
   const employeeId = me?.employeeId
 
+  // ── Streamed analytics promises ──────────────────────────────────────────────
+  // The two heaviest queries (36-month analytics tasks + contribution scores) are
+  // NOT awaited here. We kick the promises off eagerly — so their network round-
+  // trips start immediately, in parallel with the awaited light queries below —
+  // and pass them UNRESOLVED through to the client, where <Suspense> + React
+  // `use()` unwrap them. This lets the dashboard shell (hero, today's focus,
+  // period controls) paint before these queries finish. The resolved data is
+  // byte-for-byte identical to before; only WHEN it lands on the client changes.
+  const allAnalyticsTasksPromise: Promise<any[]> = isAdmin
+    ? fetchAll(supabase
+        .from('tasks')
+        .select('id, billing_amount_inr, task_date, status, service_id, client:clients(id, name), service:services(id, name)')
+        .not('status', 'eq', 'cancelled')
+        .gte('task_date', analyticsFromStr)
+        .order('task_date', { ascending: true })
+        .order('id', { ascending: true })).then(r => r.data || [])
+    : Promise.resolve<any[]>([])
+
+  const scoresPromise: Promise<any[]> = isAdmin
+    ? fetchAll(supabase
+        .from('contribution_scores')
+        .select('task_id, employee_id, score_percentage, earnings_inr, calculated_at, task:tasks(id, task_date)')
+        .gte('calculated_at', analyticsFromStr)
+        .order('calculated_at', { ascending: false })
+        .order('id', { ascending: true })).then(r => r.data || [])
+    : fetchAll(supabase
+        .from('contribution_scores')
+        .select('task_id, employee_id, score_percentage, earnings_inr, calculated_at, task:tasks(id, task_date)')
+        .eq('employee_id', employeeId)
+        .gte('calculated_at', analyticsFromStr)
+        .order('calculated_at', { ascending: false })
+        .order('id', { ascending: true })).then(r => r.data || [])
+
   // Only fetch invoices, cashbook, and all payroll history if admin
   const [
     invoicesRes,
     cashbookRes,
-    allAnalyticsTasksRes,
     displayTasksRes,
     employeesRes,
     scoredTaskIdsRes,
     todayTasksRes,
-    scoresRes,
     payrollRes,
   ] = await Promise.all([
     isAdmin
@@ -55,17 +86,6 @@ export default async function DashboardPage() {
           .from('cashbook_entries')
           .select('type, amount_inr, entry_date, description')
           .order('entry_date', { ascending: true })
-          .order('id', { ascending: true }))
-      : Promise.resolve({ data: [] }),
-
-    // Analytics tasks — admin only, last 36 months. Employees receive [].
-    isAdmin
-      ? fetchAll(supabase
-          .from('tasks')
-          .select('id, billing_amount_inr, task_date, status, service_id, client:clients(id, name), service:services(id, name)')
-          .not('status', 'eq', 'cancelled')
-          .gte('task_date', analyticsFromStr)
-          .order('task_date', { ascending: true })
           .order('id', { ascending: true }))
       : Promise.resolve({ data: [] }),
 
@@ -112,24 +132,6 @@ export default async function DashboardPage() {
           .order('status')
       : Promise.resolve({ data: [] }),
 
-    // Fetch scores — capped to the same 36-month analytics window so payload
-    // is bounded. The dashboard's teamEarnings widget only operates within
-    // any user-selected DateFilter, which itself can't exceed the loaded data.
-    isAdmin
-      ? fetchAll(supabase
-          .from('contribution_scores')
-          .select('task_id, employee_id, score_percentage, earnings_inr, calculated_at, task:tasks(id, task_date)')
-          .gte('calculated_at', analyticsFromStr)
-          .order('calculated_at', { ascending: false })
-          .order('id', { ascending: true }))
-      : fetchAll(supabase
-          .from('contribution_scores')
-          .select('task_id, employee_id, score_percentage, earnings_inr, calculated_at, task:tasks(id, task_date)')
-          .eq('employee_id', employeeId)
-          .gte('calculated_at', analyticsFromStr)
-          .order('calculated_at', { ascending: false })
-          .order('id', { ascending: true })),
-
     // Payroll: if employee, only their own (last 36 months); admin gets 24 most recent.
     isAdmin
       ? supabase
@@ -150,12 +152,10 @@ export default async function DashboardPage() {
 
   const invoices           = invoicesRes.data || []
   const allCashbook        = cashbookRes.data || []
-  const allAnalyticsTasks  = allAnalyticsTasksRes.data || []
   const displayTasks       = displayTasksRes.data || []
   const employees          = employeesRes.data || []
   const scoredTaskIds      = new Set((scoredTaskIdsRes.data || []).map((r: any) => r.task_id))
   const todayTasks         = todayTasksRes.data || []
-  const scores             = scoresRes.data || []
   const payrollRecords     = payrollRes.data || []
 
   const today = new Date()
@@ -193,13 +193,13 @@ export default async function DashboardPage() {
       dueInvoices={dueInvoices as any[]}
       allCashbook={allCashbook as any[]}
       displayTasks={displayTasks as any[]}
-      allAnalyticsTasks={allAnalyticsTasks as any[]}
+      allAnalyticsTasksPromise={allAnalyticsTasksPromise}
       todayTasks={todayTasks as any[]}
       unscoredDoneTasks={unscoredDoneTasks as any[]}
       activeTasks={activeTasks.slice(0, 12) as any[]}
       toBeInvoiced={toBeInvoiced as any[]}
       employees={employees as any[]}
-      scores={scores as any[]}
+      scoresPromise={scoresPromise}
       payrollRecords={payrollRecords as any[]}
       todayStr={todayStr}
       stats={{
