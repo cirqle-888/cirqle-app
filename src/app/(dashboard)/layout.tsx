@@ -75,11 +75,17 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <PrivacyProvider>
       <RoleProvider initialEmployee={serverEmployee}>
         <PermissionProvider user={user} logoUrl={logoUrl}>
-          <div className="flex h-screen overflow-hidden">
+          {/* h-dvh = dynamic viewport height (adapts as Safari toolbar shows/hides).
+              h-screen (100vh) on iOS uses the *large* viewport (toolbar-hidden),
+              making the container taller than the visible area when the address bar
+              is showing — that gap appears as blank white space on iPad.
+              overscroll-none on main prevents iOS elastic-bounce into the
+              background that's visible when page content is shorter than the viewport. */}
+          <div className="flex h-dvh overflow-hidden">
             <Sidebar />
             {/* pb-16 on mobile gives clearance above the employee bottom nav bar.
                 md:pb-0 restores normal layout on desktop where sidebar is visible. */}
-            <main className={`flex-1 overflow-y-auto bg-background w-full ${!user.isAdmin ? 'pb-16 md:pb-0' : ''}`}>
+            <main className={`flex-1 overflow-y-auto overscroll-none bg-background w-full ${!user.isAdmin ? 'pb-16 md:pb-0' : ''}`}>
               {children}
             </main>
             <CommandPalette />

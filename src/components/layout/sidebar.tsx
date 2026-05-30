@@ -506,7 +506,7 @@ export default function Sidebar() {
   return (
     <>
       {/* ── Desktop sidebar ── */}
-      <aside className={`hidden md:flex shrink-0 h-screen flex-col bg-sidebar border-r border-sidebar-border transition-all duration-300 ease-in-out relative ${isCollapsed ? 'w-[72px]' : 'w-60'}`}>
+      <aside className={`hidden md:flex shrink-0 h-dvh flex-col bg-sidebar border-r border-sidebar-border transition-all duration-300 ease-in-out relative ${isCollapsed ? 'w-[72px]' : 'w-60'}`}>
         <button
           onClick={() => setIsCollapsed(!isCollapsed)}
           className="absolute -right-3 top-6 z-50 flex items-center justify-center w-6 h-6 bg-sidebar border border-sidebar-border rounded-full text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-colors shadow-sm"
