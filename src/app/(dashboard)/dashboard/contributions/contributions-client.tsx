@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { calculateCommission } from '@/lib/calculations/commission'
@@ -11,12 +11,13 @@ import { taskCode, taskCodeMatches } from '@/lib/utils/task-code'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
+import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from '@/lib/utils'
 import type { DateFilterValue } from '@/components/ui/date-filter'
 import {
   ChevronLeft, ChevronRight, Minus, Plus, X, Check,
   Search, Filter, PlusCircle, Eye, EyeOff, Clock, CheckCircle2, AlertCircle,
   UserCheck, Users, CalendarDays, Lock, Edit2, ChevronDown, Trash2, Copy, ExternalLink,
-  List, LayoutGrid, MoreVertical, CheckCircle,
+  List, LayoutGrid, MoreVertical, CheckCircle, PlusIcon, FileDownIcon,
 } from 'lucide-react'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import AppSelect from '@/components/ui/app-select'
@@ -113,11 +114,15 @@ export default function ContributionsClient({
   const toast = useToast()
 
   // ── View state ──────────────────────────────────────
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
   const [view, setView] = useState<'list' | 'entry'>('list')
   const [selectedTask, setSelectedTask] = useState<any>(null)
 
   // ── List screen view mode (list / board / calendar) ──
-  const [listViewMode, setListViewMode] = useState<'list' | 'board' | 'calendar'>('list')
+  const [listViewMode, setListViewMode] = useState<'list' | 'board' | 'calendar'>((searchParams.get('view') as any) || 'list')
   const [calViewYear, setCalViewYear] = useState(() => new Date().getFullYear())
   const [calViewMonth, setCalViewMonth] = useState(() => new Date().getMonth())
 
@@ -141,17 +146,36 @@ export default function ContributionsClient({
   const [duplicatingTaskId, setDuplicatingTaskId] = useState<string | null>(null)
 
   // ── Filters ─────────────────────────────────────────
-  const [search, setSearch] = useState('')
-  const [filterClient, setFilterClient] = useState('')
-  const [filterService, setFilterService] = useState('')
-  const [filterEmployee, setFilterEmployee] = useState('')
-  const [filterEmployeeMode, setFilterEmployeeMode] = useState<'worked' | 'solo' | 'any'>('worked')
-  const [filterDate, setFilterDate] = useState<DateFilterValue>(null)
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'done' | 'missing'>('all')
+  const [search, setSearch] = useState(searchParams.get('search') || '')
+  const [filterClient, setFilterClient] = useState(searchParams.get('client') || '')
+  const [filterService, setFilterService] = useState(searchParams.get('service') || '')
+  const [filterEmployee, setFilterEmployee] = useState(searchParams.get('employee') || '')
+  const [filterEmployeeMode, setFilterEmployeeMode] = useState<'worked' | 'solo' | 'any'>((searchParams.get('empmode') as any) || 'worked')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'done' | 'missing'>((searchParams.get('status') as any) || 'all')
   const [showMobileFilters, setShowMobileFilters] = useState(false)
   const [mobileLimit, setMobileLimit] = useState(100)
+  const [filterDate, setFilterDate] = useState<DateFilterValue>(() => {
+    const d = searchParams.get('date')
+    try { return d ? JSON.parse(d) : null } catch { return null }
+  })
 
-  const router = useRouter()
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    
+    if (listViewMode && listViewMode !== 'list') params.set('view', listViewMode); else params.delete('view')
+    if (search) params.set('search', search); else params.delete('search')
+    if (filterClient) params.set('client', filterClient); else params.delete('client')
+    if (filterService) params.set('service', filterService); else params.delete('service')
+    if (filterEmployee) params.set('employee', filterEmployee); else params.delete('employee')
+    if (filterEmployeeMode && filterEmployeeMode !== 'worked') params.set('empmode', filterEmployeeMode); else params.delete('empmode')
+    if (statusFilter && statusFilter !== 'all') params.set('status', statusFilter); else params.delete('status')
+    if (filterDate) params.set('date', JSON.stringify(filterDate)); else params.delete('date')
+
+    const newQueryString = params.toString()
+    if (newQueryString !== searchParams.toString()) {
+      router.replace(`${pathname}?${newQueryString}`, { scroll: false })
+    }
+  }, [listViewMode, search, filterClient, filterService, filterEmployee, filterEmployeeMode, statusFilter, filterDate, pathname, router, searchParams])
   const autoRecalcRan = useRef(false)
 
   // ── Financial visibility ─────────────────────────────
@@ -1205,10 +1229,10 @@ export default function ContributionsClient({
                               openTask(task)
                             }
                           }}
-                          className={`bg-card border rounded-xl px-4 py-3.5 hover:border-primary/30 hover:bg-primary/[0.02] transition-all group cursor-pointer select-none ${highlightedTaskId === task.id ? 'border-violet-400 ring-1 ring-violet-400 bg-violet-500/10' : bulkMode && isSelected ? 'border-violet-400/60 bg-violet-500/[0.07]' : 'border-border'}`}>
+                          className={`bg-card border rounded-xl px-4 py-3.5 transition-all group cursor-pointer select-none border-border`}>
                           <div className="flex items-start gap-3">
                             {bulkMode && (
-                              <div className="pt-1 shrink-0" onClick={e => e.stopPropagation()}>
+                              <div className="pt-1.5 shrink-0" onClick={e => e.stopPropagation()}>
                                 <input
                                   type="checkbox"
                                   checked={isSelected}
@@ -1222,8 +1246,12 @@ export default function ContributionsClient({
                                 />
                               </div>
                             )}
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                            <div className={cn(
+                              "flex-1 min-w-0 flex flex-col items-start gap-0.5",
+                              BRANDED_PILL_BASE_CLASS,
+                              highlightedTaskId === task.id ? BRANDED_PILL_ACTIVE_CLASS : (bulkMode && isSelected) ? BRANDED_PILL_SELECTED_CLASS : ''
+                            )}>
+                              <div className="flex items-center gap-2 flex-wrap">
                                 <span
                                   title={`Task code · click to copy ${taskCode(task)}`}
                                   onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(taskCode(task)) }}
@@ -1294,21 +1322,21 @@ export default function ContributionsClient({
                                   href={`/dashboard/tasks?highlight=${task.id}`}
                                   title={`Open "${task.title}" in Tasks`}
                                   onClick={e => e.stopPropagation()}
-                                  className="p-1.5 rounded-md lg:text-muted-foreground/0 text-muted-foreground/50 group-hover:text-violet-400/50 hover:!text-violet-400 hover:bg-violet-500/10 transition-all">
+                                  className="p-1.5 rounded-md text-muted-foreground/50 hover:text-violet-400 hover:bg-violet-500/10 transition-all">
                                   <ExternalLink className="w-3.5 h-3.5" />
                                 </a>
                               )}
                               <button type="button"
                                 onClick={() => openEditTask(task)}
                                 title="Edit task details"
-                                className="p-1.5 rounded-md lg:text-muted-foreground/0 text-muted-foreground/50 group-hover:text-muted-foreground/40 hover:!text-foreground hover:bg-secondary transition-all">
+                                className="p-1.5 rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-secondary transition-all">
                                 <Edit2 className="w-3.5 h-3.5" />
                               </button>
                               <button type="button"
                                 onClick={() => handleDuplicateTask(task)}
                                 title="Duplicate task to today"
                                 disabled={duplicatingTaskId === task.id}
-                                className="p-1.5 rounded-md lg:text-muted-foreground/0 text-muted-foreground/50 group-hover:text-muted-foreground/40 hover:!text-foreground hover:bg-secondary transition-all disabled:opacity-40">
+                                className="p-1.5 rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-secondary transition-all disabled:opacity-40">
                                 {duplicatingTaskId === task.id
                                   ? <span className="w-3.5 h-3.5 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin inline-block" />
                                   : <Copy className="w-3.5 h-3.5" />
@@ -1469,18 +1497,24 @@ export default function ContributionsClient({
                             <button
                               key={task.id}
                               onClick={() => openTask(task)}
-                              className="w-full text-left bg-card border border-border rounded-xl p-3 hover:border-foreground/25 transition-colors cursor-pointer"
+                              className="w-full text-left bg-card border rounded-xl p-3 cursor-pointer border-border"
                             >
-                              <div className="flex items-center gap-1.5 mb-0.5">
-                                <span
-                                  title={`Task code · click to copy ${taskCode(task)}`}
-                                  onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(taskCode(task)) }}
-                                  className="text-[9px] font-mono font-semibold text-muted-foreground/60 bg-foreground/[0.04] border border-foreground/15 px-1 py-0.5 rounded shrink-0 cursor-pointer hover:text-foreground hover:border-foreground/25 transition-colors"
-                                >
-                                  {taskCode(task)}
-                                </span>
+                              <div className={cn(
+                                "flex flex-col items-start gap-0.5 min-w-0",
+                                BRANDED_PILL_BASE_CLASS,
+                                highlightedTaskId === task.id ? BRANDED_PILL_ACTIVE_CLASS : ''
+                              )}>
+                                <div className="flex items-center gap-1.5 mb-0.5">
+                                  <span
+                                    title={`Task code · click to copy ${taskCode(task)}`}
+                                    onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(taskCode(task)) }}
+                                    className="text-[9px] font-mono font-semibold text-muted-foreground/60 bg-foreground/[0.04] border border-foreground/15 px-1 py-0.5 rounded shrink-0 cursor-pointer hover:text-foreground hover:border-foreground/25 transition-colors"
+                                  >
+                                    {taskCode(task)}
+                                  </span>
+                                </div>
+                                <p className="text-sm font-medium text-foreground leading-tight truncate">{task.title}</p>
                               </div>
-                              <p className="text-sm font-medium text-foreground leading-tight truncate">{task.title}</p>
                               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                                 <span className="text-[10px] text-muted-foreground truncate max-w-[110px]">{task.client?.name || '—'}</span>
                                 {task.service?.name && <span className="text-[10px] text-cyan-400/60">{task.service.name}</span>}
@@ -2092,7 +2126,7 @@ export default function ContributionsClient({
 
                   <button type="button"
                     onClick={() => setExpandedEmployees(prev => { const n = new Set(prev); n.has(emp.id) ? n.delete(emp.id) : n.add(emp.id); return n })}
-                    className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-secondary/30 transition-colors">
+                    className={cn("w-full flex items-center justify-between px-4 py-3.5", ROW_INTERACTIVE_CLASS)}>
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="w-9 h-9 rounded-full gradient-bg flex items-center justify-center text-white text-sm font-bold shrink-0">
                         {emp.cqid?.replace('CQID', '') || '?'}
@@ -2307,7 +2341,7 @@ export default function ContributionsClient({
                 const pct = Math.min(e.scorePercentage, 100)
                 const emp = employees.find((em: any) => em.id === e.employeeId)
                 return (
-                  <div key={e.employeeId} className="px-5 py-4 flex items-center gap-4 hover:bg-secondary/20 transition-colors">
+                  <div key={e.employeeId} className={cn("px-5 py-4 flex items-center gap-4", ROW_INTERACTIVE_CLASS)}>
                     <div className="w-10 h-10 rounded-full gradient-bg flex items-center justify-center text-white text-sm font-bold shrink-0 shadow-sm">
                       {emp?.cqid?.replace('CQID', '') || '?'}
                     </div>

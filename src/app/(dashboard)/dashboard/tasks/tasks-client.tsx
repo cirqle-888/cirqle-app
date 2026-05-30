@@ -31,7 +31,8 @@ import {
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { formatTaskDate, fullTaskDate } from '@/lib/utils/format-date'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
-import { usePrivacy } from '@/contexts/privacy-context'
+import { usePrivacy } from "@/contexts/privacy-context"
+import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from "@/lib/utils"
 
 // Heavy modals — only mount when opened. Bundle is split off the tasks route
 // chunk so the initial page download stays leaner. ssr:false because modals
@@ -2002,21 +2003,27 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                         className="w-full bg-secondary border border-border rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-500/50"
                       />
                     ) : (
-                      <div className="flex items-center gap-1.5">
-                        <p className="font-medium text-foreground">{task.title}</p>
-                        {task.is_recurring && (
-                          <span title="Recurring task">
-                            <RefreshCw className="w-3 h-3 text-primary/60 flex-shrink-0" />
-                          </span>
-                        )}
-                        {task.recurring_parent_id && (
-                          <span title="Recurring instance">
-                            <RefreshCw className="w-3 h-3 text-muted-foreground/50 flex-shrink-0" />
-                          </span>
-                        )}
+                      <div className={cn(
+                        BRANDED_PILL_BASE_CLASS,
+                        "flex-col items-start gap-0.5",
+                        highlightedTaskId === task.id ? BRANDED_PILL_ACTIVE_CLASS : (bulkMode && selectedTasks.has(task.id)) ? BRANDED_PILL_SELECTED_CLASS : ''
+                      )}>
+                        <div className="flex items-center gap-1.5">
+                          <p className="font-medium text-foreground">{task.title}</p>
+                          {task.is_recurring && (
+                            <span title="Recurring task">
+                              <RefreshCw className="w-3 h-3 text-primary/60 flex-shrink-0" />
+                            </span>
+                          )}
+                          {task.recurring_parent_id && (
+                            <span title="Recurring instance">
+                              <RefreshCw className="w-3 h-3 text-muted-foreground/50 flex-shrink-0" />
+                            </span>
+                          )}
+                        </div>
+                        {task.description && <p className="text-xs text-muted-foreground truncate max-w-[200px]">{task.description}</p>}
                       </div>
                     )}
-                    {task.description && <p className="text-xs text-muted-foreground truncate max-w-[200px]">{task.description}</p>}
                     {/* Assignment indicators */}
                     {(() => {
                       const taskEmps = localAssignments
@@ -2288,19 +2295,51 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                   </div>
                 </div>
 
-                {/* Bottom row — date · billing · assignees */}
+                {/* Bottom row — date · billing · actions */}
                 <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-border/50">
                   <span className="text-[11px] text-muted-foreground" title={fullTaskDate(task.task_date)}>
                     {formatTaskDate(task.task_date)}
                   </span>
-                  {showBilling && (
-                    <span className="text-[11px] font-semibold text-foreground tabular-nums">
-                      {(task.quantity ?? 1) > 1
-                        ? <>{formatCurrency((task.billing_amount ?? 0) / (task.quantity ?? 1), task.currency as Currency)}<span className="text-muted-foreground/60 font-normal ml-1">×{task.quantity}</span></>
-                        : formatCurrency(task.billing_amount ?? 0, task.currency as Currency)
-                      }
-                    </span>
-                  )}
+                  <div className="flex items-center gap-0.5" onClick={e => e.stopPropagation()}>
+                    {showBilling && (
+                      <span className="text-[11px] font-semibold text-foreground tabular-nums mr-2">
+                        {(task.quantity ?? 1) > 1
+                          ? <>{formatCurrency((task.billing_amount ?? 0) / (task.quantity ?? 1), task.currency as Currency)}<span className="text-muted-foreground/60 font-normal ml-1">×{task.quantity}</span></>
+                          : formatCurrency(task.billing_amount ?? 0, task.currency as Currency)
+                        }
+                      </span>
+                    )}
+                    {can('tasks.assign') && (
+                      <button
+                        onClick={e => { e.stopPropagation(); openAssignModal(task) }}
+                        title="Assign team"
+                        className="p-1.5 rounded-md text-muted-foreground hover:text-blue-400 hover:bg-blue-500/10 transition-colors">
+                        <Users className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    {task.client_id && role === 'super_admin' && (
+                      <button
+                        type="button"
+                        title={`Edit client: ${task.client?.name}`}
+                        onClick={e => { e.stopPropagation(); setEditClientId(task.client_id); setEditClientServiceId(task.service_id ?? null) }}
+                        className="p-1.5 rounded-md text-muted-foreground hover:text-violet-400 hover:bg-violet-500/10 transition-colors">
+                        <Building2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    <a
+                      href={`/dashboard/contributions?highlight=${task.id}`}
+                      title="View contribution"
+                      onClick={e => e.stopPropagation()}
+                      className="p-1.5 rounded-md text-muted-foreground hover:text-green-400 hover:bg-green-500/10 transition-colors">
+                      <BarChart2 className="w-3.5 h-3.5" />
+                    </a>
+                    <button
+                      onClick={e => { e.stopPropagation(); setDeleteConfirm(task.id) }}
+                      title="Delete task"
+                      className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               </div>
             )
