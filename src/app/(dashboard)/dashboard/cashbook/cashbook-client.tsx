@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
+import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
@@ -117,11 +118,31 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   const [entries, setEntries] = useState<Entry[]>(initialEntries)
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [filterType, setFilterType] = useState('')
-  const [filterMonth, setFilterMonth] = useState('')
-  const [filterSearch, setFilterSearch] = useState('')
-  const [filterCategory, setFilterCategory] = useState('')
-  const [filterAllocStatus, setFilterAllocStatus] = useState('')
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  const [filterType, setFilterType] = useState(searchParams.get('type') || '')
+  const [filterMonth, setFilterMonth] = useState(searchParams.get('month') || '')
+  const [filterSearch, setFilterSearch] = useState(searchParams.get('search') || '')
+  const [filterCategory, setFilterCategory] = useState(searchParams.get('category') || '')
+  const [filterAllocStatus, setFilterAllocStatus] = useState(searchParams.get('alloc') || '')
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    
+    if (filterType) params.set('type', filterType); else params.delete('type')
+    if (filterMonth) params.set('month', filterMonth); else params.delete('month')
+    if (filterSearch) params.set('search', filterSearch); else params.delete('search')
+    if (filterCategory) params.set('category', filterCategory); else params.delete('category')
+    if (filterAllocStatus) params.set('alloc', filterAllocStatus); else params.delete('alloc')
+    
+    const newQueryString = params.toString()
+    if (newQueryString !== searchParams.toString()) {
+      router.replace(`${pathname}?${newQueryString}`, { scroll: false })
+    }
+  }, [filterType, filterMonth, filterSearch, filterCategory, filterAllocStatus, pathname, router, searchParams])
+
   const [recurringMonths, setRecurringMonths] = useState(0) // 0 = not recurring
 
   // Inline edit state
@@ -451,8 +472,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 w-full sm:w-auto flex-1 min-w-[200px]"
           />
 
-          {(filterMonth || filterCategory || filterSearch || filterAllocStatus) && (
-            <button onClick={() => { setFilterMonth(''); setFilterCategory(''); setFilterSearch(''); setFilterAllocStatus('') }} className="text-xs text-muted-foreground hover:text-foreground px-2">Clear</button>
+          {(filterType || filterMonth || filterCategory || filterSearch || filterAllocStatus) && (
+            <button onClick={() => { setFilterType(''); setFilterMonth(''); setFilterCategory(''); setFilterSearch(''); setFilterAllocStatus('') }} className="text-xs text-muted-foreground hover:text-foreground px-2">Clear</button>
           )}
         </div>
 
