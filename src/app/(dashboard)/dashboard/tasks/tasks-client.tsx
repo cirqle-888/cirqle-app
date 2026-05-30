@@ -1862,7 +1862,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
         {viewMode === 'table' && (
         <>
         {/* Desktop: full table — hidden below sm */}
-        <div className="hidden sm:block bg-card border border-border rounded-xl overflow-visible">
+        <div className="hidden sm:block bg-card border border-border rounded-xl overflow-clip">
           <table className="w-full text-sm">
             {/* Sticky table header — sits flush below the toolbar.
                 top is measured dynamically by a ResizeObserver on the toolbar,
