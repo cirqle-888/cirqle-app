@@ -2170,7 +2170,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                     )}
                   </td>
                   <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
-                    <div className="flex items-center gap-1 lg:opacity-0 opacity-100 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center gap-1 lg:opacity-0 group-hover:opacity-100">
                       {can('tasks.assign') && (
                         <button
                           onClick={e => { e.stopPropagation(); openAssignModal(task) }}
