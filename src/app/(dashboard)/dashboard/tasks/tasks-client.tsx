@@ -2006,7 +2006,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                       <div className={cn(
                         BRANDED_PILL_BASE_CLASS,
                         "flex-col items-start gap-0.5",
-                        highlightedTaskId === task.id ? BRANDED_PILL_ACTIVE_CLASS : (bulkMode && selectedTasks.has(task.id)) ? BRANDED_PILL_SELECTED_CLASS : ''
+                        (editTask?.id === task.id || highlightedTaskId === task.id) ? BRANDED_PILL_ACTIVE_CLASS : (bulkMode && selectedTasks.has(task.id)) ? BRANDED_PILL_SELECTED_CLASS : ''
                       )}>
                         <div className="flex items-center gap-1.5">
                           <p className="font-medium text-foreground">{task.title}</p>
