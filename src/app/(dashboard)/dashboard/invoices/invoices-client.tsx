@@ -4501,7 +4501,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   const showRightPanel = selectedInv || ['new', 'generate', 'batch_generate', 'statement', 'discounts'].includes(panelMode)
 
   return (
-    <div className="flex flex-col h-screen bg-background text-foreground">
+    <div className="flex flex-col h-dvh bg-background text-foreground">
       <Header title="Invoices" />
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
 

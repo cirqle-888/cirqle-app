@@ -1,6 +1,6 @@
 export default function SettingsLoading() {
   return (
-    <div className="md:flex md:h-[calc(100vh-73px)]">
+    <div className="md:flex md:h-[calc(100dvh-73px)]">
       {/* Sidebar skeleton — desktop only */}
       <div className="hidden md:block w-52 border-r border-border p-3 space-y-1 shrink-0">
         {Array.from({ length: 10 }).map((_, i) => (

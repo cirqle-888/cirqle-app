@@ -646,7 +646,7 @@ export default function SettingsClient(props: Props) {
 
       {/* On mobile this stacks: section picker → content (full width).
           On md+ it's the original 2-column layout with a left sidebar. */}
-      <div className="md:flex md:h-[calc(100vh-73px)]">
+      <div className="md:flex md:h-[calc(100dvh-73px)]">
         {/* ── Section picker — MOBILE ONLY ──
             A native <select> with <optgroup> so users can jump to any
             settings section without the left nav eating ~half the screen. */}
@@ -1884,7 +1884,7 @@ export default function SettingsClient(props: Props) {
                     </button>
                   )}
                 </div>
-                <div className="overflow-auto rounded-xl border border-border max-h-[calc(100vh-280px)]">
+                <div className="overflow-auto rounded-xl border border-border max-h-[calc(100dvh-280px)]">
                   <table className="text-xs w-full border-collapse">
                     <thead className="sticky top-0 z-20">
                       <tr className="bg-secondary/90 backdrop-blur-sm border-b border-border">

@@ -1442,7 +1442,7 @@ export default function ContributionsClient({
               // Board scroll container — owns BOTH x and y scroll. Sticky column headers
               // (top-0 inside) work because this is the nearest scroll ancestor.
               // Height = viewport - sticky page header (92px) - sticky toolbar (~120px) - some padding.
-              <div className="overflow-auto pb-4 h-[calc(100vh-220px)]">
+              <div className="overflow-auto pb-4 h-[calc(100dvh-220px)]">
                 <div className="flex gap-4 min-w-max">
                   {visibleCols.length === 0 && (
                     <p className="text-sm text-muted-foreground italic px-2 py-10">No tasks match the current filters.</p>

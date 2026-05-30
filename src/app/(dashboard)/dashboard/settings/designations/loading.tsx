@@ -1,6 +1,6 @@
 export default function DesignationsLoading() {
   return (
-    <div className="md:flex md:h-[calc(100vh-4rem)]">
+    <div className="md:flex md:h-[calc(100dvh-4rem)]">
       {/* List pane */}
       <div className="w-full md:w-64 border-b md:border-b-0 md:border-r border-border p-3 space-y-1 md:shrink-0">
         <div className="h-8 w-28 bg-secondary/60 rounded animate-pulse mb-3" />

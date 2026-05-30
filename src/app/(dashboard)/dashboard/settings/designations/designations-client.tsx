@@ -194,7 +194,7 @@ export default function DesignationsClient(props: Props) {
   //   - md+ : original 2-column (list rail + detail pane), fixed height.
   //   - <md : single-pane stack. `mobileView` decides which pane is visible.
   return (
-    <div className="md:flex md:h-[calc(100vh-4rem)] md:min-h-[600px]">
+    <div className="md:flex md:h-[calc(100dvh-4rem)] md:min-h-[600px]">
       {/* ── Left rail ──────────────────────────────────────────────────────── */}
       <aside
         className={
