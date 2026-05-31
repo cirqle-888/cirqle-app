@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { X, Download, Share2, FileText, Loader2, Check } from 'lucide-react'
 
@@ -224,7 +224,7 @@ function drawReceipt(
   // ── details panel ─────────────────────────────────────────────
   const rows: { label: string; value: string; mono: boolean }[] = [
     { label: 'Received from', value: clientName || '—', mono: false },
-    { label: 'Invoice', value: invoiceLabel, mono: true },
+    { label: 'Invoice Ref', value: invoiceLabel, mono: true },
     { label: 'Date', value: dateLabel, mono: false },
   ]
   if (input.method) rows.push({ label: 'Method', value: input.method, mono: false })
@@ -285,11 +285,30 @@ function drawReceipt(
 
 export default function ReceiptModal({ input, onClose }: Props) {
   const cardRef = useRef<HTMLDivElement>(null)
+  // Container that constrains the preview to the modal width. We measure it
+  // with a ResizeObserver and derive a CSS scale so the 432-wide card always
+  // fits without horizontal scrolling, regardless of device width.
+  const previewContainerRef = useRef<HTMLDivElement>(null)
+  const [previewScale, setPreviewScale] = useState(1)
   const [clientName, setClientName] = useState(input.defaultClientName || '')
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState<'png' | 'share' | 'pdf' | null>(null)
   const [done, setDone] = useState(false)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    const el = previewContainerRef.current
+    if (!el) return
+    const obs = new ResizeObserver(([entry]) => {
+      const w = entry.contentRect.width
+      setPreviewScale(w >= CARD_W ? 1 : w / CARD_W)
+    })
+    obs.observe(el)
+    // Set immediately on mount so there's no flash at full size
+    const initialW = el.getBoundingClientRect().width
+    if (initialW > 0 && initialW < CARD_W) setPreviewScale(initialW / CARD_W)
+    return () => obs.disconnect()
+  }, [])
 
   const balanceDue = input.invoices.reduce((s, i) => s + Math.max(0, i.outstanding ?? 0), 0)
   const invoiceLabel = input.invoices.length
@@ -404,13 +423,35 @@ export default function ReceiptModal({ input, onClose }: Props) {
           </div>
 
           {/* ── Live preview ──────────────────────────────────────────
-              A faithful on-screen mirror of the exported canvas (which is
-              drawn separately in renderReceiptCanvas). Centered.          */}
-          <div className="flex justify-center">
+              The card is designed at CARD_W × CARD_H (432 × 540 px).
+              On narrow viewports (mobile) we scale it down proportionally
+              so it always fits inside the modal without horizontal scroll.
+              The scale is derived from the container's measured width via
+              ResizeObserver — the container is 100% wide so it never
+              overflows the modal itself.
+              Export quality (canvas at CAPTURE_SCALE=2.6) is unaffected —
+              we only scale the DOM preview, not the canvas dimensions.   */}
+          <div
+            ref={previewContainerRef}
+            style={{
+              width: '100%',
+              // Reserve exactly the scaled height so the parent layout
+              // doesn't collapse or create extra whitespace.
+              height: Math.round(CARD_H * previewScale),
+              position: 'relative',
+              overflow: 'hidden',
+            }}
+          >
             <div
               style={{
-                width: CARD_W,
-                maxWidth: '100%',
+                // Always render at the native 432 × 540 design size, then
+                // scale down via transform. transform-origin: top left so
+                // the card aligns with the left edge of the container.
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                transformOrigin: 'top left',
+                transform: previewScale < 1 ? `scale(${previewScale})` : 'none',
               }}
             >
               <div
@@ -504,7 +545,7 @@ export default function ReceiptModal({ input, onClose }: Props) {
                   }}
                 >
                   <DetailRow label="Received from" value={clientName || '—'} />
-                  <DetailRow label="Invoice" value={invoiceLabel} mono />
+                  <DetailRow label="Invoice Ref" value={invoiceLabel} mono />
                   <DetailRow label="Date" value={dateLabel} />
                   {input.method ? <DetailRow label="Method" value={input.method} /> : null}
                   {input.reference ? <DetailRow label="Reference" value={input.reference} mono /> : null}
