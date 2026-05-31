@@ -52,6 +52,7 @@ interface Entry {
   description?: string
   reference?: string
   invoice_id?: string
+  receipt_number?: string | null
   deleted_at?: string | null
   category?: { id: string; name: string; type: string }
   bank_account?: { id: string; name: string }
@@ -1330,9 +1331,16 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
           input={((): ReceiptInput => {
             const allocs = (receiptEntry.allocations || []).filter(a => !a.deleted_at)
             const firstClient = allocs.find(a => a.invoice?.client?.name)?.invoice?.client?.name || ''
+            // Prefer the stored receipt_number (RCPT-YYMM-CQxxx-NNN, generated
+            // atomically by the DB function in migration 011 — all historical
+            // entries are backfilled so this should always be non-null for
+            // inflow entries). The UUID-derived fallback covers only outflow
+            // entries opened via the receipt icon, or any entry created before
+            // migration 011 was applied to this environment.
             const compact = (receiptEntry.entry_date || '').replace(/-/g, '')
+            const legacyNo = `RCPT-${compact}-${receiptEntry.id.slice(-4).toUpperCase()}`
             return {
-              receiptNo: `RCPT-${compact}-${receiptEntry.id.slice(-4).toUpperCase()}`,
+              receiptNo: receiptEntry.receipt_number || legacyNo,
               defaultClientName: firstClient,
               amount: receiptEntry.amount ?? receiptEntry.amount_inr ?? 0,
               currency: receiptEntry.currency,

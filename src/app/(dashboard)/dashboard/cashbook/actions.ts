@@ -65,58 +65,35 @@ export interface SmartEffect {
 
 // ─── Receipt number generator ─────────────────────────────────────────────────
 //
-// Format:  RCPT-{YYMM}-{NNN}-CQ{ClientCode}
-//   e.g.   RCPT-2606-001-CQ042
+// Format:  RCPT-{YYMM}-CQ{ClientCode}-{NNN}
+//   e.g.   RCPT-2606-CQ042-001
 //
-// Breakdown:
-//   RCPT          = document type
-//   YYMM          = entry date month (two-digit year + zero-padded month)
-//   NNN           = global sequential counter for the month (001, 002, …)
-//                   NOT per-client — increments regardless of which client pays
-//   CQ{code}      = "CQ" Cirqle brand prefix + client's registered code
+// Delegates to the PostgreSQL function `generate_receipt_number` (created by
+// migration 011) via supabase.rpc(). The function atomically increments a
+// per-month counter in `receipt_number_sequences` using INSERT … ON CONFLICT
+// DO UPDATE … RETURNING, so two simultaneous server actions can never receive
+// the same sequence value — no advisory locks or application retries required.
 //
-// Sequence is global so:
-//   RCPT-2606-001-CQ042   (client 042 pays first)
-//   RCPT-2606-002-CQ015   (client 015 pays next)
-//   RCPT-2606-003-CQ042   (client 042 pays again — new seq, same client suffix)
-//
-// clientCode = 'GEN' when there is no linked invoice / unknown client, giving:
-//   RCPT-2606-004-GEN
-//
-// Race-condition safety: the UNIQUE index on receipt_number
-// (migrations/011_cashbook_receipt_number.sql) means concurrent inserts that
-// accidentally pick the same seq will have one fail the DB constraint. The
-// caller (insertCashbookEntries) inserts all rows in a single .insert() call,
-// so within a batch the race doesn't apply. For simultaneous independent
-// requests the index is the final guard.
+// The UNIQUE index on cashbook_entries.receipt_number is an additional safety
+// net: if the DB function somehow returned a duplicate (e.g. a manual DB edit
+// corrupted the counter), the INSERT would fail rather than silently create a
+// duplicate receipt.
 async function generateReceiptNumber(
   admin: ReturnType<typeof createAdminClient>,
   entryDate: string,
   clientCode: string,
-): Promise<string> {
-  const d = new Date(entryDate)
-  const yy = String(d.getFullYear()).slice(-2)
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  const monthPrefix = `RCPT-${yy}${mm}-`
-
-  // Fetch all receipt numbers for this month to find the current maximum seq.
-  const { data } = await admin
-    .from('cashbook_entries')
-    .select('receipt_number')
-    .like('receipt_number', `${monthPrefix}%`)
-
-  let maxSeq = 0
-  for (const row of (data as { receipt_number: string | null }[] | null) ?? []) {
-    if (!row.receipt_number) continue
-    // Format: RCPT-2606-001-CQ042  →  parts[2] = '001'
-    const parts = row.receipt_number.split('-')
-    const seq = parseInt(parts[2] ?? '0', 10)
-    if (!isNaN(seq) && seq > maxSeq) maxSeq = seq
+): Promise<string | null> {
+  const { data, error } = await (admin as any).rpc('generate_receipt_number', {
+    p_entry_date:  entryDate,
+    p_client_code: clientCode || null,
+  })
+  if (error || !data) {
+    // Log and return null — insert will proceed without a receipt number
+    // rather than blocking the cashbook entry creation entirely.
+    console.error('[receipt-number] generate_receipt_number RPC failed:', error)
+    return null
   }
-
-  const nextSeq = String(maxSeq + 1).padStart(3, '0')
-  const suffix = clientCode ? `CQ${clientCode.toUpperCase()}` : 'GEN'
-  return `${monthPrefix}${nextSeq}-${suffix}`
+  return data as string
 }
 
 export async function insertCashbookEntries(
