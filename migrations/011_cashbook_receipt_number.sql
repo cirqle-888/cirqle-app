@@ -127,16 +127,32 @@ BEGIN
         ORDER BY ce.entry_date ASC, ce.created_at ASC, ce.id ASC
       )::INTEGER                                                 AS seq,
       COALESCE(
-        NULLIF(upper(trim(cl.code)), ''),
+        NULLIF(upper(trim(cl_direct.code)), ''),
+        NULLIF(upper(trim(alloc_client.code)), ''),
         'GEN'
       )                                                          AS client_code
     FROM cashbook_entries ce
-    LEFT JOIN invoices     inv ON inv.id = ce.invoice_id
-    LEFT JOIN clients      cl  ON cl.id  = inv.client_id
+    -- Client code lookup: prefer direct invoice_id on the entry, fall back to
+    -- the first allocation in cashbook_invoice_allocations. Most entries have
+    -- their invoice linked via allocations (added after creation), NOT via the
+    -- invoice_id column — so the COALESCE is essential for correct backfill.
+    LEFT JOIN invoices inv_direct ON inv_direct.id = ce.invoice_id
+    LEFT JOIN clients  cl_direct  ON cl_direct.id  = inv_direct.client_id
+    LEFT JOIN LATERAL (
+      SELECT cl2.code
+      FROM   cashbook_invoice_allocations cia
+      JOIN   invoices inv2 ON inv2.id = cia.invoice_id
+      JOIN   clients  cl2  ON cl2.id  = inv2.client_id
+      WHERE  cia.cashbook_entry_id = ce.id
+        AND  cia.deleted_at IS NULL
+        AND  cl2.code IS NOT NULL
+        AND  trim(cl2.code) != ''
+      ORDER BY cia.created_at ASC
+      LIMIT 1
+    ) alloc_client ON true
     WHERE ce.type       = 'inflow'
       AND ce.deleted_at IS NULL
       AND ce.receipt_number IS NULL   -- skip entries already numbered
-    ORDER BY ce.entry_date ASC, ce.created_at ASC
   LOOP
     UPDATE cashbook_entries
     SET receipt_number =
