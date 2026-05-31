@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { AlertCircle, CheckCircle2, ShieldAlert, RefreshCw, History, Unlink, Trash2, RotateCcw, FileBarChart } from 'lucide-react'
 import { useToast, ToastContainer } from '@/components/ui/toast'
+import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
+import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from "@/lib/utils"
 
 type Tab = 'overview' | 'orphans' | 'mismatches' | 'softdeleted' | 'auditlog'
 
@@ -25,15 +27,21 @@ export default function ReconciliationClient() {
   async function analyzeData() {
     setLoading(true)
     try {
-      const [cbRes, invRes, deletedRes, auditRes] = await Promise.all([
+      const [cbRes, invRes, allocRes, deletedRes, auditRes] = await Promise.all([
         supabase
           .from('cashbook_entries')
-          .select('id, amount, currency, reference, invoice_id, entry_date, description')
+          .select('id, amount, amount_inr, currency, reference, invoice_id, entry_date, description')
           .eq('type', 'inflow')
           .is('deleted_at', null),
         supabase
           .from('invoices')
           .select('id, invoice_number, total_amount, paid_amount, status, currency, due_date'),
+        // The live source of truth for invoice.paid_amount (phase-4 trigger sums
+        // active allocations — NOT cashbook_entries.invoice_id).
+        supabase
+          .from('cashbook_invoice_allocations')
+          .select('cashbook_entry_id, invoice_id, allocated_amount')
+          .is('deleted_at', null),
         supabase
           .from('cashbook_entries')
           .select('id, amount, currency, reference, invoice_id, entry_date, description, deleted_at')
@@ -49,14 +57,21 @@ export default function ReconciliationClient() {
 
       const entries = cbRes.data || []
       const invoices = invRes.data || []
+      const allocations = allocRes.data || []
 
-      // Orphans: entries with INV- pattern in reference but no invoice_id
-      setOrphans(entries.filter(e => !e.invoice_id && e.reference?.match(/INV-\d+-\d+/i)))
+      // Inflow entries that DO have an active allocation linking them to an invoice.
+      const entriesWithAllocation = new Set(allocations.map((a: any) => a.cashbook_entry_id))
 
-      // Mismatches: stored paid_amount differs from SUM(cashbook_entries)
+      // Orphans: an inflow payment whose reference looks like an invoice number
+      // but which has NO active allocation — so it is not counting toward any
+      // invoice balance and would make the app under-report payments vs the sheet.
+      setOrphans(entries.filter(e => !entriesWithAllocation.has(e.id) && e.reference?.match(/INV-\d+-\d+/i)))
+
+      // Mismatches: stored paid_amount vs the real-time SUM of active allocations
+      // (allocated_amount is already in INR base, matching how paid_amount is kept).
       const sumByInv: Record<string, number> = {}
-      entries.filter(e => e.invoice_id).forEach(e => {
-        sumByInv[e.invoice_id] = (sumByInv[e.invoice_id] || 0) + (parseFloat(e.amount) || 0)
+      allocations.forEach((a: any) => {
+        sumByInv[a.invoice_id] = (sumByInv[a.invoice_id] || 0) + (parseFloat(a.allocated_amount) || 0)
       })
       setMismatches(
         invoices
@@ -150,11 +165,22 @@ export default function ReconciliationClient() {
         const upper = orphan.reference.toUpperCase()
         const match = Object.keys(invMap).find(num => upper.includes(num))
         if (match) {
-          await supabase.from('cashbook_entries').update({ invoice_id: invMap[match] }).eq('id', orphan.id)
+          const invoiceId = invMap[match]
+          // Create the allocation that actually drives invoice.paid_amount.
+          // (Setting invoice_id alone does nothing on an UPDATE — the auto-allocate
+          // trigger only fires on INSERT.)
+          const { error: allocErr } = await supabase.from('cashbook_invoice_allocations').insert({
+            cashbook_entry_id: orphan.id,
+            invoice_id: invoiceId,
+            allocated_amount: orphan.amount_inr ?? orphan.amount ?? 0,
+          })
+          if (allocErr) continue
+          // Keep the legacy column in sync for readability (does not affect totals).
+          await supabase.from('cashbook_entries').update({ invoice_id: invoiceId }).eq('id', orphan.id)
           fixed++
         }
       }
-      toast.success(`Auto-linked ${fixed} orphaned payment${fixed !== 1 ? 's' : ''}`)
+      toast.success(`Linked ${fixed} orphaned payment${fixed !== 1 ? 's' : ''}`)
       analyzeData()
     } catch (err: any) {
       toast.error('Auto-link failed', err.message)
@@ -294,7 +320,7 @@ export default function ReconciliationClient() {
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="font-semibold">Orphaned Cashbook Payments</h3>
-                  <p className="text-sm text-muted-foreground mt-0.5">Entries containing an invoice number in their reference but lacking a strict <code className="text-xs bg-secondary px-1 rounded">invoice_id</code> link.</p>
+                  <p className="text-sm text-muted-foreground mt-0.5">Inflow payments whose reference looks like an invoice number but which have <strong>no active allocation</strong> — so they aren't counting toward any invoice balance.</p>
                 </div>
                 {orphans.length > 0 && (
                   <button onClick={fixOrphans} disabled={analyzing} className="flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg gradient-bg text-white hover:opacity-90 disabled:opacity-50">
@@ -318,7 +344,7 @@ export default function ReconciliationClient() {
                     </thead>
                     <tbody className="divide-y divide-border">
                       {orphans.map(o => (
-                        <tr key={o.id} className="hover:bg-secondary/20">
+                        <tr key={o.id} className={cn(ROW_INTERACTIVE_CLASS)}>
                           <td className="px-4 py-3 text-xs text-muted-foreground">{o.entry_date}</td>
                           <td className="px-4 py-3 font-mono text-xs text-amber-400">{o.reference}</td>
                           <td className="px-4 py-3 text-xs text-muted-foreground truncate max-w-[200px]">{o.description || '—'}</td>
@@ -338,7 +364,7 @@ export default function ReconciliationClient() {
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="font-semibold">Balance Mismatches</h3>
-                  <p className="text-sm text-muted-foreground mt-0.5">Invoices where the stored <code className="text-xs bg-secondary px-1 rounded">paid_amount</code> differs from the real-time sum of linked cashbook entries.</p>
+                  <p className="text-sm text-muted-foreground mt-0.5">Invoices where the stored <code className="text-xs bg-secondary px-1 rounded">paid_amount</code> differs from the real-time sum of its active payment allocations (₹, INR base).</p>
                 </div>
                 {mismatches.length > 0 && (
                   <button onClick={fixMismatches} disabled={analyzing} className="flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg bg-destructive text-destructive-foreground hover:opacity-90 disabled:opacity-50">
@@ -363,7 +389,7 @@ export default function ReconciliationClient() {
                     </thead>
                     <tbody className="divide-y divide-border">
                       {mismatches.map((m: any) => (
-                        <tr key={m.id} className="hover:bg-secondary/20">
+                        <tr key={m.id} className={cn(ROW_INTERACTIVE_CLASS)}>
                           <td className="px-4 py-3 font-mono text-xs">{m.invoice_number}</td>
                           <td className="px-4 py-3">
                             {m.statusMismatch ? (
@@ -414,7 +440,7 @@ export default function ReconciliationClient() {
                     </thead>
                     <tbody className="divide-y divide-border">
                       {softDeleted.map(e => (
-                        <tr key={e.id} className="hover:bg-secondary/20 opacity-70">
+                        <tr key={e.id} className={cn(ROW_INTERACTIVE_CLASS, "opacity-70")}>
                           <td className="px-4 py-3 text-xs text-muted-foreground">{e.entry_date}</td>
                           <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{e.reference || '—'}</td>
                           <td className="px-4 py-3 text-xs text-muted-foreground truncate max-w-[200px]">{e.description || '—'}</td>
@@ -472,7 +498,7 @@ export default function ReconciliationClient() {
                     </thead>
                     <tbody className="divide-y divide-border">
                       {auditLog.map(a => (
-                        <tr key={a.id} className="hover:bg-secondary/20">
+                        <tr key={a.id} className={cn(ROW_INTERACTIVE_CLASS)}>
                           <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
                             {new Date(a.changed_at).toLocaleString()}
                           </td>

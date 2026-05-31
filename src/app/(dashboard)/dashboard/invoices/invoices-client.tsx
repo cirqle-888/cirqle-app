@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
+import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { useCopy } from '@/lib/hooks/use-copy'
@@ -16,7 +17,8 @@ import {
   getStatusColor, getStatusLabel, isOverdue,
   isEditable, formatBillingPeriod, getNextAction,
 } from '@/lib/utils/invoice'
-import { formatCurrency, getCurrencySymbol } from '@/lib/calculations/currency'
+import { formatCurrency, getCurrencySymbol, round2 } from '@/lib/calculations/currency'
+import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
 import {
   FileText, Plus, X, ChevronRight, CheckCircle, Send, CreditCard,
   Trash2, AlertTriangle, Clock, Eye, Lock, Zap, Download, RefreshCw,
@@ -30,6 +32,8 @@ import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { useRole } from '@/contexts/role-context'
 import type { Currency } from '@/types'
+import { formatTaskDate } from '@/lib/utils/format-date'
+import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from '@/lib/utils'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 
 // Client edit modal only mounts when the user opens it from an invoice's
@@ -66,6 +70,9 @@ interface InvoiceItem {
 interface Payment {
   id: string; amount?: number; payment_date: string
   payment_method: string; reference?: string; notes?: string
+  // FX: amount is in the invoice/payment currency; amount_inr is the INR base.
+  currency?: string; exchange_rate?: number; amount_inr?: number
+  rate_source?: string; rate_date?: string
 }
 interface Invoice {
   id: string; invoice_number: string; client_id: string
@@ -76,7 +83,10 @@ interface Invoice {
   // payload for users without `billing.view_amounts` /
   // `billing.view_line_pricing`. UI helpers (fmt, balanceDue) must tolerate
   // the missing values and render a neutral placeholder.
+  // total_amount / paid_amount are in the INVOICE currency; *_inr are the INR
+  // base snapshots used for company accounting/reporting.
   total_amount?: number; paid_amount?: number
+  exchange_rate?: number; total_amount_inr?: number; paid_amount_inr?: number
   subtotal?: number; tax_rate?: number; tax_amount?: number
   discount_amount?: number; previous_balance?: number
   notes?: string; created_at: string; updated_at: string
@@ -91,6 +101,7 @@ interface Props {
   bankAccounts: { id: string; name: string }[]
   services: { id: string; name: string }[]
   companySettings: Record<string, string>
+  exchangeRates: { currency: string; rate_to_inr: number; rate_date?: string }[]
   /**
    * Per-field financial visibility resolved server-side from the user's
    * permission set. When `amounts` is false, total_amount/paid_amount and
@@ -141,9 +152,15 @@ function balanceDueDisplay(inv: Invoice): number | undefined {
   if (inv.total_amount == null || inv.paid_amount == null) return undefined
   return Math.max(0, inv.total_amount - inv.paid_amount)
 }
+// INR-base helpers for COMPANY-WIDE rollups (KPI cards) — never mix currencies.
+// Per-invoice display stays in the invoice currency via fmt(n, inv.currency).
+// Falls back to the raw amount for INR invoices / pre-migration rows.
+function invTotalInr(inv: Invoice): number { return inv.total_amount_inr ?? inv.total_amount ?? 0 }
+function invPaidInr(inv: Invoice): number { return inv.paid_amount_inr ?? inv.paid_amount ?? 0 }
+function balanceDueInr(inv: Invoice): number { return Math.max(0, invTotalInr(inv) - invPaidInr(inv)) }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export default function InvoicesClient({ initialInvoices, clients, bankAccounts, services, companySettings, visibility }: Props) {
+export default function InvoicesClient({ initialInvoices, clients, bankAccounts, services, companySettings, exchangeRates, visibility }: Props) {
   const showAmounts     = visibility.amounts
   const showLinePricing = visibility.linePricing
   const supabase = createClient()
@@ -162,10 +179,28 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     previous_balance: inv.previous_balance ?? 0,
   })))
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [filterStatus, setFilterStatus] = useState<string>('')
-  const [filterClient, setFilterClient] = useState<string>('')
-  const [searchQ, setSearchQ] = useState('')
-  const [tab, setTab] = useState<'active' | 'closed'>('active')
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  const [filterStatus, setFilterStatus] = useState<string>(searchParams.get('status') || '')
+  const [filterClient, setFilterClient] = useState<string>(searchParams.get('client') || '')
+  const [searchQ, setSearchQ] = useState(searchParams.get('search') || '')
+  const [tab, setTab] = useState<'active' | 'closed'>((searchParams.get('tab') as any) || 'active')
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    
+    if (filterStatus) params.set('status', filterStatus); else params.delete('status')
+    if (filterClient) params.set('client', filterClient); else params.delete('client')
+    if (searchQ) params.set('search', searchQ); else params.delete('search')
+    if (tab && tab !== 'active') params.set('tab', tab); else params.delete('tab')
+
+    const newQueryString = params.toString()
+    if (newQueryString !== searchParams.toString()) {
+      router.replace(`${pathname}?${newQueryString}`, { scroll: false })
+    }
+  }, [filterStatus, filterClient, searchQ, tab, pathname, router, searchParams])
   const [editClientId, setEditClientId] = useState<string | null>(null)
 
   // Panel modes
@@ -182,11 +217,26 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     title: string; body: string; confirmLabel: string; danger?: boolean; onConfirm: () => void
   } | null>(null)
 
-  // Payment form
+  // Payment form. `amount` is in the payment `currency`; `amountInr` is the
+  // INR base; `rate` is rate_to_inr. Defaults to the invoice currency when the
+  // pay panel opens (see openPayPanel).
   const [payForm, setPayForm] = useState({
-    amount: '', payment_date: new Date().toISOString().split('T')[0],
+    amount: '', currency: 'INR' as Currency, rate: '', amountInr: '', rateSource: 'settings' as RateSource,
+    payment_date: new Date().toISOString().split('T')[0],
     payment_method: 'bank_transfer', reference: '', notes: '', bank_account_id: '',
   })
+
+  // currency → rate_to_inr, from Settings/exchange_rates (for the FX widget).
+  const rateMap = useMemo(() => {
+    const m: Record<string, number> = {}
+    exchangeRates.forEach(r => { m[r.currency] = r.rate_to_inr })
+    return m
+  }, [exchangeRates])
+
+  // Creation rate stamped on a new invoice (INR → 1, else the settings rate).
+  // total_amount_inr is a DB-generated column (total_amount × exchange_rate), so
+  // we only ever need to persist this rate, never the INR snapshot itself.
+  const creationRate = (cur?: string) => (!cur || cur === 'INR' ? 1 : (rateMap[cur] || 1))
 
   // New invoice form (manual override)
   const [newForm, setNewForm] = useState({
@@ -381,10 +431,12 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const drafts = invoices.filter(i => i.status === 'draft')
     const overdue = invoices.filter(i => isOverdue(i.due_date || '', i.status))
     return {
-      outstanding: active.reduce((s, i) => s + balanceDue(i), 0),
-      overdueAmt: overdue.reduce((s, i) => s + balanceDue(i), 0),
+      // Company-wide KPI cards are shown in ₹ — sum the INR snapshots, not the
+      // raw invoice-currency amounts (which would mix SAR/USD/INR together).
+      outstanding: active.reduce((s, i) => s + balanceDueInr(i), 0),
+      overdueAmt: overdue.reduce((s, i) => s + balanceDueInr(i), 0),
       draftCount: drafts.length,
-      draftTotal: drafts.reduce((s, i) => s + (i.total_amount || 0), 0),
+      draftTotal: drafts.reduce((s, i) => s + invTotalInr(i), 0),
       overdueCount: overdue.length,
     }
   }, [invoices])
@@ -664,12 +716,46 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     ))
   }
 
+  // Derive { rate, amountInr, rateSource } for a foreign amount set
+  // programmatically (quick-amount buttons, opening the panel). Preserves an
+  // existing manual rate when one is supplied.
+  function payFx(amountStr: string, currency: Currency, currentRate?: string): { rate: string; amountInr: string; rateSource: RateSource } {
+    if (currency === 'INR') return { rate: '1', amountInr: amountStr, rateSource: 'manual' }
+    const hasManual = currentRate !== undefined && currentRate !== '' && (parseFloat(currentRate) || 0) > 0
+    const r = hasManual ? parseFloat(currentRate as string) : rateMap[currency]
+    const rate = r ? String(r) : ''
+    const amountInr = amountStr === '' ? '' : String(round2((parseFloat(amountStr) || 0) * (parseFloat(rate) || 0)))
+    return { rate, amountInr, rateSource: hasManual ? 'manual' : (r ? 'settings' : 'manual') }
+  }
+
+  // Open the pay panel with the payment currency defaulted to the invoice's.
+  function openPayPanel(inv: Invoice) {
+    const cur = (inv.currency || 'INR') as Currency
+    const fx = payFx('', cur)
+    setPayForm(p => ({ ...p, amount: '', currency: cur, rate: fx.rate, amountInr: '', rateSource: fx.rateSource }))
+    setIsAdvancePayment(false)
+    setPanelMode('pay')
+  }
+
   async function handlePayment(invoiceId: string) {
-    const amt = parseFloat(payForm.amount)
-    if (!amt || amt <= 0) { toastError('Enter a valid amount'); return }
     const inv = invoices.find(i => i.id === invoiceId)
     if (!inv) return
+    const foreign = parseFloat(payForm.amount) || 0
+    if (foreign <= 0) { toastError('Enter a valid amount'); return }
     setSaving(true)
+
+    // FX captured for this payment.
+    const isBase = payForm.currency === 'INR'
+    const rate = isBase ? 1 : (parseFloat(payForm.rate) || rateMap[payForm.currency] || 1)
+    const amountInr = isBase ? foreign : (parseFloat(payForm.amountInr) || round2(foreign * rate))
+    const rateSource = isBase ? 'manual' : payForm.rateSource
+    const rateDate = payForm.payment_date
+
+    // Amount applied to the invoice's outstanding balance, in the INVOICE
+    // currency. Usually the payment IS in the invoice currency (1:1); for a
+    // cross-currency payment we pivot through INR using the invoice's own rate.
+    const invRate = (inv.exchange_rate && inv.exchange_rate > 0) ? inv.exchange_rate : (rateMap[inv.currency] || 1)
+    const appliedInvoiceCcy = payForm.currency === inv.currency ? foreign : round2(amountInr / (invRate || 1))
 
     const noteText = [
       isAdvancePayment ? '[ADVANCE PAYMENT]' : null,
@@ -677,40 +763,49 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     ].filter(Boolean).join(' — ') || null
 
     const { data: pmt, error } = await supabase.from('payments').insert({
-      invoice_id: invoiceId, amount: amt, payment_date: payForm.payment_date,
-      payment_method: payForm.payment_method, reference: payForm.reference || null,
-      notes: noteText, bank_account_id: payForm.bank_account_id || null,
+      invoice_id: invoiceId,
+      amount: foreign,                 // in payForm.currency
+      currency: payForm.currency,
+      exchange_rate: rate,
+      amount_inr: amountInr,           // INR base
+      rate_source: rateSource,
+      rate_date: rateDate,
+      payment_date: payForm.payment_date,
+      payment_method: payForm.payment_method,
+      reference: payForm.reference || null,
+      notes: noteText,
+      bank_account_id: payForm.bank_account_id || null,
     }).select().single()
 
     if (error) { toastError(error.message); setSaving(false); return }
 
-    const newPaid = (inv.paid_amount || 0) + amt
+    const newPaid = round2((inv.paid_amount || 0) + appliedInvoiceCcy)  // invoice currency
+    const newPaidInr = round2((inv.paid_amount_inr || 0) + amountInr)   // INR base
     const balance = (inv.total_amount || 0) - newPaid
-    // Advance payments may exceed total — keep as 'partial' in that case, don't flip to 'paid' on accident
-    const newStatus = isAdvancePayment
-      ? (balance <= 0 ? 'paid' : 'partial')
-      : (balance <= 0 ? 'paid' : 'partial')
+    // Status is driven by the foreign (invoice-currency) balance.
+    const newStatus = balance <= 0 ? 'paid' : 'partial'
 
-    await supabase.from('invoices').update({ paid_amount: newPaid, status: newStatus }).eq('id', invoiceId)
+    await supabase.from('invoices').update({ paid_amount: newPaid, paid_amount_inr: newPaidInr, status: newStatus }).eq('id', invoiceId)
     const prevPaid = inv.paid_amount || 0
+    const prevPaidInr = inv.paid_amount_inr || 0
     const prevStatus = inv.status
     setInvoices(prev => prev.map(i => i.id === invoiceId
-      ? { ...i, paid_amount: newPaid, status: newStatus, payments: [...(i.payments || []), pmt] }
+      ? { ...i, paid_amount: newPaid, paid_amount_inr: newPaidInr, status: newStatus, payments: [...(i.payments || []), pmt] }
       : i
     ))
-    const label = isAdvancePayment ? `Advance ${fmt(amt)} recorded` : `Payment of ${fmt(amt)} recorded`
+    const label = isAdvancePayment ? `Advance ${fmt(foreign, payForm.currency)} recorded` : `Payment of ${fmt(foreign, payForm.currency)} recorded`
     success(label, undefined, 5000, {
       label: 'Undo',
       onClick: async () => {
         await supabase.from('payments').delete().eq('id', pmt.id)
-        await supabase.from('invoices').update({ paid_amount: prevPaid, status: prevStatus }).eq('id', invoiceId)
+        await supabase.from('invoices').update({ paid_amount: prevPaid, paid_amount_inr: prevPaidInr, status: prevStatus }).eq('id', invoiceId)
         setInvoices(prev => prev.map(i => i.id === invoiceId
-          ? { ...i, paid_amount: prevPaid, status: prevStatus, payments: (i.payments || []).filter(p => p.id !== pmt.id) }
+          ? { ...i, paid_amount: prevPaid, paid_amount_inr: prevPaidInr, status: prevStatus, payments: (i.payments || []).filter(p => p.id !== pmt.id) }
           : i
         ))
       },
     })
-    setPayForm({ amount: '', payment_date: new Date().toISOString().split('T')[0], payment_method: 'bank_transfer', reference: '', notes: '', bank_account_id: '' })
+    setPayForm({ amount: '', currency: (inv.currency || 'INR') as Currency, rate: '', amountInr: '', rateSource: 'settings', payment_date: new Date().toISOString().split('T')[0], payment_method: 'bank_transfer', reference: '', notes: '', bank_account_id: '' })
     setIsAdvancePayment(false)
     setPanelMode('detail')
     setSaving(false)
@@ -825,6 +920,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     await supabase.from('invoices').update({
       subtotal, tax_rate: 0, tax_amount: 0, discount_amount: 0, previous_balance: 0,
       invoice_sequence_month: sequenceMonth,
+      exchange_rate: creationRate(newForm.currency), paid_amount_inr: 0,
     }).eq('id', inv.id)
 
     if (validItems.length) {
@@ -934,6 +1030,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       billing_period_start: from, billing_period_end: to,
       subtotal, tax_rate: 0, tax_amount: 0, discount_amount: 0, previous_balance: 0,
       invoice_sequence_month: sequenceMonth,
+      exchange_rate: creationRate(client?.default_currency || 'INR'), paid_amount_inr: 0,
     }).eq('id', inv.id)
 
     await supabase.from('invoice_items').insert(
@@ -1077,6 +1174,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           billing_period_label: billingPeriod.billing_period_label,
           invoice_sequence_month: sequenceMonth,
           subtotal: group.total, tax_rate: 0, tax_amount: 0, discount_amount: 0, previous_balance: 0,
+          exchange_rate: creationRate(group.currency || 'INR'), paid_amount_inr: 0,
         }).eq('id', inv.id)
 
         // Fetch task details for items
@@ -2135,10 +2233,10 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               <div
                 key={inv.id}
                 onClick={() => selectInvoice(inv.id)}
-                className={`px-3 py-3 cursor-pointer hover:bg-foreground/[0.02] transition-colors ${isSelected ? 'bg-violet-500/10 border-l-2 border-l-violet-500' : 'border-l-2 border-l-transparent'} ${selectedForBulk.has(inv.id) ? 'bg-violet-500/5' : ''}`}
+                className="hover-gradient-row px-3 py-3"
               >
                 <div className="flex items-start gap-3">
-                  <div className="pt-0.5" onClick={e => e.stopPropagation()}>
+                  <div className="pt-1.5" onClick={e => e.stopPropagation()}>
                     <input 
                       type="checkbox" 
                       className="rounded border-border/40 bg-transparent text-violet-500 focus:ring-0 cursor-pointer h-3.5 w-3.5"
@@ -2147,7 +2245,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                     />
                   </div>
                   <div className="flex items-start justify-between gap-2 flex-1 min-w-0">
-                    <div className="min-w-0 flex-1">
+                    <div className="min-w-0 flex-1 flex flex-col items-start gap-0.5">
                       <div className="flex items-center gap-1.5 mb-0.5">
                       <button
                         type="button"
@@ -2310,14 +2408,14 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               )}
               {['sent', 'partial', 'overdue'].includes(inv.status) && (
                 <button
-                  onClick={() => setPanelMode('pay')}
+                  onClick={() => openPayPanel(inv)}
                   className="flex-1 min-w-[120px] py-1.5 px-3 bg-green-600 hover:bg-green-500 text-white text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 transition-colors">
                   <CreditCard className="w-3.5 h-3.5" />Record Payment
                 </button>
               )}
               {inv.status === 'draft' && (
                 <button
-                  onClick={() => setPanelMode('pay')}
+                  onClick={() => openPayPanel(inv)}
                   className="flex-1 min-w-[120px] py-1.5 px-3 bg-foreground/[0.06] hover:bg-foreground/[0.1] text-foreground text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 transition-colors border border-border/40">
                   <CreditCard className="w-3.5 h-3.5" />Quick Pay
                 </button>
@@ -2723,10 +2821,13 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 {inv.payments!.map(p => (
                   <div key={p.id} className="flex items-center justify-between p-2 bg-green-500/5 rounded-lg border border-green-500/20 text-xs">
                     <div>
-                      <div className="font-medium text-green-400">{fmt(p.amount, inv.currency)}</div>
+                      <div className="font-medium text-green-400">{fmt(p.amount, (p.currency as Currency) || inv.currency)}</div>
                       <div className="text-[10px] text-muted-foreground">
                         {fmtDate(p.payment_date)} · {METHOD_LABEL[p.payment_method] || p.payment_method}
                         {p.reference && ` · ${p.reference}`}
+                        {p.currency && p.currency !== 'INR' && p.amount_inr != null && (
+                          <span> · @ {p.exchange_rate} = {fmt(p.amount_inr, 'INR')}</span>
+                        )}
                       </div>
                     </div>
                     <CheckCircle className="w-3.5 h-3.5 text-green-400" />
@@ -2764,24 +2865,35 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           </button>
         </div>
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-          {/* Quick amount buttons */}
+          {/* Amount + currency + rate (3-way synced) */}
           <div>
             <label className="text-xs text-muted-foreground mb-1.5 block">Amount</label>
-            <div className="flex gap-2 mb-2 flex-wrap">
-              {balance > 0 && [balance, balance / 2].filter(v => v > 0).map((v, i) => (
-                <button key={i}
-                  onClick={() => setPayForm(p => ({ ...p, amount: v.toFixed(2) }))}
-                  className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${parseFloat(payForm.amount) === v ? 'bg-violet-500/20 border-violet-500/50 text-violet-300' : 'border-border/40 text-muted-foreground hover:border-border'}`}>
-                  {i === 0 ? 'Full' : 'Half'} {fmt(v, inv.currency)}
-                </button>
-              ))}
-            </div>
-            <input
-              type="number" value={payForm.amount}
-              onChange={e => setPayForm(p => ({ ...p, amount: e.target.value }))}
-              placeholder="0.00" min="0"
-              className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50"
+            {balance > 0 && (
+              <div className="flex gap-2 mb-2 flex-wrap">
+                {[balance, balance / 2].filter(v => v > 0).map((v, i) => (
+                  <button key={i}
+                    onClick={() => setPayForm(p => {
+                      const fx = payFx(v.toFixed(2), p.currency, p.rate)
+                      return { ...p, amount: v.toFixed(2), rate: fx.rate, amountInr: fx.amountInr, rateSource: fx.rateSource }
+                    })}
+                    className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${parseFloat(payForm.amount) === v ? 'bg-violet-500/20 border-violet-500/50 text-violet-300' : 'border-border/40 text-muted-foreground hover:border-border'}`}>
+                    {i === 0 ? 'Full' : 'Half'} {fmt(v, inv.currency)}
+                  </button>
+                ))}
+              </div>
+            )}
+            <CurrencyAmountInput
+              value={{ currency: payForm.currency, amount: payForm.amount, rate: payForm.rate, amountInr: payForm.amountInr, rateSource: payForm.rateSource }}
+              onChange={fx => setPayForm(p => ({ ...p, currency: fx.currency, amount: fx.amount, rate: fx.rate, amountInr: fx.amountInr, rateSource: fx.rateSource }))}
+              ratesMap={rateMap}
+              amountLabel="Payment"
+              rateDate={exchangeRates.find(r => r.currency === payForm.currency)?.rate_date}
             />
+            {payForm.currency !== inv.currency && (
+              <p className="mt-1.5 text-[11px] text-amber-400">
+                Paying in {payForm.currency} on a {inv.currency} invoice — the balance is reduced by the ₹ value converted at the invoice rate.
+              </p>
+            )}
           </div>
 
           <div>
@@ -2836,7 +2948,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
           {/* Live balance remaining */}
           {(() => {
-            const entered = parseFloat(payForm.amount) || 0
+            // Reduction to the balance, expressed in the invoice currency.
+            const invRate = (inv.exchange_rate && inv.exchange_rate > 0) ? inv.exchange_rate : (rateMap[inv.currency] || 1)
+            const entered = payForm.currency === inv.currency
+              ? (parseFloat(payForm.amount) || 0)
+              : round2((parseFloat(payForm.amountInr) || 0) / (invRate || 1))
             const after   = balance - entered
             if (entered <= 0) return null
             return (
@@ -3854,8 +3970,10 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
     // ── Bad debt tab data (from invoices already in state) ─────────────────
     const badDebtInvoices = invoices.filter(i => i.status === 'bad_debt')
-    const totalBadDebt    = badDebtInvoices.reduce((s, i) => s + (i.total_amount || 0), 0)
-    const badDebtUnpaid   = badDebtInvoices.reduce((s, i) => s + Math.max(0, (i.total_amount || 0) - (i.paid_amount || 0)), 0)
+    // Grand totals across all clients/currencies → INR. (Per-client rows below
+    // keep their own currency.)
+    const totalBadDebt    = badDebtInvoices.reduce((s, i) => s + invTotalInr(i), 0)
+    const badDebtUnpaid   = badDebtInvoices.reduce((s, i) => s + balanceDueInr(i), 0)
     const bdByClient      = Object.values(
       badDebtInvoices.reduce((map: any, inv) => {
         const id = inv.client_id
@@ -3880,7 +3998,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     }
     const overdueFiltered = analyticsFilterClient
       ? overdueInvs.filter(i => i.client_id === analyticsFilterClient) : overdueInvs
-    const totalOverdue  = overdueFiltered.reduce((s, i) => s + Math.max(0, (i.total_amount || 0) - (i.paid_amount || 0)), 0)
+    const totalOverdue  = overdueFiltered.reduce((s, i) => s + balanceDueInr(i), 0)
     const overdueByAge  = overdueFiltered.reduce((map: any, inv) => {
       const b = ageBucket(inv.due_date || '').label
       if (!map[b]) map[b] = { ...ageBucket(inv.due_date || ''), total: 0, count: 0 }
@@ -4537,7 +4655,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       {statsCollapsed ? (
         <button
           onClick={toggleStats}
-          className="w-full border-b border-border/40 px-4 py-2.5 flex items-center justify-between text-left hover:bg-foreground/[0.02] transition-colors"
+          className={cn("w-full border-b border-border/40 px-4 py-2.5 flex items-center justify-between text-left", ROW_INTERACTIVE_CLASS)}
         >
           <div className="flex items-center gap-2.5 text-xs flex-wrap min-w-0">
             <span className="flex items-center gap-1.5">

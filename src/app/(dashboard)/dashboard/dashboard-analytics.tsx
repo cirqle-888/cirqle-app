@@ -740,7 +740,8 @@ function StatChange({ label, current, prev, pct, format, invert }: { label: stri
 
 function InvoiceTable({ title, color, invoices, showDaysLate, showDaysToGo }: { title: string; color: string; invoices: any[]; showDaysLate?: boolean; showDaysToGo?: boolean }) {
   const headerColors: Record<string, string> = { red: 'bg-red-500/15 text-red-400 border-red-500/20', yellow: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/20' }
-  const totalDue = invoices.reduce((s, i) => s + ((i.total_amount||0)-(i.paid_amount||0)), 0)
+  // INR base for the company-wide due total (foreign invoices carry *_inr snapshots).
+  const totalDue = invoices.reduce((s, i) => s + ((i.total_amount_inr ?? i.total_amount ?? 0) - (i.paid_amount_inr ?? i.paid_amount ?? 0)), 0)
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden">
       <div className={`px-4 py-3 border-b border-border flex items-center justify-between ${headerColors[color]}`}>

@@ -40,7 +40,7 @@ export default async function DashboardPage() {
   const allAnalyticsTasksPromise: Promise<any[]> = isAdmin
     ? fetchAll(supabase
         .from('tasks')
-        .select('id, billing_amount_inr, task_date, status, service_id, client:clients(id, name), service:services(id, name)')
+        .select('id, billing_amount_inr, quantity, task_date, status, service_id, client:clients(id, name), service:services(id, name)')
         .not('status', 'eq', 'cancelled')
         .gte('task_date', analyticsFromStr)
         .order('task_date', { ascending: true })
@@ -50,13 +50,13 @@ export default async function DashboardPage() {
   const scoresPromise: Promise<any[]> = isAdmin
     ? fetchAll(supabase
         .from('contribution_scores')
-        .select('task_id, employee_id, score_percentage, earnings_inr, calculated_at, task:tasks(id, task_date)')
+        .select('task_id, employee_id, score_percentage, earnings_inr, calculated_at, task:tasks(id, quantity, task_date)')
         .gte('calculated_at', analyticsFromStr)
         .order('calculated_at', { ascending: false })
         .order('id', { ascending: true })).then(r => r.data || [])
     : fetchAll(supabase
         .from('contribution_scores')
-        .select('task_id, employee_id, score_percentage, earnings_inr, calculated_at, task:tasks(id, task_date)')
+        .select('task_id, employee_id, score_percentage, earnings_inr, calculated_at, task:tasks(id, quantity, task_date)')
         .eq('employee_id', employeeId)
         .gte('calculated_at', analyticsFromStr)
         .order('calculated_at', { ascending: false })
@@ -75,7 +75,7 @@ export default async function DashboardPage() {
     isAdmin
       ? fetchAll(supabase
           .from('invoices')
-          .select('id, invoice_number, total_amount, paid_amount, status, currency, due_date, client:clients(id, name)')
+          .select('id, invoice_number, total_amount, paid_amount, total_amount_inr, paid_amount_inr, status, currency, due_date, client:clients(id, name)')
           .order('due_date', { ascending: true })
           .order('id', { ascending: true }))
       : Promise.resolve({ data: [] }),
@@ -170,12 +170,19 @@ export default async function DashboardPage() {
   const draftInvoices    = invoices.filter(i => ['draft', 'reviewed'].includes(i.status))
   const paidInvoices     = invoices.filter(i => i.status === 'paid')
 
-  const totalBilled   = invoices.filter(i => i.status !== 'cancelled').reduce((s, i) => s + (i.total_amount || 0), 0)
-  const totalPaid     = invoices.reduce((s, i) => s + (i.paid_amount || 0), 0)
+  // Company financial summaries are always in INR. Use the INR snapshot columns
+  // (total_amount_inr / paid_amount_inr) so foreign-currency invoices are not
+  // summed as if they were rupees. Falls back to the raw amount for INR invoices
+  // and pre-migration rows (where the snapshot equals the invoice-currency value).
+  const invTotalInr = (i: any) => i.total_amount_inr ?? i.total_amount ?? 0
+  const invPaidInr  = (i: any) => i.paid_amount_inr ?? i.paid_amount ?? 0
+
+  const totalBilled   = invoices.filter(i => i.status !== 'cancelled').reduce((s, i) => s + invTotalInr(i), 0)
+  const totalPaid     = invoices.reduce((s, i) => s + invPaidInr(i), 0)
   // Outstanding = unpaid from invoices already sent to clients (not drafts)
-  const outstanding   = sentInvoices.reduce((s, i) => s + Math.max(0, (i.total_amount || 0) - (i.paid_amount || 0)), 0)
+  const outstanding   = sentInvoices.reduce((s, i) => s + Math.max(0, invTotalInr(i) - invPaidInr(i)), 0)
   // To be invoiced = draft + reviewed totals (prepared but not sent yet)
-  const toBeInvoicedAmount = draftInvoices.reduce((s, i) => s + (i.total_amount || 0), 0)
+  const toBeInvoicedAmount = draftInvoices.reduce((s, i) => s + invTotalInr(i), 0)
 
   const overdueInvoices  = invoices.filter(i => i.status !== 'paid' && i.due_date && new Date(i.due_date) < today)
   const dueInvoices      = invoices.filter(i => ['sent','partial'].includes(i.status) && i.due_date && new Date(i.due_date) >= today)
@@ -208,9 +215,9 @@ export default async function DashboardPage() {
         outstanding,
         bankBalance,
         overdueCount:        overdueInvoices.length,
-        overdueAmount:       overdueInvoices.reduce((s, i) => s + ((i.total_amount || 0) - (i.paid_amount || 0)), 0),
+        overdueAmount:       overdueInvoices.reduce((s, i) => s + (invTotalInr(i) - invPaidInr(i)), 0),
         dueCount:            dueInvoices.length,
-        dueAmount:           dueInvoices.reduce((s, i) => s + ((i.total_amount || 0) - (i.paid_amount || 0)), 0),
+        dueAmount:           dueInvoices.reduce((s, i) => s + (invTotalInr(i) - invPaidInr(i)), 0),
         toBeInvoicedCount:   draftInvoices.length,
         toBeInvoicedAmount,
         totalExpectedCash:   bankBalance + outstanding + toBeInvoicedAmount,

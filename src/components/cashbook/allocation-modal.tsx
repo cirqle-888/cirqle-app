@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
-import { X, Plus, Trash2, CheckCircle2, ShieldAlert } from 'lucide-react'
+import { X, Plus, Trash2, CheckCircle2, ShieldAlert, Sparkles } from 'lucide-react'
 import Combobox from '@/components/ui/combobox'
 
 interface Allocation {
@@ -109,6 +109,62 @@ export default function AllocationModal({ entryId, amountInr, dueInvoices, onClo
     setSaving(false)
   }
 
+  function round2(n: number) { return Math.round(n * 100) / 100 }
+
+  // One-click distribution: walk open invoices oldest-due-date first and fill
+  // each to its outstanding balance until the unallocated payment runs out.
+  async function handleAutoAllocate() {
+    if (unallocated <= 0.01) return
+    setSaving(true)
+    setError('')
+    try {
+      let remaining = unallocated
+      const sorted = [...dueInvoices].sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''))
+      const toInsert: { cashbook_entry_id: string; invoice_id: string; allocated_amount: number }[] = []
+      const toUpdate: { id: string; allocated_amount: number }[] = []
+
+      for (const inv of sorted) {
+        if (remaining <= 0.01) break
+        const existing = allocations.find(a => a.invoice_id === inv.id)
+        const alreadyForThis = existing ? Number(existing.allocated_amount) : 0
+        const outstanding = round2((inv.total_amount - (inv.paid_amount || 0)) - alreadyForThis)
+        if (outstanding <= 0.01) continue
+        const give = round2(Math.min(remaining, outstanding))
+        if (give <= 0.01) continue
+        if (existing) {
+          toUpdate.push({ id: existing.id, allocated_amount: round2(alreadyForThis + give) })
+        } else {
+          toInsert.push({ cashbook_entry_id: entryId, invoice_id: inv.id, allocated_amount: give })
+        }
+        remaining = round2(remaining - give)
+      }
+
+      if (toInsert.length === 0 && toUpdate.length === 0) {
+        setError('No open invoices available to auto-allocate.')
+        return
+      }
+
+      for (const u of toUpdate) {
+        const { error: e } = await supabase
+          .from('cashbook_invoice_allocations')
+          .update({ allocated_amount: u.allocated_amount })
+          .eq('id', u.id)
+        if (e) { setError(e.message); return }
+      }
+      if (toInsert.length) {
+        const { error: e } = await supabase.from('cashbook_invoice_allocations').insert(toInsert)
+        if (e) { setError(e.message); return }
+      }
+
+      await fetchAllocations()
+      onUpdate()
+    } catch (e: any) {
+      setError(e?.message || 'Auto-allocation failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function handleRemove(allocId: string) {
     if (!confirm('Remove this allocation?')) return
     setSaving(true)
@@ -197,7 +253,21 @@ export default function AllocationModal({ entryId, amountInr, dueInvoices, onClo
           {/* Add New Allocation */}
           {unallocated > 0.01 && (
             <div className="border-t border-border pt-5 mt-5">
-              <h3 className="text-sm font-medium mb-3">Allocate Balance</h3>
+              <div className="flex items-center justify-between mb-3 gap-3">
+                <div>
+                  <h3 className="text-sm font-medium">Allocate Balance</h3>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">Auto-fills oldest invoices first, or pick manually below.</p>
+                </div>
+                <button
+                  onClick={handleAutoAllocate}
+                  disabled={saving}
+                  className="shrink-0 flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg gradient-bg text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+                  title="Distribute the remaining balance across open invoices, oldest first"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Auto-allocate
+                </button>
+              </div>
               <div className="flex flex-col sm:flex-row gap-3 items-end">
                 <div className="flex-1 w-full space-y-1.5">
                   <label className="text-xs text-muted-foreground">Select Invoice</label>

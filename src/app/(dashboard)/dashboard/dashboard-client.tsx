@@ -18,7 +18,8 @@
 // the two array props became promise props read via `use()`.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useState, useMemo, use, Suspense } from 'react'
+import { useState, useMemo, use, Suspense, useEffect } from 'react'
+import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
 import { DateFilter, matchesDateFilter, getDateFilterLabel } from '@/components/ui/date-filter'
@@ -214,9 +215,27 @@ function AdminDashboard({
   activeTasks, toBeInvoiced, employees, scoresPromise, payrollRecords,
   todayStr,
 }: Props) {
-  const [dateFilter, setDateFilter] = useState<DateFilterValue>(null)
-  const [granularity, setGranularity] = useState<Granularity>('monthly')
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  const [dateFilter, setDateFilter] = useState<DateFilterValue>(() => {
+    const d = searchParams.get('date')
+    try { return d ? JSON.parse(d) : null } catch { return null }
+  })
+  const [granularity, setGranularity] = useState<Granularity>((searchParams.get('granularity') as any) || 'monthly')
   const [drawer, setDrawer] = useState<DrawerType>(null)
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    if (dateFilter) params.set('date', JSON.stringify(dateFilter)); else params.delete('date')
+    if (granularity && granularity !== 'monthly') params.set('granularity', granularity); else params.delete('granularity')
+
+    const newQueryString = params.toString()
+    if (newQueryString !== searchParams.toString()) {
+      router.replace(`${pathname}?${newQueryString}`, { scroll: false })
+    }
+  }, [dateFilter, granularity, pathname, router, searchParams])
 
   const today = new Date(todayStr + 'T12:00:00')
   const todayLabel = today.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
@@ -476,15 +495,37 @@ function EmployeeDashboard({
   const scores = use(scoresPromise)
 
   // ── Analytics filter state (controls KPI cards + breakdown + chart) ────────
-  const [dateFilter, setDateFilter]   = useState<DateFilterValue>(null)
-  const [granularity, setGranularity] = useState<Granularity>('monthly')
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  const [dateFilter, setDateFilter] = useState<DateFilterValue>(() => {
+    const d = searchParams.get('date')
+    try { return d ? JSON.parse(d) : null } catch { return null }
+  })
+  const [granularity, setGranularity] = useState<Granularity>((searchParams.get('granularity') as any) || 'monthly')
 
   // ── Recent contributions filter state (independent of analytics filter) ────
-  const [histSearch,    setHistSearch]    = useState('')
-  const [histStatus,    setHistStatus]    = useState('all')
-  const [histBand,      setHistBand]      = useState('all')
-  const [histPage,      setHistPage]      = useState(1)
+  const [histSearch,    setHistSearch]    = useState(searchParams.get('h_search') || '')
+  const [histStatus,    setHistStatus]    = useState(searchParams.get('h_status') || 'all')
+  const [histBand,      setHistBand]      = useState(searchParams.get('h_band') || 'all')
+  const [histPage,      setHistPage]      = useState(parseInt(searchParams.get('h_page') || '1', 10))
   const [histExpanded,  setHistExpanded]  = useState(false)
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    if (dateFilter) params.set('date', JSON.stringify(dateFilter)); else params.delete('date')
+    if (granularity && granularity !== 'monthly') params.set('granularity', granularity); else params.delete('granularity')
+    if (histSearch) params.set('h_search', histSearch); else params.delete('h_search')
+    if (histStatus && histStatus !== 'all') params.set('h_status', histStatus); else params.delete('h_status')
+    if (histBand && histBand !== 'all') params.set('h_band', histBand); else params.delete('h_band')
+    if (histPage > 1) params.set('h_page', histPage.toString()); else params.delete('h_page')
+
+    const newQueryString = params.toString()
+    if (newQueryString !== searchParams.toString()) {
+      router.replace(`${pathname}?${newQueryString}`, { scroll: false })
+    }
+  }, [dateFilter, granularity, histSearch, histStatus, histBand, histPage, pathname, router, searchParams])
 
   const today     = new Date(todayStr + 'T12:00:00')
   const todayLabel = today.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })

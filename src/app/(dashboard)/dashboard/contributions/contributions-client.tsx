@@ -1229,7 +1229,7 @@ export default function ContributionsClient({
                               openTask(task)
                             }
                           }}
-                          className={`bg-card border rounded-xl px-4 py-3.5 transition-all group cursor-pointer select-none border-border`}>
+                          className={`hover-gradient-card bg-card border rounded-xl px-4 py-3.5 group select-none border-border`}>
                           <div className="flex items-start gap-3">
                             {bulkMode && (
                               <div className="pt-1.5 shrink-0" onClick={e => e.stopPropagation()}>
@@ -1497,13 +1497,9 @@ export default function ContributionsClient({
                             <button
                               key={task.id}
                               onClick={() => openTask(task)}
-                              className="w-full text-left bg-card border rounded-xl p-3 cursor-pointer border-border"
+                              className="hover-gradient-card w-full text-left bg-card border rounded-xl p-3 border-border"
                             >
-                              <div className={cn(
-                                "flex flex-col items-start gap-0.5 min-w-0",
-                                BRANDED_PILL_BASE_CLASS,
-                                highlightedTaskId === task.id ? BRANDED_PILL_ACTIVE_CLASS : ''
-                              )}>
+                              <div className="flex flex-col items-start gap-0.5 min-w-0">
                                 <div className="flex items-center gap-1.5 mb-0.5">
                                   <span
                                     title={`Task code · click to copy ${taskCode(task)}`}

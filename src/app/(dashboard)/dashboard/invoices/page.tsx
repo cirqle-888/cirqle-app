@@ -14,7 +14,7 @@ export default async function InvoicesPage() {
   const vis = financialVisibility(me)
   const supabase = createAdminClient()
 
-  const [invoicesRes, clientsRes, bankRes, servicesRes, settingsRes] = await Promise.all([
+  const [invoicesRes, clientsRes, bankRes, servicesRes, settingsRes, ratesRes] = await Promise.all([
     // Note: this is the biggest single query on the page (HAR shows 7.5s cold).
     // The nested task+service joins inside `items` are needed by the editor,
     // PDF generator, and invoice rows — can't safely drop them without a
@@ -29,7 +29,7 @@ export default async function InvoicesPage() {
           task:tasks(id, title, task_date, status, billing_amount_inr, currency),
           service:services(id, name)
         ),
-        payments(id, amount, payment_date, payment_method, reference, notes)
+        payments(id, amount, currency, exchange_rate, amount_inr, payment_date, payment_method, reference, notes)
       `)
       .order('created_at', { ascending: false })
       .limit(500),
@@ -50,6 +50,9 @@ export default async function InvoicesPage() {
     supabase
       .from('company_settings')
       .select('key, value'),
+    supabase
+      .from('exchange_rates')
+      .select('*'),
   ])
 
   // Convert settings array to a key→value map
@@ -71,6 +74,7 @@ export default async function InvoicesPage() {
       bankAccounts={bankRes.data || []}
       services={servicesRes.data || []}
       companySettings={settings}
+      exchangeRates={ratesRes.data || []}
       visibility={{
         amounts:     vis.billingAmounts,
         linePricing: vis.billingLinePricing,

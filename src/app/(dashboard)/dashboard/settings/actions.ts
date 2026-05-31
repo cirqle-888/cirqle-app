@@ -1,8 +1,9 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/auth/enforce'
+import { requirePermission, resolveCurrentEmployeeId } from '@/lib/auth/enforce'
 import { logActivity } from '@/lib/activity/log'
+import { syncRatesToDb, ratesAreStale } from '@/lib/fx/sync'
 
 interface ActionResult<T = void> {
   ok: boolean
@@ -493,11 +494,61 @@ export async function upsertExchangeRate(
   if (!auth.ok) return { ok: false, error: auth.error }
 
   const admin = createAdminClient()
+  // A hand-entered rate is a manual override — stamp the source + today's date so
+  // the Settings UI can show "Manual" and the value date alongside API-synced rows.
   const { error } = await admin
     .from('exchange_rates')
-    .upsert({ currency, rate_to_inr: rate }, { onConflict: 'currency' })
+    .upsert(
+      {
+        currency,
+        rate_to_inr: rate,
+        rate_source: 'manual',
+        rate_date: new Date().toISOString().slice(0, 10),
+        last_updated: new Date().toISOString(),
+      },
+      { onConflict: 'currency' },
+    )
   if (error) return { ok: false, error: error.message }
   return { ok: true }
+}
+
+/**
+ * Manually refresh every exchange rate from the free FX API ("Sync now" button).
+ * Admin-gated. Returns how many rows were updated + the rate value date.
+ */
+export async function syncExchangeRates(): Promise<ActionResult<{ updated: number; rateDate?: string }>> {
+  const auth = await requirePermission('settings.manage_company')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const res = await syncRatesToDb()
+  if (!res.ok) return { ok: false, error: res.error }
+  return { ok: true, data: { updated: res.updated ?? 0, rateDate: res.rateDate } }
+}
+
+/**
+ * Host-agnostic auto-refresh: called once per session on app load by any
+ * authenticated user. Refreshes only when the freshest rate is older than the
+ * configured `fx_auto_refresh_hours` interval, so it's cheap and self-throttling.
+ * Gated on authentication only (FX market data is not sensitive).
+ */
+export async function syncExchangeRatesIfStale(): Promise<ActionResult<{ synced: boolean }>> {
+  const employeeId = await resolveCurrentEmployeeId()
+  if (!employeeId) return { ok: false, error: 'Not signed in.' }
+
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('company_settings')
+    .select('value')
+    .eq('key', 'fx_auto_refresh_hours')
+    .maybeSingle()
+  const parsed = Number(data?.value)
+  const intervalHours = Number.isFinite(parsed) ? parsed : 24
+
+  if (!(await ratesAreStale(intervalHours))) return { ok: true, data: { synced: false } }
+
+  const res = await syncRatesToDb()
+  // Don't surface API failures to the background caller — just report no sync.
+  return res.ok ? { ok: true, data: { synced: true } } : { ok: true, data: { synced: false } }
 }
 
 // ── Pricing Matrix ────────────────────────────────────────────────────────────

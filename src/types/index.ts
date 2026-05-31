@@ -323,6 +323,10 @@ export interface ExchangeRate {
   currency: Currency
   rate_to_inr: number
   last_updated: string
+  /** Where the current rate came from: a successful API sync or a manual edit. */
+  rate_source?: 'api' | 'manual'
+  /** Value date of the rate (the API's published date, or the manual edit date). */
+  rate_date?: string
 }
 
 export interface Notification {

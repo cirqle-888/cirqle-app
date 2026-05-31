@@ -14,7 +14,7 @@ export default async function CashBookPage() {
   const vis = financialVisibility(me)
   const supabase = createAdminClient()
 
-  const [entriesRes, categoriesRes, bankAccountsRes, exchangeRatesRes, dueInvoicesRes, employeesRes, clientsRes, creditsRes] = await Promise.all([
+  const [entriesRes, categoriesRes, bankAccountsRes, exchangeRatesRes, dueInvoicesRes, employeesRes, clientsRes, creditsRes, pendingPayrollsRes, companySettingsRes] = await Promise.all([
     supabase
       .from('cashbook_entries')
       .select(`
@@ -42,13 +42,39 @@ export default async function CashBookPage() {
     supabase.from('exchange_rates').select('*'),
     supabase
       .from('invoices')
-      .select('id, invoice_number, status, due_date, total_amount, paid_amount, currency, client:clients(name, code)')
+      .select('id, invoice_number, status, due_date, total_amount, paid_amount, currency, client:clients(id, name, code)')
       .in('status', ['draft', 'reviewed', 'sent', 'partial'])
       .order('due_date', { ascending: true }),
     supabase.from('employees').select('id, cqid, role').eq('is_active', true).order('cqid'),
     supabase.from('clients').select('id, name, code').eq('is_active', true).order('name'),
     supabase.from('credit_ledger').select('*, employee:employees(cqid)').eq('credit_type', 'given').order('credit_date', { ascending: false }),
+    // Pending payslips power the salary-expense picker in the entry form.
+    // Filtered to status='pending' so paid payslips don't pollute the list,
+    // sorted newest-first (year desc, month desc) so the auto-default lands
+    // on the most recent unpaid month for the selected employee.
+    supabase
+      .from('payroll')
+      .select('id, employee_id, month, year, payslip_number, net_salary, status, employee:employees(cqid, name)')
+      .eq('status', 'pending')
+      .order('year', { ascending: false })
+      .order('month', { ascending: false }),
+    // Pull the small set of company branding keys we need on receipts so the
+    // workspace's own logo/name/phone replaces the hardcoded Cirqle defaults.
+    // Same pattern as invoices/page.tsx — key/value rows materialised into a
+    // flat lookup in the client.
+    supabase
+      .from('company_settings')
+      .select('key, value')
+      .in('key', ['logo_url', 'company_name', 'company_phone', 'company_website']),
   ])
+
+  // Materialise the key/value pairs into a flat object. Empty strings collapse
+  // to undefined so the receipt renderer can use `??` for clean fallbacks.
+  const companySettings = (companySettingsRes.data || []).reduce<Record<string, string>>((acc, r: any) => {
+    const v = (r.value || '').toString().trim()
+    if (v) acc[r.key] = v
+    return acc
+  }, {})
 
   // Strip amount + amount_inr from cashbook entries (plus nested allocation
   // totals + invoice/payroll totals on the join) when the viewer lacks
@@ -65,6 +91,8 @@ export default async function CashBookPage() {
       employees={(employeesRes.data || []) as any[]}
       clients={(clientsRes.data || []) as any[]}
       outstandingCredits={(creditsRes.data || []) as any[]}
+      pendingPayrolls={(pendingPayrollsRes.data || []) as any[]}
+      companySettings={companySettings}
       showAmounts={vis.cashbookAmounts}
     />
   )

@@ -16,6 +16,7 @@ import {
   createBankAccount, updateBankAccount, deactivateBankAccount,
   createCashbookCategory, updateCashbookCategory, deactivateCashbookCategory,
   upsertExchangeRate,
+  syncExchangeRates,
   upsertMatrixCell,
 } from './actions'
 import { Plus, X, Edit2, Archive, ArchiveRestore, Save, ChevronDown, ChevronLeft, ChevronRight, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Mail, Send, RotateCcw as ResetKey, RefreshCw } from 'lucide-react'
@@ -630,14 +631,40 @@ export default function SettingsClient(props: Props) {
   }
 
   // --- Exchange rates ---
+  const [syncing, setSyncing] = useState(false)
+  const [syncMsg, setSyncMsg] = useState('')
+
+  async function reloadRates() {
+    const supabase = createSupabaseClient()
+    const { data } = await supabase.from('exchange_rates').select('*')
+    if (data) setRates(data)
+  }
+
   async function saveRate(currency: Currency, rate: number) {
     const res = await upsertExchangeRate(currency, rate)
     if (!res.ok) return
+    const today = new Date().toISOString().slice(0, 10)
     setRates(prev => {
       const existing = prev.find(r => r.currency === currency)
-      if (existing) return prev.map(r => r.currency === currency ? { ...r, rate_to_inr: rate } : r)
-      return [...prev, { currency, rate_to_inr: rate }]
+      if (existing) return prev.map(r => r.currency === currency
+        ? { ...r, rate_to_inr: rate, rate_source: 'manual', rate_date: today }
+        : r)
+      return [...prev, { currency, rate_to_inr: rate, rate_source: 'manual', rate_date: today }]
     })
+  }
+
+  async function handleSyncRates() {
+    setSyncing(true); setSyncMsg('')
+    const res = await syncExchangeRates()
+    if (!res.ok) { setSyncMsg(res.error || 'Sync failed'); setSyncing(false); return }
+    await reloadRates()
+    setSyncMsg(`Updated ${res.data?.updated ?? 0} rate(s)${res.data?.rateDate ? ` · ${res.data.rateDate}` : ''}`)
+    setSyncing(false)
+  }
+
+  async function saveSetting(key: string, value: string) {
+    setCompanySettings(p => ({ ...p, [key]: value }))
+    await upsertCompanySettings([{ key, value }])
   }
 
   return (
@@ -1815,31 +1842,80 @@ export default function SettingsClient(props: Props) {
           )}
 
           {/* Exchange Rates */}
-          {tab === 'Exchange Rates' && (
-            <div className="max-w-sm">
-              <h2 className="text-sm font-semibold mb-4">Exchange Rates (to INR)</h2>
-              <div className="space-y-3">
-                {CURRENCIES.map(currency => {
-                  const existing = rates.find(r => r.currency === currency)
-                  return (
-                    <div key={currency} className="flex items-center gap-3">
-                      <span className="text-sm font-medium w-12">{currency}</span>
-                      <input
-                        type="number"
-                        step="0.0001"
-                        min="0"
-                        defaultValue={existing?.rate_to_inr || ''}
-                        onBlur={e => saveRate(currency, parseFloat(e.target.value) || 0)}
-                        className="flex-1 bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                        placeholder="Rate to INR"
-                      />
-                    </div>
-                  )
-                })}
-                <p className="text-xs text-muted-foreground">Rates auto-save on blur (tab out of field)</p>
+          {tab === 'Exchange Rates' && (() => {
+            const lastSync = rates.map(r => r.last_updated).filter(Boolean).sort().slice(-1)[0] as string | undefined
+            return (
+              <div className="max-w-lg">
+                <div className="flex items-start justify-between gap-3 mb-1">
+                  <div>
+                    <h2 className="text-sm font-semibold">Exchange Rates (to INR)</h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Base currency <span className="font-medium text-foreground">INR</span> — used for all accounting &amp; reports.
+                      These rates pre-fill new payments &amp; cashbook entries and can be overridden per transaction.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSyncRates}
+                    disabled={syncing}
+                    className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg border border-violet-500/30 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20 shrink-0 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
+                    {syncing ? 'Syncing…' : 'Sync now'}
+                  </button>
+                </div>
+
+                <div className="flex items-center flex-wrap gap-x-4 gap-y-1 mb-4 text-xs text-muted-foreground">
+                  {lastSync && <span>Last synced: {new Date(lastSync).toLocaleString('en-IN')}</span>}
+                  {syncMsg && <span className="text-foreground">{syncMsg}</span>}
+                  <label className="flex items-center gap-1.5 ml-auto whitespace-nowrap">
+                    Auto-refresh every
+                    <input
+                      type="number" min="0" step="1"
+                      defaultValue={companySettings['fx_auto_refresh_hours'] ?? '24'}
+                      onBlur={e => saveSetting('fx_auto_refresh_hours', String(parseInt(e.target.value) || 0))}
+                      className="w-14 bg-secondary border border-border rounded-md px-2 py-1 text-xs text-center focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    />
+                    h
+                  </label>
+                </div>
+
+                <div className="space-y-2">
+                  {CURRENCIES.map(currency => {
+                    const existing = rates.find(r => r.currency === currency)
+                    return (
+                      <div key={currency} className="flex items-center gap-3">
+                        <span className="text-sm font-medium w-12">{currency}</span>
+                        <input
+                          // Re-mount when the stored rate changes (e.g. after Sync) so the
+                          // uncontrolled input picks up the new defaultValue.
+                          key={`${currency}-${existing?.rate_to_inr ?? ''}-${existing?.last_updated ?? ''}`}
+                          type="number" step="0.0001" min="0"
+                          defaultValue={existing?.rate_to_inr || ''}
+                          onBlur={e => saveRate(currency, parseFloat(e.target.value) || 0)}
+                          className="flex-1 bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                          placeholder="Rate to INR"
+                        />
+                        <div className="w-24 text-right shrink-0">
+                          {existing ? (
+                            <>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${existing.rate_source === 'api' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'}`}>
+                                {existing.rate_source === 'api' ? 'API' : 'Manual'}
+                              </span>
+                              {existing.rate_date && <div className="text-[10px] text-muted-foreground mt-0.5">{existing.rate_date}</div>}
+                            </>
+                          ) : (
+                            <span className="text-[10px] text-muted-foreground">not set</span>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+                <p className="text-xs text-muted-foreground mt-3">Rates auto-save on blur — editing one marks it “Manual”. “Sync now” fetches live mid-market rates from the free FX API.</p>
               </div>
-            </div>
-          )}
+            )
+          })()}
 
           {/* Pricing Matrix */}
           {tab === 'Pricing Matrix' && (() => {

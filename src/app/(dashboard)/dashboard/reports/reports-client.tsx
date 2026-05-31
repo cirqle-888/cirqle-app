@@ -1,10 +1,13 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
+import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import Header from '@/components/layout/header'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { calculatePerformanceScore, getQualityBand } from '@/lib/calculations/commission'
+import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts'
+import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from '@/lib/utils'
 import { DateFilter, matchesDateFilter, getDateFilterLabel } from '@/components/ui/date-filter'
 import type { ContribWithDate } from './_skills/SkillsTab'
 import type { Param, Group } from '@/lib/analytics/performance'
@@ -100,13 +103,35 @@ export default function ReportsClient({
   employees, scores, tasks, contributions, parameters, groups,
 }: Props) {
   const { dn, isUnlocked } = usePrivacy()
-  const [selectedEmp, setSelectedEmp] = useState<string>(employees[0]?.id || '')
-  const [dateFilter, setDateFilter] = useState<DateFilterValue>(null)
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  const [selectedEmp, setSelectedEmp] = useState<string>(searchParams.get('emp') || employees[0]?.id || '')
+  const [dateFilter, setDateFilter] = useState<DateFilterValue>(() => {
+    const d = searchParams.get('date')
+    try { return d ? JSON.parse(d) : null } catch { return null }
+  })
   const [expandedTask, setExpandedTask] = useState<string | null>(null)
-  const [taskSortKey, setTaskSortKey] = useState<'date' | 'earnings' | 'score'>('date')
-  const [taskSortDir, setTaskSortDir] = useState<'desc' | 'asc'>('desc')
-  const [activeTab, setActiveTab] = useState<'overview' | 'tasks' | 'monthly' | 'team' | 'clients' | 'skills'>('overview')
+  const [taskSortKey, setTaskSortKey] = useState<'date' | 'earnings' | 'score'>((searchParams.get('sortKey') as any) || 'date')
+  const [taskSortDir, setTaskSortDir] = useState<'desc' | 'asc'>((searchParams.get('sortDir') as any) || 'desc')
+  const [activeTab, setActiveTab] = useState<'overview' | 'tasks' | 'monthly' | 'team' | 'clients' | 'skills'>((searchParams.get('tab') as any) || 'overview')
   const [showAllMonths, setShowAllMonths] = useState(false)
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    
+    if (selectedEmp && selectedEmp !== (employees[0]?.id || '')) params.set('emp', selectedEmp); else params.delete('emp')
+    if (dateFilter) params.set('date', JSON.stringify(dateFilter)); else params.delete('date')
+    if (taskSortKey && taskSortKey !== 'date') params.set('sortKey', taskSortKey); else params.delete('sortKey')
+    if (taskSortDir && taskSortDir !== 'desc') params.set('sortDir', taskSortDir); else params.delete('sortDir')
+    if (activeTab && activeTab !== 'overview') params.set('tab', activeTab); else params.delete('tab')
+
+    const newQueryString = params.toString()
+    if (newQueryString !== searchParams.toString()) {
+      router.replace(`${pathname}?${newQueryString}`, { scroll: false })
+    }
+  }, [selectedEmp, dateFilter, taskSortKey, taskSortDir, activeTab, pathname, router, searchParams, employees])
   const MONTHS_PREVIEW = 6
 
   const hasNoScores = scores.length === 0
@@ -700,10 +725,10 @@ export default function ReportsClient({
                         <div key={s.id}>
                           <button
                             onClick={() => setExpandedTask(isExpanded ? null : s.id)}
-                            className="w-full grid grid-cols-[1fr_120px_80px_80px_80px] gap-2 px-5 py-3 hover:bg-secondary/30 transition-colors text-left items-center">
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium truncate">{s.task?.title || '—'}</p>
-                              <p className="text-xs text-muted-foreground">
+                            className="hover-gradient-row w-full grid grid-cols-[1fr_120px_80px_80px_80px] gap-2 px-5 py-3 text-left items-center">
+                            <div className="min-w-0 flex flex-col items-start">
+                              <p className="text-sm font-medium truncate w-full text-foreground">{s.task?.title || '—'}</p>
+                              <p className="text-xs text-muted-foreground w-full truncate">
                                 {s.task?.client?.name || '—'} · {s.task?.task_date || '—'}
                               </p>
                             </div>
@@ -788,7 +813,7 @@ export default function ReportsClient({
                         </thead>
                         <tbody className="divide-y divide-border">
                           {(showAllMonths ? monthWiseTable : monthWiseTable.slice(0, MONTHS_PREVIEW)).map(row => (
-                            <tr key={row.month} className="hover:bg-secondary/20 transition-colors">
+                            <tr key={row.month} className={cn(ROW_INTERACTIVE_CLASS)}>
                               <td className="px-4 py-3 font-medium sticky left-0 bg-card text-sm">{row.label}</td>
                               {employees.map(e => (
                                 <td key={e.id} className={`px-4 py-3 text-right text-sm ${(row[e.id] as number) > 0 ? 'font-semibold text-foreground' : 'text-muted-foreground/40'}`}>

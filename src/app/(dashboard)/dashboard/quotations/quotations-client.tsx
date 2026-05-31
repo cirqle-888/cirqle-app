@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { getStatusColor, getStatusLabel, generateQuotationNumber } from '@/lib/utils/invoice'
@@ -12,6 +12,9 @@ import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
 import { seedFromTasks } from '@/lib/hooks/use-smart-sort'
 import { useRole } from '@/contexts/role-context'
+import { useToast, ToastContainer } from '@/components/ui/toast'
+import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from "@/lib/utils"
+import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { ClientEditModal } from '@/components/ui/client-edit-modal'
 
@@ -158,6 +161,8 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
   const { role } = useRole()
   const isSuperAdmin = role === 'super_admin'
   const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
 
   const [editClientId, setEditClientId] = useState<string | null>(null)
   const [quotations, setQuotations] = useState<Quotation[]>(initialQuotations)
@@ -165,7 +170,18 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
   const [showForm, setShowForm] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [search, setSearch] = useState('')
+  const [search, setSearch] = useState(searchParams.get('search') || '')
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    
+    if (search) params.set('search', search); else params.delete('search')
+
+    const newQueryString = params.toString()
+    if (newQueryString !== searchParams.toString()) {
+      router.replace(`${pathname}?${newQueryString}`, { scroll: false })
+    }
+  }, [search, pathname, router, searchParams])
   const [convertingId, setConvertingId] = useState<string | null>(null)
   const [toast, setToast] = useState<{ message: string; show: boolean }>({ message: '', show: false })
 
@@ -484,9 +500,8 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
 
         {filteredQuotations.map(quo => (
           <div key={quo.id} className="bg-card border border-border rounded-xl overflow-hidden">
-            {/* Row header */}
             <div
-              className="flex items-center justify-between px-5 py-4 cursor-pointer hover:bg-secondary/20 transition-colors"
+              className="hover-gradient-card flex items-center justify-between px-5 py-4 rounded-t-xl border border-transparent"
               onClick={() => setExpanded(expanded === quo.id ? null : quo.id)}
             >
               {/* Left: chevron + info */}
@@ -496,15 +511,15 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                     ? <ChevronDown className="w-4 h-4 text-muted-foreground" />
                     : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
                 </div>
-                <div className="min-w-0">
+                <div className="min-w-0 flex flex-col items-start gap-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-mono text-sm font-bold tracking-tight">{quo.quotation_number}</span>
                     <span className={`text-xs px-2 py-0.5 rounded-md font-medium ${getStatusColor(quo.status)}`}>
                       {getStatusLabel(quo.status)}
                     </span>
                   </div>
-                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                    <span className="text-xs text-foreground/80 font-medium">{quo.client?.name}</span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs font-medium text-foreground">{quo.client?.name}</span>
                     {quo.client?.code && (
                       <span className="text-[10px] text-muted-foreground font-mono bg-foreground/5 px-1.5 py-0.5 rounded">
                         {quo.client.code}

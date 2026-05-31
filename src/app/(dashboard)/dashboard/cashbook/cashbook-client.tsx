@@ -6,12 +6,17 @@ import dynamic from 'next/dynamic'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { insertCashbookEntries, updateCashbookEntry, softDeleteCashbookEntry } from './actions'
-import { formatCompact } from '@/lib/calculations/currency'
-import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save } from 'lucide-react'
+import { formatCompact, round2 } from '@/lib/calculations/currency'
+import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
+import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt } from 'lucide-react'
+import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
+import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from '@/lib/utils'
+import type { DateFilterValue } from '@/components/ui/date-filter'
 import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
 import type { Currency } from '@/types'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import type { ReceiptInput } from '@/components/cashbook/receipt-modal'
 
 import Link from 'next/link'
 
@@ -23,6 +28,12 @@ const AllocationModal = dynamic(
 )
 const PayrollAllocationModal = dynamic(
   () => import('@/components/cashbook/payroll-allocation-modal'),
+  { ssr: false },
+)
+// Receipt generator only mounts when the user clicks the receipt icon on an
+// inflow entry. Lazy-loaded so jspdf stays out of the main bundle.
+const ReceiptModal = dynamic(
+  () => import('@/components/cashbook/receipt-modal'),
   { ssr: false },
 )
 
@@ -79,7 +90,7 @@ interface DueInvoice {
   total_amount: number
   paid_amount: number
   currency: string
-  client?: { name: string; code: string }
+  client?: { id: string; name: string; code: string }
 }
 
 // Which category names trigger smart fields
@@ -94,6 +105,17 @@ const SMART: Record<string, string> = {
   'cost recovery':    'client_linked',
 }
 
+interface PendingPayroll {
+  id: string
+  employee_id: string
+  month: number
+  year: number
+  payslip_number?: string | null
+  net_salary: number
+  status: string
+  employee?: { cqid: string; name: string }
+}
+
 interface Props {
   initialEntries: Entry[]
   categories: any[]
@@ -103,6 +125,20 @@ interface Props {
   employees: any[]
   clients: any[]
   outstandingCredits: any[]
+  /**
+   * All pending payslips (status='pending'), pre-sorted newest-first by the
+   * server (year desc, month desc). Used by the salary-expense smart section
+   * to narrow the picker to the chosen employee and auto-default to their
+   * latest unpaid payslip.
+   */
+  pendingPayrolls: PendingPayroll[]
+  /**
+   * Flattened company_settings lookup used by the receipt renderer to drop
+   * the hardcoded Cirqle branding. Keys: `logo_url`, `company_name`,
+   * `company_phone`, `company_website`. Missing keys are fine — the renderer
+   * falls back to safe defaults.
+   */
+  companySettings: Record<string, string>
   /**
    * True when the viewer holds `cashbook.view_amounts`. When false, amount
    * and amount_inr are already absent from `initialEntries` (stripped
@@ -114,7 +150,7 @@ interface Props {
 
 const CURRENCIES: Currency[] = ['INR', 'AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
 
-export default function CashBookClient({ initialEntries, categories, bankAccounts, exchangeRates, dueInvoices, employees, clients, outstandingCredits, showAmounts }: Props) {
+export default function CashBookClient({ initialEntries, categories, bankAccounts, exchangeRates, dueInvoices, employees, clients, outstandingCredits, pendingPayrolls, companySettings, showAmounts }: Props) {
   const [entries, setEntries] = useState<Entry[]>(initialEntries)
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -127,21 +163,25 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   const [filterSearch, setFilterSearch] = useState(searchParams.get('search') || '')
   const [filterCategory, setFilterCategory] = useState(searchParams.get('category') || '')
   const [filterAllocStatus, setFilterAllocStatus] = useState(searchParams.get('alloc') || '')
+  const [filterMinAmount, setFilterMinAmount] = useState(searchParams.get('min') || '')
+  const [filterMaxAmount, setFilterMaxAmount] = useState(searchParams.get('max') || '')
 
   useEffect(() => {
     const params = new URLSearchParams(searchParams.toString())
-    
+
     if (filterType) params.set('type', filterType); else params.delete('type')
     if (filterMonth) params.set('month', filterMonth); else params.delete('month')
     if (filterSearch) params.set('search', filterSearch); else params.delete('search')
     if (filterCategory) params.set('category', filterCategory); else params.delete('category')
     if (filterAllocStatus) params.set('alloc', filterAllocStatus); else params.delete('alloc')
-    
+    if (filterMinAmount) params.set('min', filterMinAmount); else params.delete('min')
+    if (filterMaxAmount) params.set('max', filterMaxAmount); else params.delete('max')
+
     const newQueryString = params.toString()
     if (newQueryString !== searchParams.toString()) {
       router.replace(`${pathname}?${newQueryString}`, { scroll: false })
     }
-  }, [filterType, filterMonth, filterSearch, filterCategory, filterAllocStatus, pathname, router, searchParams])
+  }, [filterType, filterMonth, filterSearch, filterCategory, filterAllocStatus, filterMinAmount, filterMaxAmount, pathname, router, searchParams])
 
   const [recurringMonths, setRecurringMonths] = useState(0) // 0 = not recurring
 
@@ -153,6 +193,9 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   const [allocatingEntry, setAllocatingEntry] = useState<Entry | null>(null)
   const [allocatingPayrollEntry, setAllocatingPayrollEntry] = useState<Entry | null>(null)
 
+  // Receipt generator state
+  const [receiptEntry, setReceiptEntry] = useState<Entry | null>(null)
+
   const invoiceCategoryId = useMemo(() => categories.find(c => c.name.toLowerCase().includes('invoice'))?.id, [categories])
   const salaryCategoryId = useMemo(() => categories.find(c => c.name.toLowerCase().includes('salary'))?.id, [categories])
 
@@ -162,10 +205,17 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     bank_account_id: '',
     amount: '',
     currency: 'INR' as Currency,
+    rate: '',
+    amountInr: '',
+    rateSource: 'settings' as RateSource,
     entry_date: new Date().toISOString().split('T')[0],
     description: '',
     reference: '',
     linked_invoice_id: '',
+    // UI-only filter: narrows the Invoice picker to a single client's pending
+    // invoices. Not persisted — once linked_invoice_id is set, the client is
+    // implicit via the invoice. Auto-fills when an invoice is selected.
+    client_filter_id: '',
     fully_paid: false,
   })
 
@@ -177,16 +227,26 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     return m
   }, [exchangeRates])
 
-  function getInrAmount(amount: number, currency: Currency) {
-    if (currency === 'INR') return amount
-    return amount * (rateMap[currency] || 1)
+  // Derive { rate, amountInr, rateSource } when amount/currency are set
+  // programmatically (invoice link, "fully paid" auto-fill) so the FX widget
+  // and stored values stay consistent without user interaction.
+  function fxFor(amountStr: string, currency: Currency): { rate: string; amountInr: string; rateSource: RateSource } {
+    if (currency === 'INR') return { rate: '1', amountInr: amountStr, rateSource: 'manual' }
+    const r = rateMap[currency]
+    const rate = r ? String(r) : ''
+    const amountInr = amountStr === '' ? '' : String(round2((parseFloat(amountStr) || 0) * (parseFloat(rate) || 0)))
+    return { rate, amountInr, rateSource: r ? 'settings' : 'manual' }
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
     const amount = parseFloat(form.amount) || 0
-    const amountInr = getInrAmount(amount, form.currency)
+    const isBase = form.currency === 'INR'
+    const exchange_rate = isBase ? 1 : (parseFloat(form.rate) || rateMap[form.currency] || 1)
+    const amountInr = isBase ? amount : (parseFloat(form.amountInr) || round2(amount * exchange_rate))
+    const rate_source: RateSource = isBase ? 'manual' : form.rateSource
+    const rate_date = form.entry_date
 
     // Build list of dates (base date + recurring copies)
     const baseDates: string[] = [form.entry_date]
@@ -224,6 +284,9 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         amount,
         currency: form.currency,
         amount_inr: amountInr,
+        exchange_rate,
+        rate_source,
+        rate_date,
         description: form.description,
         reference: form.reference,
         invoice_id: form.linked_invoice_id || null,
@@ -244,7 +307,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       setEntries(prev => [...[...allInserted].reverse(), ...prev])
       setShowForm(false)
       setRecurringMonths(0)
-      setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: '', amount: '', currency: 'INR', entry_date: new Date().toISOString().split('T')[0], description: '', reference: '', linked_invoice_id: '', fully_paid: false })
+      setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: '', amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: new Date().toISOString().split('T')[0], description: '', reference: '', linked_invoice_id: '', client_filter_id: '', fully_paid: false })
     }
     setSaving(false)
   }
@@ -252,19 +315,28 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   async function handleInlineSave() {
     if (!editingRow) return
     setSaving(true)
-    const amount_inr = getInrAmount(Number(editForm.amount) || 0, (editForm.currency ?? 'INR') as Currency)
+    const amount = Number(editForm.amount) || 0
+    const cur = (editForm.currency ?? 'INR') as Currency
+    const isBase = cur === 'INR'
+    const exchange_rate = isBase ? 1 : (rateMap[cur] || 1)
+    const amount_inr = isBase ? amount : round2(amount * exchange_rate)
+    const rate_source: RateSource = isBase ? 'manual' : (rateMap[cur] ? 'settings' : 'manual')
+    const rate_date = editForm.entry_date ?? new Date().toISOString().split('T')[0]
     const result = await updateCashbookEntry(editingRow, {
       entry_date: editForm.entry_date ?? new Date().toISOString().split('T')[0],
-      amount: editForm.amount ?? 0,
+      amount,
       amount_inr,
-      currency: editForm.currency ?? 'INR',
+      currency: cur,
+      exchange_rate,
+      rate_source,
+      rate_date,
       category_id: editForm.category_id,
       bank_account_id: editForm.bank_account_id || null,
       description: editForm.description ?? '',
       reference: editForm.reference ?? '',
     })
     if (result.ok) {
-      setEntries(prev => prev.map(e => e.id === editingRow ? { ...e, ...editForm, amount_inr } : e))
+      setEntries(prev => prev.map(e => e.id === editingRow ? { ...e, ...editForm, amount_inr, exchange_rate, rate_source, rate_date } : e))
       setEditingRow(null)
     }
     setSaving(false)
@@ -280,13 +352,21 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   }
 
   const today = new Date().toISOString().split('T')[0]
-  const sortedDueInvoices = [...dueInvoices].sort((a, b) => {
-    const aOverdue = a.due_date && a.due_date < today
-    const bOverdue = b.due_date && b.due_date < today
-    if (aOverdue && !bOverdue) return -1
-    if (!aOverdue && bOverdue) return 1
-    return (a.due_date || '').localeCompare(b.due_date || '')
-  })
+  // Pending invoices for the Invoice picker — narrowed to a single client when
+  // the user picks one in the Client filter. Sorted overdue-first then by due
+  // date so the most-pressing receivables surface at the top.
+  const sortedDueInvoices = useMemo(() => {
+    const list = form.client_filter_id
+      ? dueInvoices.filter(inv => inv.client?.id === form.client_filter_id)
+      : dueInvoices
+    return [...list].sort((a, b) => {
+      const aOverdue = a.due_date && a.due_date < today
+      const bOverdue = b.due_date && b.due_date < today
+      if (aOverdue && !bOverdue) return -1
+      if (!aOverdue && bOverdue) return 1
+      return (a.due_date || '').localeCompare(b.due_date || '')
+    })
+  }, [dueInvoices, form.client_filter_id, today])
 
   const isInvoiceCategory = form.category_id === invoiceCategoryId && form.type === 'inflow'
 
@@ -324,11 +404,11 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         const isInv = e.category_id === invoiceCategoryId
         const isSal = e.category_id === salaryCategoryId
         if (!isInv && !isSal) return false
-        
-        const totalAlloc = isInv 
+
+        const totalAlloc = isInv
           ? (e.allocations?.filter(a => !a.deleted_at).reduce((s, a) => s + Number(a.allocated_amount), 0) || 0)
           : (e.payroll_allocations?.filter(a => !a.deleted_at).reduce((s, a) => s + Number(a.allocated_amount), 0) || 0)
-        
+
         const unallocated = (e.amount_inr || 0) - totalAlloc
         if (filterAllocStatus === 'unallocated') return unallocated > 0.01 && totalAlloc === 0
         if (filterAllocStatus === 'partial') return unallocated > 0.01 && totalAlloc > 0
@@ -338,8 +418,17 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       })
     }
 
+    if (filterMinAmount) {
+      const min = parseFloat(filterMinAmount)
+      if (!isNaN(min)) result = result.filter(e => (e.amount_inr ?? 0) >= min)
+    }
+    if (filterMaxAmount) {
+      const max = parseFloat(filterMaxAmount)
+      if (!isNaN(max)) result = result.filter(e => (e.amount_inr ?? 0) <= max)
+    }
+
     return result
-  }, [entries, filterType, filterMonth, filterSearch, filterCategory, filterAllocStatus, invoiceCategoryId, salaryCategoryId])
+  }, [entries, filterType, filterMonth, filterSearch, filterCategory, filterAllocStatus, filterMinAmount, filterMaxAmount, invoiceCategoryId, salaryCategoryId])
 
   const totalInflow = filteredEntries.filter(e => e.type === 'inflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
   const totalOutflow = filteredEntries.filter(e => e.type === 'outflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
@@ -469,11 +558,30 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             placeholder="Search descriptions, clients..."
             value={filterSearch}
             onChange={e => setFilterSearch(e.target.value)}
-            className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 w-full sm:w-auto flex-1 min-w-[200px]"
+            className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 w-full sm:w-auto flex-1 min-w-[160px]"
           />
 
-          {(filterType || filterMonth || filterCategory || filterSearch || filterAllocStatus) && (
-            <button onClick={() => { setFilterType(''); setFilterMonth(''); setFilterCategory(''); setFilterSearch(''); setFilterAllocStatus('') }} className="text-xs text-muted-foreground hover:text-foreground px-2">Clear</button>
+          {/* Amount range */}
+          <div className="flex items-center gap-1">
+            <input
+              type="number"
+              placeholder="Min ₹"
+              value={filterMinAmount}
+              onChange={e => setFilterMinAmount(e.target.value)}
+              className="bg-background border border-border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 w-24"
+            />
+            <span className="text-muted-foreground text-xs">–</span>
+            <input
+              type="number"
+              placeholder="Max ₹"
+              value={filterMaxAmount}
+              onChange={e => setFilterMaxAmount(e.target.value)}
+              className="bg-background border border-border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 w-24"
+            />
+          </div>
+
+          {(filterType || filterMonth || filterCategory || filterSearch || filterAllocStatus || filterMinAmount || filterMaxAmount) && (
+            <button onClick={() => { setFilterType(''); setFilterMonth(''); setFilterCategory(''); setFilterSearch(''); setFilterAllocStatus(''); setFilterMinAmount(''); setFilterMaxAmount('') }} className="text-xs text-muted-foreground hover:text-foreground px-2">Clear</button>
           )}
         </div>
 
@@ -497,8 +605,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               const isEditing = editingRow === entry.id
 
               return (
-                <div key={entry.id} className="p-4 flex flex-col gap-3 hover:bg-secondary/20 transition-colors group">
-                  <div className="flex justify-between items-start gap-4">
+                <div key={entry.id} className="hover-gradient-row flex flex-col">
+                  <div className="p-4 flex justify-between items-start gap-4">
                     <div className="flex items-center gap-2">
                       <div className={`w-1.5 h-1.5 rounded-full ${entry.type === 'inflow' ? 'bg-green-400' : 'bg-red-400'}`} />
                       {isEditing ? (
@@ -532,86 +640,99 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                     </div>
                   </div>
 
-                  <div className="text-sm text-muted-foreground">
-                    {isEditing ? (
-                      <input type="text" value={editForm.description || ''} onChange={e => setEditForm(p => ({...p, description: e.target.value}))} className="bg-background border rounded px-2 py-1 w-full text-xs" />
-                    ) : (
-                      entry.description || '—'
-                    )}
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-between gap-2 mt-1">
-                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                      <span>
-                        {isEditing ? (
-                          <input type="date" value={editForm.entry_date || ''} onChange={e => setEditForm(p => ({...p, entry_date: e.target.value}))} className="bg-background border rounded px-2 py-1" />
-                        ) : (
-                          entry.entry_date
-                        )}
-                      </span>
-                      <span>•</span>
-                      <span>
-                        {isEditing ? (
-                          <select value={editForm.bank_account_id || ''} onChange={e => setEditForm(p => ({...p, bank_account_id: e.target.value}))} className="bg-background border rounded px-2 py-1">
-                            <option value="">Cash</option>
-                            {bankAccounts.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                          </select>
-                        ) : (
-                          entry.bank_account?.name || 'Cash'
-                        )}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-end gap-2">
+                  <div className="px-4 pb-4 flex flex-col gap-3">
+                    {/* Description */}
+                    <div className="text-sm">
                       {isEditing ? (
-                        <>
-                          <button onClick={handleInlineSave} disabled={saving} className="p-1.5 rounded-md hover:bg-primary/20 text-primary transition-colors" title="Save changes"><Save className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => setEditingRow(null)} disabled={saving} className="p-1.5 rounded-md hover:bg-secondary/80 text-muted-foreground transition-colors" title="Cancel"><X className="w-3.5 h-3.5" /></button>
-                        </>
+                        <input type="text" value={editForm.description || ''} onChange={e => setEditForm(p => ({...p, description: e.target.value}))} className="w-full bg-background border rounded px-2 py-1 text-xs" placeholder="Description" />
                       ) : (
-                        <>
-                          {isInvoice && (
-                            <button
-                              onClick={() => setAllocatingEntry(entry)}
-                              className={`p-1.5 rounded-md hover:bg-blue-500/10 transition-colors ${allocStatus === 'fully' ? 'text-blue-500' : 'text-muted-foreground hover:text-blue-400'}`}
-                              title="Manage allocations"
-                            >
-                              <LinkIcon className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                          {isSalary && (
-                            <button
-                              onClick={() => setAllocatingPayrollEntry(entry)}
-                              className={`p-1.5 rounded-md hover:bg-violet-500/10 transition-colors ${allocStatus === 'fully' ? 'text-violet-500' : 'text-muted-foreground hover:text-violet-400'}`}
-                              title="Manage salary allocations"
-                            >
-                              <LinkIcon className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                          <button onClick={() => { setEditingRow(entry.id); setEditForm(entry); }} className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors" title="Edit entry">
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleSoftDelete(entry.id)}
-                            className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-                            title="Delete entry (reversible)"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </>
+                        entry.description || <span className="text-muted-foreground italic">No description</span>
                       )}
                     </div>
-                  </div>
+                    
+                    {/* Date and actions */}
+                    <div className="flex justify-between items-center text-xs text-muted-foreground">
+                      <div className="flex items-center gap-3">
+                        <span>
+                          {isEditing ? (
+                            <input type="date" value={editForm.entry_date || ''} onChange={e => setEditForm(p => ({...p, entry_date: e.target.value}))} className="bg-background border rounded px-2 py-1" />
+                          ) : (
+                            entry.entry_date
+                          )}
+                        </span>
+                        <span>•</span>
+                        <span>
+                          {isEditing ? (
+                            <select value={editForm.bank_account_id || ''} onChange={e => setEditForm(p => ({...p, bank_account_id: e.target.value}))} className="bg-background border rounded px-2 py-1">
+                              <option value="">Cash</option>
+                              {bankAccounts.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                            </select>
+                          ) : (
+                            entry.bank_account?.name || 'Cash'
+                          )}
+                        </span>
+                      </div>
 
-                  {/* Allocation Badges */}
-                  {allocStatus && allocStatus !== 'none' && (
-                    <div className="mt-1">
-                      {allocStatus === 'partial' && <span className="inline-block bg-blue-500/10 text-blue-400 text-[9px] px-1.5 py-0.5 rounded font-medium">Partially Allocated</span>}
-                      {allocStatus === 'over' && <span className="inline-block bg-red-500/10 text-red-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Over-allocated!</span>}
-                      {allocStatus === 'fully' && <span className="inline-block bg-green-500/10 text-green-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Fully Allocated</span>}
+                      <div className="flex items-center justify-end gap-2">
+                        {isEditing ? (
+                          <>
+                            <button onClick={handleInlineSave} disabled={saving} className="p-1.5 rounded-md hover:bg-primary/20 text-primary transition-colors" title="Save changes"><Save className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => setEditingRow(null)} disabled={saving} className="p-1.5 rounded-md hover:bg-secondary/80 text-muted-foreground transition-colors" title="Cancel"><X className="w-3.5 h-3.5" /></button>
+                          </>
+                        ) : (
+                          <>
+                            {showAmounts && entry.type === 'inflow' && (
+                              <button
+                                onClick={() => setReceiptEntry(entry)}
+                                className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors"
+                                title="Generate payment receipt"
+                              >
+                                <Receipt className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {isInvoice && (
+                              <button
+                                onClick={() => setAllocatingEntry(entry)}
+                                className={`p-1.5 rounded-md hover:bg-blue-500/10 transition-colors ${allocStatus === 'fully' ? 'text-blue-500' : 'text-muted-foreground hover:text-blue-400'}`}
+                                title="Manage allocations"
+                              >
+                                <LinkIcon className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {isSalary && (
+                              <button
+                                onClick={() => setAllocatingPayrollEntry(entry)}
+                                className={`p-1.5 rounded-md hover:bg-violet-500/10 transition-colors ${allocStatus === 'fully' ? 'text-violet-500' : 'text-muted-foreground hover:text-violet-400'}`}
+                                title="Manage salary allocations"
+                              >
+                                <LinkIcon className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            <button onClick={() => { setEditingRow(entry.id); setEditForm(entry); }} className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors" title="Edit entry">
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleSoftDelete(entry.id)}
+                              className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                              title="Delete entry (reversible)"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
-                  )}
-                  {allocStatus === 'none' && <div className="mt-1"><span className="inline-block bg-amber-500/10 text-amber-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Unallocated</span></div>}
+
+                    {/* Allocation Badges */}
+                    {allocStatus && allocStatus !== 'none' && (
+                      <div className="-mt-2">
+                        {allocStatus === 'partial' && <span className="inline-block bg-blue-500/10 text-blue-400 text-[9px] px-1.5 py-0.5 rounded font-medium">Partially Allocated</span>}
+                        {allocStatus === 'over' && <span className="inline-block bg-red-500/10 text-red-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Over-allocated!</span>}
+                        {allocStatus === 'fully' && <span className="inline-block bg-green-500/10 text-green-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Fully Allocated</span>}
+                      </div>
+                    )}
+                    {allocStatus === 'none' && <div className="-mt-2"><span className="inline-block bg-amber-500/10 text-amber-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Unallocated</span></div>}
+                  </div>
                 </div>
               )
             })}
@@ -647,7 +768,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 const isEditing = editingRow === entry.id
 
                 return (
-                  <tr key={entry.id} className="hover:bg-secondary/20 transition-colors group">
+                  <tr key={entry.id} className="hover-gradient-row group">
                     <td className="px-4 py-3 text-muted-foreground text-xs">
                       {isEditing ? (
                         <input type="date" value={editForm.entry_date || ''} onChange={e => setEditForm(p => ({...p, entry_date: e.target.value}))} className="bg-background border rounded px-2 py-1" />
@@ -655,15 +776,26 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                         entry.entry_date
                       )}
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <div className={`w-1.5 h-1.5 rounded-full ${entry.type === 'inflow' ? 'bg-green-400' : 'bg-red-400'}`} />
-                        {isEditing ? (
-                          <select value={editForm.category_id || ''} onChange={e => setEditForm(p => ({...p, category_id: e.target.value}))} className="bg-background border rounded px-2 py-1 text-xs">
-                            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                          </select>
-                        ) : (
-                          <span className="text-sm">{entry.category?.name || '—'}</span>
+                    <td className="px-4 py-3 align-top">
+                      <div className={cn(
+                        BRANDED_PILL_BASE_CLASS,
+                        "flex-col items-start gap-0.5",
+                        isEditing ? BRANDED_PILL_ACTIVE_CLASS : ""
+                      )}>
+                        <div className="flex items-center gap-2">
+                          <div className={`w-1.5 h-1.5 rounded-full ${entry.type === 'inflow' ? 'bg-green-400' : 'bg-red-400'}`} />
+                          {isEditing ? (
+                            <select value={editForm.category_id || ''} onChange={e => setEditForm(p => ({...p, category_id: e.target.value}))} className="bg-background border rounded px-2 py-1 text-xs text-foreground">
+                              {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                            </select>
+                          ) : (
+                            <span className="font-medium text-foreground">{entry.category?.name}</span>
+                          )}
+                        </div>
+                        {entry.description && (
+                          <div className="text-xs text-muted-foreground opacity-70 truncate max-w-[200px] ml-3.5">
+                            {entry.description}
+                          </div>
                         )}
                       </div>
                       {/* Allocation Badges */}
@@ -719,11 +851,20 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                           </>
                         ) : (
                           <>
+                            {showAmounts && entry.type === 'inflow' && (
+                              <button
+                                onClick={() => setReceiptEntry(entry)}
+                                className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors"
+                                title="Generate payment receipt"
+                              >
+                                <Receipt className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                             {isInvoice && (
                               <button
                                 onClick={() => setAllocatingEntry(entry)}
-                                className={`lg:opacity-0 opacity-100 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-blue-500/10 ${allocStatus === 'fully' ? 'text-blue-500' : 'text-muted-foreground hover:text-blue-400'}`}
-                                title="Manage allocations"
+                                className={`p-1.5 rounded-md hover:bg-blue-500/10 transition-colors ${allocStatus === 'fully' ? 'text-blue-500' : allocStatus === 'none' ? 'text-amber-400 hover:text-blue-400' : 'text-muted-foreground hover:text-blue-400'}`}
+                                title="Manage invoice allocations"
                               >
                                 <LinkIcon className="w-3.5 h-3.5" />
                               </button>
@@ -731,7 +872,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                             {isSalary && (
                               <button
                                 onClick={() => setAllocatingPayrollEntry(entry)}
-                                className={`lg:opacity-0 opacity-100 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-violet-500/10 ${allocStatus === 'fully' ? 'text-violet-500' : 'text-muted-foreground hover:text-violet-400'}`}
+                                className={`p-1.5 rounded-md hover:bg-violet-500/10 transition-colors ${allocStatus === 'fully' ? 'text-violet-500' : 'text-muted-foreground hover:text-violet-400'}`}
                                 title="Manage salary allocations"
                               >
                                 <LinkIcon className="w-3.5 h-3.5" />
@@ -775,7 +916,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                   <button
                     key={t}
                     type="button"
-                    onClick={() => { setForm(p => ({ ...p, type: t, category_id: t === 'inflow' ? invoiceCategoryId : '', linked_invoice_id: '', fully_paid: false })); resetSmart() }}
+                    onClick={() => { setForm(p => ({ ...p, type: t, category_id: t === 'inflow' ? invoiceCategoryId : '', linked_invoice_id: '', client_filter_id: '', fully_paid: false })); resetSmart() }}
                     className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${form.type === t
                       ? t === 'inflow' ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'
                       : 'bg-secondary text-muted-foreground border border-transparent hover:text-foreground'
@@ -806,36 +947,19 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 </div>
               </div>
 
-              <div className="flex flex-col sm:grid sm:grid-cols-3 gap-3">
-                <div className="col-span-2">
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-                    Amount *
-                    {form.fully_paid && <span className="ml-2 text-green-400 font-normal">auto-filled</span>}
-                  </label>
-                  <input
-                    type="number" min="0" step="0.01"
-                    value={form.amount}
-                    onChange={e => setForm(p => ({ ...p, amount: e.target.value }))}
-                    required
-                    readOnly={form.fully_paid}
-                    className={`w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 ${form.fully_paid ? 'opacity-60 cursor-not-allowed' : ''}`}
-                    placeholder="0.00"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Currency</label>
-                  <AppSelect value={form.currency} onChange={e => setForm(p => ({ ...p, currency: e.target.value as Currency }))}>
-                    {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </AppSelect>
-                </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                  Amount *
+                  {form.fully_paid && <span className="ml-2 text-green-400 font-normal">auto-filled</span>}
+                </label>
+                <CurrencyAmountInput
+                  value={{ currency: form.currency, amount: form.amount, rate: form.rate, amountInr: form.amountInr, rateSource: form.rateSource }}
+                  onChange={fx => setForm(p => ({ ...p, currency: fx.currency, amount: fx.amount, rate: fx.rate, amountInr: fx.amountInr, rateSource: fx.rateSource }))}
+                  ratesMap={rateMap}
+                  lockAmount={form.fully_paid}
+                  rateDate={exchangeRates.find(r => r.currency === form.currency)?.rate_date}
+                />
               </div>
-
-              {form.currency !== 'INR' && (
-                <p className="text-xs text-muted-foreground">
-                  ≈ ₹{getInrAmount(parseFloat(form.amount) || 0, form.currency).toLocaleString('en-IN', { minimumFractionDigits: 2 })} INR
-                  {rateMap[form.currency] ? ` (rate: ${rateMap[form.currency]})` : ' (rate not set)'}
-                </p>
-              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -848,6 +972,30 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                   </label>
                   {isInvoiceCategory ? (
                     <div className="space-y-2">
+                      {/* Client filter — narrows the invoice picker to one client's
+                          pending invoices. Optional: leave blank to see all due
+                          invoices. Auto-fills when an invoice is picked directly. */}
+                      <Combobox
+                        options={clients.map(c => ({ id: c.id, label: c.name, sub: c.code }))}
+                        value={form.client_filter_id}
+                        onChange={id => {
+                          // If a different invoice is already selected and doesn't
+                          // belong to the newly-chosen client, drop the invoice and
+                          // any fully_paid flag tied to it. Empty id clears the
+                          // filter without touching the current invoice.
+                          setForm(p => {
+                            const currentInv = dueInvoices.find(i => i.id === p.linked_invoice_id)
+                            const mismatch = !!id && !!currentInv && currentInv.client?.id !== id
+                            return {
+                              ...p,
+                              client_filter_id: id,
+                              linked_invoice_id: mismatch ? '' : p.linked_invoice_id,
+                              fully_paid: mismatch ? false : p.fully_paid,
+                            }
+                          })
+                        }}
+                        placeholder="Filter by client (optional)…"
+                      />
                       <Combobox
                         options={sortedDueInvoices.map(inv => {
                           const outstanding = inv.total_amount - (inv.paid_amount || 0)
@@ -862,17 +1010,34 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                         onChange={id => {
                           const inv = dueInvoices.find(i => i.id === id)
                           const outstanding = inv ? (inv.total_amount - (inv.paid_amount || 0)) : 0
-                          setForm(p => ({
-                            ...p,
-                            linked_invoice_id: id,
-                            fully_paid: false,
-                            reference: inv?.invoice_number || '',
-                            amount: outstanding > 0 ? String(outstanding) : p.amount,
-                            currency: (inv?.currency as Currency) || 'INR',
-                            description: inv ? `Payment for ${inv.invoice_number} — ${inv.client?.name}` : p.description,
-                          }))
+                          const newCurrency = (inv?.currency as Currency) || 'INR'
+                          setForm(p => {
+                            const newAmount = outstanding > 0 ? String(outstanding) : p.amount
+                            const fx = fxFor(newAmount, newCurrency)
+                            return {
+                              ...p,
+                              linked_invoice_id: id,
+                              // Auto-fill the client filter when an invoice is picked
+                              // directly, so the chip above stays consistent with the
+                              // selection. Preserves an existing filter if no invoice
+                              // is bound to it.
+                              client_filter_id: inv?.client?.id || p.client_filter_id,
+                              fully_paid: false,
+                              reference: inv?.invoice_number || '',
+                              amount: newAmount,
+                              currency: newCurrency,
+                              rate: fx.rate,
+                              amountInr: fx.amountInr,
+                              rateSource: fx.rateSource,
+                              description: inv ? `Payment for ${inv.invoice_number} — ${inv.client?.name}` : p.description,
+                            }
+                          })
                         }}
-                        placeholder="Select invoice…"
+                        placeholder={
+                          form.client_filter_id && sortedDueInvoices.length === 0
+                            ? 'No pending invoices for this client'
+                            : 'Select invoice…'
+                        }
                       />
                       {form.linked_invoice_id && (() => {
                         const inv = dueInvoices.find(i => i.id === form.linked_invoice_id)
@@ -884,11 +1049,11 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                               checked={form.fully_paid}
                               onChange={e => {
                                 const checked = e.target.checked
-                                setForm(p => ({
-                                  ...p,
-                                  fully_paid: checked,
-                                  amount: checked ? String(outstanding) : p.amount,
-                                }))
+                                setForm(p => {
+                                  const newAmount = checked ? String(outstanding) : p.amount
+                                  const fx = fxFor(newAmount, p.currency)
+                                  return { ...p, fully_paid: checked, amount: newAmount, rate: fx.rate, amountInr: fx.amountInr, rateSource: fx.rateSource }
+                                })
                               }}
                               className="w-4 h-4 accent-green-500"
                             />
@@ -993,22 +1158,89 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 </div>
               )}
 
-              {smartMode === 'salary' && (
-                <div className="rounded-xl border border-purple-500/20 bg-purple-500/5 p-4 space-y-3">
-                  <p className="text-xs font-semibold text-purple-400 uppercase tracking-wide">Salary — Employee</p>
-                  <Combobox
-                    options={employees.map((e: any) => ({ id: e.id, label: e.cqid, sub: e.role || '' }))}
-                    value={smartExtra.employee_id || ''}
-                    onChange={id => {
-                      const emp = employees.find((em: any) => em.id === id)
-                      setSmartExtra(p => ({ ...p, employee_id: id }))
-                      if (emp) setForm(p => ({ ...p, description: `Salary — ${emp.cqid}` }))
-                    }}
-                    placeholder="Select employee…"
-                    sortKey="employees"
-                  />
-                </div>
-              )}
+              {smartMode === 'salary' && (() => {
+                // Month labels for payslip period display. Inline rather than
+                // importing dashboard-utils to keep this section self-contained.
+                const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+                // Pending payslips for the currently-picked employee, already
+                // sorted newest-first by the server (year desc, month desc).
+                // First element = the payslip we auto-default to.
+                const empPayslips = smartExtra.employee_id
+                  ? pendingPayrolls.filter(p => p.employee_id === smartExtra.employee_id)
+                  : []
+                return (
+                  <div className="rounded-xl border border-purple-500/20 bg-purple-500/5 p-4 space-y-3">
+                    <p className="text-xs font-semibold text-purple-400 uppercase tracking-wide">Salary — Employee</p>
+                    <Combobox
+                      options={employees.map((e: any) => ({ id: e.id, label: e.cqid, sub: e.role || '' }))}
+                      value={smartExtra.employee_id || ''}
+                      onChange={id => {
+                        const emp = employees.find((em: any) => em.id === id)
+                        // Latest pending payslip for this employee. pendingPayrolls
+                        // is server-sorted by (year desc, month desc), so .find()
+                        // returns the most recent match.
+                        const latest = id ? pendingPayrolls.find(p => p.employee_id === id) : null
+                        setSmartExtra(p => ({ ...p, employee_id: id, payslip_id: latest?.id || '' }))
+                        if (emp && latest) {
+                          const amountStr = String(latest.net_salary)
+                          const fx = fxFor(amountStr, 'INR')
+                          setForm(p => ({
+                            ...p,
+                            amount: amountStr,
+                            currency: 'INR',
+                            ...fx,
+                            reference: latest.payslip_number || '',
+                            description: `Salary — ${emp.cqid} · ${MONTHS_SHORT[latest.month - 1]} ${latest.year}`,
+                          }))
+                        } else if (emp) {
+                          // Employee with no pending payslips — clear amount/ref
+                          // so the user doesn't accidentally save stale data
+                          // carried over from a previously-picked employee.
+                          setForm(p => ({
+                            ...p,
+                            amount: '',
+                            amountInr: '',
+                            rate: '',
+                            rateSource: 'settings',
+                            reference: '',
+                            description: `Salary — ${emp.cqid}`,
+                          }))
+                        }
+                      }}
+                      placeholder="Select employee…"
+                      sortKey="employees"
+                    />
+                    {smartExtra.employee_id && (
+                      <Combobox
+                        options={empPayslips.map(ps => ({
+                          id: ps.id,
+                          label: `${MONTHS_SHORT[ps.month - 1]} ${ps.year}${ps.payslip_number ? ` · ${ps.payslip_number}` : ''}`,
+                          sub: `₹${ps.net_salary.toLocaleString('en-IN')} pending`,
+                        }))}
+                        value={smartExtra.payslip_id || ''}
+                        onChange={id => {
+                          const ps = pendingPayrolls.find(p => p.id === id)
+                          setSmartExtra(p => ({ ...p, payslip_id: id }))
+                          if (ps) {
+                            const emp = employees.find((em: any) => em.id === ps.employee_id)
+                            const amountStr = String(ps.net_salary)
+                            const fx = fxFor(amountStr, 'INR')
+                            setForm(p => ({
+                              ...p,
+                              amount: amountStr,
+                              currency: 'INR',
+                              ...fx,
+                              reference: ps.payslip_number || '',
+                              description: `Salary — ${emp?.cqid || ''} · ${MONTHS_SHORT[ps.month - 1]} ${ps.year}`,
+                            }))
+                          }
+                        }}
+                        placeholder={empPayslips.length === 0 ? 'No pending payslips for this employee' : 'Select payslip…'}
+                      />
+                    )}
+                  </div>
+                )
+              })()}
 
               {smartMode === 'client_linked' && (
                 <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-3">
@@ -1089,6 +1321,37 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
           reference={allocatingPayrollEntry.reference}
           onClose={() => setAllocatingPayrollEntry(null)}
           onUpdate={() => window.location.reload()}
+        />
+      )}
+
+      {/* Payment Receipt (4:5 shareable image / PDF) */}
+      {receiptEntry && (
+        <ReceiptModal
+          input={((): ReceiptInput => {
+            const allocs = (receiptEntry.allocations || []).filter(a => !a.deleted_at)
+            const firstClient = allocs.find(a => a.invoice?.client?.name)?.invoice?.client?.name || ''
+            const compact = (receiptEntry.entry_date || '').replace(/-/g, '')
+            return {
+              receiptNo: `RCPT-${compact}-${receiptEntry.id.slice(-4).toUpperCase()}`,
+              defaultClientName: firstClient,
+              amount: receiptEntry.amount ?? receiptEntry.amount_inr ?? 0,
+              currency: receiptEntry.currency,
+              dateISO: receiptEntry.entry_date,
+              method: receiptEntry.bank_account?.name,
+              reference: receiptEntry.reference,
+              invoices: allocs.map(a => ({
+                number: a.invoice?.invoice_number || '—',
+                outstanding: a.invoice ? Number(a.invoice.total_amount) - Number(a.invoice.paid_amount || 0) : 0,
+              })),
+              // Branding from Settings → Company. Missing keys leave the
+              // receipt rendering its built-in Cirqle defaults.
+              companyLogoUrl: companySettings.logo_url,
+              companyName:    companySettings.company_name,
+              companyPhone:   companySettings.company_phone,
+              companyWebsite: companySettings.company_website,
+            }
+          })()}
+          onClose={() => setReceiptEntry(null)}
         />
       )}
     </div>

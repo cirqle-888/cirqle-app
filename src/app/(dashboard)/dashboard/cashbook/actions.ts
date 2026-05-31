@@ -45,6 +45,10 @@ export interface CashbookEntryPayload {
   amount: number
   currency: string
   amount_inr: number
+  // FX: the rate used (rate_to_inr), where it came from, and its value date.
+  exchange_rate: number
+  rate_source: string
+  rate_date: string
   entry_date: string
   description: string
   reference: string
@@ -127,6 +131,9 @@ export interface CashbookEntryUpdate {
   amount: number
   amount_inr: number
   currency: string
+  exchange_rate: number
+  rate_source: string
+  rate_date: string
   category_id: string | undefined
   bank_account_id: string | null
   description: string

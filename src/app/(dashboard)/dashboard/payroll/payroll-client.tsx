@@ -10,7 +10,8 @@ import {
   toggleRevealSalary, createSalaryAdvance, createCreditEntry,
 } from './actions'
 import { formatCompact } from '@/lib/calculations/currency'
-import { usePrivacy } from '@/contexts/privacy-context'
+import { usePrivacy } from "@/contexts/privacy-context"
+import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from "@/lib/utils"
 import {
   Plus, X, Eye, EyeOff, Zap, CheckCircle, Printer, Download,
   ChevronLeft, ChevronRight, AlertTriangle, Calendar, BarChart2,
@@ -970,14 +971,14 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                     const totalComm = monthNets.reduce((s, m) => s + (!m.hasRecord ? m.commission : 0), 0)
                     const displayTotal = totalNet + totalComm
                     return (
-                      <tr key={emp.id} className="hover:bg-secondary/20 cursor-pointer" onClick={() => setSelectedEmp(emp)}>
-                        <td className="px-4 py-3 sticky left-0 bg-card">
+                      <tr key={emp.id} className="hover-gradient-row" onClick={() => setSelectedEmp(emp)}>
+                        <td className="px-4 py-3 sticky left-0 bg-transparent align-top z-10">
                           <div className="flex items-center gap-2">
                             <div className="w-7 h-7 rounded-lg gradient-bg flex items-center justify-center shrink-0">
                               <span className="text-white text-[9px] font-bold">{emp.cqid.replace('CQID','')}</span>
                             </div>
                             <div>
-                              <p className="text-xs font-semibold">{dn(emp)}</p>
+                              <p className="text-xs font-semibold text-foreground">{dn(emp)}</p>
                               <p className="text-[10px] text-muted-foreground">{emp.cqid}</p>
                             </div>
                           </div>

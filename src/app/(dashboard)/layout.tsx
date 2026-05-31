@@ -4,6 +4,7 @@ import { RoleProvider, type ServerEmployee } from '@/contexts/role-context'
 import { PermissionProvider, type PermissionUser } from '@/contexts/permission-context'
 import { CommandPalette } from '@/components/ui/command-palette'
 import { BirthdayCelebration } from '@/components/ui/birthday-celebration'
+import { FxRatesAutoSync } from './fx-rates-auto-sync'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { isBirthdayToday } from '@/lib/utils/birthday'
 import { createAdminClient } from '@/lib/supabase/admin'
@@ -89,6 +90,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               {children}
             </main>
             <CommandPalette />
+            <FxRatesAutoSync />
             {showBirthday && me && (
               <BirthdayCelebration
                 employeeId={me.employeeId}

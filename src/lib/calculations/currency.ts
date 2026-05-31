@@ -76,3 +76,24 @@ export function formatCompact(amount: number): string {
   if (amount >= 1000) return `₹${(amount / 1000).toFixed(2)}K`
   return `₹${amount.toFixed(2)}`
 }
+
+// ── FX helpers ────────────────────────────────────────────────────────────────
+// Shared by the <CurrencyAmountInput> widget (cashbook + invoice payments) and
+// server-side payment/entry writes so the foreign → rate → INR math is identical
+// everywhere. Rates are stored numeric(18,6); money numeric(14,2).
+
+/** Round to 2 decimals (money), guarding against binary-float drift. */
+export function round2(n: number): number {
+  return Math.round(((n || 0) + Number.EPSILON) * 100) / 100
+}
+
+/** INR base value for a foreign amount at a given rate: base = foreign × rate. */
+export function computeInr(foreignAmount: number, rate: number): number {
+  return round2((foreignAmount || 0) * (rate || 0))
+}
+
+/** Implied rate from a known INR amount and foreign amount: rate = INR ÷ foreign. */
+export function computeRate(inrAmount: number, foreignAmount: number): number {
+  if (!foreignAmount) return 0
+  return Math.round(((inrAmount || 0) / foreignAmount) * 1e6) / 1e6
+}

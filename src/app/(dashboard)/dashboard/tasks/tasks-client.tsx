@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, useEffect, useRef, Fragment } from 'react'
 import dynamic from 'next/dynamic'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
@@ -1944,10 +1944,37 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                   </div>
                 </td></tr>
               )}
-              {pagedTasks.map(task => (
+              {(() => {
+                // Group pagedTasks by task_date, preserving sort order
+                const dateGroups: [string, typeof pagedTasks][] = []
+                const seenDates = new Map<string, typeof pagedTasks>()
+                for (const task of pagedTasks) {
+                  const d = task.task_date || ''
+                  if (!seenDates.has(d)) { seenDates.set(d, []); dateGroups.push([d, seenDates.get(d)!]) }
+                  seenDates.get(d)!.push(task)
+                }
+                const colSpan = 7 + (bulkMode ? 1 : 0) + (showBilling ? 1 : 0)
+
+                return dateGroups.map(([date, dateTasks]) => (
+                  <Fragment key={date}>
+                    {/* Date group header */}
+                    <tr className="bg-secondary/40 border-y border-border/60">
+                      <td colSpan={colSpan} className="px-4 py-1.5">
+                        <div className="flex items-center gap-3">
+                          <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                            {date
+                              ? new Date(date).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+                              : 'No date'}
+                          </span>
+                          <div className="flex-1 h-px bg-border/50" />
+                          <span className="text-[11px] text-muted-foreground">{dateTasks.length} task{dateTasks.length !== 1 ? 's' : ''}</span>
+                        </div>
+                      </td>
+                    </tr>
+                    {dateTasks.map(task => (
                 <tr key={task.id}
                   data-taskid={task.id}
-                  className={`hover:bg-secondary/30 transition-colors group ${inlineEditMode ? '' : 'cursor-pointer'} ${bulkMode && selectedTasks.has(task.id) ? 'bg-violet-500/[0.07]' : ''} ${highlightedTaskId === task.id ? 'ring-1 ring-violet-400 bg-violet-500/10' : ''}`}
+                  className={`hover-gradient-row group ${inlineEditMode ? '' : 'cursor-pointer'} ${bulkMode && selectedTasks.has(task.id) ? 'bg-violet-500/[0.07]' : ''} ${highlightedTaskId === task.id ? 'ring-1 ring-violet-400 bg-violet-500/10' : ''}`}
                   onClick={
                     bulkMode
                       ? () => setSelectedTasks(prev => {
@@ -2003,11 +2030,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                         className="w-full bg-secondary border border-border rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-500/50"
                       />
                     ) : (
-                      <div className={cn(
-                        BRANDED_PILL_BASE_CLASS,
-                        "flex-col items-start gap-0.5",
-                        (editTask?.id === task.id || highlightedTaskId === task.id) ? BRANDED_PILL_ACTIVE_CLASS : (bulkMode && selectedTasks.has(task.id)) ? BRANDED_PILL_SELECTED_CLASS : ''
-                      )}>
+                      <div className="flex flex-col items-start gap-0.5">
                         <div className="flex items-center gap-1.5">
                           <p className="font-medium text-foreground">{task.title}</p>
                           {task.is_recurring && (
@@ -2219,7 +2242,10 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                     </div>
                   </td>
                 </tr>
-              ))}
+                    ))}
+                  </Fragment>
+                ))
+              })()}
             </tbody>
           </table>
         </div>
@@ -2246,7 +2272,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                       })
                     : () => openEdit(task)
                 }
-                className={`cursor-pointer bg-card border rounded-xl px-3.5 py-3 active:bg-secondary/50 transition-colors ${
+                className={`hover-gradient-card bg-card border rounded-xl px-3.5 py-3 ${
                   isSelected ? 'border-violet-500/60 bg-violet-500/[0.06]' : 'border-border'
                 } ${highlightedTaskId === task.id ? 'ring-1 ring-violet-400' : ''}`}
               >

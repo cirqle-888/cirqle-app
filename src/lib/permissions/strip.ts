@@ -132,13 +132,15 @@ export function stripInvoiceAmounts<T extends Record<string, any>>(
   if (!flags.amounts) {
     delete out.total_amount
     delete out.paid_amount
+    delete out.total_amount_inr
+    delete out.paid_amount_inr
     delete out.subtotal
     delete out.tax_amount
     delete out.discount_amount
     if (Array.isArray(out.payments)) {
       out.payments = out.payments.map((p: any) => {
-        const { amount, ...rest } = p
-        void amount
+        const { amount, amount_inr, ...rest } = p
+        void amount; void amount_inr
         return rest
       })
     }
