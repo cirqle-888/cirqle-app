@@ -1474,8 +1474,8 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
           GENERATE PREVIEW MODAL
       ════════════════════════════════════════════════════ */}
       {generatePreview && (
-        <ModalOverlay onClose={() => setGeneratePreview(null)}>
-          <div className="bg-secondary border border-foreground/15 rounded-2xl w-full max-w-xl shadow-2xl">
+        <ModalOverlay onClose={() => setGeneratePreview(null)} sheetOnMobile>
+          <div className="bg-secondary border border-foreground/15 rounded-t-2xl sm:rounded-2xl w-full max-w-xl shadow-2xl max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-foreground/15">
               <div>
                 <h2 className="font-semibold">Generate Payroll — {MONTHS[viewMonth - 1]} {viewYear}</h2>
@@ -1546,8 +1546,8 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
           PAYROLL FORM MODAL
       ════════════════════════════════════════════════════ */}
       {showPayrollForm && (
-        <ModalOverlay onClose={() => setShowPayrollForm(false)}>
-          <div className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl">
+        <ModalOverlay onClose={() => setShowPayrollForm(false)} sheetOnMobile>
+          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-lg shadow-2xl max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-border">
               <h2 className="font-semibold">Add Payroll Record</h2>
               <button onClick={() => setShowPayrollForm(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
@@ -1638,8 +1638,8 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
           ADVANCE FORM MODAL
       ════════════════════════════════════════════════════ */}
       {showAdvanceForm && (
-        <ModalOverlay onClose={() => setShowAdvanceForm(false)}>
-          <div className="bg-card border border-border rounded-2xl w-full max-w-sm shadow-2xl">
+        <ModalOverlay onClose={() => setShowAdvanceForm(false)} sheetOnMobile>
+          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-sm shadow-2xl max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-border">
               <h2 className="font-semibold">Salary Advance</h2>
               <button onClick={() => setShowAdvanceForm(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
@@ -1679,8 +1679,8 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
           CREDIT FORM MODAL
       ════════════════════════════════════════════════════ */}
       {showCreditForm && (
-        <ModalOverlay onClose={() => setShowCreditForm(false)}>
-          <div className="bg-card border border-border rounded-2xl w-full max-w-sm shadow-2xl">
+        <ModalOverlay onClose={() => setShowCreditForm(false)} sheetOnMobile>
+          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-sm shadow-2xl max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-border">
               <h2 className="font-semibold">Credit Entry</h2>
               <button onClick={() => setShowCreditForm(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>

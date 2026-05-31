@@ -2837,8 +2837,8 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
 
       {/* ── Cancellation Wizard Modal ── */}
       {cancelModal && (
-        <ModalOverlay onClose={() => setCancelModal(null)}>
-          <div className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl">
+        <ModalOverlay onClose={() => setCancelModal(null)} sheetOnMobile>
+          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-lg shadow-2xl max-h-[90dvh] overflow-y-auto">
             {/* Header */}
             <div className="px-6 py-4 border-b border-border flex items-start gap-3">
               <div className="w-10 h-10 rounded-xl bg-red-500/15 flex items-center justify-center shrink-0">

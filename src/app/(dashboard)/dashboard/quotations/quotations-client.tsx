@@ -659,8 +659,8 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
 
       {/* ── New Quotation Modal ───────────────────────────────────────────── */}
       {showForm && (
-        <ModalOverlay onClose={() => setShowForm(false)}>
-          <div className="bg-card border border-border rounded-2xl w-full max-w-2xl shadow-2xl my-4">
+        <ModalOverlay onClose={() => setShowForm(false)} sheetOnMobile>
+          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-2xl shadow-2xl max-h-[90dvh] overflow-y-auto">
             {/* Modal header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-card rounded-t-2xl z-10">
               <h2 className="font-semibold">New Quotation</h2>

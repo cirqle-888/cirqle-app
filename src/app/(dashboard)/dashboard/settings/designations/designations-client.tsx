@@ -604,8 +604,8 @@ function NewDesignationModal({
   }
 
   return (
-    <ModalOverlay onClose={onClose}>
-      <div className="bg-card border border-border rounded-2xl w-full max-w-md shadow-2xl">
+    <ModalOverlay onClose={onClose} sheetOnMobile>
+      <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-md shadow-2xl max-h-[90dvh] overflow-y-auto">
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
           <h2 className="font-semibold">New designation</h2>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground">

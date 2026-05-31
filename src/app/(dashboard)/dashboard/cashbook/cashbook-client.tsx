@@ -904,13 +904,14 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
 
       {/* Add Entry Modal */}
       {showForm && (
-        <ModalOverlay onClose={() => setShowForm(false)}>
-          <div className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+        <ModalOverlay onClose={() => setShowForm(false)} sheetOnMobile>
+          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[90dvh] overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
               <h2 className="font-semibold">Add Cash Book Entry</h2>
               <button onClick={() => setShowForm(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
             </div>
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <div className="overflow-y-auto px-6 py-5 space-y-4 flex-1 min-h-0">
               {/* Type toggle */}
               <div className="flex gap-2">
                 {(['inflow', 'outflow'] as const).map(t => (
@@ -1293,7 +1294,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 )}
               </div>
 
-              <div className="flex gap-3 pt-2">
+              </div>
+              <div className="flex gap-3 px-6 py-4 border-t border-border shrink-0 bg-card pb-[max(1rem,env(safe-area-inset-bottom))]">
                 <button type="button" onClick={() => { setShowForm(false); setRecurringMonths(0) }} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80">Cancel</button>
                 <button type="submit" disabled={saving} className={`flex-1 text-white text-sm font-medium py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50 ${form.type === 'inflow' ? 'bg-green-600' : 'bg-red-600'}`}>
                   {saving ? 'Saving…' : recurringMonths > 0 ? `Save ${recurringMonths + 1} Entries` : `Save ${form.type === 'inflow' ? 'Income' : 'Expense'}`}
