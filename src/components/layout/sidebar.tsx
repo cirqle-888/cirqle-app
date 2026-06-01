@@ -255,7 +255,7 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
   const [profileOpen, setProfileOpen] = useState(false)
   const pathname = usePathname()
   const router = useRouter()
-  const { user, can, logoUrl } = usePermissions()
+  const { user, can, logoUrl, logoUrlLight } = usePermissions()
   const { isUnlocked } = usePrivacy()
   // Local state so a broken/expired logo URL can fall back to the brand mark
   // without leaving a broken-image placeholder visible.
@@ -291,16 +291,35 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
           {/* When a workspace logo is configured, show ONLY the logo — it
               already contains the brand wordmark, so the "Cirqle / Design
               Agency" text is redundant. Falls back to the gradient "C" tile
-              + brand text only when no logo exists (first-run installs). */}
+              + brand text only when no logo exists (first-run installs).
+              Two <img> elements allow pure-CSS dark/light switching without
+              any JS flicker or theme-context read. The dark logo is shown by
+              default and hidden in light mode; the light logo is hidden by
+              default and shown in light mode. If only one logo is configured,
+              logoUrlLight falls back to logoUrl so both imgs use the same src
+              and the correct one is always visible. */}
           {logoUrl && !logoBroken ? (
-            <img
-              src={logoUrl}
-              alt="Workspace logo"
-              onError={() => setLogoBroken(true)}
-              className={`object-contain transition-all duration-300 ${
-                isCollapsed ? 'w-8 h-8' : 'h-10 max-w-[160px]'
-              }`}
-            />
+            <>
+              {/* Dark-mode logo — visible by default, hidden in light mode */}
+              <img
+                src={logoUrl}
+                alt="Workspace logo"
+                onError={() => setLogoBroken(true)}
+                className={`object-contain transition-all duration-300 dark:block hidden ${
+                  isCollapsed ? 'w-8 h-8' : 'h-10 max-w-[160px]'
+                }`}
+              />
+              {/* Light-mode logo — hidden by default, visible in light mode.
+                  Falls back to logoUrl when no separate light logo is set. */}
+              <img
+                src={logoUrlLight || logoUrl}
+                alt="Workspace logo"
+                onError={() => setLogoBroken(true)}
+                className={`object-contain transition-all duration-300 block dark:hidden ${
+                  isCollapsed ? 'w-8 h-8' : 'h-10 max-w-[160px]'
+                }`}
+              />
+            </>
           ) : (
             <>
               <div className="w-8 h-8 rounded-lg gradient-bg flex items-center justify-center shrink-0">

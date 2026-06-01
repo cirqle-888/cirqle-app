@@ -1257,7 +1257,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const FONT    = companySettings.invoice_font          || 'Arial, Helvetica, sans-serif'
     const coName  = companySettings.company_name          || 'cirqle'
     const coTag   = companySettings.company_tagline       || 'Get Budget Designs'
-    const logoUrl = companySettings.logo_url              || ''
+    const logoUrl = companySettings.logo_url_light || companySettings.logo_url || ''
     const showTag = companySettings.invoice_show_tagline  !== 'false'
 
     const stmtLogoBlock = logoUrl
@@ -1887,7 +1887,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       account: companySettings.bank_account    || '',
       ifsc:    companySettings.bank_ifsc       || '',
       upi:     companySettings.bank_upi        || '',
-      logoUrl: companySettings.logo_url        || '',
+      logoUrl: companySettings.logo_url_light || companySettings.logo_url || '',
       footerText: companySettings.invoice_footer_text || 'Thank you for your Business!',
     }
     const showLogo       = companySettings.invoice_show_logo        !== 'false'

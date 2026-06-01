@@ -775,41 +775,88 @@ export default function SettingsClient(props: Props) {
               {/* Branding */}
               <div className="space-y-4 border-t border-border pt-5">
                 <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Branding</h2>
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Company Logo</label>
-                  {/* Upload button */}
-                  <div className="flex gap-2 items-center mb-2">
-                    <label className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-secondary border border-border text-sm text-muted-foreground hover:text-foreground hover:border-border/80 cursor-pointer transition-colors">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                      Upload logo
-                      <input
-                        type="file" accept="image/*" className="hidden"
-                        onChange={e => {
-                          const file = e.target.files?.[0]
-                          if (!file) return
-                          const reader = new FileReader()
-                          reader.onload = ev => {
-                            setCompanySettings(p => ({ ...p, logo_url: ev.target?.result as string }))
-                          }
-                          reader.readAsDataURL(file)
-                        }}
-                      />
+                {/* Logo row — dark + light variants side by side */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Dark-mode logo */}
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">
+                      Company Logo
+                      <span className="ml-1.5 text-[10px] text-muted-foreground/50 font-normal">Dark mode / default</span>
                     </label>
-                    <span className="text-xs text-muted-foreground/50">or paste a URL below</span>
-                  </div>
-                  <input
-                    value={companySettings['logo_url'] || ''}
-                    onChange={e => setCompanySettings(p => ({ ...p, logo_url: e.target.value }))}
-                    placeholder="https://…"
-                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                  />
-                  {companySettings['logo_url'] && (
-                    <div className="mt-2 flex items-center gap-2">
-                      <img src={companySettings['logo_url']} alt="Logo preview" className="h-12 object-contain rounded-lg border border-border bg-secondary p-1" />
-                      <button type="button" onClick={() => setCompanySettings(p => ({ ...p, logo_url: '' }))}
-                        className="text-xs text-red-400 hover:text-red-300 transition-colors">Remove</button>
+                    <div className="flex gap-2 items-center mb-2">
+                      <label className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-secondary border border-border text-sm text-muted-foreground hover:text-foreground hover:border-border/80 cursor-pointer transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        Upload logo
+                        <input
+                          type="file" accept="image/*" className="hidden"
+                          onChange={e => {
+                            const file = e.target.files?.[0]
+                            if (!file) return
+                            const reader = new FileReader()
+                            reader.onload = ev => setCompanySettings(p => ({ ...p, logo_url: ev.target?.result as string }))
+                            reader.readAsDataURL(file)
+                          }}
+                        />
+                      </label>
+                      <span className="text-xs text-muted-foreground/50">or URL</span>
                     </div>
-                  )}
+                    <input
+                      value={companySettings['logo_url'] || ''}
+                      onChange={e => setCompanySettings(p => ({ ...p, logo_url: e.target.value }))}
+                      placeholder="https://…"
+                      className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    />
+                    {companySettings['logo_url'] && (
+                      <div className="mt-2 flex items-center gap-2">
+                        <img src={companySettings['logo_url']} alt="Dark logo preview" className="h-10 object-contain rounded-lg border border-border bg-[#0b1120] p-1.5" />
+                        <button type="button" onClick={() => setCompanySettings(p => ({ ...p, logo_url: '' }))}
+                          className="text-xs text-red-400 hover:text-red-300 transition-colors">Remove</button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Light-mode logo */}
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">
+                      Company Logo
+                      <span className="ml-1.5 text-[10px] text-muted-foreground/50 font-normal">Light mode</span>
+                    </label>
+                    <div className="flex gap-2 items-center mb-2">
+                      <label className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-secondary border border-border text-sm text-muted-foreground hover:text-foreground hover:border-border/80 cursor-pointer transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        Upload logo
+                        <input
+                          type="file" accept="image/*" className="hidden"
+                          onChange={e => {
+                            const file = e.target.files?.[0]
+                            if (!file) return
+                            const reader = new FileReader()
+                            reader.onload = ev => setCompanySettings(p => ({ ...p, logo_url_light: ev.target?.result as string }))
+                            reader.readAsDataURL(file)
+                          }}
+                        />
+                      </label>
+                      <span className="text-xs text-muted-foreground/50">or URL</span>
+                    </div>
+                    <input
+                      value={companySettings['logo_url_light'] || ''}
+                      onChange={e => setCompanySettings(p => ({ ...p, logo_url_light: e.target.value }))}
+                      placeholder="https://… (falls back to dark logo)"
+                      className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    />
+                    {companySettings['logo_url_light'] && (
+                      <div className="mt-2 flex items-center gap-2">
+                        <img src={companySettings['logo_url_light']} alt="Light logo preview" className="h-10 object-contain rounded-lg border border-border bg-white p-1.5" />
+                        <button type="button" onClick={() => setCompanySettings(p => ({ ...p, logo_url_light: '' }))}
+                          className="text-xs text-red-400 hover:text-red-300 transition-colors">Remove</button>
+                      </div>
+                    )}
+                    {!companySettings['logo_url_light'] && (
+                      <p className="mt-1.5 text-[11px] text-muted-foreground/50">
+                        Not set — dark logo used in all modes
+                      </p>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1.5">Tagline</label>
@@ -921,8 +968,8 @@ export default function SettingsClient(props: Props) {
                   >
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex items-center gap-2">
-                        {companySettings['logo_url'] && companySettings['invoice_show_logo'] !== 'false' ? (
-                          <img src={companySettings['logo_url']} alt="logo" style={{ height: 36, objectFit: 'contain' }} />
+                        {(companySettings['logo_url_light'] || companySettings['logo_url']) && companySettings['invoice_show_logo'] !== 'false' ? (
+                          <img src={companySettings['logo_url_light'] || companySettings['logo_url']} alt="logo" style={{ height: 36, objectFit: 'contain' }} />
                         ) : (
                           <svg width="32" height="32" viewBox="0 0 42 42" xmlns="http://www.w3.org/2000/svg">
                             <circle cx="21" cy="21" r="20" fill="none" stroke={companySettings['invoice_primary_color'] || '#1a2744'} strokeWidth="2.5"/>

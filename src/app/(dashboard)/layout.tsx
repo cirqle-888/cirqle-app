@@ -9,30 +9,33 @@ import { loadCurrentUser } from '@/lib/permissions/check'
 import { isBirthdayToday } from '@/lib/utils/birthday'
 import { createAdminClient } from '@/lib/supabase/admin'
 
-// Workspace logo URL fetch. Service-role client so RLS on company_settings
-// can't block it. Returns null on any failure so the Sidebar falls back to
-// the default brand mark — never crashes the dashboard layout.
-async function fetchLogoUrl(): Promise<string | null> {
+// Workspace logo URL fetch — pulls both dark and light variants.
+// Service-role client so RLS on company_settings can't block it.
+// Returns nulls on any failure so the Sidebar falls back to the default mark.
+async function fetchLogoUrls(): Promise<{ logoUrl: string | null; logoUrlLight: string | null }> {
   try {
     const admin = createAdminClient()
     const { data } = await admin
       .from('company_settings')
-      .select('value')
-      .eq('key', 'logo_url')
-      .maybeSingle()
-    const url = (data?.value || '').trim()
-    return url || null
+      .select('key, value')
+      .in('key', ['logo_url', 'logo_url_light'])
+    const map = Object.fromEntries((data || []).map((r: any) => [r.key, (r.value || '').trim()]))
+    return {
+      logoUrl:      map['logo_url']       || null,
+      logoUrlLight: map['logo_url_light'] || null,
+    }
   } catch {
-    return null
+    return { logoUrl: null, logoUrlLight: null }
   }
 }
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   // Best-effort loads — both graceful so the dashboard always renders.
-  const [me, logoUrl] = await Promise.all([
+  const [me, logos] = await Promise.all([
     loadCurrentUser().catch(() => null),
-    fetchLogoUrl(),
+    fetchLogoUrls(),
   ])
+  const { logoUrl, logoUrlLight } = logos
 
   // Default to a permissive admin shape if no employee record / migration not yet applied,
   // so the existing single-admin app keeps working until the migration runs.
@@ -75,7 +78,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   return (
     <PrivacyProvider>
       <RoleProvider initialEmployee={serverEmployee}>
-        <PermissionProvider user={user} logoUrl={logoUrl}>
+        <PermissionProvider user={user} logoUrl={logoUrl} logoUrlLight={logoUrlLight}>
           {/* h-dvh = dynamic viewport height (adapts as Safari toolbar shows/hides).
               h-screen (100vh) on iOS uses the *large* viewport (toolbar-hidden),
               making the container taller than the visible area when the address bar

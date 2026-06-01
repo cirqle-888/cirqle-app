@@ -22,14 +22,22 @@ interface PermissionContextValue {
   /** Admin-only: temporary session toggle to reveal real names instead of CQID. Defaults to OFF on every page load. */
   revealNames: boolean
   setRevealNames: (v: boolean) => void
-  /** Workspace-level logo URL (from company_settings.logo_url). null = no logo configured; render the default brand mark. */
+  /** Workspace-level logo URL for dark mode (from company_settings.logo_url). null = no logo configured; render the default brand mark. */
   logoUrl: string | null
+  /** Workspace-level logo URL for light mode (from company_settings.logo_url_light).
+   *  Falls back to logoUrl when not configured so dark-only workspaces still work. */
+  logoUrlLight: string | null
 }
 
 const Ctx = createContext<PermissionContextValue | null>(null)
 
 export function PermissionProvider(
-  { user, logoUrl = null, children }: { user: PermissionUser; logoUrl?: string | null; children: ReactNode },
+  { user, logoUrl = null, logoUrlLight = null, children }: {
+    user: PermissionUser
+    logoUrl?: string | null
+    logoUrlLight?: string | null
+    children: ReactNode
+  },
 ) {
   const [revealNames, setRevealNames] = useState(false)
   const perms = useMemo(() => new Set(user.permissions), [user.permissions])
@@ -41,7 +49,9 @@ export function PermissionProvider(
     revealNames: user.isAdmin && revealNames,
     setRevealNames,
     logoUrl,
-  }), [user, perms, revealNames, logoUrl])
+    // Light logo falls back to dark logo so no conditional needed in consumers.
+    logoUrlLight: logoUrlLight || logoUrl,
+  }), [user, perms, revealNames, logoUrl, logoUrlLight])
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

@@ -65,7 +65,7 @@ export default async function CashBookPage() {
     supabase
       .from('company_settings')
       .select('key, value')
-      .in('key', ['logo_url', 'company_name', 'company_phone', 'company_website']),
+      .in('key', ['logo_url', 'logo_url_light', 'company_name', 'company_phone', 'company_website']),
   ])
 
   // Materialise the key/value pairs into a flat object. Empty strings collapse
