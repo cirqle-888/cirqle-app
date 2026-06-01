@@ -12,20 +12,20 @@ import { createAdminClient } from '@/lib/supabase/admin'
 // Workspace logo URL fetch — pulls both dark and light variants.
 // Service-role client so RLS on company_settings can't block it.
 // Returns nulls on any failure so the Sidebar falls back to the default mark.
-async function fetchLogoUrls(): Promise<{ logoUrl: string | null; logoUrlLight: string | null }> {
+async function fetchLogoUrls(): Promise<{ logoUrl: string | null; logoUrlDark: string | null }> {
   try {
     const admin = createAdminClient()
     const { data } = await admin
       .from('company_settings')
       .select('key, value')
-      .in('key', ['logo_url', 'logo_url_light'])
+      .in('key', ['logo_url', 'logo_url_dark'])
     const map = Object.fromEntries((data || []).map((r: any) => [r.key, (r.value || '').trim()]))
     return {
-      logoUrl:      map['logo_url']       || null,
-      logoUrlLight: map['logo_url_light'] || null,
+      logoUrl:     map['logo_url']      || null,
+      logoUrlDark: map['logo_url_dark'] || null,
     }
   } catch {
-    return { logoUrl: null, logoUrlLight: null }
+    return { logoUrl: null, logoUrlDark: null }
   }
 }
 
@@ -35,7 +35,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     loadCurrentUser().catch(() => null),
     fetchLogoUrls(),
   ])
-  const { logoUrl, logoUrlLight } = logos
+  const { logoUrl, logoUrlDark } = logos
 
   // Default to a permissive admin shape if no employee record / migration not yet applied,
   // so the existing single-admin app keeps working until the migration runs.
@@ -78,7 +78,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   return (
     <PrivacyProvider>
       <RoleProvider initialEmployee={serverEmployee}>
-        <PermissionProvider user={user} logoUrl={logoUrl} logoUrlLight={logoUrlLight}>
+        <PermissionProvider user={user} logoUrl={logoUrl} logoUrlDark={logoUrlDark}>
           {/* h-dvh = dynamic viewport height (adapts as Safari toolbar shows/hides).
               h-screen (100vh) on iOS uses the *large* viewport (toolbar-hidden),
               making the container taller than the visible area when the address bar

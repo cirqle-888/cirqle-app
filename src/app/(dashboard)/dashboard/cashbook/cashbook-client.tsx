@@ -1355,7 +1355,9 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               })),
               // Branding from Settings → Company. Missing keys leave the
               // receipt rendering its built-in Cirqle defaults.
-              companyLogoUrl: companySettings.logo_url,
+              // Receipt has a dark background — use dark logo when available,
+              // fall back to the light/default logo otherwise.
+              companyLogoUrl: companySettings.logo_url_dark || companySettings.logo_url,
               companyName:    companySettings.company_name,
               companyPhone:   companySettings.company_phone,
               companyWebsite: companySettings.company_website,

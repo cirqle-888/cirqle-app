@@ -255,7 +255,7 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
   const [profileOpen, setProfileOpen] = useState(false)
   const pathname = usePathname()
   const router = useRouter()
-  const { user, can, logoUrl, logoUrlLight } = usePermissions()
+  const { user, can, logoUrl, logoUrlDark } = usePermissions()
   const { isUnlocked } = usePrivacy()
   // Local state so a broken/expired logo URL can fall back to the brand mark
   // without leaving a broken-image placeholder visible.
@@ -300,22 +300,22 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
               and the correct one is always visible. */}
           {logoUrl && !logoBroken ? (
             <>
-              {/* Dark-mode logo — visible by default, hidden in light mode */}
+              {/* Light-mode logo (logo_url) — shown in light mode, hidden in dark */}
               <img
                 src={logoUrl}
                 alt="Workspace logo"
                 onError={() => setLogoBroken(true)}
-                className={`object-contain transition-all duration-300 dark:block hidden ${
+                className={`object-contain transition-all duration-300 block dark:hidden ${
                   isCollapsed ? 'w-8 h-8' : 'h-10 max-w-[160px]'
                 }`}
               />
-              {/* Light-mode logo — hidden by default, visible in light mode.
-                  Falls back to logoUrl when no separate light logo is set. */}
+              {/* Dark-mode logo (logo_url_dark) — shown in dark mode, hidden in light.
+                  Falls back to logoUrl when no separate dark logo has been uploaded. */}
               <img
-                src={logoUrlLight || logoUrl}
+                src={logoUrlDark || logoUrl}
                 alt="Workspace logo"
                 onError={() => setLogoBroken(true)}
-                className={`object-contain transition-all duration-300 block dark:hidden ${
+                className={`object-contain transition-all duration-300 hidden dark:block ${
                   isCollapsed ? 'w-8 h-8' : 'h-10 max-w-[160px]'
                 }`}
               />
