@@ -24,9 +24,13 @@ export const CASHBOOK_FIELDS: FieldDef[] = [
   { col: 'amount_inr',   db: 'amount_inr',   example: '',           notes: 'INR equivalent (auto-set to amount when currency = INR)', default: null,
     parse: (v) => v ? parseFloat(v) : null },
   { col: 'description',  db: 'description',  example: 'Monthly payment from Sea Star', notes: 'Description', default: null },
-  { col: 'reference',    db: 'reference',    example: '',           notes: 'Reference number or note', default: null },
+  { col: 'reference',    db: 'reference',    example: 'Sea Star Supermarket', notes: 'Client name, client code, employee CQID (e.g. CQID001), or "Company" for internal expenses. Auto-resolves to client_id or employee_id on import.', default: null },
   { col: 'invoice_number', db: false,        example: 'INV-2503-001', notes: 'Recommended for invoice-linked payments', default: null },
-  { col: 'client_name',  db: false,          example: 'Sea Star Logistics', notes: 'For reference only', default: null },
+  // client_name_or_code is now stored as client_id (entity-aware allocation).
+  // Accepts the client's display name or code. Resolved via clientMap lookup.
+  { col: 'client_name_or_code', db: 'client_id', example: 'Sea Star Logistics', notes: 'Client name or code - stored as client_id for per-client allocation. Resolved in import-client.tsx via clientMap.',
+    aliases: ['client_name', 'client'],
+    validate: (v, _row, ctx) => v && !ctx.clientMap[norm(v)] ? { warn: `Client "${v}" not found - entry will be imported without a client link` } : null },
   { col: 'notes',        db: false,          example: 'Paid in full', notes: 'Additional notes', default: null },
 ]
 

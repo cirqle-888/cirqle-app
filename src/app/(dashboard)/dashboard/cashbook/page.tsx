@@ -22,15 +22,17 @@ export default async function CashBookPage() {
         category:cashbook_categories(id, name, type), 
         bank_account:bank_accounts(id, name),
         allocations:cashbook_invoice_allocations(
-          id, 
-          invoice_id, 
-          allocated_amount, 
+          id,
+          invoice_id,
+          allocated_amount,
+          deleted_at,
           invoice:invoices(invoice_number, status, due_date, total_amount, paid_amount, client:clients(name))
         ),
         payroll_allocations:cashbook_payroll_allocations(
           id,
           payroll_id,
           allocated_amount,
+          deleted_at,
           payroll:payroll(employee_id, net_salary, status, employee:employees(cqid, name))
         )
       `)
@@ -42,7 +44,7 @@ export default async function CashBookPage() {
     supabase.from('exchange_rates').select('*'),
     supabase
       .from('invoices')
-      .select('id, invoice_number, status, due_date, total_amount, paid_amount, currency, client:clients(id, name, code)')
+      .select('id, invoice_number, status, issue_date, due_date, total_amount, paid_amount, total_amount_inr, paid_amount_inr, currency, client_id, client:clients(id, name, code), payments(id)')
       .in('status', ['draft', 'reviewed', 'sent', 'partial'])
       .order('due_date', { ascending: true }),
     supabase.from('employees').select('id, cqid, role').eq('is_active', true).order('cqid'),

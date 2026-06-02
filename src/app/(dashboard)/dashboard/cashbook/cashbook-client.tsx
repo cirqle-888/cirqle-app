@@ -8,7 +8,7 @@ import { createClient } from '@/lib/supabase/client'
 import { insertCashbookEntries, updateCashbookEntry, softDeleteCashbookEntry } from './actions'
 import { formatCompact, round2 } from '@/lib/calculations/currency'
 import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
-import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt } from 'lucide-react'
+import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, RefreshCw } from 'lucide-react'
 import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from '@/lib/utils'
 import type { DateFilterValue } from '@/components/ui/date-filter'
@@ -16,6 +16,7 @@ import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
 import type { Currency } from '@/types'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { useRole } from '@/contexts/role-context'
 import type { ReceiptInput } from '@/components/cashbook/receipt-modal'
 
 import Link from 'next/link'
@@ -32,6 +33,10 @@ const PayrollAllocationModal = dynamic(
 )
 // Receipt generator only mounts when the user clicks the receipt icon on an
 // inflow entry. Lazy-loaded so jspdf stays out of the main bundle.
+const AllocationRebuildPanel = dynamic(
+  () => import('@/components/cashbook/allocation-rebuild-panel'),
+  { ssr: false },
+)
 const ReceiptModal = dynamic(
   () => import('@/components/cashbook/receipt-modal'),
   { ssr: false },
@@ -52,6 +57,7 @@ interface Entry {
   description?: string
   reference?: string
   invoice_id?: string
+  client_id?: string        // entity tag for per-client FIFO allocation
   receipt_number?: string | null
   deleted_at?: string | null
   category?: { id: string; name: string; type: string }
@@ -87,11 +93,18 @@ interface DueInvoice {
   id: string
   invoice_number: string
   status: string
+  issue_date: string
   due_date: string
   total_amount: number
   paid_amount: number
+  total_amount_inr?: number
+  paid_amount_inr?: number
   currency: string
+  client_id?: string    // for per-client FIFO filtering
   client?: { id: string; name: string; code: string }
+  // Present (non-empty) when the invoice already has direct "Record Payment"
+  // rows — used to exclude it from cashbook allocation (mutual exclusion).
+  payments?: { id: string }[]
 }
 
 // Which category names trigger smart fields
@@ -152,8 +165,11 @@ interface Props {
 const CURRENCIES: Currency[] = ['INR', 'AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
 
 export default function CashBookClient({ initialEntries, categories, bankAccounts, exchangeRates, dueInvoices, employees, clients, outstandingCredits, pendingPayrolls, companySettings, showAmounts }: Props) {
+  const { role } = useRole()
+  const isAdmin = role === 'super_admin'
   const [entries, setEntries] = useState<Entry[]>(initialEntries)
   const [showForm, setShowForm] = useState(false)
+  const [showRebuildPanel, setShowRebuildPanel] = useState(false)
   const [saving, setSaving] = useState(false)
   const router = useRouter()
   const pathname = usePathname()
@@ -291,6 +307,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         description: form.description,
         reference: form.reference,
         invoice_id: form.linked_invoice_id || null,
+        // Persist the client tag so auto-allocation only considers this client's invoices.
+        client_id: form.client_filter_id || null,
       },
       form.description,
       {
@@ -471,6 +489,14 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               <ShieldAlert className="h-4 w-4 shrink-0" />
               <span className="hidden sm:inline">Reconciliation</span>
             </Link>
+            {isAdmin && (
+              <button onClick={() => setShowRebuildPanel(true)}
+                className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap border border-amber-500/30 text-amber-300"
+                title="Rebuild all invoice allocations (admin only)">
+                <RefreshCw className="w-4 h-4 shrink-0" />
+                <span className="hidden sm:inline">Rebuild Allocations</span>
+              </button>
+            )}
             <Link href="/dashboard/import?tab=cashbook_entries"
               className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap">
               <Upload className="w-4 h-4 shrink-0" />
@@ -999,7 +1025,11 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                         placeholder="Filter by client (optional)…"
                       />
                       <Combobox
-                        options={sortedDueInvoices.map(inv => {
+                        options={sortedDueInvoices
+                          // Hide invoices already paid via the invoice "Record Payment"
+                          // panel — linking one here would create a conflicting allocation.
+                          .filter(inv => !((inv.payments || []).length > 0))
+                          .map(inv => {
                           const outstanding = inv.total_amount - (inv.paid_amount || 0)
                           const overdue = inv.due_date && inv.due_date < today
                           return {
@@ -1310,6 +1340,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       {allocatingEntry && (
         <AllocationModal
           entryId={allocatingEntry.id}
+          entryDate={allocatingEntry.entry_date}
+          entryClientId={allocatingEntry.client_id}
           amountInr={allocatingEntry.amount_inr || 0}
           dueInvoices={sortedDueInvoices}
           onClose={() => setAllocatingEntry(null)}
@@ -1365,6 +1397,26 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
           })()}
           onClose={() => setReceiptEntry(null)}
         />
+      )}
+
+      {/* Allocation Rebuild Panel (admin only) */}
+      {showRebuildPanel && (
+        <ModalOverlay onClose={() => setShowRebuildPanel(false)}>
+          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-3xl shadow-2xl max-h-[90dvh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-border shrink-0">
+              <div>
+                <h2 className="font-semibold text-sm">Allocation Rebuild</h2>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Preview, approve and commit a full per-client FIFO rebuild</p>
+              </div>
+              <button onClick={() => setShowRebuildPanel(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="overflow-y-auto p-5 flex-1">
+              <AllocationRebuildPanel />
+            </div>
+          </div>
+        </ModalOverlay>
       )}
     </div>
   )

@@ -29,7 +29,8 @@ export default async function InvoicesPage() {
           task:tasks(id, title, task_date, status, billing_amount_inr, currency),
           service:services(id, name)
         ),
-        payments(id, amount, currency, exchange_rate, amount_inr, payment_date, payment_method, reference, notes)
+        payments(id, amount, currency, exchange_rate, amount_inr, payment_date, payment_method, reference, notes),
+        cashbook_invoice_allocations(id, deleted_at)
       `)
       .order('created_at', { ascending: false })
       .limit(500),

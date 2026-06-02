@@ -889,6 +889,7 @@ export default function ImportClient({ clients, services, employees, groups, par
       const currency = g(iCurr) || 'INR'
       const amount   = g(iAmt)
       const amtInr   = g(iAmtInr) || (currency === 'INR' ? amount : '')
+      const refStr = g(iRef).trim()
       const r: ParsedRow = {
         ...baseRow(i), row_id: g(iId),
         entry_date: normalizeDate(g(iDate)),
@@ -898,9 +899,27 @@ export default function ImportClient({ clients, services, employees, groups, par
         bank_account_name: bankName,
         bank_account_id: bankName ? bankAccountMap[norm(bankName)] : undefined,
         amount, currency, amount_inr: amtInr,
-        description: g(iDesc), reference: g(iRef),
+        description: g(iDesc), reference: refStr || null,
       }
-      
+
+      // ── Resolve reference → client_id / employee_id ───────────────────────
+      // "Company" = internal expense, leave both null (no entity allocation).
+      // CQID pattern   → employee_id (salary / commission payments).
+      // Anything else  → try client name or code → client_id.
+      if (refStr && norm(refStr) !== 'company') {
+        const empId = empMap[norm(refStr)]
+        if (empId) {
+          r.employee_id = empId
+        } else {
+          const clientId = clientMap[norm(refStr)]
+          if (clientId) {
+            r.client_id = clientId
+          } else {
+            r.warnings.push(`Reference "${refStr}" not matched to any client or employee — entry imported without entity link`)
+          }
+        }
+      }
+
       const providedInvNum = g(iInvNum)
       
       if (providedInvNum) {
@@ -1532,6 +1551,8 @@ export default function ImportClient({ clients, services, employees, groups, par
             description:     r.description || null,
             reference:       r.reference || null,
             invoice_id:      r.invoice_id || null,
+            client_id:       r.client_id   || null,  // resolved from reference column
+            employee_id:     r.employee_id || null,  // resolved from reference column
           },
         }))
         if (operation === 'update') {
@@ -1556,7 +1577,7 @@ export default function ImportClient({ clients, services, employees, groups, par
                   const match = entry.reference.match(/(CQID\d{3})/i)
                   if (match) {
                     const cqid = match[1].toUpperCase()
-                    const empId = empMap[cqid] // Using the map that maps upper CQID to ID
+                    const empId = empMap[norm(cqid)]
                     if (empId) {
                       // Fetch pending payrolls for employee (oldest first)
                       const { data: payrolls } = await supabase.from('payroll')
