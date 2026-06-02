@@ -26,13 +26,13 @@ const ENTRY_SELECT = `
   *,
   category:cashbook_categories(id, name, type),
   bank_account:bank_accounts(id, name),
-  allocations:cashbook_allocations(
+  allocations:cashbook_invoice_allocations(
     id, invoice_id, allocated_amount, deleted_at,
     invoice:invoices(invoice_number, status, due_date, total_amount, paid_amount, client:clients(name))
   ),
-  payroll_allocations:payroll_allocations(
+  payroll_allocations:cashbook_payroll_allocations(
     id, payroll_id, allocated_amount, deleted_at,
-    payroll:payrolls(net_salary, status, employee:employees(name, cqid))
+    payroll:payroll(net_salary, status, employee:employees(name, cqid))
   )
 `.trim()
 
@@ -53,6 +53,7 @@ export interface CashbookEntryPayload {
   description: string
   reference: string
   invoice_id: string | null
+  client_id: string | null      // entity tag for per-client FIFO allocation
 }
 
 export interface SmartEffect {
@@ -230,4 +231,162 @@ export async function softDeleteCashbookEntry(id: string): Promise<ActionResult>
 
   revalidatePath(REVALIDATE)
   return { ok: true }
+}
+
+// ─── Allocation Rebuild Actions (admin only) ──────────────────────────────────
+//
+// Safe rebuild workflow:
+//   1. backupAndResetAllocations() - snapshots existing rows, then soft-deletes
+//      them all (triggers cascade to fix invoice paid_amounts to 0).
+//   2. commitAllocationRebuild(proposals) - inserts the approved proposals so
+//      the triggers fire and rebuild all invoice statuses from scratch.
+//
+// NOTHING is written until the user approves the preview in the UI.
+
+export interface AllocationProposal {
+  cashbook_entry_id: string
+  invoice_id: string
+  allocated_amount: number   // INR
+}
+
+/**
+ * Step 1 of the rebuild: soft-delete all active invoice allocations (resets
+ * every invoice's paid_amount / paid_amount_inr via the trigger cascade).
+ * Does NOT touch the payments table or payroll allocations.
+ * ADMIN ONLY. Returns count of allocations reset.
+ */
+export async function backupAndResetAllocations(): Promise<ActionResult<{ backed_up: number }>> {
+  const guard = await requirePermission('settings.manage_company')
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+
+  // Fetch all active allocation IDs.
+  const { data: active, error: fetchErr } = await admin
+    .from('cashbook_invoice_allocations')
+    .select('id')
+    .is('deleted_at', null)
+  if (fetchErr) return { ok: false, error: fetchErr.message }
+
+  const ids = (active || []).map((r: any) => r.id)
+  if (ids.length === 0) return { ok: true, data: { backed_up: 0 } }
+
+  // Soft-delete in batches (trigger fires per-row).
+  const now = new Date().toISOString()
+  const batchSize = 200
+  for (let i = 0; i < ids.length; i += batchSize) {
+    const batch = ids.slice(i, i + batchSize)
+    const { error: delErr } = await admin
+      .from('cashbook_invoice_allocations')
+      .update({ deleted_at: now })
+      .in('id', batch)
+      .is('deleted_at', null)
+    if (delErr) return { ok: false, error: delErr.message }
+  }
+
+  revalidatePath(REVALIDATE)
+  return { ok: true, data: { backed_up: ids.length } }
+}
+
+/**
+ * Step 2 of the rebuild: insert the approved proposals.
+ * Each insert fires the trigger -> updates the invoice's paid_amount + status.
+ * ADMIN ONLY. Returns how many allocation rows were inserted.
+ */
+export async function commitAllocationRebuild(
+  proposals: AllocationProposal[],
+): Promise<ActionResult<{ inserted: number }>> {
+  const guard = await requirePermission('settings.manage_company')
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!proposals.length) return { ok: true, data: { inserted: 0 } }
+
+  const admin = createAdminClient()
+
+  const batchSize = 200
+  let inserted = 0
+  for (let i = 0; i < proposals.length; i += batchSize) {
+    const batch = proposals.slice(i, i + batchSize)
+    const { error } = await admin.from('cashbook_invoice_allocations').insert(batch)
+    if (error) return { ok: false, error: error.message }
+    inserted += batch.length
+  }
+
+  revalidatePath(REVALIDATE)
+  return { ok: true, data: { inserted } }
+}
+
+/**
+ * Fetch all data needed for the client-matching + allocation rebuild workflow.
+ * Returns entries (with invoice client link), invoices (with INR balances),
+ * and the full clients list for the matching engine.
+ * ADMIN ONLY.
+ */
+export async function fetchRebuildData(): Promise<ActionResult<{
+  entries: any[]
+  invoices: any[]
+  clients: any[]
+}>> {
+  const guard = await requirePermission('settings.manage_company')
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+
+  const [entriesRes, invoicesRes, clientsRes] = await Promise.all([
+    // Include invoice_id + the invoice's client_id so the matcher can derive
+    // client from an import-time invoice link even when client_id is not set.
+    admin
+      .from('cashbook_entries')
+      .select('id, entry_date, description, reference, amount_inr, currency, client_id, invoice_id, invoice:invoices(client_id)')
+      .eq('type', 'inflow')
+      .is('deleted_at', null)
+      .order('entry_date', { ascending: true }),
+    admin
+      .from('invoices')
+      .select('id, invoice_number, issue_date, due_date, currency, total_amount, paid_amount, total_amount_inr, paid_amount_inr, client_id, client:clients(id, name)')
+      .not('status', 'in', '("cancelled","bad_debt")')
+      .order('issue_date', { ascending: true }),
+    admin
+      .from('clients')
+      .select('id, name, code')
+      .eq('is_active', true)
+      .order('name'),
+  ])
+
+  if (entriesRes.error) return { ok: false, error: entriesRes.error.message }
+  if (invoicesRes.error) return { ok: false, error: invoicesRes.error.message }
+
+  return {
+    ok: true,
+    data: {
+      entries: entriesRes.data || [],
+      invoices: invoicesRes.data || [],
+      clients: clientsRes.data || [],
+    },
+  }
+}
+
+/**
+ * Persist client_id tags to cashbook_entries after the manual review phase.
+ * ADMIN ONLY.
+ */
+export async function saveClientTags(
+  tags: { entry_id: string; client_id: string }[],
+): Promise<ActionResult<{ saved: number }>> {
+  const guard = await requirePermission('settings.manage_company')
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!tags.length) return { ok: true, data: { saved: 0 } }
+
+  const admin = createAdminClient()
+  let saved = 0
+  for (const t of tags) {
+    const { error } = await admin
+      .from('cashbook_entries')
+      .update({ client_id: t.client_id })
+      .eq('id', t.entry_id)
+    if (error) return { ok: false, error: error.message }
+    saved++
+  }
+
+  revalidatePath(REVALIDATE)
+  return { ok: true, data: { saved } }
 }
