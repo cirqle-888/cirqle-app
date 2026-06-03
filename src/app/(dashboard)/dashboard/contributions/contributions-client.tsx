@@ -287,20 +287,44 @@ export default function ContributionsClient({
     }
   }, [taskAssignmentsFromDB])
 
-  // ── Silent auto-recalculate missing scores on mount ──────────────────────
-  // Runs once when the page loads. If any tasks have raw contributions saved
-  // but no contribution_scores (e.g. from old saves), it calculates and saves
-  // scores automatically in the background — no button, no manual step needed.
+  // ── Silent auto-recalculate missing OR stale scores on mount ──────────────
+  // Runs once when the page loads. Recalculates and saves scores in the
+  // background — no button, no manual step. Two cases are repaired:
+  //
+  //   1. MISSING  — task has raw contributions but no contribution_scores row
+  //                 (e.g. from old saves before scoring existed).
+  //
+  //   2. STALE    — task has score rows whose earnings_inr are ALL zero, yet
+  //                 the task now has billing_amount_inr > 0. This happens when
+  //                 a task is scored BEFORE its billing/price is set (pool = 0
+  //                 → earnings = 0), then billing is added later. The score
+  //                 snapshot is never recomputed, so payroll keeps reading ₹0.
+  //                 Detecting & recomputing here makes the scores self-heal.
   useEffect(() => {
     if (autoRecalcRan.current) return
     autoRecalcRan.current = true
 
-    // Which tasks have raw contributions but no scores yet?
     const taskIdsWithContribs = new Set(contributorRecords.map(c => c.task_id))
     const scoredTaskIds = new Set(scores.map(s => s.task_id))
-    const tasksNeedingScores = initialTasks.filter(
-      (t: any) => taskIdsWithContribs.has(t.id) && !scoredTaskIds.has(t.id)
-    )
+
+    // Case 2 prep: per task, does ANY score row have non-zero earnings?
+    const taskHasNonZeroEarnings = new Map<string, boolean>()
+    scores.forEach(s => {
+      const prev = taskHasNonZeroEarnings.get(s.task_id) || false
+      taskHasNonZeroEarnings.set(s.task_id, prev || (s.earnings_inr ?? 0) > 0)
+    })
+
+    const tasksNeedingScores = initialTasks.filter((t: any) => {
+      const hasContribs = taskIdsWithContribs.has(t.id)
+      if (!hasContribs) return false
+      const hasScore = scoredTaskIds.has(t.id)
+      // Case 1: contributions but no score row at all.
+      if (!hasScore) return true
+      // Case 2: scored, but every row is ₹0 while the task now has billing.
+      const billing = t.billing_amount_inr || 0
+      const stale = billing > 0 && taskHasNonZeroEarnings.get(t.id) === false
+      return stale
+    })
     if (tasksNeedingScores.length === 0) return
 
     async function doSilentRecalc() {
