@@ -33,11 +33,15 @@ const pct = (n: number) => `${n.toFixed(1)}%`
 
 // ── Column definitions ────────────────────────────────────────────────────────
 type Align = 'left' | 'right' | 'center'
+// 'core' columns are always shown. The other 3 are toggleable column groups.
+type ColGroup = 'core' | 'billing' | 'profit' | 'employees'
 interface Col {
   key: SortKey
   label: string
   width: number
   align: Align
+  group: ColGroup
+  empId?: string
   sticky?: boolean
   render: (r: AnalysisRow) => React.ReactNode
   cls?: (r: AnalysisRow) => string
@@ -45,59 +49,59 @@ interface Col {
 
 function buildColumns(employees: EmployeeColumn[], dp: number): Col[] {
   const fixed: Col[] = [
-    { key: 'task_number', label: 'Task #', width: 76, align: 'left', sticky: true, render: r => r.task_number ?? '—' },
-    { key: 'task_date', label: 'Date', width: 96, align: 'left', render: r => r.task_date },
-    { key: 'client_name', label: 'Client', width: 150, align: 'left', render: r => r.client_name },
-    { key: 'service_name', label: 'Service', width: 140, align: 'left', render: r => r.service_name },
-    { key: 'status', label: 'Status', width: 96, align: 'center', render: r => r.status },
-    { key: 'currency', label: 'Cur', width: 56, align: 'center', render: r => r.currency },
-    { key: 'billing', label: 'Billing', width: 100, align: 'right', render: r => fmt(r.billing, dp) },
-    { key: 'billing_inr', label: 'Billing ₹', width: 110, align: 'right', render: r => inr(r.billing_inr, dp) },
-    { key: 'commission_pct', label: 'Comm %', width: 80, align: 'right', render: r => pct(r.commission_pct) },
-    { key: 'commission_pool', label: 'Pool ₹', width: 110, align: 'right', render: r => inr(r.commission_pool, dp) },
-    { key: 'total_earnings', label: 'Emp Earnings ₹', width: 120, align: 'right', render: r => inr(r.total_earnings, dp) },
-    { key: 'company_received', label: 'Received ₹', width: 110, align: 'right', render: r => inr(r.company_received, dp) },
+    { key: 'task_number', label: 'Task #', width: 76, align: 'left', group: 'core', sticky: true, render: r => r.task_number ?? '—' },
+    { key: 'task_date', label: 'Date', width: 96, align: 'left', group: 'core', render: r => r.task_date },
+    { key: 'client_name', label: 'Client', width: 150, align: 'left', group: 'core', render: r => r.client_name },
+    { key: 'service_name', label: 'Service', width: 140, align: 'left', group: 'core', render: r => r.service_name },
+    { key: 'status', label: 'Status', width: 96, align: 'center', group: 'core', render: r => r.status },
+    { key: 'currency', label: 'Cur', width: 56, align: 'center', group: 'billing', render: r => r.currency },
+    { key: 'billing', label: 'Billing', width: 100, align: 'right', group: 'billing', render: r => fmt(r.billing, dp) },
+    { key: 'billing_inr', label: 'Billing ₹', width: 110, align: 'right', group: 'billing', render: r => inr(r.billing_inr, dp) },
+    { key: 'commission_pct', label: 'Comm %', width: 80, align: 'right', group: 'billing', render: r => pct(r.commission_pct) },
+    { key: 'commission_pool', label: 'Pool ₹', width: 110, align: 'right', group: 'billing', render: r => inr(r.commission_pool, dp) },
+    { key: 'total_earnings', label: 'Emp Earnings ₹', width: 120, align: 'right', group: 'profit', render: r => inr(r.total_earnings, dp) },
+    { key: 'company_received', label: 'Received ₹', width: 110, align: 'right', group: 'billing', render: r => inr(r.company_received, dp) },
     {
-      key: 'profit', label: 'Exp Profit ₹', width: 110, align: 'right', render: r => inr(r.profit, dp),
+      key: 'profit', label: 'Exp Profit ₹', width: 110, align: 'right', group: 'profit', render: r => inr(r.profit, dp),
       cls: r => (r.profit < 0 ? 'text-red-400' : 'text-emerald-400'),
     },
     {
-      key: 'profit_pct', label: 'Exp Profit %', width: 92, align: 'right', render: r => pct(r.profit_pct),
+      key: 'profit_pct', label: 'Exp Profit %', width: 92, align: 'right', group: 'profit', render: r => pct(r.profit_pct),
       cls: r => (r.profit_pct < 0 ? 'text-red-400' : 'text-emerald-400'),
     },
     {
-      key: 'actual_received', label: 'Actual Recv ₹', width: 116, align: 'right',
+      key: 'actual_received', label: 'Actual Recv ₹', width: 116, align: 'right', group: 'profit',
       render: r => r.actual_received === null ? <span className="text-muted-foreground/40">—</span> : inr(r.actual_received, dp),
     },
     {
-      key: 'fx_gain_loss', label: 'FX +/− ₹', width: 100, align: 'right',
+      key: 'fx_gain_loss', label: 'FX +/− ₹', width: 100, align: 'right', group: 'profit',
       render: r => r.fx_gain_loss === null ? <span className="text-muted-foreground/40">—</span> : inr(r.fx_gain_loss, dp),
       cls: r => (r.fx_gain_loss === null ? '' : r.fx_gain_loss < 0 ? 'text-red-400' : r.fx_gain_loss > 0 ? 'text-emerald-400' : ''),
     },
     {
-      key: 'actual_profit', label: 'Actual Profit ₹', width: 120, align: 'right',
+      key: 'actual_profit', label: 'Actual Profit ₹', width: 120, align: 'right', group: 'profit',
       render: r => r.actual_profit === null ? <span className="text-muted-foreground/40">—</span> : inr(r.actual_profit, dp),
       cls: r => (r.actual_profit === null ? '' : r.actual_profit < 0 ? 'text-red-400' : 'text-emerald-400'),
     },
     {
-      key: 'actual_profit_pct', label: 'Actual Profit %', width: 100, align: 'right',
+      key: 'actual_profit_pct', label: 'Actual Profit %', width: 100, align: 'right', group: 'profit',
       render: r => r.actual_profit_pct === null ? <span className="text-muted-foreground/40">—</span> : pct(r.actual_profit_pct),
       cls: r => (r.actual_profit_pct === null ? '' : r.actual_profit_pct < 0 ? 'text-red-400' : 'text-emerald-400'),
     },
-    { key: 'contributors', label: 'Contrib.', width: 72, align: 'center', render: r => r.contributors },
+    { key: 'contributors', label: 'Contrib.', width: 72, align: 'center', group: 'core', render: r => r.contributors },
   ]
   const emp: Col[] = []
   for (const e of employees) {
     emp.push({
-      key: `emp:${e.id}:pct`, label: 'Contrib %', width: 78, align: 'right',
+      key: `emp:${e.id}:pct`, label: 'Contrib %', width: 78, align: 'right', group: 'employees', empId: e.id,
       render: r => { const c = r.emp[e.id]; return c && c.pct > 0 ? pct(c.pct) : <span className="text-muted-foreground/40">0%</span> },
     })
     emp.push({
-      key: `emp:${e.id}:earn`, label: 'Earned ₹', width: 92, align: 'right',
+      key: `emp:${e.id}:earn`, label: 'Earned ₹', width: 92, align: 'right', group: 'employees', empId: e.id,
       render: r => { const c = r.emp[e.id]; return c && c.earn > 0 ? inr(c.earn, dp) : <span className="text-muted-foreground/40">₹0</span> },
     })
     emp.push({
-      key: `emp:${e.id}:share`, label: '% of Bill', width: 80, align: 'right',
+      key: `emp:${e.id}:share`, label: '% of Bill', width: 80, align: 'right', group: 'employees', empId: e.id,
       render: r => { const s = empShare(r, e.id); return s > 0 ? pct(s) : <span className="text-muted-foreground/40">0%</span> },
     })
   }
@@ -149,9 +153,13 @@ function MultiSelect({ label, options, selected, onChange }: {
 }
 
 // ── URL (de)serialization ─────────────────────────────────────────────────────
-function parseFromParams(sp: URLSearchParams): { filters: Filters; sortKey: SortKey; sortDir: SortDir; pageSize: number; decimals: boolean } {
+const ALL_GROUPS: ColGroup[] = ['billing', 'profit', 'employees']
+const GROUP_LABELS: Record<string, string> = { billing: 'Billing', profit: 'Profit & FX', employees: 'Employees' }
+
+function parseFromParams(sp: URLSearchParams): { filters: Filters; sortKey: SortKey; sortDir: SortDir; pageSize: number; decimals: boolean; groups: ColGroup[] } {
   const g = (k: string) => sp.get(k) || ''
   const arr = (k: string) => { const v = sp.get(k); return v ? v.split(',').filter(Boolean) : [] }
+  const rawGroups = arr('cols').filter((x): x is ColGroup => (ALL_GROUPS as string[]).includes(x))
   return {
     filters: {
       from: g('from'), to: g('to'), month: g('month'), year: g('year'),
@@ -166,6 +174,8 @@ function parseFromParams(sp: URLSearchParams): { filters: Filters; sortKey: Sort
     sortDir: (g('dir') === 'asc' ? 'asc' : 'desc'),
     pageSize: sp.get('size') !== null ? parseInt(sp.get('size')!, 10) : 100,
     decimals: sp.get('dec') === '1',
+    // `cols` present ⇒ exactly those groups; absent ⇒ all groups on.
+    groups: sp.get('cols') !== null ? rawGroups : [...ALL_GROUPS],
   }
 }
 
@@ -174,14 +184,6 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const { isUnlocked, dn } = usePrivacy()
-
-  // Privacy lock: employee column headers, the contributor filter, and all
-  // exports show real names ONLY when privacy is unlocked — otherwise CQID.
-  // dn() returns name when unlocked, CQID when locked (same as the rest of app).
-  const displayEmployees = useMemo(
-    () => employees.map(e => ({ ...e, name: dn(e) })),
-    [employees, isUnlocked], // eslint-disable-line react-hooks/exhaustive-deps
-  )
 
   const initial = useMemo(() => parseFromParams(new URLSearchParams(searchParams.toString())), []) // eslint-disable-line react-hooks/exhaustive-deps
   const [filters, setFilters] = useState<Filters>(initial.filters)
@@ -192,8 +194,27 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   const [showFilters, setShowFilters] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [decimals, setDecimals] = useState(initial.decimals)
+  const [groups, setGroups] = useState<ColGroup[]>(initial.groups)
+  const groupSet = useMemo(() => new Set(groups), [groups])
 
-  const columns = useMemo(() => buildColumns(displayEmployees, decimals ? 2 : 0), [displayEmployees, decimals])
+  // Privacy lock: real names only when unlocked, else CQID (shared dn()).
+  // When the report is filtered to one employee, narrow the columns to JUST
+  // that employee — no point showing everyone else's blank columns.
+  const allDisplayEmployees = useMemo(
+    () => employees.map(e => ({ ...e, name: dn(e) })),
+    [employees, isUnlocked], // eslint-disable-line react-hooks/exhaustive-deps
+  )
+  const displayEmployees = useMemo(
+    () => (filters.employeeId ? allDisplayEmployees.filter(e => e.id === filters.employeeId) : allDisplayEmployees),
+    [allDisplayEmployees, filters.employeeId],
+  )
+
+  // Full column set (for export) and the visible subset (group toggles applied).
+  const allColumns = useMemo(() => buildColumns(displayEmployees, decimals ? 2 : 0), [displayEmployees, decimals])
+  const columns = useMemo(
+    () => allColumns.filter(c => c.group === 'core' || groupSet.has(c.group)),
+    [allColumns, groupSet],
+  )
   const totalWidth = useMemo(() => columns.reduce((s, c) => s + c.width, 0), [columns])
 
   // ── Sync state → URL ────────────────────────────────────────────────────────
@@ -220,9 +241,11 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     if (sortDir !== 'desc') p.set('dir', sortDir)
     if (pageSize !== 100) p.set('size', String(pageSize))
     if (decimals) p.set('dec', '1')
+    // Only serialise `cols` when not all groups are on (keeps URLs clean).
+    if (groups.length !== ALL_GROUPS.length) p.set('cols', [...groups].sort().join(','))
     const qs = p.toString()
     if (qs !== searchParams.toString()) router.replace(`${pathname}${qs ? '?' + qs : ''}`, { scroll: false })
-  }, [filters, sortKey, sortDir, pageSize, decimals, pathname, router, searchParams])
+  }, [filters, sortKey, sortDir, pageSize, decimals, groups, pathname, router, searchParams])
 
   // ── Pipeline: filter → sort ───────────────────────────────────────────────────
   const filtered = useMemo(() => applyFilters(rows, filters), [rows, filters])
@@ -325,8 +348,13 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   }, [sorted, employees])
 
   const gridTemplate = columns.map(c => `${c.width}px`).join(' ')
-  // Fixed (non-employee) columns come first; each employee then owns 3 columns.
-  const fixedCount = columns.length - displayEmployees.length * 3
+  // Fixed (non-employee) columns come first; each visible employee owns 3.
+  const fixedCount = columns.filter(c => c.group !== 'employees').length
+  // Employee groups currently visible, in display order (for the grouped header).
+  const visibleEmpGroups = useMemo(
+    () => (groupSet.has('employees') ? displayEmployees : []),
+    [groupSet, displayEmployees],
+  )
 
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
@@ -374,6 +402,25 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
           )}
           <div className="text-sm text-muted-foreground ml-1">
             <span className="font-semibold text-foreground">{fmt(sorted.length, 0)}</span> of {fmt(rows.length, 0)} tasks
+          </div>
+
+          {/* Column group toggles — show/hide whole blocks of columns */}
+          <div className="flex items-center gap-1 ml-1 pl-2 border-l border-border">
+            <span className="text-[11px] text-muted-foreground mr-0.5">Columns:</span>
+            {ALL_GROUPS.map(gp => {
+              const on = groupSet.has(gp)
+              return (
+                <button
+                  key={gp}
+                  onClick={() => setGroups(prev => prev.includes(gp) ? prev.filter(x => x !== gp) : [...prev, gp])}
+                  className={`px-2 py-1 rounded-md text-[11px] font-medium border transition-colors ${
+                    on ? 'gradient-bg text-white border-transparent' : 'bg-card border-border text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {GROUP_LABELS[gp]}
+                </button>
+              )
+            })}
           </div>
 
           <div className="ml-auto flex items-center gap-2">
@@ -427,7 +474,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
                 <label className="block text-[11px] font-medium text-muted-foreground mb-1">Has contributor</label>
                 <select value={filters.employeeId} onChange={e => setFilters(f => ({ ...f, employeeId: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs">
                   <option value="">Any employee</option>
-                  {displayEmployees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                  {allDisplayEmployees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
                 </select>
               </div>
               <MultiSelect label="Status" options={STATUSES.map(s => ({ id: s, name: s }))} selected={filters.statuses} onChange={ids => setFilters(f => ({ ...f, statuses: ids }))} />
@@ -478,7 +525,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
                   )
                 })}
                 {/* Employee groups — name on top row, 3 sub-headers below */}
-                {displayEmployees.map((e, k) => {
+                {visibleEmpGroups.map((e, k) => {
                   const base = fixedCount + 3 * k + 1   // 1-based grid line of this group
                   const subCols = columns.slice(fixedCount + 3 * k, fixedCount + 3 * k + 3)
                   return (
