@@ -232,11 +232,19 @@ export type SortKey =
   | 'billing_inr' | 'commission_pool' | 'total_earnings' | 'profit' | 'profit_pct'
   | 'contributors' | string
 
+/** Employee earnings as a % of the task's INR billing (revenue share). */
+export function empShare(row: AnalysisRow, employeeId: string): number {
+  const earn = row.emp[employeeId]?.earn ?? 0
+  return row.billing_inr > 0 ? Math.round(earn / row.billing_inr * 100 * 100) / 100 : 0
+}
+
 function sortValue(row: AnalysisRow, key: SortKey): number | string {
   if (key.startsWith('emp:')) {
     const [, id, field] = key.split(':')
     const cell = row.emp[id]
-    return (field === 'earn' ? cell?.earn : cell?.pct) ?? 0
+    if (field === 'earn') return cell?.earn ?? 0
+    if (field === 'share') return empShare(row, id)
+    return cell?.pct ?? 0
   }
   const v = (row as any)[key]
   return v ?? (typeof v === 'string' ? '' : 0)
@@ -303,7 +311,7 @@ export function toMatrix(rows: AnalysisRow[], employees: EmployeeColumn[]): (str
     'Company Received (INR)', 'Company Profit (INR)', 'Company Profit %', 'Total Contributors',
   ]
   for (const e of employees) {
-    header.push(`${e.name} Contribution %`, `${e.name} Earnings ₹`)
+    header.push(`${e.name} Contribution %`, `${e.name} Earnings ₹`, `${e.name} Earnings % of Billing`)
   }
 
   const matrix: (string | number)[][] = [header]
@@ -316,7 +324,7 @@ export function toMatrix(rows: AnalysisRow[], employees: EmployeeColumn[]): (str
     ]
     for (const e of employees) {
       const cell = r.emp[e.id]
-      line.push(cell?.pct ?? 0, cell?.earn ?? 0)
+      line.push(cell?.pct ?? 0, cell?.earn ?? 0, empShare(r, e.id))
     }
     matrix.push(line)
   }

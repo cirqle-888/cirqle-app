@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback, Fragment } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
 import { usePrivacy } from '@/contexts/privacy-context'
 import {
-  applyFilters, sortRows, computeSummary, toMatrix, matrixToCSV,
+  applyFilters, sortRows, computeSummary, toMatrix, matrixToCSV, empShare,
   EMPTY_FILTERS, type Filters, type AnalysisRow, type EmployeeColumn,
   type SortKey, type SortDir,
 } from '@/lib/reports/contribution-analysis'
@@ -69,14 +69,17 @@ function buildColumns(employees: EmployeeColumn[]): Col[] {
   ]
   const emp: Col[] = []
   for (const e of employees) {
-    const first = e.name.split(' ')[0]
     emp.push({
-      key: `emp:${e.id}:pct`, label: `${first} %`, width: 84, align: 'right',
+      key: `emp:${e.id}:pct`, label: 'Contrib %', width: 78, align: 'right',
       render: r => { const c = r.emp[e.id]; return c && c.pct > 0 ? pct(c.pct) : <span className="text-muted-foreground/40">0%</span> },
     })
     emp.push({
-      key: `emp:${e.id}:earn`, label: `${first} ₹`, width: 96, align: 'right',
+      key: `emp:${e.id}:earn`, label: 'Earned ₹', width: 92, align: 'right',
       render: r => { const c = r.emp[e.id]; return c && c.earn > 0 ? inr(c.earn) : <span className="text-muted-foreground/40">₹0</span> },
+    })
+    emp.push({
+      key: `emp:${e.id}:share`, label: '% of Bill', width: 80, align: 'right',
+      render: r => { const s = empShare(r, e.id); return s > 0 ? pct(s) : <span className="text-muted-foreground/40">0%</span> },
     })
   }
   return [...fixed, ...emp]
@@ -300,6 +303,8 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   }, [sorted, employees])
 
   const gridTemplate = columns.map(c => `${c.width}px`).join(' ')
+  // Fixed (non-employee) columns come first; each employee then owns 3 columns.
+  const fixedCount = columns.length - displayEmployees.length * 3
 
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
@@ -418,20 +423,52 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
         <div className="bg-card border border-border rounded-xl overflow-hidden">
           <div ref={scrollRef} onScroll={e => setScrollTop((e.target as HTMLDivElement).scrollTop)} className="overflow-auto" style={{ maxHeight: '62vh' }}>
             <div style={{ width: totalWidth, minWidth: '100%' }}>
-              {/* Header */}
-              <div className="sticky top-0 z-20 grid bg-secondary border-b border-border" style={{ gridTemplateColumns: gridTemplate }}>
-                {columns.map((c, ci) => {
+              {/* Two-tier header: fixed columns span both rows; each employee
+                  is one group header over 3 sortable sub-columns. */}
+              <div className="sticky top-0 z-20 grid bg-secondary border-b border-border" style={{ gridTemplateColumns: gridTemplate, gridTemplateRows: 'auto auto' }}>
+                {/* Fixed columns — span both header rows */}
+                {columns.slice(0, fixedCount).map((c, ci) => {
                   const active = sortKey === c.key
                   return (
                     <button
                       key={c.key} onClick={() => toggleSort(c.key)}
+                      style={{ gridColumn: `${ci + 1} / ${ci + 2}`, gridRow: '1 / 3' }}
                       className={`flex items-center gap-0.5 px-2 py-2 text-[11px] font-semibold whitespace-nowrap hover:bg-secondary/70 ${
                         c.align === 'right' ? 'justify-end' : c.align === 'center' ? 'justify-center' : 'justify-start'
-                      } ${active ? 'text-purple-400' : 'text-muted-foreground'} ${c.sticky ? 'sticky left-0 z-30 bg-secondary' : ''} ${ci >= 15 ? 'text-sky-400/80' : ''}`}
+                      } ${active ? 'text-purple-400' : 'text-muted-foreground'} ${c.sticky ? 'sticky left-0 z-30 bg-secondary' : ''}`}
                     >
                       <span className="truncate">{c.label}</span>
                       {active && (sortDir === 'asc' ? <ArrowUp className="w-3 h-3 shrink-0" /> : <ArrowDown className="w-3 h-3 shrink-0" />)}
                     </button>
+                  )
+                })}
+                {/* Employee groups — name on top row, 3 sub-headers below */}
+                {displayEmployees.map((e, k) => {
+                  const base = fixedCount + 3 * k + 1   // 1-based grid line of this group
+                  const subCols = columns.slice(fixedCount + 3 * k, fixedCount + 3 * k + 3)
+                  return (
+                    <Fragment key={e.id}>
+                      <div
+                        style={{ gridColumn: `${base} / ${base + 3}`, gridRow: '1 / 2' }}
+                        className="flex items-center justify-center px-2 py-1 text-[11px] font-semibold text-sky-400 truncate border-l border-border"
+                        title={e.name}
+                      >
+                        <span className="truncate">{e.name}</span>
+                      </div>
+                      {subCols.map((c, j) => {
+                        const active = sortKey === c.key
+                        return (
+                          <button
+                            key={c.key} onClick={() => toggleSort(c.key)}
+                            style={{ gridColumn: `${base + j} / ${base + j + 1}`, gridRow: '2 / 3' }}
+                            className={`flex items-center justify-end gap-0.5 px-2 py-1.5 text-[10px] font-medium whitespace-nowrap hover:bg-secondary/70 ${j === 0 ? 'border-l border-border' : ''} ${active ? 'text-purple-400' : 'text-muted-foreground'}`}
+                          >
+                            <span className="truncate">{c.label}</span>
+                            {active && (sortDir === 'asc' ? <ArrowUp className="w-3 h-3 shrink-0" /> : <ArrowDown className="w-3 h-3 shrink-0" />)}
+                          </button>
+                        )
+                      })}
+                    </Fragment>
                   )
                 })}
               </div>
@@ -449,16 +486,20 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
                         className={`grid absolute left-0 right-0 border-b border-border/50 hover:bg-secondary/40 ${idx % 2 ? 'bg-secondary/10' : ''}`}
                         style={{ top: idx * ROW_H, height: ROW_H, gridTemplateColumns: gridTemplate }}
                       >
-                        {columns.map(c => (
-                          <div
-                            key={c.key}
-                            className={`px-2 flex items-center text-xs whitespace-nowrap overflow-hidden tabular-nums ${
-                              c.align === 'right' ? 'justify-end' : c.align === 'center' ? 'justify-center' : 'justify-start'
-                            } ${c.sticky ? `sticky left-0 z-10 ${idx % 2 ? 'bg-card' : 'bg-card'}` : ''} ${c.cls ? c.cls(r) : ''}`}
-                          >
-                            <span className="truncate">{c.render(r)}</span>
-                          </div>
-                        ))}
+                        {columns.map((c, ci) => {
+                          // Left border at the start of each employee's 3-col group.
+                          const groupStart = ci >= fixedCount && (ci - fixedCount) % 3 === 0
+                          return (
+                            <div
+                              key={c.key}
+                              className={`px-2 flex items-center text-xs whitespace-nowrap overflow-hidden tabular-nums ${
+                                c.align === 'right' ? 'justify-end' : c.align === 'center' ? 'justify-center' : 'justify-start'
+                              } ${c.sticky ? 'sticky left-0 z-10 bg-card' : ''} ${groupStart ? 'border-l border-border/60' : ''} ${c.cls ? c.cls(r) : ''}`}
+                            >
+                              <span className="truncate">{c.render(r)}</span>
+                            </div>
+                          )
+                        })}
                       </div>
                     )
                   })}
