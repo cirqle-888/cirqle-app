@@ -1,0 +1,480 @@
+'use client'
+
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import { useRouter, usePathname, useSearchParams } from 'next/navigation'
+import Header from '@/components/layout/header'
+import {
+  applyFilters, sortRows, computeSummary, toMatrix, matrixToCSV,
+  EMPTY_FILTERS, type Filters, type AnalysisRow, type EmployeeColumn,
+  type SortKey, type SortDir,
+} from '@/lib/reports/contribution-analysis'
+import {
+  Download, Printer, FileSpreadsheet, SlidersHorizontal, X, ArrowUp, ArrowDown,
+  ChevronLeft, ChevronRight,
+} from 'lucide-react'
+
+interface Props {
+  rows: AnalysisRow[]
+  employees: EmployeeColumn[]
+  clients: { id: string; name: string }[]
+  services: { id: string; name: string }[]
+}
+
+const STATUSES = ['pending', 'in_progress', 'done', 'delivered', 'invoiced', 'paid', 'cancelled']
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const ROW_H = 38
+const PAGE_SIZES = [50, 100, 250, 1000, 0] // 0 = All
+
+const fmt = (n: number, dp = 2) =>
+  n.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: dp })
+const inr = (n: number, dp = 0) => '₹' + fmt(n, dp)
+const pct = (n: number) => `${n.toFixed(1)}%`
+
+// ── Column definitions ────────────────────────────────────────────────────────
+type Align = 'left' | 'right' | 'center'
+interface Col {
+  key: SortKey
+  label: string
+  width: number
+  align: Align
+  sticky?: boolean
+  render: (r: AnalysisRow) => React.ReactNode
+  cls?: (r: AnalysisRow) => string
+}
+
+function buildColumns(employees: EmployeeColumn[]): Col[] {
+  const fixed: Col[] = [
+    { key: 'task_number', label: 'Task #', width: 76, align: 'left', sticky: true, render: r => r.task_number ?? '—' },
+    { key: 'task_date', label: 'Date', width: 96, align: 'left', render: r => r.task_date },
+    { key: 'client_name', label: 'Client', width: 150, align: 'left', render: r => r.client_name },
+    { key: 'service_name', label: 'Service', width: 140, align: 'left', render: r => r.service_name },
+    { key: 'status', label: 'Status', width: 96, align: 'center', render: r => r.status },
+    { key: 'currency', label: 'Cur', width: 56, align: 'center', render: r => r.currency },
+    { key: 'billing', label: 'Billing', width: 100, align: 'right', render: r => fmt(r.billing) },
+    { key: 'billing_inr', label: 'Billing ₹', width: 110, align: 'right', render: r => inr(r.billing_inr) },
+    { key: 'commission_pct', label: 'Comm %', width: 80, align: 'right', render: r => pct(r.commission_pct) },
+    { key: 'commission_pool', label: 'Pool ₹', width: 110, align: 'right', render: r => inr(r.commission_pool) },
+    { key: 'total_earnings', label: 'Emp Earnings ₹', width: 120, align: 'right', render: r => inr(r.total_earnings) },
+    { key: 'company_received', label: 'Received ₹', width: 110, align: 'right', render: r => inr(r.company_received) },
+    {
+      key: 'profit', label: 'Profit ₹', width: 110, align: 'right', render: r => inr(r.profit),
+      cls: r => (r.profit < 0 ? 'text-red-400' : 'text-emerald-400'),
+    },
+    {
+      key: 'profit_pct', label: 'Profit %', width: 84, align: 'right', render: r => pct(r.profit_pct),
+      cls: r => (r.profit_pct < 0 ? 'text-red-400' : 'text-emerald-400'),
+    },
+    { key: 'contributors', label: 'Contrib.', width: 72, align: 'center', render: r => r.contributors },
+  ]
+  const emp: Col[] = []
+  for (const e of employees) {
+    const first = e.name.split(' ')[0]
+    emp.push({
+      key: `emp:${e.id}:pct`, label: `${first} %`, width: 84, align: 'right',
+      render: r => { const c = r.emp[e.id]; return c && c.pct > 0 ? pct(c.pct) : <span className="text-muted-foreground/40">0%</span> },
+    })
+    emp.push({
+      key: `emp:${e.id}:earn`, label: `${first} ₹`, width: 96, align: 'right',
+      render: r => { const c = r.emp[e.id]; return c && c.earn > 0 ? inr(c.earn) : <span className="text-muted-foreground/40">₹0</span> },
+    })
+  }
+  return [...fixed, ...emp]
+}
+
+// ── Small inline multi-select (chips dropdown) ────────────────────────────────
+function MultiSelect({ label, options, selected, onChange }: {
+  label: string
+  options: { id: string; name: string }[]
+  selected: string[]
+  onChange: (ids: string[]) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [open])
+  const toggle = (id: string) =>
+    onChange(selected.includes(id) ? selected.filter(x => x !== id) : [...selected, id])
+  return (
+    <div className="relative" ref={ref}>
+      <label className="block text-[11px] font-medium text-muted-foreground mb-1">{label}</label>
+      <button
+        type="button" onClick={() => setOpen(o => !o)}
+        className="w-full text-left bg-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs hover:border-border/80 flex items-center justify-between gap-1"
+      >
+        <span className="truncate">{selected.length ? `${selected.length} selected` : `All ${label.toLowerCase()}`}</span>
+        <ChevronRight className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute z-40 mt-1 w-56 max-h-64 overflow-auto bg-card border border-border rounded-lg shadow-xl p-1">
+          {selected.length > 0 && (
+            <button onClick={() => onChange([])} className="w-full text-left px-2 py-1.5 text-[11px] text-red-400 hover:bg-secondary rounded">Clear selection</button>
+          )}
+          {options.map(o => (
+            <label key={o.id} className="flex items-center gap-2 px-2 py-1.5 text-xs hover:bg-secondary rounded cursor-pointer">
+              <input type="checkbox" checked={selected.includes(o.id)} onChange={() => toggle(o.id)} className="accent-purple-500" />
+              <span className="truncate">{o.name}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── URL (de)serialization ─────────────────────────────────────────────────────
+function parseFromParams(sp: URLSearchParams): { filters: Filters; sortKey: SortKey; sortDir: SortDir; pageSize: number } {
+  const g = (k: string) => sp.get(k) || ''
+  const arr = (k: string) => { const v = sp.get(k); return v ? v.split(',').filter(Boolean) : [] }
+  return {
+    filters: {
+      from: g('from'), to: g('to'), month: g('month'), year: g('year'),
+      clientIds: arr('clients'), serviceIds: arr('services'),
+      employeeId: g('emp'), statuses: arr('status'),
+      billingMin: g('bmin'), billingMax: g('bmax'),
+      profitMin: g('pmin'), profitMax: g('pmax'),
+      profitPctMin: g('ppmin'), profitPctMax: g('ppmax'),
+      earnMin: g('emin'), earnMax: g('emax'),
+    },
+    sortKey: (g('sort') || 'task_date') as SortKey,
+    sortDir: (g('dir') === 'asc' ? 'asc' : 'desc'),
+    pageSize: sp.get('size') !== null ? parseInt(sp.get('size')!, 10) : 100,
+  }
+}
+
+export default function ContributionAnalysisClient({ rows, employees, clients, services }: Props) {
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  const initial = useMemo(() => parseFromParams(new URLSearchParams(searchParams.toString())), []) // eslint-disable-line react-hooks/exhaustive-deps
+  const [filters, setFilters] = useState<Filters>(initial.filters)
+  const [sortKey, setSortKey] = useState<SortKey>(initial.sortKey)
+  const [sortDir, setSortDir] = useState<SortDir>(initial.sortDir)
+  const [pageSize, setPageSize] = useState<number>(initial.pageSize)
+  const [page, setPage] = useState(0)
+  const [showFilters, setShowFilters] = useState(false)
+  const [exporting, setExporting] = useState(false)
+
+  const columns = useMemo(() => buildColumns(employees), [employees])
+  const totalWidth = useMemo(() => columns.reduce((s, c) => s + c.width, 0), [columns])
+
+  // ── Sync state → URL ────────────────────────────────────────────────────────
+  useEffect(() => {
+    const p = new URLSearchParams()
+    const f = filters
+    if (f.from) p.set('from', f.from)
+    if (f.to) p.set('to', f.to)
+    if (f.month) p.set('month', f.month)
+    if (f.year) p.set('year', f.year)
+    if (f.clientIds.length) p.set('clients', f.clientIds.join(','))
+    if (f.serviceIds.length) p.set('services', f.serviceIds.join(','))
+    if (f.employeeId) p.set('emp', f.employeeId)
+    if (f.statuses.length) p.set('status', f.statuses.join(','))
+    if (f.billingMin) p.set('bmin', f.billingMin)
+    if (f.billingMax) p.set('bmax', f.billingMax)
+    if (f.profitMin) p.set('pmin', f.profitMin)
+    if (f.profitMax) p.set('pmax', f.profitMax)
+    if (f.profitPctMin) p.set('ppmin', f.profitPctMin)
+    if (f.profitPctMax) p.set('ppmax', f.profitPctMax)
+    if (f.earnMin) p.set('emin', f.earnMin)
+    if (f.earnMax) p.set('emax', f.earnMax)
+    if (sortKey !== 'task_date') p.set('sort', sortKey)
+    if (sortDir !== 'desc') p.set('dir', sortDir)
+    if (pageSize !== 100) p.set('size', String(pageSize))
+    const qs = p.toString()
+    if (qs !== searchParams.toString()) router.replace(`${pathname}${qs ? '?' + qs : ''}`, { scroll: false })
+  }, [filters, sortKey, sortDir, pageSize, pathname, router, searchParams])
+
+  // ── Pipeline: filter → sort ───────────────────────────────────────────────────
+  const filtered = useMemo(() => applyFilters(rows, filters), [rows, filters])
+  const sorted = useMemo(() => sortRows(filtered, sortKey, sortDir), [filtered, sortKey, sortDir])
+  const summary = useMemo(() => computeSummary(filtered), [filtered])
+
+  // Reset to first page whenever the result set changes shape.
+  useEffect(() => { setPage(0) }, [filters, sortKey, sortDir, pageSize])
+
+  const size = pageSize === 0 ? sorted.length : pageSize
+  const pageCount = Math.max(1, Math.ceil(sorted.length / Math.max(1, size)))
+  const safePage = Math.min(page, pageCount - 1)
+  const pageRows = useMemo(
+    () => (pageSize === 0 ? sorted : sorted.slice(safePage * size, safePage * size + size)),
+    [sorted, pageSize, safePage, size],
+  )
+
+  // ── Virtualized body ──────────────────────────────────────────────────────────
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [scrollTop, setScrollTop] = useState(0)
+  const [viewH, setViewH] = useState(560)
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setViewH(el.clientHeight))
+    ro.observe(el)
+    setViewH(el.clientHeight)
+    return () => ro.disconnect()
+  }, [])
+  const overscan = 8
+  const startIdx = Math.max(0, Math.floor(scrollTop / ROW_H) - overscan)
+  const endIdx = Math.min(pageRows.length, Math.ceil((scrollTop + viewH) / ROW_H) + overscan)
+  const visible = pageRows.slice(startIdx, endIdx)
+
+  const toggleSort = useCallback((key: SortKey) => {
+    if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
+    else { setSortKey(key); setSortDir('desc') }
+  }, [sortKey])
+
+  const activeFilterCount = useMemo(() => {
+    const f = filters
+    let n = 0
+    if (f.from || f.to || f.month || f.year) n++
+    if (f.clientIds.length) n++
+    if (f.serviceIds.length) n++
+    if (f.employeeId) n++
+    if (f.statuses.length) n++
+    if (f.billingMin || f.billingMax) n++
+    if (f.profitMin || f.profitMax) n++
+    if (f.profitPctMin || f.profitPctMax) n++
+    if (f.earnMin || f.earnMax) n++
+    return n
+  }, [filters])
+
+  // ── Exports (operate on the filtered+sorted set — matches the screen) ─────────
+  const exportCSV = useCallback(() => {
+    const csv = matrixToCSV(toMatrix(sorted, employees))
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `contribution-analysis-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }, [sorted, employees])
+
+  const exportXLSX = useCallback(async () => {
+    setExporting(true)
+    try {
+      const XLSX = await import('xlsx')
+      const ws = XLSX.utils.aoa_to_sheet(toMatrix(sorted, employees))
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'Contribution Analysis')
+      XLSX.writeFile(wb, `contribution-analysis-${new Date().toISOString().slice(0, 10)}.xlsx`)
+    } finally {
+      setExporting(false)
+    }
+  }, [sorted, employees])
+
+  const printView = useCallback(() => {
+    const matrix = toMatrix(sorted, employees)
+    const [head, ...body] = matrix
+    const w = window.open('', '_blank')
+    if (!w) return
+    const th = head.map(h => `<th>${h}</th>`).join('')
+    const trs = body.map(r => `<tr>${r.map((c, i) => `<td class="${i >= 6 ? 'num' : ''}">${c}</td>`).join('')}</tr>`).join('')
+    w.document.write(`<html><head><title>Contribution Analysis</title><style>
+      body{font-family:system-ui,sans-serif;padding:16px;color:#111}
+      h1{font-size:16px;margin:0 0 4px} p{color:#666;font-size:11px;margin:0 0 12px}
+      table{border-collapse:collapse;width:100%;font-size:10px}
+      th,td{border:1px solid #ddd;padding:3px 6px;text-align:left;white-space:nowrap}
+      th{background:#f3f4f6} td.num{text-align:right} tr:nth-child(even){background:#fafafa}
+    </style></head><body>
+      <h1>Contribution Analysis Report</h1>
+      <p>${sorted.length} tasks · generated ${new Date().toLocaleString('en-IN')}</p>
+      <table><thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table>
+    </body></html>`)
+    w.document.close()
+    w.focus()
+    setTimeout(() => w.print(), 250)
+  }, [sorted, employees])
+
+  const gridTemplate = columns.map(c => `${c.width}px`).join(' ')
+
+  // ── Render ────────────────────────────────────────────────────────────────────
+  return (
+    <div className="flex flex-col h-full">
+      <Header title="Contribution Analysis" subtitle="Per-task profitability, earnings & employee contribution breakdown" />
+
+      <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4">
+        {/* Summary cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
+          {[
+            { label: 'Total Tasks', value: fmt(summary.totalTasks, 0) },
+            { label: 'Total Billing', value: inr(summary.totalBilling) },
+            { label: 'Commission Pool', value: inr(summary.totalPool) },
+            { label: 'Employee Earnings', value: inr(summary.totalEarnings) },
+            { label: 'Company Profit', value: inr(summary.totalProfit), accent: summary.totalProfit < 0 ? 'text-red-400' : 'text-emerald-400' },
+            { label: 'Avg Profit %', value: pct(summary.avgProfitPct), accent: summary.avgProfitPct < 0 ? 'text-red-400' : 'text-emerald-400' },
+            { label: 'Avg Contribution %', value: pct(summary.avgContributionPct) },
+          ].map(c => (
+            <div key={c.label} className="bg-card border border-border rounded-xl p-3">
+              <div className="text-[11px] text-muted-foreground mb-1 truncate">{c.label}</div>
+              <div className={`text-lg font-semibold tabular-nums ${(c as any).accent || ''}`}>{c.value}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Toolbar */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setShowFilters(s => !s)}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+              showFilters || activeFilterCount ? 'gradient-bg text-white border-transparent' : 'bg-card border-border text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <SlidersHorizontal className="w-4 h-4" />
+            Filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
+          </button>
+          {activeFilterCount > 0 && (
+            <button onClick={() => setFilters(EMPTY_FILTERS)} className="flex items-center gap-1 px-2.5 py-2 rounded-lg text-sm text-red-400 hover:bg-secondary">
+              <X className="w-3.5 h-3.5" /> Clear
+            </button>
+          )}
+          <div className="text-sm text-muted-foreground ml-1">
+            <span className="font-semibold text-foreground">{fmt(sorted.length, 0)}</span> of {fmt(rows.length, 0)} tasks
+          </div>
+
+          <div className="ml-auto flex items-center gap-2">
+            <button onClick={exportCSV} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm bg-card border border-border text-muted-foreground hover:text-foreground" title="Export CSV">
+              <Download className="w-4 h-4" /> CSV
+            </button>
+            <button onClick={exportXLSX} disabled={exporting} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm bg-card border border-border text-muted-foreground hover:text-foreground disabled:opacity-50" title="Export Excel">
+              <FileSpreadsheet className="w-4 h-4" /> {exporting ? '…' : 'Excel'}
+            </button>
+            <button onClick={printView} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm bg-card border border-border text-muted-foreground hover:text-foreground" title="Print">
+              <Printer className="w-4 h-4" /> Print
+            </button>
+          </div>
+        </div>
+
+        {/* Filter panel */}
+        {showFilters && (
+          <div className="bg-card border border-border rounded-xl p-4 space-y-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">From date</label>
+                <input type="date" value={filters.from} onChange={e => setFilters(f => ({ ...f, from: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs" />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">To date</label>
+                <input type="date" value={filters.to} onChange={e => setFilters(f => ({ ...f, to: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs" />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Month</label>
+                <select value={filters.month} onChange={e => setFilters(f => ({ ...f, month: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs">
+                  <option value="">Any</option>
+                  {MONTHS.map((m, i) => <option key={m} value={String(i + 1)}>{m}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Year</label>
+                <input type="number" placeholder="Any" value={filters.year} onChange={e => setFilters(f => ({ ...f, year: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs" />
+              </div>
+              <MultiSelect label="Clients" options={clients} selected={filters.clientIds} onChange={ids => setFilters(f => ({ ...f, clientIds: ids }))} />
+              <MultiSelect label="Services" options={services} selected={filters.serviceIds} onChange={ids => setFilters(f => ({ ...f, serviceIds: ids }))} />
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Has contributor</label>
+                <select value={filters.employeeId} onChange={e => setFilters(f => ({ ...f, employeeId: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs">
+                  <option value="">Any employee</option>
+                  {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                </select>
+              </div>
+              <MultiSelect label="Status" options={STATUSES.map(s => ({ id: s, name: s }))} selected={filters.statuses} onChange={ids => setFilters(f => ({ ...f, statuses: ids }))} />
+            </div>
+
+            {/* Numeric ranges */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-1 border-t border-border">
+              {([
+                ['Billing ₹', 'billingMin', 'billingMax'],
+                ['Profit ₹', 'profitMin', 'profitMax'],
+                ['Profit %', 'profitPctMin', 'profitPctMax'],
+                ['Emp Earnings ₹', 'earnMin', 'earnMax'],
+              ] as const).map(([label, minK, maxK]) => (
+                <div key={label}>
+                  <label className="block text-[11px] font-medium text-muted-foreground mb-1 mt-2">{label} range</label>
+                  <div className="flex items-center gap-1">
+                    <input type="number" placeholder="min" value={filters[minK]} onChange={e => setFilters(f => ({ ...f, [minK]: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-2 py-1.5 text-xs" />
+                    <span className="text-muted-foreground text-xs">–</span>
+                    <input type="number" placeholder="max" value={filters[maxK]} onChange={e => setFilters(f => ({ ...f, [maxK]: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-2 py-1.5 text-xs" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Spreadsheet table */}
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div ref={scrollRef} onScroll={e => setScrollTop((e.target as HTMLDivElement).scrollTop)} className="overflow-auto" style={{ maxHeight: '62vh' }}>
+            <div style={{ width: totalWidth, minWidth: '100%' }}>
+              {/* Header */}
+              <div className="sticky top-0 z-20 grid bg-secondary border-b border-border" style={{ gridTemplateColumns: gridTemplate }}>
+                {columns.map((c, ci) => {
+                  const active = sortKey === c.key
+                  return (
+                    <button
+                      key={c.key} onClick={() => toggleSort(c.key)}
+                      className={`flex items-center gap-0.5 px-2 py-2 text-[11px] font-semibold whitespace-nowrap hover:bg-secondary/70 ${
+                        c.align === 'right' ? 'justify-end' : c.align === 'center' ? 'justify-center' : 'justify-start'
+                      } ${active ? 'text-purple-400' : 'text-muted-foreground'} ${c.sticky ? 'sticky left-0 z-30 bg-secondary' : ''} ${ci >= 15 ? 'text-sky-400/80' : ''}`}
+                    >
+                      <span className="truncate">{c.label}</span>
+                      {active && (sortDir === 'asc' ? <ArrowUp className="w-3 h-3 shrink-0" /> : <ArrowDown className="w-3 h-3 shrink-0" />)}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Virtualized body */}
+              {pageRows.length === 0 ? (
+                <div className="p-10 text-center text-sm text-muted-foreground">No tasks match the current filters.</div>
+              ) : (
+                <div style={{ height: pageRows.length * ROW_H, position: 'relative' }}>
+                  {visible.map((r, i) => {
+                    const idx = startIdx + i
+                    return (
+                      <div
+                        key={r.task_id}
+                        className={`grid absolute left-0 right-0 border-b border-border/50 hover:bg-secondary/40 ${idx % 2 ? 'bg-secondary/10' : ''}`}
+                        style={{ top: idx * ROW_H, height: ROW_H, gridTemplateColumns: gridTemplate }}
+                      >
+                        {columns.map(c => (
+                          <div
+                            key={c.key}
+                            className={`px-2 flex items-center text-xs whitespace-nowrap overflow-hidden tabular-nums ${
+                              c.align === 'right' ? 'justify-end' : c.align === 'center' ? 'justify-center' : 'justify-start'
+                            } ${c.sticky ? `sticky left-0 z-10 ${idx % 2 ? 'bg-card' : 'bg-card'}` : ''} ${c.cls ? c.cls(r) : ''}`}
+                          >
+                            <span className="truncate">{c.render(r)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Pagination footer */}
+          <div className="flex items-center justify-between gap-3 px-3 py-2 border-t border-border text-xs">
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">Rows per page</span>
+              <select value={pageSize} onChange={e => setPageSize(parseInt(e.target.value, 10))} className="bg-secondary border border-border rounded-lg px-2 py-1">
+                {PAGE_SIZES.map(s => <option key={s} value={s}>{s === 0 ? 'All' : s}</option>)}
+              </select>
+            </div>
+            {pageSize !== 0 && (
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">Page {safePage + 1} of {pageCount}</span>
+                <button disabled={safePage === 0} onClick={() => setPage(p => Math.max(0, p - 1))} className="p-1 rounded border border-border disabled:opacity-40 hover:bg-secondary"><ChevronLeft className="w-4 h-4" /></button>
+                <button disabled={safePage >= pageCount - 1} onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} className="p-1 rounded border border-border disabled:opacity-40 hover:bg-secondary"><ChevronRight className="w-4 h-4" /></button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

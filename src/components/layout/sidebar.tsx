@@ -15,6 +15,7 @@ import {
   BookOpen,
   Wallet,
   BarChart3,
+  Sheet,
   Settings,
   LogOut,
   ChevronRight,
@@ -134,6 +135,9 @@ const navSections: NavSection[] = [
       // Reports is gated by reports.view — admins always have it; non-admins
       // see the tab only when their designation grants it in Settings → Designations.
       { label: 'Reports', href: '/dashboard/reports', icon: BarChart3, requiredPerm: 'reports.view' },
+      // Contribution Analysis: spreadsheet-style per-task profitability / earnings
+      // BI report. Same reports.view gate. Lives under Insights, NOT Settings.
+      { label: 'Contribution Analysis', href: '/dashboard/reports/contribution-analysis', icon: Sheet, requiredPerm: 'reports.view' },
     ],
   },
   {
