@@ -344,9 +344,20 @@ export function computeSummary(rows: AnalysisRow[]): Summary {
 
 // ─── Export (flat matrix shared by CSV + XLSX) ────────────────────────────────
 
-/** Header labels + 2-D data matrix, employee columns expanded. Filters/sort
- *  are already applied by the caller, so export always matches the screen. */
-export function toMatrix(rows: AnalysisRow[], employees: EmployeeColumn[]): (string | number)[][] {
+/** Column index of each numeric metric in the export matrix — lets callers
+ *  (e.g. group subtotal rows) place values under the right header. */
+export const MATRIX_COL = {
+  label: 0, billing_inr: 7, commission_pool: 9, total_earnings: 10,
+  company_received: 11, exp_profit: 12, exp_profit_pct: 13, actual_received: 14,
+  fx_gain_loss: 15, actual_profit: 16, actual_profit_pct: 17, contributors: 18,
+} as const
+
+/** Fixed (non-employee) column count in the export matrix. Each employee adds 3. */
+export const MATRIX_FIXED_COLS = 19
+
+const blankNum = (n: number | null) => (n === null ? '' : n)
+
+export function matrixHeader(employees: EmployeeColumn[]): string[] {
   const header: string[] = [
     'Task Number', 'Task Date', 'Client', 'Service', 'Status',
     'Currency', 'Billing Amount', 'Billing Amount (INR, Locked)', 'Commission %',
@@ -358,25 +369,29 @@ export function toMatrix(rows: AnalysisRow[], employees: EmployeeColumn[]): (str
   for (const e of employees) {
     header.push(`${e.name} Contribution %`, `${e.name} Earnings ₹`, `${e.name} Earnings % of Billing`)
   }
+  return header
+}
 
-  const blank = (n: number | null) => (n === null ? '' : n)
-  const matrix: (string | number)[][] = [header]
-  for (const r of rows) {
-    const line: (string | number)[] = [
-      r.task_number ?? '', r.task_date, r.client_name, r.service_name, r.status,
-      r.currency, r.billing, r.billing_inr, r.commission_pct,
-      r.commission_pool, r.total_earnings,
-      r.company_received, r.profit, r.profit_pct,
-      blank(r.actual_received), blank(r.fx_gain_loss), blank(r.actual_profit), blank(r.actual_profit_pct),
-      r.contributors,
-    ]
-    for (const e of employees) {
-      const cell = r.emp[e.id]
-      line.push(cell?.pct ?? 0, cell?.earn ?? 0, empShare(r, e.id))
-    }
-    matrix.push(line)
+export function rowToLine(r: AnalysisRow, employees: EmployeeColumn[]): (string | number)[] {
+  const line: (string | number)[] = [
+    r.task_number ?? '', r.task_date, r.client_name, r.service_name, r.status,
+    r.currency, r.billing, r.billing_inr, r.commission_pct,
+    r.commission_pool, r.total_earnings,
+    r.company_received, r.profit, r.profit_pct,
+    blankNum(r.actual_received), blankNum(r.fx_gain_loss), blankNum(r.actual_profit), blankNum(r.actual_profit_pct),
+    r.contributors,
+  ]
+  for (const e of employees) {
+    const cell = r.emp[e.id]
+    line.push(cell?.pct ?? 0, cell?.earn ?? 0, empShare(r, e.id))
   }
-  return matrix
+  return line
+}
+
+/** Header labels + 2-D data matrix, employee columns expanded. Filters/sort
+ *  are already applied by the caller, so export always matches the screen. */
+export function toMatrix(rows: AnalysisRow[], employees: EmployeeColumn[]): (string | number)[][] {
+  return [matrixHeader(employees), ...rows.map(r => rowToLine(r, employees))]
 }
 
 export function matrixToCSV(matrix: (string | number)[][]): string {
@@ -385,4 +400,116 @@ export function matrixToCSV(matrix: (string | number)[][]): string {
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
   }
   return matrix.map(row => row.map(esc).join(',')).join('\n')
+}
+
+// ─── Grouping (subtotaled views) ──────────────────────────────────────────────
+
+export type GroupKey = 'none' | 'client' | 'service' | 'status' | 'month' | 'year'
+
+export const GROUP_OPTIONS: { value: GroupKey; label: string }[] = [
+  { value: 'none', label: 'No grouping' },
+  { value: 'client', label: 'Client' },
+  { value: 'service', label: 'Service' },
+  { value: 'status', label: 'Status' },
+  { value: 'month', label: 'Month' },
+  { value: 'year', label: 'Year' },
+]
+
+export interface RowGroup {
+  /** stable identity within the chosen grouping dimension */
+  key: string
+  /** human label for the group header */
+  label: string
+  rows: AnalysisRow[]
+  /** subtotals over this group's rows (reuses the Summary shape) */
+  summary: Summary
+  /** Σ stored earnings_inr per employee within the group (for emp sub-columns) */
+  empEarn: Record<string, number>
+}
+
+const MON_SHORT = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** [stableKey, displayLabel] for a row under the chosen grouping dimension. */
+function groupBucket(r: AnalysisRow, key: GroupKey): [string, string] {
+  switch (key) {
+    case 'client':  return [r.client_id || '∅', r.client_name || '—']
+    case 'service': return [r.service_id || '∅', r.service_name || '—']
+    case 'status':  return [r.status || '∅', r.status || '—']
+    case 'month': {
+      const ym = (r.task_date || '').slice(0, 7)          // YYYY-MM
+      if (!ym) return ['∅', '—']
+      const mm = parseInt(ym.slice(5, 7), 10)
+      return [ym, `${MON_SHORT[mm] || '??'} ${ym.slice(0, 4)}`]
+    }
+    case 'year': {
+      const y = (r.task_date || '').slice(0, 4)
+      return [y || '∅', y || '—']
+    }
+    default: return ['', '']
+  }
+}
+
+/**
+ * Partition already-filtered+sorted rows into ordered groups. Groups appear in
+ * first-appearance order, so group order follows the caller's active sort. Each
+ * group carries its own subtotals. `key === 'none'` returns [].
+ */
+export function groupRows(rows: AnalysisRow[], key: GroupKey): RowGroup[] {
+  if (key === 'none') return []
+  const order: string[] = []
+  const buckets = new Map<string, AnalysisRow[]>()
+  const labels = new Map<string, string>()
+  for (const r of rows) {
+    const [k, label] = groupBucket(r, key)
+    let arr = buckets.get(k)
+    if (!arr) { arr = []; buckets.set(k, arr); labels.set(k, label); order.push(k) }
+    arr.push(r)
+  }
+  return order.map(k => {
+    const groupRowsArr = buckets.get(k)!
+    const empEarn: Record<string, number> = {}
+    for (const r of groupRowsArr) {
+      for (const id in r.emp) empEarn[id] = r2((empEarn[id] || 0) + r.emp[id].earn)
+    }
+    return { key: k, label: labels.get(k)!, rows: groupRowsArr, summary: computeSummary(groupRowsArr), empEarn }
+  })
+}
+
+/** A subtotal matrix line for one group — values placed under the right columns
+ *  via MATRIX_COL. Width matches matrixHeader(employees). */
+export function subtotalLine(g: RowGroup, employees: EmployeeColumn[]): (string | number)[] {
+  const width = MATRIX_FIXED_COLS + employees.length * 3
+  const line: (string | number)[] = new Array(width).fill('')
+  const s = g.summary
+  line[MATRIX_COL.label] = `Subtotal — ${g.label} (${s.totalTasks})`
+  line[MATRIX_COL.billing_inr] = s.totalBilling
+  line[MATRIX_COL.company_received] = s.totalBilling
+  line[MATRIX_COL.commission_pool] = s.totalPool
+  line[MATRIX_COL.total_earnings] = s.totalEarnings
+  line[MATRIX_COL.exp_profit] = s.totalProfit
+  line[MATRIX_COL.exp_profit_pct] = s.avgProfitPct
+  if (s.actualTasks > 0) {
+    line[MATRIX_COL.actual_received] = s.totalActualReceived
+    line[MATRIX_COL.fx_gain_loss] = s.totalFxGainLoss
+    line[MATRIX_COL.actual_profit] = s.totalActualProfit
+    line[MATRIX_COL.actual_profit_pct] = s.totalActualReceived > 0 ? r2(s.totalActualProfit / s.totalActualReceived * 100) : 0
+  }
+  // employee earnings sub-column (pct / share are left blank for a subtotal)
+  employees.forEach((e, i) => { line[MATRIX_FIXED_COLS + i * 3 + 1] = g.empEarn[e.id] ?? 0 })
+  return line
+}
+
+/** Grouped export matrix: header, then per group a banner row, its data rows,
+ *  and a subtotal row. Column shape matches toMatrix so CSV/XLSX stay aligned. */
+export function toMatrixGrouped(groups: RowGroup[], employees: EmployeeColumn[]): (string | number)[][] {
+  const header = matrixHeader(employees)
+  const matrix: (string | number)[][] = [header]
+  for (const g of groups) {
+    const banner: (string | number)[] = new Array(header.length).fill('')
+    banner[0] = `▸ ${g.label}`
+    matrix.push(banner)
+    for (const r of g.rows) matrix.push(rowToLine(r, employees))
+    matrix.push(subtotalLine(g, employees))
+  }
+  return matrix
 }

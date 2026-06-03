@@ -5,13 +5,14 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
 import { usePrivacy } from '@/contexts/privacy-context'
 import {
-  applyFilters, sortRows, computeSummary, toMatrix, matrixToCSV, empShare,
+  applyFilters, sortRows, computeSummary, toMatrix, toMatrixGrouped, matrixToCSV, empShare,
+  groupRows, GROUP_OPTIONS,
   EMPTY_FILTERS, type Filters, type AnalysisRow, type EmployeeColumn,
-  type SortKey, type SortDir,
+  type SortKey, type SortDir, type GroupKey, type RowGroup, type Summary,
 } from '@/lib/reports/contribution-analysis'
 import {
   Download, Printer, FileSpreadsheet, SlidersHorizontal, X, ArrowUp, ArrowDown,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, ChevronDown, Layers,
 } from 'lucide-react'
 
 interface Props {
@@ -24,7 +25,28 @@ interface Props {
 const STATUSES = ['pending', 'in_progress', 'done', 'delivered', 'invoiced', 'paid', 'cancelled']
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const ROW_H = 38
+const GROUP_H = 40   // group header banner height
+const SUB_H = 34     // group subtotal row height
 const PAGE_SIZES = [50, 100, 250, 1000, 0] // 0 = All
+
+// Largest index i with offsets[i] <= y (binary search; offsets is monotonic).
+function idxAtOffset(offsets: number[], y: number): number {
+  let lo = 0, hi = offsets.length - 1
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if (offsets[mid] <= y) lo = mid
+    else hi = mid - 1
+  }
+  return lo
+}
+
+// Color class for the colored subtotal metrics (profit / actual profit / FX).
+function subColor(key: string, s: Summary): string {
+  if (key === 'profit') return s.totalProfit < 0 ? 'text-red-400' : 'text-emerald-400'
+  if (key === 'actual_profit') return s.actualTasks ? (s.totalActualProfit < 0 ? 'text-red-400' : 'text-emerald-400') : ''
+  if (key === 'fx_gain_loss') return s.actualTasks ? (s.totalFxGainLoss < 0 ? 'text-red-400' : s.totalFxGainLoss > 0 ? 'text-emerald-400' : '') : ''
+  return ''
+}
 
 const fmt = (n: number, dp = 2) =>
   n.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: dp })
@@ -46,6 +68,13 @@ interface Col {
   render: (r: AnalysisRow) => React.ReactNode
   cls?: (r: AnalysisRow) => string
 }
+
+// A flat, virtualizable list item. Group headers / subtotals interleave with
+// data rows; each carries its own pixel height so the body can be variable-height.
+type DisplayItem =
+  | { kind: 'data'; h: number; row: AnalysisRow; z: number }
+  | { kind: 'group'; h: number; group: RowGroup }
+  | { kind: 'subtotal'; h: number; group: RowGroup }
 
 function buildColumns(employees: EmployeeColumn[], dp: number): Col[] {
   const fixed: Col[] = [
@@ -156,7 +185,7 @@ function MultiSelect({ label, options, selected, onChange }: {
 const ALL_GROUPS: ColGroup[] = ['billing', 'profit', 'employees']
 const GROUP_LABELS: Record<string, string> = { billing: 'Billing', profit: 'Profit & FX', employees: 'Employees' }
 
-function parseFromParams(sp: URLSearchParams): { filters: Filters; sortKey: SortKey; sortDir: SortDir; pageSize: number; decimals: boolean; groups: ColGroup[] } {
+function parseFromParams(sp: URLSearchParams): { filters: Filters; sortKey: SortKey; sortDir: SortDir; pageSize: number; decimals: boolean; groups: ColGroup[]; groupKey: GroupKey } {
   const g = (k: string) => sp.get(k) || ''
   const arr = (k: string) => { const v = sp.get(k); return v ? v.split(',').filter(Boolean) : [] }
   const rawGroups = arr('cols').filter((x): x is ColGroup => (ALL_GROUPS as string[]).includes(x))
@@ -176,6 +205,7 @@ function parseFromParams(sp: URLSearchParams): { filters: Filters; sortKey: Sort
     decimals: sp.get('dec') === '1',
     // `cols` present ⇒ exactly those groups; absent ⇒ all groups on.
     groups: sp.get('cols') !== null ? rawGroups : [...ALL_GROUPS],
+    groupKey: (['client', 'service', 'status', 'month', 'year'] as string[]).includes(g('grp')) ? (g('grp') as GroupKey) : 'none',
   }
 }
 
@@ -196,6 +226,8 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   const [decimals, setDecimals] = useState(initial.decimals)
   const [groups, setGroups] = useState<ColGroup[]>(initial.groups)
   const groupSet = useMemo(() => new Set(groups), [groups])
+  const [groupKey, setGroupKey] = useState<GroupKey>(initial.groupKey)
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
 
   // Privacy lock: real names only when unlocked, else CQID (shared dn()).
   // When the report is filtered to one employee, narrow the columns to JUST
@@ -243,14 +275,20 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     if (decimals) p.set('dec', '1')
     // Only serialise `cols` when not all groups are on (keeps URLs clean).
     if (groups.length !== ALL_GROUPS.length) p.set('cols', [...groups].sort().join(','))
+    if (groupKey !== 'none') p.set('grp', groupKey)
     const qs = p.toString()
     if (qs !== searchParams.toString()) router.replace(`${pathname}${qs ? '?' + qs : ''}`, { scroll: false })
-  }, [filters, sortKey, sortDir, pageSize, decimals, groups, pathname, router, searchParams])
+  }, [filters, sortKey, sortDir, pageSize, decimals, groups, groupKey, pathname, router, searchParams])
 
   // ── Pipeline: filter → sort ───────────────────────────────────────────────────
   const filtered = useMemo(() => applyFilters(rows, filters), [rows, filters])
   const sorted = useMemo(() => sortRows(filtered, sortKey, sortDir), [filtered, sortKey, sortDir])
   const summary = useMemo(() => computeSummary(filtered), [filtered])
+  // Grouped view: partition the full sorted set (pagination is bypassed when grouping).
+  const grouped = useMemo(
+    () => (groupKey === 'none' ? [] : groupRows(sorted, groupKey)),
+    [sorted, groupKey],
+  )
 
   // Reset to first page whenever the result set changes shape.
   useEffect(() => { setPage(0) }, [filters, sortKey, sortDir, pageSize])
@@ -275,15 +313,46 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     setViewH(el.clientHeight)
     return () => ro.disconnect()
   }, [])
-  const overscan = 8
-  const startIdx = Math.max(0, Math.floor(scrollTop / ROW_H) - overscan)
-  const endIdx = Math.min(pageRows.length, Math.ceil((scrollTop + viewH) / ROW_H) + overscan)
-  const visible = pageRows.slice(startIdx, endIdx)
+  // Flatten the (paged or grouped) result set into a variable-height list.
+  const items = useMemo<DisplayItem[]>(() => {
+    if (groupKey === 'none') return pageRows.map((row, z) => ({ kind: 'data', h: ROW_H, row, z }))
+    const out: DisplayItem[] = []
+    let z = 0
+    for (const g of grouped) {
+      out.push({ kind: 'group', h: GROUP_H, group: g })
+      if (!collapsed.has(g.key)) for (const row of g.rows) out.push({ kind: 'data', h: ROW_H, row, z: z++ })
+      out.push({ kind: 'subtotal', h: SUB_H, group: g })
+    }
+    return out
+  }, [groupKey, pageRows, grouped, collapsed])
+
+  // Prefix-sum of item heights → O(log n) viewport slicing for variable heights.
+  const offsets = useMemo(() => {
+    const o = new Array<number>(items.length + 1)
+    o[0] = 0
+    for (let i = 0; i < items.length; i++) o[i + 1] = o[i] + items[i].h
+    return o
+  }, [items])
+  const totalH = items.length ? offsets[items.length] : 0
+  const overscanPx = 240
+  const startIdx = idxAtOffset(offsets, Math.max(0, scrollTop - overscanPx))
+  const endIdx = Math.min(items.length, idxAtOffset(offsets, scrollTop + viewH + overscanPx) + 1)
+  const visible = items.slice(startIdx, endIdx)
 
   const toggleSort = useCallback((key: SortKey) => {
     if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
     else { setSortKey(key); setSortDir('desc') }
   }, [sortKey])
+
+  const toggleCollapse = useCallback((k: string) => {
+    setCollapsed(prev => {
+      const n = new Set(prev)
+      if (n.has(k)) n.delete(k); else n.add(k)
+      return n
+    })
+  }, [])
+  const collapseAll = useCallback(() => setCollapsed(new Set(grouped.map(g => g.key))), [grouped])
+  const expandAll = useCallback(() => setCollapsed(new Set()), [])
 
   const activeFilterCount = useMemo(() => {
     const f = filters
@@ -301,31 +370,37 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   }, [filters])
 
   // ── Exports (operate on the filtered+sorted set — matches the screen) ─────────
+  // Export matches the screen: grouped (with subtotal rows) when grouping is on.
+  const buildExportMatrix = useCallback(
+    () => (groupKey === 'none' ? toMatrix(sorted, displayEmployees) : toMatrixGrouped(grouped, displayEmployees)),
+    [groupKey, sorted, grouped, displayEmployees],
+  )
+
   const exportCSV = useCallback(() => {
-    const csv = matrixToCSV(toMatrix(sorted, displayEmployees))
+    const csv = matrixToCSV(buildExportMatrix())
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
     a.download = `contribution-analysis-${new Date().toISOString().slice(0, 10)}.csv`
     a.click()
     URL.revokeObjectURL(a.href)
-  }, [sorted, employees])
+  }, [buildExportMatrix])
 
   const exportXLSX = useCallback(async () => {
     setExporting(true)
     try {
       const XLSX = await import('xlsx')
-      const ws = XLSX.utils.aoa_to_sheet(toMatrix(sorted, displayEmployees))
+      const ws = XLSX.utils.aoa_to_sheet(buildExportMatrix())
       const wb = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(wb, ws, 'Contribution Analysis')
       XLSX.writeFile(wb, `contribution-analysis-${new Date().toISOString().slice(0, 10)}.xlsx`)
     } finally {
       setExporting(false)
     }
-  }, [sorted, employees])
+  }, [buildExportMatrix])
 
   const printView = useCallback(() => {
-    const matrix = toMatrix(sorted, displayEmployees)
+    const matrix = buildExportMatrix()
     const [head, ...body] = matrix
     const w = window.open('', '_blank')
     if (!w) return
@@ -345,7 +420,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     w.document.close()
     w.focus()
     setTimeout(() => w.print(), 250)
-  }, [sorted, employees])
+  }, [buildExportMatrix, sorted])
 
   const gridTemplate = columns.map(c => `${c.width}px`).join(' ')
   // Fixed (non-employee) columns come first; each visible employee owns 3.
@@ -355,6 +430,30 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     () => (groupSet.has('employees') ? displayEmployees : []),
     [groupSet, displayEmployees],
   )
+
+  // Value shown in a subtotal cell under each visible column.
+  const dp = decimals ? 2 : 0
+  const subtotalCell = (c: Col, g: RowGroup): React.ReactNode => {
+    const s = g.summary
+    switch (c.key) {
+      case 'task_number': return 'Σ'
+      case 'task_date': return `${fmt(s.totalTasks, 0)} tasks`
+      case 'billing_inr': return inr(s.totalBilling, dp)
+      case 'company_received': return inr(s.totalBilling, dp)
+      case 'commission_pool': return inr(s.totalPool, dp)
+      case 'total_earnings': return inr(s.totalEarnings, dp)
+      case 'profit': return inr(s.totalProfit, dp)
+      case 'profit_pct': return pct(s.avgProfitPct)
+      case 'actual_received': return s.actualTasks ? inr(s.totalActualReceived, dp) : '—'
+      case 'fx_gain_loss': return s.actualTasks ? inr(s.totalFxGainLoss, dp) : '—'
+      case 'actual_profit': return s.actualTasks ? inr(s.totalActualProfit, dp) : '—'
+      case 'actual_profit_pct':
+        return s.actualTasks && s.totalActualReceived ? pct(s.totalActualProfit / s.totalActualReceived * 100) : '—'
+      default:
+        if (c.empId && c.key.endsWith(':earn')) return inr(g.empEarn[c.empId] ?? 0, dp)
+        return ''
+    }
+  }
 
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
@@ -421,6 +520,25 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
                 </button>
               )
             })}
+          </div>
+
+          {/* Group by — partition rows into collapsible, subtotaled sections */}
+          <div className="flex items-center gap-1 ml-1 pl-2 border-l border-border">
+            <Layers className="w-3.5 h-3.5 text-muted-foreground" />
+            <span className="text-[11px] text-muted-foreground">Group:</span>
+            <select
+              value={groupKey}
+              onChange={e => { setGroupKey(e.target.value as GroupKey); setCollapsed(new Set()) }}
+              className="bg-secondary border border-border rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-purple-500"
+            >
+              {GROUP_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            {groupKey !== 'none' && (
+              <>
+                <button onClick={collapseAll} title="Collapse all groups" className="px-1.5 py-1 rounded-md text-[11px] leading-none border border-border text-muted-foreground hover:text-foreground">−</button>
+                <button onClick={expandAll} title="Expand all groups" className="px-1.5 py-1 rounded-md text-[11px] leading-none border border-border text-muted-foreground hover:text-foreground">+</button>
+              </>
+            )}
           </div>
 
           <div className="ml-auto flex items-center gap-2">
@@ -555,18 +673,68 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
                 })}
               </div>
 
-              {/* Virtualized body */}
-              {pageRows.length === 0 ? (
+              {/* Virtualized body (data rows + optional group headers / subtotals) */}
+              {sorted.length === 0 ? (
                 <div className="p-10 text-center text-sm text-muted-foreground">No tasks match the current filters.</div>
               ) : (
-                <div style={{ height: pageRows.length * ROW_H, position: 'relative' }}>
-                  {visible.map((r, i) => {
-                    const idx = startIdx + i
+                <div style={{ height: totalH, position: 'relative' }}>
+                  {visible.map((it, k) => {
+                    const i = startIdx + k
+                    const topPx = offsets[i]
+
+                    if (it.kind === 'group') {
+                      const isCollapsed = collapsed.has(it.group.key)
+                      return (
+                        <div
+                          key={`g:${it.group.key}`}
+                          className="absolute left-0 right-0 flex items-stretch bg-secondary/50 border-y border-border"
+                          style={{ top: topPx, height: it.h }}
+                        >
+                          <button
+                            onClick={() => toggleCollapse(it.group.key)}
+                            className="sticky left-0 z-10 flex items-center gap-1.5 px-3 bg-secondary/50 hover:bg-secondary/80 text-left"
+                            style={{ height: it.h }}
+                          >
+                            <ChevronDown className={`w-3.5 h-3.5 shrink-0 text-muted-foreground transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
+                            <Layers className="w-3.5 h-3.5 shrink-0 text-purple-400" />
+                            <span className="text-xs font-semibold truncate">{it.group.label}</span>
+                            <span className="text-[11px] text-muted-foreground">({fmt(it.group.summary.totalTasks, 0)})</span>
+                          </button>
+                        </div>
+                      )
+                    }
+
+                    if (it.kind === 'subtotal') {
+                      return (
+                        <div
+                          key={`s:${it.group.key}`}
+                          className="absolute left-0 right-0 grid bg-secondary/20 border-b border-border"
+                          style={{ top: topPx, height: it.h, gridTemplateColumns: gridTemplate }}
+                        >
+                          {columns.map((c, ci) => {
+                            const groupStart = ci >= fixedCount && (ci - fixedCount) % 3 === 0
+                            return (
+                              <div
+                                key={c.key}
+                                className={`px-2 flex items-center text-[11px] font-semibold whitespace-nowrap overflow-hidden tabular-nums ${
+                                  c.align === 'right' ? 'justify-end' : c.align === 'center' ? 'justify-center' : 'justify-start'
+                                } ${c.sticky ? 'sticky left-0 z-10 bg-card' : ''} ${groupStart ? 'border-l border-border/60' : ''} ${subColor(c.key, it.group.summary)}`}
+                              >
+                                <span className="truncate">{subtotalCell(c, it.group)}</span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )
+                    }
+
+                    // data row
+                    const r = it.row
                     return (
                       <div
                         key={r.task_id}
-                        className={`grid absolute left-0 right-0 border-b border-border/50 hover:bg-secondary/40 ${idx % 2 ? 'bg-secondary/10' : ''}`}
-                        style={{ top: idx * ROW_H, height: ROW_H, gridTemplateColumns: gridTemplate }}
+                        className={`grid absolute left-0 right-0 border-b border-border/50 hover:bg-secondary/40 ${it.z % 2 ? 'bg-secondary/10' : ''}`}
+                        style={{ top: topPx, height: ROW_H, gridTemplateColumns: gridTemplate }}
                       >
                         {columns.map((c, ci) => {
                           // Left border at the start of each employee's 3-col group.
@@ -590,19 +758,32 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
             </div>
           </div>
 
-          {/* Pagination footer */}
+          {/* Footer — pagination is bypassed while grouping (all groups shown) */}
           <div className="flex items-center justify-between gap-3 px-3 py-2 border-t border-border text-xs">
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">Rows per page</span>
-              <select value={pageSize} onChange={e => setPageSize(parseInt(e.target.value, 10))} className="bg-secondary border border-border rounded-lg px-2 py-1">
-                {PAGE_SIZES.map(s => <option key={s} value={s}>{s === 0 ? 'All' : s}</option>)}
-              </select>
-            </div>
-            {pageSize !== 0 && (
-              <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">Page {safePage + 1} of {pageCount}</span>
-                <button disabled={safePage === 0} onClick={() => setPage(p => Math.max(0, p - 1))} className="p-1 rounded border border-border disabled:opacity-40 hover:bg-secondary"><ChevronLeft className="w-4 h-4" /></button>
-                <button disabled={safePage >= pageCount - 1} onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} className="p-1 rounded border border-border disabled:opacity-40 hover:bg-secondary"><ChevronRight className="w-4 h-4" /></button>
+            {groupKey === 'none' ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground">Rows per page</span>
+                  <select value={pageSize} onChange={e => setPageSize(parseInt(e.target.value, 10))} className="bg-secondary border border-border rounded-lg px-2 py-1">
+                    {PAGE_SIZES.map(s => <option key={s} value={s}>{s === 0 ? 'All' : s}</option>)}
+                  </select>
+                </div>
+                {pageSize !== 0 && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground">Page {safePage + 1} of {pageCount}</span>
+                    <button disabled={safePage === 0} onClick={() => setPage(p => Math.max(0, p - 1))} className="p-1 rounded border border-border disabled:opacity-40 hover:bg-secondary"><ChevronLeft className="w-4 h-4" /></button>
+                    <button disabled={safePage >= pageCount - 1} onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} className="p-1 rounded border border-border disabled:opacity-40 hover:bg-secondary"><ChevronRight className="w-4 h-4" /></button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="flex items-center gap-1.5 text-muted-foreground">
+                <Layers className="w-3.5 h-3.5" />
+                <span>
+                  <span className="font-semibold text-foreground">{fmt(grouped.length, 0)}</span>{' '}
+                  {GROUP_OPTIONS.find(o => o.value === groupKey)?.label.toLowerCase()} groups ·{' '}
+                  <span className="font-semibold text-foreground">{fmt(sorted.length, 0)}</span> tasks · all shown
+                </span>
               </div>
             )}
           </div>
