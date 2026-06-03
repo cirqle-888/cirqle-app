@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
+import { usePrivacy } from '@/contexts/privacy-context'
 import {
   applyFilters, sortRows, computeSummary, toMatrix, matrixToCSV,
   EMPTY_FILTERS, type Filters, type AnalysisRow, type EmployeeColumn,
@@ -149,6 +150,15 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
+  const { isUnlocked, dn } = usePrivacy()
+
+  // Privacy lock: employee column headers, the contributor filter, and all
+  // exports show real names ONLY when privacy is unlocked — otherwise CQID.
+  // dn() returns name when unlocked, CQID when locked (same as the rest of app).
+  const displayEmployees = useMemo(
+    () => employees.map(e => ({ ...e, name: dn(e) })),
+    [employees, isUnlocked], // eslint-disable-line react-hooks/exhaustive-deps
+  )
 
   const initial = useMemo(() => parseFromParams(new URLSearchParams(searchParams.toString())), []) // eslint-disable-line react-hooks/exhaustive-deps
   const [filters, setFilters] = useState<Filters>(initial.filters)
@@ -159,7 +169,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   const [showFilters, setShowFilters] = useState(false)
   const [exporting, setExporting] = useState(false)
 
-  const columns = useMemo(() => buildColumns(employees), [employees])
+  const columns = useMemo(() => buildColumns(displayEmployees), [displayEmployees])
   const totalWidth = useMemo(() => columns.reduce((s, c) => s + c.width, 0), [columns])
 
   // ── Sync state → URL ────────────────────────────────────────────────────────
@@ -244,7 +254,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
 
   // ── Exports (operate on the filtered+sorted set — matches the screen) ─────────
   const exportCSV = useCallback(() => {
-    const csv = matrixToCSV(toMatrix(sorted, employees))
+    const csv = matrixToCSV(toMatrix(sorted, displayEmployees))
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
@@ -257,7 +267,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     setExporting(true)
     try {
       const XLSX = await import('xlsx')
-      const ws = XLSX.utils.aoa_to_sheet(toMatrix(sorted, employees))
+      const ws = XLSX.utils.aoa_to_sheet(toMatrix(sorted, displayEmployees))
       const wb = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(wb, ws, 'Contribution Analysis')
       XLSX.writeFile(wb, `contribution-analysis-${new Date().toISOString().slice(0, 10)}.xlsx`)
@@ -267,7 +277,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   }, [sorted, employees])
 
   const printView = useCallback(() => {
-    const matrix = toMatrix(sorted, employees)
+    const matrix = toMatrix(sorted, displayEmployees)
     const [head, ...body] = matrix
     const w = window.open('', '_blank')
     if (!w) return
@@ -377,7 +387,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
                 <label className="block text-[11px] font-medium text-muted-foreground mb-1">Has contributor</label>
                 <select value={filters.employeeId} onChange={e => setFilters(f => ({ ...f, employeeId: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs">
                   <option value="">Any employee</option>
-                  {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                  {displayEmployees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
                 </select>
               </div>
               <MultiSelect label="Status" options={STATUSES.map(s => ({ id: s, name: s }))} selected={filters.statuses} onChange={ids => setFilters(f => ({ ...f, statuses: ids }))} />
