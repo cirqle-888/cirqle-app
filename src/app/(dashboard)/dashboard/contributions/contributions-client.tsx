@@ -7,7 +7,7 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { calculateCommission } from '@/lib/calculations/commission'
-import { taskCode, taskCodeMatches } from '@/lib/utils/task-code'
+import { taskCode, taskCodeMatches, nextTaskNumber } from '@/lib/utils/task-code'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
@@ -826,7 +826,16 @@ export default function ContributionsClient({
   // ── Duplicate task ──────────────────────────────────────
   async function handleDuplicateTask(task: any) {
     setDuplicatingTaskId(task.id)
+    // Auto-assign the next sequential task number (same rule as the Tasks page)
+    // so the duplicate isn't created without a number.
+    const maxRow = await supabase
+      .from('tasks')
+      .select('task_number')
+      .order('task_number', { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle()
     const payload: any = {
+      task_number: nextTaskNumber(maxRow.data?.task_number),
       title: task.title,
       status: 'pending',
       task_date: new Date().toISOString().split('T')[0],
@@ -838,7 +847,7 @@ export default function ContributionsClient({
     const { data, error } = await supabase
       .from('tasks')
       .insert(payload)
-      .select('id, title, service_id, billing_amount_inr, status, task_date, client:clients(id, name), service:services(id, name)')
+      .select('id, task_number, title, service_id, billing_amount_inr, status, task_date, client:clients(id, name), service:services(id, name)')
       .single()
 
     if (!error && data) {

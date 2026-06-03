@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { getStatusColor, getStatusLabel } from '@/lib/utils/invoice'
-import { Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, RefreshCw, TrendingDown, Users, Ban, Search, ExternalLink, ChevronDown, ChevronLeft, ChevronRight, Layers, LayoutGrid, List, CalendarDays, MoreVertical, Building2, BarChart2 } from 'lucide-react'
+import { Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, RefreshCw, TrendingDown, Users, Ban, Search, ExternalLink, ChevronDown, ChevronLeft, ChevronRight, Layers, LayoutGrid, List, CalendarDays, MoreVertical, Building2, BarChart2, Copy } from 'lucide-react'
 import { formatCurrency } from '@/lib/calculations/currency'
 import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
@@ -206,6 +206,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
   }, [])
 
   const [tasks, setTasks] = useState<Task[]>(initialTasks)
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null)
   const [trash, setTrash] = useState<(Task & { deleted_at: string })[]>(initialTrash)
   const [showTrash, setShowTrash] = useState(false)
   const [trashDbCount, setTrashDbCount] = useState<number | null>(null)
@@ -784,24 +785,32 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
   }
 
   async function duplicateTask(task: Task) {
-    const maxRow = await supabase.from('tasks').select('task_number').order('task_number', { ascending: false, nullsFirst: false }).limit(1).maybeSingle()
-    const tn = nextTaskNumber(maxRow.data?.task_number)
-    const { data } = await supabase.from('tasks').insert({
-      task_number: tn,
-      title: task.title + ' (copy)',
-      description: task.description,
-      client_id: task.client_id,
-      service_id: task.service_id,
-      status: 'pending',
-      billing_amount: task.billing_amount,
-      billing_amount_inr: task.billing_amount_inr,
-      currency: task.currency,
-      task_date: new Date().toISOString().split('T')[0],
-      quantity: task.quantity || 1,
-    }).select('*, client:clients(id,name,code), service:services(id,name)').single()
-    if (data) {
-      setTasks(prev => [data as Task, ...prev])
-      success('Task duplicated')
+    if (duplicatingId) return            // guard against double-clicks (would burn two numbers)
+    setDuplicatingId(task.id)
+    try {
+      const maxRow = await supabase.from('tasks').select('task_number').order('task_number', { ascending: false, nullsFirst: false }).limit(1).maybeSingle()
+      const tn = nextTaskNumber(maxRow.data?.task_number)
+      const { data, error } = await supabase.from('tasks').insert({
+        task_number: tn,
+        title: task.title + ' (copy)',
+        description: task.description,
+        client_id: task.client_id,
+        service_id: task.service_id,
+        status: 'pending',
+        billing_amount: task.billing_amount,
+        billing_amount_inr: task.billing_amount_inr,
+        currency: task.currency,
+        task_date: new Date().toISOString().split('T')[0],
+        quantity: task.quantity || 1,
+      }).select('*, client:clients(id,name,code), service:services(id,name)').single()
+      if (data) {
+        setTasks(prev => [data as Task, ...prev])
+        success(`Task duplicated as ${taskCode(data as Task)}`)
+      } else if (error) {
+        toastError('Failed to duplicate', error.message)
+      }
+    } finally {
+      setDuplicatingId(null)
     }
   }
 
@@ -2217,6 +2226,12 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                         className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
+                      {can('tasks.create') && (
+                        <button onClick={e => { e.stopPropagation(); duplicateTask(task) }} disabled={duplicatingId === task.id} title="Duplicate task"
+                          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-40">
+                          <Copy className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                       {task.client_id && role === 'super_admin' && (
                         <button
                           type="button"
@@ -2359,6 +2374,15 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                       className="p-1.5 rounded-md text-muted-foreground hover:text-green-400 hover:bg-green-500/10 transition-colors">
                       <BarChart2 className="w-3.5 h-3.5" />
                     </a>
+                    {can('tasks.create') && (
+                      <button
+                        onClick={e => { e.stopPropagation(); duplicateTask(task) }}
+                        disabled={duplicatingId === task.id}
+                        title="Duplicate task"
+                        className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-40">
+                        <Copy className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                     <button
                       onClick={e => { e.stopPropagation(); setDeleteConfirm(task.id) }}
                       title="Delete task"
@@ -2682,6 +2706,16 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                                     className="lg:opacity-0 opacity-100 group-hover:opacity-100 text-muted-foreground hover:text-blue-400 transition-all p-1 rounded hover:bg-blue-500/10 shrink-0"
                                   >
                                     <Users className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                                {can('tasks.create') && (
+                                  <button
+                                    onClick={e => { e.stopPropagation(); duplicateTask(task) }}
+                                    disabled={duplicatingId === task.id}
+                                    title="Duplicate task"
+                                    className="lg:opacity-0 opacity-100 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-all p-1 rounded hover:bg-secondary shrink-0 disabled:opacity-40"
+                                  >
+                                    <Copy className="w-3.5 h-3.5" />
                                   </button>
                                 )}
                               </div>
