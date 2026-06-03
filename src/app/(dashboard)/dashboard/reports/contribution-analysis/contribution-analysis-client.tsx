@@ -43,7 +43,7 @@ interface Col {
   cls?: (r: AnalysisRow) => string
 }
 
-function buildColumns(employees: EmployeeColumn[]): Col[] {
+function buildColumns(employees: EmployeeColumn[], dp: number): Col[] {
   const fixed: Col[] = [
     { key: 'task_number', label: 'Task #', width: 76, align: 'left', sticky: true, render: r => r.task_number ?? '—' },
     { key: 'task_date', label: 'Date', width: 96, align: 'left', render: r => r.task_date },
@@ -51,14 +51,14 @@ function buildColumns(employees: EmployeeColumn[]): Col[] {
     { key: 'service_name', label: 'Service', width: 140, align: 'left', render: r => r.service_name },
     { key: 'status', label: 'Status', width: 96, align: 'center', render: r => r.status },
     { key: 'currency', label: 'Cur', width: 56, align: 'center', render: r => r.currency },
-    { key: 'billing', label: 'Billing', width: 100, align: 'right', render: r => fmt(r.billing) },
-    { key: 'billing_inr', label: 'Billing ₹', width: 110, align: 'right', render: r => inr(r.billing_inr) },
+    { key: 'billing', label: 'Billing', width: 100, align: 'right', render: r => fmt(r.billing, dp) },
+    { key: 'billing_inr', label: 'Billing ₹', width: 110, align: 'right', render: r => inr(r.billing_inr, dp) },
     { key: 'commission_pct', label: 'Comm %', width: 80, align: 'right', render: r => pct(r.commission_pct) },
-    { key: 'commission_pool', label: 'Pool ₹', width: 110, align: 'right', render: r => inr(r.commission_pool) },
-    { key: 'total_earnings', label: 'Emp Earnings ₹', width: 120, align: 'right', render: r => inr(r.total_earnings) },
-    { key: 'company_received', label: 'Received ₹', width: 110, align: 'right', render: r => inr(r.company_received) },
+    { key: 'commission_pool', label: 'Pool ₹', width: 110, align: 'right', render: r => inr(r.commission_pool, dp) },
+    { key: 'total_earnings', label: 'Emp Earnings ₹', width: 120, align: 'right', render: r => inr(r.total_earnings, dp) },
+    { key: 'company_received', label: 'Received ₹', width: 110, align: 'right', render: r => inr(r.company_received, dp) },
     {
-      key: 'profit', label: 'Profit ₹', width: 110, align: 'right', render: r => inr(r.profit),
+      key: 'profit', label: 'Profit ₹', width: 110, align: 'right', render: r => inr(r.profit, dp),
       cls: r => (r.profit < 0 ? 'text-red-400' : 'text-emerald-400'),
     },
     {
@@ -75,7 +75,7 @@ function buildColumns(employees: EmployeeColumn[]): Col[] {
     })
     emp.push({
       key: `emp:${e.id}:earn`, label: 'Earned ₹', width: 92, align: 'right',
-      render: r => { const c = r.emp[e.id]; return c && c.earn > 0 ? inr(c.earn) : <span className="text-muted-foreground/40">₹0</span> },
+      render: r => { const c = r.emp[e.id]; return c && c.earn > 0 ? inr(c.earn, dp) : <span className="text-muted-foreground/40">₹0</span> },
     })
     emp.push({
       key: `emp:${e.id}:share`, label: '% of Bill', width: 80, align: 'right',
@@ -130,7 +130,7 @@ function MultiSelect({ label, options, selected, onChange }: {
 }
 
 // ── URL (de)serialization ─────────────────────────────────────────────────────
-function parseFromParams(sp: URLSearchParams): { filters: Filters; sortKey: SortKey; sortDir: SortDir; pageSize: number } {
+function parseFromParams(sp: URLSearchParams): { filters: Filters; sortKey: SortKey; sortDir: SortDir; pageSize: number; decimals: boolean } {
   const g = (k: string) => sp.get(k) || ''
   const arr = (k: string) => { const v = sp.get(k); return v ? v.split(',').filter(Boolean) : [] }
   return {
@@ -146,6 +146,7 @@ function parseFromParams(sp: URLSearchParams): { filters: Filters; sortKey: Sort
     sortKey: (g('sort') || 'task_date') as SortKey,
     sortDir: (g('dir') === 'asc' ? 'asc' : 'desc'),
     pageSize: sp.get('size') !== null ? parseInt(sp.get('size')!, 10) : 100,
+    decimals: sp.get('dec') === '1',
   }
 }
 
@@ -171,8 +172,9 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   const [page, setPage] = useState(0)
   const [showFilters, setShowFilters] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [decimals, setDecimals] = useState(initial.decimals)
 
-  const columns = useMemo(() => buildColumns(displayEmployees), [displayEmployees])
+  const columns = useMemo(() => buildColumns(displayEmployees, decimals ? 2 : 0), [displayEmployees, decimals])
   const totalWidth = useMemo(() => columns.reduce((s, c) => s + c.width, 0), [columns])
 
   // ── Sync state → URL ────────────────────────────────────────────────────────
@@ -198,9 +200,10 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     if (sortKey !== 'task_date') p.set('sort', sortKey)
     if (sortDir !== 'desc') p.set('dir', sortDir)
     if (pageSize !== 100) p.set('size', String(pageSize))
+    if (decimals) p.set('dec', '1')
     const qs = p.toString()
     if (qs !== searchParams.toString()) router.replace(`${pathname}${qs ? '?' + qs : ''}`, { scroll: false })
-  }, [filters, sortKey, sortDir, pageSize, pathname, router, searchParams])
+  }, [filters, sortKey, sortDir, pageSize, decimals, pathname, router, searchParams])
 
   // ── Pipeline: filter → sort ───────────────────────────────────────────────────
   const filtered = useMemo(() => applyFilters(rows, filters), [rows, filters])
@@ -351,6 +354,15 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
           </div>
 
           <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => setDecimals(d => !d)}
+              title={decimals ? 'Showing 2 decimals — click for whole numbers' : 'Showing whole numbers — click for 2 decimals'}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                decimals ? 'gradient-bg text-white border-transparent' : 'bg-card border-border text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <span className="tabular-nums text-xs">.00</span> Decimals
+            </button>
             <button onClick={exportCSV} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm bg-card border border-border text-muted-foreground hover:text-foreground" title="Export CSV">
               <Download className="w-4 h-4" /> CSV
             </button>
