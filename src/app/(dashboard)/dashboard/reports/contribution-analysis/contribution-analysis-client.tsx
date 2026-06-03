@@ -58,12 +58,31 @@ function buildColumns(employees: EmployeeColumn[], dp: number): Col[] {
     { key: 'total_earnings', label: 'Emp Earnings ₹', width: 120, align: 'right', render: r => inr(r.total_earnings, dp) },
     { key: 'company_received', label: 'Received ₹', width: 110, align: 'right', render: r => inr(r.company_received, dp) },
     {
-      key: 'profit', label: 'Profit ₹', width: 110, align: 'right', render: r => inr(r.profit, dp),
+      key: 'profit', label: 'Exp Profit ₹', width: 110, align: 'right', render: r => inr(r.profit, dp),
       cls: r => (r.profit < 0 ? 'text-red-400' : 'text-emerald-400'),
     },
     {
-      key: 'profit_pct', label: 'Profit %', width: 84, align: 'right', render: r => pct(r.profit_pct),
+      key: 'profit_pct', label: 'Exp Profit %', width: 92, align: 'right', render: r => pct(r.profit_pct),
       cls: r => (r.profit_pct < 0 ? 'text-red-400' : 'text-emerald-400'),
+    },
+    {
+      key: 'actual_received', label: 'Actual Recv ₹', width: 116, align: 'right',
+      render: r => r.actual_received === null ? <span className="text-muted-foreground/40">—</span> : inr(r.actual_received, dp),
+    },
+    {
+      key: 'fx_gain_loss', label: 'FX +/− ₹', width: 100, align: 'right',
+      render: r => r.fx_gain_loss === null ? <span className="text-muted-foreground/40">—</span> : inr(r.fx_gain_loss, dp),
+      cls: r => (r.fx_gain_loss === null ? '' : r.fx_gain_loss < 0 ? 'text-red-400' : r.fx_gain_loss > 0 ? 'text-emerald-400' : ''),
+    },
+    {
+      key: 'actual_profit', label: 'Actual Profit ₹', width: 120, align: 'right',
+      render: r => r.actual_profit === null ? <span className="text-muted-foreground/40">—</span> : inr(r.actual_profit, dp),
+      cls: r => (r.actual_profit === null ? '' : r.actual_profit < 0 ? 'text-red-400' : 'text-emerald-400'),
+    },
+    {
+      key: 'actual_profit_pct', label: 'Actual Profit %', width: 100, align: 'right',
+      render: r => r.actual_profit_pct === null ? <span className="text-muted-foreground/40">—</span> : pct(r.actual_profit_pct),
+      cls: r => (r.actual_profit_pct === null ? '' : r.actual_profit_pct < 0 ? 'text-red-400' : 'text-emerald-400'),
     },
     { key: 'contributors', label: 'Contrib.', width: 72, align: 'center', render: r => r.contributors },
   ]
@@ -316,19 +335,23 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
 
       <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4">
         {/* Summary cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-3">
           {[
             { label: 'Total Tasks', value: fmt(summary.totalTasks, 0) },
-            { label: 'Total Billing', value: inr(summary.totalBilling) },
-            { label: 'Commission Pool', value: inr(summary.totalPool) },
-            { label: 'Employee Earnings', value: inr(summary.totalEarnings) },
-            { label: 'Company Profit', value: inr(summary.totalProfit), accent: summary.totalProfit < 0 ? 'text-red-400' : 'text-emerald-400' },
-            { label: 'Avg Profit %', value: pct(summary.avgProfitPct), accent: summary.avgProfitPct < 0 ? 'text-red-400' : 'text-emerald-400' },
+            { label: 'Total Billing', value: inr(summary.totalBilling, decimals ? 2 : 0) },
+            { label: 'Commission Pool', value: inr(summary.totalPool, decimals ? 2 : 0) },
+            { label: 'Employee Earnings', value: inr(summary.totalEarnings, decimals ? 2 : 0) },
             { label: 'Avg Contribution %', value: pct(summary.avgContributionPct) },
+            { label: 'Expected Profit', value: inr(summary.totalProfit, decimals ? 2 : 0), accent: summary.totalProfit < 0 ? 'text-red-400' : 'text-emerald-400' },
+            { label: 'Avg Expected Profit %', value: pct(summary.avgProfitPct), accent: summary.avgProfitPct < 0 ? 'text-red-400' : 'text-emerald-400' },
+            { label: 'Actual Received', value: inr(summary.totalActualReceived, decimals ? 2 : 0), sub: `${fmt(summary.actualTasks, 0)} paid tasks` },
+            { label: 'FX Gain / Loss', value: inr(summary.totalFxGainLoss, decimals ? 2 : 0), accent: summary.totalFxGainLoss < 0 ? 'text-red-400' : summary.totalFxGainLoss > 0 ? 'text-emerald-400' : '' },
+            { label: 'Actual Profit', value: inr(summary.totalActualProfit, decimals ? 2 : 0), accent: summary.totalActualProfit < 0 ? 'text-red-400' : 'text-emerald-400' },
           ].map(c => (
             <div key={c.label} className="bg-card border border-border rounded-xl p-3">
               <div className="text-[11px] text-muted-foreground mb-1 truncate">{c.label}</div>
               <div className={`text-lg font-semibold tabular-nums ${(c as any).accent || ''}`}>{c.value}</div>
+              {(c as any).sub && <div className="text-[10px] text-muted-foreground/60 mt-0.5">{(c as any).sub}</div>}
             </div>
           ))}
         </div>

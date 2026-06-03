@@ -45,10 +45,20 @@ export interface AnalysisRow {
   total_earnings: number
   /** = billing_inr (what the company received for the task) */
   company_received: number
-  /** billing_inr − total_earnings */
+  /** EXPECTED profit: billing_inr − total_earnings (locked INR basis) */
   profit: number
-  /** profit / billing_inr × 100 (0 when billing_inr = 0) */
+  /** expected profit / billing_inr × 100 (0 when billing_inr = 0) */
   profit_pct: number
+  // ── Actual / FX (informational; null until the linked invoice is fully paid) ──
+  /** task's share of the linked invoice's actual INR received; null if not yet
+   *  fully collected or not invoiced */
+  actual_received: number | null
+  /** actual_received − billing_inr (locked). +ve = FX gain, −ve = FX loss. null = pending */
+  fx_gain_loss: number | null
+  /** actual_received − total_earnings. null = pending */
+  actual_profit: number | null
+  /** actual_profit / actual_received × 100. null = pending */
+  actual_profit_pct: number | null
   /** number of employees with a contribution (pct > 0) on this task */
   contributors: number
   /** employeeId → { pct, earn } */
@@ -92,6 +102,8 @@ export function buildAnalysisRows(
   pricing: RawPricing[],
   clientName: Map<string, string>,
   serviceName: Map<string, string>,
+  /** task_id → actual INR received (apportioned). Absent/undefined ⇒ pending. */
+  actualByTask: Map<string, number> = new Map(),
   defaultCommissionPct = 50,
 ): AnalysisRow[] {
   const pmap = new Map<string, number>()
@@ -131,6 +143,15 @@ export function buildAnalysisRows(
     const profit = r2(billing_inr - total_earnings)
     const profit_pct = billing_inr > 0 ? r2(profit / billing_inr * 100) : 0
 
+    // Actual / FX — only when the linked invoice is fully paid (value present).
+    const ar = actualByTask.get(t.id)
+    const actual_received = ar === undefined ? null : r2(ar)
+    const fx_gain_loss = actual_received === null ? null : r2(actual_received - billing_inr)
+    const actual_profit = actual_received === null ? null : r2(actual_received - total_earnings)
+    const actual_profit_pct = actual_received === null
+      ? null
+      : (actual_received > 0 ? r2((actual_received - total_earnings) / actual_received * 100) : 0)
+
     rows.push({
       task_id: t.id,
       task_number: t.task_number,
@@ -149,6 +170,10 @@ export function buildAnalysisRows(
       company_received: billing_inr,
       profit,
       profit_pct,
+      actual_received,
+      fx_gain_loss,
+      actual_profit,
+      actual_profit_pct,
       contributors,
       emp,
     })
@@ -268,21 +293,35 @@ export interface Summary {
   totalBilling: number
   totalPool: number
   totalEarnings: number
+  /** expected company profit (locked INR basis) */
   totalProfit: number
   avgProfitPct: number
   avgContributionPct: number
+  // ── Actual / FX (only over tasks whose invoice is fully paid) ──
+  /** number of tasks with a fully-paid (actual) result */
+  actualTasks: number
+  totalActualReceived: number
+  totalFxGainLoss: number
+  totalActualProfit: number
 }
 
 export function computeSummary(rows: AnalysisRow[]): Summary {
   let totalBilling = 0, totalPool = 0, totalEarnings = 0, totalProfit = 0
   let profitPctSum = 0, profitPctCount = 0
   let contribPctSum = 0, contribPctCount = 0
+  let actualTasks = 0, totalActualReceived = 0, totalFxGainLoss = 0, totalActualProfit = 0
   for (const r of rows) {
     totalBilling += r.billing_inr
     totalPool += r.commission_pool
     totalEarnings += r.total_earnings
     totalProfit += r.profit
     if (r.billing_inr > 0) { profitPctSum += r.profit_pct; profitPctCount++ }
+    if (r.actual_received !== null) {
+      actualTasks++
+      totalActualReceived += r.actual_received
+      totalFxGainLoss += r.fx_gain_loss ?? 0
+      totalActualProfit += r.actual_profit ?? 0
+    }
     for (const id in r.emp) {
       const pct = r.emp[id].pct
       if (pct > 0) { contribPctSum += pct; contribPctCount++ }
@@ -296,6 +335,10 @@ export function computeSummary(rows: AnalysisRow[]): Summary {
     totalProfit: r2(totalProfit),
     avgProfitPct: profitPctCount ? r2(profitPctSum / profitPctCount) : 0,
     avgContributionPct: contribPctCount ? r2(contribPctSum / contribPctCount) : 0,
+    actualTasks,
+    totalActualReceived: r2(totalActualReceived),
+    totalFxGainLoss: r2(totalFxGainLoss),
+    totalActualProfit: r2(totalActualProfit),
   }
 }
 
@@ -306,21 +349,26 @@ export function computeSummary(rows: AnalysisRow[]): Summary {
 export function toMatrix(rows: AnalysisRow[], employees: EmployeeColumn[]): (string | number)[][] {
   const header: string[] = [
     'Task Number', 'Task Date', 'Client', 'Service', 'Status',
-    'Currency', 'Billing Amount', 'Billing Amount (INR)', 'Commission %',
+    'Currency', 'Billing Amount', 'Billing Amount (INR, Locked)', 'Commission %',
     'Commission Pool (INR)', 'Total Employee Earnings (INR)',
-    'Company Received (INR)', 'Company Profit (INR)', 'Company Profit %', 'Total Contributors',
+    'Company Received (INR)', 'Expected Profit (INR)', 'Expected Profit %',
+    'Actual Received (INR)', 'FX Gain/Loss (INR)', 'Actual Profit (INR)', 'Actual Profit %',
+    'Total Contributors',
   ]
   for (const e of employees) {
     header.push(`${e.name} Contribution %`, `${e.name} Earnings ₹`, `${e.name} Earnings % of Billing`)
   }
 
+  const blank = (n: number | null) => (n === null ? '' : n)
   const matrix: (string | number)[][] = [header]
   for (const r of rows) {
     const line: (string | number)[] = [
       r.task_number ?? '', r.task_date, r.client_name, r.service_name, r.status,
       r.currency, r.billing, r.billing_inr, r.commission_pct,
       r.commission_pool, r.total_earnings,
-      r.company_received, r.profit, r.profit_pct, r.contributors,
+      r.company_received, r.profit, r.profit_pct,
+      blank(r.actual_received), blank(r.fx_gain_loss), blank(r.actual_profit), blank(r.actual_profit_pct),
+      r.contributors,
     ]
     for (const e of employees) {
       const cell = r.emp[e.id]
