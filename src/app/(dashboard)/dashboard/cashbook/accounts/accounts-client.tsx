@@ -305,13 +305,13 @@ export default function AccountsClient({ entries, accounts, isAdmin }: Props) {
                         <span className="text-[11px] text-green-400 tabular-nums font-mono">+{inr(inflow)}</span>
                         <span className="text-muted-foreground/40 text-xs">·</span>
                         <span className="text-[11px] text-red-400 tabular-nums font-mono">−{inr(outflow)}</span>
-                        {/* Closing balance right-aligned to match Balance column */}
-                        <span className="text-xs font-semibold tabular-nums text-foreground w-[140px] text-right pr-0">
+                        {/* Closing balance */}
+                        <span className="text-xs font-semibold tabular-nums text-foreground ml-3">
                           {inr(closingBalance)}
                         </span>
                         {isOpen
-                          ? <ChevronDown  className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                          : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
+                          ? <ChevronDown  className="w-3.5 h-3.5 text-muted-foreground shrink-0 ml-1" />
+                          : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0 ml-1" />}
                       </button>
 
                       {/* Entry rows */}
