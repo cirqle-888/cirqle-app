@@ -105,7 +105,13 @@ export function TaskEditModal({
     setDeleting(true)
     const res = await serverDeleteTask(task.id, task.title ?? '')
     setDeleting(false)
-    if (res.ok) { onDeleted(task.id); onClose() }
+    if (res.ok) {
+      onDeleted(task.id)
+      onClose()
+    } else {
+      setSaveError(res.error ?? 'Could not delete task. Please try again.')
+      setConfirmDelete(false)
+    }
   }
 
   return (

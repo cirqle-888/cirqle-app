@@ -869,9 +869,12 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
       const deletedAt = res.data.deleted_at
       if (task) setTrash(prev => [{ ...task, deleted_at: deletedAt }, ...prev])
       setTasks(prev => prev.filter(t => t.id !== id))
+      setDeleteConfirm(null)
+      setEditTask(null)
+    } else {
+      toastError(res.error ?? 'Could not delete task. Please try again.')
+      setDeleteConfirm(null)
     }
-    setDeleteConfirm(null)
-    setEditTask(null)
     setDeleting(false)
   }
 
@@ -2133,7 +2136,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                     })}
                   </SortableContext>
                 </DndContext>
-                <th className="w-16 px-4 py-3 bg-secondary/95 backdrop-blur-sm"></th>
+                <th className="px-4 py-3 bg-secondary/95 backdrop-blur-sm"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
