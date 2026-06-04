@@ -81,10 +81,13 @@ export default async function DashboardPage() {
       : Promise.resolve({ data: [] }),
 
     // Cashbook — admin only, all-time for accurate bank balance calculation.
+    // Filter out soft-deleted entries so deleted/edited entries don't appear
+    // in the dashboard Cash Flow widget or distort the bank balance.
     isAdmin
       ? fetchAll(supabase
           .from('cashbook_entries')
           .select('type, amount_inr, entry_date, description')
+          .is('deleted_at', null)
           .order('entry_date', { ascending: true })
           .order('id', { ascending: true }))
       : Promise.resolve({ data: [] }),
