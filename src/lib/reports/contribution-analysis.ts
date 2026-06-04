@@ -27,6 +27,8 @@ export interface EmpCell {
 export interface AnalysisRow {
   task_id: string
   task_number: number | null
+  /** Task title / name (e.g. "Money Saver") */
+  title: string
   task_date: string
   client_id: string
   client_name: string
@@ -70,6 +72,7 @@ export interface AnalysisRow {
 export interface RawTask {
   id: string
   task_number: number | null
+  title: string | null
   task_date: string
   status: string
   currency: string | null
@@ -126,20 +129,26 @@ export function buildAnalysisRows(
       ? (pmap.get(`${t.client_id}|${t.service_id}`) ?? defaultCommissionPct)
       : defaultCommissionPct
 
+    // Commission pool from CURRENT billing — must be computed before the
+    // scores loop so we can recalculate employee earnings on the fly.
+    // This keeps the report accurate even when billing is edited after
+    // contributions were scored (stored earnings_inr would be stale).
+    const commission_pool = r2(billing_inr * commission_pct / 100)
+
     const taskScores = byTask.get(t.id) || []
     const emp: Record<string, EmpCell> = {}
     let total_earnings = 0
     let contributors = 0
     for (const s of taskScores) {
       const pct = s.score_percentage || 0
-      const earn = s.earnings_inr || 0
-      emp[s.employee_id] = { pct: r2(pct), earn: r2(earn) }
+      // Recalculate from current commission_pool rather than stored
+      // earnings_inr — stored value is stale when billing changes after scoring.
+      const earn = r2(pct / 100 * commission_pool)
+      emp[s.employee_id] = { pct: r2(pct), earn }
       total_earnings += earn
       if (pct > 0) contributors++
     }
     total_earnings = r2(total_earnings)
-
-    const commission_pool = r2(billing_inr * commission_pct / 100)
     const profit = r2(billing_inr - total_earnings)
     const profit_pct = billing_inr > 0 ? r2(profit / billing_inr * 100) : 0
 
@@ -155,6 +164,7 @@ export function buildAnalysisRows(
     rows.push({
       task_id: t.id,
       task_number: t.task_number,
+      title: t.title || '—',
       task_date: t.task_date,
       client_id: t.client_id || '',
       client_name: (t.client_id && clientName.get(t.client_id)) || '—',
@@ -253,7 +263,7 @@ export function applyFilters(rows: AnalysisRow[], f: Filters): AnalysisRow[] {
 export type SortDir = 'asc' | 'desc'
 // Fixed keys, or dynamic 'emp:<id>:pct' | 'emp:<id>:earn'
 export type SortKey =
-  | 'task_number' | 'task_date' | 'client_name' | 'service_name' | 'status'
+  | 'task_number' | 'title' | 'task_date' | 'client_name' | 'service_name' | 'status'
   | 'billing_inr' | 'commission_pool' | 'total_earnings' | 'profit' | 'profit_pct'
   | 'contributors' | string
 
@@ -347,19 +357,24 @@ export function computeSummary(rows: AnalysisRow[]): Summary {
 /** Column index of each numeric metric in the export matrix — lets callers
  *  (e.g. group subtotal rows) place values under the right header. */
 export const MATRIX_COL = {
-  label: 0, billing_inr: 7, commission_pool: 9, total_earnings: 10,
-  company_received: 11, exp_profit: 12, exp_profit_pct: 13, actual_received: 14,
-  fx_gain_loss: 15, actual_profit: 16, actual_profit_pct: 17, contributors: 18,
+  // pos 0 = task_number (also used as label cell for group subtotal rows)
+  label: 0,
+  // pos 1 = title (NEW — shifts all subsequent indices by +1)
+  title: 1,
+  // pos 2..6 = task_date, client_name, service_name, status, currency, billing
+  billing_inr: 8, commission_pool: 10, total_earnings: 11,
+  company_received: 12, exp_profit: 13, exp_profit_pct: 14, actual_received: 15,
+  fx_gain_loss: 16, actual_profit: 17, actual_profit_pct: 18, contributors: 19,
 } as const
 
 /** Fixed (non-employee) column count in the export matrix. Each employee adds 3. */
-export const MATRIX_FIXED_COLS = 19
+export const MATRIX_FIXED_COLS = 20
 
 const blankNum = (n: number | null) => (n === null ? '' : n)
 
 export function matrixHeader(employees: EmployeeColumn[]): string[] {
   const header: string[] = [
-    'Task Number', 'Task Date', 'Client', 'Service', 'Status',
+    'Task Number', 'Task Title', 'Task Date', 'Client', 'Service', 'Status',
     'Currency', 'Billing Amount', 'Billing Amount (INR, Locked)', 'Commission %',
     'Commission Pool (INR)', 'Total Employee Earnings (INR)',
     'Company Received (INR)', 'Expected Profit (INR)', 'Expected Profit %',
@@ -374,7 +389,7 @@ export function matrixHeader(employees: EmployeeColumn[]): string[] {
 
 export function rowToLine(r: AnalysisRow, employees: EmployeeColumn[]): (string | number)[] {
   const line: (string | number)[] = [
-    r.task_number ?? '', r.task_date, r.client_name, r.service_name, r.status,
+    r.task_number ?? '', r.title, r.task_date, r.client_name, r.service_name, r.status,
     r.currency, r.billing, r.billing_inr, r.commission_pct,
     r.commission_pool, r.total_earnings,
     r.company_received, r.profit, r.profit_pct,

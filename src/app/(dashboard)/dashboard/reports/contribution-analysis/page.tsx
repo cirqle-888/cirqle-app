@@ -29,7 +29,7 @@ export default async function ContributionAnalysisPage() {
     fetchAll(
       supabase
         .from('tasks')
-        .select('id, task_number, task_date, status, currency, billing_amount, billing_amount_inr, client_id, service_id')
+        .select('id, task_number, title, task_date, status, currency, billing_amount, billing_amount_inr, client_id, service_id')
         .order('id', { ascending: true }),
     ),
     fetchAll(

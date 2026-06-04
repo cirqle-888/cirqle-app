@@ -31,7 +31,7 @@ const PAGE_SIZES = [50, 100, 250, 1000, 0] // 0 = All
 
 // Columns frozen on initial load (before the user changes anything).
 // Keys match the `key` field in buildColumns (e.g. 'task_number', 'client_name').
-const DEFAULT_FROZEN_COLS: string[] = ['task_number', 'client_name']
+const DEFAULT_FROZEN_COLS: string[] = ['task_number', 'title', 'client_name']
 const LS_FROZEN_KEY = 'ca-frozen-cols'
 
 // Largest index i with offsets[i] <= y (binary search; offsets is monotonic).
@@ -84,6 +84,7 @@ type DisplayItem =
 function buildColumns(employees: EmployeeColumn[], dp: number): Col[] {
   const fixed: Col[] = [
     { key: 'task_number', label: 'Task #', width: 76, align: 'left', group: 'core', sticky: true, render: r => r.task_number ?? '—' },
+    { key: 'title', label: 'Title', width: 200, align: 'left', group: 'core', render: r => r.title },
     { key: 'task_date', label: 'Date', width: 96, align: 'left', group: 'core', render: r => r.task_date },
     { key: 'client_name', label: 'Client', width: 150, align: 'left', group: 'core', render: r => r.client_name },
     { key: 'service_name', label: 'Service', width: 140, align: 'left', group: 'core', render: r => r.service_name },
