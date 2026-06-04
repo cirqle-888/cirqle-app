@@ -8,7 +8,7 @@ import { createClient } from '@/lib/supabase/client'
 import { insertCashbookEntries, updateCashbookEntry, softDeleteCashbookEntry, fetchLiveRate } from './actions'
 import { formatCompact, round2 } from '@/lib/calculations/currency'
 import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
-import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, RefreshCw, Landmark, Wallet } from 'lucide-react'
+import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, RefreshCw, Landmark, Wallet, ChevronRight } from 'lucide-react'
 import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from '@/lib/utils'
 import type { DateFilterValue } from '@/components/ui/date-filter'
@@ -814,6 +814,12 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         subtitle="Track all income and expenses"
         actions={
           <div className="flex items-center gap-2">
+            <Link href="/dashboard/cashbook/accounts"
+              className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap"
+              title="Account balances & ledger">
+              <Landmark className="h-4 w-4 shrink-0" />
+              <span className="hidden sm:inline">Accounts</span>
+            </Link>
             <Link href="/dashboard/cashbook/reconciliation"
               className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap">
               <ShieldAlert className="h-4 w-4 shrink-0" />
@@ -901,7 +907,9 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 <Landmark className="w-4 h-4 text-muted-foreground" />
                 <span className="text-sm font-semibold">Account Balances</span>
               </div>
-              <span className="text-xs text-muted-foreground">All time · exact figures</span>
+              <Link href="/dashboard/cashbook/accounts" className="text-xs text-primary hover:underline flex items-center gap-1">
+                Full ledger view <ChevronRight className="w-3 h-3" />
+              </Link>
             </div>
             <div className="divide-y divide-border">
               {accountBalances.map(acct => {
