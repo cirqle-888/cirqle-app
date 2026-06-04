@@ -8,7 +8,7 @@ import { createClient } from '@/lib/supabase/client'
 import { insertCashbookEntries, updateCashbookEntry, softDeleteCashbookEntry, fetchLiveRate } from './actions'
 import { formatCompact, round2 } from '@/lib/calculations/currency'
 import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
-import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, RefreshCw, Landmark, Wallet, ChevronRight } from 'lucide-react'
+import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, RefreshCw, Landmark } from 'lucide-react'
 import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from '@/lib/utils'
 import type { DateFilterValue } from '@/components/ui/date-filter'
@@ -638,24 +638,6 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
 
   // Per-account balances — computed from ALL (non-deleted) entries (not filtered)
   // so the balance is always the true running total regardless of active filters.
-  const accountBalances = useMemo(() => {
-    const map: Record<string, { id: string; name: string; type: string; inflow: number; outflow: number }> = {}
-    // Seed from bankAccounts so accounts with zero activity still appear
-    for (const b of bankAccounts) {
-      map[b.id] = { id: b.id, name: b.name, type: b.type ?? 'bank', inflow: 0, outflow: 0 }
-    }
-    // Tally non-deleted entries
-    for (const e of entries) {
-      if (e.deleted_at) continue
-      const key = e.bank_account_id ?? '__cash__'
-      if (!map[key]) map[key] = { id: key, name: 'Cash in Hand', type: 'cash', inflow: 0, outflow: 0 }
-      if (e.type === 'inflow')  map[key].inflow  += e.amount_inr ?? 0
-      else                      map[key].outflow += e.amount_inr ?? 0
-    }
-    return Object.values(map)
-      .map(a => ({ ...a, balance: round2(a.inflow - a.outflow) }))
-      .sort((a, b) => b.balance - a.balance)
-  }, [entries, bankAccounts])
 
   // Realised FX gain/loss (display only — no extra entries created).
   // Formula: Σ (actual_amount_inr − foreign_amount × book_rate) for all foreign inflows.
@@ -898,73 +880,6 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
           </div>
         )}
 
-
-        {/* Account Balances — per-account running total, full precision */}
-        {showAmounts && (
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-secondary/30">
-              <div className="flex items-center gap-2">
-                <Landmark className="w-4 h-4 text-muted-foreground" />
-                <span className="text-sm font-semibold">Account Balances</span>
-              </div>
-              <Link href="/dashboard/cashbook/accounts" className="text-xs text-primary hover:underline flex items-center gap-1">
-                Full ledger view <ChevronRight className="w-3 h-3" />
-              </Link>
-            </div>
-            <div className="divide-y divide-border">
-              {accountBalances.map(acct => {
-                const isPositive = acct.balance >= 0
-                return (
-                  <div key={acct.id} className="flex items-center gap-3 px-4 py-3 hover:bg-secondary/20 transition-colors">
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                      acct.type === 'cash' ? 'bg-amber-500/10' : 'bg-primary/10'
-                    }`}>
-                      {acct.type === 'cash'
-                        ? <Wallet  className="w-4 h-4 text-amber-500" />
-                        : <Landmark className="w-4 h-4 text-primary" />}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{acct.name}</p>
-                      <p className="text-[11px] text-muted-foreground">
-                        In: ₹{acct.inflow.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                        <span className="mx-1.5 opacity-40">·</span>
-                        Out: ₹{acct.outflow.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className={`text-base font-bold tabular-nums ${isPositive ? 'text-foreground' : 'text-red-400'}`}>
-                        {isPositive ? '' : '−'}₹{Math.abs(acct.balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground">balance</p>
-                    </div>
-                  </div>
-                )
-              })}
-              {/* Total row */}
-              {accountBalances.length > 1 && (
-                <div className="flex items-center gap-3 px-4 py-3 bg-secondary/40">
-                  <div className="w-8 h-8 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold">Total</p>
-                    <p className="text-[11px] text-muted-foreground">across all accounts</p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    {(() => {
-                      const total = round2(accountBalances.reduce((s, a) => s + a.balance, 0))
-                      const pos = total >= 0
-                      return (
-                        <p className={`text-base font-bold tabular-nums ${pos ? 'text-foreground' : 'text-red-400'}`}>
-                          {pos ? '' : '−'}₹{Math.abs(total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                        </p>
-                      )
-                    })()}
-                    <p className="text-[10px] text-muted-foreground">net balance</p>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
 
         {/* Filters */}
         <div className="flex gap-3 flex-wrap items-center bg-secondary/20 p-3 rounded-xl border border-border">
