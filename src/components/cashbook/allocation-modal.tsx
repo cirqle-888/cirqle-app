@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
-import { X, Plus, Trash2, CheckCircle2, ShieldAlert, Sparkles } from 'lucide-react'
+import { X, Plus, Trash2, CheckCircle2, ShieldAlert, Sparkles, TrendingUp, TrendingDown } from 'lucide-react'
 import Combobox from '@/components/ui/combobox'
 
 interface Allocation {
@@ -39,12 +39,16 @@ interface Props {
   entryDate?: string          // YYYY-MM-DD - for date-constrained FIFO
   entryClientId?: string      // client_id on the payment entry - restricts invoices to same client
   amountInr: number
+  // FX display props — used for the realised gain/loss indicator (no extra entries created)
+  entryCurrency?: string      // e.g. 'AED' — if INR, no FX panel shown
+  entryForeignAmount?: number // the original foreign-currency amount
+  entryBookRate?: number      // rate_to_inr from exchange_rates at time of entry
   dueInvoices: any[]
   onClose: () => void
   onUpdate: () => void // trigger refresh in parent
 }
 
-export default function AllocationModal({ entryId, entryDate, entryClientId, amountInr, dueInvoices, onClose, onUpdate }: Props) {
+export default function AllocationModal({ entryId, entryDate, entryClientId, amountInr, entryCurrency, entryForeignAmount, entryBookRate, dueInvoices, onClose, onUpdate }: Props) {
   const [allocations, setAllocations] = useState<Allocation[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -76,6 +80,14 @@ export default function AllocationModal({ entryId, entryDate, entryClientId, amo
 
   const totalAllocated = allocations.reduce((sum, a) => sum + (Number(a.allocated_amount) || 0), 0)
   const unallocated = amountInr - totalAllocated
+
+  // ── Realised FX gain/loss (display only) ──────────────────────────────────
+  // FX gain/loss = actual INR received − (foreign amount × book rate at entry).
+  // No extra cashbook entries are created; this is purely informational.
+  const isForeignEntry  = entryCurrency && entryCurrency !== 'INR' && (entryForeignAmount ?? 0) > 0 && (entryBookRate ?? 0) > 0
+  const fxExpectedInr   = isForeignEntry ? Math.round(((entryForeignAmount ?? 0) * (entryBookRate ?? 0)) * 100) / 100 : 0
+  const fxDiff          = isForeignEntry ? Math.round((amountInr - fxExpectedInr) * 100) / 100 : 0
+  const fxDirection     = Math.abs(fxDiff) > 0.005 ? (fxDiff > 0 ? 'gain' : 'loss') : 'none'
 
   // ── Entity-aware filtering ───────────────────────────────────────────────────
   // 1. Mutual exclusion: hide invoices already paid via "Record Payment".
@@ -290,6 +302,28 @@ export default function AllocationModal({ entryId, entryDate, entryClientId, amo
                <p className="font-mono text-lg font-bold">₹{unallocated.toLocaleString('en-IN', {minimumFractionDigits:2})}</p>
              </div>
           </div>
+
+          {/* ── Realised FX Gain / Loss (display only, no entries created) ────── */}
+          {fxDirection !== 'none' && (
+            <div className={`flex items-center justify-between rounded-lg border px-4 py-3 ${fxDirection === 'gain' ? 'border-green-500/25 bg-green-500/5' : 'border-red-500/25 bg-red-500/5'}`}>
+              <div className="flex items-center gap-2.5">
+                {fxDirection === 'gain'
+                  ? <TrendingUp  className="w-4 h-4 text-green-400 shrink-0" />
+                  : <TrendingDown className="w-4 h-4 text-red-400   shrink-0" />}
+                <div>
+                  <p className={`text-xs font-semibold ${fxDirection === 'gain' ? 'text-green-400' : 'text-red-400'}`}>
+                    Realised FX {fxDirection === 'gain' ? 'Gain' : 'Loss'} — display only
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    {entryForeignAmount} {entryCurrency} × ₹{entryBookRate}/{ entryCurrency} (book rate) = ₹{fxExpectedInr.toLocaleString('en-IN')} &nbsp;·&nbsp; Actual ₹ received = ₹{amountInr.toLocaleString('en-IN')}
+                  </p>
+                </div>
+              </div>
+              <span className={`font-mono text-sm font-bold shrink-0 ${fxDirection === 'gain' ? 'text-green-400' : 'text-red-400'}`}>
+                {fxDirection === 'gain' ? '+' : '-'}₹{Math.abs(fxDiff).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </span>
+            </div>
+          )}
 
           {/* Error */}
           {error && (

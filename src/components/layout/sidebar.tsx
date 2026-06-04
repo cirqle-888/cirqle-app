@@ -259,11 +259,12 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
   const [profileOpen, setProfileOpen] = useState(false)
   const pathname = usePathname()
   const router = useRouter()
-  const { user, can, logoUrl, logoUrlDark } = usePermissions()
+  const { user, can, logoUrl, logoUrlDark, faviconUrl } = usePermissions()
   const { isUnlocked } = usePrivacy()
   // Local state so a broken/expired logo URL can fall back to the brand mark
   // without leaving a broken-image placeholder visible.
   const [logoBroken, setLogoBroken] = useState(false)
+  const [faviconBroken, setFaviconBroken] = useState(false)
 
   // Pre-compute visible sections once per permission change — avoids re-filtering on
   // every route transition (pathname is the only thing changing in the common case).
@@ -303,27 +304,39 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
               logoUrlLight falls back to logoUrl so both imgs use the same src
               and the correct one is always visible. */}
           {logoUrl && !logoBroken ? (
-            <>
-              {/* Light-mode logo (logo_url) — shown in light mode, hidden in dark */}
+            isCollapsed && faviconUrl && !faviconBroken ? (
+              /* Collapsed rail: show the favicon / icon mark from Settings — the
+                 full wordmark logo doesn't fit. Falls back to the shrunk logo
+                 below if no favicon is configured (or it fails to load). */
               <img
-                src={logoUrl}
-                alt="Workspace logo"
-                onError={() => setLogoBroken(true)}
-                className={`object-contain transition-all duration-300 block dark:hidden ${
-                  isCollapsed ? 'w-8 h-8' : 'h-10 max-w-[160px]'
-                }`}
+                src={faviconUrl}
+                alt="Workspace icon"
+                onError={() => setFaviconBroken(true)}
+                className="w-8 h-8 object-contain transition-all duration-300"
               />
-              {/* Dark-mode logo (logo_url_dark) — shown in dark mode, hidden in light.
-                  Falls back to logoUrl when no separate dark logo has been uploaded. */}
-              <img
-                src={logoUrlDark || logoUrl}
-                alt="Workspace logo"
-                onError={() => setLogoBroken(true)}
-                className={`object-contain transition-all duration-300 hidden dark:block ${
-                  isCollapsed ? 'w-8 h-8' : 'h-10 max-w-[160px]'
-                }`}
-              />
-            </>
+            ) : (
+              <>
+                {/* Light-mode logo (logo_url) — shown in light mode, hidden in dark */}
+                <img
+                  src={logoUrl}
+                  alt="Workspace logo"
+                  onError={() => setLogoBroken(true)}
+                  className={`object-contain transition-all duration-300 block dark:hidden ${
+                    isCollapsed ? 'w-8 h-8' : 'h-10 max-w-[160px]'
+                  }`}
+                />
+                {/* Dark-mode logo (logo_url_dark) — shown in dark mode, hidden in light.
+                    Falls back to logoUrl when no separate dark logo has been uploaded. */}
+                <img
+                  src={logoUrlDark || logoUrl}
+                  alt="Workspace logo"
+                  onError={() => setLogoBroken(true)}
+                  className={`object-contain transition-all duration-300 hidden dark:block ${
+                    isCollapsed ? 'w-8 h-8' : 'h-10 max-w-[160px]'
+                  }`}
+                />
+              </>
+            )
           ) : (
             <>
               <div className="w-8 h-8 rounded-lg gradient-bg flex items-center justify-center shrink-0">

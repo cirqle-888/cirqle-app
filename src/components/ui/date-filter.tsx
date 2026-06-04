@@ -91,11 +91,12 @@ interface Props {
   value: DateFilterValue
   onChange: (v: DateFilterValue) => void
   className?: string
+  compact?: boolean
 }
 
 type PanelMode = 'presets' | 'month' | 'range' | 'day'
 
-export function DateFilter({ value, onChange, className = '' }: Props) {
+export function DateFilter({ value, onChange, className = '', compact = false }: Props) {
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState<PanelMode>('presets')
   const now = new Date()
@@ -151,7 +152,7 @@ export function DateFilter({ value, onChange, className = '' }: Props) {
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className={`flex items-center gap-2 h-[34px] px-3 rounded-lg text-sm font-medium transition-all border ${
+        className={`flex items-center gap-1.5 ${compact ? 'h-[30px] px-2 text-xs' : 'h-[34px] px-3 text-sm'} rounded-lg font-medium transition-all border ${
           isActive
             ? 'bg-primary/10 border-primary/30 text-primary'
             : 'bg-secondary border-transparent text-muted-foreground hover:text-foreground hover:border-border/50'

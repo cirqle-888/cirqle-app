@@ -27,15 +27,19 @@ interface PermissionContextValue {
   /** Workspace-level logo for dark mode (from company_settings.logo_url_dark).
    *  Falls back to logoUrl when not set so light-only workspaces still work in dark mode. */
   logoUrlDark: string | null
+  /** Workspace icon / favicon (from company_settings.favicon_url) — used for the
+   *  collapsed sidebar rail where the full wordmark logo doesn't fit. null = none. */
+  faviconUrl: string | null
 }
 
 const Ctx = createContext<PermissionContextValue | null>(null)
 
 export function PermissionProvider(
-  { user, logoUrl = null, logoUrlDark = null, children }: {
+  { user, logoUrl = null, logoUrlDark = null, faviconUrl = null, children }: {
     user: PermissionUser
     logoUrl?: string | null
     logoUrlDark?: string | null
+    faviconUrl?: string | null
     children: ReactNode
   },
 ) {
@@ -51,7 +55,8 @@ export function PermissionProvider(
     logoUrl,
     // Dark logo falls back to light logo so workspaces with one logo still look right in both modes.
     logoUrlDark: logoUrlDark || logoUrl,
-  }), [user, perms, revealNames, logoUrl, logoUrlDark])
+    faviconUrl,
+  }), [user, perms, revealNames, logoUrl, logoUrlDark, faviconUrl])
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

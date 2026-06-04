@@ -1,11 +1,20 @@
 'use client'
 
-import { useState, useMemo, useEffect, useRef, Fragment } from 'react'
+import { useState, useMemo, useEffect, useRef, Fragment, useCallback } from 'react'
+import {
+  DndContext, closestCenter, PointerSensor, useSensor, useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext, horizontalListSortingStrategy, verticalListSortingStrategy,
+  useSortable, arrayMove,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import dynamic from 'next/dynamic'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { getStatusColor, getStatusLabel } from '@/lib/utils/invoice'
-import { Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, RefreshCw, TrendingDown, Users, Ban, Search, ExternalLink, ChevronDown, ChevronLeft, ChevronRight, Layers, LayoutGrid, List, CalendarDays, MoreVertical, Building2, BarChart2, Copy } from 'lucide-react'
+import { Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, RefreshCw, TrendingDown, Users, Ban, Search, ExternalLink, ChevronDown, ChevronLeft, ChevronRight, Layers, LayoutGrid, List, CalendarDays, MoreVertical, Building2, BarChart2, Copy, GripVertical, Settings2, ChevronUp } from 'lucide-react'
 import { formatCurrency } from '@/lib/calculations/currency'
 import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
@@ -167,6 +176,74 @@ const EMPTY_FORM = {
   manual_billing_amount: '',                                                     // user-typed override amount
 }
 
+// ── Reorderable column system ─────────────────────────────────────────────────
+type ColKey = 'client' | 'service' | 'date' | 'billing' | 'qty' | 'total' | 'status'
+const DEFAULT_COL_ORDER: ColKey[] = ['client', 'service', 'date', 'billing', 'qty', 'total', 'status']
+const COL_LABELS: Record<ColKey, string> = {
+  client: 'Client', service: 'Service', date: 'Date',
+  billing: 'Billing', qty: 'Qty', total: 'Total', status: 'Status',
+}
+const BILLING_COLS: ColKey[] = ['billing', 'qty', 'total']
+
+/** Draggable <th> wrapper — shows a grip handle on hover; handles the DnD transform. */
+function SortableColHeader({ id, children, className }: {
+  id: string; children: React.ReactNode; className?: string
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id })
+  return (
+    <th
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }}
+      className={`relative group ${className ?? ''}`}
+    >
+      {/* drag handle — desktop only, appears on header hover */}
+      <span
+        {...attributes}
+        {...listeners}
+        className="absolute left-1 top-1/2 -translate-y-1/2 hidden md:flex items-center opacity-0 group-hover:opacity-40 hover:!opacity-100 cursor-grab active:cursor-grabbing text-muted-foreground transition-opacity touch-none"
+        title="Drag to reorder"
+        onClick={e => e.stopPropagation()}
+      >
+        <GripVertical className="w-3 h-3" />
+      </span>
+      {children}
+    </th>
+  )
+}
+
+/** Draggable row in the Columns panel (vertical sort). */
+function SortablePanelRow({ id, label, onUp, onDown, isFirst, isLast }: {
+  id: string; label: string
+  onUp: () => void; onDown: () => void
+  isFirst: boolean; isLast: boolean
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id })
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }}
+      className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-secondary/60 group"
+    >
+      <span
+        {...attributes}
+        {...listeners}
+        className="cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-muted-foreground transition-colors touch-none"
+      >
+        <GripVertical className="w-3.5 h-3.5" />
+      </span>
+      <span className="flex-1 text-xs">{label}</span>
+      <button onClick={onUp} disabled={isFirst} className="p-0.5 rounded text-muted-foreground hover:text-foreground disabled:opacity-20 transition-colors">
+        <ChevronUp className="w-3.5 h-3.5" />
+      </button>
+      <button onClick={onDown} disabled={isLast} className="p-0.5 rounded text-muted-foreground hover:text-foreground disabled:opacity-20 transition-colors">
+        <ChevronDown className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  )
+}
+
 export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, myTaskIds, visibilitySettings, permissionFlags }: Props) {
   const { role, employee: currentEmployee } = useRole()
   const { can } = usePermissions()
@@ -207,6 +284,54 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
 
   const [tasks, setTasks] = useState<Task[]>(initialTasks)
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null)
+
+  // ── Column order (persisted in localStorage) ────────────────────────────────
+  const [colOrder, setColOrder] = useState<ColKey[]>(() => {
+    try {
+      const saved = localStorage.getItem('tasks-col-order')
+      if (saved) {
+        const parsed: ColKey[] = JSON.parse(saved)
+        // merge: keep saved order, append any new keys not yet in saved list
+        const missing = DEFAULT_COL_ORDER.filter(k => !parsed.includes(k))
+        return [...parsed.filter(k => DEFAULT_COL_ORDER.includes(k)), ...missing]
+      }
+    } catch {}
+    return [...DEFAULT_COL_ORDER]
+  })
+  const [showColPanel, setShowColPanel] = useState(false)
+  const colPanelRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    localStorage.setItem('tasks-col-order', JSON.stringify(colOrder))
+  }, [colOrder])
+
+  // close panel on outside click
+  useEffect(() => {
+    if (!showColPanel) return
+    const h = (e: MouseEvent) => { if (colPanelRef.current && !colPanelRef.current.contains(e.target as Node)) setShowColPanel(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [showColPanel])
+
+  const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
+
+  const handleColHeaderDragEnd = useCallback((e: DragEndEvent) => {
+    const { active, over } = e
+    if (over && active.id !== over.id)
+      setColOrder(prev => arrayMove(prev, prev.indexOf(active.id as ColKey), prev.indexOf(over.id as ColKey)))
+  }, [])
+
+  const handleColPanelDragEnd = useCallback((e: DragEndEvent) => {
+    const { active, over } = e
+    if (over && active.id !== over.id)
+      setColOrder(prev => arrayMove(prev, prev.indexOf(active.id as ColKey), prev.indexOf(over.id as ColKey)))
+  }, [])
+
+  // Columns visible in table view — billing-group only when showBilling
+  const visibleCols = useMemo(
+    () => colOrder.filter(k => !BILLING_COLS.includes(k) || showBilling),
+    [colOrder, showBilling],
+  )
   const [trash, setTrash] = useState<(Task & { deleted_at: string })[]>(initialTrash)
   const [showTrash, setShowTrash] = useState(false)
   const [trashDbCount, setTrashDbCount] = useState<number | null>(null)
@@ -1369,6 +1494,104 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
   // py-2.5 on mobile = 40px touch target; py-2 keeps desktop density unchanged.
   const inputCls = 'w-full bg-secondary border border-border rounded-lg px-3 py-2.5 sm:py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50'
 
+  // Renders the correct <td> for a given column key + task. Used by the table body
+  // to honour the user's chosen column order.
+  function renderCell(key: ColKey, task: Task) {
+    const stopInline = (e: React.MouseEvent) => { if (inlineEditMode) e.stopPropagation() }
+    switch (key) {
+      case 'client': return (
+        <td key={key} className="px-4 py-3 text-muted-foreground" onClick={stopInline}>
+          {inlineEditMode ? (
+            <select value={task.client_id} onChange={async e => {
+              const newId = e.target.value
+              await supabase.from('tasks').update({ client_id: newId }).eq('id', task.id)
+              const c = clients.find(x => x.id === newId)
+              setTasks(prev => prev.map(t => t.id === task.id ? { ...t, client_id: newId, client: c ? { id: c.id, name: c.name, code: c.code } : undefined } : t))
+            }} className="bg-secondary border border-border rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-500/50 w-full">
+              {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          ) : (task.client?.name || '—')}
+        </td>
+      )
+      case 'service': return (
+        <td key={key} className="px-4 py-3 text-muted-foreground" onClick={stopInline}>
+          {inlineEditMode ? (
+            <select value={task.service_id} onChange={async e => {
+              const newId = e.target.value
+              await supabase.from('tasks').update({ service_id: newId }).eq('id', task.id)
+              const s = sortedServices.find(x => x.id === newId)
+              setTasks(prev => prev.map(t => t.id === task.id ? { ...t, service_id: newId, service: s ? { id: s.id, name: s.name } : undefined } : t))
+            }} className="bg-secondary border border-border rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-500/50 w-full">
+              {sortedServices.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          ) : (task.service?.name || '—')}
+        </td>
+      )
+      case 'date': return (
+        <td key={key} className="px-4 py-3 text-muted-foreground" onClick={stopInline}>
+          {inlineEditMode ? (
+            <input type="date" defaultValue={task.task_date} onBlur={async e => {
+              const val = e.target.value
+              if (val && val !== task.task_date) {
+                await supabase.from('tasks').update({ task_date: val }).eq('id', task.id)
+                setTasks(prev => prev.map(t => t.id === task.id ? { ...t, task_date: val } : t))
+              }
+            }} className="bg-secondary border border-border rounded px-2 py-1 text-xs focus:outline-none focus:border-violet-500/50" />
+          ) : <span title={fullTaskDate(task.task_date)}>{formatTaskDate(task.task_date)}</span>}
+        </td>
+      )
+      case 'billing': return (
+        <td key={key} className="px-4 py-3 text-right font-medium" onClick={stopInline}>
+          {role !== 'team_lead' && inlineEditMode ? (
+            <input type="number" defaultValue={task.billing_amount ?? 0} onBlur={async e => {
+              const val = parseFloat(e.target.value) || 0
+              if (val !== task.billing_amount) {
+                await supabase.from('tasks').update({ billing_amount: val }).eq('id', task.id)
+                setTasks(prev => prev.map(t => t.id === task.id ? { ...t, billing_amount: val } : t))
+              }
+            }} className="w-24 bg-secondary border border-border rounded px-2 py-1 text-sm text-right focus:outline-none focus:border-violet-500/50" />
+          ) : formatCurrency((task.billing_amount ?? 0) / (task.quantity ?? 1), task.currency as Currency)}
+        </td>
+      )
+      case 'qty': return (
+        <td key={key} className="px-3 py-3 text-center text-sm font-medium text-foreground" onClick={stopInline}>
+          {task.quantity ?? 1}
+        </td>
+      )
+      case 'total': return (
+        <td key={key} className="px-4 py-3 text-right font-medium" onClick={stopInline}>
+          {formatCurrency(task.billing_amount ?? 0, task.currency as Currency)}
+        </td>
+      )
+      case 'status': return (
+        <td key={key} className="px-4 py-3" onClick={e => e.stopPropagation()}>
+          <select value={task.status} onChange={e => updateStatus(task.id, e.target.value)}
+            className={`text-xs px-2 py-1 rounded-md border-0 cursor-pointer ${getStatusColor(task.status)}`}
+            style={{ background: 'transparent' }}>
+            {MANUAL_STATUSES.map(s => <option key={s} value={s} className="bg-card text-foreground">{getStatusLabel(s)}</option>)}
+            {task.status === 'invoiced' && <option value="invoiced" className="bg-card text-foreground" disabled>🔒 Invoiced (system)</option>}
+          </select>
+          {task.status === 'cancelled' && task.cancelled_by && (
+            <div className="mt-1 flex items-center gap-1 flex-wrap">
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">
+                {task.cancelled_by === 'client' ? '👤 Client' : task.cancelled_by === 'no_show' ? '🚫 No-show' : '🏢 Company'}
+              </span>
+              {(task.completion_pct || 0) > 0 && <span className="text-[9px] text-muted-foreground">{task.completion_pct}% done</span>}
+              {showBilling && (task.loss_amount || 0) > 0 && (
+                <span className="text-[9px] text-red-400 font-medium">Loss {formatCurrency(task.loss_amount!, task.currency as Currency)}</span>
+              )}
+              {task.honor_contributions && (
+                <span title="Employee contributions honored" className="text-[9px] text-green-400">
+                  <Users className="inline w-2.5 h-2.5" /> Paid
+                </span>
+              )}
+            </div>
+          )}
+        </td>
+      )
+    }
+  }
+
   return (
     <div>
       <Header
@@ -1592,7 +1815,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
             </div>
 
             {/* View segment (Hidden on mobile for employees) */}
-            <div ref={viewRef} className={`relative shrink-0 order-3 sm:order-none ${role === 'employee' ? 'hidden sm:block' : ''}`}>
+            <div ref={viewRef} className={`relative shrink-0 order-3 sm:order-none flex items-center gap-1.5 ${role === 'employee' ? 'hidden sm:flex' : ''}`}>
               {/* Desktop View Buttons */}
               <div className="hidden sm:flex items-center bg-secondary border border-foreground/15 rounded-xl p-1 gap-0.5">
                 {([
@@ -1629,6 +1852,44 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                   </span>
                 ))}
               </div>
+
+              {/* Columns button — inline with Table/Board/Calendar, table view only */}
+              {viewMode === 'table' && (
+                <div ref={colPanelRef} className="relative">
+                  <button
+                    onClick={() => setShowColPanel(v => !v)}
+                    title="Reorder columns"
+                    className={`h-[34px] px-2.5 rounded-xl text-xs font-medium flex items-center gap-1.5 border transition-colors cursor-pointer ${
+                      showColPanel
+                        ? 'bg-foreground/10 border-foreground/20 text-foreground'
+                        : 'bg-secondary border-foreground/15 text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    <Settings2 className="w-3.5 h-3.5" />
+                    Columns
+                  </button>
+                  {showColPanel && (
+                    <div className="absolute right-0 top-full mt-1.5 z-50 bg-card border border-border rounded-xl shadow-2xl p-3 min-w-[180px]">
+                      <div className="flex items-center justify-between mb-2 px-1">
+                        <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Column order</span>
+                        <button onClick={() => setColOrder([...DEFAULT_COL_ORDER])} className="text-[10px] text-muted-foreground hover:text-foreground transition-colors">Reset</button>
+                      </div>
+                      <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleColPanelDragEnd}>
+                        <SortableContext items={visibleCols} strategy={verticalListSortingStrategy}>
+                          {visibleCols.map((key, i) => (
+                            <SortablePanelRow key={key} id={key} label={COL_LABELS[key]}
+                              isFirst={i === 0} isLast={i === visibleCols.length - 1}
+                              onUp={() => setColOrder(prev => arrayMove(prev, prev.indexOf(key), prev.indexOf(key) - 1))}
+                              onDown={() => setColOrder(prev => arrayMove(prev, prev.indexOf(key), prev.indexOf(key) + 1))}
+                            />
+                          ))}
+                        </SortableContext>
+                      </DndContext>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Group By popover */}
               {viewMode === 'board' && viewOpen && (
                 <div className="absolute right-0 top-full mt-1.5 z-50 bg-secondary border border-foreground/15 rounded-xl shadow-2xl p-3 min-w-[220px] space-y-3">
@@ -1656,53 +1917,88 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                 </div>
               )}
             </div>
+
           </div>
 
           {/* Advanced Filters Container (Collapsible on mobile) */}
           <div className={`${showMobileFilters ? 'flex flex-col gap-2 pt-2' : 'hidden'} sm:flex sm:flex-col sm:gap-2 sm:pt-0 w-full`}>
-            {/* Row 2: Dropdowns — Client · Service · Assignee · Sort · Date · Search DB */}
-            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-              {/* Client — merged list: active clients + any inactive clients found in loaded tasks */}
-              <FilterDropdown
-                options={clientFilterOptions}
-                value={filterClient}
-                onChange={setFilterClient}
-                placeholder="Client"
-                sortKey="clients"
-              />
-              {/* Service — use pre-fetched services list */}
-              <FilterDropdown
-                options={services.map(s => ({ value: s.id, label: s.name }))}
-                value={filterService}
-                onChange={setFilterService}
-                placeholder="Service"
-                sortKey="services"
-              />
-
-              {/* Assignee — FilterDropdown for consistent pill style with built-in × */}
-              <FilterDropdown
-                options={employees.map(emp => ({ value: emp.id, label: dn(emp) }))}
-                value={filterAssignee}
-                onChange={setFilterAssignee}
-                placeholder="Assignee"
-                sortKey="employees"
-              />
-              {/* Sort by */}
-              <FilterDropdown
+            {/* Row 2: Filters + Status chips + Pagination (compact, no wrap) */}
+            <div className="flex items-center gap-1 flex-wrap">
+              <DateFilter compact value={filterDate} onChange={setFilterDate} />
+              <FilterDropdown compact options={clientFilterOptions} value={filterClient} onChange={setFilterClient} placeholder="Client" sortKey="clients" maxLabelWidth="max-w-[90px]" />
+              <FilterDropdown compact options={services.map(s => ({ value: s.id, label: s.name }))} value={filterService} onChange={setFilterService} placeholder="Service" sortKey="services" maxLabelWidth="max-w-[90px]" />
+              <FilterDropdown compact options={employees.map(emp => ({ value: emp.id, label: dn(emp) }))} value={filterAssignee} onChange={setFilterAssignee} placeholder="Assignee" sortKey="employees" maxLabelWidth="max-w-[90px]" />
+              <FilterDropdown compact
                 options={[
                   { value: 'today_first', label: 'Today First' },
-                  { value: 'date_desc',   label: 'Newest First' },
-                  { value: 'date_asc',    label: 'Oldest First' },
-                  { value: 'amount_desc', label: 'Amount (High→Low)' },
+                  { value: 'date_desc',   label: 'Newest' },
+                  { value: 'date_asc',    label: 'Oldest' },
+                  { value: 'amount_desc', label: 'Amount ↓' },
                   { value: 'client',      label: 'Client A→Z' },
                 ]}
                 value={sortBy === 'today_first' ? '' : sortBy}
                 onChange={v => setSortBy((v || 'today_first') as typeof sortBy)}
                 placeholder="Sort by"
+                maxLabelWidth="max-w-[72px]"
               />
 
-              {/* Date filter */}
-              <DateFilter value={filterDate} onChange={setFilterDate} />
+              {/* thin separator */}
+              <span className="hidden sm:block w-px h-4 bg-foreground/10 shrink-0 mx-0.5" />
+
+              {/* Status chips — compact */}
+              <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+                className="sm:hidden h-[30px] px-2 rounded-xl text-xs font-medium bg-secondary border border-border text-foreground focus:outline-none cursor-pointer w-full">
+                <option value="">All ({statusCounts.all})</option>
+                {STATUSES.map(s => <option key={s} value={s}>{getStatusLabel(s)} ({statusCounts[s] ?? 0})</option>)}
+              </select>
+              {([
+                { key: '', label: 'All' },
+                ...STATUSES.map(s => ({ key: s, label: getStatusLabel(s) })),
+              ]).map(({ key, label }) => {
+                const count = key === '' ? statusCounts.all : (statusCounts[key] ?? 0)
+                const active = filterStatus === key
+                return (
+                  <button key={key} onClick={() => setFilterStatus(key)}
+                    className={`hidden sm:flex h-[30px] px-2.5 rounded-xl text-xs font-medium transition-colors cursor-pointer items-center gap-1 shrink-0 ${
+                      active ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {label}
+                    <span className={`text-[10px] font-semibold px-1 py-0.5 rounded ${
+                      active ? 'bg-foreground/20 text-white' : 'bg-border/50 opacity-60'
+                    }`}>{count}</span>
+                  </button>
+                )
+              })}
+              {hasActiveFilters && (
+                <button onClick={() => { setFilterStatus(''); setFilterClient(''); setFilterService(''); setSearchQ(''); setSortBy('today_first'); setFilterAssignee(''); setFilterDate(null) }}
+                  className="text-xs text-muted-foreground hover:text-foreground px-1.5 py-1 rounded-md hover:bg-foreground/[0.04] transition-colors flex items-center gap-0.5 shrink-0">
+                  <X size={11} /> Clear
+                </button>
+              )}
+
+              {/* Compact pagination — ml-auto pushes to the right */}
+              {viewMode === 'table' && totalPages > 1 && (
+                <div className="hidden sm:flex items-center gap-0.5 shrink-0 ml-auto">
+                  <span className="w-px h-4 bg-foreground/10 mx-1" />
+                  <button onClick={() => dbMode ? runDbSearch(Math.max(0, dbModePage - 1)) : setTablePage(p => Math.max(0, p - 1))} disabled={dbMode ? dbModePage === 0 : tablePage === 0} title="Previous page"
+                    className="h-[28px] w-[28px] flex items-center justify-center rounded-lg border border-border/50 text-muted-foreground disabled:opacity-30 hover:bg-foreground/5 hover:text-foreground transition-colors text-sm font-mono">‹</button>
+                  <div className="flex items-center gap-0.5 px-2 h-[28px] rounded-lg border border-border/50 bg-background text-xs text-muted-foreground">
+                    <input type="number" min={1} max={totalPages} key={dbMode ? dbModePage : tablePage} defaultValue={(dbMode ? dbModePage : tablePage) + 1}
+                      onKeyDown={e => { if (e.key === 'Enter') { const n = parseInt((e.target as HTMLInputElement).value, 10); if (!isNaN(n)) { const p = Math.max(0, Math.min(totalPages - 1, n - 1)); dbMode ? runDbSearch(p) : setTablePage(p) } } }}
+                      className="w-6 text-center bg-transparent focus:outline-none text-foreground font-medium [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                    <span className="opacity-40">/ {totalPages}</span>
+                  </div>
+                  <button onClick={() => dbMode ? runDbSearch(Math.min(totalPages - 1, dbModePage + 1)) : setTablePage(p => Math.min(totalPages - 1, p + 1))} disabled={dbMode ? dbModePage >= totalPages - 1 : tablePage === totalPages - 1} title="Next page"
+                    className="h-[28px] w-[28px] flex items-center justify-center rounded-lg border border-border/50 text-muted-foreground disabled:opacity-30 hover:bg-foreground/5 hover:text-foreground transition-colors text-sm font-mono">›</button>
+                  {!dbMode && (
+                    <select value={tablePageSize} onChange={e => { setTablePageSize(Number(e.target.value)); setTablePage(0) }} title="Rows per page"
+                      className="h-[28px] px-1 rounded-lg border border-border/50 bg-background text-xs text-muted-foreground focus:outline-none focus:border-violet-500/50 ml-0.5">
+                      {[50, 100, 200, 500].map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  )}
+                </div>
+              )}
 
               {/* ── Search Database button ──
                   Only shown when not all tasks are loaded (i.e. DB has more rows
@@ -1710,7 +2006,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                   page.tsx now paginates the full set into memory. */}
               {(() => {
                 const allLoaded = dbTaskTotal != null && dbTaskTotal <= tasks.length
-                if (allLoaded && !dbMode) return null   // hide button entirely when redundant
+                if (allLoaded && !dbMode) return null
                 return !dbMode ? (
                   <button
                     onClick={() => runDbSearch(0)}
@@ -1732,125 +2028,10 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                   </button>
                 )
               })()}
+
             </div>
 
-            {/* Row 3: Status chips (desktop) / dropdown (mobile) · Clear all · Pagination */}
-            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-              {/* Mobile: compact dropdown */}
-              <select
-                value={filterStatus}
-                onChange={e => setFilterStatus(e.target.value)}
-                className="sm:hidden h-[34px] px-2 rounded-xl text-xs font-medium bg-secondary border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer w-full"
-              >
-                <option value="">All ({statusCounts.all})</option>
-                {STATUSES.map(s => (
-                  <option key={s} value={s}>{getStatusLabel(s)} ({statusCounts[s] ?? 0})</option>
-                ))}
-              </select>
-              {/* Desktop: pill chips with counts — same pattern as Contributions page */}
-              {([
-                { key: '',           label: 'All' },
-                ...STATUSES.map(s => ({ key: s, label: getStatusLabel(s) })),
-              ]).map(({ key, label }) => {
-                const count = key === '' ? statusCounts.all : (statusCounts[key] ?? 0)
-                const active = filterStatus === key
-                return (
-                  <button
-                    key={key}
-                    onClick={() => setFilterStatus(key)}
-                    className={`hidden sm:flex h-[34px] px-3 rounded-xl text-xs font-medium transition-colors cursor-pointer items-center gap-1.5 ${
-                      active ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {label}
-                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
-                      active ? 'bg-foreground/20 text-white' : 'bg-border/50 opacity-60'
-                    }`}>{count}</span>
-                  </button>
-                )
-              })}
-              {/* Clear all — only when any filter active */}
-              {hasActiveFilters && (
-                <button
-                  onClick={() => { setFilterStatus(''); setFilterClient(''); setFilterService(''); setSearchQ(''); setSortBy('today_first'); setFilterAssignee(''); setFilterDate(null) }}
-                  className="ml-1 text-xs text-muted-foreground hover:text-foreground px-2 py-1.5 rounded-md hover:bg-foreground/[0.04] transition-colors flex items-center gap-1 shrink-0"
-                >
-                  <X size={12} /> Clear all
-                </button>
-              )}
-            </div>
           </div>
-
-            {/* ── Inline pagination — table view only ── */}
-            {viewMode === 'table' && totalPages > 1 && (
-              <>
-                <span className="w-px h-5 bg-foreground/10 shrink-0 ml-auto" />
-                <div className="flex items-center gap-1 shrink-0">
-                  {/* First */}
-                  <button
-                    onClick={() => dbMode ? runDbSearch(0) : setTablePage(0)}
-                    disabled={dbMode ? dbModePage === 0 : tablePage === 0}
-                    title="First page"
-                    className="h-[30px] w-[30px] flex items-center justify-center rounded-lg border border-border/50 text-muted-foreground disabled:opacity-30 hover:bg-foreground/5 hover:text-foreground transition-colors text-sm font-mono">
-                    «
-                  </button>
-                  {/* Prev */}
-                  <button
-                    onClick={() => dbMode ? runDbSearch(Math.max(0, dbModePage - 1)) : setTablePage(p => Math.max(0, p - 1))}
-                    disabled={dbMode ? dbModePage === 0 : tablePage === 0}
-                    title="Previous page"
-                    className="h-[30px] w-[30px] flex items-center justify-center rounded-lg border border-border/50 text-muted-foreground disabled:opacity-30 hover:bg-foreground/5 hover:text-foreground transition-colors text-sm font-mono">
-                    ‹
-                  </button>
-
-                  {/* Page indicator + jump input */}
-                  <div className="flex items-center gap-1 px-2 h-[30px] rounded-lg border border-border/50 bg-background text-xs text-muted-foreground">
-                    <input
-                      type="number" min={1} max={totalPages}
-                      key={dbMode ? dbModePage : tablePage}
-                      defaultValue={(dbMode ? dbModePage : tablePage) + 1}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') {
-                          const n = parseInt((e.target as HTMLInputElement).value, 10)
-                          if (!isNaN(n)) {
-                            const p = Math.max(0, Math.min(totalPages - 1, n - 1))
-                            dbMode ? runDbSearch(p) : setTablePage(p)
-                          }
-                        }
-                      }}
-                      className="w-8 text-center bg-transparent focus:outline-none text-foreground font-medium [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                    />
-                    <span className="opacity-50">/ {totalPages}</span>
-                  </div>
-
-                  {/* Next */}
-                  <button
-                    onClick={() => dbMode ? runDbSearch(Math.min(totalPages - 1, dbModePage + 1)) : setTablePage(p => Math.min(totalPages - 1, p + 1))}
-                    disabled={dbMode ? dbModePage >= totalPages - 1 : tablePage === totalPages - 1}
-                    title="Next page"
-                    className="h-[30px] w-[30px] flex items-center justify-center rounded-lg border border-border/50 text-muted-foreground disabled:opacity-30 hover:bg-foreground/5 hover:text-foreground transition-colors text-sm font-mono">
-                    ›
-                  </button>
-                  {/* Last */}
-                  <button
-                    onClick={() => dbMode ? runDbSearch(totalPages - 1) : setTablePage(totalPages - 1)}
-                    disabled={dbMode ? dbModePage >= totalPages - 1 : tablePage === totalPages - 1}
-                    title="Last page"
-                    className="h-[30px] w-[30px] flex items-center justify-center rounded-lg border border-border/50 text-muted-foreground disabled:opacity-30 hover:bg-foreground/5 hover:text-foreground transition-colors text-sm font-mono">
-                    »
-                  </button>
-
-                  {/* Rows-per-page — only for local mode */}
-                  {!dbMode && (
-                    <select value={tablePageSize} onChange={e => { setTablePageSize(Number(e.target.value)); setTablePage(0) }}
-                      title="Rows per page"
-                      className="h-[30px] px-1.5 rounded-lg border border-border/50 bg-background text-xs text-muted-foreground focus:outline-none focus:border-violet-500/50">
-                      {[50, 100, 200, 500].map(n => <option key={n} value={n}>{n}</option>)}
-                    </select>
-                  )}
-                </div>
-              </>
-            )}
 
           {/* ── DB mode banner ── */}
           {dbMode && (
@@ -1896,41 +2077,68 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                 )}
                 <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground w-20 bg-secondary/95 backdrop-blur-sm">Task No.</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm">Task Title</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm">
-                  <button onClick={() => setSortBy(s => s === 'client' ? 'date_desc' : 'client')}
-                    className={`flex items-center gap-1 hover:text-foreground transition-colors ${sortBy === 'client' ? 'text-violet-400' : ''}`}>
-                    Client
-                    <span className={`text-[10px] ${sortBy === 'client' ? 'opacity-100' : 'opacity-30'}`}>↕</span>
-                  </button>
-                </th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm">Service</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm">
-                  <button
-                    onClick={() => setSortBy(s => s === 'date_desc' ? 'date_asc' : 'date_desc')}
-                    className={`flex items-center gap-1 hover:text-foreground transition-colors ${sortBy === 'date_desc' || sortBy === 'date_asc' ? 'text-violet-400' : ''}`}>
-                    Date
-                    <span className="text-[10px]">
-                      {sortBy === 'date_asc' ? '↑' : sortBy === 'date_desc' ? '↓' : <span className="opacity-30">↕</span>}
-                    </span>
-                  </button>
-                </th>
-                {showBilling && (
-                  <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm">
-                    <button
-                      onClick={() => setSortBy(s => s === 'amount_desc' ? 'date_desc' : 'amount_desc')}
-                      className={`flex items-center gap-1 ml-auto hover:text-foreground transition-colors ${sortBy === 'amount_desc' ? 'text-violet-400' : ''}`}>
-                      Billing
-                      <span className={`text-[10px] ${sortBy === 'amount_desc' ? 'opacity-100' : 'opacity-30'}`}>↓</span>
-                    </button>
-                  </th>
-                )}
-                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm">Status</th>
+                {/* Reorderable columns — drag handle on hover (desktop), panel for mobile */}
+                <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleColHeaderDragEnd}>
+                  <SortableContext items={visibleCols} strategy={horizontalListSortingStrategy}>
+                    {visibleCols.map(key => {
+                      const base = 'text-xs font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm pl-6'
+                      if (key === 'client') return (
+                        <SortableColHeader key="client" id="client" className={`text-left px-4 py-3 ${base}`}>
+                          <button onClick={() => setSortBy(s => s === 'client' ? 'date_desc' : 'client')}
+                            className={`flex items-center gap-1 hover:text-foreground transition-colors ${sortBy === 'client' ? 'text-violet-400' : ''}`}>
+                            Client <span className={`text-[10px] ${sortBy === 'client' ? 'opacity-100' : 'opacity-30'}`}>↕</span>
+                          </button>
+                        </SortableColHeader>
+                      )
+                      if (key === 'service') return (
+                        <SortableColHeader key="service" id="service" className={`text-left px-4 py-3 ${base}`}>
+                          Service
+                        </SortableColHeader>
+                      )
+                      if (key === 'date') return (
+                        <SortableColHeader key="date" id="date" className={`text-left px-4 py-3 ${base}`}>
+                          <button onClick={() => setSortBy(s => s === 'date_desc' ? 'date_asc' : 'date_desc')}
+                            className={`flex items-center gap-1 hover:text-foreground transition-colors ${sortBy === 'date_desc' || sortBy === 'date_asc' ? 'text-violet-400' : ''}`}>
+                            Date
+                            <span className="text-[10px]">
+                              {sortBy === 'date_asc' ? '↑' : sortBy === 'date_desc' ? '↓' : <span className="opacity-30">↕</span>}
+                            </span>
+                          </button>
+                        </SortableColHeader>
+                      )
+                      if (key === 'billing') return (
+                        <SortableColHeader key="billing" id="billing" className={`text-right px-4 py-3 ${base}`}>
+                          <button onClick={() => setSortBy(s => s === 'amount_desc' ? 'date_desc' : 'amount_desc')}
+                            className={`flex items-center gap-1 ml-auto hover:text-foreground transition-colors ${sortBy === 'amount_desc' ? 'text-violet-400' : ''}`}>
+                            Billing <span className={`text-[10px] ${sortBy === 'amount_desc' ? 'opacity-100' : 'opacity-30'}`}>↓</span>
+                          </button>
+                        </SortableColHeader>
+                      )
+                      if (key === 'qty') return (
+                        <SortableColHeader key="qty" id="qty" className={`text-center px-3 py-3 w-14 ${base}`}>
+                          Qty
+                        </SortableColHeader>
+                      )
+                      if (key === 'total') return (
+                        <SortableColHeader key="total" id="total" className={`text-right px-4 py-3 ${base}`}>
+                          Total
+                        </SortableColHeader>
+                      )
+                      if (key === 'status') return (
+                        <SortableColHeader key="status" id="status" className={`text-left px-4 py-3 ${base}`}>
+                          Status
+                        </SortableColHeader>
+                      )
+                      return null
+                    })}
+                  </SortableContext>
+                </DndContext>
                 <th className="w-16 px-4 py-3 bg-secondary/95 backdrop-blur-sm"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {pagedTasks.length === 0 && !dbModeLoading && (
-                <tr><td colSpan={bulkMode ? 9 : 8} className="px-4 py-10 text-center">
+                <tr><td colSpan={3 + (bulkMode ? 1 : 0) + visibleCols.length} className="px-4 py-10 text-center">
                   <p className="text-sm text-muted-foreground mb-3">
                     {dbMode ? 'No tasks found in database matching your filters.' : 'No tasks found.'}
                   </p>
@@ -1947,7 +2155,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                 </td></tr>
               )}
               {dbModeLoading && (
-                <tr><td colSpan={bulkMode ? 9 : 8} className="px-4 py-10 text-center">
+                <tr><td colSpan={3 + (bulkMode ? 1 : 0) + visibleCols.length} className="px-4 py-10 text-center">
                   <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
                     <RefreshCw size={14} className="animate-spin" /> Searching database…
                   </div>
@@ -1962,21 +2170,21 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                   if (!seenDates.has(d)) { seenDates.set(d, []); dateGroups.push([d, seenDates.get(d)!]) }
                   seenDates.get(d)!.push(task)
                 }
-                const colSpan = 7 + (bulkMode ? 1 : 0) + (showBilling ? 1 : 0)
+                const colSpan = 3 + (bulkMode ? 1 : 0) + visibleCols.length
 
                 return dateGroups.map(([date, dateTasks]) => (
                   <Fragment key={date}>
                     {/* Date group header */}
-                    <tr className="bg-secondary/40 border-y border-border/60">
-                      <td colSpan={colSpan} className="px-4 py-1.5">
+                    <tr className="bg-secondary/55 border-y border-border/70 border-l-4 border-l-primary/50">
+                      <td colSpan={colSpan} className="px-4 py-2.5">
                         <div className="flex items-center gap-3">
-                          <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                          <span className="text-xs font-bold text-foreground uppercase tracking-wider">
                             {date
                               ? new Date(date).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
                               : 'No date'}
                           </span>
-                          <div className="flex-1 h-px bg-border/50" />
-                          <span className="text-[11px] text-muted-foreground">{dateTasks.length} task{dateTasks.length !== 1 ? 's' : ''}</span>
+                          <div className="flex-1 h-px bg-border/60" />
+                          <span className="text-[11px] font-medium text-muted-foreground">{dateTasks.length} task{dateTasks.length !== 1 ? 's' : ''}</span>
                         </div>
                       </td>
                     </tr>
@@ -2103,111 +2311,8 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                       )
                     })()}
                   </td>
-                  <td className="px-4 py-3 text-muted-foreground" onClick={e => inlineEditMode && e.stopPropagation()}>
-                    {inlineEditMode ? (
-                      <select
-                        value={task.client_id}
-                        onChange={async e => {
-                          const newId = e.target.value
-                          await supabase.from('tasks').update({ client_id: newId }).eq('id', task.id)
-                          const c = clients.find(x => x.id === newId)
-                          setTasks(prev => prev.map(t => t.id === task.id ? { ...t, client_id: newId, client: c ? { id: c.id, name: c.name, code: c.code } : undefined } : t))
-                        }}
-                        className="bg-secondary border border-border rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-500/50 w-full"
-                      >
-                        {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                      </select>
-                    ) : (
-                      task.client?.name || '—'
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground" onClick={e => inlineEditMode && e.stopPropagation()}>
-                    {inlineEditMode ? (
-                      <select
-                        value={task.service_id}
-                        onChange={async e => {
-                          const newId = e.target.value
-                          await supabase.from('tasks').update({ service_id: newId }).eq('id', task.id)
-                          const s = sortedServices.find(x => x.id === newId)
-                          setTasks(prev => prev.map(t => t.id === task.id ? { ...t, service_id: newId, service: s ? { id: s.id, name: s.name } : undefined } : t))
-                        }}
-                        className="bg-secondary border border-border rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-500/50 w-full"
-                      >
-                        {sortedServices.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                      </select>
-                    ) : (
-                      task.service?.name || '—'
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground" onClick={e => inlineEditMode && e.stopPropagation()}>
-                    {inlineEditMode ? (
-                      <input
-                        type="date"
-                        defaultValue={task.task_date}
-                        onBlur={async e => {
-                          const val = e.target.value
-                          if (val && val !== task.task_date) {
-                            await supabase.from('tasks').update({ task_date: val }).eq('id', task.id)
-                            setTasks(prev => prev.map(t => t.id === task.id ? { ...t, task_date: val } : t))
-                          }
-                        }}
-                        className="bg-secondary border border-border rounded px-2 py-1 text-xs focus:outline-none focus:border-violet-500/50"
-                      />
-                    ) : (
-                      <span title={fullTaskDate(task.task_date)}>{formatTaskDate(task.task_date)}</span>
-                    )}
-                  </td>
-                  {showBilling && (
-                    <td className="px-4 py-3 text-right font-medium" onClick={e => inlineEditMode && e.stopPropagation()}>
-                      {role !== 'team_lead' && inlineEditMode ? (
-                        <input
-                          type="number"
-                          defaultValue={task.billing_amount ?? 0}
-                          onBlur={async e => {
-                            const val = parseFloat(e.target.value) || 0
-                            if (val !== task.billing_amount) {
-                              await supabase.from('tasks').update({ billing_amount: val }).eq('id', task.id)
-                              setTasks(prev => prev.map(t => t.id === task.id ? { ...t, billing_amount: val } : t))
-                            }
-                          }}
-                          className="w-24 bg-secondary border border-border rounded px-2 py-1 text-sm text-right focus:outline-none focus:border-violet-500/50"
-                        />
-                      ) : (
-                        <>
-                          {task.quantity && task.quantity > 1
-                            ? <>{formatCurrency((task.billing_amount ?? 0) / task.quantity, task.currency as Currency)}<span className="text-xs text-muted-foreground ml-1">×{task.quantity}</span></>
-                            : formatCurrency(task.billing_amount ?? 0, task.currency as Currency)
-                          }
-                        </>
-                      )}
-                    </td>
-                  )}
-                  <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
-                    <select value={task.status} onChange={e => updateStatus(task.id, e.target.value)} className={`text-xs px-2 py-1 rounded-md border-0 cursor-pointer ${getStatusColor(task.status)}`} style={{ background: 'transparent' }}>
-                      {MANUAL_STATUSES.map(s => <option key={s} value={s} className="bg-card text-foreground">{getStatusLabel(s)}</option>)}
-                      {task.status === 'invoiced' && <option value="invoiced" className="bg-card text-foreground" disabled>🔒 Invoiced (system)</option>}
-                    </select>
-                    {task.status === 'cancelled' && task.cancelled_by && (
-                      <div className="mt-1 flex items-center gap-1 flex-wrap">
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">
-                          {task.cancelled_by === 'client' ? '👤 Client' : task.cancelled_by === 'no_show' ? '🚫 No-show' : '🏢 Company'}
-                        </span>
-                        {(task.completion_pct || 0) > 0 && (
-                          <span className="text-[9px] text-muted-foreground">{task.completion_pct}% done</span>
-                        )}
-                        {showBilling && (task.loss_amount || 0) > 0 && (
-                          <span className="text-[9px] text-red-400 font-medium">
-                            Loss {formatCurrency(task.loss_amount!, task.currency as Currency)}
-                          </span>
-                        )}
-                        {task.honor_contributions && (
-                          <span title="Employee contributions honored" className="text-[9px] text-green-400">
-                            <Users className="inline w-2.5 h-2.5" /> Paid
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </td>
+                  {/* Reorderable column cells — rendered in user's chosen order */}
+                  {visibleCols.map(key => renderCell(key, task))}
                   <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                     <div className="flex items-center gap-1">
                       {can('tasks.assign') && (

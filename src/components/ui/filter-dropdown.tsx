@@ -17,10 +17,12 @@ interface Props {
   className?: string
   /** max width of the trigger label before truncating */
   maxLabelWidth?: string
+  /** Smaller trigger height/padding for compact toolbars */
+  compact?: boolean
 }
 
 export function FilterDropdown({
-  options, value, onChange, placeholder, sortKey, className = '', maxLabelWidth = 'max-w-[140px]',
+  options, value, onChange, placeholder, sortKey, className = '', maxLabelWidth = 'max-w-[140px]', compact = false,
 }: Props) {
   const [open,     setOpen]     = useState(false)
   const [search,   setSearch]   = useState('')
@@ -137,7 +139,7 @@ export function FilterDropdown({
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className={`flex items-center gap-2 h-[34px] px-3 rounded-xl text-sm font-medium transition-all border
+        className={`flex items-center gap-1.5 ${compact ? 'h-[30px] px-2 text-xs' : 'h-[34px] px-3 text-sm'} rounded-xl font-medium transition-all border
           ${isActive
             ? 'bg-violet-500/15 border-violet-500/40 text-violet-300'
             : 'bg-secondary border-foreground/15 text-muted-foreground hover:text-foreground hover:border-foreground/20'

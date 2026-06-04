@@ -12,20 +12,21 @@ import { createAdminClient } from '@/lib/supabase/admin'
 // Workspace logo URL fetch — pulls both dark and light variants.
 // Service-role client so RLS on company_settings can't block it.
 // Returns nulls on any failure so the Sidebar falls back to the default mark.
-async function fetchLogoUrls(): Promise<{ logoUrl: string | null; logoUrlDark: string | null }> {
+async function fetchLogoUrls(): Promise<{ logoUrl: string | null; logoUrlDark: string | null; faviconUrl: string | null }> {
   try {
     const admin = createAdminClient()
     const { data } = await admin
       .from('company_settings')
       .select('key, value')
-      .in('key', ['logo_url', 'logo_url_dark'])
+      .in('key', ['logo_url', 'logo_url_dark', 'favicon_url'])
     const map = Object.fromEntries((data || []).map((r: any) => [r.key, (r.value || '').trim()]))
     return {
       logoUrl:     map['logo_url']      || null,
       logoUrlDark: map['logo_url_dark'] || null,
+      faviconUrl:  map['favicon_url']   || null,
     }
   } catch {
-    return { logoUrl: null, logoUrlDark: null }
+    return { logoUrl: null, logoUrlDark: null, faviconUrl: null }
   }
 }
 
@@ -35,7 +36,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     loadCurrentUser().catch(() => null),
     fetchLogoUrls(),
   ])
-  const { logoUrl, logoUrlDark } = logos
+  const { logoUrl, logoUrlDark, faviconUrl } = logos
 
   // Default to a permissive admin shape if no employee record / migration not yet applied,
   // so the existing single-admin app keeps working until the migration runs.
@@ -78,7 +79,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   return (
     <PrivacyProvider>
       <RoleProvider initialEmployee={serverEmployee}>
-        <PermissionProvider user={user} logoUrl={logoUrl} logoUrlDark={logoUrlDark}>
+        <PermissionProvider user={user} logoUrl={logoUrl} logoUrlDark={logoUrlDark} faviconUrl={faviconUrl}>
           {/* h-dvh = dynamic viewport height (adapts as Safari toolbar shows/hides).
               h-screen (100vh) on iOS uses the *large* viewport (toolbar-hidden),
               making the container taller than the visible area when the address bar

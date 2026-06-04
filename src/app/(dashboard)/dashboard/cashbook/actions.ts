@@ -11,6 +11,7 @@ import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission } from '@/lib/auth/enforce'
 import { PERMS } from '@/lib/permissions/keys'
+import { fetchRates } from '@/lib/fx/sync'
 
 const REVALIDATE = '/dashboard/cashbook'
 
@@ -389,4 +390,40 @@ export async function saveClientTags(
 
   revalidatePath(REVALIDATE)
   return { ok: true, data: { saved } }
+}
+
+// ─── Live FX rate sync ────────────────────────────────────────────────────────
+
+/**
+ * Fetch the live rate for a single foreign currency from the FX API.
+ * Also upserts it to exchange_rates so Settings → Exchange Rates stays fresh.
+ * Returns the new rate_to_inr value and the API's rate date.
+ */
+export async function fetchLiveRate(
+  currency: string,
+): Promise<ActionResult<{ rate: number; rateDate: string }>> {
+  const guard = await requirePermission(PERMS.CASHBOOK_EDIT)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const fetched = await fetchRates()
+  if (!fetched.ok || !fetched.rates) {
+    return { ok: false, error: fetched.error || 'Failed to fetch live rates' }
+  }
+
+  const rate = fetched.rates[currency.toUpperCase()]
+  if (typeof rate !== 'number' || rate <= 0) {
+    return { ok: false, error: `No live rate available for ${currency}` }
+  }
+
+  const rateDate = fetched.rateDate ?? new Date().toISOString().slice(0, 10)
+
+  // Persist so Settings / exchange_rates table stays current.
+  const admin = createAdminClient()
+  await admin.from('exchange_rates').upsert(
+    { currency, rate_to_inr: rate, rate_source: 'api', rate_date: rateDate, last_updated: new Date().toISOString() },
+    { onConflict: 'currency' },
+  )
+
+  revalidatePath(REVALIDATE)
+  return { ok: true, data: { rate, rateDate } }
 }

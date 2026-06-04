@@ -5,7 +5,7 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
-import { insertCashbookEntries, updateCashbookEntry, softDeleteCashbookEntry } from './actions'
+import { insertCashbookEntries, updateCashbookEntry, softDeleteCashbookEntry, fetchLiveRate } from './actions'
 import { formatCompact, round2 } from '@/lib/calculations/currency'
 import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
 import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, RefreshCw } from 'lucide-react'
@@ -58,14 +58,16 @@ interface Entry {
   reference?: string
   invoice_id?: string
   client_id?: string        // entity tag for per-client FIFO allocation
+  exchange_rate?: number
+  rate_source?: string
   receipt_number?: string | null
   deleted_at?: string | null
   category?: { id: string; name: string; type: string }
   bank_account?: { id: string; name: string }
-  allocations?: { 
-    id: string; 
-    invoice_id: string; 
-    allocated_amount: number; 
+  allocations?: {
+    id: string;
+    invoice_id: string;
+    allocated_amount: number;
     deleted_at?: string | null;
     invoice?: {
       invoice_number: string;
@@ -73,7 +75,11 @@ interface Entry {
       due_date: string;
       total_amount: number;
       paid_amount: number;
-      client?: { name: string }
+      // FX fields — added to query so drill-down can use invoice's book rate
+      total_amount_inr?: number;
+      exchange_rate?: number;
+      currency?: string;
+      client?: { id: string; name: string }
     }
   }[]
   payroll_allocations?: {
@@ -169,6 +175,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   const isAdmin = role === 'super_admin'
   const [entries, setEntries] = useState<Entry[]>(initialEntries)
   const [showForm, setShowForm] = useState(false)
+  const [formEditingId, setFormEditingId] = useState<string | null>(null)   // non-null = editing existing
   const [showRebuildPanel, setShowRebuildPanel] = useState(false)
   const [saving, setSaving] = useState(false)
   const router = useRouter()
@@ -182,6 +189,9 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   const [filterAllocStatus, setFilterAllocStatus] = useState(searchParams.get('alloc') || '')
   const [filterMinAmount, setFilterMinAmount] = useState(searchParams.get('min') || '')
   const [filterMaxAmount, setFilterMaxAmount] = useState(searchParams.get('max') || '')
+
+  // FX Report modal (hidden by default, opt-in)
+  const [showFxReportModal, setShowFxReportModal] = useState(false)
 
   useEffect(() => {
     const params = new URLSearchParams(searchParams.toString())
@@ -214,7 +224,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   const [receiptEntry, setReceiptEntry] = useState<Entry | null>(null)
 
   const invoiceCategoryId = useMemo(() => categories.find(c => c.name.toLowerCase().includes('invoice'))?.id, [categories])
-  const salaryCategoryId = useMemo(() => categories.find(c => c.name.toLowerCase().includes('salary'))?.id, [categories])
+  const salaryCategoryId  = useMemo(() => categories.find(c => c.name.toLowerCase().includes('salary'))?.id, [categories])
+
 
   const [form, setForm] = useState({
     type: 'inflow' as 'inflow' | 'outflow',
@@ -244,6 +255,23 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     return m
   }, [exchangeRates])
 
+  // ── FX gain/loss calculations ────────────────────────────────────────────────
+  // Compare the amount_inr the user actually typed against what the stored book
+  // rate would produce. Difference = realised exchange rate gain or loss.
+  const fxCalcAmount    = parseFloat(form.amount) || 0
+  const fxCalcCurrency  = form.currency as Currency
+  const fxBookRate      = rateMap[fxCalcCurrency] || 0
+  const fxActualInr     = parseFloat(form.amountInr) || 0
+  const fxExpectedInr   = fxCalcCurrency !== 'INR' && fxBookRate > 0
+    ? round2(fxCalcAmount * fxBookRate)
+    : 0
+  const fxDiff = fxCalcCurrency !== 'INR' && fxBookRate > 0 && fxActualInr > 0 && fxCalcAmount > 0
+    ? round2(fxActualInr - fxExpectedInr)
+    : 0
+  const fxDirection = Math.abs(fxDiff) > 0.005
+    ? (fxDiff > 0 ? 'gain' : 'loss')
+    : 'none'
+
   // Derive { rate, amountInr, rateSource } when amount/currency are set
   // programmatically (invoice link, "fully paid" auto-fill) so the FX widget
   // and stored values stay consistent without user interaction.
@@ -255,6 +283,44 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     return { rate, amountInr, rateSource: r ? 'settings' : 'manual' }
   }
 
+  /** Open the full Add/Edit form pre-filled with an existing entry's data. */
+  function openEditForm(entry: Entry) {
+    const cur = (entry.currency as Currency) ?? 'INR'
+    const storedRate = entry.exchange_rate ?? (cur === 'INR' ? 1 : (rateMap[cur] || 1))
+    setForm({
+      type:            entry.type,
+      category_id:     entry.category_id ?? '',
+      bank_account_id: entry.bank_account_id ?? '',
+      amount:          entry.amount != null ? String(entry.amount) : '',
+      currency:        cur,
+      rate:            cur === 'INR' ? '1' : String(storedRate),
+      amountInr:       entry.amount_inr != null ? String(entry.amount_inr) : '',
+      rateSource:      (entry.rate_source as RateSource) ?? (cur === 'INR' ? 'manual' : 'settings'),
+      entry_date:      entry.entry_date ?? new Date().toISOString().slice(0, 10),
+      description:     entry.description ?? '',
+      reference:       entry.reference ?? '',
+      // Pre-fill the invoice reference if linked (the Combobox will show the linked invoice
+      // if it is still open; if already paid it won't appear in the picker but the reference
+      // text still shows).
+      linked_invoice_id: entry.invoice_id ?? '',
+      client_filter_id:  entry.client_id  ?? '',
+      fully_paid:      false,
+    })
+    setFormEditingId(entry.id)
+    setRecurringMonths(0)
+    setShowForm(true)
+  }
+
+  /** Fetch a live FX rate from the API, update rateMap in-place, return the result for the widget. */
+  async function syncLiveRate(currency: string): Promise<{ rate: number; rateDate: string } | null> {
+    const res = await fetchLiveRate(currency)
+    if (!res.ok || !res.data) return null
+    // Patch rateMap so fxFor() and the FX-gain panel use the fresh rate immediately
+    // without waiting for a page reload.
+    rateMap[currency] = res.data.rate
+    return res.data
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
@@ -264,6 +330,48 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     const amountInr = isBase ? amount : (parseFloat(form.amountInr) || round2(amount * exchange_rate))
     const rate_source: RateSource = isBase ? 'manual' : form.rateSource
     const rate_date = form.entry_date
+
+    // ── EDIT MODE: update existing entry ────────────────────────────────────
+    if (formEditingId) {
+      const result = await updateCashbookEntry(formEditingId, {
+        entry_date:      form.entry_date,
+        amount,
+        amount_inr:      amountInr,
+        currency:        form.currency,
+        exchange_rate,
+        rate_source,
+        rate_date,
+        category_id:     form.category_id,
+        bank_account_id: form.bank_account_id || null,
+        description:     form.description,
+        reference:       form.reference,
+      })
+      if (result.ok) {
+        setEntries(prev => prev.map(e =>
+          e.id === formEditingId
+            ? {
+                ...e,
+                type:            form.type,
+                category_id:     form.category_id,
+                bank_account_id: form.bank_account_id || undefined,
+                amount,
+                currency:        form.currency as Currency,
+                amount_inr:      amountInr,
+                exchange_rate,
+                rate_source,
+                entry_date:      form.entry_date,
+                description:     form.description,
+                reference:       form.reference,
+              }
+            : e,
+        ))
+        setShowForm(false)
+        setFormEditingId(null)
+        setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: '', amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: new Date().toISOString().split('T')[0], description: '', reference: '', linked_invoice_id: '', client_filter_id: '', fully_paid: false })
+      }
+      setSaving(false)
+      return
+    }
 
     // Build list of dates (base date + recurring copies)
     const baseDates: string[] = [form.entry_date]
@@ -334,29 +442,70 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   async function handleInlineSave() {
     if (!editingRow) return
     setSaving(true)
-    const amount = Number(editForm.amount) || 0
-    const cur = (editForm.currency ?? 'INR') as Currency
+
+    // Find the original entry to preserve its stored exchange_rate
+    const originalEntry = entries.find(e => e.id === editingRow)
+    if (!originalEntry) {
+      setSaving(false)
+      return
+    }
+
+    const amount = Number(editForm.amount) ?? (originalEntry.amount || 0)
+    const cur = (editForm.currency ?? originalEntry.currency ?? 'INR') as Currency
     const isBase = cur === 'INR'
-    const exchange_rate = isBase ? 1 : (rateMap[cur] || 1)
+
+    // IMPORTANT: Preserve the stored exchange_rate ONLY if currency hasn't changed.
+    // If the user changed the currency, use the book rate for the NEW currency.
+    const currencyChanged = editForm.currency && editForm.currency !== originalEntry.currency
+    let exchange_rate: number
+    let rate_source: RateSource
+
+    if (isBase) {
+      exchange_rate = 1
+      rate_source = 'manual'
+    } else if (currencyChanged) {
+      // Currency was changed — use the book rate for the new currency
+      exchange_rate = rateMap[cur] || 1
+      rate_source = rateMap[cur] ? 'settings' : 'manual'
+    } else {
+      // Currency unchanged — preserve the stored rate (historical data is precious)
+      exchange_rate = originalEntry.exchange_rate ?? (rateMap[cur] || 1)
+      rate_source = (originalEntry.rate_source as RateSource) ?? 'settings'
+    }
+
+    // Recalculate INR using the (preserved or new) exchange rate
     const amount_inr = isBase ? amount : round2(amount * exchange_rate)
-    const rate_source: RateSource = isBase ? 'manual' : (rateMap[cur] ? 'settings' : 'manual')
-    const rate_date = editForm.entry_date ?? new Date().toISOString().split('T')[0]
+    const rate_date = editForm.entry_date ?? originalEntry.entry_date ?? new Date().toISOString().split('T')[0]
+
     const result = await updateCashbookEntry(editingRow, {
-      entry_date: editForm.entry_date ?? new Date().toISOString().split('T')[0],
+      entry_date: editForm.entry_date ?? originalEntry.entry_date ?? new Date().toISOString().split('T')[0],
       amount,
       amount_inr,
       currency: cur,
       exchange_rate,
       rate_source,
       rate_date,
-      category_id: editForm.category_id,
-      bank_account_id: editForm.bank_account_id || null,
-      description: editForm.description ?? '',
-      reference: editForm.reference ?? '',
+      category_id: editForm.category_id ?? originalEntry.category_id,
+      bank_account_id: editForm.bank_account_id ?? originalEntry.bank_account_id ?? null,
+      description: editForm.description ?? originalEntry.description ?? '',
+      reference: editForm.reference ?? originalEntry.reference ?? '',
     })
     if (result.ok) {
-      setEntries(prev => prev.map(e => e.id === editingRow ? { ...e, ...editForm, amount_inr, exchange_rate, rate_source, rate_date } : e))
+      setEntries(prev => prev.map(e => e.id === editingRow ? {
+        ...e,
+        amount,
+        amount_inr,
+        exchange_rate,
+        rate_source,
+        rate_date,
+        entry_date: editForm.entry_date ?? originalEntry.entry_date,
+        description: editForm.description ?? originalEntry.description,
+        reference: editForm.reference ?? originalEntry.reference,
+        category_id: editForm.category_id ?? originalEntry.category_id,
+        bank_account_id: editForm.bank_account_id ?? originalEntry.bank_account_id,
+      } : e))
       setEditingRow(null)
+      setEditForm({})
     }
     setSaving(false)
   }
@@ -449,9 +598,147 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     return result
   }, [entries, filterType, filterMonth, filterSearch, filterCategory, filterAllocStatus, filterMinAmount, filterMaxAmount, invoiceCategoryId, salaryCategoryId])
 
-  const totalInflow = filteredEntries.filter(e => e.type === 'inflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
+  const totalInflow  = filteredEntries.filter(e => e.type === 'inflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
   const totalOutflow = filteredEntries.filter(e => e.type === 'outflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
   const net = totalInflow - totalOutflow
+
+  // Realised FX gain/loss (display only — no extra entries created).
+  // Formula: Σ (actual_amount_inr − foreign_amount × book_rate) for all foreign inflows.
+  // Positive = net gain (received more INR than book rate implied).
+  // Negative = net loss.
+  const realisedFxGainLoss = useMemo(() =>
+    filteredEntries
+      .filter(e => e.type === 'inflow' && e.currency !== 'INR' && (e.amount ?? 0) > 0 && (e.amount_inr ?? 0) > 0)
+      .reduce((sum, e) => {
+        const bookRate = rateMap[e.currency as string]
+        if (!bookRate) return sum
+        return round2(sum + round2((e.amount_inr ?? 0) - round2((e.amount ?? 0) * bookRate)))
+      }, 0),
+    [filteredEntries, rateMap],
+  )
+
+  // ── FX Gain/Loss by period ────────────────────────────────────────────────────
+  //
+  // Formula (per the accounting requirement):
+  //   FX Gain/Loss = Actual INR Received − (Foreign Amount × Book Rate)
+  //
+  // "Book Rate" priority:
+  //   1. Invoice's stored exchange_rate (set when the invoice was issued — stable,
+  //      never changes, represents the rate the business originally expected).
+  //   2. Current rateMap rate (only for entries with no invoice link — labelled
+  //      "vs current rate" so the user knows it can drift).
+  //
+  // Using the INVOICE rate (not today's rate) ensures historical reports never
+  // change when the exchange_rates table is updated.
+
+  interface FxEntryDetail {
+    entryId:       string
+    entryDate:     string
+    clientName:    string
+    invoiceNumber: string
+    foreignAmount: number
+    currency:      string
+    bookValueInr:  number   // foreign × invoice.exchange_rate (or rateMap fallback)
+    actualInr:     number   // entry.amount_inr
+    fxDiff:        number   // actualInr − bookValueInr
+    rateSource:    'invoice' | 'rateMap'
+  }
+
+  interface FxPeriodRow {
+    period:  string         // 'YYYY-MM'
+    label:   string         // 'Jun 2026'
+    fxDiff:  number
+    count:   number
+    entries: FxEntryDetail[]
+  }
+
+  const fxByMonth = useMemo((): FxPeriodRow[] => {
+    const map: Record<string, FxPeriodRow> = {}
+
+    entries
+      .filter(e =>
+        e.type === 'inflow' &&
+        e.currency !== 'INR' &&
+        (e.amount ?? 0) > 0 &&
+        (e.amount_inr ?? 0) > 0 &&
+        !e.deleted_at,
+      )
+      .forEach(e => {
+        const actualInr  = e.amount_inr ?? 0
+        const foreignAmt = e.amount ?? 0
+
+        // Determine book value and source
+        const activeAllocs = (e.allocations ?? []).filter(a => !a.deleted_at && a.invoice)
+        let bookValueInr: number
+        let rateSourceLabel: 'invoice' | 'rateMap'
+        let clientName    = ''
+        let invoiceNumber = ''
+
+        if (activeAllocs.length > 0) {
+          // Use the first allocation's invoice exchange_rate as the book rate.
+          // For multi-invoice payments this is an approximation; good enough for reporting.
+          const inv = activeAllocs[0].invoice!
+          const invRate = inv.exchange_rate ?? rateMap[e.currency as string] ?? 0
+          bookValueInr    = round2(foreignAmt * invRate)
+          rateSourceLabel = inv.exchange_rate ? 'invoice' : 'rateMap'
+          clientName      = inv.client?.name ?? ''
+          invoiceNumber   = inv.invoice_number ?? ''
+        } else {
+          // No invoice link — fall back to current book rate
+          const br = rateMap[e.currency as string]
+          if (!br) return
+          bookValueInr    = round2(foreignAmt * br)
+          rateSourceLabel = 'rateMap'
+        }
+
+        const diff = round2(actualInr - bookValueInr)
+        if (Math.abs(diff) < 0.005) return   // no meaningful FX movement
+
+        const period = e.entry_date.slice(0, 7)
+        const [yr, mo] = period.split('-')
+        const label = new Date(Number(yr), Number(mo) - 1, 1)
+          .toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
+
+        if (!map[period]) map[period] = { period, label, fxDiff: 0, count: 0, entries: [] }
+        map[period].fxDiff = round2(map[period].fxDiff + diff)
+        map[period].count++
+        map[period].entries.push({
+          entryId:       e.id,
+          entryDate:     e.entry_date,
+          clientName,
+          invoiceNumber,
+          foreignAmount: foreignAmt,
+          currency:      e.currency as string,
+          bookValueInr,
+          actualInr,
+          fxDiff:        diff,
+          rateSource:    rateSourceLabel,
+        })
+      })
+
+    return Object.values(map)
+      .sort((a, b) => b.period.localeCompare(a.period))
+      .map(row => ({
+        ...row,
+        entries: [...row.entries].sort((a, b) => b.fxDiff - a.fxDiff),
+      }))
+  }, [entries, rateMap])
+
+  const fxByYear = useMemo(() => {
+    const map: Record<string, { year: string; fxDiff: number; count: number; entries: FxEntryDetail[] }> = {}
+    fxByMonth.forEach(m => {
+      const yr = m.period.slice(0, 4)
+      if (!map[yr]) map[yr] = { year: yr, fxDiff: 0, count: 0, entries: [] }
+      map[yr].fxDiff = round2(map[yr].fxDiff + m.fxDiff)
+      map[yr].count  += m.count
+      map[yr].entries.push(...m.entries)
+    })
+    return Object.values(map).sort((a, b) => b.year.localeCompare(a.year))
+  }, [fxByMonth])
+
+  const [showFxReport,  setShowFxReport]  = useState(false)
+  const [fxPeriodView,  setFxPeriodView]  = useState<'month' | 'year'>('month')
+  const [fxExpandedRow, setFxExpandedRow] = useState<string | null>(null)
 
   const inflowCategories = categories.filter(c => c.type === 'inflow' || c.type === 'both')
   const outflowCategories = categories.filter(c => c.type === 'outflow' || c.type === 'both')
@@ -507,6 +794,14 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               <Plus className="w-4 h-4 shrink-0" />
               Add Entry
             </button>
+            {realisedFxGainLoss !== 0 && (
+              <button onClick={() => setShowFxReportModal(true)}
+                className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap"
+                title="View FX Gain/Loss report">
+                <TrendingUp className="w-4 h-4 shrink-0" />
+                <span className="hidden sm:inline">FX Report</span>
+              </button>
+            )}
           </div>
         }
       />
@@ -515,7 +810,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         {/* Summary — only rendered when the viewer can see ₹ amounts. Without
             cashbook.view_amounts the totals would collapse to ₹0 and mislead. */}
         {showAmounts && (
-          <div className="grid grid-cols-3 gap-4">
+          <div className={`grid gap-4 ${realisedFxGainLoss !== 0 ? 'grid-cols-4' : 'grid-cols-3'}`}>
             <div className="bg-card border border-border rounded-xl p-4">
               <div className="flex items-center gap-2 mb-1">
                 <TrendingUp className="w-4 h-4 text-green-400" />
@@ -537,8 +832,23 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               </div>
               <p className={`text-xl font-bold ${net >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatCompact(Math.abs(net))}</p>
             </div>
+            {realisedFxGainLoss !== 0 && (
+              <div className={`bg-card border rounded-xl p-4 ${realisedFxGainLoss > 0 ? 'border-green-500/25' : 'border-red-500/25'}`}>
+                <div className="flex items-center gap-2 mb-1">
+                  {realisedFxGainLoss > 0
+                    ? <TrendingUp  className="w-4 h-4 text-green-400" />
+                    : <TrendingDown className="w-4 h-4 text-red-400" />}
+                  <p className="text-xs text-muted-foreground">FX {realisedFxGainLoss > 0 ? 'Gain' : 'Loss'}</p>
+                </div>
+                <p className={`text-xl font-bold ${realisedFxGainLoss > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {realisedFxGainLoss > 0 ? '+' : '-'}{formatCompact(Math.abs(realisedFxGainLoss))}
+                </p>
+                <p className="text-[10px] text-muted-foreground/60 mt-0.5">vs book rate · display only</p>
+              </div>
+            )}
           </div>
         )}
+
 
         {/* Filters */}
         <div className="flex gap-3 flex-wrap items-center bg-secondary/20 p-3 rounded-xl border border-border">
@@ -735,7 +1045,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                                 <LinkIcon className="w-3.5 h-3.5" />
                               </button>
                             )}
-                            <button onClick={() => { setEditingRow(entry.id); setEditForm(entry); }} className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors" title="Edit entry">
+                            <button onClick={() => openEditForm(entry)} className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors" title="Edit entry (full form)">
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
                             <button
@@ -795,52 +1105,76 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 const isEditing = editingRow === entry.id
 
                 return (
-                  <tr key={entry.id} className="hover-gradient-row group">
+                  <tr key={entry.id} className={`hover-gradient-row group ${isEditing ? 'ring-2 ring-inset ring-primary/30 bg-primary/3' : ''}`}>
+                    {/* ── Date ────────────────────────────────────────────── */}
                     <td className="px-4 py-3 text-muted-foreground text-xs">
                       {isEditing ? (
-                        <input type="date" value={editForm.entry_date || ''} onChange={e => setEditForm(p => ({...p, entry_date: e.target.value}))} className="bg-background border rounded px-2 py-1" />
+                        <input
+                          type="date"
+                          value={editForm.entry_date || ''}
+                          onChange={e => setEditForm(p => ({...p, entry_date: e.target.value}))}
+                          className="bg-background border border-border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 w-full"
+                        />
                       ) : (
                         entry.entry_date
                       )}
                     </td>
+
+                    {/* ── Category ────────────────────────────────────────── */}
                     <td className="px-4 py-3 align-top">
-                      <div className={cn(
-                        BRANDED_PILL_BASE_CLASS,
-                        "flex-col items-start gap-0.5",
-                        isEditing ? BRANDED_PILL_ACTIVE_CLASS : ""
-                      )}>
-                        <div className="flex items-center gap-2">
-                          <div className={`w-1.5 h-1.5 rounded-full ${entry.type === 'inflow' ? 'bg-green-400' : 'bg-red-400'}`} />
-                          {isEditing ? (
-                            <select value={editForm.category_id || ''} onChange={e => setEditForm(p => ({...p, category_id: e.target.value}))} className="bg-background border rounded px-2 py-1 text-xs text-foreground">
-                              {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                            </select>
-                          ) : (
-                            <span className="font-medium text-foreground">{entry.category?.name}</span>
-                          )}
-                        </div>
-                        {entry.description && (
-                          <div className="text-xs text-muted-foreground opacity-70 truncate max-w-[200px] ml-3.5">
-                            {entry.description}
+                      {isEditing ? (
+                        /* Clean select — no pill wrapper so it doesn't look like a combobox */
+                        <select
+                          value={editForm.category_id || ''}
+                          onChange={e => setEditForm(p => ({...p, category_id: e.target.value}))}
+                          className="bg-background border border-border rounded-lg px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 w-full"
+                        >
+                          {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                      ) : (
+                        <>
+                          <div className={cn(BRANDED_PILL_BASE_CLASS, 'flex-col items-start gap-0.5')}>
+                            <div className="flex items-center gap-2">
+                              <div className={`w-1.5 h-1.5 rounded-full ${entry.type === 'inflow' ? 'bg-green-400' : 'bg-red-400'}`} />
+                              <span className="font-medium text-foreground">{entry.category?.name}</span>
+                            </div>
+                            {entry.description && (
+                              <div className="text-xs text-muted-foreground opacity-70 truncate max-w-[200px] ml-3.5">
+                                {entry.description}
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                      {/* Allocation Badges */}
-                      {allocStatus === 'none' && <span className="inline-block mt-1 bg-amber-500/10 text-amber-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Unallocated</span>}
-                      {allocStatus === 'partial' && <span className="inline-block mt-1 bg-blue-500/10 text-blue-400 text-[9px] px-1.5 py-0.5 rounded font-medium">Partially Allocated</span>}
-                      {allocStatus === 'over' && <span className="inline-block mt-1 bg-red-500/10 text-red-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Over-allocated!</span>}
-                      {allocStatus === 'fully' && <span className="inline-block mt-1 bg-green-500/10 text-green-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Fully Allocated</span>}
+                          {allocStatus === 'none'    && <span className="inline-block mt-1 bg-amber-500/10  text-amber-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Unallocated</span>}
+                          {allocStatus === 'partial' && <span className="inline-block mt-1 bg-blue-500/10   text-blue-400  text-[9px] px-1.5 py-0.5 rounded font-medium">Partially Allocated</span>}
+                          {allocStatus === 'over'    && <span className="inline-block mt-1 bg-red-500/10    text-red-500   text-[9px] px-1.5 py-0.5 rounded font-medium">Over-allocated!</span>}
+                          {allocStatus === 'fully'   && <span className="inline-block mt-1 bg-green-500/10  text-green-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Fully Allocated</span>}
+                        </>
+                      )}
                     </td>
+
+                    {/* ── Description ─────────────────────────────────────── */}
                     <td className="px-4 py-3 text-sm text-muted-foreground">
                       {isEditing ? (
-                        <input type="text" value={editForm.description || ''} onChange={e => setEditForm(p => ({...p, description: e.target.value}))} className="bg-background border rounded px-2 py-1 w-full text-xs" />
+                        <input
+                          type="text"
+                          value={editForm.description || ''}
+                          onChange={e => setEditForm(p => ({...p, description: e.target.value}))}
+                          className="bg-background border border-border rounded-lg px-2 py-1.5 w-full text-xs focus:outline-none focus:ring-2 focus:ring-primary/50"
+                          placeholder="Description"
+                        />
                       ) : (
                         entry.description || '—'
                       )}
                     </td>
+
+                    {/* ── Account ─────────────────────────────────────────── */}
                     <td className="px-4 py-3 text-xs text-muted-foreground">
                       {isEditing ? (
-                        <select value={editForm.bank_account_id || ''} onChange={e => setEditForm(p => ({...p, bank_account_id: e.target.value}))} className="bg-background border rounded px-2 py-1">
+                        <select
+                          value={editForm.bank_account_id || ''}
+                          onChange={e => setEditForm(p => ({...p, bank_account_id: e.target.value}))}
+                          className="bg-background border border-border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 w-full"
+                        >
                           <option value="">Cash</option>
                           {bankAccounts.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                         </select>
@@ -848,11 +1182,25 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                         entry.bank_account?.name || 'Cash'
                       )}
                     </td>
+
+                    {/* ── Amount ──────────────────────────────────────────── */}
                     <td className={`px-4 py-3 text-right font-semibold ${entry.type === 'inflow' ? 'text-green-400' : 'text-red-400'}`}>
                       {isEditing ? (
-                        <div className="flex gap-1 justify-end">
-                          <input type="number" value={editForm.amount || ''} onChange={e => setEditForm(p => ({...p, amount: Number(e.target.value)}))} className="bg-background border rounded px-2 py-1 w-20 text-xs" />
-                          <select value={editForm.currency || ''} onChange={e => setEditForm(p => ({...p, currency: e.target.value as Currency}))} className="bg-background border rounded px-1 py-1 text-xs">
+                        <div className="flex gap-1.5 justify-end items-center">
+                          <input
+                            type="number"
+                            step="any"
+                            min="0"
+                            value={editForm.amount || ''}
+                            onChange={e => setEditForm(p => ({...p, amount: Number(e.target.value)}))}
+                            className="bg-background border border-border rounded-lg px-2 py-1.5 w-24 text-xs text-right focus:outline-none focus:ring-2 focus:ring-primary/50"
+                            placeholder="0.00"
+                          />
+                          <select
+                            value={editForm.currency || ''}
+                            onChange={e => setEditForm(p => ({...p, currency: e.target.value as Currency}))}
+                            className="bg-background border border-border rounded-lg px-1.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50"
+                          >
                             {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
                           </select>
                         </div>
@@ -869,12 +1217,18 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                         </>
                       )}
                     </td>
+
+                    {/* ── Actions ─────────────────────────────────────────── */}
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
                         {isEditing ? (
                           <>
-                            <button onClick={handleInlineSave} disabled={saving} className="p-1.5 rounded-md hover:bg-primary/20 text-primary transition-colors" title="Save changes"><Save className="w-3.5 h-3.5" /></button>
-                            <button onClick={() => setEditingRow(null)} disabled={saving} className="p-1.5 rounded-md hover:bg-secondary/80 text-muted-foreground transition-colors" title="Cancel"><X className="w-3.5 h-3.5" /></button>
+                            <button onClick={handleInlineSave} disabled={saving} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-primary/15 text-primary hover:bg-primary/25 text-xs font-medium transition-colors disabled:opacity-50" title="Save changes">
+                              <Save className="w-3 h-3" />Save
+                            </button>
+                            <button onClick={() => setEditingRow(null)} disabled={saving} className="p-1.5 rounded-lg hover:bg-secondary/80 text-muted-foreground transition-colors" title="Cancel">
+                              <X className="w-3.5 h-3.5" />
+                            </button>
                           </>
                         ) : (
                           <>
@@ -905,7 +1259,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                                 <LinkIcon className="w-3.5 h-3.5" />
                               </button>
                             )}
-                            <button onClick={() => { setEditingRow(entry.id); setEditForm(entry); }} className="lg:opacity-0 opacity-100 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary" title="Edit entry">
+                            <button onClick={() => openEditForm(entry)} className="lg:opacity-0 opacity-100 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary" title="Edit entry (full form with FX options)">
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
                             <button
@@ -930,11 +1284,14 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
 
       {/* Add Entry Modal */}
       {showForm && (
-        <ModalOverlay onClose={() => setShowForm(false)} sheetOnMobile>
+        <ModalOverlay onClose={() => { setShowForm(false); setFormEditingId(null) }} sheetOnMobile>
           <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[90dvh] overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
-              <h2 className="font-semibold">Add Cash Book Entry</h2>
-              <button onClick={() => setShowForm(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+              <div>
+                <h2 className="font-semibold">{formEditingId ? 'Edit Cash Book Entry' : 'Add Cash Book Entry'}</h2>
+                {formEditingId && <p className="text-[11px] text-muted-foreground mt-0.5">Invoice allocation is managed separately via the ⛓ link button</p>}
+              </div>
+              <button onClick={() => { setShowForm(false); setFormEditingId(null) }} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
             </div>
             <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
               <div className="overflow-y-auto px-6 py-5 space-y-4 flex-1 min-h-0">
@@ -986,7 +1343,34 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                   ratesMap={rateMap}
                   lockAmount={form.fully_paid}
                   rateDate={exchangeRates.find(r => r.currency === form.currency)?.rate_date}
+                  onSyncRate={syncLiveRate}
                 />
+
+                {/* ── FX Gain / Loss indicator (display-only — no separate entry created) ── */}
+                {fxDirection !== 'none' && (
+                  <div className={`rounded-lg border px-3 py-2.5 space-y-1.5 ${fxDirection === 'gain' ? 'border-green-500/25 bg-green-500/5' : 'border-red-500/25 bg-red-500/5'}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        {fxDirection === 'gain'
+                          ? <TrendingUp  className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                          : <TrendingDown className="w-3.5 h-3.5 text-red-400   shrink-0" />}
+                        <span className={`text-xs font-semibold ${fxDirection === 'gain' ? 'text-green-400' : 'text-red-400'}`}>
+                          Realised FX {fxDirection === 'gain' ? 'Gain' : 'Loss'}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground/60 italic">display only</span>
+                      </div>
+                      <span className={`font-mono text-sm font-bold ${fxDirection === 'gain' ? 'text-green-400' : 'text-red-400'}`}>
+                        {fxDirection === 'gain' ? '+' : '-'}₹{Math.abs(fxDiff).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 text-[11px] text-muted-foreground">
+                      <span>At book rate (₹{fxBookRate} per {fxCalcCurrency})</span>
+                      <span className="text-right font-mono">₹{fxExpectedInr.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                      <span>Actual ₹ received</span>
+                      <span className="text-right font-mono">₹{fxActualInr.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1030,12 +1414,17 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                           // panel — linking one here would create a conflicting allocation.
                           .filter(inv => !((inv.payments || []).length > 0))
                           .map(inv => {
+                          const cur = inv.currency || 'INR'
                           const outstanding = inv.total_amount - (inv.paid_amount || 0)
                           const overdue = inv.due_date && inv.due_date < today
+                          // Show amount in the invoice's own currency; add INR equivalent for foreign invoices
+                          const outstandingLabel = cur === 'INR'
+                            ? `₹${outstanding.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                            : `${cur} ${outstanding.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
                           return {
                             id: inv.id,
                             label: `${overdue ? '⚠ ' : ''}${inv.invoice_number} — ${inv.client?.name}`,
-                            sub: `₹${outstanding.toLocaleString('en-IN')}${overdue ? ' overdue' : inv.due_date ? ` due ${inv.due_date}` : ''}`,
+                            sub: `${outstandingLabel} outstanding${overdue ? ' · overdue' : inv.due_date ? ` · due ${inv.due_date}` : ''}`,
                           }
                         })}
                         value={form.linked_invoice_id}
@@ -1074,6 +1463,11 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                       {form.linked_invoice_id && (() => {
                         const inv = dueInvoices.find(i => i.id === form.linked_invoice_id)
                         const outstanding = inv ? (inv.total_amount - (inv.paid_amount || 0)) : 0
+                        const invCur = inv?.currency || 'INR'
+                        // Display the outstanding in the invoice's own currency symbol
+                        const outstandingLabel = invCur === 'INR'
+                          ? `₹${outstanding.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                          : `${invCur} ${outstanding.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
                         return (
                           <label className={`flex items-center gap-2.5 px-3 py-2.5 rounded-lg cursor-pointer transition-colors border ${form.fully_paid ? 'bg-green-500/10 border-green-500/30' : 'bg-secondary border-transparent hover:border-border'}`}>
                             <input
@@ -1092,7 +1486,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                             <div>
                               <span className="text-sm font-medium">Mark as fully paid</span>
                               <span className="text-xs text-muted-foreground ml-2">
-                                — fills ₹{outstanding.toLocaleString('en-IN')} and closes the invoice
+                                — fills {outstandingLabel} and closes the invoice
                               </span>
                             </div>
                           </label>
@@ -1296,8 +1690,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 <input type="text" value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none" placeholder="What is this for?" />
               </div>
 
-              {/* Recurring entry */}
-              <div className={`rounded-xl border p-3 transition-colors ${recurringMonths > 0 ? 'bg-violet-500/10 border-violet-500/30' : 'bg-foreground/[0.02] border-border/40'}`}>
+              {/* Recurring entry — hidden when editing an existing entry */}
+              {!formEditingId && <div className={`rounded-xl border p-3 transition-colors ${recurringMonths > 0 ? 'bg-violet-500/10 border-violet-500/30' : 'bg-foreground/[0.02] border-border/40'}`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <input type="checkbox" id="recurring-toggle" checked={recurringMonths > 0}
@@ -1322,13 +1716,19 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                     Will create {recurringMonths + 1} entries total (this month + {recurringMonths} copies)
                   </p>
                 )}
-              </div>
+              </div>}
 
               </div>
               <div className="flex gap-3 px-6 py-4 border-t border-border shrink-0 bg-card pb-[max(1rem,env(safe-area-inset-bottom))]">
-                <button type="button" onClick={() => { setShowForm(false); setRecurringMonths(0) }} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80">Cancel</button>
+                <button type="button" onClick={() => { setShowForm(false); setFormEditingId(null); setRecurringMonths(0) }} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80">Cancel</button>
                 <button type="submit" disabled={saving} className={`flex-1 text-white text-sm font-medium py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50 ${form.type === 'inflow' ? 'bg-green-600' : 'bg-red-600'}`}>
-                  {saving ? 'Saving…' : recurringMonths > 0 ? `Save ${recurringMonths + 1} Entries` : `Save ${form.type === 'inflow' ? 'Income' : 'Expense'}`}
+                  {saving
+                    ? 'Saving…'
+                    : formEditingId
+                      ? 'Update Entry'
+                      : recurringMonths > 0
+                        ? `Save ${recurringMonths + 1} Entries`
+                        : `Save ${form.type === 'inflow' ? 'Income' : 'Expense'}`}
                 </button>
               </div>
             </form>
@@ -1343,6 +1743,9 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
           entryDate={allocatingEntry.entry_date}
           entryClientId={allocatingEntry.client_id}
           amountInr={allocatingEntry.amount_inr || 0}
+          entryCurrency={(allocatingEntry.currency as any) || 'INR'}
+          entryForeignAmount={allocatingEntry.amount ?? 0}
+          entryBookRate={rateMap[(allocatingEntry.currency as string) || 'INR'] || 0}
           dueInvoices={sortedDueInvoices}
           onClose={() => setAllocatingEntry(null)}
           onUpdate={() => window.location.reload()}
@@ -1414,6 +1817,118 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             </div>
             <div className="overflow-y-auto p-5 flex-1">
               <AllocationRebuildPanel />
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* FX Gain/Loss Report Modal (opt-in) */}
+      {showFxReportModal && (
+        <ModalOverlay onClose={() => setShowFxReportModal(false)} sheetOnMobile>
+          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-2xl shadow-2xl max-h-[90dvh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
+              <div>
+                <h2 className="font-semibold">FX Gain/Loss Report</h2>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Historical exchange rate analysis · display only</p>
+              </div>
+              <button onClick={() => setShowFxReportModal(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-6 space-y-4">
+              {/* Month / Year toggle */}
+              <div className="flex gap-1.5">
+                {(['month', 'year'] as const).map(v => (
+                  <button key={v} type="button" onClick={() => setFxPeriodView(v)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${fxPeriodView === v ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground border border-border'}`}>
+                    {v === 'month' ? 'By Month' : 'By Year'}
+                  </button>
+                ))}
+              </div>
+
+              {/* Summary Card */}
+              <div className={`rounded-lg border ${realisedFxGainLoss > 0 ? 'border-green-500/25 bg-green-500/5' : 'border-red-500/25 bg-red-500/5'} p-4`}>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-2">
+                    {realisedFxGainLoss > 0
+                      ? <TrendingUp className="w-4 h-4 text-green-400 shrink-0" />
+                      : <TrendingDown className="w-4 h-4 text-red-400 shrink-0" />}
+                    <span className={`text-sm font-semibold ${realisedFxGainLoss > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      Total FX {realisedFxGainLoss > 0 ? 'Gain' : 'Loss'}
+                    </span>
+                  </div>
+                  <span className={`text-lg font-bold font-mono ${realisedFxGainLoss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {realisedFxGainLoss >= 0 ? '+' : ''}₹{realisedFxGainLoss.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+              </div>
+
+              {/* Table */}
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-muted-foreground border-b border-border">
+                    <th className="text-left pb-2 font-medium w-8"></th>
+                    <th className="text-left pb-2 font-medium">{fxPeriodView === 'month' ? 'Month' : 'Year'}</th>
+                    <th className="text-right pb-2 font-medium">Entries</th>
+                    <th className="text-right pb-2 font-medium">FX Gain / Loss</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {(fxPeriodView === 'month' ? fxByMonth : fxByYear).map(row => {
+                    const periodKey = fxPeriodView === 'month' ? (row as any).period : (row as any).year
+                    const isExpanded = fxExpandedRow === periodKey
+                    return (
+                      <>
+                        <tr key={`${periodKey}-header`}
+                            onClick={() => setFxExpandedRow(isExpanded ? null : periodKey)}
+                            className="hover:bg-secondary/20 transition-colors cursor-pointer">
+                          <td className="py-2 pl-2">
+                            <svg className={`w-4 h-4 text-muted-foreground transition-transform inline ${isExpanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
+                          </td>
+                          <td className="py-2 font-medium">
+                            {fxPeriodView === 'month' ? (row as any).label : (row as any).year}
+                          </td>
+                          <td className="py-2 text-right text-muted-foreground">{row.count}</td>
+                          <td className={`py-2 text-right font-mono font-semibold ${row.fxDiff >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {row.fxDiff >= 0 ? '+' : ''}₹{row.fxDiff.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          </td>
+                        </tr>
+                        {isExpanded && row.entries.map((entry, idx) => (
+                          <tr key={`${periodKey}-entry-${idx}`} className="bg-secondary/10">
+                            <td className="py-2 pl-6"></td>
+                            <td className="py-2 space-y-0.5">
+                              <div className="font-medium text-foreground">{entry.clientName || '—'}</div>
+                              <div className="text-muted-foreground text-[10px]">
+                                {entry.invoiceNumber ? `Inv: ${entry.invoiceNumber}` : 'No invoice'} • {entry.entryDate}
+                              </div>
+                            </td>
+                            <td className="py-2 text-right">
+                              <div className="text-foreground">{entry.foreignAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} {entry.currency}</div>
+                              <div className="text-muted-foreground text-[10px]">Book: ₹{entry.bookValueInr.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                            </td>
+                            <td className="py-2 text-right">
+                              <div className="text-foreground">₹{entry.actualInr.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                              <div className={`font-mono text-[10px] font-semibold ${entry.fxDiff >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {entry.fxDiff >= 0 ? '+' : ''}₹{Math.abs(entry.fxDiff).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </>
+                    )
+                  })}
+                </tbody>
+                <tfoot className="border-t border-border">
+                  <tr>
+                    <td className="pt-2"></td>
+                    <td className="pt-2 text-muted-foreground font-medium">Total</td>
+                    <td className="pt-2 text-right text-muted-foreground">{fxByMonth.reduce((s, m) => s + m.count, 0)}</td>
+                    <td className={`pt-2 text-right font-mono font-bold ${realisedFxGainLoss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {realisedFxGainLoss >= 0 ? '+' : ''}₹{realisedFxGainLoss.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
             </div>
           </div>
         </ModalOverlay>

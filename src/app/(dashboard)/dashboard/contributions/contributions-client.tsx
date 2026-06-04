@@ -1126,11 +1126,11 @@ export default function ContributionsClient({
                 placeholder="Service"
                 sortKey="services"
               />
-            </div>
 
-            {/* Row 3: Status chips & Clear */}
-            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-              {/* Mobile: compact dropdown */}
+              {/* thin separator between filter dropdowns and status chips */}
+              <span className="hidden sm:block w-px h-5 bg-foreground/10 shrink-0" />
+
+              {/* Status chips — merged from former Row 3 */}
               <select
                 value={statusFilter}
                 onChange={e => setStatusFilter(e.target.value as any)}
@@ -1141,46 +1141,33 @@ export default function ContributionsClient({
                 <option value="done">Scored ({doneCount})</option>
                 <option value="missing">Missing ({missingCount})</option>
               </select>
-              
-              {/* Desktop: chips */}
-              <div className="hidden sm:flex items-center gap-1.5 flex-wrap">
-                {([
-                  { key: 'all',     label: 'All',     count: localTasks.length },
-                  { key: 'pending', label: 'Pending', count: pendingCount     },
-                  { key: 'done',    label: 'Scored',  count: doneCount        },
-                  { key: 'missing', label: 'Missing', count: missingCount     },
-                ] as const).map(({ key, label, count }) => (
-                  <button key={key} onClick={() => setStatusFilter(key as any)}
-                    className={`h-[34px] px-3 rounded-xl text-xs font-medium transition-colors flex items-center gap-1.5 cursor-pointer ${
-                      statusFilter === key
-                        ? key === 'missing'
-                          ? 'bg-orange-500/20 text-orange-300 border border-orange-500/30'
-                          : 'gradient-bg text-white'
-                        : 'bg-secondary text-muted-foreground hover:text-foreground'
-                    }`}>
-                    {label}
-                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
-                      statusFilter === key && key === 'missing' ? 'bg-orange-500/30 text-orange-300' :
-                      statusFilter === key ? 'bg-foreground/20 text-white' : 'bg-border/50 opacity-60'
-                    }`}>{count}</span>
-                    {key === 'missing' && count > 0 && statusFilter !== 'missing' && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-orange-400 shrink-0" />
-                    )}
-                  </button>
-                ))}
-              </div>
-
+              {([
+                { key: 'all',     label: 'All',     count: localTasks.length },
+                { key: 'pending', label: 'Pending', count: pendingCount     },
+                { key: 'done',    label: 'Scored',  count: doneCount        },
+                { key: 'missing', label: 'Missing', count: missingCount     },
+              ] as const).map(({ key, label, count }) => (
+                <button key={key} onClick={() => setStatusFilter(key as any)}
+                  className={`hidden sm:flex h-[34px] px-3 rounded-xl text-xs font-medium transition-colors items-center gap-1.5 cursor-pointer shrink-0 ${
+                    statusFilter === key
+                      ? key === 'missing'
+                        ? 'bg-orange-500/20 text-orange-300 border border-orange-500/30'
+                        : 'gradient-bg text-white'
+                      : 'bg-secondary text-muted-foreground hover:text-foreground'
+                  }`}>
+                  {label}
+                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
+                    statusFilter === key && key === 'missing' ? 'bg-orange-500/30 text-orange-300' :
+                    statusFilter === key ? 'bg-foreground/20 text-white' : 'bg-border/50 opacity-60'
+                  }`}>{count}</span>
+                  {key === 'missing' && count > 0 && statusFilter !== 'missing' && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-orange-400 shrink-0" />
+                  )}
+                </button>
+              ))}
               {hasAnyFilter && (
                 <button
-                  onClick={() => {
-                    setSearch('')
-                    setFilterClient('')
-                    setFilterService('')
-                    setFilterEmployee('')
-                    setFilterEmployeeMode('worked')
-                    setFilterDate(null)
-                    setStatusFilter('all')
-                  }}
+                  onClick={() => { setSearch(''); setFilterClient(''); setFilterService(''); setFilterEmployee(''); setFilterEmployeeMode('worked'); setFilterDate(null); setStatusFilter('all') }}
                   className="ml-1 text-xs text-muted-foreground hover:text-foreground px-2 py-1.5 rounded-md hover:bg-foreground/[0.04] transition-colors flex items-center gap-1 shrink-0"
                 >
                   <X size={12} /> Clear all
