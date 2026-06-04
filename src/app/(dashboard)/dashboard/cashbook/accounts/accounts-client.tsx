@@ -297,78 +297,96 @@ export default function AccountsClient({ entries, accounts, isAdmin }: Props) {
                       {/* Month accordion header */}
                       <button
                         onClick={() => toggleMonth(key)}
-                        className="w-full flex items-center gap-3 px-4 py-3 bg-secondary/25 hover:bg-secondary/40 transition-colors text-left"
+                        className="w-full flex items-center gap-3 px-4 py-2.5 bg-secondary/25 hover:bg-secondary/40 transition-colors text-left"
                       >
                         <Calendar className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                        <span className="text-xs font-semibold text-foreground uppercase tracking-wide flex-1">{label}</span>
-                        <span className="text-xs text-green-400 font-mono tabular-nums">+{inr(inflow)}</span>
-                        <span className="mx-1 text-muted-foreground/40 text-xs">·</span>
-                        <span className="text-xs text-red-400 font-mono tabular-nums">−{inr(outflow)}</span>
-                        <span className="mx-2 text-muted-foreground/40 text-xs">|</span>
-                        <span className="text-xs font-semibold tabular-nums text-foreground">{inr(closingBalance)}</span>
+                        <span className="text-xs font-bold text-foreground uppercase tracking-wider flex-1">{label}</span>
+                        {/* Inflow / outflow chips */}
+                        <span className="text-[11px] text-green-400 tabular-nums font-mono">+{inr(inflow)}</span>
+                        <span className="text-muted-foreground/40 text-xs">·</span>
+                        <span className="text-[11px] text-red-400 tabular-nums font-mono">−{inr(outflow)}</span>
+                        {/* Closing balance right-aligned to match Balance column */}
+                        <span className="text-xs font-semibold tabular-nums text-foreground w-[140px] text-right pr-0">
+                          {inr(closingBalance)}
+                        </span>
                         {isOpen
-                          ? <ChevronDown  className="w-3.5 h-3.5 text-muted-foreground shrink-0 ml-1" />
-                          : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0 ml-1" />}
+                          ? <ChevronDown  className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                          : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
                       </button>
 
                       {/* Entry rows */}
                       {isOpen && (
-                        <div>
-                          {/* Column header */}
-                          <div className="grid grid-cols-[1fr_auto_auto] sm:grid-cols-[90px_1fr_120px_auto_110px] gap-x-3 px-4 py-1.5 border-b border-border/50 bg-secondary/10">
-                            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide hidden sm:block">Date</span>
-                            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Description</span>
-                            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide hidden sm:block">Category</span>
-                            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide text-right">Amount</span>
-                            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide text-right hidden sm:block">Running Bal.</span>
-                          </div>
-                          {rows.map(e => {
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm border-collapse">
+                            <colgroup>
+                              <col className="w-[110px]" />   {/* Date */}
+                              <col />                          {/* Description — flex */}
+                              <col className="w-[150px]" />   {/* Category */}
+                              <col className="w-[130px]" />   {/* Amount */}
+                              <col className="w-[140px]" />   {/* Running balance */}
+                            </colgroup>
+                            <thead>
+                              <tr className="border-b border-border/60 bg-secondary/15">
+                                <th className="text-left px-4 py-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Date</th>
+                                <th className="text-left px-3 py-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Description</th>
+                                <th className="text-left px-3 py-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Category</th>
+                                <th className="text-right px-4 py-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Amount</th>
+                                <th className="text-right px-4 py-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Balance</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border/40">
+                            {rows.map(e => {
                             const isIn = e.type === 'inflow'
                             const amt  = e.amount_inr ?? 0
                             const inv  = (e.allocations ?? []).find(a => !a.deleted_at && a.invoice)?.invoice
                             return (
-                              <div
+                              <tr
                                 key={e.id}
-                                className="grid grid-cols-[1fr_auto_auto] sm:grid-cols-[90px_1fr_120px_auto_110px] gap-x-3 items-center px-4 py-2.5 border-b border-border/40 hover:bg-secondary/20 transition-colors last:border-b-0"
+                                className="hover:bg-secondary/20 transition-colors"
                               >
                                 {/* Date */}
-                                <span className="text-xs text-muted-foreground tabular-nums hidden sm:block whitespace-nowrap">{fmtDate(e.entry_date)}</span>
+                                <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap align-top pt-3.5">
+                                  {fmtDate(e.entry_date)}
+                                </td>
 
                                 {/* Description */}
-                                <div className="min-w-0">
-                                  <p className="text-xs font-medium truncate">
+                                <td className="px-3 py-3 min-w-0">
+                                  <p className="text-xs font-medium leading-snug">
                                     {e.description || (isIn ? 'Income' : 'Expense')}
                                   </p>
                                   {inv && (
-                                    <p className="text-[11px] text-muted-foreground/70 truncate">
+                                    <p className="text-[11px] text-muted-foreground/60 mt-0.5">
                                       {inv.invoice_number}{inv.client?.name ? ` · ${inv.client.name}` : ''}
                                     </p>
                                   )}
-                                  <p className="text-[11px] text-muted-foreground/60 sm:hidden">{fmtDate(e.entry_date)}</p>
-                                </div>
+                                </td>
 
                                 {/* Category */}
-                                {e.category ? (
-                                  <span className="text-[11px] text-muted-foreground truncate hidden sm:block">{e.category.name}</span>
-                                ) : <span className="hidden sm:block" />}
+                                <td className="px-3 py-3 text-[11px] text-muted-foreground whitespace-nowrap align-top pt-3.5">
+                                  {e.category?.name ?? <span className="opacity-30">—</span>}
+                                </td>
 
-                                {/* Amount */}
-                                <div className="flex items-center gap-1 justify-end shrink-0">
-                                  {isIn
-                                    ? <ArrowUpRight   className="w-3 h-3 text-green-400 shrink-0" />
-                                    : <ArrowDownRight className="w-3 h-3 text-red-400 shrink-0" />}
-                                  <span className={`text-sm font-semibold tabular-nums ${isIn ? 'text-green-400' : 'text-red-400'}`}>
+                                {/* Amount — right-aligned, coloured, with arrow icon */}
+                                <td className="px-4 py-3 text-right whitespace-nowrap align-top pt-3.5">
+                                  <span className={`inline-flex items-center gap-0.5 text-sm font-semibold tabular-nums ${isIn ? 'text-green-400' : 'text-red-400'}`}>
+                                    {isIn
+                                      ? <ArrowUpRight   className="w-3 h-3 shrink-0" />
+                                      : <ArrowDownRight className="w-3 h-3 shrink-0" />}
                                     {isIn ? '+' : '−'}{inr(amt)}
                                   </span>
-                                </div>
+                                </td>
 
-                                {/* Running balance */}
-                                <span className="text-xs font-mono font-semibold tabular-nums text-right hidden sm:block text-foreground/80">
-                                  {e.running >= 0 ? '' : '−'}{inr(Math.abs(e.running))}
-                                </span>
-                              </div>
+                                {/* Running balance — right-aligned, monospace */}
+                                <td className="px-4 py-3 text-right whitespace-nowrap align-top pt-3.5">
+                                  <span className={`text-sm font-mono font-semibold tabular-nums ${e.running >= 0 ? 'text-foreground' : 'text-red-400'}`}>
+                                    {e.running >= 0 ? '' : '−'}{inr(Math.abs(e.running))}
+                                  </span>
+                                </td>
+                              </tr>
                             )
                           })}
+                            </tbody>
+                          </table>
                         </div>
                       )}
                     </div>
