@@ -1017,72 +1017,90 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
     const maxRow = await supabase.from('tasks').select('task_number').order('task_number', { ascending: false, nullsFirst: false }).limit(1).maybeSingle()
     const tn = form.task_number ? parseInt(form.task_number, 10) : nextTaskNumber(maxRow.data?.task_number)
 
-    const { data, error } = await supabase
+    // Snapshot the billing math (per-group breakdown for parameter-driven, or the
+    // simple percent/fixed formula) so historical invoices stay stable even if
+    // weights are tuned later. Split out from the payload so we can gracefully
+    // retry WITHOUT it on databases where migration 003 (the billing_snapshot
+    // column) hasn't been applied yet — otherwise every variant insert fails.
+    const billingSnapshot = !form.parent_task_id ? null
+      : form.billing_mode === 'parameter_driven' ? {
+          formula:         'parameter_driven',
+          parent_billing:  parentTask?.billing_amount_inr ?? 0,
+          total_fraction:  computeTotalFraction(),
+          computed_amount: computedAmount,
+          computed_at:     new Date().toISOString(),
+          groups:          groups.map(g => {
+            const groupParams = parameters.filter(p => p.group_id === g.id && variantParamIds.has(p.id))
+            if (groupParams.length === 0) return null
+            const internalShare = computeGroupShare(g.id)
+            return {
+              group_id:               g.id,
+              group_name:             g.name,
+              group_weight:           g.weight || 0,
+              internal_share:         internalShare,
+              contribution_to_parent: ((g.weight || 0) / 100) * internalShare * 100,
+              selections: groupParams.map(p => ({
+                parameter_id: p.id,
+                name:         p.name,
+                weight:       p.weight,
+                value:        parseFloat(variantParamValues[p.id] || '1') || 0,
+                input_type:   p.input_type || 'count',
+                is_master:    !!p.is_master,
+              })),
+            }
+          }).filter(Boolean),
+        }
+      : {
+          formula:         form.billing_mode,
+          parent_billing:  parentTask?.billing_amount_inr ?? 0,
+          percent:         form.billing_percent ? parseFloat(form.billing_percent) : null,
+          computed_amount: computedAmount,
+          computed_at:     new Date().toISOString(),
+        }
+
+    const insertPayload: Record<string, unknown> = {
+      task_number: tn,
+      title: form.title,
+      description: form.description || null,
+      client_id: form.client_id,
+      service_id: form.service_id,
+      status: form.status,
+      billing_amount: computedAmount,
+      billing_amount_inr: computedAmount,
+      quantity: qty,
+      currency: unitCurrency,
+      task_date: form.task_date,
+      is_recurring: form.is_recurring,
+      recurring_interval: form.is_recurring ? form.recurring_interval : null,
+      recurring_end_date: form.is_recurring && form.recurring_end_date ? form.recurring_end_date : null,
+      // ── Variant fields — only included when the user actually linked a parent task,
+      //    so original-task inserts still work even if migration 002 hasn't been run yet ──
+      ...(form.parent_task_id ? {
+        parent_task_id:   form.parent_task_id,
+        variant_type:     form.variant_type || null,
+        variant_label:    form.variant_label || null,
+        billing_mode:     form.billing_mode,
+        billing_percent:  form.billing_percent ? parseFloat(form.billing_percent) : null,
+        billing_override: form.billing_override,
+        is_billable:      form.is_billable,
+      } : {}),
+    }
+
+    const selectCols = `*, client:clients(id, name, code), service:services(id, name)`
+    let { data, error } = await supabase
       .from('tasks')
-      .insert({
-        task_number: tn,
-        title: form.title,
-        description: form.description || null,
-        client_id: form.client_id,
-        service_id: form.service_id,
-        status: form.status,
-        billing_amount: computedAmount,
-        billing_amount_inr: computedAmount,
-        quantity: qty,
-        currency: unitCurrency,
-        task_date: form.task_date,
-        is_recurring: form.is_recurring,
-        recurring_interval: form.is_recurring ? form.recurring_interval : null,
-        recurring_end_date: form.is_recurring && form.recurring_end_date ? form.recurring_end_date : null,
-        // ── Variant fields — only included when the user actually linked a parent task,
-        //    so original-task inserts still work even if migration 002 hasn't been run yet ──
-        ...(form.parent_task_id ? {
-          parent_task_id:   form.parent_task_id,
-          variant_type:     form.variant_type || null,
-          variant_label:    form.variant_label || null,
-          billing_mode:     form.billing_mode,
-          billing_percent:  form.billing_percent ? parseFloat(form.billing_percent) : null,
-          billing_override: form.billing_override,
-          is_billable:      form.is_billable,
-          // Snapshot the billing math with per-group breakdown so historical invoices
-          // stay stable even if weights are tuned later. Stored in `billing_snapshot` JSONB.
-          billing_snapshot: form.billing_mode === 'parameter_driven' ? {
-            formula:         'parameter_driven',
-            parent_billing:  parentTask?.billing_amount_inr ?? 0,
-            total_fraction:  computeTotalFraction(),
-            computed_amount: computedAmount,
-            computed_at:     new Date().toISOString(),
-            groups:          groups.map(g => {
-              const groupParams = parameters.filter(p => p.group_id === g.id && variantParamIds.has(p.id))
-              if (groupParams.length === 0) return null
-              const internalShare = computeGroupShare(g.id)
-              return {
-                group_id:               g.id,
-                group_name:             g.name,
-                group_weight:           g.weight || 0,
-                internal_share:         internalShare,
-                contribution_to_parent: ((g.weight || 0) / 100) * internalShare * 100,
-                selections: groupParams.map(p => ({
-                  parameter_id: p.id,
-                  name:         p.name,
-                  weight:       p.weight,
-                  value:        parseFloat(variantParamValues[p.id] || '1') || 0,
-                  input_type:   p.input_type || 'count',
-                  is_master:    !!p.is_master,
-                })),
-              }
-            }).filter(Boolean),
-          } : {
-            formula:         form.billing_mode,
-            parent_billing:  parentTask?.billing_amount_inr ?? 0,
-            percent:         form.billing_percent ? parseFloat(form.billing_percent) : null,
-            computed_amount: computedAmount,
-            computed_at:     new Date().toISOString(),
-          },
-        } : {}),
-      })
-      .select(`*, client:clients(id, name, code), service:services(id, name)`)
+      .insert(billingSnapshot ? { ...insertPayload, billing_snapshot: billingSnapshot } : insertPayload)
+      .select(selectCols)
       .single()
+
+    // Graceful fallback for DBs missing migration 003: the billing_snapshot
+    // column doesn't exist → retry without it. The amount is already frozen in
+    // billing_amount_inr, so the task saves correctly; only the audit snapshot
+    // is skipped (run migration 003 to capture it for parameter-driven variants).
+    if (error && /billing_snapshot/i.test(`${error.message ?? ''} ${(error as { details?: string }).details ?? ''}`)) {
+      console.warn('tasks.billing_snapshot missing — saving variant without snapshot. Apply migrations/003_billing_snapshot.sql.')
+      ;({ data, error } = await supabase.from('tasks').insert(insertPayload).select(selectCols).single())
+    }
 
     if (!error && data) {
       setTasks(prev => [data, ...prev])
