@@ -13,14 +13,34 @@ import {
 import {
   Download, Printer, FileSpreadsheet, SlidersHorizontal, X, ArrowUp, ArrowDown,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Layers, Pin, GripVertical,
+  Save, RotateCcw, Building2, Check,
 } from 'lucide-react'
+import { savePersonalReportLayout, saveSystemReportLayout } from './actions'
+
+// Persisted layout shape (stored as JSONB). All fields optional so older/newer
+// saved layouts stay forward-compatible. The index signature both allows future
+// layout settings without a type change and makes it a valid JSON record.
+interface LayoutConfig {
+  version?: number
+  colOrder?: string[]
+  groups?: ColGroup[]
+  frozenCols?: string[]
+  sortKey?: SortKey
+  sortDir?: SortDir
+  [key: string]: unknown
+}
 
 interface Props {
   rows: AnalysisRow[]
   employees: EmployeeColumn[]
   clients: { id: string; name: string }[]
   services: { id: string; name: string }[]
+  isAdmin: boolean
+  personalLayout: LayoutConfig | null
+  systemLayout: LayoutConfig | null
 }
+
+const REPORT_NAME = 'contribution_analysis'
 
 const STATUSES = ['pending', 'in_progress', 'done', 'delivered', 'invoiced', 'paid', 'cancelled']
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -225,34 +245,45 @@ function parseFromParams(sp: URLSearchParams): { filters: Filters; sortKey: Sort
   }
 }
 
-export default function ContributionAnalysisClient({ rows, employees, clients, services }: Props) {
+export default function ContributionAnalysisClient({ rows, employees, clients, services, isAdmin, personalLayout, systemLayout }: Props) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const { isUnlocked, dn } = usePrivacy()
 
-  const initial = useMemo(() => parseFromParams(new URLSearchParams(searchParams.toString())), []) // eslint-disable-line react-hooks/exhaustive-deps
+  // Saved layouts held in state so "Reset" uses the freshest value after a Save
+  // within the same session (no page reload needed).
+  const [savedPersonal, setSavedPersonal] = useState<LayoutConfig | null>(personalLayout)
+  const [savedSystem, setSavedSystem] = useState<LayoutConfig | null>(systemLayout)
+  // Initial-load priority: personal → system → hardcoded (URL params still win
+  // for the shareable fields: groups + sort).
+  const dbLayout = personalLayout ?? systemLayout ?? null
+  const sp0 = useMemo(() => new URLSearchParams(searchParams.toString()), []) // eslint-disable-line react-hooks/exhaustive-deps
+  const hasUrlCols = sp0.get('cols') !== null
+  const hasUrlSort = sp0.get('sort') !== null
+
+  const initial = useMemo(() => parseFromParams(sp0), []) // eslint-disable-line react-hooks/exhaustive-deps
   const [filters, setFilters] = useState<Filters>(initial.filters)
-  const [sortKey, setSortKey] = useState<SortKey>(initial.sortKey)
-  const [sortDir, setSortDir] = useState<SortDir>(initial.sortDir)
+  const [sortKey, setSortKey] = useState<SortKey>(hasUrlSort ? initial.sortKey : (dbLayout?.sortKey ?? initial.sortKey))
+  const [sortDir, setSortDir] = useState<SortDir>(hasUrlSort ? initial.sortDir : (dbLayout?.sortDir ?? initial.sortDir))
   const [pageSize, setPageSize] = useState<number>(initial.pageSize)
   const [page, setPage] = useState(0)
   const [showFilters, setShowFilters] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [decimals, setDecimals] = useState(initial.decimals)
-  const [groups, setGroups] = useState<ColGroup[]>(initial.groups)
+  const [groups, setGroups] = useState<ColGroup[]>(hasUrlCols ? initial.groups : ((dbLayout?.groups as ColGroup[] | undefined) ?? initial.groups))
   const groupSet = useMemo(() => new Set(groups), [groups])
   const [groupKey, setGroupKey] = useState<GroupKey>(initial.groupKey)
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
 
   // ── Freeze columns ──────────────────────────────────────────────────────────
-  // Initialise from localStorage; fall back to the compiled-in defaults.
+  // Priority: localStorage working copy → saved layout → compiled-in defaults.
   const [frozenCols, setFrozenCols] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem(LS_FROZEN_KEY)
       if (saved !== null) return new Set<string>(JSON.parse(saved))
     } catch {}
-    return new Set(DEFAULT_FROZEN_COLS)
+    return new Set(dbLayout?.frozenCols ?? DEFAULT_FROZEN_COLS)
   })
   const [showFreezePanel, setShowFreezePanel] = useState(false)
   const freezePanelRef = useRef<HTMLDivElement>(null)
@@ -287,7 +318,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
       const saved = localStorage.getItem(LS_COL_ORDER_KEY)
       if (saved) return JSON.parse(saved) as string[]
     } catch {}
-    return [...DEFAULT_COL_ORDER]
+    return [...(dbLayout?.colOrder ?? DEFAULT_COL_ORDER)]
   })
   const [showColOrderPanel, setShowColOrderPanel] = useState(false)
   const colOrderPanelRef = useRef<HTMLDivElement>(null)
@@ -317,6 +348,66 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
       return arr
     })
   }, [])
+
+  // ── Saved layouts (personal / system default) ────────────────────────────────
+  const [savingLayout, setSavingLayout] = useState<null | 'personal' | 'system'>(null)
+  const [layoutMsg, setLayoutMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const layoutMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const flashLayoutMsg = useCallback((kind: 'ok' | 'err', text: string) => {
+    setLayoutMsg({ kind, text })
+    if (layoutMsgTimer.current) clearTimeout(layoutMsgTimer.current)
+    layoutMsgTimer.current = setTimeout(() => setLayoutMsg(null), 2600)
+  }, [])
+
+  // Snapshot the current layout-affecting state into a persistable object.
+  const buildCurrentLayout = useCallback((): LayoutConfig => ({
+    version: 1,
+    colOrder,
+    groups,
+    frozenCols: [...frozenCols],
+    sortKey,
+    sortDir,
+  }), [colOrder, groups, frozenCols, sortKey, sortDir])
+
+  // Apply a saved layout (or the hardcoded fallback when null) to live state.
+  // The existing localStorage / URL sync effects pick up the changes, so the
+  // working copy stays consistent after a reset.
+  const applyLayout = useCallback((layout: LayoutConfig | null) => {
+    if (layout?.colOrder) setColOrder([...layout.colOrder]); else setColOrder([...DEFAULT_COL_ORDER])
+    if (layout?.frozenCols) setFrozenCols(new Set(layout.frozenCols)); else setFrozenCols(new Set(DEFAULT_FROZEN_COLS))
+    if (layout?.groups) setGroups([...(layout.groups as ColGroup[])]); else setGroups([...ALL_GROUPS])
+    if (layout?.sortKey) setSortKey(layout.sortKey)
+    if (layout?.sortDir) setSortDir(layout.sortDir)
+  }, [])
+
+  const handleSavePersonal = useCallback(async () => {
+    setSavingLayout('personal')
+    const layout = buildCurrentLayout()
+    const res = await savePersonalReportLayout(REPORT_NAME, layout)
+    setSavingLayout(null)
+    if (res.ok) { setSavedPersonal(layout); flashLayoutMsg('ok', 'Saved as your default') }
+    else flashLayoutMsg('err', res.error ?? 'Save failed')
+  }, [buildCurrentLayout, flashLayoutMsg])
+
+  const handleSaveSystem = useCallback(async () => {
+    setSavingLayout('system')
+    const layout = buildCurrentLayout()
+    const res = await saveSystemReportLayout(REPORT_NAME, layout)
+    setSavingLayout(null)
+    if (res.ok) { setSavedSystem(layout); flashLayoutMsg('ok', 'Saved as system default') }
+    else flashLayoutMsg('err', res.error ?? 'Save failed')
+  }, [buildCurrentLayout, flashLayoutMsg])
+
+  const handleResetMine = useCallback(() => {
+    const target = savedPersonal ?? savedSystem ?? null
+    applyLayout(target)
+    flashLayoutMsg('ok', savedPersonal ? 'Restored your default' : savedSystem ? 'No personal layout — using system' : 'Restored built-in default')
+  }, [savedPersonal, savedSystem, applyLayout, flashLayoutMsg])
+
+  const handleResetSystem = useCallback(() => {
+    applyLayout(savedSystem ?? null)
+    flashLayoutMsg('ok', savedSystem ? 'Restored system default' : 'No system default — using built-in')
+  }, [savedSystem, applyLayout, flashLayoutMsg])
 
   // Privacy lock: real names only when unlocked, else CQID (shared dn()).
   // When the report is filtered to one employee, narrow the columns to JUST
@@ -744,6 +835,63 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
                   <p className="text-[10px] text-muted-foreground/60 mt-2 px-1 border-t border-border pt-2">
                     Employee columns always appear at the end.
                   </p>
+
+                  {/* ── Saved layouts (this captures order + visible groups + frozen + sort) ── */}
+                  <div className="mt-2 pt-2 border-t border-border space-y-1">
+                    <span className="block text-[11px] font-semibold text-muted-foreground uppercase tracking-wide px-1 mb-1">Saved layouts</span>
+
+                    <button
+                      onClick={handleSavePersonal}
+                      disabled={savingLayout !== null}
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs hover:bg-secondary/60 disabled:opacity-50 transition-colors"
+                    >
+                      <Save className="w-3.5 h-3.5 shrink-0 text-purple-400" />
+                      <span className="flex-1 text-left">Save current as my default</span>
+                      {savingLayout === 'personal' && <span className="w-3 h-3 border-2 border-foreground/20 border-t-purple-400 rounded-full animate-spin" />}
+                    </button>
+
+                    {isAdmin && (
+                      <button
+                        onClick={handleSaveSystem}
+                        disabled={savingLayout !== null}
+                        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs hover:bg-secondary/60 disabled:opacity-50 transition-colors"
+                      >
+                        <Building2 className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+                        <span className="flex-1 text-left">Set current as system default</span>
+                        <span className="text-[9px] px-1 py-0.5 rounded-full bg-amber-500/10 text-amber-400/80 font-medium shrink-0">admin</span>
+                        {savingLayout === 'system' && <span className="w-3 h-3 border-2 border-foreground/20 border-t-amber-400 rounded-full animate-spin" />}
+                      </button>
+                    )}
+
+                    <div className="h-px bg-border my-1" />
+
+                    <button
+                      onClick={handleResetMine}
+                      disabled={savingLayout !== null}
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs hover:bg-secondary/60 disabled:opacity-50 transition-colors"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+                      <span className="flex-1 text-left">Reset to my default</span>
+                    </button>
+
+                    <button
+                      onClick={handleResetSystem}
+                      disabled={savingLayout !== null}
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs hover:bg-secondary/60 disabled:opacity-50 transition-colors"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+                      <span className="flex-1 text-left">Reset to system default</span>
+                    </button>
+
+                    {layoutMsg && (
+                      <div className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-[11px] ${
+                        layoutMsg.kind === 'ok' ? 'text-emerald-400 bg-emerald-500/10' : 'text-red-400 bg-red-500/10'
+                      }`}>
+                        {layoutMsg.kind === 'ok' ? <Check className="w-3 h-3 shrink-0" /> : <X className="w-3 h-3 shrink-0" />}
+                        <span className="truncate">{layoutMsg.text}</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

@@ -126,12 +126,36 @@ export default async function ContributionAnalysisPage() {
     toolPctByTask,
   )
 
+  // ── Saved layouts (personal + system default) ──────────────────────────────
+  // Priority at load time (handled client-side): personal → system → hardcoded.
+  // Wrapped defensively so the page still renders pre-migration (table missing).
+  const REPORT_NAME = 'contribution_analysis'
+  let personalLayout: Record<string, unknown> | null = null
+  let systemLayout: Record<string, unknown> | null = null
+  try {
+    const [sysRes, personalRes] = await Promise.all([
+      supabase.from('report_layouts').select('layout_json')
+        .is('user_id', null).eq('report_name', REPORT_NAME).eq('is_system_default', true).maybeSingle(),
+      me?.employeeId
+        ? supabase.from('report_layouts').select('layout_json')
+            .eq('user_id', me.employeeId).eq('report_name', REPORT_NAME).maybeSingle()
+        : Promise.resolve({ data: null }),
+    ])
+    systemLayout = (sysRes?.data?.layout_json as Record<string, unknown>) ?? null
+    personalLayout = ((personalRes as { data: { layout_json?: Record<string, unknown> } | null })?.data?.layout_json) ?? null
+  } catch {
+    // report_layouts not migrated yet — fall back to hardcoded defaults.
+  }
+
   return (
     <ContributionAnalysisClient
       rows={rows}
       employees={employees}
       clients={clients}
       services={services}
+      isAdmin={isAdmin}
+      personalLayout={personalLayout}
+      systemLayout={systemLayout}
     />
   )
 }
