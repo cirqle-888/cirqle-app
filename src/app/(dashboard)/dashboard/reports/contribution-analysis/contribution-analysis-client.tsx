@@ -12,7 +12,7 @@ import {
 } from '@/lib/reports/contribution-analysis'
 import {
   Download, Printer, FileSpreadsheet, SlidersHorizontal, X, ArrowUp, ArrowDown,
-  ChevronLeft, ChevronRight, ChevronDown, Layers, Pin,
+  ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Layers, Pin, GripVertical,
 } from 'lucide-react'
 
 interface Props {
@@ -33,6 +33,16 @@ const PAGE_SIZES = [50, 100, 250, 1000, 0] // 0 = All
 // Keys match the `key` field in buildColumns (e.g. 'task_number', 'client_name').
 const DEFAULT_FROZEN_COLS: string[] = ['task_number', 'title', 'client_name']
 const LS_FROZEN_KEY = 'ca-frozen-cols'
+
+// Default display order for non-employee columns.
+// Change this array to set the factory-default column sequence.
+const DEFAULT_COL_ORDER: string[] = [
+  'title', 'task_date', 'client_name', 'task_number', 'service_name', 'status',
+  'currency', 'billing', 'billing_inr', 'commission_pct', 'commission_pool',
+  'total_earnings', 'company_received', 'profit', 'profit_pct',
+  'actual_received', 'fx_gain_loss', 'actual_profit', 'actual_profit_pct', 'contributors',
+]
+const LS_COL_ORDER_KEY = 'ca-col-order'
 
 // Largest index i with offsets[i] <= y (binary search; offsets is monotonic).
 function idxAtOffset(offsets: number[], y: number): number {
@@ -271,6 +281,43 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     })
   }, [])
 
+  // ── Column order ─────────────────────────────────────────────────────────────
+  const [colOrder, setColOrder] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(LS_COL_ORDER_KEY)
+      if (saved) return JSON.parse(saved) as string[]
+    } catch {}
+    return [...DEFAULT_COL_ORDER]
+  })
+  const [showColOrderPanel, setShowColOrderPanel] = useState(false)
+  const colOrderPanelRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    try { localStorage.setItem(LS_COL_ORDER_KEY, JSON.stringify(colOrder)) } catch {}
+  }, [colOrder])
+
+  useEffect(() => {
+    if (!showColOrderPanel) return
+    const h = (e: MouseEvent) => {
+      if (colOrderPanelRef.current && !colOrderPanelRef.current.contains(e.target as Node))
+        setShowColOrderPanel(false)
+    }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [showColOrderPanel])
+
+  const moveCol = useCallback((key: string, dir: -1 | 1) => {
+    setColOrder(prev => {
+      const idx = prev.indexOf(key)
+      if (idx < 0) return prev
+      const next = idx + dir
+      if (next < 0 || next >= prev.length) return prev
+      const arr = [...prev]
+      ;[arr[idx], arr[next]] = [arr[next], arr[idx]]
+      return arr
+    })
+  }, [])
+
   // Privacy lock: real names only when unlocked, else CQID (shared dn()).
   // When the report is filtered to one employee, narrow the columns to JUST
   // that employee — no point showing everyone else's blank columns.
@@ -284,7 +331,18 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   )
 
   // Full column set (for export) and the visible subset (group toggles applied).
-  const allColumns = useMemo(() => buildColumns(displayEmployees, decimals ? 2 : 0), [displayEmployees, decimals])
+  // Non-employee columns are sorted according to the user's colOrder preference.
+  const allColumns = useMemo(() => {
+    const cols = buildColumns(displayEmployees, decimals ? 2 : 0)
+    const empCols = cols.filter(c => c.group === 'employees')
+    const fixedCols = cols.filter(c => c.group !== 'employees')
+    // Apply saved order; any new column keys not yet in the saved order are appended.
+    const ordered = [
+      ...colOrder.map(k => fixedCols.find(c => c.key === k)).filter((c): c is Col => !!c),
+      ...fixedCols.filter(c => !colOrder.includes(c.key)),
+    ]
+    return [...ordered, ...empCols]
+  }, [displayEmployees, decimals, colOrder])
   const columns = useMemo(
     () => allColumns.filter(c => c.group === 'core' || groupSet.has(c.group)),
     [allColumns, groupSet],
@@ -614,6 +672,81 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
             >
               <span className="tabular-nums text-xs">.00</span> Decimals
             </button>
+
+            {/* ── Column order panel ── */}
+            <div className="relative" ref={colOrderPanelRef}>
+              <button
+                onClick={() => setShowColOrderPanel(v => !v)}
+                title="Reorder columns"
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                  showColOrderPanel
+                    ? 'bg-foreground/10 border-foreground/20 text-foreground'
+                    : 'bg-card border-border text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <GripVertical className="w-4 h-4" />
+                Columns
+              </button>
+              {showColOrderPanel && (
+                <div className="absolute top-full right-0 mt-1.5 z-50 bg-card border border-border rounded-xl shadow-2xl p-3 min-w-[240px]">
+                  <div className="flex items-center justify-between mb-2 px-1">
+                    <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Column order</span>
+                    <button
+                      onClick={() => setColOrder([...DEFAULT_COL_ORDER])}
+                      className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                      title="Reset to default order"
+                    >
+                      Reset
+                    </button>
+                  </div>
+                  <div className="space-y-0.5 max-h-72 overflow-y-auto">
+                    {(() => {
+                      // Build the ordered list of non-employee columns
+                      const fixedCols = allColumns.filter(c => c.group !== 'employees')
+                      return fixedCols.map((col, i) => (
+                        <div
+                          key={col.key}
+                          className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-secondary/60 group/row"
+                        >
+                          {/* Up / down buttons */}
+                          <div className="flex flex-col shrink-0">
+                            <button
+                              onClick={() => moveCol(col.key, -1)}
+                              disabled={i === 0}
+                              className="p-0.5 rounded text-muted-foreground hover:text-foreground disabled:opacity-20 transition-colors"
+                              title="Move up"
+                            >
+                              <ChevronUp className="w-3 h-3" />
+                            </button>
+                            <button
+                              onClick={() => moveCol(col.key, 1)}
+                              disabled={i === fixedCols.length - 1}
+                              className="p-0.5 rounded text-muted-foreground hover:text-foreground disabled:opacity-20 transition-colors"
+                              title="Move down"
+                            >
+                              <ChevronDown className="w-3 h-3" />
+                            </button>
+                          </div>
+                          <GripVertical className="w-3 h-3 shrink-0 text-muted-foreground/30 group-hover/row:text-muted-foreground/60" />
+                          <span className="text-xs flex-1 truncate">{col.label}</span>
+                          {/* Group badge */}
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium shrink-0 ${
+                            col.group === 'core'    ? 'bg-foreground/5 text-muted-foreground/60' :
+                            col.group === 'billing' ? 'bg-blue-500/10 text-blue-400/70' :
+                                                      'bg-emerald-500/10 text-emerald-400/70'
+                          }`}>
+                            {col.group}
+                          </span>
+                        </div>
+                      ))
+                    })()}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/60 mt-2 px-1 border-t border-border pt-2">
+                    Employee columns always appear at the end.
+                  </p>
+                </div>
+              )}
+            </div>
 
             {/* ── Freeze columns panel ── */}
             <div className="relative" ref={freezePanelRef}>
