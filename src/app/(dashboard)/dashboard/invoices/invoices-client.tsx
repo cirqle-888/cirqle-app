@@ -244,7 +244,17 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   // Creation rate stamped on a new invoice (INR → 1, else the settings rate).
   // total_amount_inr is a DB-generated column (total_amount × exchange_rate), so
   // we only ever need to persist this rate, never the INR snapshot itself.
-  const creationRate = (cur?: string) => (!cur || cur === 'INR' ? 1 : (rateMap[cur] || 1))
+  // Issue-date book rate snapshotted onto a new invoice. For a foreign currency
+  // with no Settings rate we must NOT silently store 1.0 (it makes total_amount_inr
+  // and realised FX meaningless). The interactive create path blocks outright; the
+  // auto/group paths warn loudly here so the gap is visible rather than silent.
+  const creationRate = (cur?: string) => {
+    if (!cur || cur === 'INR') return 1
+    const r = rateMap[cur]
+    if (r && r > 0) return r
+    console.warn(`[invoice] No exchange rate for ${cur} — snapshotting 1.0. Set it in Settings → Exchange Rates so FX/INR totals are correct.`)
+    return 1
+  }
 
   // New invoice form (manual override)
   const [newForm, setNewForm] = useState({
@@ -909,6 +919,12 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   // Keep ref in sync so Cmd+S can call it
   const createManualInvoice = useCallback(async function createManualInvoiceImpl() {
     if (!newForm.client_id) { toastError('Select a client'); return }
+    // Block non-INR invoices when no Settings rate exists — otherwise the rate is
+    // silently snapshotted as 1.0, making total_amount_inr and realised FX wrong.
+    if (newForm.currency !== 'INR' && !(rateMap[newForm.currency] > 0)) {
+      toastError(`No exchange rate for ${newForm.currency}. Add it in Settings → Exchange Rates before invoicing in ${newForm.currency}.`)
+      return
+    }
     setSaving(true)
     const client = clients.find(c => c.id === newForm.client_id)
     const clientCode = client?.code || 'CLI'

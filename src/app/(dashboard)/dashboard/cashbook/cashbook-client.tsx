@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import Header from '@/components/layout/header'
@@ -105,6 +105,7 @@ interface DueInvoice {
   paid_amount: number
   total_amount_inr?: number
   paid_amount_inr?: number
+  exchange_rate?: number   // frozen book rate at issue — used for realised FX
   currency: string
   client_id?: string    // for per-client FIFO filtering
   client?: { id: string; name: string; code: string }
@@ -255,12 +256,45 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     return m
   }, [exchangeRates])
 
+  // Frozen "book rate" for a foreign inflow's realised FX gain/loss. Priority:
+  //   1. The linked invoice's snapshotted exchange_rate — the rate the receivable
+  //      was booked at. Stable forever, so a settled gain/loss never drifts.
+  //      (exchange_rate === 1 on a non-INR invoice means "never snapshotted" — skip.)
+  //   2. The entry's OWN stored exchange_rate — also frozen at creation. For a
+  //      standalone receipt (no invoice booking) this self-reconciles to a ~0
+  //      realised diff, which is correct: no booking baseline ⇒ no realised FX.
+  // The live settings rate (rateMap) is deliberately NOT used, so reopening this
+  // section can never change a past figure (the bug this replaces).
+  const bookRateForEntry = useCallback((e: Entry): number => {
+    const inv = (e.allocations ?? []).find(a => !a.deleted_at && a.invoice)?.invoice
+    if (inv && (inv.exchange_rate ?? 0) > 0 && inv.exchange_rate !== 1) return inv.exchange_rate as number
+    const own = e.exchange_rate ?? 0
+    if (own > 0) return own
+    const amt = e.amount ?? 0
+    return amt > 0 ? round2((e.amount_inr ?? 0) / amt) : 0
+  }, [])
+
   // ── FX gain/loss calculations ────────────────────────────────────────────────
   // Compare the amount_inr the user actually typed against what the stored book
   // rate would produce. Difference = realised exchange rate gain or loss.
   const fxCalcAmount    = parseFloat(form.amount) || 0
   const fxCalcCurrency  = form.currency as Currency
-  const fxBookRate      = rateMap[fxCalcCurrency] || 0
+  // Book rate for the in-form FX indicator. Prefer the linked invoice's FROZEN
+  // rate (from the entry being edited, or the invoice picked in the form) so the
+  // realised gain/loss can't drift when the live settings rate refreshes. Fall
+  // back to the live rate ONLY for a brand-new, not-yet-linked foreign entry,
+  // where no snapshot exists yet.
+  const fxLinkedInvoiceRate = useMemo(() => {
+    const editing = formEditingId ? entries.find(e => e.id === formEditingId) : null
+    const allocInv = (editing?.allocations ?? []).find(a => !a.deleted_at && a.invoice)?.invoice
+    if (allocInv && (allocInv.exchange_rate ?? 0) > 0 && allocInv.exchange_rate !== 1) return allocInv.exchange_rate as number
+    if (form.linked_invoice_id) {
+      const inv = dueInvoices.find(i => i.id === form.linked_invoice_id)
+      if (inv && (inv.exchange_rate ?? 0) > 0 && inv.exchange_rate !== 1) return inv.exchange_rate as number
+    }
+    return 0
+  }, [formEditingId, entries, form.linked_invoice_id, dueInvoices])
+  const fxBookRate      = fxLinkedInvoiceRate || rateMap[fxCalcCurrency] || 0
   const fxActualInr     = parseFloat(form.amountInr) || 0
   const fxExpectedInr   = fxCalcCurrency !== 'INR' && fxBookRate > 0
     ? round2(fxCalcAmount * fxBookRate)
@@ -610,11 +644,11 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     filteredEntries
       .filter(e => e.type === 'inflow' && e.currency !== 'INR' && (e.amount ?? 0) > 0 && (e.amount_inr ?? 0) > 0)
       .reduce((sum, e) => {
-        const bookRate = rateMap[e.currency as string]
+        const bookRate = bookRateForEntry(e)   // frozen (invoice → entry), never live
         if (!bookRate) return sum
         return round2(sum + round2((e.amount_inr ?? 0) - round2((e.amount ?? 0) * bookRate)))
       }, 0),
-    [filteredEntries, rateMap],
+    [filteredEntries, bookRateForEntry],
   )
 
   // ── FX Gain/Loss by period ────────────────────────────────────────────────────
@@ -667,29 +701,17 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         const actualInr  = e.amount_inr ?? 0
         const foreignAmt = e.amount ?? 0
 
-        // Determine book value and source
+        // Always use the FROZEN book rate (invoice snapshot → entry's own rate),
+        // never the live settings rate, so historical periods never change.
         const activeAllocs = (e.allocations ?? []).filter(a => !a.deleted_at && a.invoice)
-        let bookValueInr: number
-        let rateSourceLabel: 'invoice' | 'rateMap'
-        let clientName    = ''
-        let invoiceNumber = ''
-
-        if (activeAllocs.length > 0) {
-          // Use the first allocation's invoice exchange_rate as the book rate.
-          // For multi-invoice payments this is an approximation; good enough for reporting.
-          const inv = activeAllocs[0].invoice!
-          const invRate = inv.exchange_rate ?? rateMap[e.currency as string] ?? 0
-          bookValueInr    = round2(foreignAmt * invRate)
-          rateSourceLabel = inv.exchange_rate ? 'invoice' : 'rateMap'
-          clientName      = inv.client?.name ?? ''
-          invoiceNumber   = inv.invoice_number ?? ''
-        } else {
-          // No invoice link — fall back to current book rate
-          const br = rateMap[e.currency as string]
-          if (!br) return
-          bookValueInr    = round2(foreignAmt * br)
-          rateSourceLabel = 'rateMap'
-        }
+        const bookRate  = bookRateForEntry(e)
+        if (!bookRate) return
+        const bookValueInr = round2(foreignAmt * bookRate)
+        const inv = activeAllocs[0]?.invoice
+        const usedInvoiceRate = !!(inv && (inv.exchange_rate ?? 0) > 0 && inv.exchange_rate !== 1)
+        const rateSourceLabel: 'invoice' | 'rateMap' = usedInvoiceRate ? 'invoice' : 'rateMap'
+        const clientName    = inv?.client?.name ?? ''
+        const invoiceNumber = inv?.invoice_number ?? ''
 
         const diff = round2(actualInr - bookValueInr)
         if (Math.abs(diff) < 0.005) return   // no meaningful FX movement
@@ -722,7 +744,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         ...row,
         entries: [...row.entries].sort((a, b) => b.fxDiff - a.fxDiff),
       }))
-  }, [entries, rateMap])
+  }, [entries, bookRateForEntry])
 
   const fxByYear = useMemo(() => {
     const map: Record<string, { year: string; fxDiff: number; count: number; entries: FxEntryDetail[] }> = {}
