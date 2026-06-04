@@ -330,10 +330,12 @@ export interface SaveTaskInput {
   clientId:     string | null
   serviceId:    string | null
   status:       string
-  billingAmount: number
-  billingAmountInr: number
-  quantity:     number
-  currency:     string
+  // Optional: when omitted (e.g. editing a variant task), the existing billing
+  // columns are left untouched so a derived/frozen price is never overwritten.
+  billingAmount?: number
+  billingAmountInr?: number
+  quantity?:    number
+  currency?:    string
   taskDate:     string | null
 }
 
@@ -353,10 +355,12 @@ export async function serverSaveTask(
       client_id:          input.clientId || null,
       service_id:         input.serviceId || null,
       status:             input.status,
-      billing_amount:     input.billingAmount,
-      billing_amount_inr: input.billingAmountInr,
-      quantity:           input.quantity,
-      currency:           input.currency,
+      // Only overwrite billing when the caller supplied it. Variant edits omit
+      // these so the parent-derived price stays frozen.
+      ...(input.billingAmount    !== undefined ? { billing_amount:     input.billingAmount } : {}),
+      ...(input.billingAmountInr !== undefined ? { billing_amount_inr: input.billingAmountInr } : {}),
+      ...(input.quantity         !== undefined ? { quantity:           input.quantity } : {}),
+      ...(input.currency         !== undefined ? { currency:           input.currency } : {}),
       task_date:          input.taskDate || null,
     })
     .eq('id', input.taskId)

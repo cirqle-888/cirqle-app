@@ -70,6 +70,18 @@ export function TaskEditModal({
   const unitPrice = cp?.price ?? svc?.default_price ?? 0
   const unitCurrency = (cp?.currency || svc?.default_currency || 'INR') as Currency
 
+  // Variant tasks (revision / concept / size) bill as a derived share of their
+  // PARENT task and freeze that amount at creation. Editing them here must NEVER
+  // recompute from the service pricing matrix — otherwise the derived price
+  // (e.g. ₹40 = 20% of parent) gets overwritten with the full service price (₹200).
+  const isVariant = !!task.parent_task_id
+  const variantBillingInr = Number(task.billing_amount_inr ?? 0)
+  const VARIANT_MODE_LABEL: Record<string, string> = {
+    percent_of_parent: '% of parent',
+    parameter_driven:  'parameter-driven',
+    fixed:             'fixed amount',
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
@@ -89,10 +101,16 @@ export function TaskEditModal({
       clientId:         form.client_id || null,
       serviceId:        form.service_id || null,
       status:           form.status,
-      billingAmount:    amount,
-      billingAmountInr: amount,
-      quantity:         qty,
-      currency:         unitCurrency,
+      // Variant tasks bill as a parent-derived share frozen at creation. Omit the
+      // billing fields so the server PRESERVES the stored values — otherwise an
+      // edit would overwrite the derived price (e.g. ₹40) with the full service
+      // price (₹200). Original tasks recompute from the pricing matrix as before.
+      ...(isVariant ? {} : {
+        billingAmount:    amount,
+        billingAmountInr: amount,
+        quantity:         qty,
+        currency:         unitCurrency,
+      }),
       taskDate:         form.task_date || null,
     })
 
@@ -201,30 +219,51 @@ export function TaskEditModal({
 
               {/* Quantity / Hours / Spend + Price */}
               {showFinancials && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {pt === 'fixed_per_creative' && (
-                    <div>
-                      <label className="block text-xs font-medium text-muted-foreground mb-1.5">Creatives</label>
-                      <input type="number" min="1" step="1" value={form.quantity} onChange={e => setForm(p => ({ ...p, quantity: e.target.value }))} className={inputCls} />
-                    </div>
-                  )}
-                  {pt === 'hourly' && (
-                    <div>
-                      <label className="block text-xs font-medium text-muted-foreground mb-1.5">Hours</label>
-                      <input type="number" min="0.5" step="0.5" value={form.hours} onChange={e => setForm(p => ({ ...p, hours: e.target.value }))} className={inputCls} />
-                    </div>
-                  )}
-                  {pt === 'percentage_of_spend' && (
-                    <div>
-                      <label className="block text-xs font-medium text-muted-foreground mb-1.5">Ad Spend ({unitCurrency})</label>
-                      <input type="number" min="0" step="0.01" value={form.spend} onChange={e => setForm(p => ({ ...p, spend: e.target.value }))} className={inputCls} placeholder="e.g. 1000" />
-                    </div>
-                  )}
+                isVariant ? (
+                  /* Variant task — billing is derived from the parent and locked.
+                     Showing the editable service-price fields here would let an
+                     edit silently overwrite the variant price with the full
+                     service price, so we surface a read-only locked price instead. */
                   <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">Price ({unitCurrency})</label>
-                    <input readOnly value={unitPrice} className={inputCls + ' opacity-60 cursor-not-allowed'} />
+                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                      Price ({(task.currency as string) || 'INR'})
+                    </label>
+                    <input readOnly value={variantBillingInr} className={inputCls + ' opacity-60 cursor-not-allowed'} />
+                    <p className="text-[11px] text-amber-500/90 mt-1.5 flex items-start gap-1.5">
+                      <span aria-hidden>🔗</span>
+                      <span>
+                        Variant price is <strong>locked</strong> — derived from the parent task
+                        {task.billing_mode ? ` (${VARIANT_MODE_LABEL[task.billing_mode] ?? task.billing_mode})` : ''}.
+                        Editing here won’t change it, so it can’t be overwritten with the full service price.
+                      </span>
+                    </p>
                   </div>
-                </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {pt === 'fixed_per_creative' && (
+                      <div>
+                        <label className="block text-xs font-medium text-muted-foreground mb-1.5">Creatives</label>
+                        <input type="number" min="1" step="1" value={form.quantity} onChange={e => setForm(p => ({ ...p, quantity: e.target.value }))} className={inputCls} />
+                      </div>
+                    )}
+                    {pt === 'hourly' && (
+                      <div>
+                        <label className="block text-xs font-medium text-muted-foreground mb-1.5">Hours</label>
+                        <input type="number" min="0.5" step="0.5" value={form.hours} onChange={e => setForm(p => ({ ...p, hours: e.target.value }))} className={inputCls} />
+                      </div>
+                    )}
+                    {pt === 'percentage_of_spend' && (
+                      <div>
+                        <label className="block text-xs font-medium text-muted-foreground mb-1.5">Ad Spend ({unitCurrency})</label>
+                        <input type="number" min="0" step="0.01" value={form.spend} onChange={e => setForm(p => ({ ...p, spend: e.target.value }))} className={inputCls} placeholder="e.g. 1000" />
+                      </div>
+                    )}
+                    <div>
+                      <label className="block text-xs font-medium text-muted-foreground mb-1.5">Price ({unitCurrency})</label>
+                      <input readOnly value={unitPrice} className={inputCls + ' opacity-60 cursor-not-allowed'} />
+                    </div>
+                  </div>
+                )
               )}
 
               {/* Description */}
