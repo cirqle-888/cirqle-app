@@ -108,6 +108,12 @@ export function buildAnalysisRows(
   /** task_id → actual INR received (apportioned). Absent/undefined ⇒ pending. */
   actualByTask: Map<string, number> = new Map(),
   defaultCommissionPct = 50,
+  /** employee_id → performance_rating (0–100). Drives the earnings formula. */
+  empRating: Map<string, number> = new Map(),
+  /** task_id → Σ tool fixed_percentage used on the task (flat pool deduction). */
+  toolPctByTask: Map<string, number> = new Map(),
+  /** Rating assumed when an employee has no record (neutral = no penalty). */
+  defaultPerformanceRating = 100,
 ): AnalysisRow[] {
   const pmap = new Map<string, number>()
   for (const p of pricing) {
@@ -129,11 +135,12 @@ export function buildAnalysisRows(
       ? (pmap.get(`${t.client_id}|${t.service_id}`) ?? defaultCommissionPct)
       : defaultCommissionPct
 
-    // Commission pool from CURRENT billing — must be computed before the
-    // scores loop so we can recalculate employee earnings on the fly.
-    // This keeps the report accurate even when billing is edited after
-    // contributions were scored (stored earnings_inr would be stale).
+    // Commission pool from CURRENT billing.
     const commission_pool = r2(billing_inr * commission_pct / 100)
+    // Tools deduct a flat % of the pool first (mirrors the live commission
+    // engine). `remainingPool` is what employees actually split.
+    const toolPct = toolPctByTask.get(t.id) || 0
+    const remainingPool = commission_pool * (1 - toolPct / 100)
 
     const taskScores = byTask.get(t.id) || []
     const emp: Record<string, EmpCell> = {}
@@ -141,9 +148,15 @@ export function buildAnalysisRows(
     let contributors = 0
     for (const s of taskScores) {
       const pct = s.score_percentage || 0
-      // Recalculate from current commission_pool rather than stored
-      // earnings_inr — stored value is stale when billing changes after scoring.
-      const earn = r2(pct / 100 * commission_pool)
+      const rating = empRating.get(s.employee_id) ?? defaultPerformanceRating
+      // Mirror the live commission engine EXACTLY:
+      //   earnings = remainingPool × (score%/100) × (performanceRating/100)
+      // score_percentage is the employee's normalised SHARE (0–100) of the
+      // pool BEFORE the rating multiplier — so the rating must be applied here.
+      // Recomputed from CURRENT billing + rating so the report always matches
+      // the live Contributions page, even after a billing/quantity edit (stored
+      // earnings_inr can be stale until the contribution is re-saved).
+      const earn = r2(remainingPool * (pct / 100) * (rating / 100))
       emp[s.employee_id] = { pct: r2(pct), earn }
       total_earnings += earn
       if (pct > 0) contributors++

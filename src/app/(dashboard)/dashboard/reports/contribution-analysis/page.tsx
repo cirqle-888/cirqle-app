@@ -20,7 +20,7 @@ export default async function ContributionAnalysisPage() {
 
   const supabase = createAdminClient()
 
-  const [employeesRes, clientsRes, servicesRes, pricingRes, tasksRes, scoresRes, invoiceItemsRes, invoicesRes] = await Promise.all([
+  const [employeesRes, clientsRes, servicesRes, pricingRes, tasksRes, scoresRes, invoiceItemsRes, invoicesRes, ratingsRes, taskToolsRes, toolsRes] = await Promise.all([
     // Active employees define the dynamic columns (ordered by CQID for stability).
     supabase.from('employees').select('id, cqid, name').eq('is_active', true).order('cqid'),
     supabase.from('clients').select('id, name').order('name'),
@@ -42,6 +42,12 @@ export default async function ContributionAnalysisPage() {
     fetchAll(supabase.from('invoice_items').select('task_id, invoice_id, total').order('id', { ascending: true })),
     // Invoice payment state — paid_amount_inr is the ACTUAL INR received.
     fetchAll(supabase.from('invoices').select('id, status, paid_amount_inr').order('id', { ascending: true })),
+    // ALL employees' performance ratings (incl. archived contributors) — drives
+    // the earnings formula: earnings = pool × score% × rating%.
+    supabase.from('employees').select('id, performance_rating'),
+    // Tool usage per task + tool deduction % (flat % off the pool, like the engine).
+    fetchAll(supabase.from('task_tools').select('task_id, tool_id').order('id', { ascending: true })),
+    supabase.from('tools').select('id, fixed_percentage, is_active'),
   ])
 
   const employees: EmployeeColumn[] = (employeesRes.data || []) as EmployeeColumn[]
@@ -91,6 +97,23 @@ export default async function ContributionAnalysisPage() {
     if (v.anyItem && v.allPaid) actualByTask.set(taskId, v.received)
   }
 
+  // ── Employee performance ratings (id → rating %) ──────────────────────────
+  const empRating = new Map<string, number>()
+  for (const e of (ratingsRes.data || []) as { id: string; performance_rating: number | null }[]) {
+    empRating.set(e.id, Number(e.performance_rating) || 100)
+  }
+
+  // ── Per-task tool deduction % (Σ active tool fixed_percentage) ─────────────
+  const toolPctById = new Map<string, number>()
+  for (const t of (toolsRes.data || []) as { id: string; fixed_percentage: number | null; is_active: boolean | null }[]) {
+    if (t.is_active !== false) toolPctById.set(t.id, Number(t.fixed_percentage) || 0)
+  }
+  const toolPctByTask = new Map<string, number>()
+  for (const tt of (taskToolsRes.data || []) as { task_id: string; tool_id: string }[]) {
+    const pct = toolPctById.get(tt.tool_id) || 0
+    if (pct) toolPctByTask.set(tt.task_id, (toolPctByTask.get(tt.task_id) || 0) + pct)
+  }
+
   const rows = buildAnalysisRows(
     (tasksRes.data || []) as RawTask[],
     (scoresRes.data || []) as RawScore[],
@@ -98,6 +121,9 @@ export default async function ContributionAnalysisPage() {
     clientName,
     serviceName,
     actualByTask,
+    50,            // defaultCommissionPct
+    empRating,
+    toolPctByTask,
   )
 
   return (
