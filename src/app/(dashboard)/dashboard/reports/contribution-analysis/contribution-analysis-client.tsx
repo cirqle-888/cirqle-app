@@ -12,7 +12,7 @@ import {
 } from '@/lib/reports/contribution-analysis'
 import {
   Download, Printer, FileSpreadsheet, SlidersHorizontal, X, ArrowUp, ArrowDown,
-  ChevronLeft, ChevronRight, ChevronDown, Layers,
+  ChevronLeft, ChevronRight, ChevronDown, Layers, Pin,
 } from 'lucide-react'
 
 interface Props {
@@ -28,6 +28,11 @@ const ROW_H = 38
 const GROUP_H = 40   // group header banner height
 const SUB_H = 34     // group subtotal row height
 const PAGE_SIZES = [50, 100, 250, 1000, 0] // 0 = All
+
+// Columns frozen on initial load (before the user changes anything).
+// Keys match the `key` field in buildColumns (e.g. 'task_number', 'client_name').
+const DEFAULT_FROZEN_COLS: string[] = ['task_number', 'client_name']
+const LS_FROZEN_KEY = 'ca-frozen-cols'
 
 // Largest index i with offsets[i] <= y (binary search; offsets is monotonic).
 function idxAtOffset(offsets: number[], y: number): number {
@@ -229,6 +234,42 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   const [groupKey, setGroupKey] = useState<GroupKey>(initial.groupKey)
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
 
+  // ── Freeze columns ──────────────────────────────────────────────────────────
+  // Initialise from localStorage; fall back to the compiled-in defaults.
+  const [frozenCols, setFrozenCols] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem(LS_FROZEN_KEY)
+      if (saved !== null) return new Set<string>(JSON.parse(saved))
+    } catch {}
+    return new Set(DEFAULT_FROZEN_COLS)
+  })
+  const [showFreezePanel, setShowFreezePanel] = useState(false)
+  const freezePanelRef = useRef<HTMLDivElement>(null)
+
+  // Persist frozen set whenever it changes.
+  useEffect(() => {
+    try { localStorage.setItem(LS_FROZEN_KEY, JSON.stringify([...frozenCols])) } catch {}
+  }, [frozenCols])
+
+  // Close freeze panel on outside click.
+  useEffect(() => {
+    if (!showFreezePanel) return
+    const h = (e: MouseEvent) => {
+      if (freezePanelRef.current && !freezePanelRef.current.contains(e.target as Node))
+        setShowFreezePanel(false)
+    }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [showFreezePanel])
+
+  const toggleFreeze = useCallback((key: string) => {
+    setFrozenCols(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key); else next.add(key)
+      return next
+    })
+  }, [])
+
   // Privacy lock: real names only when unlocked, else CQID (shared dn()).
   // When the report is filtered to one employee, narrow the columns to JUST
   // that employee — no point showing everyone else's blank columns.
@@ -248,6 +289,27 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     [allColumns, groupSet],
   )
   const totalWidth = useMemo(() => columns.reduce((s, c) => s + c.width, 0), [columns])
+
+  // ── Freeze column helpers ─────────────────────────────────────────────────
+  // Cumulative left-offset for each frozen column key (for sticky positioning).
+  const frozenLeftMap = useMemo(() => {
+    const map = new Map<string, number>()
+    let left = 0
+    for (const col of columns) {
+      if (frozenCols.has(col.key)) {
+        map.set(col.key, left)
+        left += col.width
+      }
+    }
+    return map
+  }, [columns, frozenCols])
+
+  // Key of the rightmost frozen column — gets a separator border.
+  const lastFrozenKey = useMemo(() => {
+    let last: string | null = null
+    for (const col of columns) if (frozenCols.has(col.key)) last = col.key
+    return last
+  }, [columns, frozenCols])
 
   // ── Sync state → URL ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -551,6 +613,67 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
             >
               <span className="tabular-nums text-xs">.00</span> Decimals
             </button>
+
+            {/* ── Freeze columns panel ── */}
+            <div className="relative" ref={freezePanelRef}>
+              <button
+                onClick={() => setShowFreezePanel(v => !v)}
+                title="Manage frozen columns"
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                  frozenCols.size > 0
+                    ? 'gradient-bg text-white border-transparent'
+                    : 'bg-card border-border text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Pin className="w-4 h-4" />
+                Freeze{frozenCols.size > 0 ? ` (${frozenCols.size})` : ''}
+              </button>
+              {showFreezePanel && (
+                <div className="absolute top-full right-0 mt-1.5 z-50 bg-card border border-border rounded-xl shadow-2xl p-3 min-w-[220px]">
+                  <div className="flex items-center justify-between mb-2 px-1">
+                    <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Freeze columns</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setFrozenCols(new Set(DEFAULT_FROZEN_COLS))}
+                        className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                        title="Restore default frozen columns"
+                      >
+                        Default
+                      </button>
+                      <span className="text-border text-[10px]">·</span>
+                      <button
+                        onClick={() => setFrozenCols(new Set())}
+                        className="text-[10px] text-red-400/70 hover:text-red-400 transition-colors"
+                        title="Unfreeze all columns"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-0.5 max-h-64 overflow-y-auto">
+                    {columns.filter(c => c.group !== 'employees').map(c => {
+                      const isFrozen = frozenCols.has(c.key)
+                      return (
+                        <label key={c.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-secondary/60 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={isFrozen}
+                            onChange={() => toggleFreeze(c.key)}
+                            className="accent-purple-500 shrink-0"
+                          />
+                          <Pin className={`w-3 h-3 shrink-0 transition-colors ${isFrozen ? 'text-purple-400' : 'text-muted-foreground/30'}`} />
+                          <span className="text-xs truncate">{c.label}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/60 mt-2 px-1 border-t border-border pt-2">
+                    Hover any column header and click <Pin className="w-2.5 h-2.5 inline" /> to pin/unpin.
+                  </p>
+                </div>
+              )}
+            </div>
+
             <button onClick={exportCSV} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm bg-card border border-border text-muted-foreground hover:text-foreground" title="Export CSV">
               <Download className="w-4 h-4" /> CSV
             </button>
@@ -629,16 +752,41 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
                 {/* Fixed columns — span both header rows */}
                 {columns.slice(0, fixedCount).map((c, ci) => {
                   const active = sortKey === c.key
+                  const isFrozen = frozenCols.has(c.key)
+                  const isLast = c.key === lastFrozenKey
+                  const frozenLeft = frozenLeftMap.get(c.key) ?? 0
                   return (
                     <button
                       key={c.key} onClick={() => toggleSort(c.key)}
-                      style={{ gridColumn: `${ci + 1} / ${ci + 2}`, gridRow: '1 / 3' }}
-                      className={`flex items-center gap-0.5 px-2 py-2 text-[11px] font-semibold whitespace-nowrap hover:bg-secondary/70 ${
+                      style={{
+                        gridColumn: `${ci + 1} / ${ci + 2}`, gridRow: '1 / 3',
+                        ...(isFrozen ? { left: frozenLeft } : {}),
+                      }}
+                      className={`group/hdr relative flex items-center gap-0.5 px-2 py-2 text-[11px] font-semibold whitespace-nowrap hover:bg-secondary/70 ${
                         c.align === 'right' ? 'justify-end' : c.align === 'center' ? 'justify-center' : 'justify-start'
-                      } ${active ? 'text-purple-400' : 'text-muted-foreground'} ${c.sticky ? 'sticky left-0 z-30 bg-secondary' : ''}`}
+                      } ${active ? 'text-purple-400' : 'text-muted-foreground'} ${
+                        isFrozen ? 'sticky z-30 bg-secondary' : ''
+                      } ${isLast ? 'border-r-2 border-purple-500/30' : ''}`}
                     >
                       <span className="truncate">{c.label}</span>
                       {active && (sortDir === 'asc' ? <ArrowUp className="w-3 h-3 shrink-0" /> : <ArrowDown className="w-3 h-3 shrink-0" />)}
+                      {/* Always-visible frozen indicator */}
+                      {isFrozen && (
+                        <Pin className="w-2.5 h-2.5 shrink-0 ml-0.5 text-purple-400/60" />
+                      )}
+                      {/* Pin / unpin toggle — visible on header hover */}
+                      <span
+                        role="button"
+                        onClick={e => { e.stopPropagation(); toggleFreeze(c.key) }}
+                        title={isFrozen ? 'Unfreeze column' : 'Freeze column'}
+                        className={`absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover/hdr:flex w-5 h-5 items-center justify-center rounded transition-colors cursor-pointer z-10 ${
+                          isFrozen
+                            ? 'text-purple-400 hover:text-purple-300 bg-secondary/80'
+                            : 'text-muted-foreground/50 hover:text-foreground bg-secondary/60'
+                        }`}
+                      >
+                        <Pin className="w-3 h-3" />
+                      </span>
                     </button>
                   )
                 })}
@@ -713,12 +861,16 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
                         >
                           {columns.map((c, ci) => {
                             const groupStart = ci >= fixedCount && (ci - fixedCount) % 3 === 0
+                            const isFrozen = frozenCols.has(c.key)
+                            const isLast = c.key === lastFrozenKey
+                            const frozenLeft = frozenLeftMap.get(c.key) ?? 0
                             return (
                               <div
                                 key={c.key}
+                                style={isFrozen ? { left: frozenLeft } : {}}
                                 className={`px-2 flex items-center text-[11px] font-semibold whitespace-nowrap overflow-hidden tabular-nums ${
                                   c.align === 'right' ? 'justify-end' : c.align === 'center' ? 'justify-center' : 'justify-start'
-                                } ${c.sticky ? 'sticky left-0 z-10 bg-card' : ''} ${groupStart ? 'border-l border-border/60' : ''} ${subColor(c.key, it.group.summary)}`}
+                                } ${isFrozen ? 'sticky z-10 bg-card' : ''} ${isLast ? 'border-r-2 border-purple-500/10' : ''} ${groupStart ? 'border-l border-border/60' : ''} ${subColor(c.key, it.group.summary)}`}
                               >
                                 <span className="truncate">{subtotalCell(c, it.group)}</span>
                               </div>
@@ -730,21 +882,25 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
 
                     // data row
                     const r = it.row
+                    const rowBg = it.z % 2 ? 'bg-secondary/10' : ''
                     return (
                       <div
                         key={r.task_id}
-                        className={`grid absolute left-0 right-0 border-b border-border/50 hover:bg-secondary/40 ${it.z % 2 ? 'bg-secondary/10' : ''}`}
+                        className={`grid absolute left-0 right-0 border-b border-border/50 hover:bg-secondary/40 ${rowBg}`}
                         style={{ top: topPx, height: ROW_H, gridTemplateColumns: gridTemplate }}
                       >
                         {columns.map((c, ci) => {
-                          // Left border at the start of each employee's 3-col group.
                           const groupStart = ci >= fixedCount && (ci - fixedCount) % 3 === 0
+                          const isFrozen = frozenCols.has(c.key)
+                          const isLast = c.key === lastFrozenKey
+                          const frozenLeft = frozenLeftMap.get(c.key) ?? 0
                           return (
                             <div
                               key={c.key}
+                              style={isFrozen ? { left: frozenLeft } : {}}
                               className={`px-2 flex items-center text-xs whitespace-nowrap overflow-hidden tabular-nums ${
                                 c.align === 'right' ? 'justify-end' : c.align === 'center' ? 'justify-center' : 'justify-start'
-                              } ${c.sticky ? 'sticky left-0 z-10 bg-card' : ''} ${groupStart ? 'border-l border-border/60' : ''} ${c.cls ? c.cls(r) : ''}`}
+                              } ${isFrozen ? 'sticky z-10 bg-card' : ''} ${isLast ? 'border-r-2 border-purple-500/10' : ''} ${groupStart ? 'border-l border-border/60' : ''} ${c.cls ? c.cls(r) : ''}`}
                             >
                               <span className="truncate">{c.render(r)}</span>
                             </div>
