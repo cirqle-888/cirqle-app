@@ -309,14 +309,15 @@ export default function ImportClient({ clients, services, employees, groups, par
     clientId:   '',
     serviceId:  '',    // jobs, contributions
     employeeId: '',    // contributions
-    taskNumber: '',    // jobs, contributions — filter to a specific task number
+    taskNumberFrom: '',  // jobs, contributions — task number range start
+    taskNumberTo:   '',  // jobs, contributions — task number range end
     status:     '',
     dateFrom:   '',
     dateTo:     '',
     isActive:   '',    // '' | 'true' | 'false'
     entryType:  '',    // cashbook: 'income' | 'expense'
   })
-  const EXPORT_FILTER_EMPTY = { clientId: '', serviceId: '', employeeId: '', taskNumber: '', status: '', dateFrom: '', dateTo: '', isActive: '', entryType: '' }
+  const EXPORT_FILTER_EMPTY = { clientId: '', serviceId: '', employeeId: '', taskNumberFrom: '', taskNumberTo: '', status: '', dateFrom: '', dateTo: '', isActive: '', entryType: '' }
   // Reset export filters when mode changes
   useEffect(() => {
     setExportFilters(EXPORT_FILTER_EMPTY)
@@ -388,16 +389,14 @@ export default function ImportClient({ clients, services, employees, groups, par
     //      silently drops the request ("TypeError: Failed to fetch").
     const CONTRIB_CHUNK = 150  // 150 × ~36 chars ≈ 5.5 KB per request; safe margin
     if (m === 'contributions') {
-      const needsTaskJoin = exportFilters.clientId || exportFilters.serviceId || exportFilters.taskNumber || exportFilters.dateFrom || exportFilters.dateTo
+      const needsTaskJoin = exportFilters.clientId || exportFilters.serviceId || exportFilters.taskNumberFrom || exportFilters.taskNumberTo || exportFilters.dateFrom || exportFilters.dateTo
       let taskIds: string[] | null = null
       if (needsTaskJoin) {
         let tq = supabase.from('tasks').select('id')
         if (exportFilters.clientId)  tq = tq.eq('client_id',  exportFilters.clientId)
         if (exportFilters.serviceId) tq = tq.eq('service_id', exportFilters.serviceId)
-        if (exportFilters.taskNumber) {
-          const tn = parseInt(exportFilters.taskNumber, 10)
-          if (!isNaN(tn)) tq = tq.eq('task_number', tn)
-        }
+        if (exportFilters.taskNumberFrom) { const n = parseInt(exportFilters.taskNumberFrom, 10); if (!isNaN(n)) tq = tq.gte('task_number', n) }
+        if (exportFilters.taskNumberTo)   { const n = parseInt(exportFilters.taskNumberTo,   10); if (!isNaN(n)) tq = tq.lte('task_number', n) }
         if (exportFilters.dateFrom) tq = tq.gte('task_date', exportFilters.dateFrom)
         if (exportFilters.dateTo)   tq = tq.lte('task_date', exportFilters.dateTo)
         const { data: taskRows, error: tErr } = await tq
@@ -454,9 +453,9 @@ export default function ImportClient({ clients, services, employees, groups, par
       // Apply export filters
       if (exportFilters.clientId  && hasClientId.includes(m))  q = q.eq('client_id',  exportFilters.clientId)
       if (exportFilters.serviceId && hasServiceId.includes(m)) q = q.eq('service_id', exportFilters.serviceId)
-      if (exportFilters.taskNumber && m === 'jobs') {
-        const tn = parseInt(exportFilters.taskNumber, 10)
-        if (!isNaN(tn)) q = q.eq('task_number', tn)
+      if (m === 'jobs') {
+        if (exportFilters.taskNumberFrom) { const n = parseInt(exportFilters.taskNumberFrom, 10); if (!isNaN(n)) q = q.gte('task_number', n) }
+        if (exportFilters.taskNumberTo)   { const n = parseInt(exportFilters.taskNumberTo,   10); if (!isNaN(n)) q = q.lte('task_number', n) }
       }
       if (exportFilters.status    && hasStatus.includes(m))    q = q.eq('status', exportFilters.status)
       if (exportFilters.dateFrom  && dateCol)                  q = q.gte(dateCol, exportFilters.dateFrom)
@@ -2729,11 +2728,21 @@ export default function ImportClient({ clients, services, employees, groups, par
                     )}
                     {/* Task number — jobs, contributions */}
                     {['jobs','contributions'].includes(mode) && (
-                      <div>
-                        <label className="text-[10px] text-muted-foreground mb-1 block">Task number (exact)</label>
-                        <input type="number" min="1" placeholder="e.g. 1042" value={exportFilters.taskNumber}
-                          onChange={e => setExportFilters(f => ({ ...f, taskNumber: e.target.value }))}
-                          className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60" />
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] text-muted-foreground mb-1 block">Task # from</label>
+                          <input type="number" min="1" placeholder="e.g. 1000"
+                            value={exportFilters.taskNumberFrom}
+                            onChange={e => setExportFilters(f => ({ ...f, taskNumberFrom: e.target.value }))}
+                            className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground mb-1 block">Task # to</label>
+                          <input type="number" min="1" placeholder="e.g. 1200"
+                            value={exportFilters.taskNumberTo}
+                            onChange={e => setExportFilters(f => ({ ...f, taskNumberTo: e.target.value }))}
+                            className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60" />
+                        </div>
                       </div>
                     )}
                     {/* Status — jobs, invoices, invoice_status */}
