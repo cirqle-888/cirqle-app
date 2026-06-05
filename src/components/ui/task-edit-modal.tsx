@@ -87,6 +87,8 @@ export function TaskEditModal({
     setSaving(true)
     setSaveError(null)
 
+    // qty is always derived from the employee-visible input fields so that
+    // non-admin edits also update the quantity column correctly.
     let amount = unitPrice
     let qty = 1
     if (pt === 'fixed_per_creative') { qty = parseFloat(form.quantity) || 1; amount = unitPrice * qty }
@@ -101,15 +103,17 @@ export function TaskEditModal({
       clientId:         form.client_id || null,
       serviceId:        form.service_id || null,
       status:           form.status,
-      // Variant tasks bill as a parent-derived share frozen at creation. Omit the
-      // billing fields so the server PRESERVES the stored values — otherwise an
-      // edit would overwrite the derived price (e.g. ₹40) with the full service
-      // price (₹200). Original tasks recompute from the pricing matrix as before.
-      ...(isVariant ? {} : {
-        billingAmount:    amount,
-        billingAmountInr: amount,
-        quantity:         qty,
-        currency:         unitCurrency,
+      // Variant: preserve frozen billing but still save updated quantity.
+      // Non-admin (showFinancials=false): save quantity only — billing fields
+      // are omitted so the server keeps the existing price untouched.
+      // Admin + original task: recompute from matrix as before.
+      ...(isVariant ? { quantity: qty } : {
+        ...(showFinancials ? {
+          billingAmount:    amount,
+          billingAmountInr: amount,
+          currency:         unitCurrency,
+        } : {}),
+        quantity: qty,
       }),
       taskDate:         form.task_date || null,
     })
@@ -264,6 +268,34 @@ export function TaskEditModal({
                     </div>
                   </div>
                 )
+              )}
+
+              {/* Quantity input for employees without pricing access.
+                  Mirrors the Add Task form: shows creatives/hours/spend but
+                  no price or total so financial data stays hidden. */}
+              {!showFinancials && !isVariant && (
+                pt === 'fixed_per_creative' ? (
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">Number of creatives</label>
+                    <input type="number" min="1" step="1" value={form.quantity}
+                      onChange={e => setForm(p => ({ ...p, quantity: e.target.value }))}
+                      className={inputCls} placeholder="1" />
+                  </div>
+                ) : pt === 'hourly' ? (
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">Hours worked</label>
+                    <input type="number" min="0.5" step="0.5" value={form.hours}
+                      onChange={e => setForm(p => ({ ...p, hours: e.target.value }))}
+                      className={inputCls} placeholder="1" />
+                  </div>
+                ) : pt === 'percentage_of_spend' ? (
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">Client's total ad spend</label>
+                    <input type="number" min="0" step="0.01" value={form.spend}
+                      onChange={e => setForm(p => ({ ...p, spend: e.target.value }))}
+                      className={inputCls} placeholder="e.g. 1000" />
+                  </div>
+                ) : null
               )}
 
               {/* Description */}
