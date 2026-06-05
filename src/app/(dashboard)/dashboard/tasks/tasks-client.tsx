@@ -4316,6 +4316,53 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                 </div>
               )}
 
+              {/* Quantity input for employees without pricing access.
+                  Shown only when the billing section above is hidden, so
+                  non-admin users can still record how many creatives/hours
+                  they worked. No price or total is revealed here. */}
+              {!showBilling && selectedService && (
+                pricingType === 'fixed_per_creative' ? (
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                      Number of creatives
+                    </label>
+                    <input
+                      type="number" min="1" step="1"
+                      value={form.quantity}
+                      onChange={e => setForm(p => ({ ...p, quantity: e.target.value }))}
+                      className={inputCls}
+                      placeholder="1"
+                    />
+                  </div>
+                ) : pricingType === 'hourly' ? (
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                      Hours worked
+                    </label>
+                    <input
+                      type="number" min="0.5" step="0.5"
+                      value={form.hours}
+                      onChange={e => setForm(p => ({ ...p, hours: e.target.value }))}
+                      className={inputCls}
+                      placeholder="1"
+                    />
+                  </div>
+                ) : pricingType === 'percentage_of_spend' ? (
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                      Client's total ad spend
+                    </label>
+                    <input
+                      type="number" min="0" step="0.01"
+                      value={form.spend}
+                      onChange={e => setForm(p => ({ ...p, spend: e.target.value }))}
+                      className={inputCls}
+                      placeholder="e.g. 1000"
+                    />
+                  </div>
+                ) : null
+              )}
+
               {/* Description (more often filled than status — placed before it) */}
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1.5">Description</label>
