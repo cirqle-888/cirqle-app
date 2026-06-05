@@ -378,12 +378,18 @@ export default function ImportClient({ clients, services, employees, groups, par
     // Modes that have is_active column
     const hasIsActive: ImportMode[] = ['employees', 'clients', 'services']
 
-    // Contributions needs special pre-filtering: client/service/task/date filters
-    // apply to the `tasks` table, then we collect matching task_ids.
-    // Employee filter applies directly to contribution_scores.employee_id.
-    let restrictTaskIds: string[] | null = null
+    // ── Contributions: pre-filter via tasks table then chunked fetch ─────────
+    // contribution_scores has no client_id/service_id — those live on tasks.
+    // Approach:
+    //   1. Query tasks with the applicable filters → get matching task_id list
+    //   2. Fetch contribution_scores in chunks of CONTRIB_CHUNK IDs per request
+    //      to stay well under the URL length limit (~8 KB). Putting hundreds of
+    //      UUIDs in a single .in() parameter exceeds that limit and the browser
+    //      silently drops the request ("TypeError: Failed to fetch").
+    const CONTRIB_CHUNK = 150  // 150 × ~36 chars ≈ 5.5 KB per request; safe margin
     if (m === 'contributions') {
       const needsTaskJoin = exportFilters.clientId || exportFilters.serviceId || exportFilters.taskNumber || exportFilters.dateFrom || exportFilters.dateTo
+      let taskIds: string[] | null = null
       if (needsTaskJoin) {
         let tq = supabase.from('tasks').select('id')
         if (exportFilters.clientId)  tq = tq.eq('client_id',  exportFilters.clientId)
@@ -395,10 +401,50 @@ export default function ImportClient({ clients, services, employees, groups, par
         if (exportFilters.dateFrom) tq = tq.gte('task_date', exportFilters.dateFrom)
         if (exportFilters.dateTo)   tq = tq.lte('task_date', exportFilters.dateTo)
         const { data: taskRows, error: tErr } = await tq
-        if (tErr) { toastError(`Task filter failed: ${tErr.message}`); return }
-        restrictTaskIds = (taskRows || []).map((t: any) => t.id)
-        if (restrictTaskIds.length === 0) { toastError('No tasks match your filters — nothing to export'); return }
+        if (tErr) { toastError(`Export failed — could not filter tasks: ${tErr.message}`); return }
+        taskIds = (taskRows || []).map((t: any) => t.id)
+        if (taskIds.length === 0) { toastError('No tasks match your filters — nothing to export'); return }
       }
+
+      // Build the base contribution_scores query (employee filter applies in every chunk)
+      const buildContribQ = (ids?: string[]) => {
+        let q = supabase.from('contribution_scores').select('*')
+        if (exportFilters.employeeId) q = q.eq('employee_id', exportFilters.employeeId)
+        if (ids) q = q.in('task_id', ids)
+        return q
+      }
+
+      if (taskIds) {
+        // Chunked fetch — avoids URL-length-exceeded errors for large ID sets
+        for (let i = 0; i < taskIds.length; i += CONTRIB_CHUNK) {
+          const chunk = taskIds.slice(i, i + CONTRIB_CHUNK)
+          const { data, error } = await buildContribQ(chunk)
+          if (error) { toastError(`Export failed: ${error.message}`); return }
+          if (data) allData.push(...data)
+        }
+      } else {
+        // No task-join filter — just paginate all scores (optionally by employee)
+        for (let page = 0; page < 100; page++) {
+          const { data, error } = await buildContribQ()
+            .range(page * PAGE, (page + 1) * PAGE - 1)
+            .order('task_id', { ascending: true })
+          if (error) { toastError(`Export failed: ${error.message}`); return }
+          if (data) allData.push(...data)
+          if (!data || data.length < PAGE) break
+        }
+      }
+
+      // Skip the generic loop below — data is already collected
+      if (allData.length === 0) { toastError('No data to export'); return }
+      let data = allData
+      const allKeys = new Set<string>()
+      data.forEach((r: Record<string, unknown>) => Object.keys(r).forEach(k => allKeys.add(k)))
+      const headers = ['id', ...[...allKeys].filter(k => k !== 'id').sort()]
+      const csv = toCsv(headers, data)
+      const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
+      downloadCsv(`${m}_export_${ts}.csv`, csv)
+      success(`Exported ${data.length} row${data.length !== 1 ? 's' : ''}`)
+      return  // ← early return; skip generic loop
     }
 
     for (let page = 0; page < 100; page++) {   // hard ceiling: 100k rows
@@ -417,11 +463,6 @@ export default function ImportClient({ clients, services, employees, groups, par
       if (exportFilters.dateTo    && dateCol)                  q = q.lte(dateCol, exportFilters.dateTo)
       if (exportFilters.isActive !== '' && hasIsActive.includes(m)) q = q.eq('is_active', exportFilters.isActive === 'true')
       if (exportFilters.entryType && m === 'cashbook_entries') q = q.eq('type', exportFilters.entryType)
-      // Contributions: employee filter (direct); task-join results (from pre-filter above)
-      if (m === 'contributions') {
-        if (exportFilters.employeeId) q = q.eq('employee_id', exportFilters.employeeId)
-        if (restrictTaskIds)          q = q.in('task_id', restrictTaskIds)
-      }
 
       const { data, error } = await q
       if (error) {
