@@ -316,8 +316,9 @@ export default function ImportClient({ clients, services, employees, groups, par
     dateTo:     '',
     isActive:   '',    // '' | 'true' | 'false'
     entryType:  '',    // cashbook: 'income' | 'expense'
+    parameterIds: [] as string[],  // contributions param_detail: filter by specific parameters
   })
-  const EXPORT_FILTER_EMPTY = { clientId: '', serviceId: '', employeeId: '', taskNumberFrom: '', taskNumberTo: '', status: '', dateFrom: '', dateTo: '', isActive: '', entryType: '' }
+  const EXPORT_FILTER_EMPTY = { clientId: '', serviceId: '', employeeId: '', taskNumberFrom: '', taskNumberTo: '', status: '', dateFrom: '', dateTo: '', isActive: '', entryType: '', parameterIds: [] }
   // Reset export filters when mode changes
   useEffect(() => {
     setExportFilters(EXPORT_FILTER_EMPTY)
@@ -438,7 +439,24 @@ export default function ImportClient({ clients, services, employees, groups, par
       let data = allData
       const allKeys = new Set<string>()
       data.forEach((r: Record<string, unknown>) => Object.keys(r).forEach(k => allKeys.add(k)))
-      const headers = ['id', ...[...allKeys].filter(k => k !== 'id').sort()]
+      let headers = ['id', ...[...allKeys].filter(k => k !== 'id').sort()]
+
+      // When param_detail mode + parameters selected, filter to only those parameter columns
+      if (contribSubMode === 'param_detail' && exportFilters.parameterIds.length > 0) {
+        const paramMap = new Map(parameters.map(p => [p.id, p.name]))
+        const selectedParamNames = new Set(
+          exportFilters.parameterIds.map(id => paramMap.get(id)).filter(Boolean)
+        )
+        // Keep base columns + only selected parameter columns
+        const baseColumns = ['id', 'task_id', 'task_number', 'task_title', 'task_date', 'employee_id', 'employee_cqid', 'score_percentage', 'earnings']
+        headers = headers.filter(h => baseColumns.includes(h) || selectedParamNames.has(h))
+        data = data.map(r => {
+          const filtered: Record<string, unknown> = {}
+          headers.forEach(h => { if (h in r) filtered[h] = r[h] })
+          return filtered
+        })
+      }
+
       const csv = toCsv(headers, data)
       const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
       downloadCsv(`${m}_export_${ts}.csv`, csv)
@@ -2724,6 +2742,40 @@ export default function ImportClient({ clients, services, employees, groups, par
                           <option value="">All employees</option>
                           {employees.map(e => <option key={e.id} value={e.id}>{e.cqid} — {e.name}</option>)}
                         </select>
+                      </div>
+                    )}
+                    {/* Parameters — contributions param_detail mode */}
+                    {mode === 'contributions' && contribSubMode === 'param_detail' && (
+                      <div>
+                        <label className="text-[10px] text-muted-foreground mb-1 block">Parameters (optional)</label>
+                        <div className="space-y-1 max-h-40 overflow-y-auto bg-background border border-border rounded-lg p-2">
+                          {parameters.length === 0 ? (
+                            <p className="text-[10px] text-muted-foreground px-1 py-1">No parameters available</p>
+                          ) : (
+                            parameters.map(p => (
+                              <label key={p.id} className="flex items-center gap-2 px-1 py-1 text-[10px] cursor-pointer hover:bg-foreground/5 rounded">
+                                <input
+                                  type="checkbox"
+                                  checked={exportFilters.parameterIds.includes(p.id)}
+                                  onChange={e => {
+                                    if (e.target.checked) {
+                                      setExportFilters(f => ({ ...f, parameterIds: [...f.parameterIds, p.id] }))
+                                    } else {
+                                      setExportFilters(f => ({ ...f, parameterIds: f.parameterIds.filter(id => id !== p.id) }))
+                                    }
+                                  }}
+                                  className="accent-violet-500"
+                                />
+                                <span className="text-foreground">{p.name}</span>
+                              </label>
+                            ))
+                          )}
+                        </div>
+                        {exportFilters.parameterIds.length > 0 && (
+                          <p className="text-[10px] text-violet-400 mt-1">
+                            {exportFilters.parameterIds.length} parameter{exportFilters.parameterIds.length !== 1 ? 's' : ''} selected
+                          </p>
+                        )}
                       </div>
                     )}
                     {/* Task number — jobs, contributions */}
