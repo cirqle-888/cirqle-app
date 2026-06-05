@@ -307,15 +307,19 @@ export default function ImportClient({ clients, services, employees, groups, par
   const [exportFilterOpen, setExportFilterOpen] = useState(false)
   const [exportFilters, setExportFilters] = useState({
     clientId:   '',
+    serviceId:  '',    // jobs, contributions
+    employeeId: '',    // contributions
+    taskNumber: '',    // jobs, contributions — filter to a specific task number
     status:     '',
     dateFrom:   '',
     dateTo:     '',
     isActive:   '',    // '' | 'true' | 'false'
     entryType:  '',    // cashbook: 'income' | 'expense'
   })
+  const EXPORT_FILTER_EMPTY = { clientId: '', serviceId: '', employeeId: '', taskNumber: '', status: '', dateFrom: '', dateTo: '', isActive: '', entryType: '' }
   // Reset export filters when mode changes
   useEffect(() => {
-    setExportFilters({ clientId: '', status: '', dateFrom: '', dateTo: '', isActive: '', entryType: '' })
+    setExportFilters(EXPORT_FILTER_EMPTY)
     setExportFilterOpen(false)
   }, [mode])
 
@@ -365,24 +369,59 @@ export default function ImportClient({ clients, services, employees, groups, par
     }
     const dateCol = dateColMap[m]
 
-    // Modes that have client_id column directly
-    const hasClientId: ImportMode[] = ['jobs', 'invoices', 'invoice_status', 'discounts', 'pricing_matrix', 'contributions']
+    // Modes that have client_id column directly (NOT contributions — that joins via tasks)
+    const hasClientId: ImportMode[] = ['jobs', 'invoices', 'invoice_status', 'discounts', 'pricing_matrix']
+    // Modes that have service_id column directly
+    const hasServiceId: ImportMode[] = ['jobs']
     // Modes that have status column
     const hasStatus: ImportMode[] = ['jobs', 'invoices', 'invoice_status']
     // Modes that have is_active column
     const hasIsActive: ImportMode[] = ['employees', 'clients', 'services']
+
+    // Contributions needs special pre-filtering: client/service/task/date filters
+    // apply to the `tasks` table, then we collect matching task_ids.
+    // Employee filter applies directly to contribution_scores.employee_id.
+    let restrictTaskIds: string[] | null = null
+    if (m === 'contributions') {
+      const needsTaskJoin = exportFilters.clientId || exportFilters.serviceId || exportFilters.taskNumber || exportFilters.dateFrom || exportFilters.dateTo
+      if (needsTaskJoin) {
+        let tq = supabase.from('tasks').select('id')
+        if (exportFilters.clientId)  tq = tq.eq('client_id',  exportFilters.clientId)
+        if (exportFilters.serviceId) tq = tq.eq('service_id', exportFilters.serviceId)
+        if (exportFilters.taskNumber) {
+          const tn = parseInt(exportFilters.taskNumber, 10)
+          if (!isNaN(tn)) tq = tq.eq('task_number', tn)
+        }
+        if (exportFilters.dateFrom) tq = tq.gte('task_date', exportFilters.dateFrom)
+        if (exportFilters.dateTo)   tq = tq.lte('task_date', exportFilters.dateTo)
+        const { data: taskRows, error: tErr } = await tq
+        if (tErr) { toastError(`Task filter failed: ${tErr.message}`); return }
+        restrictTaskIds = (taskRows || []).map((t: any) => t.id)
+        if (restrictTaskIds.length === 0) { toastError('No tasks match your filters — nothing to export'); return }
+      }
+    }
 
     for (let page = 0; page < 100; page++) {   // hard ceiling: 100k rows
       let q = supabase.from(cfg.table).select('*').range(page * PAGE, (page + 1) * PAGE - 1)
       if (orderingWorks && cfg.orderBy) q = q.order(cfg.orderBy, { ascending: true, nullsFirst: false })
 
       // Apply export filters
-      if (exportFilters.clientId  && hasClientId.includes(m))  q = q.eq('client_id', exportFilters.clientId)
+      if (exportFilters.clientId  && hasClientId.includes(m))  q = q.eq('client_id',  exportFilters.clientId)
+      if (exportFilters.serviceId && hasServiceId.includes(m)) q = q.eq('service_id', exportFilters.serviceId)
+      if (exportFilters.taskNumber && m === 'jobs') {
+        const tn = parseInt(exportFilters.taskNumber, 10)
+        if (!isNaN(tn)) q = q.eq('task_number', tn)
+      }
       if (exportFilters.status    && hasStatus.includes(m))    q = q.eq('status', exportFilters.status)
       if (exportFilters.dateFrom  && dateCol)                  q = q.gte(dateCol, exportFilters.dateFrom)
       if (exportFilters.dateTo    && dateCol)                  q = q.lte(dateCol, exportFilters.dateTo)
       if (exportFilters.isActive !== '' && hasIsActive.includes(m)) q = q.eq('is_active', exportFilters.isActive === 'true')
       if (exportFilters.entryType && m === 'cashbook_entries') q = q.eq('type', exportFilters.entryType)
+      // Contributions: employee filter (direct); task-join results (from pre-filter above)
+      if (m === 'contributions') {
+        if (exportFilters.employeeId) q = q.eq('employee_id', exportFilters.employeeId)
+        if (restrictTaskIds)          q = q.in('task_id', restrictTaskIds)
+      }
 
       const { data, error } = await q
       if (error) {
@@ -2595,7 +2634,7 @@ export default function ImportClient({ clients, services, employees, groups, par
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z"/></svg>
                   {exportFilterOpen ? 'Hide filters' : 'Filter export'}
                   {(() => {
-                    const n = [exportFilters.clientId, exportFilters.status, exportFilters.dateFrom, exportFilters.dateTo, exportFilters.isActive, exportFilters.entryType].filter(Boolean).length
+                    const n = Object.values(exportFilters).filter(Boolean).length
                     return n > 0 ? <span className="ml-1 px-1.5 py-0.5 rounded-full bg-violet-500/20 text-violet-400 text-[10px] font-semibold">{n}</span> : null
                   })()}
                 </button>
@@ -2614,8 +2653,8 @@ export default function ImportClient({ clients, services, employees, groups, par
                         </select>
                       </div>
                     )}
-                    {/* Client — jobs, invoices, invoice_status, discounts, pricing_matrix */}
-                    {['jobs','invoices','invoice_status','discounts','pricing_matrix'].includes(mode) && (
+                    {/* Client — jobs, invoices, invoice_status, discounts, pricing_matrix, contributions */}
+                    {['jobs','invoices','invoice_status','discounts','pricing_matrix','contributions'].includes(mode) && (
                       <div>
                         <label className="text-[10px] text-muted-foreground mb-1 block">Client</label>
                         <select value={exportFilters.clientId} onChange={e => setExportFilters(f => ({ ...f, clientId: e.target.value }))}
@@ -2623,6 +2662,37 @@ export default function ImportClient({ clients, services, employees, groups, par
                           <option value="">All clients</option>
                           {clients.map(c => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
                         </select>
+                      </div>
+                    )}
+                    {/* Service — jobs, contributions */}
+                    {['jobs','contributions'].includes(mode) && (
+                      <div>
+                        <label className="text-[10px] text-muted-foreground mb-1 block">Service</label>
+                        <select value={exportFilters.serviceId} onChange={e => setExportFilters(f => ({ ...f, serviceId: e.target.value }))}
+                          className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60">
+                          <option value="">All services</option>
+                          {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                      </div>
+                    )}
+                    {/* Employee — contributions */}
+                    {mode === 'contributions' && (
+                      <div>
+                        <label className="text-[10px] text-muted-foreground mb-1 block">Employee</label>
+                        <select value={exportFilters.employeeId} onChange={e => setExportFilters(f => ({ ...f, employeeId: e.target.value }))}
+                          className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60">
+                          <option value="">All employees</option>
+                          {employees.map(e => <option key={e.id} value={e.id}>{e.cqid} — {e.name}</option>)}
+                        </select>
+                      </div>
+                    )}
+                    {/* Task number — jobs, contributions */}
+                    {['jobs','contributions'].includes(mode) && (
+                      <div>
+                        <label className="text-[10px] text-muted-foreground mb-1 block">Task number (exact)</label>
+                        <input type="number" min="1" placeholder="e.g. 1042" value={exportFilters.taskNumber}
+                          onChange={e => setExportFilters(f => ({ ...f, taskNumber: e.target.value }))}
+                          className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60" />
                       </div>
                     )}
                     {/* Status — jobs, invoices, invoice_status */}
@@ -2655,22 +2725,26 @@ export default function ImportClient({ clients, services, employees, groups, par
                     {['jobs','invoices','invoice_status','cashbook_entries','discounts','contributions'].includes(mode) && (
                       <div className="grid grid-cols-2 gap-2">
                         <div>
-                          <label className="text-[10px] text-muted-foreground mb-1 block">Date from</label>
+                          <label className="text-[10px] text-muted-foreground mb-1 block">
+                            {mode === 'contributions' ? 'Task date from' : 'Date from'}
+                          </label>
                           <input type="date" value={exportFilters.dateFrom} onChange={e => setExportFilters(f => ({ ...f, dateFrom: e.target.value }))}
                             className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60" />
                         </div>
                         <div>
-                          <label className="text-[10px] text-muted-foreground mb-1 block">Date to</label>
+                          <label className="text-[10px] text-muted-foreground mb-1 block">
+                            {mode === 'contributions' ? 'Task date to' : 'Date to'}
+                          </label>
                           <input type="date" value={exportFilters.dateTo} onChange={e => setExportFilters(f => ({ ...f, dateTo: e.target.value }))}
                             className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60" />
                         </div>
                       </div>
                     )}
                     {/* Clear filters */}
-                    {[exportFilters.clientId, exportFilters.status, exportFilters.dateFrom, exportFilters.dateTo, exportFilters.isActive, exportFilters.entryType].some(Boolean) && (
-                      <button type="button" onClick={() => setExportFilters({ clientId: '', status: '', dateFrom: '', dateTo: '', isActive: '', entryType: '' })}
+                    {Object.values(exportFilters).some(Boolean) && (
+                      <button type="button" onClick={() => setExportFilters(EXPORT_FILTER_EMPTY)}
                         className="text-[10px] text-red-400 hover:text-red-300 transition-colors">
-                        × Clear filters
+                        × Clear all filters
                       </button>
                     )}
                   </div>
