@@ -89,7 +89,7 @@ export default async function ContributionsPage() {
     // and the assignee filter work the same way for everyone.
     timed('task_assignments',       fetchAll(supabase.from('task_assignments').select('task_id, employee_id').order('task_id', { ascending: true }).order('employee_id', { ascending: true }))),
     // Contributions ledger (numeric weights, not money) — visible to all.
-    timed('contributions',          fetchAll(supabase.from('contributions').select('task_id, employee_id, value').gt('value', 0).order('id', { ascending: true }))),
+    timed('contributions',          fetchAll(supabase.from('contributions').select('task_id, employee_id, parameter_id, value').gt('value', 0).order('id', { ascending: true }))),
     timed('task_tools', isAdmin
       ? fetchAll(supabase.from('task_tools').select('task_id, tool_id').order('task_id', { ascending: true }).order('tool_id', { ascending: true }))
       : noData),

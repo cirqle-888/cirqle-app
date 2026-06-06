@@ -54,7 +54,7 @@ interface Props {
   clients: { id: string; name: string }[]
   services: { id: string; name: string }[]
   taskAssignments: Assignment[]
-  contributorRecords: { task_id: string; employee_id: string; value: number }[]
+  contributorRecords: { task_id: string; employee_id: string; parameter_id?: string; value: number }[]
   taskToolRecords: { task_id: string; tool_id: string }[]
   pricingMatrix: { client_id: string; service_id: string; commission_percentage: number | null; price: number | null; currency: string | null }[]
   visibilitySettings?: VisibilitySettings
@@ -197,6 +197,8 @@ export default function ContributionsClient({
   const [expandedEmployees, setExpandedEmployees] = useState<Set<string>>(new Set())
   const [activeGroups, setActiveGroups] = useState<Set<string>>(new Set())
   const [activeSubParams, setActiveSubParams] = useState<Set<string>>(new Set())
+  // Per emp+group: whether the "less-used parameters" section is expanded
+  const [expandedSubGroups, setExpandedSubGroups] = useState<Set<string>>(new Set())
 
   // ── Auto-save draft ──────────────────────────────────
   const [draftSaved, setDraftSaved] = useState(false)
@@ -457,6 +459,65 @@ export default function ContributionsClient({
     return m
   }, [taskToolRecords])
 
+  // taskId → task_date, used to date each historical contribution for recency.
+  const taskDateById = useMemo(() => {
+    const m = new Map<string, string>()
+    localTasks.forEach((t: any) => { if (t.task_date) m.set(t.id, t.task_date) })
+    return m
+  }, [localTasks])
+
+  // Per-employee parameter usage from the full contributions ledger:
+  // empId → paramId → { count, last } where count = how many tasks they've used
+  // that parameter on and last = most recent task_date (ms). Drives the
+  // "most-used parameters first" ordering in the entry form.
+  const paramUsageByEmp = useMemo(() => {
+    const m = new Map<string, Map<string, { count: number; last: number }>>()
+    for (const r of contributorRecords as any[]) {
+      if (!r.parameter_id || (r.value ?? 0) <= 0) continue
+      if (!m.has(r.employee_id)) m.set(r.employee_id, new Map())
+      const inner = m.get(r.employee_id)!
+      const prev = inner.get(r.parameter_id) || { count: 0, last: 0 }
+      const d = taskDateById.get(r.task_id)
+      const ts = d ? new Date(d + 'T00:00:00').getTime() : 0
+      inner.set(r.parameter_id, { count: prev.count + 1, last: Math.max(prev.last, ts) })
+    }
+    return m
+  }, [contributorRecords, taskDateById])
+
+  // Split a group's sub-parameters into the employee's frequently-used ones
+  // (shown up-front as ready steppers) and the rest (behind a "more" toggle).
+  // Ranking = usage count + a recency boost, so what they "mostly and recently"
+  // do floats to the top. Any param with a current value is always shown.
+  function rankSubParams(empId: string, subs: any[]) {
+    const usage = paramUsageByEmp.get(empId)
+    const now = Date.now()
+    const scored = subs.map(p => {
+      const u = usage?.get(p.id)
+      const count = u?.count || 0
+      const last = u?.last || 0
+      const daysAgo = last ? (now - last) / 86400000 : Infinity
+      const recencyBoost = daysAgo < 30 ? 6 : daysAgo < 90 ? 3 : daysAgo < 180 ? 1 : 0
+      const hasVal = (contributions[p.id]?.[empId] || 0) > 0
+      return { p, score: count + recencyBoost, hasVal }
+    })
+    const sorted = [...scored].sort((a, b) =>
+      b.score - a.score || (a.p.display_order || 0) - (b.p.display_order || 0))
+    const N = 4
+    const frequentSet = new Set<string>()
+    scored.forEach(s => { if (s.hasVal) frequentSet.add(s.p.id) })
+    for (const s of sorted) {
+      if (frequentSet.size >= N) break
+      if (s.score > 0) frequentSet.add(s.p.id)
+    }
+    // No history at all → fall back to first N by display order so the form
+    // still surfaces something sensible to tap.
+    if (frequentSet.size === 0) sorted.slice(0, N).forEach(s => frequentSet.add(s.p.id))
+    return {
+      frequent: subs.filter(p => frequentSet.has(p.id)),
+      rest:     subs.filter(p => !frequentSet.has(p.id)),
+    }
+  }
+
   // Assignment lookup: taskId → Set<employeeId>
   const taskAssignmentMap = useMemo(() => {
     const m: Record<string, Set<string>> = {}
@@ -634,15 +695,6 @@ export default function ContributionsClient({
     })
   }
 
-  function toggleSubParam(empId: string, paramId: string, count: number) {
-    const key = `${empId}:${paramId}`
-    if (count > 0) {
-      setContrib(paramId, empId, 0)
-      setActiveSubParams(prev => { const n = new Set(prev); n.delete(key); return n })
-    } else {
-      setActiveSubParams(prev => { const n = new Set(prev); n.add(key); return n })
-    }
-  }
 
   async function openTask(task: any) {
     // Reset everything first, show entry view immediately
@@ -2279,17 +2331,18 @@ export default function ContributionsClient({
                                     ) : (
                                       <div className="flex items-center gap-2">
                                         <button type="button" onClick={() => setContrib(master.id, emp.id, Math.max(0, masterVal - 1))}
-                                          className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/60 transition-colors">
-                                          <Minus className="w-3.5 h-3.5" />
+                                          disabled={masterVal === 0}
+                                          className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/60 active:scale-90 disabled:opacity-30 disabled:active:scale-100 transition-all">
+                                          <Minus className="w-4 h-4" />
                                         </button>
-                                        <input type="number" min="0" step="1"
+                                        <input type="number" inputMode="numeric" min="0" step="1"
                                           value={masterVal || ''}
                                           onChange={e => setContrib(master.id, emp.id, parseInt(e.target.value) || 0)}
-                                          className="w-16 bg-secondary border border-border rounded-lg px-2 py-1.5 text-sm text-center font-semibold focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                          className="w-16 h-10 bg-background border border-border rounded-lg px-2 text-base text-center font-bold focus:outline-none focus:ring-2 focus:ring-primary/50"
                                           placeholder="0" />
                                         <button type="button" onClick={() => setContrib(master.id, emp.id, masterVal + 1)}
-                                          className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/60 transition-colors">
-                                          <Plus className="w-3.5 h-3.5" />
+                                          className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/60 active:scale-90 transition-all">
+                                          <Plus className="w-4 h-4" />
                                         </button>
                                         <span className="text-xs text-muted-foreground">items</span>
                                       </div>
@@ -2297,45 +2350,69 @@ export default function ContributionsClient({
                                   </div>
                                 )}
 
-                                {group.subs.length > 0 && (
-                                  <div>
-                                    <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-2">
-                                      {isPct ? 'Revisions received' : 'Items handled'}
-                                      <span className="normal-case font-normal ml-1 opacity-60">— tap to add</span>
-                                    </p>
-                                    <div className="flex flex-wrap gap-2">
-                                      {group.subs.map((param: any) => {
-                                        const count = contributions[param.id]?.[emp.id] || 0
-                                        const isActive = count > 0 || activeSubParams.has(`${emp.id}:${param.id}`)
-                                        if (!isActive) return (
-                                          <button key={param.id} type="button"
-                                            onClick={() => toggleSubParam(emp.id, param.id, count)}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary border border-transparent text-xs text-muted-foreground hover:border-border hover:text-foreground transition-all">
-                                            <Plus className="w-3 h-3 opacity-50" /> {param.name}
+                                {group.subs.length > 0 && (() => {
+                                  const { frequent, rest } = rankSubParams(emp.id, group.subs)
+                                  const expandKey = `${emp.id}:${group.id}`
+                                  const showAll = expandedSubGroups.has(expandKey)
+                                  const visible = showAll ? [...frequent, ...rest] : frequent
+
+                                  // One full-width row per parameter: name on the left, a large
+                                  // −/N/+ stepper on the right. Big tap targets work on phone and
+                                  // desktop alike; active rows glow amber so progress is obvious.
+                                  const Row = (param: any) => {
+                                    const count = contributions[param.id]?.[emp.id] || 0
+                                    return (
+                                      <div key={param.id}
+                                        className={`flex items-center gap-2 rounded-xl border px-3 py-2 transition-colors ${
+                                          count > 0 ? 'border-amber-500/35 bg-amber-500/[0.07]' : 'border-border bg-secondary/20'
+                                        }`}>
+                                        <span className={`flex-1 min-w-0 truncate text-sm ${count > 0 ? 'font-semibold text-amber-200' : 'text-muted-foreground'}`}>
+                                          {param.name}
+                                        </span>
+                                        <div className="flex items-center gap-1 shrink-0">
+                                          <button type="button" aria-label={`Decrease ${param.name}`}
+                                            onClick={() => setContrib(param.id, emp.id, Math.max(0, count - 1))}
+                                            disabled={count === 0}
+                                            className="w-9 h-9 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/60 active:scale-90 disabled:opacity-30 disabled:active:scale-100 transition-all">
+                                            <Minus className="w-4 h-4" />
                                           </button>
-                                        )
-                                        return (
-                                          <div key={param.id} className="flex items-center gap-0 bg-amber-500/10 border border-amber-500/25 rounded-lg overflow-hidden text-xs">
-                                            <span className="px-2.5 py-1.5 text-amber-300 font-medium border-r border-amber-500/20 whitespace-nowrap">{param.name}</span>
-                                            <button type="button" onClick={() => setContrib(param.id, emp.id, Math.max(0, count - 1))}
-                                              className="w-7 h-7 flex items-center justify-center text-amber-400 hover:bg-amber-500/10 transition-colors">
-                                              <Minus className="w-3 h-3" />
-                                            </button>
-                                            <span className="w-7 text-center font-bold text-amber-300">{count}</span>
-                                            <button type="button" onClick={() => setContrib(param.id, emp.id, count + 1)}
-                                              className="w-7 h-7 flex items-center justify-center text-amber-400 hover:bg-amber-500/10 transition-colors">
-                                              <Plus className="w-3 h-3" />
-                                            </button>
-                                            <button type="button" onClick={() => toggleSubParam(emp.id, param.id, count > 0 ? count : 1)}
-                                              className="w-7 h-7 flex items-center justify-center text-amber-500/60 hover:text-red-400 hover:bg-red-500/10 border-l border-amber-500/20 transition-colors">
-                                              <X className="w-3 h-3" />
-                                            </button>
-                                          </div>
-                                        )
-                                      })}
+                                          <input type="number" inputMode="numeric" min="0" step="1"
+                                            value={count || ''} placeholder="0"
+                                            onChange={e => setContrib(param.id, emp.id, parseInt(e.target.value) || 0)}
+                                            className={`w-12 h-9 bg-background border rounded-lg text-center text-sm font-bold focus:outline-none focus:ring-2 focus:ring-primary/40 ${
+                                              count > 0 ? 'border-amber-500/40 text-amber-300' : 'border-border text-foreground'
+                                            }`} />
+                                          <button type="button" aria-label={`Increase ${param.name}`}
+                                            onClick={() => setContrib(param.id, emp.id, count + 1)}
+                                            className="w-9 h-9 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/60 active:scale-90 transition-all">
+                                            <Plus className="w-4 h-4" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    )
+                                  }
+
+                                  return (
+                                    <div>
+                                      <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                                        {isPct ? 'Revisions received' : 'Items handled'}
+                                      </p>
+                                      <div className="space-y-1.5">
+                                        {visible.map(Row)}
+                                      </div>
+                                      {rest.length > 0 && (
+                                        <button type="button"
+                                          onClick={() => setExpandedSubGroups(prev => {
+                                            const n = new Set(prev); n.has(expandKey) ? n.delete(expandKey) : n.add(expandKey); return n
+                                          })}
+                                          className="mt-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                                          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showAll ? 'rotate-180' : ''}`} />
+                                          {showAll ? 'Show fewer' : `${rest.length} more ${isPct ? 'revision' : 'item'}${rest.length !== 1 ? 's' : ''}`}
+                                        </button>
+                                      )}
                                     </div>
-                                  </div>
-                                )}
+                                  )
+                                })()}
                               </div>
                             )}
                           </div>
