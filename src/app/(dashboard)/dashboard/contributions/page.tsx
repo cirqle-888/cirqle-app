@@ -1,6 +1,7 @@
 import { createAdminClient, fetchAll } from '@/lib/supabase/server'
 import { loadCurrentUser } from '@/lib/permissions/check'
-import { financialVisibility } from '@/lib/permissions/strip'
+import { financialVisibility, userCanSee } from '@/lib/permissions/strip'
+import { PERMS } from '@/lib/permissions/keys'
 import ContributionsClient from './contributions-client'
 
 export const dynamic = 'force-dynamic'
@@ -147,6 +148,7 @@ export default async function ContributionsPage() {
       permissionFlags={{
         earnings: vis.contributionEarnings,
         pricing:  vis.tasksPricing,
+        viewAll:  isAdmin || userCanSee(me, PERMS.CONTRIBUTIONS_VIEW_ALL),
       }}
     />
   )

@@ -68,6 +68,8 @@ interface Props {
   permissionFlags: {
     earnings: boolean
     pricing:  boolean
+    /** true = admin/view_all; false = employee sees only their own contributions */
+    viewAll?: boolean
   }
 }
 
@@ -527,6 +529,15 @@ export default function ContributionsClient({
   // tells the client whether earnings_inr is even present in the payload.
   const canSeeFinancials = role !== 'employee' && showContribs && showBilling && permissionFlags.earnings
 
+  // Whether the current user can see all employees' contributions.
+  // Falls back to role-based check for backwards compat (no viewAll flag = old behaviour).
+  const canViewAll = permissionFlags.viewAll ?? (role !== 'employee')
+
+  // In 'own' scope, the entry form only shows the logged-in employee's card.
+  const scopedEmployees = canViewAll
+    ? employees
+    : employees.filter(e => e.id === currentEmployee?.id)
+
   // For employee/view_only role, only show their assigned tasks
   const myVisibleTasks = useMemo(() => {
     return filteredTasks
@@ -731,6 +742,12 @@ export default function ContributionsClient({
           if (empIds.size) setExpandedEmployees(empIds)
         }
       } catch { /* ignore */ }
+    }
+
+    // In 'own' scope, auto-expand the current employee's card so they
+    // land directly on the entry form — no extra tap needed.
+    if (!canViewAll && currentEmployee?.id) {
+      setExpandedEmployees(prev => { const n = new Set(prev); n.add(currentEmployee.id); return n })
     }
   }
 
@@ -2123,10 +2140,11 @@ export default function ContributionsClient({
         )}
 
         {/* ── Employee cards ── */}
-        {employees.length > 0 && (
+        {scopedEmployees.length > 0 && (
           <div className="space-y-2">
-            {employees.map(emp => {
+            {scopedEmployees.map(emp => {
               const isExpanded = expandedEmployees.has(emp.id)
+              const isOwnScope = !canViewAll
               const groupSummary = groupedParams
                 .filter(g => activeGroups.has(`${emp.id}:${g.id}`))
                 .map(g => {
@@ -2138,37 +2156,50 @@ export default function ContributionsClient({
                 .filter(g => g.masterVal > 0 || g.subTotal > 0)
 
               return (
-                <div key={emp.id} className={`bg-card border rounded-xl overflow-hidden transition-all ${isExpanded ? 'border-primary/20' : 'border-border'}`}>
+                <div key={emp.id} className={`bg-card border rounded-xl overflow-hidden transition-all ${isExpanded || isOwnScope ? 'border-primary/20' : 'border-border'}`}>
 
-                  <button type="button"
-                    onClick={() => setExpandedEmployees(prev => { const n = new Set(prev); n.has(emp.id) ? n.delete(emp.id) : n.add(emp.id); return n })}
-                    className={cn("w-full flex items-center justify-between px-4 py-3.5", ROW_INTERACTIVE_CLASS)}>
-                    <div className="flex items-center gap-3 min-w-0">
+                  {/* Own-scope: static header — card always open, no toggle needed */}
+                  {isOwnScope ? (
+                    <div className="flex items-center gap-3 px-4 py-3 border-b border-border/50">
                       <div className="w-9 h-9 rounded-full gradient-bg flex items-center justify-center text-white text-sm font-bold shrink-0">
                         {emp.cqid?.replace('CQID', '') || '?'}
                       </div>
-                      <div className="text-left min-w-0">
+                      <div>
                         <p className="font-semibold text-sm">{dn(emp)}</p>
                         <p className="text-xs text-muted-foreground">{emp.cqid}</p>
                       </div>
-                      {groupSummary.length > 0 && (
-                        <div className="flex gap-1.5 ml-1 flex-wrap">
-                          {groupSummary.map(g => (
-                            <span key={g.name} className="text-xs bg-primary/15 text-primary px-2 py-0.5 rounded-full font-medium whitespace-nowrap">
-                              {g.name.replace(' Group', '')}: {g.masterVal > 0 ? `${g.masterVal}${g.isPct ? '%' : ''}` : '—'}
-                              {g.subTotal > 0 && <span className="opacity-70"> +{g.subTotal}</span>}
-                            </span>
-                          ))}
+                    </div>
+                  ) : (
+                    <button type="button"
+                      onClick={() => setExpandedEmployees(prev => { const n = new Set(prev); n.has(emp.id) ? n.delete(emp.id) : n.add(emp.id); return n })}
+                      className={cn("w-full flex items-center justify-between px-4 py-3.5", ROW_INTERACTIVE_CLASS)}>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-9 h-9 rounded-full gradient-bg flex items-center justify-center text-white text-sm font-bold shrink-0">
+                          {emp.cqid?.replace('CQID', '') || '?'}
                         </div>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0 ml-2">
-                      {!groupSummary.length && <span className="text-xs text-muted-foreground/50">tap to expand</span>}
-                      {isExpanded ? <ChevronLeft className="w-4 h-4 text-muted-foreground rotate-90" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
-                    </div>
-                  </button>
+                        <div className="text-left min-w-0">
+                          <p className="font-semibold text-sm">{dn(emp)}</p>
+                          <p className="text-xs text-muted-foreground">{emp.cqid}</p>
+                        </div>
+                        {groupSummary.length > 0 && (
+                          <div className="flex gap-1.5 ml-1 flex-wrap">
+                            {groupSummary.map(g => (
+                              <span key={g.name} className="text-xs bg-primary/15 text-primary px-2 py-0.5 rounded-full font-medium whitespace-nowrap">
+                                {g.name.replace(' Group', '')}: {g.masterVal > 0 ? `${g.masterVal}${g.isPct ? '%' : ''}` : '—'}
+                                {g.subTotal > 0 && <span className="opacity-70"> +{g.subTotal}</span>}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0 ml-2">
+                        {!groupSummary.length && <span className="text-xs text-muted-foreground/50">tap to expand</span>}
+                        {isExpanded ? <ChevronLeft className="w-4 h-4 text-muted-foreground rotate-90" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
+                      </div>
+                    </button>
+                  )}
 
-                  {isExpanded && (
+                  {(isExpanded || isOwnScope) && (
                     <div className="border-t border-border p-4 space-y-2">
                       {groupedParams.length === 0 && (
                         <p className="text-xs text-muted-foreground text-center py-4">
