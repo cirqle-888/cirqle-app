@@ -15,17 +15,20 @@
 -- because they read billing_amount_inr as the foreign line amount — the app
 -- now reads billing_amount for invoices, so this conversion is safe.
 --
--- This migration:
---   1. Installs a BEFORE INSERT/UPDATE trigger so EVERY task write path
---      (Add Task, Inline Edit, Recalc Billing modal, server actions, future
---      code) derives billing_amount_inr = billing_amount × current rate for
---      non-INR original tasks — no path can bypass it.
---   2. Runs a one-time backfill for existing rows.
+-- This migration installs a BEFORE INSERT/UPDATE trigger so EVERY task write
+-- path (Add Task, Inline Edit, Recalc Billing modal, server actions, future
+-- code) derives billing_amount_inr = billing_amount × current rate for non-INR
+-- original tasks — no path can bypass it.
+--
+-- NOTE: the one-time backfill of EXISTING rows was already applied
+-- programmatically via the service-role client on 2026-06-06, so it is NOT
+-- repeated here (that would double-convert). This file is safe to re-run —
+-- CREATE OR REPLACE + DROP TRIGGER IF EXISTS make it idempotent.
 --
 -- Variant tasks (parent_task_id IS NOT NULL) are EXCLUDED: their
--- billing_amount_inr is a frozen, parent-derived figure (and the parent is
--- already in INR after this runs), so they must not be recomputed here.
--- Tasks whose currency has no exchange_rates row are left unchanged (1:1).
+-- billing_amount_inr is a frozen, parent-derived figure (parent already in
+-- INR), so they must not be recomputed here. Tasks whose currency has no
+-- exchange_rates row are left unchanged (1:1).
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- 1. Conversion trigger ───────────────────────────────────────────────────────
@@ -57,13 +60,5 @@ CREATE TRIGGER trg_task_billing_inr
   FOR EACH ROW
   EXECUTE FUNCTION set_task_billing_inr();
 
--- 2. One-time backfill of existing rows ───────────────────────────────────────
--- (Direct billing_amount_inr update → does NOT fire the trigger above.)
-UPDATE tasks t
-SET    billing_amount_inr = round((t.billing_amount * r.rate_to_inr)::numeric, 2)
-FROM   exchange_rates r
-WHERE  t.currency = r.currency
-  AND  t.currency IS DISTINCT FROM 'INR'
-  AND  t.parent_task_id IS NULL
-  AND  t.billing_amount IS NOT NULL
-  AND  t.billing_amount > 0;
+-- (One-time backfill of existing rows already applied programmatically — see
+-- header note. Do NOT add it back here.)
