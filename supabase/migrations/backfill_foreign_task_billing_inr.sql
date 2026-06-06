@@ -69,15 +69,16 @@ CREATE TRIGGER trg_task_billing_inr
   EXECUTE FUNCTION set_task_billing_inr();
 
 -- 3. Pin the locked rate onto the already-converted existing rows ──────────────
--- Their billing_amount_inr is already = billing_amount × current rate (applied
--- programmatically). Record that rate so future amount edits reuse it instead of
--- re-pegging to a newer rate. Does NOT modify billing_amount_inr.
+-- DERIVE the rate from the values already stored (billing_amount_inr ÷
+-- billing_amount) rather than re-reading the current exchange_rates row. This
+-- guarantees billing_amount_inr = billing_amount × billing_exchange_rate exactly,
+-- so the lock stays self-consistent even if market rates have moved since the
+-- programmatic backfill. Does NOT modify billing_amount_inr.
 UPDATE tasks t
-SET    billing_exchange_rate = r.rate_to_inr
-FROM   exchange_rates r
-WHERE  t.currency = r.currency
-  AND  t.currency IS DISTINCT FROM 'INR'
+SET    billing_exchange_rate = round((t.billing_amount_inr / t.billing_amount)::numeric, 6)
+WHERE  t.currency IS DISTINCT FROM 'INR'
   AND  t.parent_task_id IS NULL
   AND  t.billing_amount IS NOT NULL
   AND  t.billing_amount > 0
+  AND  t.billing_amount_inr IS NOT NULL
   AND  t.billing_exchange_rate IS NULL;
