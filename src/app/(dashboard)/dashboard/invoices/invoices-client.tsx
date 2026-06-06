@@ -985,7 +985,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     // Fetch done AND invoiced tasks in range (so we can warn about already-invoiced ones)
     const { data: rawTasks } = await supabase
       .from('tasks')
-      .select('id, title, task_date, billing_amount_inr, currency, status, service:services(name)')
+      .select('id, title, task_date, billing_amount, billing_amount_inr, currency, status, service:services(name)')
       .eq('client_id', genForm.client_id)
       .in('status', ['done', 'invoiced'])
       .gte('task_date', from)
@@ -1043,7 +1043,12 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const { invoiceNumber: invNum, sequenceMonth } =
       await generateInvoiceNumber(supabase, invoiceDate, clientCode)
 
-    const subtotal = selected.reduce((s, t) => s + (t.billing_amount_inr || 0), 0)
+    // Customer invoices bill in the task's OWN currency, so line amounts come
+    // from billing_amount (foreign), NOT billing_amount_inr (the internal INR
+    // base used only for contributions/payroll/analytics). Fallback keeps
+    // legacy rows that only have the INR column working.
+    const taskAmt = (t: any) => t.billing_amount ?? t.billing_amount_inr ?? 0
+    const subtotal = selected.reduce((s, t) => s + taskAmt(t), 0)
     // Base insert — columns that always exist
     const { data: inv, error } = await supabase.from('invoices').insert({
       invoice_number: invNum, client_id: genForm.client_id, status: 'draft',
@@ -1066,7 +1071,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       selected.map((t, idx) => ({
         invoice_id: inv.id, task_id: t.id,
         description: t.title, quantity: 1,
-        unit_price: t.billing_amount_inr, total: t.billing_amount_inr,
+        unit_price: taskAmt(t), total: taskAmt(t),
         currency: t.currency || 'INR', display_order: idx,
       }))
     )
@@ -1097,7 +1102,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     for (let page = 0; page < 50; page++) {
       let q = supabase
         .from('tasks')
-        .select('id, title, task_date, billing_amount_inr, currency, client_id, client:clients(id, name, code, default_currency)')
+        .select('id, title, task_date, billing_amount, billing_amount_inr, currency, client_id, client:clients(id, name, code, default_currency)')
         .eq('status', 'done')
         .order('task_date')
         .range(page * PAGE, (page + 1) * PAGE - 1)
@@ -1151,11 +1156,14 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         }
       }
       groupMap[key].taskCount++
-      groupMap[key].total += t.billing_amount_inr || 0
+      // Bill in the task's own currency: use billing_amount (foreign), not the
+      // internal INR base. Fallback keeps legacy INR-only rows working.
+      const amt = t.billing_amount ?? t.billing_amount_inr ?? 0
+      groupMap[key].total += amt
       groupMap[key].taskIds.push(t.id)
       groupMap[key].tasks.push({
         id: t.id, title: t.title,
-        task_date: t.task_date, billing_amount_inr: t.billing_amount_inr || 0,
+        task_date: t.task_date, billing_amount_inr: amt,
         currency: t.currency || 'INR',
       })
     })
@@ -1209,17 +1217,20 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         // Fetch task details for items
         const { data: taskDetails } = await supabase
           .from('tasks')
-          .select('id, title, billing_amount_inr, currency')
+          .select('id, title, billing_amount, billing_amount_inr, currency')
           .in('id', group.taskIds)
 
         if (taskDetails?.length) {
           await supabase.from('invoice_items').insert(
-            taskDetails.map((t: any, idx: number) => ({
-              invoice_id: inv.id, task_id: t.id,
-              description: t.title, quantity: 1,
-              unit_price: t.billing_amount_inr, total: t.billing_amount_inr,
-              currency: t.currency || 'INR', display_order: idx,
-            }))
+            taskDetails.map((t: any, idx: number) => {
+              const amt = t.billing_amount ?? t.billing_amount_inr ?? 0
+              return {
+                invoice_id: inv.id, task_id: t.id,
+                description: t.title, quantity: 1,
+                unit_price: amt, total: amt,
+                currency: t.currency || 'INR', display_order: idx,
+              }
+            })
           )
         }
         doneCount++
@@ -3161,7 +3172,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   // ─────────────────────────────────────────────────────────────────────────
   function renderGeneratePanel() {
     const selectedCount = genTasks.filter(t => genSelectedIds.has(t.id)).length
-    const selectedTotal = genTasks.filter(t => genSelectedIds.has(t.id)).reduce((s, t) => s + (t.billing_amount_inr || 0), 0)
+    const selectedTotal = genTasks.filter(t => genSelectedIds.has(t.id)).reduce((s, t) => s + (t.billing_amount ?? t.billing_amount_inr ?? 0), 0)
     return (
       <div className="flex flex-col h-full overflow-hidden">
         <div className="px-4 py-3 border-b border-border/40 flex items-center justify-between">
@@ -3283,7 +3294,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                         </div>
                       )}
                     </div>
-                    <span className="text-xs font-semibold shrink-0">{fmt(task.billing_amount_inr || 0, task.currency || 'INR')}</span>
+                    <span className="text-xs font-semibold shrink-0">{fmt(task.billing_amount ?? task.billing_amount_inr ?? 0, task.currency || 'INR')}</span>
                   </label>
                     )
                   })}
