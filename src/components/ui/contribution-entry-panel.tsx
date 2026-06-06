@@ -387,7 +387,34 @@ export function ContributionEntryPanel({
           </div>
         )}
 
-        {existingScores.length > 0 ? (
+        {/* When a live calculation is running, show those values (what will be saved).
+            Fall back to DB-saved scores only when no live data is available. */}
+        {calculatedResult && calculatedResult.employeeEarnings.length > 0 ? (
+          <div className="divide-y divide-border/30">
+            {calculatedResult.employeeEarnings.map((e: any) => {
+              const emp = employees.find(em => em.id === e.employeeId)
+              return (
+                <div key={e.employeeId} className="px-4 py-2.5 flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-full gradient-bg flex items-center justify-center text-white text-[10px] font-bold shrink-0">
+                      {emp?.cqid?.replace('CQID', '') || '?'}
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold">{emp ? dn(emp) : e.employeeName}</p>
+                      <p className="text-[10px] text-muted-foreground">{emp?.cqid}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-bold gradient-text">{e.scorePercentage.toFixed(1)}%</span>
+                    {canSeeFinancials && e.earnings > 0 && (
+                      <span className="text-sm font-bold text-green-400">₹{Math.round(e.earnings).toLocaleString('en-IN')}</span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        ) : existingScores.length > 0 ? (
           <div className="divide-y divide-border/30">
             {existingScores.map((s: any) => {
               const emp = employees.find(e => e.id === s.employee_id)
