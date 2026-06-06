@@ -42,36 +42,32 @@ export async function refreshPayrollRecord(
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const admin = createAdminClient()
-  
-  // Fetch existing record
+
+  // Fetch the existing record (with employee for the audit log).
   const { data: record, error: fetchErr } = await admin
     .from('payroll')
-    .select('*')
+    .select('*, employee:employees(id, cqid, name)')
     .eq('id', input.id)
     .single()
-    
-  if (fetchErr || !record) return { ok: false, error: fetchErr?.message || 'Not found' }
+
+  if (fetchErr || !record) return { ok: false, error: fetchErr?.message || 'Payroll record not found' }
+  // Paid records are immutable — never refresh them.
   if (record.status === 'paid') return { ok: false, error: 'Cannot refresh a paid payroll record' }
 
-  // Check if anything actually changed
-  if (record.commission_earned === input.newCommission && record.net_salary === input.newNetSalary) {
-    return { ok: true, data: { row: record } } // Nothing to do
-  }
-
   const oldComm = record.commission_earned || 0
-  const oldNet = record.net_salary || 0
+  const oldNet  = record.net_salary || 0
 
-  const nowStr = new Date().toISOString()
-  const auditNote = `[System ${nowStr.slice(0,19).replace('T', ' ')}]: Refreshed payroll. Commission: ${oldComm} -> ${input.newCommission}. Net Salary: ${oldNet} -> ${input.newNetSalary}.`
-  
-  const newNotes = record.notes ? `${record.notes}\n${auditNote}` : auditNote
+  // Tolerance check — ignore sub-rupee float noise so we don't write a no-op.
+  if (Math.round(oldComm) === Math.round(input.newCommission) &&
+      Math.round(oldNet)  === Math.round(input.newNetSalary)) {
+    return { ok: true, data: { row: record } } // Already in sync
+  }
 
   const { data, error } = await admin
     .from('payroll')
-    .update({ 
-      commission_earned: input.newCommission, 
-      net_salary: input.newNetSalary,
-      notes: newNotes
+    .update({
+      commission_earned: input.newCommission,
+      net_salary:        input.newNetSalary,
     })
     .eq('id', input.id)
     .select('*, employee:employees(id, cqid, name)')
@@ -79,13 +75,22 @@ export async function refreshPayrollRecord(
 
   if (error) return { ok: false, error: error.message }
 
-  // Log activity
+  // Audit via the activity log (NOT the user-editable notes field).
   void logActivity({
-    actorId: guard.employeeId,
+    actorId:    guard.employeeId,
+    subjectId:  record.employee_id,
     entityType: 'payroll',
-    entityId: input.id,
-    action: 'edited',
-    detail: { refresh: true, old_net: oldNet, new_net: input.newNetSalary }
+    entityId:   input.id,
+    action:     'payroll_refreshed',
+    detail: {
+      cqid:           record.employee?.cqid ?? null,
+      month:          record.month,
+      year:           record.year,
+      prevCommission: oldComm,
+      newCommission:  input.newCommission,
+      prevNet:        oldNet,
+      newNet:         input.newNetSalary,
+    },
   })
 
   revalidatePath(REVALIDATE)

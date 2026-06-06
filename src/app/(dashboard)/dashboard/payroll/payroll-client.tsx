@@ -466,6 +466,17 @@ export default function PayrollClient({
     }
   }
 
+  // Whether a pending record's saved figures differ from the live recompute by
+  // ≥ ₹1. The rounding tolerance keeps the Refresh affordance from appearing
+  // for sub-rupee float noise. Paid records are immutable → never out of sync.
+  function payrollOutOfSync(record: any): boolean {
+    if (!record || record.status !== 'pending') return false
+    const liveComm = monthCommissions[record.employee_id] || 0
+    const liveNet = Math.max(0, (record.base_salary || 0) + liveComm - (record.advances_deducted || 0) - (record.other_deductions || 0))
+    return Math.round(record.commission_earned || 0) !== Math.round(liveComm)
+      || Math.round(record.net_salary || 0) !== Math.round(liveNet)
+  }
+
   // ── Exports ───────────────────────────────────────────────────────────────
 
   function dl(csv: string, name: string) {
@@ -802,8 +813,8 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                       <div className="flex justify-between items-center font-semibold text-sm pt-1.5 border-t border-border/60">
                         <span className="flex items-center gap-1.5">
                           Net Payable
-                          {record?.status === 'pending' && record.net_salary !== netEst && (
-                            <button 
+                          {record && payrollOutOfSync(record) && (
+                            <button
                               onClick={e => { e.stopPropagation(); handleRefreshPayroll(record.id) }}
                               disabled={refreshingId === record.id}
                               title="Live commission changed. Click to refresh."
@@ -1544,7 +1555,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                       </button>
                       {record.status !== 'paid' && (
                         <>
-                          {(record.commission_earned !== commission || record.net_salary !== (Math.max(0, (emp.base_salary || 0) + commission - (record.advances_deducted || 0) - (record.other_deductions || 0)))) && (
+                          {payrollOutOfSync(record) && (
                             <button onClick={() => handleRefreshPayroll(record.id)} disabled={refreshingId === record.id}
                               className="flex items-center gap-1.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-500 text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50">
                               <RefreshCw className={`w-3.5 h-3.5 ${refreshingId === record.id ? 'animate-spin' : ''}`} /> 
