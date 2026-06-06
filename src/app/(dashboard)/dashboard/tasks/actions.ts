@@ -282,10 +282,11 @@ export async function serverFillTaskBilling(
       .maybeSingle()
     if (!cp?.price) return
 
+    const cpCurrency = cp.currency || 'INR'
     await admin.from('tasks').update({
       billing_amount:     cp.price,
-      billing_amount_inr: cp.price,
-      currency:           cp.currency || 'INR',
+      billing_amount_inr: await toInr(admin, cp.price, cpCurrency),
+      currency:           cpCurrency,
     }).eq('id', taskId)
     return
   }
@@ -315,7 +316,7 @@ export async function serverFillTaskBilling(
 
   await admin.from('tasks').update({
     billing_amount:     amount,
-    billing_amount_inr: amount,
+    billing_amount_inr: await toInr(admin, amount, unitCurrency),
     currency:           unitCurrency,
   }).eq('id', taskId)
 }
@@ -339,6 +340,27 @@ export interface SaveTaskInput {
   taskDate:     string | null
 }
 
+/**
+ * Convert a billing amount in `currency` to INR using the current stored
+ * exchange rate (exchange_rates.rate_to_inr). Falls back to 1:1 when the
+ * currency is INR or no rate is configured — never worse than the old
+ * behaviour, which stored the raw foreign number as if it were INR.
+ */
+async function toInr(
+  admin: ReturnType<typeof createAdminClient>,
+  amount: number,
+  currency: string | null | undefined,
+): Promise<number> {
+  if (!currency || currency === 'INR') return amount
+  const { data } = await admin
+    .from('exchange_rates')
+    .select('rate_to_inr')
+    .eq('currency', currency)
+    .maybeSingle()
+  const rate = data?.rate_to_inr ?? 1
+  return Math.round(amount * rate * 100) / 100
+}
+
 export async function serverSaveTask(
   input: SaveTaskInput,
 ): Promise<ActionResult<any>> {
@@ -346,6 +368,15 @@ export async function serverSaveTask(
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const admin = createAdminClient()
+
+  // Derive the INR value server-side from the foreign amount + current rate, so
+  // foreign-currency tasks store a true INR figure rather than the raw foreign
+  // number the client passes. Variant edits omit billingAmount, leaving the
+  // frozen parent-derived price untouched.
+  const billingInr = input.billingAmount !== undefined
+    ? await toInr(admin, input.billingAmount, input.currency)
+    : undefined
+
   const { data, error } = await admin
     .from('tasks')
     .update({
@@ -357,8 +388,8 @@ export async function serverSaveTask(
       status:             input.status,
       // Only overwrite billing when the caller supplied it. Variant edits omit
       // these so the parent-derived price stays frozen.
-      ...(input.billingAmount    !== undefined ? { billing_amount:     input.billingAmount } : {}),
-      ...(input.billingAmountInr !== undefined ? { billing_amount_inr: input.billingAmountInr } : {}),
+      ...(input.billingAmount !== undefined ? { billing_amount: input.billingAmount } : {}),
+      ...(billingInr !== undefined ? { billing_amount_inr: billingInr } : {}),
       ...(input.quantity         !== undefined ? { quantity:           input.quantity } : {}),
       ...(input.currency         !== undefined ? { currency:           input.currency } : {}),
       task_date:          input.taskDate || null,
