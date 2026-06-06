@@ -27,6 +27,71 @@ interface ActionResult<T = void> {
   data?: T
 }
 
+// ─── Refresh Payroll ──────────────────────────────────────────────────────────
+
+export interface RefreshPayrollInput {
+  id: string
+  newCommission: number
+  newNetSalary: number
+}
+
+export async function refreshPayrollRecord(
+  input: RefreshPayrollInput,
+): Promise<ActionResult<{ row: any }>> {
+  const guard = await requirePermission(PERMS.PAYROLL_EDIT)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+  
+  // Fetch existing record
+  const { data: record, error: fetchErr } = await admin
+    .from('payroll')
+    .select('*')
+    .eq('id', input.id)
+    .single()
+    
+  if (fetchErr || !record) return { ok: false, error: fetchErr?.message || 'Not found' }
+  if (record.status === 'paid') return { ok: false, error: 'Cannot refresh a paid payroll record' }
+
+  // Check if anything actually changed
+  if (record.commission_earned === input.newCommission && record.net_salary === input.newNetSalary) {
+    return { ok: true, data: { row: record } } // Nothing to do
+  }
+
+  const oldComm = record.commission_earned || 0
+  const oldNet = record.net_salary || 0
+
+  const nowStr = new Date().toISOString()
+  const auditNote = `[System ${nowStr.slice(0,19).replace('T', ' ')}]: Refreshed payroll. Commission: ${oldComm} -> ${input.newCommission}. Net Salary: ${oldNet} -> ${input.newNetSalary}.`
+  
+  const newNotes = record.notes ? `${record.notes}\n${auditNote}` : auditNote
+
+  const { data, error } = await admin
+    .from('payroll')
+    .update({ 
+      commission_earned: input.newCommission, 
+      net_salary: input.newNetSalary,
+      notes: newNotes
+    })
+    .eq('id', input.id)
+    .select('*, employee:employees(id, cqid, name)')
+    .single()
+
+  if (error) return { ok: false, error: error.message }
+
+  // Log activity
+  void logActivity({
+    actorId: guard.employeeId,
+    entityType: 'payroll',
+    entityId: input.id,
+    action: 'edited',
+    detail: { refresh: true, old_net: oldNet, new_net: input.newNetSalary }
+  })
+
+  revalidatePath(REVALIDATE)
+  return { ok: true, data: { row: data } }
+}
+
 // ─── Bulk Generate ────────────────────────────────────────────────────────────
 
 export interface PayrollInsertRow {

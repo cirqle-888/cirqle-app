@@ -7,7 +7,7 @@ import Header from '@/components/layout/header'
 import { createClient, safeFetchAll } from '@/lib/supabase/client'
 import {
   bulkGeneratePayroll, createPayrollRecord, markPayrollPaid, markPayrollUnpaid,
-  toggleRevealSalary, createSalaryAdvance, createCreditEntry,
+  toggleRevealSalary, createSalaryAdvance, createCreditEntry, refreshPayrollRecord
 } from './actions'
 import { formatCompact } from '@/lib/calculations/currency'
 import { usePrivacy } from "@/contexts/privacy-context"
@@ -153,6 +153,13 @@ export default function PayrollClient({
   } | null>(null)
   const [saving, setSaving] = useState(false)
   const [showBulkGenerate, setShowBulkGenerate] = useState(false)
+  const [refreshingId, setRefreshingId] = useState<string | null>(null)
+
+  // ── Records Tab Filters ───────────────────────────────────────────────────
+  const [recordsFilterMonth, setRecordsFilterMonth] = useState('all')
+  const [recordsFilterYear, setRecordsFilterYear]   = useState('all')
+  const [recordsFilterEmpId, setRecordsFilterEmpId] = useState('all')
+  const [recordsFilterStatus, setRecordsFilterStatus] = useState('all')
 
   // ── Live scores state (starts from server data, updated by realtime + refresh) ──
   const [liveScores, setLiveScores]   = useState(contributionScores)
@@ -252,6 +259,16 @@ export default function PayrollClient({
   }, [empList, commissionByEmpMonth, monthKey])
 
   const monthPayroll    = useMemo(() => payroll.filter(r => r.month === viewMonth && r.year === viewYear), [payroll, viewMonth, viewYear])
+
+  const filteredRecords = useMemo(() => {
+    return payroll.filter(r => {
+      if (recordsFilterMonth !== 'all' && r.month.toString() !== recordsFilterMonth) return false
+      if (recordsFilterYear !== 'all' && r.year.toString() !== recordsFilterYear) return false
+      if (recordsFilterEmpId !== 'all' && r.employee_id !== recordsFilterEmpId) return false
+      if (recordsFilterStatus !== 'all' && r.status !== recordsFilterStatus) return false
+      return true
+    })
+  }, [payroll, recordsFilterMonth, recordsFilterYear, recordsFilterEmpId, recordsFilterStatus])
   const processedEmpIds = useMemo(() => new Set(monthPayroll.map(r => r.employee_id)), [monthPayroll])
 
   /** empId → Set of worked dates (YYYY-MM-DD) in selected month (uses live scores) */
@@ -418,6 +435,34 @@ export default function PayrollClient({
     const result = await toggleRevealSalary(empId, current)
     if (result.ok) {
       setEmpList(e => e.map(emp => emp.id === empId ? { ...emp, reveal_salary: !current } : emp))
+    }
+  }
+
+  // ── Refresh Payroll ───────────────────────────────────────────────────────
+
+  async function handleRefreshPayroll(id: string) {
+    const record = payroll.find(r => r.id === id)
+    if (!record || record.status === 'paid') return
+    const liveComm = monthCommissions[record.employee_id] || 0
+    const liveNet = Math.max(0, (record.base_salary || 0) + liveComm - (record.advances_deducted || 0) - (record.other_deductions || 0))
+    
+    setRefreshingId(id)
+    try {
+      const result = await refreshPayrollRecord({
+        id,
+        newCommission: liveComm,
+        newNetSalary: liveNet
+      })
+      if (result.ok && result.data) {
+        setPayroll(prev => prev.map(p => p.id === id ? result.data!.row : p))
+        // success silent
+      } else {
+        alert(result.error || 'Failed to refresh payroll')
+      }
+    } catch (e: any) {
+      alert(e.message || 'Error refreshing payroll')
+    } finally {
+      setRefreshingId(null)
     }
   }
 
@@ -746,14 +791,28 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                         <span className="text-muted-foreground">Base</span>
                         <span>₹{(emp.base_salary || 0).toLocaleString('en-IN')}</span>
                       </div>
-                      <div className="flex justify-between">
+                      <div className="flex justify-between items-center group/comm">
                         <span className="text-muted-foreground">Commission</span>
-                        <span className={commission > 0 ? 'text-green-400' : 'text-muted-foreground'}>
-                          {commission > 0 ? `+₹${commission.toLocaleString('en-IN')}` : '—'}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className={commission > 0 ? 'text-green-400' : 'text-muted-foreground'}>
+                            {commission > 0 ? `+₹${commission.toLocaleString('en-IN')}` : '—'}
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex justify-between font-semibold text-sm pt-1.5 border-t border-border/60">
-                        <span>Net Payable</span>
+                      <div className="flex justify-between items-center font-semibold text-sm pt-1.5 border-t border-border/60">
+                        <span className="flex items-center gap-1.5">
+                          Net Payable
+                          {record?.status === 'pending' && record.net_salary !== netEst && (
+                            <button 
+                              onClick={e => { e.stopPropagation(); handleRefreshPayroll(record.id) }}
+                              disabled={refreshingId === record.id}
+                              title="Live commission changed. Click to refresh."
+                              className="text-amber-500 hover:text-amber-400 transition-colors disabled:opacity-50"
+                            >
+                              <RefreshCw className={`w-3 h-3 ${refreshingId === record.id ? 'animate-spin' : ''}`} />
+                            </button>
+                          )}
+                        </span>
                         <span>₹{(record?.net_salary ?? netEst).toLocaleString('en-IN')}</span>
                       </div>
                     </div>
@@ -809,6 +868,45 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
         ════════════════════════════════════════════════════ */}
         {tab === 'Records' && (
           <div className="bg-card border border-border rounded-xl">
+            {/* Filter Bar */}
+            <div className="px-4 py-3 border-b border-border flex flex-wrap gap-3 bg-secondary/20">
+              <select value={recordsFilterMonth} onChange={e => setRecordsFilterMonth(e.target.value)}
+                className="text-xs bg-background border border-border rounded-lg px-3 py-2 outline-none focus:border-primary">
+                <option value="all">All Months</option>
+                {MONTHS.map((m, i) => <option key={m} value={String(i + 1)}>{m}</option>)}
+              </select>
+              <select value={recordsFilterYear} onChange={e => setRecordsFilterYear(e.target.value)}
+                className="text-xs bg-background border border-border rounded-lg px-3 py-2 outline-none focus:border-primary">
+                <option value="all">All Years</option>
+                {Array.from(new Set(payroll.map(r => r.year))).sort().reverse().map(y => (
+                  <option key={y} value={String(y)}>{y}</option>
+                ))}
+              </select>
+              <select value={recordsFilterEmpId} onChange={e => setRecordsFilterEmpId(e.target.value)}
+                className="text-xs bg-background border border-border rounded-lg px-3 py-2 outline-none focus:border-primary max-w-[200px] truncate">
+                <option value="all">All Employees</option>
+                {empList.filter(e => e.is_active).map(e => (
+                  <option key={e.id} value={e.id}>{dn(e)}</option>
+                ))}
+              </select>
+              <select value={recordsFilterStatus} onChange={e => setRecordsFilterStatus(e.target.value)}
+                className="text-xs bg-background border border-border rounded-lg px-3 py-2 outline-none focus:border-primary">
+                <option value="all">All Status</option>
+                <option value="paid">Paid</option>
+                <option value="pending">Pending</option>
+              </select>
+              {(recordsFilterMonth !== 'all' || recordsFilterYear !== 'all' || recordsFilterEmpId !== 'all' || recordsFilterStatus !== 'all') && (
+                <button onClick={() => {
+                  setRecordsFilterMonth('all')
+                  setRecordsFilterYear('all')
+                  setRecordsFilterEmpId('all')
+                  setRecordsFilterStatus('all')
+                }} className="text-xs text-muted-foreground hover:text-foreground px-2">
+                  Clear Filters
+                </button>
+              )}
+            </div>
+
             {/* Desktop Table View */}
             <div className="hidden lg:block overflow-x-auto">
             <table className="w-full text-sm min-w-[700px]">
@@ -825,10 +923,10 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {payroll.length === 0 && (
-                  <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-muted-foreground">No payroll records yet. Use Generate on the Overview tab.</td></tr>
+                {filteredRecords.length === 0 && (
+                  <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-muted-foreground">No payroll records match the filters.</td></tr>
                 )}
-                {payroll.map(record => {
+                {filteredRecords.map(record => {
                   const emp = empList.find(e => e.id === record.employee_id)
                   const ded = (record.advances_deducted || 0) + (record.other_deductions || 0)
                   return (
@@ -869,10 +967,10 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
 
             {/* Mobile Card View */}
             <div className="lg:hidden flex flex-col p-2 gap-2">
-              {payroll.length === 0 && (
-                <div className="px-4 py-10 text-center text-sm text-muted-foreground">No payroll records yet. Use Generate on the Overview tab.</div>
+              {filteredRecords.length === 0 && (
+                <div className="px-4 py-10 text-center text-sm text-muted-foreground">No payroll records match the filters.</div>
               )}
-              {payroll.map(record => {
+              {filteredRecords.map(record => {
                 const emp = empList.find(e => e.id === record.employee_id)
                 const ded = (record.advances_deducted || 0) + (record.other_deductions || 0)
                 return (
@@ -1445,10 +1543,19 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                         <Printer className="w-3.5 h-3.5" /> Print Slip
                       </button>
                       {record.status !== 'paid' && (
-                        <button onClick={() => { setSelectedEmp(null); confirmMarkPaid(record.id) }}
-                          className="flex items-center gap-1.5 bg-green-600 hover:bg-green-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
-                          <CheckCircle className="w-3.5 h-3.5" /> Mark Paid
-                        </button>
+                        <>
+                          {(record.commission_earned !== commission || record.net_salary !== (Math.max(0, (emp.base_salary || 0) + commission - (record.advances_deducted || 0) - (record.other_deductions || 0)))) && (
+                            <button onClick={() => handleRefreshPayroll(record.id)} disabled={refreshingId === record.id}
+                              className="flex items-center gap-1.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-500 text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50">
+                              <RefreshCw className={`w-3.5 h-3.5 ${refreshingId === record.id ? 'animate-spin' : ''}`} /> 
+                              {refreshingId === record.id ? 'Refreshing...' : 'Refresh Payroll'}
+                            </button>
+                          )}
+                          <button onClick={() => { setSelectedEmp(null); confirmMarkPaid(record.id) }}
+                            className="flex items-center gap-1.5 bg-green-600 hover:bg-green-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+                            <CheckCircle className="w-3.5 h-3.5" /> Mark Paid
+                          </button>
+                        </>
                       )}
                     </>
                   ) : (
