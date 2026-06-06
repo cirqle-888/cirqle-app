@@ -7,6 +7,7 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { calculateCommission } from '@/lib/calculations/commission'
+import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
 import { taskCode, taskCodeMatches, nextTaskNumber } from '@/lib/utils/task-code'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
@@ -32,7 +33,7 @@ const TaskEditModal = dynamic(
   { ssr: false },
 )
 
-interface Score { task_id: string; employee_id: string; earnings_inr?: number; score_percentage: number }
+interface Score { task_id: string; employee_id: string; earnings_inr?: number; score_percentage: number; calculated_at?: string }
 interface Assignment { task_id: string; employee_id: string }
 
 interface VisibilitySettings {
@@ -57,6 +58,7 @@ interface Props {
   contributorRecords: { task_id: string; employee_id: string; parameter_id?: string; value: number }[]
   taskToolRecords: { task_id: string; tool_id: string }[]
   pricingMatrix: { client_id: string; service_id: string; commission_percentage: number | null; price: number | null; currency: string | null }[]
+  performanceHistory: any[]
   visibilitySettings?: VisibilitySettings
   /**
    * Per-field financial visibility from the server. earnings = user holds
@@ -108,7 +110,7 @@ export default function ContributionsClient({
   tasks: initialTasks, employees, groups, parameters, tools,
   parameterServices, toolServices, groupServices: groupServicesFromDB,
   scores, clients, services, taskAssignments: taskAssignmentsFromDB,
-  contributorRecords, taskToolRecords, pricingMatrix, visibilitySettings,
+  contributorRecords, taskToolRecords, pricingMatrix, performanceHistory, visibilitySettings,
   permissionFlags,
 }: Props) {
 
@@ -381,12 +383,17 @@ export default function ContributionsClient({
           locked: false, created_at: '', updated_at: '',
         }))
 
+        const effectiveEmployees = employees.map((emp: any) => ({
+          ...emp,
+          performance_rating: getEffectivePerformanceRating(emp.id, task.task_date, performanceHistory, emp.performance_rating)
+        }))
+
         try {
           const result = calculateCommission({
             taskId: task.id,
             billingAmountINR: task.billing_amount_inr || 0,
             serviceCommissionPct: commPct,
-            employees, groups: taskGroups,
+            employees: effectiveEmployees, groups: taskGroups,
             parameters: taskParams,
             toolsUsed: taskToolsForCalc,
             contributions: contribArray,
@@ -518,6 +525,35 @@ export default function ContributionsClient({
     }
   }
 
+  // Order an employee's groups by their own history (same frequency+recency
+  // signal as parameters, aggregated across each group's params). Groups with
+  // any value in the CURRENT task always float to the top; new employees with
+  // no history keep the configured display order. Returns the ordered groups
+  // tagged with whether each is the single "most-used" group (for the badge).
+  function rankGroups(empId: string, gps: any[]) {
+    const usage = paramUsageByEmp.get(empId)
+    const now = Date.now()
+    const scored = gps.map(g => {
+      let count = 0, last = 0
+      for (const p of g.params) {
+        const u = usage?.get(p.id)
+        if (u) { count += u.count; last = Math.max(last, u.last) }
+      }
+      const daysAgo = last ? (now - last) / 86400000 : Infinity
+      const recencyBoost = daysAgo < 30 ? 6 : daysAgo < 90 ? 3 : daysAgo < 180 ? 1 : 0
+      const isActive = g.params.some((p: any) => (contributions[p.id]?.[empId] || 0) > 0)
+      return { g, score: count + recencyBoost, isActive }
+    })
+    scored.sort((a, b) => {
+      if (a.isActive !== b.isActive) return a.isActive ? -1 : 1
+      return b.score - a.score || (a.g.display_order || 0) - (b.g.display_order || 0)
+    })
+    // The top group earns the "Most Used" badge only when it has real history
+    // and there's more than one group to compare against.
+    const topId = scored.length > 1 && scored[0]?.score > 0 ? scored[0].g.id : null
+    return scored.map(s => ({ ...s, isMostUsed: s.g.id === topId }))
+  }
+
   // Assignment lookup: taskId → Set<employeeId>
   const taskAssignmentMap = useMemo(() => {
     const m: Record<string, Set<string>> = {}
@@ -599,6 +635,18 @@ export default function ContributionsClient({
     ? employees
     : employees.filter(e => e.id === currentEmployee?.id)
 
+  // Most recent save time for the open task (shown in the per-employee summary).
+  const taskLastSaved = useMemo(() => {
+    if (!selectedTask) return null
+    const ds = scores
+      .filter(s => s.task_id === selectedTask.id && s.calculated_at)
+      .map(s => s.calculated_at as string)
+      .sort()
+    return ds.length
+      ? new Date(ds[ds.length - 1]).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+      : null
+  }, [scores, selectedTask])
+
   // For employee/view_only role, only show their assigned tasks
   const myVisibleTasks = useMemo(() => {
     return filteredTasks
@@ -661,18 +709,24 @@ export default function ContributionsClient({
         locked: false, created_at: '', updated_at: '',
       }))
     )
+
+    const effectiveEmployees = employees.map((emp: any) => ({
+      ...emp,
+      performance_rating: getEffectivePerformanceRating(emp.id, selectedTask.task_date, performanceHistory, emp.performance_rating)
+    }))
+
     try {
       return calculateCommission({
         taskId: selectedTask.id,
         billingAmountINR: selectedTask.billing_amount_inr || 0,
         serviceCommissionPct: serviceCommPct,
-        employees, groups,
+        employees: effectiveEmployees, groups,
         parameters: filteredParams,
         toolsUsed: filteredTools.map(t => ({ tool: t, used: toolsUsed[t.id] || false })),
         contributions: contribArray,
       })
     } catch { return null }
-  }, [contributions, toolsUsed, serviceCommPct, selectedTask, employees, groups, filteredParams, filteredTools])
+  }, [contributions, toolsUsed, serviceCommPct, selectedTask, employees, groups, filteredParams, filteredTools, performanceHistory])
 
   // ── Entry-view helpers ────────────────────────────────
   function setContrib(paramId: string, empId: string, val: number) {
@@ -2259,7 +2313,24 @@ export default function ContributionsClient({
                           <Link href="/dashboard/settings" className="underline hover:text-foreground">Settings</Link>.
                         </p>
                       )}
-                      {groupedParams.map(group => {
+                      {/* Per-employee summary — instant feedback without scrolling to the breakdown */}
+                      {groupedParams.length > 0 && (() => {
+                        const used = groupedParams.reduce((acc, g) =>
+                          acc + g.params.filter((p: any) => (contributions[p.id]?.[emp.id] || 0) > 0).length, 0)
+                        const liveEmp = calculatedResult?.employeeEarnings.find((e: any) => e.employeeId === emp.id)
+                        return (
+                          <div className="flex items-center gap-x-4 gap-y-1 flex-wrap rounded-xl border border-border bg-secondary/30 px-3 py-2 text-xs">
+                            <span className="text-muted-foreground">Used <span className="font-semibold text-foreground">{used}</span></span>
+                            {liveEmp && <span className="text-muted-foreground">Score <span className="font-semibold text-primary">{liveEmp.scorePercentage.toFixed(1)}%</span></span>}
+                            {canSeeFinancials && liveEmp && (
+                              <span className="text-muted-foreground">Earns <span className="font-semibold text-green-600 dark:text-green-400">₹{Math.round(liveEmp.earnings).toLocaleString('en-IN')}</span></span>
+                            )}
+                            {taskLastSaved && <span className="text-muted-foreground/70 ml-auto">Saved {taskLastSaved}</span>}
+                          </div>
+                        )
+                      })()}
+
+                      {rankGroups(emp.id, groupedParams).map(({ g: group, isMostUsed }) => {
                         const groupKey = `${emp.id}:${group.id}`
                         const isGroupOn = activeGroups.has(groupKey)
                         const master = group.master
@@ -2268,6 +2339,9 @@ export default function ContributionsClient({
                         const subActiveCount = group.subs.filter((p: any) =>
                           (contributions[p.id]?.[emp.id] || 0) > 0 || activeSubParams.has(`${emp.id}:${p.id}`)
                         ).length
+                        const totalP = group.params.length
+                        const doneP = group.params.filter((p: any) => (contributions[p.id]?.[emp.id] || 0) > 0).length
+                        const progressPct = totalP ? (doneP / totalP) * 100 : 0
 
                         return (
                           <div key={group.id}
@@ -2281,10 +2355,21 @@ export default function ContributionsClient({
                                 {isGroupOn && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
                               </div>
                               <div className="flex-1 min-w-0">
-                                <p className={`text-sm font-semibold ${isGroupOn ? 'text-foreground' : 'text-muted-foreground'}`}>
-                                  {group.name}
-                                </p>
-                                {showFinancials && <p className="text-xs text-muted-foreground/60">{group.weight}% weight</p>}
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <p className={`text-sm font-semibold ${isGroupOn ? 'text-foreground' : 'text-muted-foreground'}`}>
+                                    {group.name}
+                                  </p>
+                                  {isMostUsed && (
+                                    <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-300 border border-blue-500/25 whitespace-nowrap">
+                                      🔥 Most Used
+                                    </span>
+                                  )}
+                                  <span className="text-[10px] text-muted-foreground shrink-0">{doneP}/{totalP}</span>
+                                </div>
+                                {/* progress bar */}
+                                <div className="mt-1.5 h-1 w-full max-w-[170px] rounded-full bg-foreground/10 overflow-hidden">
+                                  <div className="h-full rounded-full bg-blue-500 dark:bg-blue-400 transition-all" style={{ width: `${progressPct}%` }} />
+                                </div>
                               </div>
                               {isGroupOn && masterVal > 0 && (
                                 <span className="text-xs font-semibold gradient-text shrink-0">
@@ -2368,8 +2453,13 @@ export default function ContributionsClient({
                                             ? 'border-blue-500/40 bg-blue-50/80 dark:bg-blue-950/30 dark:border-blue-800 border-l-4 border-l-blue-500 dark:border-l-blue-400'
                                             : 'border-border bg-secondary/20 hover:border-border/60 hover:bg-secondary/40'
                                         }`}>
-                                        <span className={`flex-1 min-w-0 truncate text-sm ${count > 0 ? 'font-semibold text-blue-900 dark:text-blue-100' : 'text-muted-foreground'}`}>
-                                          {param.name}
+                                        <span className={`flex-1 min-w-0 flex items-center gap-1.5 text-sm ${count > 0 ? 'font-semibold text-blue-900 dark:text-blue-100' : 'text-muted-foreground'}`}>
+                                          {count > 0 && (
+                                            <span className="w-4 h-4 rounded-full bg-blue-500 dark:bg-blue-400 flex items-center justify-center shrink-0">
+                                              <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />
+                                            </span>
+                                          )}
+                                          <span className="truncate">{param.name}</span>
                                         </span>
                                         <div className="flex items-center gap-1 shrink-0">
                                           <button type="button" aria-label={`Decrease ${param.name}`}

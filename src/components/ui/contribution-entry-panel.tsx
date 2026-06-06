@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { calculateCommission } from '@/lib/calculations/commission'
+import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
 import { cn, ROW_INTERACTIVE_CLASS } from '@/lib/utils'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { useToast } from '@/components/ui/toast'
@@ -39,6 +40,7 @@ interface ContributionEntryPanelProps {
     task_number?: number | null
     title: string
     service_id: string
+    task_date?: string
     billing_amount_inr?: number
     status: string
     client_id?: string
@@ -90,13 +92,14 @@ export function ContributionEntryPanel({
   const [expandedSubGroups, setExpandedSubGroups] = useState<Set<string>>(new Set())
   // empId → paramId → usage count (from history fetch on mount)
   const [paramHistory, setParamHistory] = useState<Map<string, Map<string, number>>>(new Map())
+  const [performanceHistory, setPerformanceHistory] = useState<any[]>([])
 
   const draftKey = `cirqle_draft_${task.id}`
 
   useEffect(() => {
     async function load() {
       setLoading(true)
-      const [contribRes, toolsRes, toolSvcRes, toolRecRes, scoreRes, pricingRes] = await Promise.all([
+      const [contribRes, toolsRes, toolSvcRes, toolRecRes, scoreRes, pricingRes, histRes] = await Promise.all([
         supabase.from('contributions').select('parameter_id, employee_id, value').eq('task_id', task.id),
         supabase.from('tools').select('*').eq('is_active', true).order('name'),
         supabase.from('tool_services').select('tool_id, service_id'),
@@ -111,11 +114,13 @@ export function ContributionEntryPanel({
               .eq('service_id', task.service_id)
               .maybeSingle()
           : Promise.resolve({ data: null, error: null }),
+        supabase.from('employee_performance_history').select('*').order('effective_from', { ascending: false }),
       ])
 
       setTools(toolsRes.data || [])
       setToolServices(toolSvcRes.data || [])
       setExistingScores(scoreRes.data || [])
+      setPerformanceHistory((histRes as any)?.data || [])
 
       // Fetch param usage history to rank sub-parameters by frequency.
       // For 'own' scope we only need the current employee; for 'all' we
@@ -275,11 +280,16 @@ export function ContributionEntryPanel({
       }))
     )
     try {
+      const effectiveEmployees = employees.map(e => ({
+        ...e,
+        performance_rating: getEffectivePerformanceRating(e.id, task.task_date || new Date().toISOString(), performanceHistory, e.performance_rating ?? 100)
+      }))
+
       return calculateCommission({
         taskId: task.id,
         billingAmountINR: task.billing_amount_inr || 0,
         serviceCommissionPct: serviceCommPct,
-        employees: employees.map(e => ({ ...e, performance_rating: e.performance_rating ?? 100 })) as any,
+        employees: effectiveEmployees as any,
         groups: groups as any,
         parameters: filteredParams as any,
         toolsUsed: filteredTools.map((t: any) => ({ tool: t, used: toolsUsed[t.id] || false })),
@@ -344,6 +354,25 @@ export function ContributionEntryPanel({
       frequent: subs.filter(p => frequentSet.has(p.id)),
       rest:     subs.filter(p => !frequentSet.has(p.id)),
     }
+  }
+
+  // Order an employee's groups by their own usage history (frequency).
+  // Groups with any value in the CURRENT task float to the top; new employees
+  // keep the configured display order. Top group is tagged for the badge.
+  function rankGroups(empId: string, gps: any[]) {
+    const usage = paramHistory.get(empId)
+    const scored = gps.map(g => {
+      let count = 0
+      for (const p of g.params) count += usage?.get(p.id) || 0
+      const isActive = g.params.some((p: any) => (contributions[p.id]?.[empId] || 0) > 0)
+      return { g, score: count, isActive }
+    })
+    scored.sort((a, b) => {
+      if (a.isActive !== b.isActive) return a.isActive ? -1 : 1
+      return b.score - a.score || (a.g.display_order || 0) - (b.g.display_order || 0)
+    })
+    const topId = scored.length > 1 && scored[0]?.score > 0 ? scored[0].g.id : null
+    return scored.map(s => ({ ...s, isMostUsed: s.g.id === topId }))
   }
 
   async function handleSave() {
@@ -650,7 +679,28 @@ export function ContributionEntryPanel({
                             No contribution groups linked to this service. Configure in Settings.
                           </p>
                         )}
-                        {groupedParams.map(group => {
+                        {/* Per-employee summary — instant feedback without scrolling */}
+                        {groupedParams.length > 0 && (() => {
+                          const used = groupedParams.reduce((acc, g) =>
+                            acc + g.params.filter((p: any) => (contributions[p.id]?.[emp.id] || 0) > 0).length, 0)
+                          const liveEmp = calculatedResult?.employeeEarnings.find(e => e.employeeId === emp.id)
+                          return (
+                            <div className="flex items-center gap-x-4 gap-y-1 flex-wrap rounded-xl border border-border bg-secondary/30 px-3 py-2 text-xs">
+                              <span className="text-muted-foreground">Used <span className="font-semibold text-foreground">{used}</span></span>
+                              {liveEmp && <span className="text-muted-foreground">Score <span className="font-semibold text-primary">{liveEmp.scorePercentage.toFixed(1)}%</span></span>}
+                              {canSeeFinancials && liveEmp && (
+                                <span className="text-muted-foreground">Earns <span className="font-semibold text-green-600 dark:text-green-400">₹{Math.round(liveEmp.earnings).toLocaleString('en-IN')}</span></span>
+                              )}
+                              {lastUpdated && (
+                                <span className="text-muted-foreground/70 ml-auto">
+                                  Saved {new Date(lastUpdated).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                </span>
+                              )}
+                            </div>
+                          )
+                        })()}
+
+                        {rankGroups(emp.id, groupedParams).map(({ g: group, isMostUsed }) => {
                           const groupKey = `${emp.id}:${group.id}`
                           const isGroupOn = activeGroups.has(groupKey)
                           const master = group.master
@@ -659,6 +709,9 @@ export function ContributionEntryPanel({
                           const subActiveCount = group.subs.filter((p: any) =>
                             (contributions[p.id]?.[emp.id] || 0) > 0 || activeSubParams.has(`${emp.id}:${p.id}`)
                           ).length
+                          const totalP = group.params.length
+                          const doneP = group.params.filter((p: any) => (contributions[p.id]?.[emp.id] || 0) > 0).length
+                          const progressPct = totalP ? (doneP / totalP) * 100 : 0
 
                           return (
                             <div key={group.id}
@@ -672,9 +725,20 @@ export function ContributionEntryPanel({
                                   {isGroupOn && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                  <p className={`text-sm font-semibold ${isGroupOn ? 'text-foreground' : 'text-muted-foreground'}`}>
-                                    {group.name}
-                                  </p>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <p className={`text-sm font-semibold ${isGroupOn ? 'text-foreground' : 'text-muted-foreground'}`}>
+                                      {group.name}
+                                    </p>
+                                    {isMostUsed && (
+                                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-300 border border-blue-500/25 whitespace-nowrap">
+                                        🔥 Most Used
+                                      </span>
+                                    )}
+                                    <span className="text-[10px] text-muted-foreground shrink-0">{doneP}/{totalP}</span>
+                                  </div>
+                                  <div className="mt-1.5 h-1 w-full max-w-[170px] rounded-full bg-foreground/10 overflow-hidden">
+                                    <div className="h-full rounded-full bg-blue-500 dark:bg-blue-400 transition-all" style={{ width: `${progressPct}%` }} />
+                                  </div>
                                 </div>
                                 {isGroupOn && masterVal > 0 && (
                                   <span className="text-xs font-semibold gradient-text shrink-0">
@@ -750,8 +814,13 @@ export function ContributionEntryPanel({
                                               ? 'border-blue-500/40 bg-blue-50/80 dark:bg-blue-950/30 dark:border-blue-800 border-l-4 border-l-blue-500 dark:border-l-blue-400'
                                               : 'border-border bg-secondary/20 hover:border-border/60 hover:bg-secondary/40'
                                           }`}>
-                                          <span className={`flex-1 min-w-0 truncate text-sm ${count > 0 ? 'font-semibold text-blue-900 dark:text-blue-100' : 'text-muted-foreground'}`}>
-                                            {param.name}
+                                          <span className={`flex-1 min-w-0 flex items-center gap-1.5 text-sm ${count > 0 ? 'font-semibold text-blue-900 dark:text-blue-100' : 'text-muted-foreground'}`}>
+                                            {count > 0 && (
+                                              <span className="w-4 h-4 rounded-full bg-blue-500 dark:bg-blue-400 flex items-center justify-center shrink-0">
+                                                <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />
+                                              </span>
+                                            )}
+                                            <span className="truncate">{param.name}</span>
                                           </span>
                                           <div className="flex items-center gap-1 shrink-0">
                                             <button type="button" aria-label={`Decrease ${param.name}`}
@@ -855,11 +924,15 @@ export function ContributionEntryPanel({
             </div>
           )}
 
-          {/* Save */}
-          <button type="button" onClick={handleSave} disabled={saving}
-            className="w-full gradient-bg text-white text-sm font-semibold py-3 rounded-xl hover:opacity-90 disabled:opacity-50 transition-opacity">
-            {saving ? 'Saving…' : 'Save Contributions'}
-          </button>
+          {/* Save — sticky to the bottom of the scroll area so it's always
+              reachable no matter how many parameters are being scored. The
+              negative margins let the bar span the full panel width. */}
+          <div className="sticky bottom-0 -mx-4 -mb-6 px-4 pt-3 pb-4 bg-card/95 backdrop-blur border-t border-border">
+            <button type="button" onClick={handleSave} disabled={saving}
+              className="w-full gradient-bg text-white text-sm font-semibold py-3 rounded-xl hover:opacity-90 disabled:opacity-50 transition-opacity">
+              {saving ? 'Saving…' : 'Save Contributions'}
+            </button>
+          </div>
         </>
       )}
     </div>

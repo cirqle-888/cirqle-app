@@ -59,7 +59,7 @@ export default async function ContributionsPage() {
     scoresRes, clientsRes, servicesRes, assignmentsRes,
     contributorRecordsRes, taskToolRecordsRes, pricingRes,
     visibilityBillingRes, visibilityContribRes, visibilityNamesRes,
-    taskGroupAssignmentsRes, taskParamAssignmentsRes
+    taskGroupAssignmentsRes, taskParamAssignmentsRes, performanceHistoryRes
   ] = await Promise.all([
     // Tasks — same shape for both roles, employee select drops billing_amount_inr.
     timed('tasks',                  fetchAll(tasksQuery)),
@@ -81,8 +81,8 @@ export default async function ContributionsPage() {
     // doesn't include those rows. HAR showed this was the slowest call on the
     // page (2477ms unbounded); the date filter drops it dramatically.
     timed('contribution_scores', vis.contributionEarnings
-      ? fetchAll(supabase.from('contribution_scores').select('task_id, employee_id, earnings_inr, score_percentage').gte('calculated_at', contribWindowFromStr).order('id', { ascending: true }))
-      : fetchAll(supabase.from('contribution_scores').select('task_id, employee_id, score_percentage').gte('calculated_at', contribWindowFromStr).order('id', { ascending: true }))),
+      ? fetchAll(supabase.from('contribution_scores').select('task_id, employee_id, earnings_inr, score_percentage, calculated_at').gte('calculated_at', contribWindowFromStr).order('id', { ascending: true }))
+      : fetchAll(supabase.from('contribution_scores').select('task_id, employee_id, score_percentage, calculated_at').gte('calculated_at', contribWindowFromStr).order('id', { ascending: true }))),
     timed('clients',                supabase.from('clients').select('id, name').order('name')),
     timed('services',               supabase.from('services').select('id, name').order('name')),
     // Full task_assignments graph — both roles get it so contributor strips
@@ -102,9 +102,9 @@ export default async function ContributionsPage() {
     timed('vis_billing',            supabase.from('company_settings').select('value').eq('key', 'visibility_billing').maybeSingle()),
     timed('vis_contrib',            supabase.from('company_settings').select('value').eq('key', 'visibility_contributions').maybeSingle()),
     timed('vis_names',              supabase.from('company_settings').select('value').eq('key', 'visibility_employee_names').maybeSingle()),
-    // Group + param assignment graph: visible to all for consistent filter UX.
     timed('task_group_assigns',     fetchAll(supabase.from('task_group_assignments').select('task_id, employee_id'))),
     timed('task_param_assigns',     fetchAll(supabase.from('task_parameter_assignments').select('task_id, employee_id'))),
+    timed('performance_history',    fetchAll(supabase.from('employee_performance_history').select('*').order('effective_from', { ascending: false }))),
   ])
 
   // Merge all assignment types into a unique list for visibility filtering
@@ -140,6 +140,7 @@ export default async function ContributionsPage() {
       contributorRecords={contributorRecordsRes.data || []}
       taskToolRecords={taskToolRecordsRes.data || []}
       pricingMatrix={pricingRes.data || []}
+      performanceHistory={performanceHistoryRes.data || []}
       visibilitySettings={{
         billing:        (visibilityBillingRes.data?.value as string) || 'all',
         contributions:  (visibilityContribRes.data?.value as string) || 'all',
