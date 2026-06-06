@@ -86,6 +86,10 @@ export function ContributionEntryPanel({
   const [activeGroups, setActiveGroups] = useState<Set<string>>(new Set())
   const [activeSubParams, setActiveSubParams] = useState<Set<string>>(new Set())
   const [showFinancials, setShowFinancials] = useState(false)
+  // Per emp+group: whether the "less-used parameters" section is expanded
+  const [expandedSubGroups, setExpandedSubGroups] = useState<Set<string>>(new Set())
+  // empId → paramId → usage count (from history fetch on mount)
+  const [paramHistory, setParamHistory] = useState<Map<string, Map<string, number>>>(new Map())
 
   const draftKey = `cirqle_draft_${task.id}`
 
@@ -112,6 +116,29 @@ export function ContributionEntryPanel({
       setTools(toolsRes.data || [])
       setToolServices(toolSvcRes.data || [])
       setExistingScores(scoreRes.data || [])
+
+      // Fetch param usage history to rank sub-parameters by frequency.
+      // For 'own' scope we only need the current employee; for 'all' we
+      // fetch everyone scoped to the same service's tasks so the query stays small.
+      const histQ = supabase
+        .from('contributions')
+        .select('employee_id, parameter_id, task_id')
+        .gt('value', 0)
+        .neq('task_id', task.id) // exclude current task (its values are already loaded)
+      const finalHistQ = viewScope === 'own' && currentEmployeeId
+        ? histQ.eq('employee_id', currentEmployeeId)
+        : histQ
+      const { data: histRows } = await finalHistQ
+      if (histRows?.length) {
+        const hm = new Map<string, Map<string, number>>()
+        for (const r of histRows as any[]) {
+          if (!r.parameter_id) continue
+          if (!hm.has(r.employee_id)) hm.set(r.employee_id, new Map())
+          const inner = hm.get(r.employee_id)!
+          inner.set(r.parameter_id, (inner.get(r.parameter_id) || 0) + 1)
+        }
+        setParamHistory(hm)
+      }
 
       if (scoreRes.data?.length) {
         const dates = scoreRes.data
@@ -288,6 +315,34 @@ export function ContributionEntryPanel({
       setActiveSubParams(prev => { const n = new Set(prev); n.delete(key); return n })
     } else {
       setActiveSubParams(prev => { const n = new Set(prev); n.add(key); return n })
+    }
+  }
+
+  // Split a group's sub-parameters into frequently-used (shown up-front as
+  // ready steppers) and less-used (hidden behind an expander).
+  // Ranking = historical usage count. Any param with a current value always shows.
+  function rankSubParams(empId: string, subs: any[]) {
+    const usage = paramHistory.get(empId)
+    const N = 4
+    const scored = subs.map(p => ({
+      p,
+      score: usage?.get(p.id) || 0,
+      hasVal: (contributions[p.id]?.[empId] || 0) > 0,
+    }))
+    const sorted = [...scored].sort((a, b) =>
+      b.score - a.score || (a.p.display_order || 0) - (b.p.display_order || 0))
+
+    const frequentSet = new Set<string>()
+    scored.forEach(s => { if (s.hasVal) frequentSet.add(s.p.id) })
+    for (const s of sorted) {
+      if (frequentSet.size >= N) break
+      if (s.score > 0) frequentSet.add(s.p.id)
+    }
+    if (frequentSet.size === 0) sorted.slice(0, N).forEach(s => frequentSet.add(s.p.id))
+
+    return {
+      frequent: subs.filter(p => frequentSet.has(p.id)),
+      rest:     subs.filter(p => !frequentSet.has(p.id)),
     }
   }
 
@@ -661,17 +716,18 @@ export function ContributionEntryPanel({
                                       ) : (
                                         <div className="flex items-center gap-2">
                                           <button type="button" onClick={() => setContrib(master.id, emp.id, Math.max(0, masterVal - 1))}
-                                            className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/60 transition-colors">
-                                            <Minus className="w-3.5 h-3.5" />
+                                            disabled={masterVal === 0}
+                                            className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/60 active:scale-90 disabled:opacity-30 disabled:active:scale-100 transition-all">
+                                            <Minus className="w-4 h-4" />
                                           </button>
-                                          <input type="number" min="0" step="1"
+                                          <input type="number" inputMode="numeric" min="0" step="1"
                                             value={masterVal || ''}
                                             onChange={e => setContrib(master.id, emp.id, parseInt(e.target.value) || 0)}
-                                            className="w-16 bg-secondary border border-border rounded-lg px-2 py-1.5 text-sm text-center font-semibold focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                            className="w-16 h-10 bg-background border border-border rounded-lg px-2 text-base text-center font-bold focus:outline-none focus:ring-2 focus:ring-primary/50"
                                             placeholder="0" />
                                           <button type="button" onClick={() => setContrib(master.id, emp.id, masterVal + 1)}
-                                            className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/60 transition-colors">
-                                            <Plus className="w-3.5 h-3.5" />
+                                            className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/60 active:scale-90 transition-all">
+                                            <Plus className="w-4 h-4" />
                                           </button>
                                           <span className="text-xs text-muted-foreground">items</span>
                                         </div>
@@ -679,45 +735,70 @@ export function ContributionEntryPanel({
                                     </div>
                                   )}
 
-                                  {group.subs.length > 0 && (
-                                    <div>
-                                      <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-2">
-                                        {isPct ? 'Revisions received' : 'Items handled'}
-                                        <span className="normal-case font-normal ml-1 opacity-60">— tap to add</span>
-                                      </p>
-                                      <div className="flex flex-wrap gap-2">
-                                        {group.subs.map((param: any) => {
-                                          const count = contributions[param.id]?.[emp.id] || 0
-                                          const isActive = count > 0 || activeSubParams.has(`${emp.id}:${param.id}`)
-                                          if (!isActive) return (
-                                            <button key={param.id} type="button"
-                                              onClick={() => toggleSubParam(emp.id, param.id, count)}
-                                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary border border-transparent text-xs text-muted-foreground hover:border-border hover:text-foreground transition-all">
-                                              <Plus className="w-3 h-3 opacity-50" /> {param.name}
+                                  {group.subs.length > 0 && (() => {
+                                    const { frequent, rest } = rankSubParams(emp.id, group.subs)
+                                    const expandKey = `${emp.id}:${group.id}`
+                                    const showAll = expandedSubGroups.has(expandKey)
+                                    const visible = showAll ? [...frequent, ...rest] : frequent
+
+                                    const Row = (param: any) => {
+                                      const count = contributions[param.id]?.[emp.id] || 0
+                                      return (
+                                        <div key={param.id}
+                                          className={`flex items-center gap-2 rounded-xl border px-3 py-2 transition-colors ${
+                                            count > 0
+                                              ? 'border-blue-500/40 bg-blue-50/80 dark:bg-blue-950/30 dark:border-blue-800 border-l-4 border-l-blue-500 dark:border-l-blue-400'
+                                              : 'border-border bg-secondary/20 hover:border-border/60 hover:bg-secondary/40'
+                                          }`}>
+                                          <span className={`flex-1 min-w-0 truncate text-sm ${count > 0 ? 'font-semibold text-blue-900 dark:text-blue-100' : 'text-muted-foreground'}`}>
+                                            {param.name}
+                                          </span>
+                                          <div className="flex items-center gap-1 shrink-0">
+                                            <button type="button" aria-label={`Decrease ${param.name}`}
+                                              onClick={() => setContrib(param.id, emp.id, Math.max(0, count - 1))}
+                                              disabled={count === 0}
+                                              className="w-9 h-9 rounded-lg bg-background/60 border border-border flex items-center justify-center hover:bg-secondary active:scale-90 disabled:opacity-30 disabled:active:scale-100 transition-all">
+                                              <Minus className="w-4 h-4" />
                                             </button>
-                                          )
-                                          return (
-                                            <div key={param.id} className="flex items-center gap-0 bg-amber-500/10 border border-amber-500/25 rounded-lg overflow-hidden text-xs">
-                                              <span className="px-2.5 py-1.5 text-amber-300 font-medium border-r border-amber-500/20 whitespace-nowrap">{param.name}</span>
-                                              <button type="button" onClick={() => setContrib(param.id, emp.id, Math.max(0, count - 1))}
-                                                className="w-7 h-7 flex items-center justify-center text-amber-400 hover:bg-amber-500/10 transition-colors">
-                                                <Minus className="w-3 h-3" />
-                                              </button>
-                                              <span className="w-7 text-center font-bold text-amber-300">{count}</span>
-                                              <button type="button" onClick={() => setContrib(param.id, emp.id, count + 1)}
-                                                className="w-7 h-7 flex items-center justify-center text-amber-400 hover:bg-amber-500/10 transition-colors">
-                                                <Plus className="w-3 h-3" />
-                                              </button>
-                                              <button type="button" onClick={() => toggleSubParam(emp.id, param.id, count > 0 ? count : 1)}
-                                                className="w-7 h-7 flex items-center justify-center text-amber-500/60 hover:text-red-400 hover:bg-red-500/10 border-l border-amber-500/20 transition-colors">
-                                                <X className="w-3 h-3" />
-                                              </button>
-                                            </div>
-                                          )
-                                        })}
+                                            <input type="number" inputMode="numeric" min="0" step="1"
+                                              value={count || ''} placeholder="0"
+                                              onChange={e => setContrib(param.id, emp.id, parseInt(e.target.value) || 0)}
+                                              className={`w-12 h-9 bg-background border rounded-lg text-center text-sm font-bold focus:outline-none focus:ring-2 focus:ring-primary/40 ${
+                                                count > 0 ? 'border-blue-400 dark:border-blue-600 text-blue-900 dark:text-blue-100' : 'border-border text-foreground'
+                                              }`} />
+                                            <button type="button" aria-label={`Increase ${param.name}`}
+                                              onClick={() => setContrib(param.id, emp.id, count + 1)}
+                                              className="w-9 h-9 rounded-lg bg-background/60 border border-border flex items-center justify-center hover:bg-secondary active:scale-90 transition-all">
+                                              <Plus className="w-4 h-4" />
+                                            </button>
+                                          </div>
+                                        </div>
+                                      )
+                                    }
+
+                                    return (
+                                      <div>
+                                        <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                                          {isPct ? 'Revisions received' : 'Items handled'}
+                                        </p>
+                                        <div className="space-y-1.5">
+                                          {visible.map(Row)}
+                                        </div>
+                                        {rest.length > 0 && (
+                                          <button type="button"
+                                            onClick={() => setExpandedSubGroups(prev => {
+                                              const n = new Set(prev)
+                                              n.has(expandKey) ? n.delete(expandKey) : n.add(expandKey)
+                                              return n
+                                            })}
+                                            className="mt-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                                            <ChevronLeft className={`w-3.5 h-3.5 transition-transform ${showAll ? '-rotate-90' : 'rotate-90'}`} />
+                                            {showAll ? 'Show fewer' : `${rest.length} more ${isPct ? 'revision' : 'item'}${rest.length !== 1 ? 's' : ''}`}
+                                          </button>
+                                        )}
                                       </div>
-                                    </div>
-                                  )}
+                                    )
+                                  })()}
                                 </div>
                               )}
                             </div>

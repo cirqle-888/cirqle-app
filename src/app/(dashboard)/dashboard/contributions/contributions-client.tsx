@@ -2364,9 +2364,11 @@ export default function ContributionsClient({
                                     return (
                                       <div key={param.id}
                                         className={`flex items-center gap-2 rounded-xl border px-3 py-2 transition-colors ${
-                                          count > 0 ? 'border-amber-500/35 bg-amber-500/[0.07]' : 'border-border bg-secondary/20'
+                                          count > 0
+                                            ? 'border-blue-500/40 bg-blue-50/80 dark:bg-blue-950/30 dark:border-blue-800 border-l-4 border-l-blue-500 dark:border-l-blue-400'
+                                            : 'border-border bg-secondary/20 hover:border-border/60 hover:bg-secondary/40'
                                         }`}>
-                                        <span className={`flex-1 min-w-0 truncate text-sm ${count > 0 ? 'font-semibold text-amber-200' : 'text-muted-foreground'}`}>
+                                        <span className={`flex-1 min-w-0 truncate text-sm ${count > 0 ? 'font-semibold text-blue-900 dark:text-blue-100' : 'text-muted-foreground'}`}>
                                           {param.name}
                                         </span>
                                         <div className="flex items-center gap-1 shrink-0">
@@ -2380,7 +2382,7 @@ export default function ContributionsClient({
                                             value={count || ''} placeholder="0"
                                             onChange={e => setContrib(param.id, emp.id, parseInt(e.target.value) || 0)}
                                             className={`w-12 h-9 bg-background border rounded-lg text-center text-sm font-bold focus:outline-none focus:ring-2 focus:ring-primary/40 ${
-                                              count > 0 ? 'border-amber-500/40 text-amber-300' : 'border-border text-foreground'
+                                              count > 0 ? 'border-blue-400 dark:border-blue-600 text-blue-900 dark:text-blue-100' : 'border-border text-foreground'
                                             }`} />
                                           <button type="button" aria-label={`Increase ${param.name}`}
                                             onClick={() => setContrib(param.id, emp.id, count + 1)}
