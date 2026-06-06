@@ -670,6 +670,17 @@ export function ContributionEntryPanel({
             </div>
           )}
 
+          {/* Warning: no billing amount → pool = ₹0 */}
+          {calculatedResult && canSeeFinancials && (task.billing_amount_inr || 0) === 0 && (
+            <div className="bg-amber-500/10 border border-amber-500/25 rounded-xl px-4 py-3 flex items-start gap-2">
+              <span className="text-amber-400 mt-0.5 shrink-0">⚠</span>
+              <p className="text-[11px] text-amber-400">
+                No billing amount set on this task — commission pool is ₹0 so earnings will be ₹0.
+                Switch to the <strong>Details</strong> tab to set the billing amount first, then scores will calculate correctly.
+              </p>
+            </div>
+          )}
+
           {/* Live commission breakdown */}
           {calculatedResult && canSeeFinancials && (
             <div className="rounded-xl overflow-hidden border border-green-500/20">
