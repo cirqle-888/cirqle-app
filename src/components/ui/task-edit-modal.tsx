@@ -26,6 +26,10 @@ interface TaskEditModalProps {
   canEditContributions?: boolean
   /** Whether the user can see ₹ earnings in contributions */
   showEarnings?: boolean
+  /** 'all' = admin sees everyone; 'own' = employee sees only themselves */
+  contribViewScope?: 'all' | 'own'
+  /** The logged-in employee's id — used to scope 'own' view */
+  currentEmployeeId?: string
   /** Which tab to open initially */
   initialTab?: 'details' | 'contributions'
   /** Reference data needed by the Contributions tab */
@@ -52,6 +56,7 @@ const inputCls = 'w-full bg-secondary border border-border rounded-lg px-3 py-2 
 export function TaskEditModal({
   task, clients, services, clientPricings = [], showFinancials = true,
   canViewContributions = false, canEditContributions = false, showEarnings = false,
+  contribViewScope = 'all', currentEmployeeId,
   initialTab = 'details',
   employees = [], groups = [], parameters = [], groupServices = [],
   onSaved, onDeleted, onClose,
@@ -406,6 +411,8 @@ export function TaskEditModal({
                   groupServices={groupServices}
                   canEdit={canEditContributions}
                   showEarnings={showEarnings}
+                  viewScope={contribViewScope}
+                  currentEmployeeId={currentEmployeeId}
                   onSaved={() => onSaved(task)}
                 />
               </div>

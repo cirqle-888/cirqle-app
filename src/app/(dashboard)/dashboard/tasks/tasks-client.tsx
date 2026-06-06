@@ -137,6 +137,7 @@ interface Props {
   permissionFlags?: {
     pricing: boolean
     contribView?: boolean
+    contribViewAll?: boolean
     contribEdit?: boolean
     contribEarnings?: boolean
   }
@@ -3740,6 +3741,8 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
           canViewContributions={permissionFlags?.contribView}
           canEditContributions={permissionFlags?.contribEdit}
           showEarnings={permissionFlags?.contribEarnings}
+          contribViewScope={permissionFlags?.contribViewAll ? 'all' : 'own'}
+          currentEmployeeId={currentEmployee?.id}
           initialTab={openOnContribTab === editTask.id ? 'contributions' : 'details'}
           employees={employees}
           groups={groups}

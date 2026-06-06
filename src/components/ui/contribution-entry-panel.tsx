@@ -51,13 +51,21 @@ interface ContributionEntryPanelProps {
   groupServices: { group_id: string; service_id: string }[]
   canEdit: boolean
   showEarnings: boolean
+  /** 'all' = show all employees (admin); 'own' = show only current employee */
+  viewScope?: 'all' | 'own'
+  /** The logged-in employee's id — required when viewScope === 'own' */
+  currentEmployeeId?: string
   onSaved?: () => void
 }
 
 export function ContributionEntryPanel({
-  task, employees, groups, parameters, groupServices,
-  canEdit, showEarnings, onSaved,
+  task, employees: allEmployees, groups, parameters, groupServices,
+  canEdit, showEarnings, viewScope = 'all', currentEmployeeId, onSaved,
 }: ContributionEntryPanelProps) {
+  // Scope employees to just the current user when they only have view_own access
+  const employees = viewScope === 'own' && currentEmployeeId
+    ? allEmployees.filter(e => e.id === currentEmployeeId)
+    : allEmployees
   const supabase = createClient()
   const { dn } = usePrivacy()
   const toast = useToast()
@@ -176,6 +184,12 @@ export function ContributionEntryPanel({
             if (empIds.size) setExpandedEmployees(empIds)
           }
         } catch { /* ignore */ }
+      }
+
+      // In 'own' scope, auto-expand the current employee's card so they land
+      // directly on the entry form — no extra tap needed.
+      if (viewScope === 'own' && currentEmployeeId) {
+        setExpandedEmployees(prev => { const n = new Set(prev); n.add(currentEmployeeId); return n })
       }
 
       setLoading(false)
@@ -519,42 +533,62 @@ export function ContributionEntryPanel({
 
                 const liveEarning = calculatedResult?.employeeEarnings.find(e => e.employeeId === emp.id)
 
+                // In 'own' scope there's exactly one card — always expanded, no toggle
+                const isOwnScope = viewScope === 'own'
+
                 return (
                   <div key={emp.id} className={`bg-card border rounded-xl overflow-hidden transition-all ${isExpanded ? 'border-primary/20' : 'border-border'}`}>
-                    <button type="button"
-                      onClick={() => setExpandedEmployees(prev => { const n = new Set(prev); n.has(emp.id) ? n.delete(emp.id) : n.add(emp.id); return n })}
-                      className={cn('w-full flex items-center justify-between px-4 py-3.5', ROW_INTERACTIVE_CLASS)}>
-                      <div className="flex items-center gap-3 min-w-0">
+                    {/* Card header: clickable to expand/collapse in 'all' scope;
+                        static name banner in 'own' scope (already expanded) */}
+                    {isOwnScope ? (
+                      <div className="flex items-center gap-3 px-4 py-3 border-b border-border/50">
                         <div className="w-9 h-9 rounded-full gradient-bg flex items-center justify-center text-white text-sm font-bold shrink-0">
                           {emp.cqid?.replace('CQID', '') || '?'}
                         </div>
-                        <div className="text-left min-w-0">
+                        <div>
                           <p className="font-semibold text-sm">{dn(emp)}</p>
                           <p className="text-xs text-muted-foreground">{emp.cqid}</p>
                         </div>
-                        {groupSummary.length > 0 && (
-                          <div className="flex gap-1.5 ml-1 flex-wrap">
-                            {groupSummary.map(g => (
-                              <span key={g.name} className="text-xs bg-primary/15 text-primary px-2 py-0.5 rounded-full font-medium whitespace-nowrap">
-                                {g.name.replace(' Group', '')}: {g.masterVal > 0 ? `${g.masterVal}${g.isPct ? '%' : ''}` : '—'}
-                                {g.subTotal > 0 && <span className="opacity-70"> +{g.subTotal}</span>}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0 ml-2">
                         {canSeeFinancials && liveEarning && (
-                          <span className="text-xs font-bold text-green-400">₹{liveEarning.earnings.toFixed(0)}</span>
+                          <span className="text-xs font-bold text-green-400 ml-auto">₹{liveEarning.earnings.toFixed(0)}</span>
                         )}
-                        {!groupSummary.length && <span className="text-xs text-muted-foreground/50">expand</span>}
-                        {isExpanded
-                          ? <ChevronLeft className="w-4 h-4 text-muted-foreground rotate-90" />
-                          : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
                       </div>
-                    </button>
+                    ) : (
+                      <button type="button"
+                        onClick={() => setExpandedEmployees(prev => { const n = new Set(prev); n.has(emp.id) ? n.delete(emp.id) : n.add(emp.id); return n })}
+                        className={cn('w-full flex items-center justify-between px-4 py-3.5', ROW_INTERACTIVE_CLASS)}>
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-9 h-9 rounded-full gradient-bg flex items-center justify-center text-white text-sm font-bold shrink-0">
+                            {emp.cqid?.replace('CQID', '') || '?'}
+                          </div>
+                          <div className="text-left min-w-0">
+                            <p className="font-semibold text-sm">{dn(emp)}</p>
+                            <p className="text-xs text-muted-foreground">{emp.cqid}</p>
+                          </div>
+                          {groupSummary.length > 0 && (
+                            <div className="flex gap-1.5 ml-1 flex-wrap">
+                              {groupSummary.map(g => (
+                                <span key={g.name} className="text-xs bg-primary/15 text-primary px-2 py-0.5 rounded-full font-medium whitespace-nowrap">
+                                  {g.name.replace(' Group', '')}: {g.masterVal > 0 ? `${g.masterVal}${g.isPct ? '%' : ''}` : '—'}
+                                  {g.subTotal > 0 && <span className="opacity-70"> +{g.subTotal}</span>}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0 ml-2">
+                          {canSeeFinancials && liveEarning && (
+                            <span className="text-xs font-bold text-green-400">₹{liveEarning.earnings.toFixed(0)}</span>
+                          )}
+                          {!groupSummary.length && <span className="text-xs text-muted-foreground/50">expand</span>}
+                          {isExpanded
+                            ? <ChevronLeft className="w-4 h-4 text-muted-foreground rotate-90" />
+                            : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
+                        </div>
+                      </button>
+                    )}
 
-                    {isExpanded && (
+                    {(isExpanded || isOwnScope) && (
                       <div className="border-t border-border p-4 space-y-2">
                         {groupedParams.length === 0 && (
                           <p className="text-xs text-muted-foreground text-center py-4">
