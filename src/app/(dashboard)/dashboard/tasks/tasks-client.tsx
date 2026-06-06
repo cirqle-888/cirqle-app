@@ -131,11 +131,15 @@ interface Props {
   visibilitySettings?: VisibilitySettings
   /**
    * Per-field financial visibility from the server. `pricing` = user holds
-   * `tasks.view_pricing`. When false, billing_amount/billing_amount_inr/
-   * currency/loss_amount fields are absent from `initialTasks` (stripped
-   * server-side) — this flag tells the client to suppress the column.
+   * `tasks.view_pricing`. Contribution flags gate the Contributions tab in
+   * the task edit modal.
    */
-  permissionFlags?: { pricing: boolean }
+  permissionFlags?: {
+    pricing: boolean
+    contribView?: boolean
+    contribEdit?: boolean
+    contribEarnings?: boolean
+  }
 }
 
 // 'invoiced' is system-managed (set automatically when invoice is sent) — excluded from manual dropdown
@@ -508,6 +512,8 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
 
   // Edit / delete state
   const [editTask, setEditTask] = useState<Task | null>(null)
+  // When set to a task id, the edit modal opens on the Contributions tab
+  const [openOnContribTab, setOpenOnContribTab] = useState<string | null>(null)
 
   // Cmd+S / Ctrl+S: submit the currently open form
   const addFormRef  = useRef<HTMLFormElement>(null)
@@ -2368,14 +2374,25 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                           <Building2 className="w-3.5 h-3.5" />
                         </button>
                       )}
-                      <a
-                        href={`/dashboard/contributions?highlight=${task.id}`}
-                        title="View contribution"
-                        onClick={e => e.stopPropagation()}
-                        className="p-1.5 rounded-md text-muted-foreground hover:text-green-400 hover:bg-green-500/10 transition-colors"
-                      >
-                        <BarChart2 className="w-3.5 h-3.5" />
-                      </a>
+                      {permissionFlags?.contribView ? (
+                        <button
+                          type="button"
+                          title="View contributions"
+                          onClick={e => { e.stopPropagation(); setEditTask(task); setOpenOnContribTab(task.id) }}
+                          className="p-1.5 rounded-md text-muted-foreground hover:text-green-400 hover:bg-green-500/10 transition-colors"
+                        >
+                          <BarChart2 className="w-3.5 h-3.5" />
+                        </button>
+                      ) : (
+                        <a
+                          href={`/dashboard/contributions?highlight=${task.id}`}
+                          title="View contribution"
+                          onClick={e => e.stopPropagation()}
+                          className="p-1.5 rounded-md text-muted-foreground hover:text-green-400 hover:bg-green-500/10 transition-colors"
+                        >
+                          <BarChart2 className="w-3.5 h-3.5" />
+                        </a>
+                      )}
                       <button onClick={e => { e.stopPropagation(); setDeleteConfirm(task.id) }} title="Delete task"
                         className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors">
                         <Trash2 className="w-3.5 h-3.5" />
@@ -2493,13 +2510,23 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                         <Building2 className="w-3.5 h-3.5" />
                       </button>
                     )}
-                    <a
-                      href={`/dashboard/contributions?highlight=${task.id}`}
-                      title="View contribution"
-                      onClick={e => e.stopPropagation()}
-                      className="p-1.5 rounded-md text-muted-foreground hover:text-green-400 hover:bg-green-500/10 transition-colors">
-                      <BarChart2 className="w-3.5 h-3.5" />
-                    </a>
+                    {permissionFlags?.contribView ? (
+                      <button
+                        type="button"
+                        title="View contributions"
+                        onClick={e => { e.stopPropagation(); setEditTask(task); setOpenOnContribTab(task.id) }}
+                        className="p-1.5 rounded-md text-muted-foreground hover:text-green-400 hover:bg-green-500/10 transition-colors">
+                        <BarChart2 className="w-3.5 h-3.5" />
+                      </button>
+                    ) : (
+                      <a
+                        href={`/dashboard/contributions?highlight=${task.id}`}
+                        title="View contribution"
+                        onClick={e => e.stopPropagation()}
+                        className="p-1.5 rounded-md text-muted-foreground hover:text-green-400 hover:bg-green-500/10 transition-colors">
+                        <BarChart2 className="w-3.5 h-3.5" />
+                      </a>
+                    )}
                     {can('tasks.create') && (
                       <button
                         onClick={e => { e.stopPropagation(); duplicateTask(task) }}
@@ -3710,13 +3737,21 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
           services={services}
           clientPricings={clientPricings}
           showFinancials={showBilling}
+          canViewContributions={permissionFlags?.contribView}
+          canEditContributions={permissionFlags?.contribEdit}
+          showEarnings={permissionFlags?.contribEarnings}
+          initialTab={openOnContribTab === editTask.id ? 'contributions' : 'details'}
+          employees={employees}
+          groups={groups}
+          parameters={parameters}
+          groupServices={groupServices}
           onSaved={(data) => setTasks(prev => prev.map(t => t.id === data.id ? data : t))}
           onDeleted={(id) => {
             const t = tasks.find(t => t.id === id)
             if (t) setTrash(prev => [{ ...t, deleted_at: new Date().toISOString() }, ...prev])
             setTasks(prev => prev.filter(t => t.id !== id))
           }}
-          onClose={() => setEditTask(null)}
+          onClose={() => { setEditTask(null); setOpenOnContribTab(null) }}
         />
       )}
 

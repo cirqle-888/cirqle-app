@@ -1,6 +1,7 @@
 import { createAdminClient, fetchAll, stablePaginationQuery, safeQuery, columnExists } from '@/lib/supabase/server'
 import { loadCurrentUser } from '@/lib/permissions/check'
-import { financialVisibility, stripTaskListPricing } from '@/lib/permissions/strip'
+import { financialVisibility, stripTaskListPricing, userCanSee } from '@/lib/permissions/strip'
+import { PERMS } from '@/lib/permissions/keys'
 import TasksClient from './tasks-client'
 
 export const dynamic = 'force-dynamic'
@@ -95,6 +96,14 @@ export default async function TasksPage() {
   const isEmployee = !isAdmin
   const vis = financialVisibility(me)
 
+  const canAccessContribs = isAdmin
+    || userCanSee(me, PERMS.CONTRIBUTIONS_VIEW_ALL)
+    || userCanSee(me, PERMS.CONTRIBUTIONS_EDIT)
+  const canViewContribs = isAdmin
+    || userCanSee(me, PERMS.CONTRIBUTIONS_VIEW_OWN)
+    || userCanSee(me, PERMS.CONTRIBUTIONS_VIEW_ALL)
+  const canEditContribs = userCanSee(me, PERMS.CONTRIBUTIONS_EDIT)
+
   // Process-level cached probe (HAR showed this 400'd on every load).
   // Now: one round-trip per server lifetime instead of per page nav.
   // (Whole try-and-fallback dance exists because legacy installs may pre-date
@@ -142,18 +151,18 @@ export default async function TasksPage() {
       : Promise.resolve({ data: [] as any[], error: null }),
     // Full active employee roster is needed by both admins and employees so
     // task cards can show assignee names and the filter dropdown lists peers.
-    supabase.from('employees').select('id, cqid, name, is_active').eq('is_active', true).order('cqid'),
+    supabase.from('employees').select('id, cqid, name, is_active, performance_rating').eq('is_active', true).order('cqid'),
     // Global task_assignments so employees can see who is on each task and
     // filter by any teammate. Just (task_id, employee_id) — no extra data.
     // safeQuery short-circuits the round-trip once the table is known missing.
     safeQuery('task_assignments', supabase.from('task_assignments').select('task_id, employee_id')),
-    isAdmin
+    canAccessContribs
       ? supabase.from('contribution_groups').select('*').order('display_order')
       : Promise.resolve({ data: [] as any[], error: null }),
-    isAdmin
+    canAccessContribs
       ? supabase.from('parameters').select('*').order('display_order')
       : Promise.resolve({ data: [] as any[], error: null }),
-    isAdmin
+    canAccessContribs
       ? supabase.from('group_services').select('group_id, service_id')
       : Promise.resolve({ data: [] as any[], error: null }),
     isAdmin
@@ -220,7 +229,12 @@ export default async function TasksPage() {
         contributions:  (visibilityContribRes.data?.value as string) || 'all',
         employee_names: (visibilityNamesRes.data?.value as string) || 'all',
       }}
-      permissionFlags={{ pricing: vis.tasksPricing }}
+      permissionFlags={{
+        pricing: vis.tasksPricing,
+        contribView: canViewContribs,
+        contribEdit: canEditContribs,
+        contribEarnings: vis.contributionEarnings,
+      }}
     />
   )
 }

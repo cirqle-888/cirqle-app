@@ -1,12 +1,18 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { X, Trash2 } from 'lucide-react'
+import dynamic from 'next/dynamic'
+import { X, Trash2, BarChart2 } from 'lucide-react'
 import { serverSaveTask, serverDeleteTask } from '@/app/(dashboard)/dashboard/tasks/actions'
 import { ModalOverlay } from './modal-overlay'
 import AppSelect from './app-select'
 import Combobox from './combobox'
 import type { Currency } from '@/types'
+
+const ContributionEntryPanel = dynamic(
+  () => import('./contribution-entry-panel').then(m => m.ContributionEntryPanel),
+  { ssr: false },
+)
 
 interface TaskEditModalProps {
   task: any
@@ -14,6 +20,19 @@ interface TaskEditModalProps {
   services: { id: string; name: string; pricing_type?: string; default_price?: number; default_currency?: string }[]
   clientPricings?: { client_id: string; service_id: string; price: number; currency: string; commission_percentage?: number }[]
   showFinancials?: boolean
+  /** Whether to show the Contributions tab at all */
+  canViewContributions?: boolean
+  /** Whether the user can enter/save contribution scores */
+  canEditContributions?: boolean
+  /** Whether the user can see ₹ earnings in contributions */
+  showEarnings?: boolean
+  /** Which tab to open initially */
+  initialTab?: 'details' | 'contributions'
+  /** Reference data needed by the Contributions tab */
+  employees?: { id: string; cqid: string; name: string | null; performance_rating?: number }[]
+  groups?: { id: string; name: string; weight: number }[]
+  parameters?: { id: string; name: string; group_id: string; weight: number; is_master?: boolean; input_type?: 'percentage' | 'count' }[]
+  groupServices?: { group_id: string; service_id: string }[]
   onSaved: (updatedTask: any) => void
   onDeleted: (taskId: string) => void
   onClose: () => void
@@ -31,8 +50,16 @@ const STATUS_LABELS: Record<string, string> = {
 const inputCls = 'w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50'
 
 export function TaskEditModal({
-  task, clients, services, clientPricings = [], showFinancials = true, onSaved, onDeleted, onClose,
+  task, clients, services, clientPricings = [], showFinancials = true,
+  canViewContributions = false, canEditContributions = false, showEarnings = false,
+  initialTab = 'details',
+  employees = [], groups = [], parameters = [], groupServices = [],
+  onSaved, onDeleted, onClose,
 }: TaskEditModalProps) {
+  const [activeTab, setActiveTab] = useState<'details' | 'contributions'>(
+    canViewContributions && initialTab === 'contributions' ? 'contributions' : 'details'
+  )
+
   const [form, setForm] = useState({
     task_number: String(task.task_number ?? ''),
     title: task.title ?? '',
@@ -157,6 +184,32 @@ export function TaskEditModal({
             <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
           </div>
 
+          {/* Tab bar — only shown when the Contributions tab is available */}
+          {canViewContributions && (
+            <div className="flex shrink-0 border-b border-border px-6 bg-card">
+              {(['details', 'contributions'] as const).map(tab => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setActiveTab(tab)}
+                  className={`py-2.5 px-1 mr-5 text-sm font-medium border-b-2 transition-colors capitalize ${
+                    activeTab === tab
+                      ? 'border-primary text-foreground'
+                      : 'border-transparent text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {tab === 'contributions' ? (
+                    <span className="flex items-center gap-1.5">
+                      <BarChart2 className="w-3.5 h-3.5" /> Contributions
+                    </span>
+                  ) : tab}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* ── Details tab ── */}
+          {activeTab === 'details' && (
           <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
             {/* Scrollable body — grows to fill space between header and footer */}
             <div className="overflow-y-auto p-6 space-y-4 flex-1">
@@ -339,6 +392,37 @@ export function TaskEditModal({
               </button>
             </div>
           </form>
+          )}
+
+          {/* ── Contributions tab ── */}
+          {activeTab === 'contributions' && canViewContributions && (
+            <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <div className="overflow-y-auto flex-1">
+                <ContributionEntryPanel
+                  task={task}
+                  employees={employees}
+                  groups={groups}
+                  parameters={parameters}
+                  groupServices={groupServices}
+                  canEdit={canEditContributions}
+                  showEarnings={showEarnings}
+                  onSaved={() => onSaved(task)}
+                />
+              </div>
+              <div
+                className="flex gap-3 px-6 pt-3 border-t border-border bg-card sm:rounded-b-2xl shrink-0"
+                style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 12px)' }}
+              >
+                <button type="button" onClick={onClose} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80">Close</button>
+                <a
+                  href={`/dashboard/contributions?highlight=${task.id}`}
+                  className="flex-1 flex items-center justify-center gap-1.5 text-sm font-medium py-2.5 rounded-lg border border-border text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <BarChart2 className="w-3.5 h-3.5" /> Full report
+                </a>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </ModalOverlay>
