@@ -18,6 +18,7 @@ import {
   FileText, ArrowRight, TrendingUp, TrendingDown, RefreshCw,
 } from 'lucide-react'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { useToast, ToastContainer } from '@/components/ui/toast'
 
 // Heavy bulk-generate modal (773 lines) — only mounts when an admin clicks
 // the action. Splitting it off the initial payroll chunk reduces the entry
@@ -141,6 +142,7 @@ export default function PayrollClient({
   const now    = new Date()
   const router = useRouter()
   const { dn, isUnlocked } = usePrivacy()
+  const { toasts, dismiss, success: toastSuccess, error: toastError } = useToast()
 
   // ── UI state ──────────────────────────────────────────────────────────────
   const [tab, setTab] = useState('Overview')
@@ -704,10 +706,10 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                       })
                       setRefreshing(false)
                       if (result.ok && result.data?.updated) {
-                        toast.success(`Recalculated payroll for ${MONTHS[viewMonth - 1]}`, `${result.data.updated} record${result.data.updated !== 1 ? 's' : ''} updated`)
+                        toastSuccess(`Recalculated payroll for ${MONTHS[viewMonth - 1]}`, `${result.data.updated} record${result.data.updated !== 1 ? 's' : ''} updated`)
                         router.refresh()
                       } else if (!result.ok) {
-                        toast.error('Payroll refresh failed', result.error)
+                        toastError('Payroll refresh failed', result.error)
                       }
                     }}
                     disabled={refreshing}
@@ -1904,6 +1906,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
           }}
         />
       )}
+      <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </div>
   )
 }

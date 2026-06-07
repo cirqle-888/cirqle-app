@@ -219,7 +219,7 @@ export async function recalculatePayrollForMonth(
       updates.push({
         payrollId: record.id,
         employeeId: record.employee_id,
-        cqid: record.employee?.cqid,
+        cqid: (record.employee as any)?.cqid,
         oldCommission,
         newCommission,
         oldNetSalary,

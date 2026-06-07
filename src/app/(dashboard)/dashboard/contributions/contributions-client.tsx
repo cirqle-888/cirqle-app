@@ -414,7 +414,7 @@ export default function ContributionsClient({
       // Auto-recalculate payroll for affected months when contributions change
       if (savedCount > 0) {
         const affectedMonths = new Set<string>()
-        tasks.forEach((task: any) => {
+        tasksNeedingScores.forEach((task: any) => {
           if (task.task_date) {
             const taskDate = new Date(task.task_date)
             const monthKey = `${taskDate.getFullYear()}-${taskDate.getMonth() + 1}`
