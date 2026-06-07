@@ -533,6 +533,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
   }, [showForm, editTask])
   const [editForm, setEditForm] = useState({ ...EMPTY_FORM, id: '' })
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null) // task id
+  const [deleteConfirmHasScores, setDeleteConfirmHasScores] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [editSaving, setEditSaving] = useState(false)
 
@@ -869,6 +870,16 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
     setEditSaving(false)
   }
 
+  async function initiateDelete(id: string) {
+    // Check if this task has any contribution scores — if so we show a stronger warning.
+    const { count } = await supabase
+      .from('contribution_scores')
+      .select('*', { count: 'exact', head: true })
+      .eq('task_id', id)
+    setDeleteConfirmHasScores((count ?? 0) > 0)
+    setDeleteConfirm(id)
+  }
+
   async function handleDelete(id: string) {
     setDeleting(true)
     const task = tasks.find(t => t.id === id)
@@ -878,10 +889,12 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
       if (task) setTrash(prev => [{ ...task, deleted_at: deletedAt }, ...prev])
       setTasks(prev => prev.filter(t => t.id !== id))
       setDeleteConfirm(null)
+      setDeleteConfirmHasScores(false)
       setEditTask(null)
     } else {
       toastError(res.error ?? 'Could not delete task. Please try again.')
       setDeleteConfirm(null)
+      setDeleteConfirmHasScores(false)
     }
     setDeleting(false)
   }
@@ -1743,7 +1756,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                               className="text-xs px-3 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 font-medium transition-colors">
                               Restore
                             </button>
-                            <button onClick={() => setDeleteConfirm(task.id)}
+                            <button onClick={() => initiateDelete(task.id)}
                               className="text-xs px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 font-medium transition-colors">
                               Delete Forever
                             </button>
@@ -2395,7 +2408,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                           <BarChart2 className="w-3.5 h-3.5" />
                         </a>
                       )}
-                      <button onClick={e => { e.stopPropagation(); setDeleteConfirm(task.id) }} title="Delete task"
+                      <button onClick={e => { e.stopPropagation(); initiateDelete(task.id) }} title="Delete task"
                         className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -2539,7 +2552,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                       </button>
                     )}
                     <button
-                      onClick={e => { e.stopPropagation(); setDeleteConfirm(task.id) }}
+                      onClick={e => { e.stopPropagation(); initiateDelete(task.id) }}
                       title="Delete task"
                       className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors">
                       <Trash2 className="w-3.5 h-3.5" />
@@ -3273,8 +3286,19 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                 )}
               </div>
             </div>
+            {deleteConfirmHasScores && (
+              <div className="flex items-start gap-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3.5 py-3">
+                <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-semibold text-amber-300">This task has contribution scores</p>
+                  <p className="text-xs text-amber-400/80 mt-0.5">
+                    Employee earnings and payroll linked to this task will be recalculated and may decrease.
+                  </p>
+                </div>
+              </div>
+            )}
             <div className="flex gap-3">
-              <button onClick={() => setDeleteConfirm(null)} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80 transition-colors">
+              <button onClick={() => { setDeleteConfirm(null); setDeleteConfirmHasScores(false) }} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80 transition-colors">
                 Cancel
               </button>
               <button
