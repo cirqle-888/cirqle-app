@@ -131,6 +131,17 @@ export interface Contribution {
   employee?: Employee
 }
 
+export interface EmployeePerformanceHistory {
+  id: string
+  employee_id: string
+  performance_rating: number
+  effective_from: string
+  reason?: string
+  created_at: string
+  updated_at: string
+  employee?: Employee
+}
+
 export interface ContributionScore {
   id: string
   task_id: string
@@ -138,6 +149,10 @@ export interface ContributionScore {
   score_percentage: number
   earnings: number
   calculated_at: string
+  previous_earnings?: number
+  previous_performance_rating?: number
+  recalculated_at?: string
+  recalculated_by?: string
   employee?: Employee
 }
 

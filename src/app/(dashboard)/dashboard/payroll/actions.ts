@@ -97,6 +97,200 @@ export async function refreshPayrollRecord(
   return { ok: true, data: { row: data } }
 }
 
+// ─── Auto-Recalculate Payroll for Month ──────────────────────────────────────
+
+export interface RecalculateMonthInput {
+  month: number
+  year: number
+  source?: 'task_edit' | 'contribution_edit' | 'csv_contribution_import' | 'csv_task_import' | 'manual_refresh'
+}
+
+export async function recalculatePayrollForMonth(
+  input: RecalculateMonthInput,
+): Promise<ActionResult<{ updated: number; updates: any[] }>> {
+  const guard = await requirePermission(PERMS.PAYROLL_EDIT)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+
+  // Month window: [monthStart, nextMonthStart)
+  const monthStr = `${input.year}-${String(input.month).padStart(2, '0')}`
+  const nextMonth = input.month === 12 ? 1 : input.month + 1
+  const nextYear = input.month === 12 ? input.year + 1 : input.year
+  const nextMonthStr = `${nextYear}-${String(nextMonth).padStart(2, '0')}`
+  const monthStart = `${monthStr}-01`
+  const nextMonthStart = `${nextMonthStr}-01`
+
+  // Commission per employee for this month — computed the SAME way the payroll
+  // client does it (group scores by the linked task's month). NOTE: a PostgREST
+  // filter on an embedded resource (.gte('task.task_date', …)) does NOT filter
+  // the parent contribution_scores rows, so we resolve the month's task ids
+  // first and filter scores by task_id. Scores with no task fall back to their
+  // calculated_at month (mirrors the client's monthCommissions logic).
+  const commissionByEmployee: Record<string, number> = {}
+
+  // 1) Task-linked scores: find this month's task ids, then sum their scores.
+  const { data: monthTasks, error: tasksErr } = await admin
+    .from('tasks')
+    .select('id')
+    .gte('task_date', monthStart)
+    .lt('task_date', nextMonthStart)
+    .is('deleted_at', null)
+  if (tasksErr) return { ok: false, error: tasksErr.message }
+
+  const taskIds = (monthTasks ?? []).map((t: any) => t.id)
+  if (taskIds.length > 0) {
+    // Chunk the id list to stay well under URL-length limits.
+    const CHUNK = 200
+    for (let i = 0; i < taskIds.length; i += CHUNK) {
+      const chunk = taskIds.slice(i, i + CHUNK)
+      const { data: scores, error: scoresErr } = await admin
+        .from('contribution_scores')
+        .select('employee_id, earnings_inr')
+        .in('task_id', chunk)
+      if (scoresErr) return { ok: false, error: scoresErr.message }
+      scores?.forEach((s: any) => {
+        commissionByEmployee[s.employee_id] =
+          (commissionByEmployee[s.employee_id] || 0) + (s.earnings_inr || 0)
+      })
+    }
+  }
+
+  // 2) Orphan scores (no task_id, e.g. earnings-only CSV imports): bucket them
+  //    into the month by calculated_at, matching the client's fallback.
+  const { data: orphanScores, error: orphanErr } = await admin
+    .from('contribution_scores')
+    .select('employee_id, earnings_inr, calculated_at')
+    .is('task_id', null)
+    .gte('calculated_at', monthStart)
+    .lt('calculated_at', nextMonthStart)
+  if (orphanErr) return { ok: false, error: orphanErr.message }
+  orphanScores?.forEach((s: any) => {
+    commissionByEmployee[s.employee_id] =
+      (commissionByEmployee[s.employee_id] || 0) + (s.earnings_inr || 0)
+  })
+
+  // Get all pending payroll for this month with employee info
+  const { data: payroll, error: payrollErr } = await admin
+    .from('payroll')
+    .select('id, employee_id, base_salary, commission_earned, advances_deducted, other_deductions, employee:employees(id, cqid)')
+    .eq('month', input.month)
+    .eq('year', input.year)
+    .eq('status', 'pending')
+
+  if (payrollErr) return { ok: false, error: payrollErr.message }
+  if (!payroll || payroll.length === 0) {
+    return { ok: true, data: { updated: 0, updates: [] } }
+  }
+
+  // Track all updates for logging
+  const updates: any[] = []
+
+  // Update each pending payroll record with recalculated commission
+  let updated = 0
+  for (const record of payroll) {
+    // Round commission to the rupee — IDENTICAL to the payroll client's
+    // monthCommissions (Math.round) so auto-sync and the manual per-record
+    // refresh produce the same stored value (no flip-flopping).
+    const newCommission = Math.round(commissionByEmployee[record.employee_id] || 0)
+    const oldCommission = record.commission_earned || 0
+
+    // Skip if commission is unchanged (≥ ₹1 difference required to write).
+    if (Math.round(oldCommission) === newCommission) continue
+
+    // Net salary clamped to ≥ 0 — matches the payroll client's handleRefreshPayroll.
+    const baseMinusDeductions =
+      (record.base_salary || 0) -
+      (record.advances_deducted || 0) -
+      (record.other_deductions || 0)
+    const oldNetSalary = Math.max(0, baseMinusDeductions + oldCommission)
+    const newNetSalary = Math.max(0, baseMinusDeductions + newCommission)
+
+    const { error: updateErr } = await admin
+      .from('payroll')
+      .update({
+        commission_earned: newCommission,
+        net_salary: newNetSalary,
+      })
+      .eq('id', record.id)
+
+    if (!updateErr) {
+      updated++
+      updates.push({
+        payrollId: record.id,
+        employeeId: record.employee_id,
+        cqid: record.employee?.cqid,
+        oldCommission,
+        newCommission,
+        oldNetSalary,
+        newNetSalary,
+        commissionDiff: newCommission - oldCommission,
+        netSalaryDiff: newNetSalary - oldNetSalary,
+      })
+    }
+  }
+
+  // Log activity with detailed changes
+  if (updated > 0) {
+    void logActivity({
+      actorId:    guard.employeeId,
+      entityType: 'payroll',
+      action:     'auto_recalculated',
+      detail: {
+        month: input.month,
+        year: input.year,
+        recordsUpdated: updated,
+        source: input.source || 'unknown',
+        changes: updates,
+      },
+    })
+  }
+
+  revalidatePath(REVALIDATE)
+  return { ok: true, data: { updated, updates } }
+}
+
+// ─── Batch Recalculate Payroll for Multiple Months ────────────────────────────
+
+export interface RecalculateMonthsInput {
+  months: { month: number; year: number }[]
+  source?: RecalculateMonthInput['source']
+}
+
+export async function recalculatePayrollForMonths(
+  input: RecalculateMonthsInput,
+): Promise<ActionResult<{ totalUpdated: number; monthResults: any[] }>> {
+  const guard = await requirePermission(PERMS.PAYROLL_EDIT)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const monthResults: any[] = []
+  let totalUpdated = 0
+
+  // Deduplicate months — so importing many tasks from the same month only
+  // recalculates that month's payroll ONCE (requirement #5).
+  const uniqueMonths = Array.from(
+    new Map(input.months.map(m => [`${m.year}-${m.month}`, m])).values()
+  )
+
+  for (const monthInput of uniqueMonths) {
+    const result = await recalculatePayrollForMonth({
+      ...monthInput,
+      source: input.source,
+    })
+    if (result.ok && result.data) {
+      totalUpdated += result.data.updated
+      monthResults.push({
+        month: monthInput.month,
+        year: monthInput.year,
+        updated: result.data.updated,
+        updates: result.data.updates,
+      })
+    }
+  }
+
+  return { ok: true, data: { totalUpdated, monthResults } }
+}
+
 // ─── Bulk Generate ────────────────────────────────────────────────────────────
 
 export interface PayrollInsertRow {

@@ -36,6 +36,7 @@ import {
   serverCancelTask,
   serverFillTaskBilling,
   logTaskCreated,
+  serverInlineTaskUpdate,
 } from './actions'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { formatTaskDate, fullTaskDate } from '@/lib/utils/format-date'
@@ -1532,7 +1533,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
           {inlineEditMode ? (
             <select value={task.client_id} onChange={async e => {
               const newId = e.target.value
-              await supabase.from('tasks').update({ client_id: newId }).eq('id', task.id)
+              await serverInlineTaskUpdate(task.id, { client_id: newId })
               const c = clients.find(x => x.id === newId)
               setTasks(prev => prev.map(t => t.id === task.id ? { ...t, client_id: newId, client: c ? { id: c.id, name: c.name, code: c.code } : undefined } : t))
             }} className="bg-secondary border border-border rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-500/50 w-full">
@@ -1546,7 +1547,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
           {inlineEditMode ? (
             <select value={task.service_id} onChange={async e => {
               const newId = e.target.value
-              await supabase.from('tasks').update({ service_id: newId }).eq('id', task.id)
+              await serverInlineTaskUpdate(task.id, { service_id: newId })
               const s = sortedServices.find(x => x.id === newId)
               setTasks(prev => prev.map(t => t.id === task.id ? { ...t, service_id: newId, service: s ? { id: s.id, name: s.name } : undefined } : t))
             }} className="bg-secondary border border-border rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-500/50 w-full">
@@ -1561,7 +1562,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
             <input type="date" defaultValue={task.task_date} onBlur={async e => {
               const val = e.target.value
               if (val && val !== task.task_date) {
-                await supabase.from('tasks').update({ task_date: val }).eq('id', task.id)
+                await serverInlineTaskUpdate(task.id, { task_date: val })
                 setTasks(prev => prev.map(t => t.id === task.id ? { ...t, task_date: val } : t))
               }
             }} className="bg-secondary border border-border rounded px-2 py-1 text-xs focus:outline-none focus:border-violet-500/50" />
@@ -1574,7 +1575,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
             <input type="number" defaultValue={task.billing_amount ?? 0} onBlur={async e => {
               const val = parseFloat(e.target.value) || 0
               if (val !== task.billing_amount) {
-                await supabase.from('tasks').update({ billing_amount: val }).eq('id', task.id)
+                await serverInlineTaskUpdate(task.id, { billing_amount: val }, task.currency || undefined)
                 setTasks(prev => prev.map(t => t.id === task.id ? { ...t, billing_amount: val } : t))
               }
             }} className="w-24 bg-secondary border border-border rounded px-2 py-1 text-sm text-right focus:outline-none focus:border-violet-500/50" />
@@ -2267,7 +2268,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                         onBlur={async e => {
                           const val = e.target.value.trim()
                           if (val && val !== task.title) {
-                            await supabase.from('tasks').update({ title: val }).eq('id', task.id)
+                            await serverInlineTaskUpdate(task.id, { title: val })
                             setTasks(prev => prev.map(t => t.id === task.id ? { ...t, title: val } : t))
                           }
                         }}

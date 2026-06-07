@@ -7,7 +7,7 @@ import Header from '@/components/layout/header'
 import { createClient, safeFetchAll } from '@/lib/supabase/client'
 import {
   bulkGeneratePayroll, createPayrollRecord, markPayrollPaid, markPayrollUnpaid,
-  toggleRevealSalary, createSalaryAdvance, createCreditEntry, refreshPayrollRecord
+  toggleRevealSalary, createSalaryAdvance, createCreditEntry, refreshPayrollRecord, recalculatePayrollForMonth
 } from './actions'
 import { formatCompact } from '@/lib/calculations/currency'
 import { usePrivacy } from "@/contexts/privacy-context"
@@ -690,9 +690,31 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                     <span className={`w-1.5 h-1.5 rounded-full ${refreshing ? 'bg-amber-400 animate-pulse' : 'bg-green-400'}`} />
                     {refreshing ? 'Updating…' : `Live · ${lastRefresh.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`}
                   </span>
-                  <button onClick={refreshScores} disabled={refreshing} title="Refresh commission data"
+                  <button onClick={refreshScores} disabled={refreshing} title="Refresh contribution scores"
                     className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40">
                     <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setRefreshing(true)
+                      const result = await recalculatePayrollForMonth({
+                        month: viewMonth,
+                        year: viewYear,
+                        source: 'manual_refresh'
+                      })
+                      setRefreshing(false)
+                      if (result.ok && result.data?.updated) {
+                        toast.success(`Recalculated payroll for ${MONTHS[viewMonth - 1]}`, `${result.data.updated} record${result.data.updated !== 1 ? 's' : ''} updated`)
+                        router.refresh()
+                      } else if (!result.ok) {
+                        toast.error('Payroll refresh failed', result.error)
+                      }
+                    }}
+                    disabled={refreshing}
+                    title="Recalculate pending payroll for this month"
+                    className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
+                  >
+                    <Zap className={`w-3.5 h-3.5 ${refreshing ? 'animate-pulse' : ''}`} />
                   </button>
                 </div>
               </div>

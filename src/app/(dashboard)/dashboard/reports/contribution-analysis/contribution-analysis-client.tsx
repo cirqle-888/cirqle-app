@@ -496,6 +496,14 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   const filtered = useMemo(() => applyFilters(rows, filters), [rows, filters])
   const sorted = useMemo(() => sortRows(filtered, sortKey, sortDir), [filtered, sortKey, sortDir])
   const summary = useMemo(() => computeSummary(filtered), [filtered])
+  // Per-employee earnings totals over the whole filtered set (for the totals row).
+  const empEarnTotals = useMemo(() => {
+    const out: Record<string, number> = {}
+    for (const r of filtered) {
+      for (const id in r.emp) out[id] = (out[id] || 0) + r.emp[id].earn
+    }
+    return out
+  }, [filtered])
   // Grouped view: partition the full sorted set (pagination is bypassed when grouping).
   const grouped = useMemo(
     () => (groupKey === 'none' ? [] : groupRows(sorted, groupKey)),
@@ -663,6 +671,30 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
         return s.actualTasks && s.totalActualReceived ? pct(s.totalActualProfit / s.totalActualReceived * 100) : '—'
       default:
         if (c.empId && c.key.endsWith(':earn')) return inr(g.empEarn[c.empId] ?? 0, dp)
+        return ''
+    }
+  }
+
+  // Grand total for a column over the entire filtered set (totals row under the header).
+  const grandTotalCell = (c: Col): React.ReactNode => {
+    const s = summary
+    switch (c.key) {
+      case 'task_number': return 'Σ'
+      case 'title': return 'TOTAL'
+      case 'task_date': return `${fmt(s.totalTasks, 0)} tasks`
+      case 'billing_inr': return inr(s.totalBilling, dp)
+      case 'company_received': return inr(s.totalBilling, dp)
+      case 'commission_pool': return inr(s.totalPool, dp)
+      case 'total_earnings': return inr(s.totalEarnings, dp)
+      case 'profit': return inr(s.totalProfit, dp)
+      case 'profit_pct': return pct(s.avgProfitPct)
+      case 'actual_received': return s.actualTasks ? inr(s.totalActualReceived, dp) : '—'
+      case 'fx_gain_loss': return s.actualTasks ? inr(s.totalFxGainLoss, dp) : '—'
+      case 'actual_profit': return s.actualTasks ? inr(s.totalActualProfit, dp) : '—'
+      case 'actual_profit_pct':
+        return s.actualTasks && s.totalActualReceived ? pct(s.totalActualProfit / s.totalActualReceived * 100) : '—'
+      default:
+        if (c.empId && c.key.endsWith(':earn')) return inr(empEarnTotals[c.empId] ?? 0, dp)
         return ''
     }
   }
@@ -1030,7 +1062,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
             <div style={{ width: totalWidth, minWidth: '100%' }}>
               {/* Two-tier header: fixed columns span both rows; each employee
                   is one group header over 3 sortable sub-columns. */}
-              <div className="sticky top-0 z-20 grid bg-secondary border-b border-border" style={{ gridTemplateColumns: gridTemplate, gridTemplateRows: 'auto auto' }}>
+              <div className="sticky top-0 z-20 grid bg-secondary border-b border-border" style={{ gridTemplateColumns: gridTemplate, gridTemplateRows: 'auto auto auto' }}>
                 {/* Fixed columns — span both header rows */}
                 {columns.slice(0, fixedCount).map((c, ci) => {
                   const active = sortKey === c.key
@@ -1099,6 +1131,26 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
                         )
                       })}
                     </Fragment>
+                  )
+                })}
+                {/* Totals row — sums for the current filter, pinned under the header */}
+                {columns.map((c, ci) => {
+                  const isFrozen = frozenCols.has(c.key)
+                  const isLast = c.key === lastFrozenKey
+                  const frozenLeft = frozenLeftMap.get(c.key) ?? 0
+                  return (
+                    <div
+                      key={`tot:${c.key}`}
+                      style={{
+                        gridColumn: `${ci + 1} / ${ci + 2}`, gridRow: '3 / 4',
+                        ...(isFrozen ? { left: frozenLeft } : {}),
+                      }}
+                      className={`flex items-center px-2 py-1.5 text-[11px] font-bold whitespace-nowrap bg-secondary border-t-2 border-purple-500/40 text-purple-300 ${
+                        c.align === 'right' ? 'justify-end' : c.align === 'center' ? 'justify-center' : 'justify-start'
+                      } ${isFrozen ? 'sticky z-30 bg-secondary' : ''} ${isLast ? 'border-r-2 border-purple-500/30' : ''}`}
+                    >
+                      <span className="truncate">{grandTotalCell(c)}</span>
+                    </div>
                   )
                 })}
               </div>

@@ -30,6 +30,7 @@ export default async function ContributionAnalysisPage() {
       supabase
         .from('tasks')
         .select('id, task_number, title, task_date, status, currency, billing_amount, billing_amount_inr, client_id, service_id')
+        .is('deleted_at', null)
         .order('id', { ascending: true }),
     ),
     fetchAll(

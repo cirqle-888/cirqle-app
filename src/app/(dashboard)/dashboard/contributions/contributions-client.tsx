@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
+import { recalculatePayrollForMonth } from '@/app/(dashboard)/dashboard/payroll/actions'
 import { calculateCommission } from '@/lib/calculations/commission'
 import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
 import { taskCode, taskCodeMatches, nextTaskNumber } from '@/lib/utils/task-code'
@@ -408,6 +409,25 @@ export default function ContributionsClient({
             savedCount++
           }
         } catch { /* skip tasks that fail calculation */ }
+      }
+
+      // Auto-recalculate payroll for affected months when contributions change
+      if (savedCount > 0) {
+        const affectedMonths = new Set<string>()
+        tasks.forEach((task: any) => {
+          if (task.task_date) {
+            const taskDate = new Date(task.task_date)
+            const monthKey = `${taskDate.getFullYear()}-${taskDate.getMonth() + 1}`
+            affectedMonths.add(monthKey)
+          }
+        })
+        // Fire-and-forget payroll recalculations for all affected months
+        affectedMonths.forEach((monthKey: string) => {
+          const [year, month] = monthKey.split('-').map(Number)
+          recalculatePayrollForMonth({ month, year, source: 'contribution_edit' }).catch(() => {
+            // Silently ignore payroll recalc errors
+          })
+        })
       }
 
       // Refresh server data so counts & payroll reflect the new scores
@@ -884,6 +904,18 @@ export default function ContributionsClient({
     }
     if (contribInserts.length) await supabase.from('contributions').insert(contribInserts)
     if (toolInserts.length) await supabase.from('task_tools').insert(toolInserts)
+
+    // Auto-recalculate pending payroll for this month when contributions change
+    if (selectedTask.task_date) {
+      const taskDate = new Date(selectedTask.task_date)
+      const month = taskDate.getMonth() + 1
+      const year = taskDate.getFullYear()
+      // Fire-and-forget payroll recalculation
+      recalculatePayrollForMonth({ month, year, source: 'contribution_edit' }).catch(() => {
+        // Silently ignore payroll recalc errors; contribution save succeeded
+      })
+    }
+
     setSaving(false)
 
     // Auto-dismiss toast showing who was paid what

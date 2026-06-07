@@ -33,6 +33,7 @@ export default async function ContributionsPage() {
     .from('tasks')
     .select(vis.tasksPricing ? taskSelectWithPricing : taskSelectWithoutPricing)
     .in('status', ['pending', 'in_progress', 'done', 'delivered', 'invoiced', 'paid'])
+    .is('deleted_at', null)
     .gte('task_date', contribWindowFromStr)
     .order('task_date', { ascending: false })
     .order('id', { ascending: true })

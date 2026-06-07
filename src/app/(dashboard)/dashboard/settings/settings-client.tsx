@@ -26,7 +26,9 @@ import { usePrivacy, getStoredPin, setStoredPin, isForceLocked } from '@/context
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { generateInviteToken, revokeInviteToken, archiveEmployee, restoreEmployee, adminResetPassword, updateEmployeeAvatar } from './employee-actions'
 import { RecalcBillingModal } from './recalc-billing-modal'
+import { RecalcCommissionsModal } from './recalc-commissions-modal'
 import { EmployeeAvatar, AvatarPicker } from '@/components/ui/employee-avatar'
+import { PerformanceHistoryModal } from './performance-history-modal'
 
 // ── Module-level search bar (stable reference — never defined inside a component) ──
 function SearchBar({ value, onChange, placeholder = 'Search…', className = '' }: {
@@ -262,6 +264,8 @@ export default function SettingsClient(props: Props) {
   const [avatarModal, setAvatarModal] = useState<{ id: string; cqid: string; name: string | null; currentUrl: string | null } | null>(null)
   const [avatarPickerValue, setAvatarPickerValue] = useState<string | null>(null)
   const [avatarSaving, setAvatarSaving] = useState(false)
+  const [showHistoryModal, setShowHistoryModal] = useState<any | null>(null)
+  const [showRecalcCommissions, setShowRecalcCommissions] = useState(false)
 
   async function handleGenerateInvite(emp: any) {
     setInviteBusy(emp.id)
@@ -1250,10 +1254,16 @@ export default function SettingsClient(props: Props) {
             <div>
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold">Employees ({filteredEmployees.length}{empSearch ? `/${employees.length}` : ''})</h2>
-                <button onClick={() => openEmployeeForm()}
-                  className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90">
-                  <Plus className="w-4 h-4" /> Add Employee
-                </button>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setShowRecalcCommissions(true)}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-border text-sm font-medium hover:bg-secondary transition-colors text-muted-foreground">
+                    <RefreshCw className="w-4 h-4" /> Bulk Recalc
+                  </button>
+                  <button onClick={() => openEmployeeForm()}
+                    className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90">
+                    <Plus className="w-4 h-4" /> Add Employee
+                  </button>
+                </div>
               </div>
               <div className="flex items-center gap-2 mb-3">
                 <div className="flex bg-secondary border border-border rounded-lg p-0.5">
@@ -2326,9 +2336,23 @@ export default function SettingsClient(props: Props) {
                       </AppSelect>
                     </FieldRow>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 gap-3 items-end">
                     <FieldRow label="Base Salary (₹)"><input type="number" min="0" step="0.01" value={form.base_salary || ''} onChange={e => setForm(p => ({ ...p, base_salary: parseFloat(e.target.value) || 0 }))} className={inputCls} placeholder="0" /></FieldRow>
-                    <FieldRow label="Performance Rating (%)"><input type="number" min="0" max="100" step="1" value={form.performance_rating || ''} onChange={e => setForm(p => ({ ...p, performance_rating: parseFloat(e.target.value) || 0 }))} className={inputCls} placeholder="70" /></FieldRow>
+                    <FieldRow label="Performance Rating (%)">
+                      <div className="flex gap-2">
+                        <input type="number" min="0" max="100" step="1" value={form.performance_rating || ''} onChange={e => setForm(p => ({ ...p, performance_rating: parseFloat(e.target.value) || 0 }))} className={inputCls} placeholder="70" />
+                        {editingId && (
+                          <button
+                            type="button"
+                            onClick={() => setShowHistoryModal(form)}
+                            className="bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 flex items-center justify-center transition-colors flex-shrink-0"
+                            title="Performance History Register"
+                          >
+                            <CalendarDays className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </FieldRow>
                   </div>
                   <FieldRow label={<span className="flex items-center gap-1">Salary Day <InfoTip text="Day of the month salary is paid. e.g. 1 = 1st of every month, 5 = 5th of every month." /></span>}>
                     <div className="w-full relative">
@@ -3030,6 +3054,21 @@ export default function SettingsClient(props: Props) {
             </div>
           </div>
         </ModalOverlay>
+      )}
+
+      {showHistoryModal && (
+        <PerformanceHistoryModal 
+          employee={showHistoryModal} 
+          onClose={() => setShowHistoryModal(null)} 
+        />
+      )}
+
+      {showRecalcCommissions && (
+        <RecalcCommissionsModal
+          open={showRecalcCommissions}
+          onClose={() => setShowRecalcCommissions(false)}
+          employees={employees}
+        />
       )}
     </div>
   )

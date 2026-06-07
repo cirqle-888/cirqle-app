@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Download } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { recalculatePayrollForMonths } from '@/app/(dashboard)/dashboard/payroll/actions'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { buildHeader, buildExampleRow, buildColumnDefs, parseRowFromSchema, buildInsertRecord, norm as sNorm } from '@/lib/import/engine'
 import {
@@ -1494,12 +1495,24 @@ export default function ImportClient({ clients, services, employees, groups, par
       }
       case 'jobs': {
         const table = 'tasks'
+        const affectedMonths: Set<string> = new Set()
+
         if (operation === 'delete') {
           const ids = valid.map(r => r.row_id).filter(Boolean) as string[]
           await backupBeforeUpdate(table, ids)
           await batchDelete(table, ids)
           break
         }
+
+        // Collect affected months from all task records
+        valid.forEach((r: any) => {
+          if (r.task_date) {
+            const d = new Date(r.task_date)
+            const key = `${d.getFullYear()}-${d.getMonth() + 1}`
+            affectedMonths.add(key)
+          }
+        })
+
         if (operation === 'update') {
           // In update mode, respect the CSV's task_number as-is (no auto-assign)
           const recs = valid.map(r => {
@@ -1523,6 +1536,18 @@ export default function ImportClient({ clients, services, employees, groups, par
           })
           await backupBeforeUpdate('tasks', recs.map(r => r.row_id))
           await batchUpdate('tasks', recs)
+
+          // Auto-recalculate payroll for all affected months
+          if (affectedMonths.size > 0) {
+            const months = Array.from(affectedMonths).map(key => {
+              const [year, month] = key.split('-').map(Number)
+              return { month, year }
+            })
+            // Fire-and-forget
+            recalculatePayrollForMonths({ months, source: 'csv_task_import' }).catch(() => {
+              // Silently ignore payroll errors
+            })
+          }
         } else {
           // Base columns guaranteed to exist in schema
           const baseRows = valid.map(r => ({
@@ -1565,12 +1590,24 @@ export default function ImportClient({ clients, services, employees, groups, par
       }
       case 'contributions': {
         const table = 'contribution_scores'
+        const affectedMonths: Set<string> = new Set()
+
         if (operation === 'delete') {
           const ids = valid.map(r => r.row_id).filter(Boolean) as string[]
           await backupBeforeUpdate(table, ids)
           await batchDelete(table, ids)
           break
         }
+
+        // Collect affected months from all contribution records
+        valid.forEach((r: any) => {
+          if (r.task_date) {
+            const d = new Date(r.task_date)
+            const key = `${d.getFullYear()}-${d.getMonth() + 1}`
+            affectedMonths.add(key)
+          }
+        })
+
         if (operation === 'update') {
           // Simple update path: update contribution_scores directly by id
           const recs = valid.map(r => ({
@@ -1580,6 +1617,7 @@ export default function ImportClient({ clients, services, employees, groups, par
               employee_id: r.employee_id,
               score_percentage: parseFloat(r.score_percentage) || 0,
               earnings_inr: parseFloat(r.earnings) || 0,
+              is_manual_override: true,
               calculated_at: new Date().toISOString(),
             },
           }))
@@ -1592,6 +1630,7 @@ export default function ImportClient({ clients, services, employees, groups, par
             employee_id: r.employee_id,
             score_percentage: 0,
             earnings_inr: parseFloat(r.earnings) || 0,
+            is_manual_override: true,
             calculated_at: new Date().toISOString(),
           })), 'task_id,employee_id')
         } else if (contribSubMode === 'score_pct') {
@@ -1601,6 +1640,7 @@ export default function ImportClient({ clients, services, employees, groups, par
             employee_id: r.employee_id,
             score_percentage: parseFloat(r.score_percentage) || 0,
             earnings_inr: parseFloat(r.earnings) || 0,
+            is_manual_override: true,
             calculated_at: new Date().toISOString(),
           })), 'task_id,employee_id')
         } else {
@@ -1621,8 +1661,20 @@ export default function ImportClient({ clients, services, employees, groups, par
             }
           }
           if (contribRows.length) {
-            await batchInsert('contributions', contribRows)
+            await batchInsert('contributions', contribRows, 'task_id,employee_id,parameter_id')
           }
+        }
+
+        // Auto-recalculate payroll for all affected months
+        if (affectedMonths.size > 0) {
+          const months = Array.from(affectedMonths).map(key => {
+            const [year, month] = key.split('-').map(Number)
+            return { month, year }
+          })
+          // Fire-and-forget; don't block CSV import if payroll recalc fails
+          recalculatePayrollForMonths({ months, source: 'csv_contribution_import' }).catch(() => {
+            // Silently ignore payroll errors; CSV import succeeded
+          })
         }
         break
       }

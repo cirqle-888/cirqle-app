@@ -70,14 +70,41 @@ export default function PayrollAllocationModal({ entryId, amountInr, employees, 
   }
 
   async function fetchPendingPayrolls(empId: string) {
-    const { data } = await supabase
+    const { data: payrollsData } = await supabase
       .from('payroll')
       .select('id, net_salary, status, month, year, payslip_number')
       .eq('employee_id', empId)
       .eq('status', 'pending')
       .order('year', { ascending: true })
       .order('month', { ascending: true })
-    if (data) setPayrolls(data)
+    
+    if (payrollsData && payrollsData.length > 0) {
+      const ids = payrollsData.map(p => p.id)
+      const { data: allocData } = await supabase
+        .from('cashbook_payroll_allocations')
+        .select('payroll_id, allocated_amount')
+        .in('payroll_id', ids)
+        .is('deleted_at', null)
+        
+      const allocMap: Record<string, number> = {}
+      if (allocData) {
+        allocData.forEach(a => {
+          allocMap[a.payroll_id] = (allocMap[a.payroll_id] || 0) + Number(a.allocated_amount)
+        })
+      }
+      
+      const filtered = payrollsData
+        .map(p => {
+          const net = Number(p.net_salary) || 0
+          const allocated = allocMap[p.id] || 0
+          return { ...p, remainingAmount: Math.max(0, net - allocated) }
+        })
+        .filter(p => p.remainingAmount > 0.01)
+        
+      setPayrolls(filtered)
+    } else {
+      setPayrolls([])
+    }
   }
 
   const totalAllocated = allocations.reduce((sum, a) => sum + (Number(a.allocated_amount) || 0), 0)
@@ -262,7 +289,7 @@ export default function PayrollAllocationModal({ entryId, amountInr, employees, 
                           label: slipNum
                             ? `${slipNum} — ${payMonthName} ${py || ''}`
                             : `${payMonthName} ${py || ''} Payslip`,
-                          sub: `Net: ₹${Number(p.net_salary).toLocaleString('en-IN')}`,
+                          sub: `Remaining: ₹${(p.remainingAmount).toLocaleString('en-IN')} (Net: ₹${Number(p.net_salary).toLocaleString('en-IN')})`,
                         }
                       })}
                       value={newAllocPayroll}
@@ -270,10 +297,7 @@ export default function PayrollAllocationModal({ entryId, amountInr, employees, 
                         setNewAllocPayroll(id)
                         const p = payrolls.find(i => i.id === id)
                         if (p) {
-                          const pNet = Number(p.net_salary)
-                          // To be completely accurate, we'd fetch existing allocations for this payroll
-                          // But as an estimate we suggest min(unallocated, net_salary)
-                          const suggest = Math.min(unallocated, pNet)
+                          const suggest = Math.min(unallocated, p.remainingAmount)
                           setNewAllocAmount(suggest > 0 ? suggest.toString() : unallocated.toString())
                         }
                       }}

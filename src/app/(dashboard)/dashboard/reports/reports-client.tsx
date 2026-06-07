@@ -79,6 +79,7 @@ interface Props {
   contributions: ContribWithDate[]
   parameters:    Param[]
   groups:        Group[]
+  performanceHistory?: any[]
 }
 
 const BAND_COLORS: Record<string, string> = {
@@ -100,7 +101,7 @@ function fmt(n: number) {
 }
 
 export default function ReportsClient({
-  employees, scores, tasks, contributions, parameters, groups,
+  employees, scores, tasks, contributions, parameters, groups, performanceHistory = [],
 }: Props) {
   const { dn, isUnlocked } = usePrivacy()
   const router = useRouter()
@@ -513,7 +514,7 @@ export default function ReportsClient({
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                   {[
                     { label: 'Tasks Scored',  value: taskCount, sub: dateFilter ? getDateFilterLabel(dateFilter) : 'All time' },
-                    { label: 'Avg Score',     value: `${avgScore.toFixed(1)}%`, sub: `Perf. rating ${emp.performance_rating}%`, highlight: avgScore >= 75 ? 'green' : avgScore >= 50 ? 'yellow' : 'red' },
+                    { label: 'Avg Score',     value: `${avgScore.toFixed(1)}%`, sub: `Current active rating: ${emp.performance_rating}%`, highlight: avgScore >= 75 ? 'green' : avgScore >= 50 ? 'yellow' : 'red' },
                     { label: 'Total Earnings',value: fmt(totalEarnings), sub: `₹${Math.round(totalEarnings).toLocaleString('en-IN')}` },
                     { label: 'Solo Tasks',    value: soloTaskCount, sub: '100% solo contribution', highlight: soloTaskCount > 0 ? 'purple' : undefined },
                   ].map(s => (
@@ -669,9 +670,37 @@ export default function ReportsClient({
                     <p className="text-sm font-semibold text-primary mb-0.5">Performance Insight</p>
                     <p className="text-sm text-foreground">{perfResult.suggestion}</p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Performance rating: {emp.performance_rating}% · {taskCount} scored task{taskCount !== 1 ? 's' : ''}
+                      Current active rating: {emp.performance_rating}% · {taskCount} scored task{taskCount !== 1 ? 's' : ''}
                       {dateFilter ? ` · ${getDateFilterLabel(dateFilter)}` : ' · All time'}
                     </p>
+                  </div>
+                </div>
+
+                {/* Performance Timeline */}
+                <div className="bg-card border border-border rounded-xl p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm font-semibold">Performance Timeline</h3>
+                    <p className="text-xs text-muted-foreground">Historical rating changes</p>
+                  </div>
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-primary" />
+                      <span className="text-sm font-medium">Current Active Rating:</span>
+                      <span className="text-sm font-bold text-primary">{emp.performance_rating}%</span>
+                    </div>
+                    <div className="pl-1 border-l-2 border-border/40 ml-1 space-y-4 py-2">
+                      {performanceHistory.filter((h: any) => h.employee_id === emp.id).length === 0 ? (
+                        <p className="text-xs text-muted-foreground pl-4">No historical records.</p>
+                      ) : (
+                        performanceHistory.filter((h: any) => h.employee_id === emp.id).map((h: any) => (
+                          <div key={h.id} className="relative pl-5">
+                            <div className="absolute w-2 h-2 rounded-full bg-muted-foreground/30 left-[-5px] top-1.5" />
+                            <p className="text-sm font-semibold">{h.performance_percentage}% <span className="text-xs font-normal text-muted-foreground ml-2">{h.effective_from}</span></p>
+                            {h.notes && <p className="text-xs text-muted-foreground mt-0.5">{h.notes}</p>}
+                          </div>
+                        ))
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>

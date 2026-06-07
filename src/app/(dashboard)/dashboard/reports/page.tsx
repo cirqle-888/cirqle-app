@@ -56,12 +56,14 @@ export default async function ReportsPage() {
     .order('task_id')
     .order('id', { ascending: true })
 
-  const [employeesRes, scoresRes, tasksRes, contributionsRes, parametersRes, groupsRes] =
+  const performanceHistoryQuery = isAdmin || !employeeId
+    ? supabase.from('employee_performance_history').select('*').order('effective_from', { ascending: false })
+    : supabase.from('employee_performance_history').select('*').eq('employee_id', employeeId).order('effective_from', { ascending: false })
+
+  const [employeesRes, scoresRes, tasksRes, contributionsRes, parametersRes, groupsRes, historyRes] =
     await Promise.all([
       employeesQuery,
       fetchAll(scoresQuery),
-      // Tasks tab: keep the 24-month window — tasks table is larger and the
-      // tab shows a scrollable list, so we cap it for payload size.
       isAdmin || !employeeId
         ? fetchAll(supabase
             .from('tasks')
@@ -79,11 +81,9 @@ export default async function ReportsPage() {
         .select('id, name, weight')
         .eq('is_active', true)
         .order('weight', { ascending: false }),
+      performanceHistoryQuery
     ])
 
-  // Employee mode: derive the tasks visible from the scores we already loaded.
-  // This avoids an extra DB call and guarantees the employee never sees a task
-  // they have no contribution on.
   let tasks = tasksRes.data || []
   if (!(isAdmin || !employeeId)) {
     const seen = new Map<string, any>()
@@ -105,8 +105,6 @@ export default async function ReportsPage() {
     tasks = Array.from(seen.values())
   }
 
-  // Flatten contributions join: { task_id, employee_id, parameter_id, value, task: { task_date } }
-  // → { task_id, employee_id, parameter_id, value, task_date }
   const contributions = (contributionsRes.data || []).map((r: any) => ({
     task_id:      r.task_id,
     employee_id:  r.employee_id,
@@ -123,6 +121,7 @@ export default async function ReportsPage() {
       contributions={contributions}
       parameters={(parametersRes.data || []) as any[]}
       groups={(groupsRes.data || []) as any[]}
+      performanceHistory={historyRes.data || []}
     />
   )
 }

@@ -19,6 +19,8 @@ import { requirePermission } from '@/lib/auth/enforce'
 import { logActivity } from '@/lib/activity/log'
 import { PERMS } from '@/lib/permissions/keys'
 import { revalidatePath } from 'next/cache'
+import { recalcTaskCommissions, syncDraftInvoices } from '@/lib/sync/integrity'
+import { recalculatePayrollForMonth } from '@/app/(dashboard)/dashboard/payroll/actions'
 
 const REVALIDATE = '/dashboard/tasks'
 
@@ -149,7 +151,6 @@ export async function serverBulkUpdateStatus(
   if (!ids.length) return { ok: false, error: 'No tasks selected.' }
 
   const admin = createAdminClient()
-  // Batch in chunks of 100 to stay under Supabase IN() limit
   const CHUNK = 100
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK)
@@ -194,7 +195,6 @@ export async function serverCancelTask(
 
   const admin = createAdminClient()
 
-  // 1. Update task
   const { error: taskErr } = await admin.from('tasks').update({
     status:               'cancelled',
     cancelled_by:         input.cancelledBy,
@@ -205,12 +205,10 @@ export async function serverCancelTask(
   }).eq('id', input.taskId)
   if (taskErr) return { ok: false, error: taskErr.message }
 
-  // 2. Remove contribution scores if not honouring
   if (!input.honorContributions) {
     await admin.from('contribution_scores').delete().eq('task_id', input.taskId)
   }
 
-  // 3. Optionally record cashbook loss
   if (input.recordCashbook && input.lossAmount > 0) {
     const who = input.cancelledBy === 'client' ? 'Client cancellation'
       : input.cancelledBy === 'no_show' ? 'No-show' : 'Company decision'
@@ -244,27 +242,16 @@ export async function serverCancelTask(
   return { ok: true }
 }
 
-// ── Backfill billing amount for tasks created by employees ───────────────────
-//
-// Employees don't receive pricing data, so their browser inserts billing_amount=0.
-// This action runs server-side immediately after the browser insert; it looks up
-// client-specific pricing (or the service default) via the admin client and
-// updates billing_amount / billing_amount_inr without ever sending the price
-// to the employee's browser.
-
 export async function serverFillTaskBilling(
   taskId:    string,
   clientId:  string | null,
   serviceId: string | null,
   quantity:  number,
 ): Promise<void> {
-  // No permission guard needed — this is a self-healing write, always safe.
-  // It only updates tasks created seconds ago (the caller passes the new task id).
   if (!serviceId) return
 
   const admin = createAdminClient()
 
-  // 1. Fetch service pricing info
   const { data: svc } = await admin
     .from('services')
     .select('default_price, default_currency, pricing_type')
@@ -272,7 +259,6 @@ export async function serverFillTaskBilling(
     .maybeSingle()
 
   if (!svc || !svc.default_price) {
-    // Try client-specific override
     if (!clientId) return
     const { data: cp } = await admin
       .from('client_service_pricing')
@@ -291,7 +277,6 @@ export async function serverFillTaskBilling(
     return
   }
 
-  // 2. Check for client-specific override price
   let unitPrice  = svc.default_price
   let unitCurrency = svc.default_currency || 'INR'
   if (clientId) {
@@ -304,13 +289,12 @@ export async function serverFillTaskBilling(
     if (cp?.price) { unitPrice = cp.price; unitCurrency = cp.currency || unitCurrency }
   }
 
-  // 3. Compute amount based on pricing type
   const pt = svc.pricing_type || 'fixed_per_creative'
   const amount =
     pt === 'fixed_per_creative' ? unitPrice * (quantity || 1) :
     pt === 'retainer'           ? unitPrice :
     pt === 'hourly'             ? unitPrice * (quantity || 1) :
-    0 // percentage_of_spend: can't compute without spend amount
+    0 
 
   if (amount <= 0) return
 
@@ -319,6 +303,32 @@ export async function serverFillTaskBilling(
     billing_amount_inr: await toInr(admin, amount, unitCurrency),
     currency:           unitCurrency,
   }).eq('id', taskId)
+}
+
+// ── Inline task update (for table edits) ──────────────────────────────────────
+
+export async function serverInlineTaskUpdate(
+  taskId: string,
+  updates: any,
+  currencyForInrConversion?: string
+): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.TASKS_EDIT)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+
+  if (updates.billing_amount !== undefined && currencyForInrConversion) {
+    updates.billing_amount_inr = await toInr(admin, updates.billing_amount, currencyForInrConversion)
+  }
+
+  const { error } = await admin.from('tasks').update(updates).eq('id', taskId)
+  if (error) return { ok: false, error: error.message }
+
+  // Sync Integrity!
+  await syncDraftInvoices(taskId)
+  await recalcTaskCommissions(taskId, guard.employeeId)
+
+  return { ok: true }
 }
 
 // ── Full task update (replaces browser-client update in TaskEditModal) ───────
@@ -331,8 +341,6 @@ export interface SaveTaskInput {
   clientId:     string | null
   serviceId:    string | null
   status:       string
-  // Optional: when omitted (e.g. editing a variant task), the existing billing
-  // columns are left untouched so a derived/frozen price is never overwritten.
   billingAmount?: number
   billingAmountInr?: number
   quantity?:    number
@@ -340,12 +348,6 @@ export interface SaveTaskInput {
   taskDate:     string | null
 }
 
-/**
- * Convert a billing amount in `currency` to INR using the current stored
- * exchange rate (exchange_rates.rate_to_inr). Falls back to 1:1 when the
- * currency is INR or no rate is configured — never worse than the old
- * behaviour, which stored the raw foreign number as if it were INR.
- */
 async function toInr(
   admin: ReturnType<typeof createAdminClient>,
   amount: number,
@@ -369,10 +371,6 @@ export async function serverSaveTask(
 
   const admin = createAdminClient()
 
-  // Derive the INR value server-side from the foreign amount + current rate, so
-  // foreign-currency tasks store a true INR figure rather than the raw foreign
-  // number the client passes. Variant edits omit billingAmount, leaving the
-  // frozen parent-derived price untouched.
   const billingInr = input.billingAmount !== undefined
     ? await toInr(admin, input.billingAmount, input.currency)
     : undefined
@@ -386,8 +384,6 @@ export async function serverSaveTask(
       client_id:          input.clientId || null,
       service_id:         input.serviceId || null,
       status:             input.status,
-      // Only overwrite billing when the caller supplied it. Variant edits omit
-      // these so the parent-derived price stays frozen.
       ...(input.billingAmount !== undefined ? { billing_amount: input.billingAmount } : {}),
       ...(billingInr !== undefined ? { billing_amount_inr: billingInr } : {}),
       ...(input.quantity         !== undefined ? { quantity:           input.quantity } : {}),
@@ -408,12 +404,23 @@ export async function serverSaveTask(
     detail:     { title: input.title },
   })
 
+  // SYNC INTEGRITY!
+  await syncDraftInvoices(input.taskId)
+  await recalcTaskCommissions(input.taskId, guard.employeeId)
+
+  // Auto-recalculate pending payroll for this task's month
+  if (input.taskDate) {
+    const taskDate = new Date(input.taskDate)
+    const month = taskDate.getMonth() + 1
+    const year = taskDate.getFullYear()
+    // Fire-and-forget; don't block task save if payroll recalc fails
+    void recalculatePayrollForMonth({ month, year, source: 'task_edit' }).catch(() => {
+      // Silently ignore payroll errors; task save succeeded
+    })
+  }
+
   return { ok: true, data }
 }
-
-// ── Log task created (called from browser after insert) ───────────────────────
-// Task create has complex billing math done browser-side, so the DB insert
-// stays there. This lightweight action just writes the log row.
 
 export async function logTaskCreated(
   taskId:    string,
