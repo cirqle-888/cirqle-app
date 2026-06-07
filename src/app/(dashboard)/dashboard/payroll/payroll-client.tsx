@@ -15,8 +15,9 @@ import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECT
 import {
   Plus, X, Eye, EyeOff, Zap, CheckCircle, Printer, Download,
   ChevronLeft, ChevronRight, AlertTriangle, Calendar, BarChart2,
-  FileText, ArrowRight, TrendingUp, TrendingDown, RefreshCw,
+  FileText, ArrowRight, TrendingUp, TrendingDown, RefreshCw, Mail, Loader2,
 } from 'lucide-react'
+import { sendBulkPayslips } from '@/lib/payslip/actions'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 
@@ -25,6 +26,12 @@ import { useToast, ToastContainer } from '@/components/ui/toast'
 // payload meaningfully; for users who never trigger it, it never downloads.
 const BulkGenerateModal = dynamic(
   () => import('@/components/payroll/bulk-generate-modal'),
+  { ssr: false },
+)
+
+// Payslip preview/send modal — only loads when "Send Payslip" is clicked.
+const PayslipModal = dynamic(
+  () => import('@/components/payroll/payslip-modal').then(m => m.PayslipModal),
   { ssr: false },
 )
 
@@ -150,6 +157,9 @@ export default function PayrollClient({
   const [viewYear, setViewYear]   = useState(now.getFullYear())
   const [selectedEmp, setSelectedEmp]         = useState<Employee | null>(null)
   const [generatePreview, setGeneratePreview] = useState<any[] | null>(null)
+  const [payslipModal, setPayslipModal] = useState<{ employeeId: string } | null>(null)
+  const [bulkPayslipConfirm, setBulkPayslipConfirm] = useState(false)
+  const [bulkSending, setBulkSending] = useState(false)
   const [confirmModal, setConfirmModal]       = useState<{
     title: string; body: string; confirmLabel: string; onConfirm: () => void
   } | null>(null)
@@ -437,6 +447,21 @@ export default function PayrollClient({
     const result = await toggleRevealSalary(empId, current)
     if (result.ok) {
       setEmpList(e => e.map(emp => emp.id === empId ? { ...emp, reveal_salary: !current } : emp))
+    }
+  }
+
+  // ── Bulk payslip send (all PAID employees this month) ─────────────────────
+  async function handleBulkPayslips() {
+    setBulkSending(true)
+    const result = await sendBulkPayslips({ month: viewMonth, year: viewYear })
+    setBulkSending(false)
+    setBulkPayslipConfirm(false)
+    if (result.ok && result.data) {
+      const { sent, failed } = result.data
+      if (failed === 0) toastSuccess(`Payslips sent`, `${sent} payslip${sent !== 1 ? 's' : ''} emailed for ${MONTHS[viewMonth - 1]}`)
+      else toastError(`${sent} sent · ${failed} failed`, result.data.results.filter(r => !r.ok).map(r => `${r.cqid}: ${r.error}`).join('; '))
+    } else {
+      toastError('Bulk send failed', result.error)
     }
   }
 
@@ -734,6 +759,17 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                     Pending: ₹{monthStats.pending.toLocaleString('en-IN')}
                   </div>
                 )}
+                {monthStats.paidCount > 0 && (
+                  <button
+                    onClick={() => setBulkPayslipConfirm(true)}
+                    disabled={bulkSending}
+                    title={`Email payslips to all ${monthStats.paidCount} paid employee${monthStats.paidCount !== 1 ? 's' : ''}`}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/25 text-primary hover:bg-primary/20 transition-colors flex items-center gap-1.5 font-medium disabled:opacity-50"
+                  >
+                    {bulkSending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />}
+                    Send payslips ({monthStats.paidCount})
+                  </button>
+                )}
               </div>
             </div>
 
@@ -868,16 +904,30 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
 
                     {/* Action buttons */}
                     {record && record.status !== 'paid' && (
-                      <button onClick={e => { e.stopPropagation(); confirmMarkPaid(record.id) }}
-                        className="mt-3 w-full text-xs py-1.5 rounded-lg bg-secondary hover:bg-green-500/10 hover:text-green-400 border border-border hover:border-green-500/30 transition-all font-medium">
-                        Mark Paid
-                      </button>
+                      <div className="mt-3 flex gap-2">
+                        <button onClick={e => { e.stopPropagation(); confirmMarkPaid(record.id) }}
+                          className="flex-1 text-xs py-1.5 rounded-lg bg-secondary hover:bg-green-500/10 hover:text-green-400 border border-border hover:border-green-500/30 transition-all font-medium">
+                          Mark Paid
+                        </button>
+                        <button onClick={e => { e.stopPropagation(); setPayslipModal({ employeeId: emp.id }) }}
+                          title="Send payslip"
+                          className="px-2.5 py-1.5 rounded-lg bg-secondary hover:bg-primary/10 hover:text-primary border border-border hover:border-primary/30 transition-all">
+                          <Mail className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     )}
                     {record && record.status === 'paid' && (
-                      <button onClick={e => { e.stopPropagation(); confirmMarkUnpaid(record.id) }}
-                        className="mt-3 w-full text-xs py-1.5 rounded-lg text-muted-foreground/50 hover:text-red-400 hover:bg-red-500/5 border border-transparent hover:border-red-500/20 transition-all">
-                        Undo Payment
-                      </button>
+                      <div className="mt-3 flex gap-2">
+                        <button onClick={e => { e.stopPropagation(); setPayslipModal({ employeeId: emp.id }) }}
+                          className="flex-1 text-xs py-1.5 rounded-lg bg-secondary hover:bg-primary/10 hover:text-primary border border-border hover:border-primary/30 transition-all font-medium flex items-center justify-center gap-1.5">
+                          <Mail className="w-3.5 h-3.5" /> Send Payslip
+                        </button>
+                        <button onClick={e => { e.stopPropagation(); confirmMarkUnpaid(record.id) }}
+                          title="Undo payment"
+                          className="px-2.5 py-1.5 rounded-lg text-muted-foreground/50 hover:text-red-400 hover:bg-red-500/5 border border-transparent hover:border-red-500/20 transition-all text-xs">
+                          Undo
+                        </button>
+                      </div>
                     )}
                     {!record && (
                       <button
@@ -1906,6 +1956,51 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
           }}
         />
       )}
+      {/* ════════════════════════════════════════════════════
+          PAYSLIP PREVIEW / SEND MODAL
+      ════════════════════════════════════════════════════ */}
+      {payslipModal && (
+        <PayslipModal
+          employeeId={payslipModal.employeeId}
+          month={viewMonth}
+          year={viewYear}
+          monthLabel={`${MONTHS[viewMonth - 1]} ${viewYear}`}
+          onClose={() => setPayslipModal(null)}
+          onSent={to => toastSuccess('Payslip sent', `Emailed to ${to}`)}
+        />
+      )}
+
+      {/* ════════════════════════════════════════════════════
+          BULK PAYSLIP CONFIRM
+      ════════════════════════════════════════════════════ */}
+      {bulkPayslipConfirm && (
+        <ModalOverlay onClose={() => setBulkPayslipConfirm(false)}>
+          <div className="bg-card border border-border rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                <Mail className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <p className="font-semibold">Send all payslips?</p>
+                <p className="text-sm text-muted-foreground">
+                  Emails a branded payslip (with PDF) to all {monthStats.paidCount} paid employee{monthStats.paidCount !== 1 ? 's' : ''} for {MONTHS[viewMonth - 1]} {viewYear}.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setBulkPayslipConfirm(false)} disabled={bulkSending}
+                className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80 transition-colors disabled:opacity-50">
+                Cancel
+              </button>
+              <button onClick={handleBulkPayslips} disabled={bulkSending}
+                className="flex-1 bg-primary text-primary-foreground text-sm font-medium py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
+                {bulkSending ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending…</> : <>Send all</>}
+              </button>
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
+
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </div>
   )
