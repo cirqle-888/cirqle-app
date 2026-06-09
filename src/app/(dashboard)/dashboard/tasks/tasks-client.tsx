@@ -2446,7 +2446,26 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
           {mobileTasks.length === 0 && (
             <div className="bg-card border border-border rounded-xl px-4 py-10 text-center text-sm text-muted-foreground">No tasks found</div>
           )}
-          {mobileTasks.map(task => {
+          {(() => {
+            // Group mobile cards by task_date (same as the desktop table).
+            const groups: [string, typeof mobileTasks][] = []
+            const seen = new Map<string, typeof mobileTasks>()
+            for (const task of mobileTasks) {
+              const d = task.task_date || ''
+              if (!seen.has(d)) { seen.set(d, []); groups.push([d, seen.get(d)!]) }
+              seen.get(d)!.push(task)
+            }
+            return groups.map(([date, dateTasks]) => (
+              <Fragment key={date || 'no-date'}>
+                {/* Date group header */}
+                <div className="flex items-center gap-2 px-1 pt-3 pb-0.5 first:pt-1">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-foreground">
+                    {date ? new Date(date).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : 'No date'}
+                  </span>
+                  <div className="flex-1 h-px bg-border/60" />
+                  <span className="text-[10px] font-medium text-muted-foreground">{dateTasks.length} task{dateTasks.length !== 1 ? 's' : ''}</span>
+                </div>
+                {dateTasks.map(task => {
             const isSelected = bulkMode && selectedTasks.has(task.id)
             return (
               <div
@@ -2580,8 +2599,11 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                 </div>
               </div>
             )
-          })}
-          
+                })}
+              </Fragment>
+            ))
+          })()}
+
           {/* Mobile Load More Button */}
           {mobileTasks.length < (dbMode ? dbModeResults.length : visibleTasks.length) && (
             <button
