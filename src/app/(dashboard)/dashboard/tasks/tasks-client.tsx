@@ -1584,7 +1584,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
         </td>
       )
       case 'date': return (
-        <td key={key} className="px-4 py-3 text-muted-foreground" onClick={stopInline}>
+        <td key={key} className="px-4 py-3 text-muted-foreground whitespace-nowrap" onClick={stopInline}>
           {inlineEditMode ? (
             <input type="date" defaultValue={task.task_date} onBlur={async e => {
               const val = e.target.value
