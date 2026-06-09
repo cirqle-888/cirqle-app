@@ -452,7 +452,7 @@ export default function AllocationRebuildPanel() {
             <RefreshCw className="w-3 h-3" /> Re-run
           </button>
           <button
-            onClick={() => setPhase(summary.requires_review > 0 ? 'review' : 'preview')}
+            onClick={() => summary.requires_review > 0 ? setPhase('review') : runPreview()}
             className="flex-1 py-2 text-sm font-medium rounded-lg gradient-bg text-white hover:opacity-90 transition-opacity">
             {summary.requires_review > 0
               ? `Review ${summary.requires_review} unresolved entry${summary.requires_review !== 1 ? 's' : ''} →`
