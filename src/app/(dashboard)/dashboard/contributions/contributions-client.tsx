@@ -7,6 +7,7 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { recalculatePayrollForMonth } from '@/app/(dashboard)/dashboard/payroll/actions'
+import { applyTaskAgreements } from './actions'
 import { calculateCommission } from '@/lib/calculations/commission'
 import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
 import { taskCode, taskCodeMatches, nextTaskNumber } from '@/lib/utils/task-code'
@@ -417,6 +418,8 @@ export default function ContributionsClient({
             }))
             await supabase.from('contribution_scores').delete().eq('task_id', task.id)
             await supabase.from('contribution_scores').insert(scoreInserts)
+            // Layer employee commission agreements on top (no-op without agreements).
+            await applyTaskAgreements(task.id)
             savedCount++
           }
         } catch { /* skip tasks that fail calculation */ }
@@ -908,6 +911,8 @@ export default function ContributionsClient({
       }))
       await supabase.from('contribution_scores').delete().eq('task_id', selectedTask.id)
       if (scoreInserts.length) await supabase.from('contribution_scores').insert(scoreInserts)
+      // Layer employee commission agreements on top (no-op without agreements).
+      await applyTaskAgreements(selectedTask.id)
       // Only advance status to 'done' if task is still pending/in_progress — never downgrade invoiced/paid tasks
       if (['pending', 'in_progress'].includes(selectedTask.status)) {
         await supabase.from('tasks').update({ status: 'done' }).eq('id', selectedTask.id)

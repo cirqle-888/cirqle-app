@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { calculateCommission } from '@/lib/calculations/commission'
 import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
+import { syncTaskAgreementEarnings } from '@/lib/sync/agreement-earnings'
 
 const r2 = (n: number) => Math.round(n * 100) / 100
 
@@ -76,6 +77,10 @@ export async function refreshStoredEarningsFromBilling(taskId: string) {
       updated++
     }
   }
+
+  // Layer employee commission agreements on top (no-op without agreements).
+  await syncTaskAgreementEarnings(taskId)
+
   return { updated, message: `Refreshed ${updated} score(s) from current billing` }
 }
 
@@ -193,6 +198,9 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
     if (upsertBatch.length > 0) {
       await supabase.from('contribution_scores').upsert(upsertBatch, { onConflict: 'task_id,employee_id' })
     }
+
+    // Layer employee commission agreements on top (no-op without agreements).
+    await syncTaskAgreementEarnings(taskId)
 
     return { success: true, updatedCount: upsertBatch.length }
   } catch (err) {

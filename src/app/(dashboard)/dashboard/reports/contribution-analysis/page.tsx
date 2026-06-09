@@ -5,6 +5,7 @@ import {
   buildAnalysisRows,
   type RawTask, type RawScore, type RawPricing, type EmployeeColumn,
 } from '@/lib/reports/contribution-analysis'
+import type { CommissionAgreement } from '@/lib/calculations/agreements'
 import ContributionAnalysisClient from './contribution-analysis-client'
 
 // Scores are written whenever contributions are saved — always read fresh.
@@ -36,7 +37,7 @@ export default async function ContributionAnalysisPage() {
     fetchAll(
       supabase
         .from('contribution_scores')
-        .select('task_id, employee_id, score_percentage, earnings_inr')
+        .select('task_id, employee_id, score_percentage, earnings_inr, is_manual_override')
         .order('id', { ascending: true }),
     ),
     // Task → invoice line items (for actual-received apportioning).
@@ -115,6 +116,17 @@ export default async function ContributionAnalysisPage() {
     if (pct) toolPctByTask.set(tt.task_id, (toolPctByTask.get(tt.task_id) || 0) + pct)
   }
 
+  // Active employee commission agreements (defensive — table may not exist
+  // pre-migration). Empty ⇒ the report behaves exactly as before.
+  let agreements: CommissionAgreement[] = []
+  try {
+    const { data, error } = await supabase
+      .from('employee_commission_agreements')
+      .select('id, employee_id, client_id, service_id, agreement_type, agreement_value, currency, effective_from, effective_to, is_active')
+      .eq('is_active', true)
+    if (!error && data) agreements = data as CommissionAgreement[]
+  } catch { /* table missing pre-migration — ignore */ }
+
   const rows = buildAnalysisRows(
     (tasksRes.data || []) as RawTask[],
     (scoresRes.data || []) as RawScore[],
@@ -125,6 +137,8 @@ export default async function ContributionAnalysisPage() {
     50,            // defaultCommissionPct
     empRating,
     toolPctByTask,
+    100,           // defaultPerformanceRating
+    agreements,
   )
 
   // ── Saved layouts (personal + system default) ──────────────────────────────

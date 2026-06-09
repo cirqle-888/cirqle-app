@@ -9,6 +9,11 @@
  * summary / export), so everything here is pure and isomorphic.
  */
 
+import {
+  matchAgreement, computeAgreementEarning,
+  type CommissionAgreement, type EarningSource,
+} from '@/lib/calculations/agreements'
+
 // ─── Column / row shapes ──────────────────────────────────────────────────────
 
 export interface EmployeeColumn {
@@ -22,6 +27,8 @@ export interface EmpCell {
   pct: number
   /** stored contribution_scores.earnings_inr */
   earn: number
+  /** how `earn` was derived: contribution (normal) | agreement | manual_override */
+  source?: EarningSource
 }
 
 export interface AnalysisRow {
@@ -86,6 +93,7 @@ export interface RawScore {
   employee_id: string
   score_percentage: number | null
   earnings_inr: number | null
+  is_manual_override?: boolean | null
 }
 export interface RawPricing {
   client_id: string
@@ -114,6 +122,8 @@ export function buildAnalysisRows(
   toolPctByTask: Map<string, number> = new Map(),
   /** Rating assumed when an employee has no record (neutral = no penalty). */
   defaultPerformanceRating = 100,
+  /** Active employee commission agreements. Empty ⇒ pure contribution model (unchanged). */
+  agreements: CommissionAgreement[] = [],
 ): AnalysisRow[] {
   const pmap = new Map<string, number>()
   for (const p of pricing) {
@@ -156,8 +166,21 @@ export function buildAnalysisRows(
       // Recomputed from CURRENT billing + rating so the report always matches
       // the live Contributions page, even after a billing/quantity edit (stored
       // earnings_inr can be stale until the contribution is re-saved).
-      const earn = r2(remainingPool * (pct / 100) * (rating / 100))
-      emp[s.employee_id] = { pct: r2(pct), earn }
+      const normalEarn = r2(remainingPool * (pct / 100) * (rating / 100))
+
+      // Employee commission agreement override (mirrors syncTaskAgreementEarnings
+      // so the report == stored == payroll). Applies only when the employee
+      // contributed (pct > 0) and the score isn't a manual override.
+      let earn = normalEarn
+      let source: EarningSource = s.is_manual_override ? 'manual_override' : 'contribution'
+      if (pct > 0 && !s.is_manual_override && agreements.length > 0) {
+        const ag = matchAgreement(agreements, s.employee_id, t.client_id || null, t.service_id || null, t.task_date)
+        if (ag) {
+          earn = computeAgreementEarning(ag, { billingInr: billing_inr, remainingPool })
+          source = 'agreement'
+        }
+      }
+      emp[s.employee_id] = { pct: r2(pct), earn, source }
       total_earnings += earn
       if (pct > 0) contributors++
     }

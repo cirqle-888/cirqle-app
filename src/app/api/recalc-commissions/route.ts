@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { calculateCommission } from '@/lib/calculations/commission'
 import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
+import { syncTaskAgreementEarnings } from '@/lib/sync/agreement-earnings'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 
 export async function POST(req: NextRequest) {
@@ -210,6 +211,14 @@ export async function POST(req: NextRequest) {
           console.error("Upsert chunk error:", error)
           return NextResponse.json({ error: error.message }, { status: 500 })
         }
+      }
+    }
+
+    // Layer employee commission agreements on top of the recomputed base
+    // earnings (no-op without agreements). Only the tasks we just processed.
+    for (const task of tasks) {
+      if (byTask[task.id]?.length) {
+        try { await syncTaskAgreementEarnings(task.id) } catch { /* best-effort */ }
       }
     }
 
