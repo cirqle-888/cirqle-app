@@ -5,10 +5,10 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
-import { insertCashbookEntries, updateCashbookEntry, softDeleteCashbookEntry, fetchLiveRate } from './actions'
+import { insertCashbookEntries, updateCashbookEntry, softDeleteCashbookEntry, fetchLiveRate, backupAndResetAllocations } from './actions'
 import { formatCompact, round2 } from '@/lib/calculations/currency'
 import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
-import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, RefreshCw, Landmark } from 'lucide-react'
+import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, RefreshCw, Landmark, CheckCircle } from 'lucide-react'
 import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from '@/lib/utils'
 import type { DateFilterValue } from '@/components/ui/date-filter'
@@ -187,8 +187,17 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   const [formEditingId, setFormEditingId] = useState<string | null>(null)   // non-null = editing existing
   const [showRebuildPanel, setShowRebuildPanel] = useState(false)
   const [saving, setSaving] = useState(false)
+  // Unallocate-all-invoices flow: idle → confirm → working → done(count)
+  const [unallocate, setUnallocate] = useState<'closed' | 'confirm' | 'working' | { done: number }>('closed')
   const router = useRouter()
   const pathname = usePathname()
+
+  async function runUnallocateAll() {
+    setUnallocate('working')
+    const res = await backupAndResetAllocations()
+    if (res.ok) { setUnallocate({ done: res.data?.backed_up ?? 0 }); router.refresh() }
+    else { alert(res.error || 'Failed to unallocate'); setUnallocate('closed') }
+  }
   const searchParams = useSearchParams()
 
   const [filterType, setFilterType] = useState(searchParams.get('type') || '')
@@ -821,6 +830,14 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 title="Rebuild all invoice allocations (admin only)">
                 <RefreshCw className="w-4 h-4 shrink-0" />
                 <span className="hidden sm:inline">Rebuild Allocations</span>
+              </button>
+            )}
+            {isAdmin && (
+              <button onClick={() => setUnallocate('confirm')}
+                className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap border border-red-500/30 text-red-300"
+                title="Remove ALL invoice allocations (payroll untouched, reversible)">
+                <ShieldAlert className="w-4 h-4 shrink-0" />
+                <span className="hidden sm:inline">Unallocate All</span>
               </button>
             )}
             <Link href="/dashboard/import?tab=cashbook_entries"
@@ -1857,6 +1874,52 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             <div className="overflow-y-auto p-5 flex-1">
               <AllocationRebuildPanel />
             </div>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* Unallocate All Invoices (admin only) */}
+      {unallocate !== 'closed' && (
+        <ModalOverlay onClose={() => { if (unallocate !== 'working') setUnallocate('closed') }}>
+          <div className="bg-card border border-border rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4">
+            {typeof unallocate === 'object' ? (
+              <>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-green-500/10 flex items-center justify-center shrink-0">
+                    <CheckCircle className="w-5 h-5 text-green-400" />
+                  </div>
+                  <div>
+                    <p className="font-semibold">Invoices unallocated</p>
+                    <p className="text-sm text-muted-foreground">
+                      Removed <strong className="text-foreground">{unallocate.done}</strong> invoice allocation{unallocate.done !== 1 ? 's' : ''}. Invoice paid amounts &amp; statuses were recalculated.
+                    </p>
+                  </div>
+                </div>
+                <button onClick={() => setUnallocate('closed')} className="w-full bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80 transition-colors">Done</button>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center shrink-0">
+                    <ShieldAlert className="w-5 h-5 text-red-400" />
+                  </div>
+                  <div>
+                    <p className="font-semibold">Unallocate all invoices?</p>
+                    <p className="text-sm text-muted-foreground">
+                      Removes <b>every</b> invoice allocation and resets all invoices to unpaid/partial. <b>Payroll allocations are not touched.</b> Reversible from the Reconciliation toolkit.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <button onClick={() => setUnallocate('closed')} disabled={unallocate === 'working'}
+                    className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80 transition-colors disabled:opacity-50">Cancel</button>
+                  <button onClick={runUnallocateAll} disabled={unallocate === 'working'}
+                    className="flex-1 bg-red-500 hover:bg-red-600 text-white text-sm font-medium py-2.5 rounded-lg disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
+                    {unallocate === 'working' ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Unallocating…</> : 'Unallocate all'}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </ModalOverlay>
       )}
