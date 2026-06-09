@@ -257,27 +257,12 @@ export async function serverFillTaskBilling(
     .select('default_price, default_currency, pricing_type')
     .eq('id', serviceId)
     .maybeSingle()
+  if (!svc) return
 
-  if (!svc || !svc.default_price) {
-    if (!clientId) return
-    const { data: cp } = await admin
-      .from('client_service_pricing')
-      .select('price, currency')
-      .eq('client_id', clientId)
-      .eq('service_id', serviceId)
-      .maybeSingle()
-    if (!cp?.price) return
-
-    const cpCurrency = cp.currency || 'INR'
-    await admin.from('tasks').update({
-      billing_amount:     cp.price,
-      billing_amount_inr: await toInr(admin, cp.price, cpCurrency),
-      currency:           cpCurrency,
-    }).eq('id', taskId)
-    return
-  }
-
-  let unitPrice  = svc.default_price
+  // Resolve the UNIT price + currency. The per-client Pricing Matrix wins;
+  // otherwise fall back to the service's default price. NOTE: matrix/default
+  // price is *per creative / per unit* — quantity is applied below.
+  let unitPrice: number | null = svc.default_price ?? null
   let unitCurrency = svc.default_currency || 'INR'
   if (clientId) {
     const { data: cp } = await admin
@@ -286,16 +271,20 @@ export async function serverFillTaskBilling(
       .eq('client_id', clientId)
       .eq('service_id', serviceId)
       .maybeSingle()
-    if (cp?.price) { unitPrice = cp.price; unitCurrency = cp.currency || unitCurrency }
+    if (cp?.price != null) { unitPrice = cp.price; unitCurrency = cp.currency || unitCurrency }
   }
+  if (unitPrice == null || unitPrice <= 0) return
 
+  // billing_amount is the TOTAL for the task. Per-unit & hourly pricing
+  // multiply by quantity (the bug was a branch that stored the unit price as
+  // the total — splitting it across units instead of multiplying). Retainer is
+  // flat; percentage-of-spend can't be derived here so we leave billing alone.
   const pt = svc.pricing_type || 'fixed_per_creative'
-  const amount =
-    pt === 'fixed_per_creative' ? unitPrice * (quantity || 1) :
-    pt === 'retainer'           ? unitPrice :
-    pt === 'hourly'             ? unitPrice * (quantity || 1) :
-    0 
-
+  const qty = quantity || 1
+  let amount: number
+  if (pt === 'retainer') amount = unitPrice
+  else if (pt === 'percentage_of_spend') return
+  else amount = unitPrice * qty // fixed_per_creative, hourly, and sane default
   if (amount <= 0) return
 
   await admin.from('tasks').update({
@@ -303,6 +292,16 @@ export async function serverFillTaskBilling(
     billing_amount_inr: await toInr(admin, amount, unitCurrency),
     currency:           unitCurrency,
   }).eq('id', taskId)
+
+  // Cascade: keep contribution earnings, draft invoices, and pending payroll in
+  // sync with the new billing — so a corrected price flows everywhere.
+  await recalcTaskCommissions(taskId)
+  await syncDraftInvoices(taskId)
+  const { data: t } = await admin.from('tasks').select('task_date').eq('id', taskId).maybeSingle()
+  if (t?.task_date) {
+    const d = new Date(t.task_date)
+    void recalculatePayrollForMonth({ month: d.getMonth() + 1, year: d.getFullYear(), source: 'task_edit' }).catch(() => {})
+  }
 }
 
 // ── Inline task update (for table edits) ──────────────────────────────────────
