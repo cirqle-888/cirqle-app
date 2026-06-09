@@ -2,6 +2,8 @@
 
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
+import { Handshake } from 'lucide-react'
 import Header from '@/components/layout/header'
 import AppSelect from '@/components/ui/app-select'
 import { createClient as createSupabaseClient } from '@/lib/supabase/client'
@@ -1395,6 +1397,10 @@ export default function SettingsClient(props: Props) {
                       <button onClick={() => openEmployeeForm(emp)} className="p-2 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground" title="Edit">
                         <Edit2 className="w-4 h-4" />
                       </button>
+
+                      <Link href={`/dashboard/employees/${emp.id}/agreements`} className="p-2 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-primary" title="Commission Agreements">
+                        <Handshake className="w-4 h-4" />
+                      </Link>
 
                       {emp.is_archived ? (
                         <button

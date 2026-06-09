@@ -39,6 +39,8 @@ export const PERMS = {
   EMPLOYEES_ARCHIVE:                'employees.archive',
   EMPLOYEES_REVIEW_CHANGE_REQUESTS: 'employees.review_change_requests',
   EMPLOYEES_REVEAL_NAMES:           'employees.reveal_names',
+  /** Create / edit per-employee commission agreements (special client/service rates). */
+  EMPLOYEES_MANAGE_AGREEMENTS:      'employees.manage_agreements',
 
   // Payroll
   PAYROLL_VIEW:         'payroll.view',
