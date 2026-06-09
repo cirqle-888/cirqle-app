@@ -1494,6 +1494,11 @@ export default function SettingsClient(props: Props) {
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="font-medium">{client.name}</p>
                         <span className="text-xs font-mono bg-secondary px-2 py-0.5 rounded">{client.code}</span>
+                        {client.pricing_pending && (
+                          <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/25">
+                            Needs pricing
+                          </span>
+                        )}
                         {clientOutstanding[client.id]?.outstanding > 0 && (
                           <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-400 border border-orange-500/20">
                             ₹{Math.round(clientOutstanding[client.id].outstanding).toLocaleString('en-IN')} outstanding
@@ -1592,7 +1597,14 @@ export default function SettingsClient(props: Props) {
                   ) : (
                     <div key={svc.id} className="bg-card border border-border rounded-xl px-5 py-4 flex items-center justify-between">
                       <div>
-                        <p className="font-medium">{svc.name}</p>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-medium">{svc.name}</p>
+                          {svc.pricing_pending && (
+                            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/25">
+                              Needs pricing
+                            </span>
+                          )}
+                        </div>
                         <div className="flex items-center gap-2 mt-1 flex-wrap">
                           {svc.description && <p className="text-xs text-muted-foreground">{svc.description}</p>}
                           {linkedGroupNames.length > 0

@@ -2,6 +2,8 @@ import { createAdminClient, fetchAll, stablePaginationQuery, safeQuery, columnEx
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility, stripTaskListPricing, userCanSee } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
+import { getPendingPricing } from '@/lib/pricing/pending'
+import { PricingPendingBanner } from '@/components/pricing/pricing-pending-banner'
 import TasksClient from './tasks-client'
 
 export const dynamic = 'force-dynamic'
@@ -206,7 +208,12 @@ export default async function TasksPage() {
   const initialTasks = stripTaskListPricing(allTasks || [], vis.tasksPricing)
   const initialTrash = stripTaskListPricing((trashRes.data || []) as any[], vis.tasksPricing)
 
+  // Pending-to-price banner — only for users who can see/set pricing.
+  const pendingPricing = vis.tasksPricing ? await getPendingPricing(supabase) : { clients: [], services: [], total: 0 }
+
   return (
+    <>
+    {vis.tasksPricing && <PricingPendingBanner clients={pendingPricing.clients} services={pendingPricing.services} />}
     <TasksClient
       dbTaskTotal={dbCountRes.count ?? undefined}
       initialTasks={initialTasks}
@@ -237,5 +244,6 @@ export default async function TasksPage() {
         contribEarnings: vis.contributionEarnings,
       }}
     />
+    </>
   )
 }

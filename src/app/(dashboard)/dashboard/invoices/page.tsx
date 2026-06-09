@@ -1,6 +1,8 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility, stripInvoiceList } from '@/lib/permissions/strip'
+import { getPendingPricing } from '@/lib/pricing/pending'
+import { PricingPendingBanner } from '@/components/pricing/pricing-pending-banner'
 import InvoicesClient from './invoices-client'
 
 export const dynamic = 'force-dynamic'
@@ -68,7 +70,13 @@ export default async function InvoicesPage() {
     { amounts: vis.billingAmounts, linePricing: vis.billingLinePricing },
   )
 
+  // Pending-to-price banner — only for users who can see invoice amounts/pricing.
+  const canSeePricing = (me?.isAdmin ?? true) || vis.billingAmounts || vis.billingLinePricing
+  const pendingPricing = canSeePricing ? await getPendingPricing(supabase) : { clients: [], services: [], total: 0 }
+
   return (
+    <>
+    {canSeePricing && <PricingPendingBanner clients={pendingPricing.clients} services={pendingPricing.services} />}
     <InvoicesClient
       initialInvoices={initialInvoices}
       clients={clientsRes.data || []}
@@ -81,5 +89,6 @@ export default async function InvoicesPage() {
         linePricing: vis.billingLinePricing,
       }}
     />
+    </>
   )
 }

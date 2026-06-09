@@ -1,5 +1,7 @@
 import { createAdminClient, fetchAll, stablePaginationQuery } from '@/lib/supabase/server'
 import { loadCurrentUser } from '@/lib/permissions/check'
+import { getPendingPricing } from '@/lib/pricing/pending'
+import { PricingPendingBanner } from '@/components/pricing/pricing-pending-banner'
 import DashboardClient from './dashboard-client'
 
 export const dynamic = 'force-dynamic'
@@ -196,7 +198,13 @@ export default async function DashboardPage() {
   const unscoredDoneTasks = displayTasks.filter(t => t.status === 'done' && !scoredTaskIds.has(t.id))
   const activeTasks      = displayTasks.filter(t => t.status === 'pending' || t.status === 'in_progress')
 
+  // Pending-to-price banner — only for users who can see/set pricing.
+  const canSeePricing = isAdmin || !!me?.permissions?.has('tasks.view_pricing')
+  const pendingPricing = canSeePricing ? await getPendingPricing(supabase) : { clients: [], services: [], total: 0 }
+
   return (
+    <>
+    {canSeePricing && <PricingPendingBanner clients={pendingPricing.clients} services={pendingPricing.services} />}
     <DashboardClient
       invoices={invoices as any[]}
       overdueInvoices={overdueInvoices as any[]}
@@ -228,5 +236,6 @@ export default async function DashboardPage() {
       }}
       isAdmin={isAdmin}
     />
+    </>
   )
 }
