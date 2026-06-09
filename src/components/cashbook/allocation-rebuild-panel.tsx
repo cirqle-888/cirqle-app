@@ -769,5 +769,19 @@ export default function AllocationRebuildPanel() {
     )
   }
 
-  return null
+  // Fallback — never leave the wizard body blank if a phase/data combination
+  // isn't matched above (e.g. phase === 'match' with no summary). Offer recovery.
+  return (
+    <div className="space-y-3 py-2">
+      <p className="text-sm text-muted-foreground">
+        The rebuild wizard lost its place. This is harmless — nothing was changed.
+      </p>
+      <button
+        onClick={() => { setPreview(null); setEditable([]); setSummary(null); setPhase('idle') }}
+        className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg gradient-bg text-white hover:opacity-90 transition-opacity"
+      >
+        <RefreshCw className="w-4 h-4" /> Restart wizard
+      </button>
+    </div>
+  )
 }

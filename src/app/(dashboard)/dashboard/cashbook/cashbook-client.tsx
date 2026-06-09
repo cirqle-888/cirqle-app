@@ -35,7 +35,15 @@ const PayrollAllocationModal = dynamic(
 // inflow entry. Lazy-loaded so jspdf stays out of the main bundle.
 const AllocationRebuildPanel = dynamic(
   () => import('@/components/cashbook/allocation-rebuild-panel'),
-  { ssr: false },
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+        <span className="w-4 h-4 border-2 border-foreground/20 border-t-primary rounded-full animate-spin" />
+        Loading rebuild wizard…
+      </div>
+    ),
+  },
 )
 const ReceiptModal = dynamic(
   () => import('@/components/cashbook/receipt-modal'),
