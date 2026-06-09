@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { Clock, Sparkles, Check } from 'lucide-react'
-import { getTitleSuggestions } from '@/app/(dashboard)/dashboard/tasks/quick-create-actions'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Clock, Sparkles, Check, Wand2 } from 'lucide-react'
+import { getTitleSuggestions, getRecentTitlePool } from '@/app/(dashboard)/dashboard/tasks/quick-create-actions'
 
 interface Props {
   value: string
@@ -34,6 +34,12 @@ function levenshtein(a: string, b: string): number {
   return prev[n]
 }
 
+/** Normalize for fuzzy comparison: lowercase, strip everything but a–z 0–9.
+ *  This makes spacing/punctuation differences free ("weec end sle" ≈ "weekendsale"). */
+function norm(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
 /** Tidy a title: trim, collapse inner whitespace, fix spacing around dashes. */
 function cleanTitle(s: string): string {
   return s
@@ -61,10 +67,20 @@ function toTitleCase(s: string): string {
 export function TitleAutocomplete({ value, onChange, className, placeholder, required, localTitles = [] }: Props) {
   const [open, setOpen] = useState(false)
   const [serverSugs, setServerSugs] = useState<{ title: string; count: number }[]>([])
+  const [pool, setPool] = useState<string[]>([])
   const [focused, setFocused] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
+  const poolFetched = useRef(false)
 
-  // Debounced server fetch for suggestions.
+  // Fetch the broad title pool once (on first focus) for fuzzy "did you mean".
+  async function ensurePool() {
+    if (poolFetched.current) return
+    poolFetched.current = true
+    const res = await getRecentTitlePool()
+    if (res.ok && res.data) setPool(res.data.titles)
+  }
+
+  // Debounced server fetch for substring suggestions.
   useEffect(() => {
     if (!focused) return
     const term = value.trim()
@@ -99,20 +115,32 @@ export function TitleAutocomplete({ value, onChange, className, placeholder, req
   const showCleanup = cleaned !== value && cleaned.length > 0
   const showCase = !showCleanup && titleCased !== value && titleCased.length > 0
 
-  // "Did you mean" — closest past title within a small edit distance, not exact.
-  const didYouMean = (() => {
-    if (term.length < 3) return null
-    const pool = merged.length ? merged : serverSugs.map(s => ({ title: s.title, count: s.count }))
+  // "Did you mean" — closest past title by normalized edit distance (spacing and
+  // punctuation ignored), matched against the full history pool. Catches typos
+  // like "weec end sle" → "Weekend Sale".
+  const didYouMean = useMemo(() => {
+    const raw = value.trim()
+    if (raw.length < 4) return null
+    const nt = norm(raw)
+    if (nt.length < 4) return null
+
+    const candidates = pool.length ? pool : localTitles
     let best: { title: string; d: number } | null = null
-    for (const s of pool) {
-      const cand = s.title.toLowerCase()
-      if (cand === term) return null // exact exists — nothing to suggest
-      const d = levenshtein(term, cand)
-      const tol = Math.max(1, Math.floor(cand.length * 0.25))
-      if (d <= tol && (!best || d < best.d)) best = { title: s.title, d }
+    for (const cand of candidates) {
+      const nc = norm(cand)
+      if (!nc) continue
+      if (nc === nt) return null // an exact (normalized) match exists — nothing to suggest
+      if (Math.abs(nc.length - nt.length) > 4) continue // length gate keeps it fast
+      const d = levenshtein(nt, nc)
+      const tol = Math.max(2, Math.floor(nc.length * 0.34))
+      if (d <= tol && (!best || d < best.d)) best = { title: cand, d }
     }
-    return best?.title ?? null
-  })()
+    if (!best) return null
+    // Skip if the only difference is letter case (the Title-case row covers that).
+    const bestTitle: string = best.title
+    if (bestTitle.toLowerCase() === raw.toLowerCase()) return null
+    return bestTitle
+  }, [value, pool, localTitles])
 
   // Close on outside click.
   useEffect(() => {
@@ -130,7 +158,7 @@ export function TitleAutocomplete({ value, onChange, className, placeholder, req
       <input
         value={value}
         onChange={e => { onChange(e.target.value); setOpen(true) }}
-        onFocus={() => { setFocused(true); setOpen(true) }}
+        onFocus={() => { setFocused(true); setOpen(true); ensurePool() }}
         onBlur={() => {
           // Auto-tidy whitespace on blur (non-destructive: only spacing).
           const c = cleanTitle(value)
@@ -147,6 +175,15 @@ export function TitleAutocomplete({ value, onChange, className, placeholder, req
           {/* Corrections */}
           {(showCleanup || showCase || didYouMean) && (
             <div className="p-1.5 border-b border-foreground/[0.06] space-y-1">
+              {didYouMean && (
+                <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => { onChange(didYouMean); setOpen(false) }}
+                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left bg-amber-500/[0.08] hover:bg-amber-500/15 border border-amber-500/20 transition-colors">
+                  <Wand2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span className="text-xs text-amber-400/90 shrink-0">Did you mean</span>
+                  <span className="text-xs font-semibold text-foreground truncate">{didYouMean}</span>
+                  <span className="text-xs text-amber-400/70 shrink-0">?</span>
+                </button>
+              )}
               {showCleanup && (
                 <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => { onChange(cleaned); setOpen(false) }}
                   className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left hover:bg-foreground/[0.06] transition-colors">
@@ -161,13 +198,6 @@ export function TitleAutocomplete({ value, onChange, className, placeholder, req
                   <Sparkles className="w-3.5 h-3.5 text-violet-400 shrink-0" />
                   <span className="text-xs text-muted-foreground">Title case →</span>
                   <span className="text-xs font-medium text-foreground truncate">{titleCased}</span>
-                </button>
-              )}
-              {didYouMean && (
-                <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => { onChange(didYouMean); setOpen(false) }}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left hover:bg-amber-500/10 transition-colors">
-                  <span className="text-xs text-amber-400 shrink-0">Did you mean</span>
-                  <span className="text-xs font-medium text-foreground truncate">&ldquo;{didYouMean}&rdquo;?</span>
                 </button>
               )}
             </div>

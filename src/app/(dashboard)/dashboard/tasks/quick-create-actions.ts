@@ -181,3 +181,35 @@ export async function getTitleSuggestions(
 
   return { ok: true, data: { suggestions } }
 }
+
+/**
+ * Broad pool of recent distinct task titles — NOT filtered by the query — so the
+ * client can fuzzy-match typos against real history ("weec end sle" → "Weekend
+ * Sale"). Fetched once when the title field is first focused.
+ */
+export async function getRecentTitlePool(): Promise<ActionResult<{ titles: string[] }>> {
+  const guard = await requireAnyPermission([PERMS.TASKS_CREATE, PERMS.TASKS_EDIT, PERMS.TASKS_VIEW_ALL])
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from('tasks')
+    .select('title')
+    .not('title', 'is', null)
+    .is('deleted_at', null)
+    .order('id', { ascending: false })
+    .limit(800)
+  if (error) return { ok: false, error: error.message }
+
+  const seen = new Set<string>()
+  const titles: string[] = []
+  for (const r of (data ?? []) as { title: string }[]) {
+    const t = (r.title || '').trim()
+    if (!t) continue
+    const k = t.toLowerCase()
+    if (seen.has(k)) continue
+    seen.add(k)
+    titles.push(t)
+  }
+  return { ok: true, data: { titles } }
+}
