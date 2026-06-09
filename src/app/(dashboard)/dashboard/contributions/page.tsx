@@ -20,8 +20,8 @@ export default async function ContributionsPage() {
   // fields (billing_amount_inr, currency, etc.) are included ONLY when the
   // viewer holds `tasks.view_pricing` — otherwise they're stripped from the
   // payload before it leaves the server.
-  const taskSelectWithPricing    = 'id, task_number, title, service_id, billing_amount_inr, status, task_date, client:clients(id, name), service:services(id, name)'
-  const taskSelectWithoutPricing = 'id, task_number, title, service_id, status, task_date, client:clients(id, name), service:services(id, name)'
+  const taskSelectWithPricing    = 'id, task_number, title, service_id, billing_amount_inr, status, task_date, client:clients(id, name, code), service:services(id, name)'
+  const taskSelectWithoutPricing = 'id, task_number, title, service_id, status, task_date, client:clients(id, name, code), service:services(id, name)'
   // 24-month window bounds the otherwise unbounded task list. Contributions for
   // tasks older than 24 months should already be finalized; the editor here is
   // for active/recent work. HAR showed this query was the slowest (2060ms) when

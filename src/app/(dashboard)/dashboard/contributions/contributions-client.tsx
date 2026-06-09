@@ -1438,7 +1438,7 @@ export default function ContributionsClient({
                                 <StatusBadge done={doneEmps.length} total={employees.length} />
                               </div>
                               <div className="flex items-center gap-2 flex-wrap text-xs text-muted-foreground">
-                                {task.client?.name && <span className="font-medium text-foreground/70">{task.client.name}</span>}
+                                {task.client?.name && <span className="font-medium text-foreground/70">{task.client.name}{task.client?.code && <span className="ml-1 text-[10px] font-mono text-muted-foreground/50">{task.client.code}</span>}</span>}
                                 {task.client?.name && task.service?.name && <span>·</span>}
                                 {task.service?.name && <span>{task.service.name}</span>}
                                 {canSeeFinancials && showFinancials && task.billing_amount_inr > 0 && (
@@ -1687,7 +1687,7 @@ export default function ContributionsClient({
                                 <p className="text-sm font-medium text-foreground leading-tight truncate">{task.title}</p>
                               </div>
                               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                                <span className="text-[10px] text-muted-foreground truncate max-w-[110px]">{task.client?.name || '—'}</span>
+                                <span className="text-[10px] text-muted-foreground truncate max-w-[140px]">{task.client?.name || '—'}{task.client?.code ? ` · ${task.client.code}` : ''}</span>
                                 {task.service?.name && <span className="text-[10px] text-cyan-400/60">{task.service.name}</span>}
                                 <span className={`text-[10px] px-1.5 py-0.5 rounded ${statusColor(task.status)}`}>{statusLabel(task.status)}</span>
                                 <span className="text-[10px] text-muted-foreground/50">{task.task_date}</span>

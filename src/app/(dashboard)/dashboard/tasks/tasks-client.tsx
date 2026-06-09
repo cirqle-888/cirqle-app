@@ -1559,9 +1559,14 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
               const c = clients.find(x => x.id === newId)
               setTasks(prev => prev.map(t => t.id === task.id ? { ...t, client_id: newId, client: c ? { id: c.id, name: c.name, code: c.code } : undefined } : t))
             }} className="bg-secondary border border-border rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-500/50 w-full">
-              {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {clients.map(c => <option key={c.id} value={c.id}>{c.code ? `${c.name} · ${c.code}` : c.name}</option>)}
             </select>
-          ) : (task.client?.name || '—')}
+          ) : (
+            <span>
+              {task.client?.name || '—'}
+              {task.client?.code && <span className="ml-1.5 text-[10px] font-mono text-muted-foreground/50">{task.client.code}</span>}
+            </span>
+          )}
         </td>
       )
       case 'service': return (
@@ -1751,7 +1756,10 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                           <p className="font-medium text-foreground line-through decoration-muted-foreground">{task.title}</p>
                           {task.description && <p className="text-xs text-muted-foreground truncate max-w-[180px]">{task.description}</p>}
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground">{task.client?.name || '—'}</td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {task.client?.name || '—'}
+                          {task.client?.code && <span className="ml-1.5 text-[10px] font-mono text-muted-foreground/50">{task.client.code}</span>}
+                        </td>
                         <td className="px-4 py-3 text-muted-foreground">{task.service?.name || '—'}</td>
                         <td className="px-4 py-3 text-muted-foreground">{deletedDate.toLocaleDateString('en-GB')}</td>
                         <td className="px-4 py-3">
@@ -2484,7 +2492,9 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                     </div>
                     {/* Meta line — client · service */}
                     <p className="text-xs text-muted-foreground truncate mt-0.5">
-                      {task.client?.name || '—'} <span className="text-muted-foreground/40">·</span> {task.service?.name || '—'}
+                      {task.client?.name || '—'}
+                      {task.client?.code && <span className="ml-1 text-[10px] font-mono text-muted-foreground/50">{task.client.code}</span>}
+                      {' '}<span className="text-muted-foreground/40">·</span> {task.service?.name || '—'}
                     </p>
                   </div>
                   <div className="relative shrink-0">
@@ -2898,7 +2908,7 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                               </div>
                               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                                 {boardGroupBy !== 'client' && (
-                                  <span className="text-[10px] text-muted-foreground truncate max-w-[100px]">{task.client?.name || '—'}</span>
+                                  <span className="text-[10px] text-muted-foreground truncate max-w-[140px]">{task.client?.name || '—'}{task.client?.code ? ` · ${task.client.code}` : ''}</span>
                                 )}
                                 {boardGroupBy !== 'service' && task.service?.name && (
                                   <span className="text-[10px] text-cyan-400/60">{task.service.name}</span>

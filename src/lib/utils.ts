@@ -5,6 +5,20 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/**
+ * Client display name with its unique code appended for disambiguation
+ * (two clients can share a name; the code never repeats). e.g. "Sea Star · 015".
+ * Returns a plain string — use where client names render as text.
+ */
+export function clientLabel(
+  client?: { name?: string | null; code?: string | null } | null,
+  fallback = '—',
+): string {
+  const name = client?.name?.trim()
+  if (!name) return fallback
+  return client?.code ? `${name} · ${client.code}` : name
+}
+
 // Global UI interaction states
 export const ROW_INTERACTIVE_CLASS = "cursor-pointer" // No background changes on hover
 
