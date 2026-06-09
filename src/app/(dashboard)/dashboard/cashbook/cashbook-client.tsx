@@ -205,6 +205,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   const [filterSearch, setFilterSearch] = useState(searchParams.get('search') || '')
   const [filterCategory, setFilterCategory] = useState(searchParams.get('category') || '')
   const [filterAllocStatus, setFilterAllocStatus] = useState(searchParams.get('alloc') || '')
+  const [filterClient, setFilterClient] = useState(searchParams.get('client') || '')
+  const [sortDir, setSortDir] = useState(searchParams.get('sort') || 'desc') // date: desc = newest first
   const [filterMinAmount, setFilterMinAmount] = useState(searchParams.get('min') || '')
   const [filterMaxAmount, setFilterMaxAmount] = useState(searchParams.get('max') || '')
 
@@ -219,6 +221,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     if (filterSearch) params.set('search', filterSearch); else params.delete('search')
     if (filterCategory) params.set('category', filterCategory); else params.delete('category')
     if (filterAllocStatus) params.set('alloc', filterAllocStatus); else params.delete('alloc')
+    if (filterClient) params.set('client', filterClient); else params.delete('client')
+    if (sortDir && sortDir !== 'desc') params.set('sort', sortDir); else params.delete('sort')
     if (filterMinAmount) params.set('min', filterMinAmount); else params.delete('min')
     if (filterMaxAmount) params.set('max', filterMaxAmount); else params.delete('max')
 
@@ -226,7 +230,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     if (newQueryString !== searchParams.toString()) {
       router.replace(`${pathname}?${newQueryString}`, { scroll: false })
     }
-  }, [filterType, filterMonth, filterSearch, filterCategory, filterAllocStatus, filterMinAmount, filterMaxAmount, pathname, router, searchParams])
+  }, [filterType, filterMonth, filterSearch, filterCategory, filterAllocStatus, filterClient, sortDir, filterMinAmount, filterMaxAmount, pathname, router, searchParams])
 
   const [recurringMonths, setRecurringMonths] = useState(0) // 0 = not recurring
 
@@ -637,6 +641,14 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       })
     }
 
+    if (filterClient) {
+      // Match the entry's tagged client OR any allocated invoice's client.
+      result = result.filter(e =>
+        e.client_id === filterClient ||
+        e.allocations?.some(a => !a.deleted_at && a.invoice?.client?.id === filterClient)
+      )
+    }
+
     if (filterMinAmount) {
       const min = parseFloat(filterMinAmount)
       if (!isNaN(min)) result = result.filter(e => (e.amount_inr ?? 0) >= min)
@@ -646,8 +658,15 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       if (!isNaN(max)) result = result.filter(e => (e.amount_inr ?? 0) <= max)
     }
 
+    // Sort by date (stable tie-break by id so same-day order is consistent).
+    result = [...result].sort((a, b) => {
+      const d = (a.entry_date || '').localeCompare(b.entry_date || '')
+      const cmp = d !== 0 ? d : String(a.id || '').localeCompare(String(b.id || ''))
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+
     return result
-  }, [entries, filterType, filterMonth, filterSearch, filterCategory, filterAllocStatus, filterMinAmount, filterMaxAmount, invoiceCategoryId, salaryCategoryId])
+  }, [entries, filterType, filterMonth, filterSearch, filterCategory, filterAllocStatus, filterClient, sortDir, filterMinAmount, filterMaxAmount, invoiceCategoryId, salaryCategoryId])
 
   const totalInflow  = filteredEntries.filter(e => e.type === 'inflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
   const totalOutflow = filteredEntries.filter(e => e.type === 'outflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
@@ -934,8 +953,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             {categoriesByRecentUse.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
 
-          <select 
-            value={filterAllocStatus} 
+          <select
+            value={filterAllocStatus}
             onChange={e => setFilterAllocStatus(e.target.value)}
             className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50"
           >
@@ -945,6 +964,24 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             <option value="fully">Fully Allocated</option>
             <option value="over">Over-allocated</option>
           </select>
+
+          <select
+            value={filterClient}
+            onChange={e => setFilterClient(e.target.value)}
+            className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 max-w-[170px]"
+          >
+            <option value="">All Clients</option>
+            {clients.map(c => <option key={c.id} value={c.id}>{c.code ? `${c.name} · ${c.code}` : c.name}</option>)}
+          </select>
+
+          <button
+            type="button"
+            onClick={() => setSortDir(d => d === 'desc' ? 'asc' : 'desc')}
+            title={sortDir === 'desc' ? 'Date: newest first (click for oldest first)' : 'Date: oldest first (click for newest first)'}
+            className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 hover:bg-secondary/50 transition-colors flex items-center gap-1.5 whitespace-nowrap"
+          >
+            Date {sortDir === 'desc' ? '↓ Newest' : '↑ Oldest'}
+          </button>
 
           <input
             type="text"
