@@ -23,6 +23,10 @@ import {
 } from 'lucide-react'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import AppSelect from '@/components/ui/app-select'
+import Combobox from '@/components/ui/combobox'
+import { TitleAutocomplete } from '@/components/tasks/title-autocomplete'
+import { QuickCreateClientModal, QuickCreateServiceModal } from '@/components/tasks/quick-create-modals'
+import { usePermissions } from '@/contexts/permission-context'
 import { useRole } from '@/contexts/role-context'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { PageShell, PageContent, StickyToolbar, PageChrome } from '@/components/layout/page-shell'
@@ -53,7 +57,7 @@ interface Props {
   toolServices: { tool_id: string; service_id: string }[]
   groupServices: { group_id: string; service_id: string }[]
   scores: Score[]
-  clients: { id: string; name: string }[]
+  clients: { id: string; name: string; code?: string }[]
   services: { id: string; name: string }[]
   taskAssignments: Assignment[]
   contributorRecords: { task_id: string; employee_id: string; parameter_id?: string; value: number }[]
@@ -117,6 +121,15 @@ export default function ContributionsClient({
 
   // ── Toast ───────────────────────────────────────────
   const toast = useToast()
+  const { can } = usePermissions()
+
+  // Inline quick-create (client / service) from the Add Task dropdowns — same as
+  // the Tasks page. Local lists so newly added ones appear immediately.
+  const [clientList, setClientList] = useState(clients)
+  const [serviceList, setServiceList] = useState(services)
+  const [quickCreate, setQuickCreate] = useState<{ kind: 'client' | 'service'; query: string } | null>(null)
+  const canCreateClient  = can('clients.create')
+  const canCreateService = can('services.create')
 
   // ── View state ──────────────────────────────────────
   const router = useRouter()
@@ -146,8 +159,6 @@ export default function ContributionsClient({
   })
   const [addingTask, setAddingTask] = useState(false)
   const [addTaskError, setAddTaskError] = useState('')
-  const [titleSearch, setTitleSearch] = useState('')         // for the combobox
-  const [showTitleDropdown, setShowTitleDropdown] = useState(false)
   const [duplicatingTaskId, setDuplicatingTaskId] = useState<string | null>(null)
 
   // ── Filters ─────────────────────────────────────────
@@ -967,16 +978,6 @@ export default function ContributionsClient({
     router.refresh()
   }
 
-  // ── Title suggestions (unique titles from existing tasks) ──
-  const titleSuggestions = useMemo(() => {
-    const seen = new Set<string>()
-    const q = titleSearch.toLowerCase()
-    return localTasks
-      .map(t => t.title)
-      .filter((t): t is string => !!t && !seen.has(t) && !!seen.add(t))
-      .filter(t => q ? t.toLowerCase().includes(q) : true)
-      .slice(0, 8)
-  }, [localTasks, titleSearch])
 
   // ── Duplicate task ──────────────────────────────────────
   async function handleDuplicateTask(task: any) {
@@ -1879,42 +1880,17 @@ export default function ContributionsClient({
               </div>
 
               <form onSubmit={handleAddTask} className="px-5 pt-4 pb-4 space-y-4 overflow-y-auto flex-1">
-                {/* Title — searchable combobox */}
-                <div className="relative">
+                {/* Title — autocomplete + correction (same as Tasks page) */}
+                <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Task Title *</label>
-                  <input
+                  <TitleAutocomplete
                     value={addTaskForm.title}
-                    onChange={e => {
-                      const v = e.target.value
-                      setAddTaskForm(f => ({ ...f, title: v }))
-                      setTitleSearch(v)
-                      setShowTitleDropdown(true)
-                    }}
-                    onFocus={() => { setTitleSearch(addTaskForm.title); setShowTitleDropdown(true) }}
-                    onBlur={() => setTimeout(() => setShowTitleDropdown(false), 150)}
+                    onChange={v => setAddTaskForm(f => ({ ...f, title: v }))}
+                    required
                     className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
                     placeholder="e.g. Big Mid Week Offer Flyer"
-                    autoFocus
+                    localTitles={localTasks.map(t => t.title).filter(Boolean) as string[]}
                   />
-                  {/* Suggestions dropdown */}
-                  {showTitleDropdown && titleSuggestions.length > 0 && (
-                    <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-card border border-border rounded-xl shadow-2xl shadow-black/40 overflow-hidden">
-                      <div className="px-3 py-1.5 border-b border-border/60">
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Recent titles — click to reuse</p>
-                      </div>
-                      {titleSuggestions.map((t, i) => (
-                        <button key={i} type="button"
-                          onMouseDown={() => {
-                            setAddTaskForm(f => ({ ...f, title: t }))
-                            setShowTitleDropdown(false)
-                          }}
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-secondary transition-colors flex items-center gap-2 text-foreground">
-                          <Copy className="w-3 h-3 text-muted-foreground/50 shrink-0" />
-                          {t}
-                        </button>
-                      ))}
-                    </div>
-                  )}
                 </div>
 
                 {/* Date + Status row */}
@@ -1939,21 +1915,31 @@ export default function ContributionsClient({
                   </div>
                 </div>
 
-                {/* Client + Service row */}
+                {/* Client + Service row — searchable comboboxes with add-new */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Client</label>
-                    <AppSelect value={addTaskForm.client_id} onChange={e => setAddTaskForm(f => ({ ...f, client_id: e.target.value }))}>
-                      <option value="">Select client…</option>
-                      {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </AppSelect>
+                    <Combobox
+                      options={clientList.map(c => ({ id: c.id, label: c.name, sub: c.code }))}
+                      value={addTaskForm.client_id}
+                      onChange={id => setAddTaskForm(f => ({ ...f, client_id: id }))}
+                      placeholder="Search client…"
+                      sortKey="clients"
+                      onAddNew={canCreateClient ? (q => setQuickCreate({ kind: 'client', query: q })) : undefined}
+                      addNewLabel="Add client"
+                    />
                   </div>
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Service</label>
-                    <AppSelect value={addTaskForm.service_id} onChange={e => setAddTaskForm(f => ({ ...f, service_id: e.target.value }))}>
-                      <option value="">Select service…</option>
-                      {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </AppSelect>
+                    <Combobox
+                      options={serviceList.map(s => ({ id: s.id, label: s.name }))}
+                      value={addTaskForm.service_id}
+                      onChange={id => setAddTaskForm(f => ({ ...f, service_id: id }))}
+                      placeholder="Search service…"
+                      sortKey="services"
+                      onAddNew={canCreateService ? (q => setQuickCreate({ kind: 'service', query: q })) : undefined}
+                      addNewLabel="Add service"
+                    />
                   </div>
                 </div>
 
@@ -1994,6 +1980,36 @@ export default function ContributionsClient({
               </form>
             </div>
           </ModalOverlay>
+        )}
+
+        {/* Inline quick-create: Client */}
+        {quickCreate?.kind === 'client' && (
+          <QuickCreateClientModal
+            initialName={quickCreate.query}
+            canSeePricing={showFinancials}
+            onClose={() => setQuickCreate(null)}
+            onCreated={(client) => {
+              setClientList(prev => [{ id: client.id, name: client.name, code: client.code }, ...prev])
+              setAddTaskForm(f => ({ ...f, client_id: client.id }))
+              setQuickCreate(null)
+              toast.success(`Client "${client.name}" added`)
+            }}
+          />
+        )}
+
+        {/* Inline quick-create: Service */}
+        {quickCreate?.kind === 'service' && (
+          <QuickCreateServiceModal
+            initialName={quickCreate.query}
+            canSeePricing={showFinancials}
+            onClose={() => setQuickCreate(null)}
+            onCreated={(service) => {
+              setServiceList(prev => [...prev, { id: service.id, name: service.name }])
+              setAddTaskForm(f => ({ ...f, service_id: service.id }))
+              setQuickCreate(null)
+              toast.success(`Service "${service.name}" added`)
+            }}
+          />
         )}
 
         {/* ── Bulk action toolbar ── */}

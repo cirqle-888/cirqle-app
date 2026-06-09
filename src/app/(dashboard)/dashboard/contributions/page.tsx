@@ -84,7 +84,7 @@ export default async function ContributionsPage() {
     timed('contribution_scores', vis.contributionEarnings
       ? fetchAll(supabase.from('contribution_scores').select('task_id, employee_id, earnings_inr, score_percentage, calculated_at').gte('calculated_at', contribWindowFromStr).order('id', { ascending: true }))
       : fetchAll(supabase.from('contribution_scores').select('task_id, employee_id, score_percentage, calculated_at').gte('calculated_at', contribWindowFromStr).order('id', { ascending: true }))),
-    timed('clients',                supabase.from('clients').select('id, name').order('name')),
+    timed('clients',                supabase.from('clients').select('id, name, code').order('name')),
     timed('services',               supabase.from('services').select('id, name').order('name')),
     // Full task_assignments graph — both roles get it so contributor strips
     // and the assignee filter work the same way for everyone.

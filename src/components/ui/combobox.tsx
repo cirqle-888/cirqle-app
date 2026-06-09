@@ -174,7 +174,7 @@ export default function Combobox({
             }`}
         >
           <div className="min-w-0 flex-1">
-            <span className="truncate block">{o.label}</span>
+            <span className="block break-words">{o.label}</span>
             {o.sub && <span className="text-[11px] text-muted-foreground truncate block">{o.sub}</span>}
           </div>
           <Badge badge={o._badge} />
