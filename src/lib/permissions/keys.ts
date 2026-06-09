@@ -70,6 +70,12 @@ export const PERMS = {
   /** See ₹ inflow/outflow values and bank balance figures. */
   CASHBOOK_VIEW_AMOUNTS: 'cashbook.view_amounts',
 
+  // Clients / Services — granular "add" perms (separate from settings.access)
+  /** Create new clients (e.g. + Add client in the task form). */
+  CLIENTS_CREATE:  'clients.create',
+  /** Create new services (e.g. + Add service in the task form). */
+  SERVICES_CREATE: 'services.create',
+
   // Settings
   SETTINGS_ACCESS:              'settings.access',
   SETTINGS_MANAGE_DESIGNATIONS: 'settings.manage_designations',

@@ -123,6 +123,14 @@ export async function upsertClientServicePricings(
     .from('client_service_pricing')
     .upsert(pricingRows, { onConflict: 'client_id,service_id' })
   if (error) return { ok: false, error: error.message }
+
+  // Setting pricing resolves the "pending to price" flag for the touched
+  // clients and services. Best-effort — ignore if the column isn't there yet.
+  const clientIds = Array.from(new Set(pricingRows.map(r => r.client_id)))
+  const serviceIds = Array.from(new Set(pricingRows.map(r => r.service_id)))
+  await admin.from('clients').update({ pricing_pending: false }).in('id', clientIds).then(undefined, () => {})
+  await admin.from('services').update({ pricing_pending: false }).in('id', serviceIds).then(undefined, () => {})
+
   return { ok: true }
 }
 

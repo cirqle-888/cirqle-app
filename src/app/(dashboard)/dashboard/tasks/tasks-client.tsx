@@ -17,6 +17,8 @@ import { getStatusColor, getStatusLabel } from '@/lib/utils/invoice'
 import { Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, RefreshCw, TrendingDown, Users, Ban, Search, ExternalLink, ChevronDown, ChevronLeft, ChevronRight, Layers, LayoutGrid, List, CalendarDays, MoreVertical, Building2, BarChart2, Copy, GripVertical, Settings2, ChevronUp } from 'lucide-react'
 import { formatCurrency } from '@/lib/calculations/currency'
 import Combobox from '@/components/ui/combobox'
+import { TitleAutocomplete } from '@/components/tasks/title-autocomplete'
+import { QuickCreateClientModal, QuickCreateServiceModal } from '@/components/tasks/quick-create-modals'
 import AppSelect from '@/components/ui/app-select'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
@@ -481,7 +483,14 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
 
   // Local copies so quick-set price updates reflect immediately without page reload
   const [services, setServices] = useState(initialServices)
+  const [clientList, setClientList] = useState(clients)
   const [clientPricings, setClientPricings] = useState(initialClientPricings)
+
+  // Inline quick-create (client / service) opened from the Add Task dropdowns.
+  const [quickCreate, setQuickCreate] = useState<{ kind: 'client' | 'service'; query: string } | null>(null)
+  const canCreateClient  = can('clients.create')
+  const canCreateService = can('services.create')
+  const canSeePricing    = permissionFlags?.pricing ?? false
 
   // ── Sticky header + toolbar measurement ────────────────────────────────────
   // Both the page Header and the task toolbar are sticky. We measure both with
@@ -3813,7 +3822,14 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1.5">Title *</label>
-                  <input value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} required className={inputCls} placeholder="e.g. Offer Flyer — June batch" />
+                  <TitleAutocomplete
+                    value={form.title}
+                    onChange={v => setForm(p => ({ ...p, title: v }))}
+                    required
+                    className={inputCls}
+                    placeholder="e.g. Offer Flyer — June batch"
+                    localTitles={initialTasks.map(t => t.title).filter(Boolean) as string[]}
+                  />
                 </div>
               </div>
 
@@ -3822,11 +3838,13 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1.5">Client *</label>
                   <Combobox
-                    options={clients.map(c => ({ id: c.id, label: c.name, sub: c.code }))}
+                    options={clientList.map(c => ({ id: c.id, label: c.name, sub: c.code }))}
                     value={form.client_id}
                     onChange={handleClientChange}
                     placeholder="Search client…"
                     sortKey="clients"
+                    onAddNew={canCreateClient ? (q => setQuickCreate({ kind: 'client', query: q })) : undefined}
+                    addNewLabel="Add client"
                   />
                 </div>
                 <div>
@@ -3841,6 +3859,8 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
                     onChange={handleServiceChange}
                     placeholder="Search service…"
                     sortKey="services"
+                    onAddNew={canCreateService ? (q => setQuickCreate({ kind: 'service', query: q })) : undefined}
+                    addNewLabel="Add service"
                   />
                 </div>
               </div>
@@ -4507,6 +4527,36 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
           clientId={editClientId}
           serviceId={editClientServiceId ?? undefined}
           onClose={() => { setEditClientId(null); setEditClientServiceId(null) }}
+        />
+      )}
+
+      {/* Inline quick-create: Client */}
+      {quickCreate?.kind === 'client' && (
+        <QuickCreateClientModal
+          initialName={quickCreate.query}
+          canSeePricing={canSeePricing}
+          onClose={() => setQuickCreate(null)}
+          onCreated={(client, pricingPending) => {
+            setClientList(prev => [{ id: client.id, name: client.name, code: client.code }, ...prev])
+            handleClientChange(client.id)
+            setQuickCreate(null)
+            success(`Client "${client.name}" added`, pricingPending ? 'Flagged for pricing by an admin' : undefined)
+          }}
+        />
+      )}
+
+      {/* Inline quick-create: Service */}
+      {quickCreate?.kind === 'service' && (
+        <QuickCreateServiceModal
+          initialName={quickCreate.query}
+          canSeePricing={canSeePricing}
+          onClose={() => setQuickCreate(null)}
+          onCreated={(service, pricingPending) => {
+            setServices(prev => [...prev, service])
+            handleServiceChange(service.id)
+            setQuickCreate(null)
+            success(`Service "${service.name}" added`, pricingPending ? 'Flagged for pricing by an admin' : undefined)
+          }}
         />
       )}
     </div>

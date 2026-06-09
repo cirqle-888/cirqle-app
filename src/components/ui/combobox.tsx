@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { Search, X, ChevronDown, Clock, TrendingUp } from 'lucide-react'
+import { Search, X, ChevronDown, Clock, TrendingUp, Plus } from 'lucide-react'
 import { readSortData, trackUsage, smartSort, type SortBadge } from '@/lib/hooks/use-smart-sort'
 
 export interface ComboOption {
@@ -21,6 +21,11 @@ interface Props {
   /** localStorage key for smart-sort (e.g. "clients", "services", "employees") */
   sortKey?:     string
   disabled?:    boolean
+  /** When set, a sticky "+ Add new" button shows at the bottom of the panel.
+   *  Receives the current search text so the create form can prefill the name. */
+  onAddNew?:    (query: string) => void
+  /** Label for the add-new button, e.g. "Add new client". */
+  addNewLabel?: string
 }
 
 // ─── Badge chip ───────────────────────────────────────────────────────────────
@@ -51,7 +56,7 @@ function Divider({ label }: { label: string }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function Combobox({
-  options, value, onChange, placeholder, className, sortKey, disabled,
+  options, value, onChange, placeholder, className, sortKey, disabled, onAddNew, addNewLabel,
 }: Props) {
   const [open,      setOpen]      = useState(false)
   const [query,     setQuery]     = useState('')
@@ -254,6 +259,23 @@ export default function Combobox({
           <div className="max-h-60 overflow-y-auto overscroll-contain">
             {renderRows()}
           </div>
+
+          {/* Sticky "Add new" footer */}
+          {onAddNew && (
+            <button
+              type="button"
+              onClick={() => { const q = query; setOpen(false); setQuery(''); onAddNew(q) }}
+              className="w-full flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-violet-400
+                border-t border-foreground/[0.08] bg-violet-500/[0.04] hover:bg-violet-500/10 transition-colors"
+            >
+              <span className="inline-flex w-5 h-5 items-center justify-center rounded-full bg-violet-500/15">
+                <Plus className="w-3.5 h-3.5" />
+              </span>
+              {query.trim()
+                ? <span className="truncate">{addNewLabel || 'Add'} &ldquo;{query.trim()}&rdquo;</span>
+                : (addNewLabel || 'Add new')}
+            </button>
+          )}
         </div>,
         document.body
       )}
