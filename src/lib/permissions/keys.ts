@@ -72,6 +72,15 @@ export const PERMS = {
   /** See ₹ inflow/outflow values and bank balance figures. */
   CASHBOOK_VIEW_AMOUNTS: 'cashbook.view_amounts',
 
+  // External Request Portal
+  REQUESTS_VIEW:          'requests.view',
+  REQUESTS_REVIEW:        'requests.review',
+  REQUESTS_START:         'requests.start',
+  REQUESTS_MANAGE:        'requests.manage',
+  REQUESTS_ACTIVITY_VIEW: 'requests.activity.view',
+  INTAKE_LINKS_MANAGE:    'intake_links.manage',
+  AGENCY_LINKS_MANAGE:    'agency_links.manage',
+
   // Clients / Services — granular "add" perms (separate from settings.access)
   /** Create new clients (e.g. + Add client in the task form). */
   CLIENTS_CREATE:  'clients.create',
