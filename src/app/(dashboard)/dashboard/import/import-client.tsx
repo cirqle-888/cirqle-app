@@ -2008,6 +2008,7 @@ export default function ImportClient({ clients, services, employees, groups, par
       jobs:          'Invoice items, contributions, and contribution scores for these tasks will also be deleted.',
       employees:     'Contribution scores for these employees will also be deleted.',
       groups:        'All parameters (and their contributions) inside these groups will also be deleted.',
+      invoices:      'Invoice line items and allocations will be deleted. Linked Cash Book payments are KEPT but unlinked from the invoice.',
     }
     const extraWarning = cascadeWarnings[cleanupMode] ? `\n\n⚠️ ${cascadeWarnings[cleanupMode]}` : ''
     if (!window.confirm(`Delete ${ids.length} record${ids.length !== 1 ? 's' : ''}? This cannot be undone.${extraWarning}`)) return
@@ -2019,6 +2020,15 @@ export default function ImportClient({ clients, services, employees, groups, par
       for (let i = 0; i < values.length; i += BATCH) {
         const { error } = await supabase.from(table).delete().in(field, values.slice(i, i + BATCH))
         if (error) throw new Error(`${table}: ${error.message}`)
+      }
+    }
+
+    // Unlink (set a FK column to null) instead of deleting — used to preserve
+    // independent records (e.g. cashbook payments) while removing the parent.
+    const batchUnlink = async (table: string, field: string, values: string[]) => {
+      for (let i = 0; i < values.length; i += BATCH) {
+        const { error } = await supabase.from(table).update({ [field]: null }).in(field, values.slice(i, i + BATCH))
+        if (error) throw new Error(`${table} (unlink): ${error.message}`)
       }
     }
 
@@ -2052,6 +2062,15 @@ export default function ImportClient({ clients, services, employees, groups, par
       if (cleanupMode === 'cashbook_entries') {
         // Delete any related allocations before deleting the entries to satisfy foreign key constraint
         await batchDelete('cashbook_invoice_allocations', 'cashbook_entry_id', ids)
+      }
+      if (cleanupMode === 'invoices') {
+        // Remove invoice-only children first…
+        await batchDelete('invoice_items', 'invoice_id', ids)
+        await batchDelete('cashbook_invoice_allocations', 'invoice_id', ids)
+        await batchDelete('discount_logs', 'invoice_id', ids)
+        // …then UNLINK cashbook payments (keep the money records — they are real
+        // entries in your books, just no longer tied to a deleted invoice).
+        await batchUnlink('cashbook_entries', 'invoice_id', ids)
       }
 
       // ── Main delete ─────────────────────────────────────────────────────────
