@@ -14,8 +14,9 @@ import dynamic from 'next/dynamic'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { getStatusColor, getStatusLabel } from '@/lib/utils/invoice'
-import { Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, RefreshCw, TrendingDown, Users, Ban, Search, ExternalLink, ChevronDown, ChevronLeft, ChevronRight, Layers, LayoutGrid, List, CalendarDays, MoreVertical, Building2, BarChart2, Copy, GripVertical, Settings2, ChevronUp } from 'lucide-react'
+import { Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, RefreshCw, TrendingDown, Users, Ban, Search, ExternalLink, ChevronDown, ChevronLeft, ChevronRight, Layers, LayoutGrid, List, CalendarDays, MoreVertical, Building2, BarChart2, Copy, GripVertical, Settings2, ChevronUp, Inbox } from 'lucide-react'
 import { formatCurrency } from '@/lib/calculations/currency'
+import Link from 'next/link'
 import Combobox from '@/components/ui/combobox'
 import { TitleAutocomplete } from '@/components/tasks/title-autocomplete'
 import { QuickCreateClientModal, QuickCreateServiceModal } from '@/components/tasks/quick-create-modals'
@@ -1670,6 +1671,17 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
               </button>
             ) : (
               <>
+                {/* External Requests inbox — requires requests.view permission */}
+                {can('requests.view') && (
+                  <Link
+                    href="/dashboard/requests"
+                    title="External requests from clients & agencies"
+                    className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-2 bg-secondary hover:bg-secondary/80 transition-colors"
+                  >
+                    <Inbox className="w-4 h-4 text-violet-400" />
+                    <span className="hidden sm:inline">Requests</span>
+                  </Link>
+                )}
                 {/* Workload Report — requires tasks.workload permission */}
                 {can('tasks.workload') && (
                   <button

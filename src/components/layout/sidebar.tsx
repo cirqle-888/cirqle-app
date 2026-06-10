@@ -1,6 +1,6 @@
 'use client'
 
-import { memo, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -32,6 +32,7 @@ import {
   KeyRound,
   UserCircle,
   ChevronDown,
+  Inbox,
 } from 'lucide-react'
 import { CommandPaletteTrigger } from '@/components/ui/command-palette'
 import { EmployeeAvatar } from '@/components/ui/employee-avatar'
@@ -112,6 +113,7 @@ const navSections: NavSection[] = [
     items: [
       { label: 'Dashboard',     href: '/dashboard',               icon: LayoutDashboard, requiredPerm: 'dashboard.view' },
       { label: 'Tasks',         href: '/dashboard/tasks',         icon: CheckSquare },
+      { label: 'Requests',      href: '/dashboard/requests',      icon: Inbox, requiredPerm: 'requests.view' },
       { label: 'Contributions', href: '/dashboard/contributions', icon: TrendingUp },
     ],
   },
@@ -266,6 +268,32 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
   const [logoBroken, setLogoBroken] = useState(false)
   const [faviconBroken, setFaviconBroken] = useState(false)
 
+  // Requests badge — count of requests with new external activity. This is the
+  // ONLY global indicator for the Request Portal (design: no popups/toasts).
+  // Defensive: silently 0 if the portal tables don't exist yet.
+  const [requestsBadge, setRequestsBadge] = useState(0)
+  const canSeeRequests = can('requests.view')
+  useEffect(() => {
+    if (!canSeeRequests) return
+    let alive = true
+    ;(async () => {
+      try {
+        const supabase = createClient()
+        const { data, error } = await supabase
+          .from('task_requests')
+          .select('id, last_external_activity_at, last_staff_viewed_at, status')
+          .not('status', 'in', '("rejected","archived")')
+          .limit(500)
+        if (!alive || error || !data) return
+        setRequestsBadge(data.filter((r: any) =>
+          r.last_external_activity_at &&
+          (!r.last_staff_viewed_at || r.last_external_activity_at > r.last_staff_viewed_at)
+        ).length)
+      } catch { /* table missing pre-migration */ }
+    })()
+    return () => { alive = false }
+  }, [canSeeRequests, pathname])
+
   // Pre-compute visible sections once per permission change — avoids re-filtering on
   // every route transition (pathname is the only thing changing in the common case).
   const visibleNavSections = useMemo(
@@ -405,9 +433,19 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
                           : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
                       }`}
                     >
-                      <Icon className={`w-4 h-4 shrink-0 transition-colors ${active ? 'text-primary' : 'text-muted-foreground group-hover:text-sidebar-accent-foreground'}`} />
+                      <span className="relative shrink-0">
+                        <Icon className={`w-4 h-4 shrink-0 transition-colors ${active ? 'text-primary' : 'text-muted-foreground group-hover:text-sidebar-accent-foreground'}`} />
+                        {href === '/dashboard/requests' && requestsBadge > 0 && isCollapsed && (
+                          <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400" />
+                        )}
+                      </span>
                       <div className={`flex items-center overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0' : 'flex-1 opacity-100'}`}>
                         <span className="flex-1 truncate whitespace-nowrap">{label}</span>
+                        {href === '/dashboard/requests' && requestsBadge > 0 && (
+                          <span className="ml-2 shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-bold flex items-center justify-center">
+                            {requestsBadge > 99 ? '99+' : requestsBadge}
+                          </span>
+                        )}
                         {active && <ChevronRight className="w-3 h-3 text-primary shrink-0 ml-2" />}
                       </div>
                     </Link>
