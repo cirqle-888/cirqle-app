@@ -87,10 +87,53 @@ async function fetchEmployeeOwnTaskIds(
   return Array.from(all)
 }
 
-export default async function TasksPage() {
+export default async function TasksPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>
+}) {
   // createClient() (anon key + session) used only for auth via loadCurrentUser().
   // createAdminClient() (service role) bypasses RLS for all data queries server-side.
   const supabase = createAdminClient()
+
+  // ── Request promotion (?fromRequest=<id>) — design §5 ─────────────────────
+  // Fetch the request so the Add Task modal opens prefilled. Defensive: bad id
+  // or missing portal tables simply yields no prefill.
+  let promotionRequest: any = null
+  const sp = searchParams ? await searchParams : undefined
+  const fromRequest = typeof sp?.fromRequest === 'string' ? sp.fromRequest : null
+  if (fromRequest) {
+    try {
+      const { data: req } = await supabase
+        .from('task_requests')
+        .select('id, ref_no, title, description, remarks, design_plan, priority, due_date, client_id, service_id, content_link, reference_link, drive_folder_link, extra_links, promoted_task_id')
+        .eq('id', fromRequest)
+        .maybeSingle()
+      if (req && !req.promoted_task_id) {
+        // Compose the description block (remarks / plan / links / priority).
+        const parts: string[] = []
+        if (req.description) parts.push(req.description)
+        if (req.design_plan) parts.push(`Design plan:\n${req.design_plan}`)
+        if (req.remarks) parts.push(`Remarks:\n${req.remarks}`)
+        const links: string[] = []
+        if (req.content_link) links.push(`Content: ${req.content_link}`)
+        if (req.reference_link) links.push(`Reference: ${req.reference_link}`)
+        if (req.drive_folder_link) links.push(`Drive folder: ${req.drive_folder_link}`)
+        for (const l of (req.extra_links || [])) if (l?.url) links.push(`${l.label || 'Link'}: ${l.url}`)
+        if (links.length) parts.push(`Reference links:\n${links.join('\n')}`)
+        if (req.priority && req.priority !== 'normal') parts.push(`Priority: ${req.priority}`)
+        promotionRequest = {
+          id: req.id,
+          ref_no: req.ref_no,
+          title: req.title,
+          description: parts.join('\n\n'),
+          client_id: req.client_id,
+          service_id: req.service_id,
+          due_date: req.due_date,
+        }
+      }
+    } catch { /* portal not migrated — ignore */ }
+  }
 
   // Best-effort load user role to apply optimizations
   const me = await loadCurrentUser().catch(() => null)
@@ -215,6 +258,7 @@ export default async function TasksPage() {
     <>
     {vis.tasksPricing && <PricingPendingBanner clients={pendingPricing.clients} services={pendingPricing.services} />}
     <TasksClient
+      promotionRequest={promotionRequest}
       dbTaskTotal={dbCountRes.count ?? undefined}
       initialTasks={initialTasks}
       initialTrash={initialTrash}

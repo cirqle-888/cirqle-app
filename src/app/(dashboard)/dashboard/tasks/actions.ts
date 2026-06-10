@@ -21,6 +21,7 @@ import { PERMS } from '@/lib/permissions/keys'
 import { revalidatePath } from 'next/cache'
 import { recalcTaskCommissions, syncDraftInvoices } from '@/lib/sync/integrity'
 import { recalculatePayrollForMonth } from '@/app/(dashboard)/dashboard/payroll/actions'
+import { syncRequestStatusFromTask, syncRequestStatusFromTasks } from '@/lib/requests/task-sync'
 
 const REVALIDATE = '/dashboard/tasks'
 
@@ -168,6 +169,9 @@ export async function serverBulkUpdateStatus(
     action:     'status_changed',
     detail:     { bulk: true, count: ids.length, to: toStatus },
   })
+
+  // Mirror onto any promoted requests (no-op when none are linked).
+  void syncRequestStatusFromTasks(ids, toStatus).catch(() => {})
 
   return { ok: true }
 }
@@ -326,6 +330,7 @@ export async function serverInlineTaskUpdate(
   // Sync Integrity!
   await syncDraftInvoices(taskId)
   await recalcTaskCommissions(taskId, guard.employeeId)
+  if (updates.status) void syncRequestStatusFromTask(taskId, updates.status).catch(() => {})
 
   return { ok: true }
 }
@@ -406,6 +411,7 @@ export async function serverSaveTask(
   // SYNC INTEGRITY!
   await syncDraftInvoices(input.taskId)
   await recalcTaskCommissions(input.taskId, guard.employeeId)
+  if (input.status) void syncRequestStatusFromTask(input.taskId, input.status).catch(() => {})
 
   // Auto-recalculate pending payroll for this task's month
   if (input.taskDate) {

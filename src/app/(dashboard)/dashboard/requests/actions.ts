@@ -124,6 +124,55 @@ export async function updateInternalNotes(
   return { ok: true }
 }
 
+/**
+ * Promotion (design §5): called AFTER the prefilled Add Task modal actually
+ * creates the task. Links the request to the task, sets status = started,
+ * logs the promotion (internal) + Started milestone (requester-visible),
+ * and fires the "started" email.
+ */
+export async function markRequestPromoted(
+  requestId: string, taskId: string, taskNumber: number | null,
+): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.REQUESTS_START)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+  const { data: req, error } = await admin
+    .from('task_requests')
+    .select('id, ref_no, title, status, source, track_token, client_id, agency_id, submitter_email, promoted_task_id')
+    .eq('id', requestId).single()
+  if (error || !req) return { ok: false, error: 'Request not found.' }
+  if (req.promoted_task_id) return { ok: false, error: 'This request was already promoted.' }
+
+  const { error: upErr } = await admin.from('task_requests').update({
+    promoted_task_id: taskId,
+    promoted_at: new Date().toISOString(),
+    promoted_by: guard.employeeId,
+    status: 'started',
+    client_status: 'started',
+    status_updated_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }).eq('id', requestId)
+  if (upErr) return { ok: false, error: upErr.message }
+
+  // Internal promotion record + requester-visible Started milestone.
+  await logRequestActivity(admin, {
+    requestId, actorType: 'admin', actorId: guard.employeeId, actorLabel: 'Cirqle',
+    action: 'promoted', visibility: 'internal',
+    detail: { task_id: taskId, task_number: taskNumber },
+  })
+  await logRequestActivity(admin, {
+    requestId, actorType: 'admin', actorId: guard.employeeId, actorLabel: 'Cirqle',
+    action: 'status_changed',
+    visibility: req.source === 'agency' ? 'agency' : 'client',
+    detail: { from: req.status, to: 'started' },
+  })
+  void notifyRequesterStatus(req as any, 'started')
+
+  revalidatePath(REVALIDATE)
+  return { ok: true }
+}
+
 /** Close a revision item. */
 export async function markRevisionAddressed(revisionId: string): Promise<ActionResult> {
   const guard = await requirePermission(PERMS.REQUESTS_MANAGE)

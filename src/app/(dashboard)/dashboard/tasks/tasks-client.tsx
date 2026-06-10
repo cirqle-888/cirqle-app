@@ -20,6 +20,7 @@ import Link from 'next/link'
 import Combobox from '@/components/ui/combobox'
 import { TitleAutocomplete } from '@/components/tasks/title-autocomplete'
 import { QuickCreateClientModal, QuickCreateServiceModal } from '@/components/tasks/quick-create-modals'
+import { markRequestPromoted } from '@/app/(dashboard)/dashboard/requests/actions'
 import AppSelect from '@/components/ui/app-select'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
@@ -110,6 +111,12 @@ interface VisibilitySettings {
 }
 
 interface Props {
+  /** Set when arriving via /dashboard/tasks?fromRequest=<id> — opens the Add
+   *  Task modal prefilled from the external request (promotion flow). */
+  promotionRequest?: {
+    id: string; ref_no: number; title: string; description: string
+    client_id: string | null; service_id: string | null; due_date: string | null
+  } | null
   dbTaskTotal?: number
   initialTasks: Task[]
   initialTrash: (Task & { deleted_at: string })[]
@@ -253,7 +260,7 @@ function SortablePanelRow({ id, label, onUp, onDown, isFirst, isLast }: {
   )
 }
 
-export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, myTaskIds, visibilitySettings, permissionFlags }: Props) {
+export default function TasksClient({ promotionRequest, dbTaskTotal, initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, myTaskIds, visibilitySettings, permissionFlags }: Props) {
   const { role, employee: currentEmployee } = useRole()
   const { can } = usePermissions()
   const { toasts, dismiss, success, error: toastError } = useToast()
@@ -472,6 +479,26 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
   const [showMobileFilters, setShowMobileFilters] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [previewTaskNumber, setPreviewTaskNumber] = useState<number | null>(null)
+
+  // ── Request promotion (?fromRequest=…) — open Add Task prefilled (design §5).
+  // The task is only created when the user presses Create Task; on success we
+  // link it back to the request via markRequestPromoted.
+  const [promotingRequestId, setPromotingRequestId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!promotionRequest) return
+    setForm({
+      ...EMPTY_FORM,
+      title: promotionRequest.title,
+      description: promotionRequest.description,
+      client_id: promotionRequest.client_id || '',
+      service_id: promotionRequest.service_id || '',
+      task_date: promotionRequest.due_date || new Date().toISOString().split('T')[0],
+    })
+    setPromotingRequestId(promotionRequest.id)
+    setShowForm(true)
+    // Strip the query param so a refresh doesn't re-trigger the prefill.
+    window.history.replaceState(null, '', '/dashboard/tasks')
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     seedFromTasks(initialTasks.map(t => ({
@@ -1138,6 +1165,18 @@ export default function TasksClient({ dbTaskTotal, initialTasks, initialTrash, c
 
       // Log task created (fire-and-forget server action — doesn't block UI)
       void logTaskCreated(data.id, data.title, data.task_number ?? null)
+
+      // Promotion flow: link the created task back to the external request
+      // (sets request → started, logs activity, emails the requester).
+      if (promotingRequestId) {
+        void markRequestPromoted(promotingRequestId, data.id, data.task_number ?? null)
+          .then(res => {
+            if (res.ok) success('Request promoted', `Task #${data.task_number ?? ''} linked — requester notified`)
+            else toastError('Task created, but linking the request failed', res.error)
+          })
+          .catch(() => {})
+        setPromotingRequestId(null)
+      }
 
       // If the user can't see pricing, billing_amount was inserted as 0.
       // Backfill the correct price server-side (admin client reads pricing tables).
