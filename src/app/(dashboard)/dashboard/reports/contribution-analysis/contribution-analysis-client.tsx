@@ -13,7 +13,7 @@ import {
 import {
   Download, Printer, FileSpreadsheet, SlidersHorizontal, X, ArrowUp, ArrowDown,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Layers, Pin, GripVertical,
-  Save, RotateCcw, Building2, Check,
+  Save, RotateCcw, Building2, Check, Search,
 } from 'lucide-react'
 import { savePersonalReportLayout, saveSystemReportLayout } from './actions'
 
@@ -195,36 +195,113 @@ function MultiSelect({ label, options, selected, onChange }: {
   onChange: (ids: string[]) => void
 }) {
   const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
   const ref = useRef<HTMLDivElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
+
   useEffect(() => {
-    if (!open) return
+    if (!open) { setQuery(''); return }
+    setTimeout(() => searchRef.current?.focus(), 50)
     const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
   }, [open])
+
+  const filtered = query.trim()
+    ? options.filter(o => o.name.toLowerCase().includes(query.toLowerCase()))
+    : options
+
   const toggle = (id: string) =>
     onChange(selected.includes(id) ? selected.filter(x => x !== id) : [...selected, id])
+
+  const allFilteredIds = filtered.map(o => o.id)
+  const allFilteredSelected = allFilteredIds.every(id => selected.includes(id))
+  const toggleAll = () => {
+    if (allFilteredSelected) {
+      onChange(selected.filter(id => !allFilteredIds.includes(id)))
+    } else {
+      const next = [...new Set([...selected, ...allFilteredIds])]
+      onChange(next)
+    }
+  }
+
+  const buttonLabel = selected.length
+    ? selected.length === 1
+      ? (options.find(o => o.id === selected[0])?.name ?? '1 selected')
+      : `${selected.length} selected`
+    : `All ${label.toLowerCase()}`
+
   return (
     <div className="relative" ref={ref}>
       <label className="block text-[11px] font-medium text-muted-foreground mb-1">{label}</label>
       <button
         type="button" onClick={() => setOpen(o => !o)}
-        className="w-full text-left bg-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs hover:border-border/80 flex items-center justify-between gap-1"
+        className="w-full text-left bg-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs hover:border-purple-500/40 focus:outline-none focus:border-purple-500/60 flex items-center justify-between gap-1 transition-colors"
       >
-        <span className="truncate">{selected.length ? `${selected.length} selected` : `All ${label.toLowerCase()}`}</span>
-        <ChevronRight className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`} />
+        <span className="truncate flex items-center gap-1.5">
+          {selected.length > 0 && (
+            <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-purple-500/20 text-purple-400 text-[10px] font-semibold shrink-0">
+              {selected.length}
+            </span>
+          )}
+          {buttonLabel}
+        </span>
+        <ChevronDown className={`w-3 h-3 shrink-0 transition-transform text-muted-foreground ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
-        <div className="absolute z-40 mt-1 w-56 max-h-64 overflow-auto bg-card border border-border rounded-lg shadow-xl p-1">
-          {selected.length > 0 && (
-            <button onClick={() => onChange([])} className="w-full text-left px-2 py-1.5 text-[11px] text-red-400 hover:bg-secondary rounded">Clear selection</button>
-          )}
-          {options.map(o => (
-            <label key={o.id} className="flex items-center gap-2 px-2 py-1.5 text-xs hover:bg-secondary rounded cursor-pointer">
-              <input type="checkbox" checked={selected.includes(o.id)} onChange={() => toggle(o.id)} className="accent-purple-500" />
-              <span className="truncate">{o.name}</span>
-            </label>
-          ))}
+        <div className="absolute z-50 mt-1 w-64 bg-card border border-border rounded-xl shadow-2xl flex flex-col overflow-hidden">
+          {/* Search */}
+          <div className="p-2 border-b border-border">
+            <div className="flex items-center gap-1.5 bg-secondary rounded-lg px-2 py-1.5">
+              <Search className="w-3 h-3 text-muted-foreground shrink-0" />
+              <input
+                ref={searchRef}
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                placeholder={`Search ${label.toLowerCase()}…`}
+                className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/50"
+              />
+              {query && (
+                <button onClick={() => setQuery('')} className="text-muted-foreground hover:text-foreground">
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          </div>
+          {/* Select all / clear row */}
+          <div className="flex items-center justify-between px-2 py-1.5 border-b border-border/50">
+            <button
+              onClick={toggleAll}
+              className="text-[11px] text-purple-400 hover:text-purple-300 font-medium"
+            >
+              {allFilteredSelected ? 'Deselect all' : 'Select all'}
+              {query ? ` (${filtered.length})` : ''}
+            </button>
+            {selected.length > 0 && (
+              <button onClick={() => onChange([])} className="text-[11px] text-red-400 hover:text-red-300">
+                Clear
+              </button>
+            )}
+          </div>
+          {/* Options list */}
+          <div className="overflow-y-auto max-h-56 p-1">
+            {filtered.length === 0 ? (
+              <p className="text-center text-xs text-muted-foreground py-4">No matches</p>
+            ) : (
+              filtered.map(o => {
+                const checked = selected.includes(o.id)
+                return (
+                  <label key={o.id} className={`flex items-center gap-2 px-2 py-1.5 text-xs rounded-lg cursor-pointer transition-colors ${checked ? 'bg-purple-500/10 text-purple-200' : 'hover:bg-secondary text-foreground'}`}>
+                    <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${checked ? 'bg-purple-500 border-purple-500' : 'border-border'}`}>
+                      {checked && <Check className="w-2.5 h-2.5 text-white" />}
+                    </span>
+                    <input type="checkbox" checked={checked} onChange={() => toggle(o.id)} className="sr-only" />
+                    <span className="truncate">{o.name}</span>
+                  </label>
+                )
+              })
+            )}
+          </div>
         </div>
       )}
     </div>
