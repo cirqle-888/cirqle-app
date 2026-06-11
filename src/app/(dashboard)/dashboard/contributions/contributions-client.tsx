@@ -169,6 +169,7 @@ export default function ContributionsClient({
   const [filterEmployee, setFilterEmployee] = useState(searchParams.get('employee') || '')
   const [filterEmployeeMode, setFilterEmployeeMode] = useState<'worked' | 'solo' | 'any'>((searchParams.get('empmode') as any) || 'worked')
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'done' | 'missing'>((searchParams.get('status') as any) || 'all')
+  const [sortBy, setSortBy] = useState<'today_first' | 'date_desc' | 'date_asc' | 'amount_desc' | 'client'>((searchParams.get('sort') as any) || 'today_first')
   const [showMobileFilters, setShowMobileFilters] = useState(false)
   const [mobileLimit, setMobileLimit] = useState(100)
   const [filterDate, setFilterDate] = useState<DateFilterValue>(() => {
@@ -186,13 +187,14 @@ export default function ContributionsClient({
     if (filterEmployee) params.set('employee', filterEmployee); else params.delete('employee')
     if (filterEmployeeMode && filterEmployeeMode !== 'worked') params.set('empmode', filterEmployeeMode); else params.delete('empmode')
     if (statusFilter && statusFilter !== 'all') params.set('status', statusFilter); else params.delete('status')
+    if (sortBy && sortBy !== 'today_first') params.set('sort', sortBy); else params.delete('sort')
     if (filterDate) params.set('date', JSON.stringify(filterDate)); else params.delete('date')
 
     const newQueryString = params.toString()
     if (newQueryString !== searchParams.toString()) {
       router.replace(`${pathname}?${newQueryString}`, { scroll: false })
     }
-  }, [listViewMode, search, filterClient, filterService, filterEmployee, filterEmployeeMode, statusFilter, filterDate, pathname, router, searchParams])
+  }, [listViewMode, search, filterClient, filterService, filterEmployee, filterEmployeeMode, statusFilter, sortBy, filterDate, pathname, router, searchParams])
   const autoRecalcRan = useRef(false)
 
   // ── Financial visibility ─────────────────────────────
@@ -490,6 +492,18 @@ export default function ContributionsClient({
     return m
   }, [scores, contributorRecords])
 
+  // taskId → empId → { pct, earnings_inr } — for showing scores on list cards
+  const taskScoreDetailMap = useMemo(() => {
+    const m: Record<string, Record<string, { pct: number; earnings: number | null }>> = {}
+    scores.forEach(s => {
+      if (s.score_percentage > 0 || (s.earnings_inr ?? 0) > 0) {
+        if (!m[s.task_id]) m[s.task_id] = {}
+        m[s.task_id][s.employee_id] = { pct: s.score_percentage, earnings: s.earnings_inr ?? null }
+      }
+    })
+    return m
+  }, [scores])
+
   // Tools lookup: taskId → tool_id[]
   const taskToolsMap = useMemo(() => {
     const m: Record<string, string[]> = {}
@@ -681,10 +695,20 @@ export default function ContributionsClient({
       : null
   }, [scores, selectedTask])
 
-  // For employee/view_only role, only show their assigned tasks
+  // For employee/view_only role, only show their assigned tasks — then apply quick sort
   const myVisibleTasks = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10)
+    if (sortBy === 'today_first') {
+      const todayTasks = filteredTasks.filter(t => t.task_date === today)
+      const rest = filteredTasks.filter(t => t.task_date !== today).sort((a, b) => (b.task_date || '').localeCompare(a.task_date || ''))
+      return [...todayTasks, ...rest]
+    }
+    if (sortBy === 'date_asc')    return [...filteredTasks].sort((a, b) => (a.task_date || '').localeCompare(b.task_date || ''))
+    if (sortBy === 'date_desc')   return [...filteredTasks].sort((a, b) => (b.task_date || '').localeCompare(a.task_date || ''))
+    if (sortBy === 'amount_desc') return [...filteredTasks].sort((a, b) => (b.billing_amount_inr ?? 0) - (a.billing_amount_inr ?? 0))
+    if (sortBy === 'client')      return [...filteredTasks].sort((a, b) => (a.client?.name || '').localeCompare(b.client?.name || ''))
     return filteredTasks
-  }, [filteredTasks])
+  }, [filteredTasks, sortBy])
 
   const tasksByDate = useMemo(() => {
     const map: Record<string, any[]> = {}
@@ -852,13 +876,14 @@ export default function ContributionsClient({
             newActiveSubParams.add(`${employee_id}:${parameter_id}`)
           }
         }
-        newExpandedEmps.add(employee_id)
+        // Note: we intentionally do NOT add to newExpandedEmps here —
+        // admin cards start collapsed; tap to open the one you want.
       })
 
       setContributions(contribs)
       setActiveGroups(newActiveGroups)
       setActiveSubParams(newActiveSubParams)
-      setExpandedEmployees(newExpandedEmps)
+      setExpandedEmployees(new Set()) // always start collapsed
     }
 
     if (toolRes.data?.length) {
@@ -879,7 +904,7 @@ export default function ContributionsClient({
           // Re-expand employees that have data
           const empIds = new Set<string>()
           Object.values(dc || {}).forEach((empMap: any) => Object.keys(empMap).forEach(id => empIds.add(id)))
-          if (empIds.size) setExpandedEmployees(empIds)
+          // Don't auto-expand for admin — only own-scope expands below
         }
       } catch { /* ignore */ }
     }
@@ -1287,6 +1312,18 @@ export default function ContributionsClient({
                 placeholder="Service"
                 sortKey="services"
               />
+              <FilterDropdown
+                options={[
+                  { value: 'today_first', label: 'Today First' },
+                  { value: 'date_desc',   label: 'Newest' },
+                  { value: 'date_asc',    label: 'Oldest' },
+                  { value: 'amount_desc', label: 'Amount ↓' },
+                  { value: 'client',      label: 'Client A→Z' },
+                ]}
+                value={sortBy === 'today_first' ? '' : sortBy}
+                onChange={v => setSortBy((v || 'today_first') as typeof sortBy)}
+                placeholder="Sort by"
+              />
 
               {/* thin separator between filter dropdowns and status chips */}
               <span className="hidden sm:block w-px h-5 bg-foreground/10 shrink-0" />
@@ -1472,6 +1509,7 @@ export default function ContributionsClient({
                                   {employees.map(emp => {
                                     const done = contributed?.has(emp.id)
                                     const assigned = taskAssignmentMap[task.id]?.has(emp.id)
+                                    const scoreDetail = taskScoreDetailMap[task.id]?.[emp.id]
                                     const chipStyle = done
                                       ? 'bg-green-500/10 border-green-500/20 text-green-400'
                                       : assigned
@@ -1484,6 +1522,14 @@ export default function ContributionsClient({
                                         className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium border transition-all ${chipStyle} ${showFinancials && !done ? 'hover:scale-105 cursor-pointer' : 'cursor-default'}`}>
                                         {done ? <Check className="w-2.5 h-2.5" /> : assigned ? <UserCheck className="w-2.5 h-2.5" /> : null}
                                         {dn(emp)}
+                                        {done && scoreDetail && (
+                                          <span className="opacity-80 font-semibold">
+                                            {scoreDetail.pct.toFixed(0)}%
+                                            {canSeeFinancials && showFinancials && scoreDetail.earnings !== null && (
+                                              <span className="ml-0.5 text-green-300">₹{Math.round(scoreDetail.earnings).toLocaleString('en-IN')}</span>
+                                            )}
+                                          </span>
+                                        )}
                                       </button>
                                     )
                                   })}
@@ -2352,7 +2398,19 @@ export default function ContributionsClient({
                         )}
                       </div>
                       <div className="flex items-center gap-2 shrink-0 ml-2">
-                        {!groupSummary.length && <span className="text-xs text-muted-foreground/50">tap to expand</span>}
+                        {(() => {
+                          const saved = selectedTask && scores.find(s => s.task_id === selectedTask.id && s.employee_id === emp.id && s.score_percentage > 0)
+                          if (saved) return (
+                            <span className="flex items-center gap-1 text-xs font-semibold text-primary/80">
+                              {saved.score_percentage.toFixed(1)}%
+                              {canSeeFinancials && showFinancials && (saved.earnings_inr ?? 0) > 0 && (
+                                <span className="text-green-400">₹{Math.round(saved.earnings_inr!).toLocaleString('en-IN')}</span>
+                              )}
+                            </span>
+                          )
+                          if (!groupSummary.length) return <span className="text-xs text-muted-foreground/50">tap to expand</span>
+                          return null
+                        })()}
                         {isExpanded ? <ChevronLeft className="w-4 h-4 text-muted-foreground rotate-90" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
                       </div>
                     </button>
