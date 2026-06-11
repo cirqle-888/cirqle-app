@@ -17,6 +17,7 @@ import {
   Save, RotateCcw, Building2, Check, Search,
 } from 'lucide-react'
 import { savePersonalReportLayout, saveSystemReportLayout } from './actions'
+import { readSortData, trackUsage, type SortEntry } from '@/lib/hooks/use-smart-sort'
 
 // Persisted layout shape (stored as JSONB). All fields optional so older/newer
 // saved layouts stay forward-compatible. The index signature both allows future
@@ -189,17 +190,24 @@ function buildColumns(employees: EmployeeColumn[], dp: number): Col[] {
 }
 
 // ── Small inline multi-select (chips dropdown) ────────────────────────────────
-function MultiSelect({ label, options, selected, onChange }: {
+function MultiSelect({ label, options, selected, onChange, sortKey }: {
   label: string
   options: { id: string; name: string }[]
   selected: string[]
   onChange: (ids: string[]) => void
+  /** smart-sort key (e.g. "clients") — orders recently used → frequent → rest */
+  sortKey?: string
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [panelPos, setPanelPos] = useState<{ top: number; left: number; width: number; openUp: boolean } | null>(null)
+  const [sortData, setSortData] = useState<Record<string, SortEntry>>({})
   const containerRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (sortKey) setSortData(readSortData(sortKey))
+  }, [sortKey])
 
   const recomputePos = useCallback(() => {
     if (!containerRef.current) return
@@ -236,12 +244,37 @@ function MultiSelect({ label, options, selected, onChange }: {
     return () => document.removeEventListener('mousedown', h)
   }, [open])
 
-  const filtered = query.trim()
-    ? options.filter(o => o.name.toLowerCase().includes(query.toLowerCase()))
-    : options
+  // Smart ordering: recently used (30d) first, then most frequently used,
+  // then the rest in their incoming (alphabetical) order — same scheme as
+  // FilterDropdown. Plain order while typing a search query.
+  const ordered = useMemo(() => {
+    if (!sortKey || query.trim()) return options
+    const RECENT_MS = 30 * 24 * 60 * 60 * 1000
+    const now = Date.now()
+    const rec: typeof options = [], freq: typeof options = [], rest: typeof options = []
+    for (const o of options) {
+      const e = sortData[o.id]
+      if (!e) { rest.push(o); continue }
+      if (now - new Date(e.lastUsed).getTime() <= RECENT_MS) rec.push(o)
+      else freq.push(o)
+    }
+    rec.sort((a, b) => (sortData[b.id]?.lastUsed || '').localeCompare(sortData[a.id]?.lastUsed || ''))
+    freq.sort((a, b) => (sortData[b.id]?.count || 0) - (sortData[a.id]?.count || 0) || a.name.localeCompare(b.name))
+    return [...rec, ...freq, ...rest]
+  }, [options, sortKey, sortData, query])
 
-  const toggle = (id: string) =>
-    onChange(selected.includes(id) ? selected.filter(x => x !== id) : [...selected, id])
+  const filtered = query.trim()
+    ? ordered.filter(o => o.name.toLowerCase().includes(query.toLowerCase()))
+    : ordered
+
+  const toggle = (id: string) => {
+    const adding = !selected.includes(id)
+    if (adding && sortKey) {
+      trackUsage(sortKey, id)
+      setSortData(readSortData(sortKey))
+    }
+    onChange(adding ? [...selected, id] : selected.filter(x => x !== id))
+  }
 
   const allFilteredIds = filtered.map(o => o.id)
   const allFilteredSelected = allFilteredIds.length > 0 && allFilteredIds.every(id => selected.includes(id))
@@ -531,6 +564,40 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     () => (filters.employeeId ? allDisplayEmployees.filter(e => e.id === filters.employeeId) : allDisplayEmployees),
     [allDisplayEmployees, filters.employeeId],
   )
+
+  // ── Smart Mode: with any date filter active (from/to/month/year), the
+  // Clients/Services/Has-contributor options narrow to values present in rows
+  // within that period (current selections kept so they stay clearable).
+  const dateScopedRows = useMemo(() => {
+    const { from, to, month, year } = filters
+    if (!from && !to && !month && !year) return null
+    const y = year ? parseInt(year, 10) : null
+    const m = month ? parseInt(month, 10) : null
+    return rows.filter(r => {
+      const d = r.task_date || ''
+      if (from && d < from) return false
+      if (to && d > to) return false
+      if (y !== null && parseInt(d.slice(0, 4), 10) !== y) return false
+      if (m !== null && parseInt(d.slice(5, 7), 10) !== m) return false
+      return true
+    })
+  }, [rows, filters.from, filters.to, filters.month, filters.year]) // eslint-disable-line react-hooks/exhaustive-deps
+  const scopedClients = useMemo(() => {
+    if (!dateScopedRows) return clients
+    const ids = new Set(dateScopedRows.map(r => r.client_id))
+    return clients.filter(c => ids.has(c.id) || filters.clientIds.includes(c.id))
+  }, [dateScopedRows, clients, filters.clientIds])
+  const scopedServices = useMemo(() => {
+    if (!dateScopedRows) return services
+    const ids = new Set(dateScopedRows.map(r => r.service_id))
+    return services.filter(s => ids.has(s.id) || filters.serviceIds.includes(s.id))
+  }, [dateScopedRows, services, filters.serviceIds])
+  const scopedContribEmployees = useMemo(() => {
+    if (!dateScopedRows) return allDisplayEmployees
+    const ids = new Set<string>()
+    dateScopedRows.forEach(r => { for (const id in r.emp) if ((r.emp[id]?.pct ?? 0) > 0) ids.add(id) })
+    return allDisplayEmployees.filter(e => ids.has(e.id) || e.id === filters.employeeId)
+  }, [dateScopedRows, allDisplayEmployees, filters.employeeId])
 
   // Full column set (for export) and the visible subset (group toggles applied).
   // Non-employee columns are sorted according to the user's colOrder preference.
@@ -1187,13 +1254,13 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
                 <label className="block text-[11px] font-medium text-muted-foreground mb-1">Year</label>
                 <input type="number" placeholder="Any" value={filters.year} onChange={e => setFilters(f => ({ ...f, year: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs" />
               </div>
-              <MultiSelect label="Clients" options={clients} selected={filters.clientIds} onChange={ids => setFilters(f => ({ ...f, clientIds: ids }))} />
-              <MultiSelect label="Services" options={services} selected={filters.serviceIds} onChange={ids => setFilters(f => ({ ...f, serviceIds: ids }))} />
+              <MultiSelect label="Clients" options={scopedClients} selected={filters.clientIds} onChange={ids => setFilters(f => ({ ...f, clientIds: ids }))} sortKey="clients" />
+              <MultiSelect label="Services" options={scopedServices} selected={filters.serviceIds} onChange={ids => setFilters(f => ({ ...f, serviceIds: ids }))} sortKey="services" />
               <div>
                 <label className="block text-[11px] font-medium text-muted-foreground mb-1">Has contributor</label>
                 <select value={filters.employeeId} onChange={e => setFilters(f => ({ ...f, employeeId: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs">
                   <option value="">Any employee</option>
-                  {allDisplayEmployees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                  {scopedContribEmployees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
                 </select>
               </div>
               <MultiSelect label="Status" options={STATUSES.map(s => ({ id: s, name: s }))} selected={filters.statuses} onChange={ids => setFilters(f => ({ ...f, statuses: ids }))} />

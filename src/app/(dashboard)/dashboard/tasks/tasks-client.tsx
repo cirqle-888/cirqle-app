@@ -1582,6 +1582,36 @@ export default function TasksClient({ promotionRequest, dbTaskTotal, initialTask
     return result.sort((a, b) => a.label.localeCompare(b.label))
   }, [clients, tasks])
 
+  // ── Smart Mode: with a date filter active, dropdowns only offer values that
+  // actually occur in tasks within the selected period (current selection is
+  // always kept so it can be cleared). FilterDropdown handles recency/frequency
+  // ordering via sortKey.
+  const dateScopedTasks = useMemo(
+    () => (filterDate ? tasks.filter(t => matchesDateFilter(t.task_date, filterDate)) : null),
+    [tasks, filterDate],
+  )
+  const scopedClientOptions = useMemo(() => {
+    if (!dateScopedTasks) return clientFilterOptions
+    const ids = new Set(dateScopedTasks.map(t => t.client?.id).filter(Boolean))
+    return clientFilterOptions.filter(o => ids.has(o.value) || o.value === filterClient)
+  }, [dateScopedTasks, clientFilterOptions, filterClient])
+  const scopedServiceOptions = useMemo(() => {
+    const all = services.map(s => ({ value: s.id, label: s.name }))
+    if (!dateScopedTasks) return all
+    const ids = new Set(dateScopedTasks.map(t => t.service?.id).filter(Boolean))
+    return all.filter(o => ids.has(o.value) || o.value === filterService)
+  }, [dateScopedTasks, services, filterService])
+  const scopedAssigneeOptions = useMemo(() => {
+    const all = employees.map(emp => ({ value: emp.id, label: dn(emp) }))
+    if (!dateScopedTasks) return all
+    const taskIds = new Set(dateScopedTasks.map(t => t.id))
+    const ids = new Set<string>()
+    for (const a of localAssignments)      if (taskIds.has(a.task_id)) ids.add(a.employee_id)
+    for (const a of localGroupAssignments) if (taskIds.has(a.task_id)) ids.add(a.employee_id)
+    for (const a of localParamAssignments) if (taskIds.has(a.task_id)) ids.add(a.employee_id)
+    return all.filter(o => ids.has(o.value) || o.value === filterAssignee)
+  }, [dateScopedTasks, employees, dn, localAssignments, localGroupAssignments, localParamAssignments, filterAssignee])
+
   // py-2.5 on mobile = 40px touch target; py-2 keeps desktop density unchanged.
   const inputCls = 'w-full bg-secondary border border-border rounded-lg px-3 py-2.5 sm:py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50'
 
@@ -2035,9 +2065,9 @@ export default function TasksClient({ promotionRequest, dbTaskTotal, initialTask
             {/* Row 2: Filters + Status chips + Pagination (compact, no wrap) */}
             <div className="flex items-center gap-1 flex-wrap">
               <DateFilter compact value={filterDate} onChange={setFilterDate} />
-              <FilterDropdown compact options={clientFilterOptions} value={filterClient} onChange={setFilterClient} placeholder="Client" sortKey="clients" maxLabelWidth="max-w-[90px]" />
-              <FilterDropdown compact options={services.map(s => ({ value: s.id, label: s.name }))} value={filterService} onChange={setFilterService} placeholder="Service" sortKey="services" maxLabelWidth="max-w-[90px]" />
-              <FilterDropdown compact options={employees.map(emp => ({ value: emp.id, label: dn(emp) }))} value={filterAssignee} onChange={setFilterAssignee} placeholder="Assignee" sortKey="employees" maxLabelWidth="max-w-[90px]" />
+              <FilterDropdown compact options={scopedClientOptions} value={filterClient} onChange={setFilterClient} placeholder="Client" sortKey="clients" maxLabelWidth="max-w-[90px]" />
+              <FilterDropdown compact options={scopedServiceOptions} value={filterService} onChange={setFilterService} placeholder="Service" sortKey="services" maxLabelWidth="max-w-[90px]" />
+              <FilterDropdown compact options={scopedAssigneeOptions} value={filterAssignee} onChange={setFilterAssignee} placeholder="Assignee" sortKey="employees" maxLabelWidth="max-w-[90px]" />
               <FilterDropdown compact
                 options={[
                   { value: 'today_first', label: 'Today First' },

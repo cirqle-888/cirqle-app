@@ -825,6 +825,45 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     })
   }, [categories, entries])
 
+  // ── Smart Mode: with a month filter active, the Category/Client filter
+  // dropdowns only offer values present in that month's entries (the current
+  // selection is kept so it stays clearable).
+  const monthEntries = useMemo(
+    () => (filterMonth ? entries.filter(e => e.entry_date?.startsWith(filterMonth)) : null),
+    [entries, filterMonth],
+  )
+  const scopedFilterCategories = useMemo(() => {
+    if (!monthEntries) return categoriesByRecentUse
+    const ids = new Set(monthEntries.map(e => e.category_id).filter(Boolean))
+    return categoriesByRecentUse.filter(c => ids.has(c.id) || c.id === filterCategory)
+  }, [monthEntries, categoriesByRecentUse, filterCategory])
+  // Clients ordered by most recent cashbook activity (direct or via allocation),
+  // then narrowed to the filtered month when one is selected.
+  const scopedFilterClients = useMemo(() => {
+    const lastUsed: Record<string, string> = {}
+    const touch = (id: string | null | undefined, date: string | null | undefined) => {
+      if (id && date && (!lastUsed[id] || date > lastUsed[id])) lastUsed[id] = date
+    }
+    for (const e of entries) {
+      touch(e.client_id, e.entry_date)
+      e.allocations?.forEach((a: any) => { if (!a.deleted_at) touch(a.invoice?.client?.id, e.entry_date) })
+    }
+    const ordered = [...clients].sort((a, b) => {
+      const aD = lastUsed[a.id] ?? '', bD = lastUsed[b.id] ?? ''
+      if (bD && !aD) return 1
+      if (aD && !bD) return -1
+      if (aD !== bD) return bD.localeCompare(aD)
+      return a.name.localeCompare(b.name)
+    })
+    if (!monthEntries) return ordered
+    const inMonth = new Set<string>()
+    for (const e of monthEntries) {
+      if (e.client_id) inMonth.add(e.client_id)
+      e.allocations?.forEach((a: any) => { if (!a.deleted_at && a.invoice?.client?.id) inMonth.add(a.invoice.client.id) })
+    }
+    return ordered.filter(c => inMonth.has(c.id) || c.id === filterClient)
+  }, [entries, clients, monthEntries, filterClient])
+
   return (
     <div>
       <Header
@@ -950,7 +989,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 max-w-[150px]"
           >
             <option value="">All Categories</option>
-            {categoriesByRecentUse.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {scopedFilterCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
 
           <select
@@ -971,7 +1010,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 max-w-[170px]"
           >
             <option value="">All Clients</option>
-            {clients.map(c => <option key={c.id} value={c.id}>{c.code ? `${c.name} · ${c.code}` : c.name}</option>)}
+            {scopedFilterClients.map(c => <option key={c.id} value={c.id}>{c.code ? `${c.name} · ${c.code}` : c.name}</option>)}
           </select>
 
           <button

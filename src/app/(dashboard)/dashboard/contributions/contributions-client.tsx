@@ -612,6 +612,36 @@ export default function ContributionsClient({
     return m
   }, [assignments])
 
+  // ── Smart Mode: with a date filter active, the Employee/Client/Service
+  // dropdowns only offer values present in tasks within the selected period
+  // (current selection is kept so it stays clearable).
+  const dateScopedTasks = useMemo(
+    () => (filterDate ? localTasks.filter((t: any) => matchesDateFilter(t.task_date, filterDate)) : null),
+    [localTasks, filterDate],
+  )
+  const scopedEmployeeOptions = useMemo(() => {
+    const all = employees.map((emp: any) => ({ value: emp.id, label: dn(emp) }))
+    if (!dateScopedTasks) return all
+    const ids = new Set<string>()
+    dateScopedTasks.forEach((t: any) => {
+      taskScoreMap[t.id]?.forEach((id: string) => ids.add(id))
+      taskAssignmentMap[t.id]?.forEach((id: string) => ids.add(id))
+    })
+    return all.filter(o => ids.has(o.value) || o.value === filterEmployee)
+  }, [dateScopedTasks, employees, dn, taskScoreMap, taskAssignmentMap, filterEmployee])
+  const scopedClientOptions = useMemo(() => {
+    const all = clients.map(c => ({ value: c.id, label: c.name }))
+    if (!dateScopedTasks) return all
+    const ids = new Set(dateScopedTasks.map((t: any) => t.client?.id).filter(Boolean))
+    return all.filter(o => ids.has(o.value) || o.value === filterClient)
+  }, [dateScopedTasks, clients, filterClient])
+  const scopedServiceOptions = useMemo(() => {
+    const all = services.map(s => ({ value: s.id, label: s.name }))
+    if (!dateScopedTasks) return all
+    const ids = new Set(dateScopedTasks.map((t: any) => t.service_id).filter(Boolean))
+    return all.filter(o => ids.has(o.value) || o.value === filterService)
+  }, [dateScopedTasks, services, filterService])
+
   async function toggleAssignment(taskId: string, empId: string) {
     const isAssigned = taskAssignmentMap[taskId]?.has(empId)
     const next = isAssigned
@@ -1273,7 +1303,7 @@ export default function ContributionsClient({
               <DateFilter value={filterDate} onChange={setFilterDate} />
               
               <FilterDropdown
-                options={employees.map(emp => ({ value: emp.id, label: dn(emp) }))}
+                options={scopedEmployeeOptions}
                 value={filterEmployee}
                 onChange={v => { setFilterEmployee(v); setFilterEmployeeMode('worked') }}
                 placeholder="Employee"
@@ -1299,14 +1329,14 @@ export default function ContributionsClient({
                 </div>
               )}
               <FilterDropdown
-                options={clients.map(c => ({ value: c.id, label: c.name }))}
+                options={scopedClientOptions}
                 value={filterClient}
                 onChange={setFilterClient}
                 placeholder="Client"
                 sortKey="clients"
               />
               <FilterDropdown
-                options={services.map(s => ({ value: s.id, label: s.name }))}
+                options={scopedServiceOptions}
                 value={filterService}
                 onChange={setFilterService}
                 placeholder="Service"
