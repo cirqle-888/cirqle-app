@@ -57,6 +57,14 @@ function activityText(a: any): string {
 /** Externally-open statuses (reorderable). Completed/Delivered fall out. */
 const OPEN_SET = new Set(['submitted', 'under_review', 'approved', 'started', 'in_progress', 'waiting_for_content', 'revision_requested'])
 
+/** Auto-grow a textarea with its content, capped at 600px (then scrolls).
+ *  Keeps the initial min-height from the className. */
+function autoGrow(e: React.FormEvent<HTMLTextAreaElement>) {
+  const el = e.currentTarget
+  el.style.height = 'auto'
+  el.style.height = `${Math.min(el.scrollHeight + 2, 600)}px`
+}
+
 export default function IntakeClient({
   token, linkType, requesterName, services, initialRequests,
   logoUrl, lastTaskTitle, driveFolderLink,
@@ -155,7 +163,7 @@ export default function IntakeClient({
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8 sm:py-12">
+    <div className="max-w-3xl lg:max-w-6xl mx-auto px-4 py-8 sm:py-12">
       {/* Brand header — workspace logo with wordmark fallback */}
       <div className="text-center mb-8">
         {logoUrl ? (
@@ -184,6 +192,9 @@ export default function IntakeClient({
         </div>
       )}
 
+      {/* Desktop: two-column canvas (form left, requests right). Mobile: stacked. */}
+      <div className="lg:grid lg:grid-cols-2 lg:gap-8 lg:items-start">
+      <div className="lg:sticky lg:top-6">
       {/* ── New Request (collapsible — one window with the list below) ── */}
       <button
         onClick={() => { setFormOpen(o => !o); setSentRef(null) }}
@@ -212,6 +223,7 @@ export default function IntakeClient({
             <div>
               <label className={labelCls}>Details</label>
               <textarea rows={6} value={form.description || ''} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                onInput={autoGrow}
                 className={inputCls + ' resize-y min-h-[140px]'}
                 placeholder={'Describe the work in as much detail as you like — sizes, formats, headings, text to include, offers, products…\n\nLong paragraphs are welcome.'} />
             </div>
@@ -242,6 +254,7 @@ export default function IntakeClient({
             <div>
               <label className={labelCls}>Design plan / notes</label>
               <textarea rows={5} value={form.design_plan || ''} onChange={e => setForm(f => ({ ...f, design_plan: e.target.value }))}
+                onInput={autoGrow}
                 className={inputCls + ' resize-y min-h-[110px]'}
                 placeholder={'Style direction, colours, layout ideas, references to follow…\n\nShare your full brainstorm here.'} />
             </div>
@@ -321,6 +334,7 @@ export default function IntakeClient({
             </button>
           </form>
       )}
+      </div>
 
       {/* ── Your requests (always visible — same window) ── */}
       <div>
@@ -360,7 +374,7 @@ export default function IntakeClient({
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-[11px] font-mono text-muted-foreground">REQ-{String(r.ref_no).padStart(4, '0')}</span>
-                      <p className="text-sm font-semibold truncate">{r.title}</p>
+                      <p className="text-sm font-semibold break-words">{r.title}</p>
                     </div>
                     <div className="flex items-center gap-2.5 mt-1 text-[11px] text-muted-foreground">
                       {r.due_date && <span className="flex items-center gap-1"><CalendarDays className="w-3 h-3" />{fmtDate(r.due_date)}</span>}
@@ -491,6 +505,7 @@ export default function IntakeClient({
             )
           })}
         </div>
+      </div>
       </div>
 
       <p className="text-center text-[11px] text-muted-foreground/50 mt-8">
