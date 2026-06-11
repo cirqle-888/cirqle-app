@@ -8,7 +8,7 @@ import { createClient } from '@/lib/supabase/client'
 import { insertCashbookEntries, updateCashbookEntry, softDeleteCashbookEntry, fetchLiveRate, backupAndResetAllocations } from './actions'
 import { formatCompact, round2 } from '@/lib/calculations/currency'
 import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
-import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, RefreshCw, Landmark, CheckCircle, ArrowLeftRight } from 'lucide-react'
+import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, RefreshCw, Landmark, CheckCircle, ArrowLeftRight, Copy } from 'lucide-react'
 import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from '@/lib/utils'
 import type { DateFilterValue } from '@/components/ui/date-filter'
@@ -342,6 +342,31 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     const rate = r ? String(r) : ''
     const amountInr = amountStr === '' ? '' : String(round2((parseFloat(amountStr) || 0) * (parseFloat(rate) || 0)))
     return { rate, amountInr, rateSource: r ? 'settings' : 'manual' }
+  }
+
+  /** Open the Add form pre-filled from an existing entry but dated today (duplicate). */
+  function openDuplicateForm(entry: Entry) {
+    const cur = (entry.currency as Currency) ?? 'INR'
+    const storedRate = entry.exchange_rate ?? (cur === 'INR' ? 1 : (rateMap[cur] || 1))
+    setForm({
+      type:            entry.type,
+      category_id:     entry.category_id ?? '',
+      bank_account_id: entry.bank_account_id ?? '',
+      amount:          entry.amount != null ? String(entry.amount) : '',
+      currency:        cur,
+      rate:            cur === 'INR' ? '1' : String(storedRate),
+      amountInr:       entry.amount_inr != null ? String(entry.amount_inr) : '',
+      rateSource:      (entry.rate_source as RateSource) ?? (cur === 'INR' ? 'manual' : 'settings'),
+      entry_date:      new Date().toISOString().slice(0, 10),
+      description:     entry.description ?? '',
+      reference:       '',
+      linked_invoice_id: '',
+      client_filter_id:  entry.client_id ?? '',
+      fully_paid:      false,
+    })
+    setFormEditingId(null)
+    setRecurringMonths(0)
+    setShowForm(true)
   }
 
   /** Open the full Add/Edit form pre-filled with an existing entry's data. */
@@ -1189,6 +1214,9 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                                 <LinkIcon className="w-3.5 h-3.5" />
                               </button>
                             )}
+                            <button onClick={() => openDuplicateForm(entry)} className="p-1.5 rounded-md hover:bg-amber-500/10 text-muted-foreground hover:text-amber-500 transition-colors" title="Duplicate to today">
+                              <Copy className="w-3.5 h-3.5" />
+                            </button>
                             <button onClick={() => openEditForm(entry)} className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors" title="Edit entry (full form)">
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
@@ -1404,6 +1432,9 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                                 <LinkIcon className="w-3.5 h-3.5" />
                               </button>
                             )}
+                            <button onClick={() => openDuplicateForm(entry)} className="lg:opacity-0 opacity-100 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-amber-500/10 text-muted-foreground hover:text-amber-500" title="Duplicate to today">
+                              <Copy className="w-3.5 h-3.5" />
+                            </button>
                             <button onClick={() => openEditForm(entry)} className="lg:opacity-0 opacity-100 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary" title="Edit entry (full form with FX options)">
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
