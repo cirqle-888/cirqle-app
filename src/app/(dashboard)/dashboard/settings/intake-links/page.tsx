@@ -30,8 +30,18 @@ export default async function IntakeLinksPage() {
     agencies = agenciesRes.data || []
   } catch { migrated = false }
 
-  const { data: clients } = await admin
-    .from('clients').select('id, name, code').eq('is_active', true).order('name')
+  // drive_folder_link needs the v1.1 patch migration — fall back without it.
+  let clients: any[] | null = null
+  {
+    const withDrive = await admin
+      .from('clients').select('id, name, code, drive_folder_link').eq('is_active', true).order('name')
+    if (!withDrive.error) clients = withDrive.data
+    else {
+      const basic = await admin
+        .from('clients').select('id, name, code').eq('is_active', true).order('name')
+      clients = basic.data
+    }
+  }
 
   return (
     <IntakeLinksClient

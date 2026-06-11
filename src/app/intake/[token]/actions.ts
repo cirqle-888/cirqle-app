@@ -17,8 +17,11 @@ interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
 
 /** External-safe columns — the ONLY request fields the public side ever reads. */
 const EXTERNAL_COLS =
-  'id, ref_no, track_token, title, description, remarks, design_plan, priority, due_date, is_planned, ' +
+  'id, ref_no, track_token, title, description, remarks, design_plan, priority, priority_rank, due_date, is_planned, ' +
   'client_status, content_link, reference_link, deliverables_link, drive_folder_link, extra_links, created_at'
+
+/** Statuses the requester can still reorder (open work). */
+const OPEN_STATUSES = ['submitted', 'under_review', 'approved', 'started', 'in_progress', 'waiting_for_content', 'revision_requested']
 
 // ─── Token resolution ─────────────────────────────────────────────────────────
 
@@ -99,7 +102,17 @@ export async function submitIntakeRequest(
   if (title.length > 300) return { ok: false, error: 'Title is too long.' }
 
   const admin = createAdminClient()
-  const { data, error } = await admin.from('task_requests').insert({
+
+  // New requests join the END of the requester's priority queue (rank = open+1).
+  let nextRank: number | null = null
+  try {
+    const { count } = await ownershipFilter(
+      admin.from('task_requests').select('id', { count: 'exact', head: true }), link,
+    ).in('status', OPEN_STATUSES)
+    nextRank = (count ?? 0) + 1
+  } catch { /* defensive */ }
+
+  const payload: Record<string, unknown> = {
     link_id: link.linkId,
     source: link.type,
     client_id: link.clientId,
@@ -112,14 +125,23 @@ export async function submitIntakeRequest(
     remarks: input.remarks?.trim() || null,
     design_plan: input.design_plan?.trim() || null,
     priority: input.priority || 'normal',
+    priority_rank: nextRank,
     due_date: input.due_date || null,
     is_planned: !!input.is_planned,
     content_link: input.content_link?.trim() || null,
     reference_link: input.reference_link?.trim() || null,
     extra_links: (input.extra_links || []).filter(l => l.url?.trim()).slice(0, 10),
     service_id: input.service_id || null,
-  }).select('id, ref_no, track_token, title, source').single()
-  if (error) return { ok: false, error: 'Could not submit the request. Please try again.' }
+  }
+  let { data, error } = await admin.from('task_requests').insert(payload)
+    .select('id, ref_no, track_token, title, source').single()
+  // Graceful pre-patch fallback: priority_rank column missing → retry without it.
+  if (error && /priority_rank/i.test(error.message || '')) {
+    delete payload.priority_rank
+    ;({ data, error } = await admin.from('task_requests').insert(payload)
+      .select('id, ref_no, track_token, title, source').single())
+  }
+  if (error || !data) return { ok: false, error: 'Could not submit the request. Please try again.' }
 
   const actorLabel = input.submitter_name?.trim() || link.requesterLabel
   await logRequestActivity(admin, {
@@ -227,6 +249,45 @@ export async function updateRequestRemarks(
     visibility: link.visibility, detail: { field: 'remarks', from: cur?.remarks ?? null, to: next || null },
   })
   await bumpExternalActivity(own.admin, requestId)
+  return { ok: true }
+}
+
+/**
+ * Reorder the requester's OPEN requests (priority ranking 1..N — design v1.1).
+ * `orderedIds` is the full open list, most-important first. Every id must
+ * belong to this token's tenant — others are silently ignored.
+ */
+export async function reorderMyRequests(
+  token: string, orderedIds: string[],
+): Promise<ActionResult> {
+  const link = await resolveToken(token)
+  if (!link) return { ok: false, error: 'This link is no longer valid.' }
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) return { ok: true }
+
+  const admin = createAdminClient()
+  // Ownership: fetch this tenant's open request ids, keep only those.
+  const { data: own } = await ownershipFilter(
+    admin.from('task_requests').select('id'), link,
+  ).in('status', OPEN_STATUSES)
+  const ownIds = new Set((own || []).map((r: any) => r.id))
+  const ranked = orderedIds.filter(id => ownIds.has(id))
+
+  let rank = 1
+  for (const id of ranked) {
+    await admin.from('task_requests').update({ priority_rank: rank }).eq('id', id)
+    rank++
+  }
+  if (ranked.length > 0) {
+    await logRequestActivity(admin, {
+      requestId: ranked[0],
+      actorType: link.type === 'agency' ? 'agency' : 'client',
+      actorLabel: link.requesterLabel,
+      action: 'field_changed',
+      visibility: link.visibility,
+      detail: { field: 'priority order', to: `${ranked.length} request(s) reordered` },
+    })
+    await bumpExternalActivity(admin, ranked[0])
+  }
   return { ok: true }
 }
 

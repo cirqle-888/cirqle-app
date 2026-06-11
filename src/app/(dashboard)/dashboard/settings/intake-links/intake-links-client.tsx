@@ -10,8 +10,9 @@ import {
 } from 'lucide-react'
 import {
   createIntakeLink, revokeIntakeLink, regenerateIntakeLink,
-  saveAgency, deactivateAgency, type AgencyInput,
+  saveAgency, deactivateAgency, saveClientDriveFolder, type AgencyInput,
 } from './actions'
+import { FolderOpen } from 'lucide-react'
 
 const inputCls = 'w-full bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20'
 const labelCls = 'block text-xs font-medium text-muted-foreground mb-1.5'
@@ -28,7 +29,7 @@ export default function IntakeLinksClient({
   migrated: boolean
   initialLinks: any[]
   initialAgencies: any[]
-  clients: { id: string; name: string; code?: string }[]
+  clients: { id: string; name: string; code?: string; drive_folder_link?: string | null }[]
   appUrl: string
 }) {
   const { toasts, dismiss, success, error: toastError } = useToast()
@@ -43,6 +44,20 @@ export default function IntakeLinksClient({
   const [copied, setCopied] = useState<string | null>(null)
   const [agencyForm, setAgencyForm] = useState<AgencyInput | null>(null)
   const [agencySaving, setAgencySaving] = useState(false)
+
+  // Per-client Drive folder drafts (keyed by client id).
+  const [driveDrafts, setDriveDrafts] = useState<Record<string, string>>(
+    () => Object.fromEntries(clients.map(c => [c.id, c.drive_folder_link || ''])),
+  )
+  const [driveSaving, setDriveSaving] = useState<string | null>(null)
+
+  async function handleSaveDrive(clientId: string) {
+    setDriveSaving(clientId)
+    const res = await saveClientDriveFolder(clientId, driveDrafts[clientId] || '')
+    setDriveSaving(null)
+    if (res.ok) success('Drive folder saved', 'The client sees it on their portal')
+    else toastError('Could not save Drive folder', res.error)
+  }
 
   const urlFor = (token: string) => `${appUrl}/intake/${token}`
 
@@ -183,26 +198,44 @@ export default function IntakeLinksClient({
           const who = l.type === 'client' ? (l.client ? `${l.client.name}${l.client.code ? ' · ' + l.client.code : ''}` : '—')
             : l.type === 'agency' ? (l.agency?.name || '—') : 'Anyone with the link'
           return (
-            <div key={l.id} className="bg-card border border-border rounded-xl px-4 py-3 flex items-center gap-3">
-              <span className={`text-[11px] px-2 py-0.5 rounded-full border shrink-0 ${meta.cls}`}>{meta.label}</span>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{who}{l.label ? <span className="text-muted-foreground font-normal"> · {l.label}</span> : null}</p>
-                <p className="text-[11px] font-mono text-muted-foreground/70 truncate">{urlFor(l.token)}</p>
+            <div key={l.id} className="bg-card border border-border rounded-xl px-4 py-3">
+              <div className="flex items-center gap-3">
+                <span className={`text-[11px] px-2 py-0.5 rounded-full border shrink-0 ${meta.cls}`}>{meta.label}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{who}{l.label ? <span className="text-muted-foreground font-normal"> · {l.label}</span> : null}</p>
+                  <p className="text-[11px] font-mono text-muted-foreground/70 truncate">{urlFor(l.token)}</p>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button onClick={() => copyUrl(l)} title="Copy URL"
+                    className="p-1.5 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors">
+                    {copied === l.id ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                  <button onClick={() => handleRegenerate(l)} disabled={busy === l.id} title="Regenerate (old URL dies)"
+                    className="p-1.5 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40">
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  </button>
+                  <button onClick={() => handleRevoke(l)} disabled={busy === l.id} title="Revoke"
+                    className="p-1.5 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-400 transition-colors disabled:opacity-40">
+                    <Ban className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <button onClick={() => copyUrl(l)} title="Copy URL"
-                  className="p-1.5 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors">
-                  {copied === l.id ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
-                </button>
-                <button onClick={() => handleRegenerate(l)} disabled={busy === l.id} title="Regenerate (old URL dies)"
-                  className="p-1.5 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40">
-                  <RefreshCw className="w-3.5 h-3.5" />
-                </button>
-                <button onClick={() => handleRevoke(l)} disabled={busy === l.id} title="Revoke"
-                  className="p-1.5 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-400 transition-colors disabled:opacity-40">
-                  <Ban className="w-3.5 h-3.5" />
-                </button>
-              </div>
+              {/* Per-client Drive folder — shown on the client's portal as their upload area */}
+              {l.type === 'client' && l.client_id && (
+                <div className="flex items-center gap-2 mt-2.5 pt-2.5 border-t border-border/60">
+                  <FolderOpen className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <input
+                    value={driveDrafts[l.client_id] ?? ''}
+                    onChange={e => setDriveDrafts(p => ({ ...p, [l.client_id]: e.target.value }))}
+                    placeholder="Google Drive folder link for this client (shared, can-edit) — shown on their portal"
+                    className="flex-1 bg-secondary border border-foreground/10 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-violet-500/50"
+                  />
+                  <button onClick={() => handleSaveDrive(l.client_id)} disabled={driveSaving === l.client_id}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-secondary border border-border hover:bg-secondary/70 disabled:opacity-50 transition-colors shrink-0">
+                    {driveSaving === l.client_id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Save'}
+                  </button>
+                </div>
+              )}
             </div>
           )
         })}

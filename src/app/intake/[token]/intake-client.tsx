@@ -3,13 +3,14 @@
 import { useState } from 'react'
 import {
   Send, Loader2, CheckCircle2, Plus, X, Link2, ChevronDown, ChevronUp,
-  Clock, RefreshCw, MessageSquarePlus, CalendarDays,
+  Clock, RefreshCw, MessageSquarePlus, CalendarDays, FolderOpen,
+  ArrowUp, ArrowDown,
 } from 'lucide-react'
 import { CLIENT_STATUS_LABEL } from '@/lib/requests/core'
 import {
   submitIntakeRequest, getExternalTimeline, addRequestLink,
   updateRequestRemarks, submitRevisionRequest, getMyRequests,
-  type IntakeSubmitInput,
+  reorderMyRequests, type IntakeSubmitInput,
 } from './actions'
 
 const inputCls = 'w-full bg-secondary border border-foreground/15 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20'
@@ -38,28 +39,36 @@ const emptyForm = (): IntakeSubmitInput => ({
   extra_links: [], service_id: null, submitter_name: '', submitter_email: '', website: '',
 })
 
-/** Human sentence for an external timeline entry. */
+/** Human sentence for an external timeline entry. Staff posts are attributed. */
 function activityText(a: any): string {
   const d = a.detail || {}
+  const fromCirqle = a.actor_type === 'admin' || a.actor_type === 'system'
   switch (a.action) {
     case 'submitted':          return 'Request submitted'
     case 'status_changed':     return `Status: ${CLIENT_STATUS_LABEL[d.to] || d.to || 'updated'}`
     case 'link_added':         return `Added link — ${d.label || d.url || ''}`
     case 'field_changed':      return d.field === 'remarks' ? 'Updated remarks' : `Updated ${d.field || 'details'}`
     case 'revision_requested': return `Revision requested${d.message ? ` — “${d.message}”` : ''}`
-    case 'note':               return d.message || 'Update from Cirqle'
+    case 'note':               return `${fromCirqle ? 'Cirqle: ' : ''}${d.message || 'Update'}`
     default:                   return a.action.replace(/_/g, ' ')
   }
 }
 
+/** Externally-open statuses (reorderable). Completed/Delivered fall out. */
+const OPEN_SET = new Set(['submitted', 'under_review', 'approved', 'started', 'in_progress', 'waiting_for_content', 'revision_requested'])
+
 export default function IntakeClient({
   token, linkType, requesterName, services, initialRequests,
+  logoUrl, lastTaskTitle, driveFolderLink,
 }: {
   token: string
   linkType: 'client' | 'agency' | 'generic'
   requesterName: string | null
   services: { id: string; name: string }[]
   initialRequests: any[]
+  logoUrl?: string | null
+  lastTaskTitle?: string | null
+  driveFolderLink?: string | null
 }) {
   const [tab, setTab] = useState<'submit' | 'track'>('submit')
   const [form, setForm] = useState<IntakeSubmitInput>(emptyForm())
@@ -102,6 +111,26 @@ export default function IntakeClient({
     }
   }
 
+  // ── Priority ranking (open requests, 1 = first) ────────────────────────────
+  const openRequests = requests
+    .filter(r => OPEN_SET.has(r.client_status))
+    .sort((a, b) => (a.priority_rank ?? 999) - (b.priority_rank ?? 999) || (a.created_at || '').localeCompare(b.created_at || ''))
+  const closedRequests = requests.filter(r => !OPEN_SET.has(r.client_status))
+
+  function moveRank(id: string, dir: -1 | 1) {
+    const idx = openRequests.findIndex(r => r.id === id)
+    const j = idx + dir
+    if (idx < 0 || j < 0 || j >= openRequests.length) return
+    const order = openRequests.map(r => r.id)
+    ;[order[idx], order[j]] = [order[j], order[idx]]
+    // Optimistic rank update, then persist.
+    setRequests(prev => prev.map(r => {
+      const k = order.indexOf(r.id)
+      return k >= 0 ? { ...r, priority_rank: k + 1 } : r
+    }))
+    void reorderMyRequests(token, order)
+  }
+
   async function runAction() {
     if (!actionBox) return
     setActionBusy(true)
@@ -122,11 +151,18 @@ export default function IntakeClient({
   }
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-8 sm:py-12">
-      {/* Brand header */}
+    <div className="max-w-3xl mx-auto px-4 py-8 sm:py-12">
+      {/* Brand header — workspace logo with wordmark fallback */}
       <div className="text-center mb-8">
-        <div className="text-3xl font-extrabold tracking-tight">cirqle<span className="text-blue-400">.</span></div>
-        <div className="text-[10px] tracking-[0.3em] text-muted-foreground uppercase mt-0.5">Design</div>
+        {logoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={logoUrl} alt="Cirqle Design" className="h-12 mx-auto object-contain" />
+        ) : (
+          <>
+            <div className="text-3xl font-extrabold tracking-tight">cirqle<span className="text-blue-400">.</span></div>
+            <div className="text-[10px] tracking-[0.3em] text-muted-foreground uppercase mt-0.5">Design</div>
+          </>
+        )}
         <h1 className="text-lg font-bold mt-5">
           {requesterName ? `Welcome, ${requesterName}` : 'Submit a request'}
         </h1>
@@ -164,15 +200,16 @@ export default function IntakeClient({
               className="hidden" tabIndex={-1} autoComplete="off" aria-hidden="true" />
 
             <div>
-              <label className={labelCls}>What do you need? *</label>
+              <label className={labelCls}>What is this task / creative about? *</label>
               <input required value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-                className={inputCls} placeholder="e.g. Weekend Sale — Offer Flyer" />
+                className={inputCls} placeholder={lastTaskTitle ? `e.g. ${lastTaskTitle}` : 'e.g. Weekend Sale — Offer Flyer'} />
             </div>
 
             <div>
               <label className={labelCls}>Details</label>
-              <textarea rows={3} value={form.description || ''} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                className={inputCls + ' resize-none'} placeholder="Describe the work — sizes, formats, text to include…" />
+              <textarea rows={6} value={form.description || ''} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                className={inputCls + ' resize-y min-h-[140px]'}
+                placeholder={'Describe the work in as much detail as you like — sizes, formats, headings, text to include, offers, products…\n\nLong paragraphs are welcome.'} />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -184,29 +221,43 @@ export default function IntakeClient({
                 </select>
               </div>
               <div>
-                <label className={labelCls}>Priority</label>
-                <select value={form.priority} onChange={e => setForm(f => ({ ...f, priority: e.target.value as any }))} className={inputCls}>
-                  <option value="low">Low</option><option value="normal">Normal</option>
-                  <option value="high">High</option><option value="urgent">Urgent</option>
-                </select>
-              </div>
-              <div>
                 <label className={labelCls}>Needed by</label>
                 <input type="date" value={form.due_date || ''} onChange={e => setForm(f => ({ ...f, due_date: e.target.value || null }))} className={inputCls} />
               </div>
               {linkType === 'agency' && (
-                <label className="flex items-center gap-2 text-sm mt-6 cursor-pointer">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="checkbox" checked={!!form.is_planned} onChange={e => setForm(f => ({ ...f, is_planned: e.target.checked }))} />
                   This is a planned / future campaign
                 </label>
               )}
             </div>
+            <p className="text-[11px] text-muted-foreground/70 -mt-1">
+              New requests join the end of your priority list — you can reorder them any time in <b>My Requests</b>.
+            </p>
 
             <div>
               <label className={labelCls}>Design plan / notes</label>
-              <textarea rows={2} value={form.design_plan || ''} onChange={e => setForm(f => ({ ...f, design_plan: e.target.value }))}
-                className={inputCls + ' resize-none'} placeholder="Style direction, colours, references to follow…" />
+              <textarea rows={5} value={form.design_plan || ''} onChange={e => setForm(f => ({ ...f, design_plan: e.target.value }))}
+                className={inputCls + ' resize-y min-h-[110px]'}
+                placeholder={'Style direction, colours, layout ideas, references to follow…\n\nShare your full brainstorm here.'} />
             </div>
+
+            {/* Shared Drive folder — set by Cirqle per client */}
+            {driveFolderLink && (
+              <div className="bg-amber-500/8 border border-amber-500/25 rounded-xl p-3.5 flex items-start gap-3">
+                <FolderOpen className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-amber-300">Your shared Drive folder</p>
+                  <p className="text-xs text-amber-400/80 mt-0.5">
+                    Create a folder named after this request and upload your content (images, logos, text files) there.
+                  </p>
+                </div>
+                <a href={driveFolderLink} target="_blank" rel="noreferrer"
+                  className="shrink-0 text-xs font-semibold px-3 py-2 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/30 hover:bg-amber-500/25 transition-colors">
+                  Open folder ↗
+                </a>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
@@ -276,11 +327,32 @@ export default function IntakeClient({
               No requests yet — submit your first one!
             </div>
           )}
-          {requests.map(r => {
+          {openRequests.length > 1 && (
+            <p className="text-[11px] text-muted-foreground/70 px-1">
+              Use the ↑↓ arrows to set your priority order — #1 is what we work on first.
+            </p>
+          )}
+          {[...openRequests, ...closedRequests].map(r => {
             const isOpen = expanded === r.id
+            const rankIdx = openRequests.findIndex(x => x.id === r.id)
             return (
               <div key={r.id} className="bg-card border border-border rounded-2xl overflow-hidden">
-                <button onClick={() => toggleExpand(r.id)} className="w-full text-left px-4 py-3.5 flex items-center gap-3">
+                <div role="button" tabIndex={0} onClick={() => toggleExpand(r.id)}
+                  onKeyDown={e => { if (e.key === 'Enter') toggleExpand(r.id) }}
+                  className="w-full text-left px-4 py-3.5 flex items-center gap-3 cursor-pointer">
+                  {rankIdx >= 0 && (
+                    <div className="flex flex-col items-center gap-0.5 shrink-0" onClick={e => e.stopPropagation()}>
+                      <button onClick={() => moveRank(r.id, -1)} disabled={rankIdx === 0}
+                        className="p-0.5 rounded text-muted-foreground hover:text-foreground disabled:opacity-20" title="Higher priority">
+                        <ArrowUp className="w-3.5 h-3.5" />
+                      </button>
+                      <span className="text-[10px] font-bold text-violet-400">#{rankIdx + 1}</span>
+                      <button onClick={() => moveRank(r.id, 1)} disabled={rankIdx === openRequests.length - 1}
+                        className="p-0.5 rounded text-muted-foreground hover:text-foreground disabled:opacity-20" title="Lower priority">
+                        <ArrowDown className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-[11px] font-mono text-muted-foreground">REQ-{String(r.ref_no).padStart(4, '0')}</span>
@@ -295,10 +367,45 @@ export default function IntakeClient({
                     {CLIENT_STATUS_LABEL[r.client_status] || 'Submitted'}
                   </span>
                   {isOpen ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />}
-                </button>
+                </div>
 
                 {isOpen && (
                   <div className="border-t border-border px-4 py-4 space-y-4">
+                    {/* Full request details — everything the requester sent */}
+                    {(r.description || r.design_plan || r.remarks || r.due_date) && (
+                      <div className="space-y-3">
+                        {r.description && (
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1">Details</p>
+                            <p className="text-sm text-foreground/90 whitespace-pre-wrap">{r.description}</p>
+                          </div>
+                        )}
+                        {r.design_plan && (
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1">Design plan</p>
+                            <p className="text-sm text-foreground/90 whitespace-pre-wrap">{r.design_plan}</p>
+                          </div>
+                        )}
+                        {r.remarks && (
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1">Remarks</p>
+                            <p className="text-sm text-foreground/90 whitespace-pre-wrap">{r.remarks}</p>
+                          </div>
+                        )}
+                        {r.due_date && (
+                          <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                            <CalendarDays className="w-3.5 h-3.5" /> Deadline: <span className="text-foreground/90 font-medium">{fmtDate(r.due_date)}</span>
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {driveFolderLink && (
+                      <a href={driveFolderLink} target="_blank" rel="noreferrer"
+                        className="flex items-center gap-2 text-xs font-medium text-amber-300 bg-amber-500/8 border border-amber-500/25 rounded-lg px-3 py-2 hover:bg-amber-500/15 transition-colors">
+                        <FolderOpen className="w-3.5 h-3.5" /> Open your Drive folder — add a folder for this request &amp; upload content ↗
+                      </a>
+                    )}
                     {/* Quick actions */}
                     <div className="flex flex-wrap gap-2">
                       <button onClick={() => { setActionBox({ id: r.id, kind: 'link' }); setActionText(''); setActionUrl('') }}
@@ -363,7 +470,10 @@ export default function IntakeClient({
                             <Clock className="w-3 h-3 text-muted-foreground/50 mt-0.5 shrink-0" />
                             <div className="min-w-0">
                               <p className="text-foreground/90">{activityText(a)}</p>
-                              <p className="text-[10px] text-muted-foreground/60">{fmtDateTime(a.created_at)}</p>
+                              <p className="text-[10px] text-muted-foreground/60">
+                                {fmtDateTime(a.created_at)}
+                                {(a.actor_type === 'admin' || a.actor_type === 'system') ? ' · from Cirqle' : ''}
+                              </p>
                             </div>
                           </div>
                         ))}

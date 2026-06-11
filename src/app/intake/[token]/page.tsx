@@ -52,18 +52,55 @@ export default async function IntakePage({ params }: { params: Promise<{ token: 
     link.type === 'client' ? reqQuery.eq('client_id', link.client_id)
     : link.type === 'agency' ? reqQuery.eq('agency_id', link.agency_id)
     : reqQuery.eq('link_id', link.id)
-  const [requestsRes, servicesRes] = await Promise.all([
+  const [requestsRes, servicesRes, logoRes, logoDarkRes] = await Promise.all([
     scoped.order('created_at', { ascending: false }).limit(100),
     admin.from('services').select('id, name').eq('is_active', true).order('display_order').order('name'),
+    admin.from('company_settings').select('value').eq('key', 'logo_url').maybeSingle(),
+    admin.from('company_settings').select('value').eq('key', 'logo_url_dark').maybeSingle(),
   ])
+
+  // Client links: only offer services PRICED for this client in the Pricing
+  // Matrix (a client_service_pricing row with a price). Agency/generic see all.
+  let services = servicesRes.data || []
+  let lastTaskTitle: string | null = null
+  let driveFolderLink: string | null = null
+  if (link.type === 'client' && link.client_id) {
+    const [pricingRes, lastTaskRes] = await Promise.all([
+      admin.from('client_service_pricing')
+        .select('service_id, price, is_active')
+        .eq('client_id', link.client_id)
+        .not('price', 'is', null),
+      admin.from('tasks')
+        .select('title')
+        .eq('client_id', link.client_id)
+        .is('deleted_at', null)
+        .order('task_date', { ascending: false })
+        .limit(1),
+    ])
+    const pricedIds = new Set((pricingRes.data || [])
+      .filter((p: any) => p.is_active !== false && (p.price ?? 0) > 0)
+      .map((p: any) => p.service_id))
+    if (pricedIds.size > 0) services = services.filter((s: any) => pricedIds.has(s.id))
+    lastTaskTitle = lastTaskRes.data?.[0]?.title || null
+
+    // drive_folder_link needs the v1.1 patch — read defensively.
+    try {
+      const { data: c } = await admin.from('clients')
+        .select('drive_folder_link').eq('id', link.client_id).maybeSingle()
+      driveFolderLink = (c as any)?.drive_folder_link || null
+    } catch { /* column not migrated yet */ }
+  }
 
   return (
     <IntakeClient
       token={token}
       linkType={link.type}
       requesterName={requesterName}
-      services={servicesRes.data || []}
+      services={services}
       initialRequests={requestsRes.data || []}
+      logoUrl={(logoDarkRes.data?.value as string) || (logoRes.data?.value as string) || null}
+      lastTaskTitle={lastTaskTitle}
+      driveFolderLink={driveFolderLink}
     />
   )
 }

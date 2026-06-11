@@ -221,6 +221,9 @@ export default function RequestsClient({
               </div>
               <div className="flex items-center gap-2.5 mt-1 text-[11px] text-muted-foreground flex-wrap">
                 <span className="truncate max-w-[220px]">{requesterOf(r)}</span>
+                {r.priority_rank != null && !['completed', 'delivered', 'rejected', 'archived'].includes(r.status) && (
+                  <span className="font-bold text-violet-400" title="Requester's priority order">P#{r.priority_rank}</span>
+                )}
                 {r.priority !== 'normal' && <span className={`flex items-center gap-0.5 font-medium ${PRIORITY_CHIP[r.priority]}`}><Flag className="w-3 h-3" />{r.priority}</span>}
                 {r.due_date && <span className="flex items-center gap-1"><CalendarDays className="w-3 h-3" />due {fmtDate(r.due_date)}</span>}
                 <span>{ago(r.created_at)}</span>

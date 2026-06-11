@@ -23,7 +23,7 @@ export default async function TrackPage({ params }: { params: Promise<{ trackTok
       const vis = request.source === 'agency' ? 'agency' : 'client'
       const { data: acts } = await admin
         .from('request_activity')
-        .select('id, action, detail, created_at')
+        .select('id, action, detail, actor_type, created_at')
         .eq('request_id', request.id)
         .eq('visibility', vis)
         .order('created_at', { ascending: false })
@@ -80,7 +80,10 @@ export default async function TrackPage({ params }: { params: Promise<{ trackTok
           {timeline.map(a => (
             <div key={a.id} className="text-xs">
               <p className="text-foreground/90">{text(a)}</p>
-              <p className="text-[10px] text-muted-foreground/60">{fmtDT(a.created_at)}</p>
+              <p className="text-[10px] text-muted-foreground/60">
+                {fmtDT(a.created_at)}
+                {(a.actor_type === 'admin' || a.actor_type === 'system') ? ' · from Cirqle' : ''}
+              </p>
             </div>
           ))}
         </div>
