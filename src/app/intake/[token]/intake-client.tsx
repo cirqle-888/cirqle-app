@@ -70,7 +70,9 @@ export default function IntakeClient({
   lastTaskTitle?: string | null
   driveFolderLink?: string | null
 }) {
-  const [tab, setTab] = useState<'submit' | 'track'>('submit')
+  // Single-window layout: collapsible submit form on top, requests list below.
+  // The form starts open for first-time visitors (no requests yet).
+  const [formOpen, setFormOpen] = useState(initialRequests.length === 0)
   const [form, setForm] = useState<IntakeSubmitInput>(emptyForm())
   const [extraLabel, setExtraLabel] = useState('')
   const [extraUrl, setExtraUrl] = useState('')
@@ -98,7 +100,9 @@ export default function IntakeClient({
     if (res.ok && res.data) {
       setSentRef(res.data.ref)
       setForm(emptyForm())
+      setFormOpen(false)
       void refreshRequests()
+      window.scrollTo({ top: 0, behavior: 'smooth' })
     } else setError(res.error || 'Something went wrong. Please try again.')
   }
 
@@ -167,34 +171,34 @@ export default function IntakeClient({
           {requesterName ? `Welcome, ${requesterName}` : 'Submit a request'}
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Send us your {linkType === 'agency' ? 'campaign and design requests' : 'design requests'} and track their progress — no login needed.
+          Send us your {linkType === 'agency' ? 'campaign and design requests' : 'design requests'} and track their progress.
         </p>
       </div>
 
-      {/* Tabs */}
-      <div className="flex bg-secondary rounded-xl p-1 gap-1 mb-6">
-        {([['submit', 'New Request'], ['track', `My Requests (${requests.length})`]] as const).map(([k, label]) => (
-          <button key={k} onClick={() => setTab(k)}
-            className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${tab === k ? 'gradient-bg text-white shadow' : 'text-muted-foreground hover:text-foreground'}`}>
-            {label}
-          </button>
-        ))}
-      </div>
+      {/* Success banner (after submit) */}
+      {sentRef && (
+        <div className="bg-card border border-green-500/30 rounded-2xl px-4 py-3.5 mb-4 flex items-center gap-3">
+          <CheckCircle2 className="w-5 h-5 text-green-400 shrink-0" />
+          <p className="text-sm flex-1">Request received — <b>{sentRef}</b>. We&apos;ll review it shortly; track it below.</p>
+          <button onClick={() => setSentRef(null)} className="p-1 rounded text-muted-foreground hover:text-foreground shrink-0"><X className="w-4 h-4" /></button>
+        </div>
+      )}
 
-      {/* ── SUBMIT ── */}
-      {tab === 'submit' && (
-        sentRef ? (
-          <div className="bg-card border border-green-500/30 rounded-2xl p-8 text-center">
-            <CheckCircle2 className="w-10 h-10 text-green-400 mx-auto mb-3" />
-            <p className="font-semibold">Request received — {sentRef}</p>
-            <p className="text-sm text-muted-foreground mt-1">We&apos;ll review it shortly. Track progress in the My Requests tab.</p>
-            <div className="flex gap-3 justify-center mt-5">
-              <button onClick={() => setSentRef(null)} className="px-4 py-2 text-sm font-medium rounded-lg bg-secondary hover:bg-secondary/70 transition-colors">Submit another</button>
-              <button onClick={() => { setSentRef(null); setTab('track') }} className="px-4 py-2 text-sm font-medium rounded-lg gradient-bg text-white hover:opacity-90 transition-opacity">Track requests</button>
-            </div>
-          </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="bg-card border border-border rounded-2xl p-5 sm:p-6 space-y-4">
+      {/* ── New Request (collapsible — one window with the list below) ── */}
+      <button
+        onClick={() => { setFormOpen(o => !o); setSentRef(null) }}
+        className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border transition-all mb-4 ${
+          formOpen ? 'bg-secondary border-border text-foreground' : 'gradient-bg text-white border-transparent shadow hover:opacity-90'
+        }`}>
+        <span className="text-sm font-semibold flex items-center gap-2">
+          <Plus className={`w-4 h-4 transition-transform duration-200 ${formOpen ? 'rotate-45' : ''}`} />
+          {formOpen ? 'Close' : 'New Request'}
+        </span>
+        {!formOpen && <span className="text-xs opacity-80 hidden sm:inline">Tap to submit a request</span>}
+      </button>
+
+      {formOpen && (
+          <form onSubmit={handleSubmit} className="bg-card border border-border rounded-2xl p-4 sm:p-6 space-y-4 mb-6">
             {/* Honeypot — hidden from humans */}
             <input type="text" value={form.website || ''} onChange={e => setForm(f => ({ ...f, website: e.target.value }))}
               className="hidden" tabIndex={-1} autoComplete="off" aria-hidden="true" />
@@ -316,15 +320,15 @@ export default function IntakeClient({
               {sending ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending…</> : <><Send className="w-4 h-4" /> Submit request</>}
             </button>
           </form>
-        )
       )}
 
-      {/* ── TRACK ── */}
-      {tab === 'track' && (
+      {/* ── Your requests (always visible — same window) ── */}
+      <div>
+        <h2 className="text-sm font-bold px-1 mb-3">Your requests ({requests.length})</h2>
         <div className="space-y-2.5">
           {requests.length === 0 && (
             <div className="bg-card border border-border rounded-2xl px-6 py-10 text-center text-sm text-muted-foreground">
-              No requests yet — submit your first one!
+              No requests yet — submit your first one above!
             </div>
           )}
           {openRequests.length > 1 && (
@@ -487,7 +491,7 @@ export default function IntakeClient({
             )
           })}
         </div>
-      )}
+      </div>
 
       <p className="text-center text-[11px] text-muted-foreground/50 mt-8">
         Cirqle Design · cirqle.work · This page only shows your own requests.

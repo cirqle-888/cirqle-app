@@ -148,7 +148,9 @@ export async function updateSession(request: NextRequest) {
                   || pathname.startsWith('/forgot-password')
                   || pathname.startsWith('/reset-password')
                   || pathname.startsWith('/register')
-  const isPublic   = pathname === '/' || pathname.startsWith('/portal')
+  const isPublic   = pathname === '/'
+                  || pathname.startsWith('/portal')
+                  || pathname.startsWith('/intake')   // client/agency request portal — tokenized, no login
 
   if (!user && !isAuthPage && !isPublic) {
     const url = request.nextUrl.clone()
