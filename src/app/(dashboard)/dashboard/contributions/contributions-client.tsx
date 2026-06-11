@@ -1511,10 +1511,10 @@ export default function ContributionsClient({
                                     const assigned = taskAssignmentMap[task.id]?.has(emp.id)
                                     const scoreDetail = taskScoreDetailMap[task.id]?.[emp.id]
                                     const chipStyle = done
-                                      ? 'bg-green-500/10 border-green-500/20 text-green-400'
+                                      ? 'bg-green-100 border-green-300 text-green-700 dark:bg-green-500/10 dark:border-green-500/20 dark:text-green-400'
                                       : assigned
-                                        ? 'bg-blue-500/10 border-blue-500/25 text-blue-400'
-                                        : 'bg-secondary border-transparent text-muted-foreground/40'
+                                        ? 'bg-blue-100 border-blue-300 text-blue-700 dark:bg-blue-500/10 dark:border-blue-500/25 dark:text-blue-400'
+                                        : 'bg-gray-100 border-gray-200 text-gray-400 dark:bg-secondary dark:border-transparent dark:text-muted-foreground/40'
                                     return (
                                       <button key={emp.id} type="button"
                                         onClick={showFinancials && !done ? () => toggleAssignment(task.id, emp.id) : undefined}
@@ -1523,10 +1523,10 @@ export default function ContributionsClient({
                                         {done ? <Check className="w-2.5 h-2.5" /> : assigned ? <UserCheck className="w-2.5 h-2.5" /> : null}
                                         {dn(emp)}
                                         {done && scoreDetail && (
-                                          <span className="opacity-80 font-semibold">
+                                          <span className="font-semibold">
                                             {scoreDetail.pct.toFixed(0)}%
                                             {canSeeFinancials && showFinancials && scoreDetail.earnings !== null && (
-                                              <span className="ml-0.5 text-green-300">₹{Math.round(scoreDetail.earnings).toLocaleString('en-IN')}</span>
+                                              <span className="ml-0.5 text-green-600 dark:text-green-300">₹{Math.round(scoreDetail.earnings).toLocaleString('en-IN')}</span>
                                             )}
                                           </span>
                                         )}
