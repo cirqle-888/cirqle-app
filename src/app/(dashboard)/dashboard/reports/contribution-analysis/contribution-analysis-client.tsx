@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useMemo, useEffect, useRef, useCallback, Fragment } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback, useLayoutEffect, Fragment } from 'react'
+import { createPortal } from 'react-dom'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
 import { usePrivacy } from '@/contexts/privacy-context'
@@ -196,13 +197,41 @@ function MultiSelect({ label, options, selected, onChange }: {
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const ref = useRef<HTMLDivElement>(null)
+  const [panelPos, setPanelPos] = useState<{ top: number; left: number; width: number; openUp: boolean } | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
+  const recomputePos = useCallback(() => {
+    if (!containerRef.current) return
+    const rect = containerRef.current.getBoundingClientRect()
+    const PANEL_W = 272
+    const PANEL_MAX_H = 360
+    const spaceBelow = window.innerHeight - rect.bottom
+    const spaceAbove = rect.top
+    const openUp = spaceBelow < PANEL_MAX_H && spaceAbove > spaceBelow
+    const left = rect.right - PANEL_W < 8 ? Math.max(8, rect.left) : Math.min(rect.left, window.innerWidth - PANEL_W - 8)
+    setPanelPos({ top: openUp ? rect.top - 6 : rect.bottom + 4, left, width: PANEL_W, openUp })
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!open) { setPanelPos(null); setQuery(''); return }
+    recomputePos()
+    requestAnimationFrame(() => searchRef.current?.focus())
+    const onScroll = () => recomputePos()
+    window.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onScroll)
+    return () => { window.removeEventListener('scroll', onScroll, true); window.removeEventListener('resize', onScroll) }
+  }, [open, recomputePos])
+
   useEffect(() => {
-    if (!open) { setQuery(''); return }
-    setTimeout(() => searchRef.current?.focus(), 50)
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    if (!open) return
+    const h = (e: MouseEvent) => {
+      const t = e.target as Element | null
+      if (!t) return
+      if (containerRef.current?.contains(t)) return
+      if (t.closest?.('[data-ms-panel]')) return
+      setOpen(false)
+    }
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
   }, [open])
@@ -215,24 +244,68 @@ function MultiSelect({ label, options, selected, onChange }: {
     onChange(selected.includes(id) ? selected.filter(x => x !== id) : [...selected, id])
 
   const allFilteredIds = filtered.map(o => o.id)
-  const allFilteredSelected = allFilteredIds.every(id => selected.includes(id))
+  const allFilteredSelected = allFilteredIds.length > 0 && allFilteredIds.every(id => selected.includes(id))
   const toggleAll = () => {
-    if (allFilteredSelected) {
-      onChange(selected.filter(id => !allFilteredIds.includes(id)))
-    } else {
-      const next = [...new Set([...selected, ...allFilteredIds])]
-      onChange(next)
-    }
+    if (allFilteredSelected) onChange(selected.filter(id => !allFilteredIds.includes(id)))
+    else onChange([...new Set([...selected, ...allFilteredIds])])
   }
 
   const buttonLabel = selected.length
-    ? selected.length === 1
-      ? (options.find(o => o.id === selected[0])?.name ?? '1 selected')
-      : `${selected.length} selected`
+    ? selected.length === 1 ? (options.find(o => o.id === selected[0])?.name ?? '1 selected') : `${selected.length} selected`
     : `All ${label.toLowerCase()}`
 
+  const panel = open && panelPos && typeof document !== 'undefined' ? createPortal(
+    <div
+      data-ms-panel
+      onMouseDown={e => e.stopPropagation()}
+      style={{
+        position: 'fixed',
+        top: panelPos.openUp ? undefined : panelPos.top,
+        bottom: panelPos.openUp ? window.innerHeight - panelPos.top : undefined,
+        left: panelPos.left,
+        width: panelPos.width,
+        zIndex: 1000,
+      }}
+      className="bg-card border border-border rounded-xl shadow-2xl shadow-black/50 flex flex-col overflow-hidden animate-in fade-in slide-in-from-top-1 duration-100"
+    >
+      <div className="p-2 border-b border-border">
+        <div className="flex items-center gap-1.5 bg-secondary rounded-lg px-2 py-1.5">
+          <Search className="w-3 h-3 text-muted-foreground shrink-0" />
+          <input ref={searchRef} value={query} onChange={e => setQuery(e.target.value)}
+            placeholder={`Search ${label.toLowerCase()}…`}
+            className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/50" />
+          {query && <button onClick={() => setQuery('')} className="text-muted-foreground hover:text-foreground"><X className="w-3 h-3" /></button>}
+        </div>
+      </div>
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/50">
+        <button onClick={toggleAll} className="text-[11px] text-purple-400 hover:text-purple-300 font-medium">
+          {allFilteredSelected ? 'Deselect all' : 'Select all'}{query ? ` (${filtered.length})` : ''}
+        </button>
+        {selected.length > 0 && <button onClick={() => onChange([])} className="text-[11px] text-red-400 hover:text-red-300">Clear</button>}
+      </div>
+      <div className="overflow-y-auto max-h-56 p-1 overscroll-contain">
+        {filtered.length === 0
+          ? <p className="text-center text-xs text-muted-foreground py-4">No matches</p>
+          : filtered.map(o => {
+              const checked = selected.includes(o.id)
+              return (
+                <label key={o.id} className={`flex items-center gap-2 px-2 py-1.5 text-xs rounded-lg cursor-pointer transition-colors ${checked ? 'bg-purple-500/10 text-purple-200' : 'hover:bg-secondary text-foreground'}`}>
+                  <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${checked ? 'bg-purple-500 border-purple-500' : 'border-border'}`}>
+                    {checked && <Check className="w-2.5 h-2.5 text-white" />}
+                  </span>
+                  <input type="checkbox" checked={checked} onChange={() => toggle(o.id)} className="sr-only" />
+                  <span className="truncate">{o.name}</span>
+                </label>
+              )
+            })
+        }
+      </div>
+    </div>,
+    document.body,
+  ) : null
+
   return (
-    <div className="relative" ref={ref}>
+    <div ref={containerRef}>
       <label className="block text-[11px] font-medium text-muted-foreground mb-1">{label}</label>
       <button
         type="button" onClick={() => setOpen(o => !o)}
@@ -248,62 +321,7 @@ function MultiSelect({ label, options, selected, onChange }: {
         </span>
         <ChevronDown className={`w-3 h-3 shrink-0 transition-transform text-muted-foreground ${open ? 'rotate-180' : ''}`} />
       </button>
-      {open && (
-        <div className="absolute z-50 mt-1 w-64 bg-card border border-border rounded-xl shadow-2xl flex flex-col overflow-hidden">
-          {/* Search */}
-          <div className="p-2 border-b border-border">
-            <div className="flex items-center gap-1.5 bg-secondary rounded-lg px-2 py-1.5">
-              <Search className="w-3 h-3 text-muted-foreground shrink-0" />
-              <input
-                ref={searchRef}
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                placeholder={`Search ${label.toLowerCase()}…`}
-                className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/50"
-              />
-              {query && (
-                <button onClick={() => setQuery('')} className="text-muted-foreground hover:text-foreground">
-                  <X className="w-3 h-3" />
-                </button>
-              )}
-            </div>
-          </div>
-          {/* Select all / clear row */}
-          <div className="flex items-center justify-between px-2 py-1.5 border-b border-border/50">
-            <button
-              onClick={toggleAll}
-              className="text-[11px] text-purple-400 hover:text-purple-300 font-medium"
-            >
-              {allFilteredSelected ? 'Deselect all' : 'Select all'}
-              {query ? ` (${filtered.length})` : ''}
-            </button>
-            {selected.length > 0 && (
-              <button onClick={() => onChange([])} className="text-[11px] text-red-400 hover:text-red-300">
-                Clear
-              </button>
-            )}
-          </div>
-          {/* Options list */}
-          <div className="overflow-y-auto max-h-56 p-1">
-            {filtered.length === 0 ? (
-              <p className="text-center text-xs text-muted-foreground py-4">No matches</p>
-            ) : (
-              filtered.map(o => {
-                const checked = selected.includes(o.id)
-                return (
-                  <label key={o.id} className={`flex items-center gap-2 px-2 py-1.5 text-xs rounded-lg cursor-pointer transition-colors ${checked ? 'bg-purple-500/10 text-purple-200' : 'hover:bg-secondary text-foreground'}`}>
-                    <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${checked ? 'bg-purple-500 border-purple-500' : 'border-border'}`}>
-                      {checked && <Check className="w-2.5 h-2.5 text-white" />}
-                    </span>
-                    <input type="checkbox" checked={checked} onChange={() => toggle(o.id)} className="sr-only" />
-                    <span className="truncate">{o.name}</span>
-                  </label>
-                )
-              })
-            )}
-          </div>
-        </div>
-      )}
+      {panel}
     </div>
   )
 }
@@ -360,6 +378,8 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   const [pageSize, setPageSize] = useState<number>(initial.pageSize)
   const [page, setPage] = useState(0)
   const [showFilters, setShowFilters] = useState(false)
+  const [searchQ, setSearchQ] = useState('')
+  const [quickSort, setQuickSort] = useState<'date_desc' | 'date_asc' | 'amount_desc' | 'client' | ''>('')
   const [exporting, setExporting] = useState(false)
   const [decimals, setDecimals] = useState(initial.decimals)
   const [groups, setGroups] = useState<ColGroup[]>(hasUrlCols ? initial.groups : ((dbLayout?.groups as ColGroup[] | undefined) ?? initial.groups))
@@ -585,7 +605,24 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
 
   // ── Pipeline: filter → sort ───────────────────────────────────────────────────
   const filtered = useMemo(() => applyFilters(rows, filters), [rows, filters])
-  const sorted = useMemo(() => sortRows(filtered, sortKey, sortDir), [filtered, sortKey, sortDir])
+  const baseSort = useMemo(() => sortRows(filtered, sortKey, sortDir), [filtered, sortKey, sortDir])
+  const sorted = useMemo(() => {
+    let s = baseSort
+    if (searchQ.trim()) {
+      const q = searchQ.toLowerCase()
+      s = s.filter(r =>
+        r.title?.toLowerCase().includes(q) ||
+        r.client_name?.toLowerCase().includes(q) ||
+        r.service_name?.toLowerCase().includes(q) ||
+        String(r.task_number ?? '').includes(q),
+      )
+    }
+    if (quickSort === 'date_asc')    return [...s].sort((a, b) => (a.task_date || '').localeCompare(b.task_date || ''))
+    if (quickSort === 'date_desc')   return [...s].sort((a, b) => (b.task_date || '').localeCompare(a.task_date || ''))
+    if (quickSort === 'amount_desc') return [...s].sort((a, b) => (b.billing_inr ?? 0) - (a.billing_inr ?? 0))
+    if (quickSort === 'client')      return [...s].sort((a, b) => (a.client_name || '').localeCompare(b.client_name || ''))
+    return s
+  }, [baseSort, searchQ, quickSort])
   const summary = useMemo(() => computeSummary(filtered), [filtered])
   // Per-employee earnings totals over the whole filtered set (for the totals row).
   const empEarnTotals = useMemo(() => {
@@ -602,7 +639,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   )
 
   // Reset to first page whenever the result set changes shape.
-  useEffect(() => { setPage(0) }, [filters, sortKey, sortDir, pageSize])
+  useEffect(() => { setPage(0) }, [filters, sortKey, sortDir, pageSize, searchQ, quickSort])
 
   const size = pageSize === 0 ? sorted.length : pageSize
   const pageCount = Math.max(1, Math.ceil(sorted.length / Math.max(1, size)))
@@ -834,6 +871,42 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
               <X className="w-3.5 h-3.5" /> Clear
             </button>
           )}
+
+          {/* Search */}
+          <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-lg px-2.5 h-[34px] min-w-[160px] max-w-[220px] flex-1 sm:flex-none">
+            <Search className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            <input
+              value={searchQ}
+              onChange={e => setSearchQ(e.target.value)}
+              placeholder="Search title, client…"
+              className="bg-transparent text-xs outline-none flex-1 placeholder:text-muted-foreground/50"
+            />
+            {searchQ && <button onClick={() => setSearchQ('')} className="text-muted-foreground hover:text-foreground shrink-0"><X className="w-3 h-3" /></button>}
+          </div>
+
+          {/* Quick sort */}
+          <div className="relative flex items-center">
+            <select
+              value={quickSort}
+              onChange={e => setQuickSort(e.target.value as typeof quickSort)}
+              className={`h-[34px] pl-2.5 pr-6 rounded-lg text-xs font-medium border appearance-none cursor-pointer transition-colors focus:outline-none ${
+                quickSort ? 'bg-violet-500/15 border-violet-500/40 text-violet-300' : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <option value="">Sort by</option>
+              <option value="date_desc">Newest first</option>
+              <option value="date_asc">Oldest first</option>
+              <option value="amount_desc">Amount ↓</option>
+              <option value="client">Client A→Z</option>
+            </select>
+            <ChevronDown className="w-3 h-3 absolute right-2 pointer-events-none text-muted-foreground" />
+            {quickSort && (
+              <button onClick={() => setQuickSort('')} className="ml-1 text-violet-400 hover:text-violet-300">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
           <div className="text-sm text-muted-foreground ml-1">
             <span className="font-semibold text-foreground">{fmt(sorted.length, 0)}</span> of {fmt(rows.length, 0)} tasks
           </div>
