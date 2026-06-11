@@ -321,3 +321,75 @@ export async function submitRevisionRequest(
   await bumpExternalActivity(own.admin, requestId)
   return { ok: true }
 }
+
+// ─── Edit request sections (each change is logged to the timeline) ────────────
+
+/** Fields the requester may edit on their own request. */
+const EDITABLE_FIELDS = ['title', 'description', 'design_plan', 'due_date'] as const
+export type EditableField = typeof EDITABLE_FIELDS[number]
+
+export async function updateRequestField(
+  token: string, requestId: string, field: EditableField, value: string,
+): Promise<ActionResult> {
+  if (!EDITABLE_FIELDS.includes(field)) return { ok: false, error: 'This field cannot be edited.' }
+  const link = await resolveToken(token)
+  if (!link) return { ok: false, error: 'This link is no longer valid.' }
+  const own = await ownRequest(link, requestId)
+  if (!own) return { ok: false, error: 'Not found.' }
+
+  const next = (value || '').trim().slice(0, field === 'title' ? 300 : 5000) || null
+  if (field === 'title' && !next) return { ok: false, error: 'Title cannot be empty.' }
+  if (field === 'due_date' && next && !/^\d{4}-\d{2}-\d{2}$/.test(next)) {
+    return { ok: false, error: 'Pick a valid date.' }
+  }
+
+  const { data: cur } = await own.admin.from('task_requests').select(field).eq('id', requestId).single()
+  const { error } = await own.admin.from('task_requests')
+    .update({ [field]: next, updated_at: new Date().toISOString() })
+    .eq('id', requestId)
+  if (error) return { ok: false, error: 'Could not save the change.' }
+
+  const truncate = (v: unknown) => typeof v === 'string' ? v.slice(0, 200) : v
+  await logRequestActivity(own.admin, {
+    requestId, actorType: link.type === 'agency' ? 'agency' : 'client',
+    actorLabel: link.requesterLabel, action: 'field_changed',
+    visibility: link.visibility,
+    detail: { field, from: truncate((cur as any)?.[field] ?? null), to: truncate(next) },
+  })
+  await bumpExternalActivity(own.admin, requestId)
+  return { ok: true }
+}
+
+// ─── Cancel (only before work starts) ──────────────────────────────────────────
+
+const CANCELLABLE = ['submitted', 'under_review', 'approved', 'waiting_for_content', 'revision_requested']
+
+export async function cancelMyRequest(token: string, requestId: string): Promise<ActionResult> {
+  const link = await resolveToken(token)
+  if (!link) return { ok: false, error: 'This link is no longer valid.' }
+  const own = await ownRequest(link, requestId)
+  if (!own) return { ok: false, error: 'Not found.' }
+  if (!CANCELLABLE.includes(own.request.status)) {
+    return { ok: false, error: 'Work has already started on this request — please contact Cirqle to cancel.' }
+  }
+
+  const { error } = await own.admin.from('task_requests').update({
+    status: 'cancelled', client_status: 'cancelled', priority_rank: null,
+    status_updated_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+  }).eq('id', requestId)
+  if (error) {
+    // Pre-patch DB: 'cancelled' not yet in the status constraint.
+    if (/check|constraint/i.test(error.message || '')) {
+      return { ok: false, error: 'Cancellation needs the v1.1 update — ask Cirqle to apply it.' }
+    }
+    return { ok: false, error: 'Could not cancel the request.' }
+  }
+
+  await logRequestActivity(own.admin, {
+    requestId, actorType: link.type === 'agency' ? 'agency' : 'client',
+    actorLabel: link.requesterLabel, action: 'status_changed',
+    visibility: link.visibility, detail: { from: own.request.status, to: 'cancelled' },
+  })
+  await bumpExternalActivity(own.admin, requestId)
+  return { ok: true }
+}

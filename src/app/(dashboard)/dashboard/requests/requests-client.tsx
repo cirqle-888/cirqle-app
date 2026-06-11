@@ -22,7 +22,7 @@ const TABS: { key: string; label: string; statuses: string[] }[] = [
   { key: 'reviewed', label: 'Reviewed', statuses: ['under_review'] },
   { key: 'approved', label: 'Approved', statuses: ['approved'] },
   { key: 'started',  label: 'Started',  statuses: ['started', 'in_progress', 'waiting_for_content', 'revision_requested', 'completed', 'delivered'] },
-  { key: 'rejected', label: 'Rejected', statuses: ['rejected'] },
+  { key: 'rejected', label: 'Rejected', statuses: ['rejected', 'cancelled'] },
   { key: 'archived', label: 'Archived', statuses: ['archived'] },
 ]
 
@@ -44,6 +44,7 @@ const TRANSITIONS: Record<string, { to: RequestStatus; label: string }[]> = {
   delivered:           [],
   rejected:            [],
   archived:            [],
+  cancelled:           [],
 }
 
 const fmtDate = (d?: string | null) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'

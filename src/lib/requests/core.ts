@@ -12,7 +12,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 export type RequestStatus =
   | 'submitted' | 'under_review' | 'approved' | 'started' | 'in_progress'
   | 'waiting_for_content' | 'revision_requested' | 'completed' | 'delivered'
-  | 'rejected' | 'archived'
+  | 'rejected' | 'archived' | 'cancelled'
 
 export type Visibility = 'internal' | 'client' | 'agency'
 export type ActorType = 'client' | 'agency' | 'admin' | 'system'
@@ -28,6 +28,7 @@ export const CLIENT_STATUS_LABEL: Record<string, string> = {
   revision_requested:  'Revision Requested',
   completed:           'Completed',
   delivered:           'Delivered',
+  cancelled:           'Cancelled',
 }
 
 /** Internal status → external `client_status` projection (§3 of the design).
@@ -50,6 +51,7 @@ export const STATUS_CHIP: Record<string, string> = {
   delivered:           'bg-emerald-500/12 text-emerald-300 border-emerald-500/25',
   rejected:            'bg-red-500/12 text-red-400 border-red-500/25',
   archived:            'bg-secondary text-muted-foreground border-border',
+  cancelled:           'bg-red-500/10 text-red-400/80 border-red-500/20',
 }
 
 export const PRIORITY_CHIP: Record<string, string> = {

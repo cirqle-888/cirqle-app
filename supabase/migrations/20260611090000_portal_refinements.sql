@@ -19,3 +19,10 @@ ALTER TABLE public.task_requests
   ADD COLUMN IF NOT EXISTS priority_rank integer;
 COMMENT ON COLUMN public.task_requests.priority_rank IS
   'Client-set rank among their open requests (1 = first). Null after completion.';
+
+-- 3. Allow clients to CANCEL their own (not-yet-started) requests.
+ALTER TABLE public.task_requests DROP CONSTRAINT IF EXISTS task_requests_status_check;
+ALTER TABLE public.task_requests ADD CONSTRAINT task_requests_status_check CHECK (status IN
+  ('submitted','under_review','approved','started','in_progress',
+   'waiting_for_content','revision_requested','completed','delivered',
+   'rejected','archived','cancelled'));

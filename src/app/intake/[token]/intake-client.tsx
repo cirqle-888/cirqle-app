@@ -4,13 +4,14 @@ import { useState } from 'react'
 import {
   Send, Loader2, CheckCircle2, Plus, X, Link2, ChevronDown, ChevronUp,
   Clock, RefreshCw, MessageSquarePlus, CalendarDays, FolderOpen,
-  ArrowUp, ArrowDown,
+  ArrowUp, ArrowDown, Pencil, Ban,
 } from 'lucide-react'
 import { CLIENT_STATUS_LABEL } from '@/lib/requests/core'
 import {
   submitIntakeRequest, getExternalTimeline, addRequestLink,
   updateRequestRemarks, submitRevisionRequest, getMyRequests,
-  reorderMyRequests, type IntakeSubmitInput,
+  reorderMyRequests, updateRequestField, cancelMyRequest,
+  type IntakeSubmitInput, type EditableField,
 } from './actions'
 
 const inputCls = 'w-full bg-secondary border border-foreground/15 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20'
@@ -26,6 +27,7 @@ const STATUS_CLS: Record<string, string> = {
   revision_requested:  'bg-pink-500/12 text-pink-400 border-pink-500/25',
   completed:           'bg-emerald-500/12 text-emerald-400 border-emerald-500/25',
   delivered:           'bg-emerald-500/12 text-emerald-300 border-emerald-500/25',
+  cancelled:           'bg-red-500/10 text-red-400/80 border-red-500/20',
 }
 
 const fmtDate = (d?: string | null) =>
@@ -90,7 +92,7 @@ export default function IntakeClient({
   const [requests, setRequests] = useState<any[]>(initialRequests)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [timeline, setTimeline] = useState<Record<string, any[]>>({})
-  const [actionBox, setActionBox] = useState<{ id: string; kind: 'link' | 'remarks' | 'revision' } | null>(null)
+  const [actionBox, setActionBox] = useState<{ id: string; kind: 'link' | 'remarks' | 'revision' | 'field'; field?: EditableField } | null>(null)
   const [actionText, setActionText] = useState('')
   const [actionUrl, setActionUrl] = useState('')
   const [actionBusy, setActionBusy] = useState(false)
@@ -143,12 +145,30 @@ export default function IntakeClient({
     void reorderMyRequests(token, order)
   }
 
+  /** Statuses the requester can still cancel (work not started yet). */
+  const CANCELLABLE = ['submitted', 'under_review', 'approved', 'waiting_for_content', 'revision_requested']
+
+  function openField(r: any, field: EditableField) {
+    setActionBox({ id: r.id, kind: 'field', field })
+    setActionText(String(r[field] ?? '')); setActionUrl('')
+  }
+
+  async function handleCancel(r: any) {
+    if (!confirm(`Cancel "${r.title}"? This tells Cirqle not to work on it.`)) return
+    const res = await cancelMyRequest(token, r.id)
+    if (res.ok) {
+      void refreshRequests()
+      setTimeline(t => { const n = { ...t }; delete n[r.id]; return n })
+    } else alert(res.error || 'Could not cancel.')
+  }
+
   async function runAction() {
     if (!actionBox) return
     setActionBusy(true)
     let res: { ok: boolean; error?: string }
     if (actionBox.kind === 'link') res = await addRequestLink(token, actionBox.id, actionText, actionUrl)
     else if (actionBox.kind === 'remarks') res = await updateRequestRemarks(token, actionBox.id, actionText)
+    else if (actionBox.kind === 'field') res = await updateRequestField(token, actionBox.id, actionBox.field!, actionText)
     else res = await submitRevisionRequest(token, actionBox.id, actionText, actionUrl)
     setActionBusy(false)
     if (res.ok) {
@@ -192,21 +212,18 @@ export default function IntakeClient({
         </div>
       )}
 
-      {/* Desktop: two-column canvas (form left, requests right). Mobile: stacked. */}
-      <div className="lg:grid lg:grid-cols-2 lg:gap-8 lg:items-start">
-      <div className="lg:sticky lg:top-6">
-      {/* ── New Request (collapsible — one window with the list below) ── */}
-      <button
-        onClick={() => { setFormOpen(o => !o); setSentRef(null) }}
-        className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border transition-all mb-4 ${
-          formOpen ? 'bg-secondary border-border text-foreground' : 'gradient-bg text-white border-transparent shadow hover:opacity-90'
-        }`}>
-        <span className="text-sm font-semibold flex items-center gap-2">
+      {/* ── Header row: requests are the main content; New Request is a button ── */}
+      <div className="flex items-center justify-between gap-3 mb-3 px-1">
+        <h2 className="text-base font-bold">Your requests ({requests.length})</h2>
+        <button
+          onClick={() => { setFormOpen(o => !o); setSentRef(null) }}
+          className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all shrink-0 ${
+            formOpen ? 'bg-secondary border border-border text-foreground' : 'gradient-bg text-white shadow hover:opacity-90'
+          }`}>
           <Plus className={`w-4 h-4 transition-transform duration-200 ${formOpen ? 'rotate-45' : ''}`} />
           {formOpen ? 'Close' : 'New Request'}
-        </span>
-        {!formOpen && <span className="text-xs opacity-80 hidden sm:inline">Tap to submit a request</span>}
-      </button>
+        </button>
+      </div>
 
       {formOpen && (
           <form onSubmit={handleSubmit} className="bg-card border border-border rounded-2xl p-4 sm:p-6 space-y-4 mb-6">
@@ -334,11 +351,9 @@ export default function IntakeClient({
             </button>
           </form>
       )}
-      </div>
 
-      {/* ── Your requests (always visible — same window) ── */}
+      {/* ── Requests list (main content) ── */}
       <div>
-        <h2 className="text-sm font-bold px-1 mb-3">Your requests ({requests.length})</h2>
         <div className="space-y-2.5">
           {requests.length === 0 && (
             <div className="bg-card border border-border rounded-2xl px-6 py-10 text-center text-sm text-muted-foreground">
@@ -389,34 +404,41 @@ export default function IntakeClient({
 
                 {isOpen && (
                   <div className="border-t border-border px-4 py-4 space-y-4">
-                    {/* Full request details — everything the requester sent */}
-                    {(r.description || r.design_plan || r.remarks || r.due_date) && (
-                      <div className="space-y-3">
-                        {r.description && (
-                          <div>
-                            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1">Details</p>
-                            <p className="text-sm text-foreground/90 whitespace-pre-wrap">{r.description}</p>
+                    {/* Full request details — every section editable (logged to activity) */}
+                    <div className="space-y-3">
+                      {([
+                        ['title', 'Title', r.title],
+                        ['description', 'Details', r.description],
+                        ['design_plan', 'Design plan', r.design_plan],
+                      ] as [EditableField, string, string | null][]).map(([field, label, value]) => (
+                        <div key={field}>
+                          <div className="flex items-center gap-2 mb-1">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">{label}</p>
+                            <button onClick={() => openField(r, field)} title={`Edit ${label.toLowerCase()}`}
+                              className="p-0.5 rounded text-muted-foreground/50 hover:text-foreground transition-colors">
+                              <Pencil className="w-3 h-3" />
+                            </button>
                           </div>
-                        )}
-                        {r.design_plan && (
-                          <div>
-                            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1">Design plan</p>
-                            <p className="text-sm text-foreground/90 whitespace-pre-wrap">{r.design_plan}</p>
-                          </div>
-                        )}
-                        {r.remarks && (
-                          <div>
-                            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1">Remarks</p>
-                            <p className="text-sm text-foreground/90 whitespace-pre-wrap">{r.remarks}</p>
-                          </div>
-                        )}
-                        {r.due_date && (
-                          <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                            <CalendarDays className="w-3.5 h-3.5" /> Deadline: <span className="text-foreground/90 font-medium">{fmtDate(r.due_date)}</span>
-                          </p>
-                        )}
-                      </div>
-                    )}
+                          {value
+                            ? <p className="text-sm text-foreground/90 whitespace-pre-wrap break-words">{value}</p>
+                            : <p className="text-xs text-muted-foreground/40 italic">Not added yet — tap the pencil to add.</p>}
+                        </div>
+                      ))}
+                      {r.remarks && (
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1">Remarks</p>
+                          <p className="text-sm text-foreground/90 whitespace-pre-wrap break-words">{r.remarks}</p>
+                        </div>
+                      )}
+                      <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                        <CalendarDays className="w-3.5 h-3.5" /> Deadline:{' '}
+                        <span className="text-foreground/90 font-medium">{r.due_date ? fmtDate(r.due_date) : 'not set'}</span>
+                        <button onClick={() => openField(r, 'due_date')} title="Edit deadline"
+                          className="p-0.5 rounded text-muted-foreground/50 hover:text-foreground transition-colors">
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                      </p>
+                    </div>
 
                     {driveFolderLink && (
                       <a href={driveFolderLink} target="_blank" rel="noreferrer"
@@ -438,6 +460,12 @@ export default function IntakeClient({
                         className="text-xs px-3 py-1.5 rounded-lg bg-pink-500/10 text-pink-400 border border-pink-500/25 hover:bg-pink-500/20 transition-colors flex items-center gap-1.5">
                         <RefreshCw className="w-3 h-3" /> Request revision
                       </button>
+                      {CANCELLABLE.includes(r.client_status) && (
+                        <button onClick={() => handleCancel(r)}
+                          className="text-xs px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 border border-red-500/25 hover:bg-red-500/20 transition-colors flex items-center gap-1.5">
+                          <Ban className="w-3 h-3" /> Cancel request
+                        </button>
+                      )}
                     </div>
 
                     {actionBox !== null && actionBox.id === r.id && (
@@ -457,9 +485,22 @@ export default function IntakeClient({
                             <input value={actionUrl} onChange={e => setActionUrl(e.target.value)} className={inputCls} placeholder="Reference link (optional)" />
                           </>
                         )}
+                        {actionBox.kind === 'field' && (
+                          actionBox.field === 'title'
+                            ? <input value={actionText} onChange={e => setActionText(e.target.value)} className={inputCls} placeholder="Request title" />
+                            : actionBox.field === 'due_date'
+                              ? <input type="date" value={actionText} onChange={e => setActionText(e.target.value)} className={inputCls} />
+                              : <textarea rows={5} value={actionText} onChange={e => setActionText(e.target.value)} onInput={autoGrow}
+                                  className={inputCls + ' resize-y min-h-[110px]'}
+                                  placeholder={actionBox.field === 'description' ? 'Describe the work…' : 'Style direction, colours, references…'} />
+                        )}
                         <div className="flex gap-2">
                           <button onClick={() => setActionBox(null)} className="flex-1 text-xs py-2 rounded-lg bg-secondary hover:bg-secondary/70 transition-colors">Cancel</button>
-                          <button onClick={runAction} disabled={actionBusy || (actionBox.kind === 'link' ? !actionUrl.trim() : !actionText.trim())}
+                          <button onClick={runAction} disabled={actionBusy || (
+                            actionBox.kind === 'link' ? !actionUrl.trim()
+                            : actionBox.kind === 'field' ? (actionBox.field === 'title' && !actionText.trim())
+                            : !actionText.trim()
+                          )}
                             className="flex-1 text-xs py-2 rounded-lg gradient-bg text-white hover:opacity-90 disabled:opacity-50 transition-opacity flex items-center justify-center gap-1.5">
                             {actionBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : null} Save
                           </button>
@@ -505,7 +546,6 @@ export default function IntakeClient({
             )
           })}
         </div>
-      </div>
       </div>
 
       <p className="text-center text-[11px] text-muted-foreground/50 mt-8">

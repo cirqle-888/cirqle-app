@@ -26,6 +26,7 @@ DROP TABLE IF EXISTS deductions CASCADE;
 DROP TABLE IF EXISTS credit_ledger CASCADE;
 DROP TABLE IF EXISTS salary_advances CASCADE;
 DROP TABLE IF EXISTS payroll CASCADE;
+DROP TABLE IF EXISTS employee_performance_history CASCADE;
 DROP TABLE IF EXISTS cashbook_entries CASCADE;
 DROP TABLE IF EXISTS cashbook_categories CASCADE;
 DROP TABLE IF EXISTS payments CASCADE;
@@ -310,6 +311,10 @@ CREATE TABLE contribution_scores (
   score_percentage DECIMAL(8,4) DEFAULT 0,
   earnings_inr DECIMAL(12,2) DEFAULT 0,
   calculated_at TIMESTAMPTZ DEFAULT NOW(),
+  previous_earnings DECIMAL(12,2),
+  previous_performance_rating DECIMAL(5,2),
+  recalculated_at TIMESTAMPTZ,
+  recalculated_by UUID REFERENCES employees(id) ON DELETE SET NULL,
   UNIQUE(task_id, employee_id)
 );
 

@@ -11,7 +11,7 @@ async function run() {
   }
   const client = new Client({ connectionString: process.env.DATABASE_URL });
   await client.connect();
-  const sql = fs.readFileSync('supabase/migrations/phase9_payroll_allocations.sql', 'utf8');
+  const sql = fs.readFileSync('supabase/migrations/20260606100000_performance_history.sql', 'utf8');
   try {
     await client.query(sql);
     console.log("Migration applied successfully!");

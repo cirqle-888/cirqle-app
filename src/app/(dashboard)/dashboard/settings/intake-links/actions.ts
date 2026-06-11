@@ -133,7 +133,12 @@ export async function saveClientDriveFolder(
   const { error } = await admin.from('clients')
     .update({ drive_folder_link: u || null })
     .eq('id', clientId)
-  if (error) return { ok: false, error: error.message }
+  if (error) {
+    if (/drive_folder_link/i.test(error.message || '')) {
+      return { ok: false, error: 'Run the v1.1 migration first: supabase/migrations/20260611090000_portal_refinements.sql (Supabase → SQL Editor).' }
+    }
+    return { ok: false, error: error.message }
+  }
   revalidatePath(REVALIDATE)
   return { ok: true }
 }
