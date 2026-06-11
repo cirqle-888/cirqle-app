@@ -392,6 +392,72 @@ export async function saveClientTags(
   return { ok: true, data: { saved } }
 }
 
+// ─── Internal account transfer ───────────────────────────────────────────────
+
+export interface TransferPayload {
+  from_account_id: string
+  to_account_id: string
+  amount: number
+  entry_date: string
+  description: string
+}
+
+/**
+ * Creates a matched pair of cashbook entries (outflow + inflow) linked by a
+ * shared transfer_ref UUID. Both entries use INR, no category, no invoice.
+ */
+export async function insertTransfer(
+  payload: TransferPayload,
+): Promise<ActionResult<{ outflow: any; inflow: any }>> {
+  const guard = await requirePermission(PERMS.CASHBOOK_EDIT)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+
+  // Look up account names for auto-generated descriptions.
+  const { data: accounts } = await admin
+    .from('bank_accounts')
+    .select('id, name')
+    .in('id', [payload.from_account_id, payload.to_account_id])
+  const nameOf = (id: string) => accounts?.find((a: any) => a.id === id)?.name ?? 'Account'
+
+  const transferRef = crypto.randomUUID()
+  const baseFields = {
+    amount: payload.amount,
+    currency: 'INR',
+    amount_inr: payload.amount,
+    exchange_rate: 1,
+    rate_source: 'manual',
+    rate_date: payload.entry_date,
+    entry_date: payload.entry_date,
+    transfer_ref: transferRef,
+  }
+
+  const outflowDesc = payload.description || `Transfer to ${nameOf(payload.to_account_id)}`
+  const inflowDesc  = payload.description || `Transfer from ${nameOf(payload.from_account_id)}`
+
+  const [outRes, inRes] = await Promise.all([
+    admin.from('cashbook_entries').insert({
+      ...baseFields,
+      type: 'outflow',
+      bank_account_id: payload.from_account_id,
+      description: outflowDesc,
+    }).select(ENTRY_SELECT).single(),
+    admin.from('cashbook_entries').insert({
+      ...baseFields,
+      type: 'inflow',
+      bank_account_id: payload.to_account_id,
+      description: inflowDesc,
+    }).select(ENTRY_SELECT).single(),
+  ])
+
+  if (outRes.error) return { ok: false, error: outRes.error.message }
+  if (inRes.error) return { ok: false, error: inRes.error.message }
+
+  revalidatePath(REVALIDATE)
+  return { ok: true, data: { outflow: outRes.data, inflow: inRes.data } }
+}
+
 // ─── Live FX rate sync ────────────────────────────────────────────────────────
 
 /**

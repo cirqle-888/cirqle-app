@@ -8,7 +8,7 @@ import { createClient } from '@/lib/supabase/client'
 import { insertCashbookEntries, updateCashbookEntry, softDeleteCashbookEntry, fetchLiveRate, backupAndResetAllocations } from './actions'
 import { formatCompact, round2 } from '@/lib/calculations/currency'
 import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
-import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, RefreshCw, Landmark, CheckCircle } from 'lucide-react'
+import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, RefreshCw, Landmark, CheckCircle, ArrowLeftRight } from 'lucide-react'
 import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from '@/lib/utils'
 import type { DateFilterValue } from '@/components/ui/date-filter'
@@ -49,6 +49,10 @@ const ReceiptModal = dynamic(
   () => import('@/components/cashbook/receipt-modal'),
   { ssr: false },
 )
+const TransferModal = dynamic(
+  () => import('@/components/cashbook/transfer-modal'),
+  { ssr: false },
+)
 
 interface Entry {
   id: string
@@ -69,6 +73,7 @@ interface Entry {
   exchange_rate?: number
   rate_source?: string
   receipt_number?: string | null
+  transfer_ref?: string | null
   deleted_at?: string | null
   category?: { id: string; name: string; type: string }
   bank_account?: { id: string; name: string }
@@ -184,6 +189,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   const isAdmin = role === 'super_admin'
   const [entries, setEntries] = useState<Entry[]>(initialEntries)
   const [showForm, setShowForm] = useState(false)
+  const [showTransfer, setShowTransfer] = useState(false)
   const [formEditingId, setFormEditingId] = useState<string | null>(null)   // non-null = editing existing
   const [showRebuildPanel, setShowRebuildPanel] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -903,6 +909,11 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               <Upload className="w-4 h-4 shrink-0" />
               <span className="hidden sm:inline">Import</span>
             </Link>
+            <button onClick={() => setShowTransfer(true)}
+              className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap">
+              <ArrowLeftRight className="w-4 h-4 shrink-0" />
+              <span className="hidden sm:inline">Transfer</span>
+            </button>
             <button onClick={() => setShowForm(true)}
               className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-3 py-2 rounded-lg hover:opacity-90 transition-opacity whitespace-nowrap">
               <Plus className="w-4 h-4 shrink-0" />
@@ -1111,12 +1122,13 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
 
                   <div className="px-4 pb-4 flex flex-col gap-3">
                     {/* Description */}
-                    <div className="text-sm">
+                    <div className="text-sm space-y-1">
                       {isEditing ? (
                         <input type="text" value={editForm.description || ''} onChange={e => setEditForm(p => ({...p, description: e.target.value}))} className="w-full bg-background border rounded px-2 py-1 text-xs" placeholder="Description" />
                       ) : (
                         entry.description || <span className="text-muted-foreground italic">No description</span>
                       )}
+                      {entry.transfer_ref && <span className="inline-flex items-center gap-1 bg-purple-500/10 text-purple-400 text-[10px] px-1.5 py-0.5 rounded font-medium"><ArrowLeftRight className="w-3 h-3" />Internal Transfer</span>}
                     </div>
                     
                     {/* Date and actions */}
@@ -1276,6 +1288,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                               </div>
                             )}
                           </div>
+                          {entry.transfer_ref && <span className="inline-flex items-center gap-1 mt-1 bg-purple-500/10 text-purple-400 text-[9px] px-1.5 py-0.5 rounded font-medium"><ArrowLeftRight className="w-2.5 h-2.5" />Internal Transfer</span>}
                           {allocStatus === 'none'    && <span className="inline-block mt-1 bg-amber-500/10  text-amber-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Unallocated</span>}
                           {allocStatus === 'partial' && <span className="inline-block mt-1 bg-blue-500/10   text-blue-400  text-[9px] px-1.5 py-0.5 rounded font-medium">Partially Allocated</span>}
                           {allocStatus === 'over'    && <span className="inline-block mt-1 bg-red-500/10    text-red-500   text-[9px] px-1.5 py-0.5 rounded font-medium">Over-allocated!</span>}
@@ -1413,6 +1426,18 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
           </div>
         </div>
       </div>
+
+      {/* Transfer Modal */}
+      {showTransfer && (
+        <TransferModal
+          bankAccounts={bankAccounts}
+          onClose={() => setShowTransfer(false)}
+          onSaved={(outflow, inflow) => {
+            setEntries(prev => [outflow, inflow, ...prev])
+            setShowTransfer(false)
+          }}
+        />
+      )}
 
       {/* Add Entry Modal */}
       {showForm && (
