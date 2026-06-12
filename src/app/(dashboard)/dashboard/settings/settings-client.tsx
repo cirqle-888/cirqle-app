@@ -794,6 +794,19 @@ export default function SettingsClient(props: Props) {
                     />
                   </div>
                 ))}
+
+                {/* Payslip from address — separate field with hint */}
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Payslip Sending Email</label>
+                  <input
+                    type="email"
+                    value={companySettings['payslip_from_email'] || ''}
+                    onChange={e => setCompanySettings(p => ({ ...p, payslip_from_email: e.target.value }))}
+                    placeholder="e.g. payslip@cirqle.work or Cirqle Payroll <payslip@cirqle.work>"
+                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Address used as the From field when sending payslips. Must be a domain verified in Resend.</p>
+                </div>
               </div>
 
               {/* Branding */}

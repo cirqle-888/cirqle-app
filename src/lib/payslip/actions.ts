@@ -163,8 +163,16 @@ async function sendOne(
     return { ok: false, error: `PDF generation failed: ${e?.message || e}` }
   }
 
+  // Use in-app setting if saved, fall back to env var / default
+  const { data: fromSetting } = await admin
+    .from('company_settings')
+    .select('value')
+    .eq('key', 'payslip_from_email')
+    .maybeSingle()
+  const fromAddress = (fromSetting?.value as string | null)?.trim() || payslipFrom()
+
   const { data: sendRes, error: sendErr } = await resend.emails.send({
-    from: payslipFrom(),
+    from: fromAddress,
     to,
     subject,
     html,
