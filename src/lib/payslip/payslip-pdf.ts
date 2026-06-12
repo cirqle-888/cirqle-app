@@ -125,40 +125,38 @@ export function renderPayslipPdf(d: PayslipData): Buffer {
   }
   y += boxH + 28
 
-  // ── Performance + attendance (two cards) ───────────────────────────────────
+  // ── Attendance + tasks contributed (two cards) ────────────────────────────
   const cardW = (innerW - 16) / 2
   const cardH = 60
-  const perfColor = d.performance.rating >= 90 ? RGB.green : d.performance.rating >= 70 ? RGB.accent2 : d.performance.rating >= 50 ? RGB.amber : RGB.red
-  // perf
+  // days active
   doc.setFillColor(...RGB.navy); doc.setDrawColor(...RGB.line)
   doc.roundedRect(M, y, cardW, cardH, 8, 8, 'FD')
   doc.setTextColor(...RGB.muted); doc.setFont('helvetica', 'normal'); doc.setFontSize(8)
-  doc.text('PERFORMANCE', M + 14, y + 20)
-  doc.setTextColor(perfColor[0], perfColor[1], perfColor[2]); doc.setFont('helvetica', 'bold'); doc.setFontSize(22)
-  doc.text(`${d.performance.rating}%`, M + 14, y + 46)
+  doc.text('DAYS ACTIVE', M + 14, y + 20)
+  doc.setTextColor(...RGB.white); doc.setFont('helvetica', 'bold'); doc.setFontSize(22)
+  doc.text(`${d.attendance.workedDays}`, M + 14, y + 46)
   doc.setTextColor(...RGB.faint); doc.setFont('helvetica', 'normal'); doc.setFontSize(8)
-  doc.text('Current rating', M + 70, y + 46)
-  // attendance
+  doc.text(`/ ${d.attendance.daysInMonth} days`, M + 46, y + 46)
+  // tasks contributed
   const ax = M + cardW + 16
   doc.setFillColor(...RGB.navy); doc.roundedRect(ax, y, cardW, cardH, 8, 8, 'FD')
   doc.setTextColor(...RGB.muted); doc.setFontSize(8)
-  doc.text('ATTENDANCE', ax + 14, y + 20)
+  doc.text('TASKS CONTRIBUTED', ax + 14, y + 20)
   doc.setTextColor(...RGB.white); doc.setFont('helvetica', 'bold'); doc.setFontSize(22)
-  doc.text(`${d.attendance.workedDays}`, ax + 14, y + 46)
+  doc.text(`${d.totals.monthTaskCount}`, ax + 14, y + 46)
   doc.setTextColor(...RGB.faint); doc.setFont('helvetica', 'normal'); doc.setFontSize(8)
-  doc.text(`days active · ${d.totals.monthTaskCount} task${d.totals.monthTaskCount !== 1 ? 's' : ''}`, ax + 44, y + 46)
+  doc.text('creatives this month', ax + 44, y + 46)
   y += cardH + 28
 
-  // ── Contribution range breakdown ───────────────────────────────────────────
+  // ── Contribution quality (count only — no per-band earnings) ─────────────
   doc.setTextColor(...RGB.white); doc.setFont('helvetica', 'bold'); doc.setFontSize(12)
-  doc.text('Contribution Range Breakdown', M, y); y += 16
+  doc.text('Contribution Quality', M, y); y += 16
   doc.setTextColor(...RGB.faint); doc.setFont('helvetica', 'normal'); doc.setFontSize(8)
-  doc.text(`${d.period.label}  ·  ${inr(d.totals.monthEarnings)} across ${d.totals.monthTaskCount} task${d.totals.monthTaskCount !== 1 ? 's' : ''}`, M, y); y += 16
+  doc.text(`${d.period.label}  ·  ${d.totals.monthTaskCount} task${d.totals.monthTaskCount !== 1 ? 's' : ''} contributed`, M, y); y += 16
 
   doc.setFontSize(8); doc.setTextColor(...RGB.faint)
   doc.text('QUALITY BAND', M, y)
-  doc.text('TASKS', M + innerW * 0.62, y, { align: 'right' })
-  doc.text('EARNINGS', W - M, y, { align: 'right' })
+  doc.text('COUNT', W - M, y, { align: 'right' })
   y += 6; doc.setDrawColor(...RGB.line); doc.line(M, y, W - M, y); y += 14
 
   if (d.contributionRanges.length === 0) {
@@ -170,10 +168,8 @@ export function renderPayslipPdf(d: PayslipData): Buffer {
       doc.setFillColor(c[0], c[1], c[2]); doc.roundedRect(M, y - 8, 8, 8, 2, 2, 'F')
       doc.setTextColor(...RGB.text); doc.setFont('helvetica', 'normal'); doc.setFontSize(10)
       doc.text(b.label, M + 16, y)
-      doc.setTextColor(...RGB.muted)
-      doc.text(String(b.count), M + innerW * 0.62, y, { align: 'right' })
-      doc.setTextColor(...RGB.text); doc.setFont('helvetica', 'bold')
-      doc.text(inr(b.earnings), W - M, y, { align: 'right' })
+      doc.setTextColor(...RGB.muted); doc.setFont('helvetica', 'bold')
+      doc.text(`${b.count} task${b.count !== 1 ? 's' : ''}`, W - M, y, { align: 'right' })
       y += 20
     }
   }

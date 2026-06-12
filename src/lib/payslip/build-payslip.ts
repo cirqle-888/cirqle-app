@@ -14,7 +14,7 @@ const BAND_LABELS: Record<string, string> = {
 }
 const BAND_ORDER: PayslipBand['band'][] = ['100', '76-99', '51-75', '26-50', '0-25']
 
-const COMPANY = {
+const COMPANY_DEFAULTS = {
   name:    'Cirqle Design',
   email:   'farooq@cirqle.work',
   website: 'cirqle.work',
@@ -214,7 +214,13 @@ export async function buildPayslipData(
       monthTaskCount: monthTasks.length,
       sixMonthTotal: Math.round(sixMonthTotal * 100) / 100,
     },
-    company: COMPANY,
+    company: {
+      ...COMPANY_DEFAULTS,
+      logoUrl: await (async () => {
+        const { data } = await admin.from('company_settings').select('value').eq('key', 'logo_url').maybeSingle()
+        return (data?.value as string | null) || null
+      })(),
+    },
   }
 
   return { ok: true, data }

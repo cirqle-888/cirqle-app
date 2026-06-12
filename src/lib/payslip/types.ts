@@ -78,5 +78,6 @@ export interface PayslipData {
     email: string
     website: string
     phone: string
+    logoUrl: string | null
   }
 }
