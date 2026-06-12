@@ -1,4 +1,5 @@
 import { jsPDF } from 'jspdf'
+import sharp from 'sharp'
 import type { PayslipData } from './types'
 
 // Professional light palette — A4, white background
@@ -51,14 +52,17 @@ function getMilestone(total: number): number | null {
 const inr = (n: number) =>
   'Rs ' + (Math.round(n * 100) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-/** Fetch a remote image URL and return a base64 data-URI string (or null on failure). */
-async function fetchImageAsDataUrl(url: string): Promise<string | null> {
+/** Fetch a remote image, resize to ≤240×72 px via sharp, return PNG data-URI (or null). */
+async function fetchLogoDataUrl(url: string): Promise<string | null> {
   try {
     const res = await fetch(url)
     if (!res.ok) return null
-    const buf = await res.arrayBuffer()
-    const ct = res.headers.get('content-type') || 'image/png'
-    return `data:${ct};base64,` + Buffer.from(buf).toString('base64')
+    const raw = Buffer.from(await res.arrayBuffer())
+    const resized = await sharp(raw)
+      .resize({ width: 240, height: 72, fit: 'inside', withoutEnlargement: true })
+      .png({ compressionLevel: 9 })
+      .toBuffer()
+    return 'data:image/png;base64,' + resized.toString('base64')
   } catch {
     return null
   }
@@ -79,7 +83,7 @@ export async function renderPayslipPdf(d: PayslipData): Promise<Buffer> {
   const totalDeductions = s.advancesDeducted + s.otherDeductions
 
   // Pre-fetch logo if available
-  const logoDataUrl = d.company.logoUrl ? await fetchImageAsDataUrl(d.company.logoUrl) : null
+  const logoDataUrl = d.company.logoUrl ? await fetchLogoDataUrl(d.company.logoUrl) : null
 
   // White background
   doc.setFillColor(...C.white)
