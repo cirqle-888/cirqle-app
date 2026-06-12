@@ -17,6 +17,13 @@ const RGB = {
   amber: [251, 191, 36] as [number, number, number],
   red:   [248, 113, 113] as [number, number, number],
 }
+const MILESTONES = [50000, 100000, 150000, 200000, 300000, 500000, 1000000]
+function getMilestone(total: number): number | null {
+  let hit: number | null = null
+  for (const m of MILESTONES) { if (total >= m) hit = m }
+  return hit
+}
+
 const BAND_RGB: Record<string, [number, number, number]> = {
   '100': RGB.green, '76-99': RGB.accent2, '51-75': [167, 139, 250], '26-50': RGB.amber, '0-25': RGB.red,
 }
@@ -200,6 +207,20 @@ export function renderPayslipPdf(d: PayslipData): Buffer {
     doc.text(m.shortLabel, cx, baseY + 14, { align: 'center' })
   })
   y = baseY + 34
+
+  // ── Milestone banner ──────────────────────────────────────────────────────
+  const milestone = getMilestone(d.totals.sixMonthTotal)
+  if (milestone) {
+    const milestoneLabel = 'Rs ' + milestone.toLocaleString('en-IN')
+    doc.setFillColor(245, 243, 255)
+    doc.setDrawColor(221, 214, 254)
+    doc.roundedRect(M, y, innerW, 44, 8, 8, 'FD')
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(...RGB.accent)
+    doc.text('MILESTONE REACHED', M + 14, y + 16)
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(55, 65, 81)
+    doc.text(`You've earned over ${milestoneLabel} in the last 6 months — great work!`, M + 14, y + 32)
+    y += 44 + 20
+  }
 
   // ── Footer (pinned to bottom) ──────────────────────────────────────────────
   const footH = 64

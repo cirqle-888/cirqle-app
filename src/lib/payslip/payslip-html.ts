@@ -40,6 +40,13 @@ const SALARY_TYPE_LABEL: Record<string, string> = {
 const inr = (n: number) =>
   '₹' + (Math.round(n * 100) / 100).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
 
+const MILESTONES = [50000, 100000, 150000, 200000, 300000, 500000, 1000000]
+function getMilestone(total: number): number | null {
+  let hit: number | null = null
+  for (const m of MILESTONES) { if (total >= m) hit = m }
+  return hit
+}
+
 function salaryRow(label: string, value: string, color = C.ink, bold = false) {
   return `
     <tr>
@@ -188,6 +195,19 @@ export function renderPayslipHtml(d: PayslipData, note?: string): string {
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="height:110px;"><tr style="vertical-align:bottom;">${bars}</tr></table>
           <div style="border-top:1px solid ${C.border};margin-top:0;"></div>
         </td></tr>
+
+        <!-- Milestone -->
+        ${(() => {
+          const m = getMilestone(d.totals.sixMonthTotal)
+          if (!m) return ''
+          return `
+        <tr><td style="padding:0 28px 22px;">
+          <div style="background:linear-gradient(135deg,#f5f3ff,#ede9fe);border:1px solid #ddd6fe;border-radius:10px;padding:14px 18px;">
+            <div style="font-size:12px;font-weight:700;color:${C.accent};text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">★ Milestone reached</div>
+            <div style="font-size:13px;color:${C.body};line-height:1.5;">You've earned over ${inr(m)} in the last 6 months — great work!</div>
+          </div>
+        </td></tr>`
+        })()}
 
         <!-- Footer -->
         <tr><td style="background:${C.head};border-top:1px solid ${C.border};border-radius:0 0 14px 14px;padding:18px 28px;text-align:center;">
