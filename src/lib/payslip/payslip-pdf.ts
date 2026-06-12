@@ -51,8 +51,21 @@ function getMilestone(total: number): number | null {
 const inr = (n: number) =>
   'Rs ' + (Math.round(n * 100) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
+/** Fetch a remote image URL and return a base64 data-URI string (or null on failure). */
+async function fetchImageAsDataUrl(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url)
+    if (!res.ok) return null
+    const buf = await res.arrayBuffer()
+    const ct = res.headers.get('content-type') || 'image/png'
+    return `data:${ct};base64,` + Buffer.from(buf).toString('base64')
+  } catch {
+    return null
+  }
+}
+
 /** Render a professional A4 payslip PDF suitable for submission to employers. */
-export function renderPayslipPdf(d: PayslipData): Buffer {
+export async function renderPayslipPdf(d: PayslipData): Promise<Buffer> {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' })
   const W = 595.28
   const H = 841.89
@@ -65,6 +78,9 @@ export function renderPayslipPdf(d: PayslipData): Buffer {
   const gross = s.baseSalary + s.commission + s.bonus
   const totalDeductions = s.advancesDeducted + s.otherDeductions
 
+  // Pre-fetch logo if available
+  const logoDataUrl = d.company.logoUrl ? await fetchImageAsDataUrl(d.company.logoUrl) : null
+
   // White background
   doc.setFillColor(...C.white)
   doc.rect(0, 0, W, H, 'F')
@@ -75,18 +91,26 @@ export function renderPayslipPdf(d: PayslipData): Buffer {
 
   // ── Letterhead ─────────────────────────────────────────────────────────────
   y = 24
-  // Logo
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(20)
-  doc.setTextColor(...C.ink)
-  doc.text('cirqle', M, y + 18)
-  const cqW = doc.getTextWidth('cirqle')
-  doc.setTextColor(...C.accent)
-  doc.text('.', M + cqW, y + 18)
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(7)
-  doc.setTextColor(...C.muted)
-  doc.text('D E S I G N', M + 1, y + 29)
+
+  if (logoDataUrl) {
+    // Render actual logo image, max 120×36 pt
+    doc.addImage(logoDataUrl, 'PNG', M, y, 120, 36)
+    y += 44
+  } else {
+    // Text fallback
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(20)
+    doc.setTextColor(...C.ink)
+    doc.text('cirqle', M, y + 18)
+    const cqW = doc.getTextWidth('cirqle')
+    doc.setTextColor(...C.accent)
+    doc.text('.', M + cqW, y + 18)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(7)
+    doc.setTextColor(...C.muted)
+    doc.text('D E S I G N', M + 1, y + 29)
+    y += 44
+  }
 
   // Company contact — right aligned
   doc.setFont('helvetica', 'normal')

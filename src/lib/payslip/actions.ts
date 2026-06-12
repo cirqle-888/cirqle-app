@@ -158,7 +158,7 @@ async function sendOne(
 
   let pdf: Buffer
   try {
-    pdf = renderPayslipPdf(d)
+    pdf = await renderPayslipPdf(d)
   } catch (e: any) {
     return { ok: false, error: `PDF generation failed: ${e?.message || e}` }
   }

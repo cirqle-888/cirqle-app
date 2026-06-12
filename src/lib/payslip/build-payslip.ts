@@ -16,8 +16,8 @@ const BAND_ORDER: PayslipBand['band'][] = ['100', '76-99', '51-75', '26-50', '0-
 
 const COMPANY_DEFAULTS = {
   name:    'Cirqle Design',
-  email:   'farooq@cirqle.work',
-  website: 'cirqle.work',
+  email:   'team@cirqle.work',
+  website: 'www.cirqle.work',
   phone:   '+91 81295 34377',
 }
 
