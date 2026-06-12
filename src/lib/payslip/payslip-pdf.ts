@@ -96,7 +96,7 @@ export function renderPayslipPdf(d: PayslipData): Buffer {
   doc.setTextColor(...RGB.white); doc.setFont('helvetica', 'bold'); doc.setFontSize(12)
   doc.text('Earnings & Deductions', M, y); y += 22
   if (s.baseSalary > 0) lineRow('Base Salary', inr(s.baseSalary))
-  lineRow('Commission Earned', inr(s.commission), RGB.green)
+  lineRow('Creative Rewards', inr(s.commission), RGB.green)
   if (s.bonus > 0) lineRow('Bonus', inr(s.bonus), RGB.green)
   doc.setDrawColor(...RGB.line); doc.line(M, y - 12, W - M, y - 12)
   lineRow('Gross', inr(gross), RGB.text, true)
@@ -210,7 +210,7 @@ export function renderPayslipPdf(d: PayslipData): Buffer {
   doc.setTextColor(...RGB.faint); doc.setFont('helvetica', 'normal'); doc.setFontSize(8)
   doc.text(`${d.company.website}   ·   ${d.company.email}   ·   ${d.company.phone}`, W / 2, footY + 40, { align: 'center' })
   doc.setFontSize(7)
-  doc.text('System-generated payslip · For queries reply to the payslip email.', W / 2, footY + 54, { align: 'center' })
+  doc.text('For queries, reply to the payslip email.', W / 2, footY + 54, { align: 'center' })
 
   const ab = doc.output('arraybuffer')
   return Buffer.from(ab)

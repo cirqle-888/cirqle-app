@@ -73,10 +73,10 @@ export function renderPayslipHtml(d: PayslipData, note?: string): string {
     ? `<tr><td colspan="2" style="padding:10px 0;color:${C.faint};font-size:12px;text-align:center;">No scored contributions this month.</td></tr>`
     : d.contributionRanges.map(b => `
       <tr style="border-top:1px solid ${C.border};">
-        <td style="padding:9px 14px 9px 0;font-size:13px;color:${C.body};">
-          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${BAND_DOT[b.band]};margin-right:8px;vertical-align:middle;"></span>${b.label}
+        <td style="padding:9px 14px;font-size:13px;color:${C.body};">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${BAND_DOT[b.band]};margin-right:8px;vertical-align:middle;position:relative;top:-1px;"></span>${b.label}
         </td>
-        <td style="padding:9px 0;text-align:right;font-size:13px;font-weight:600;color:${C.ink};">${b.count} task${b.count !== 1 ? 's' : ''}</td>
+        <td style="padding:9px 14px 9px 0;text-align:right;font-size:13px;font-weight:600;color:${C.ink};">${b.count} task${b.count !== 1 ? 's' : ''}</td>
       </tr>`).join('')
 
   // ── Logo block ────────────────────────────────────────────────────────────
@@ -127,7 +127,7 @@ export function renderPayslipHtml(d: PayslipData, note?: string): string {
           <div style="font-size:12px;font-weight:600;color:${C.muted};text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Earnings &amp; Deductions</div>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
             ${s.baseSalary > 0 ? salaryRow('Base Salary', inr(s.baseSalary)) : ''}
-            ${salaryRow('Commission Earned', inr(s.commission), C.green)}
+            ${salaryRow('Creative Rewards', inr(s.commission), C.green)}
             ${s.bonus > 0 ? salaryRow('Bonus', inr(s.bonus), C.green) : ''}
             <tr><td colspan="2" style="border-top:1px solid ${C.border};padding-top:4px;"></td></tr>
             ${salaryRow('Gross', inr(gross), C.ink, true)}
@@ -195,7 +195,7 @@ export function renderPayslipHtml(d: PayslipData, note?: string): string {
           <div style="font-size:11px;color:${C.faint};margin-top:5px;line-height:1.8;">
             ${d.company.website} &nbsp;·&nbsp; ${d.company.email} &nbsp;·&nbsp; ${d.company.phone}
           </div>
-          <div style="font-size:10px;color:${C.faint};margin-top:10px;">This is a system-generated payslip. For queries, reply to this email.</div>
+          <div style="font-size:10px;color:${C.faint};margin-top:10px;">For queries, reply to this email.</div>
         </td></tr>
 
       </table>
@@ -215,7 +215,7 @@ export function renderPayslipText(d: PayslipData): string {
     d.payslipNumber ? `Payslip No: ${d.payslipNumber}` : '',
     ``,
     s.baseSalary > 0 ? `Base Salary:     ${inr(s.baseSalary)}` : '',
-    `Commission:      ${inr(s.commission)}`,
+    `Creative Rewards: ${inr(s.commission)}`,
     s.bonus > 0 ? `Bonus:           ${inr(s.bonus)}` : '',
     s.advancesDeducted > 0 ? `Advance Ded:    -${inr(s.advancesDeducted)}` : '',
     s.otherDeductions > 0 ? `Deductions:     -${inr(s.otherDeductions)}` : '',
