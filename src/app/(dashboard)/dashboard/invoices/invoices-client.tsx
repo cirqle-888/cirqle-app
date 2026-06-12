@@ -2020,6 +2020,30 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
          </svg>`
       : ''
 
+    // Silk Shade — soft blurred gradient washes hugging the top & bottom page edges
+    const shadeSvg = bgStyle === 'shade'
+      ? `<svg style="position:fixed;top:0;left:0;width:100%;height:130px;pointer-events:none;z-index:0" viewBox="0 0 800 130" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+           <defs><filter id="shTop" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="11"/></filter></defs>
+           <g filter="url(#shTop)">
+             <path d="M-30 -40 L830 -40 L830 18 C700 52 560 6 430 30 C290 56 140 14 -30 58 Z" fill="${NAVY_LIGHT}" opacity="0.22"/>
+             <path d="M-30 -40 L830 -40 L830 44 C660 78 520 30 380 52 C240 74 100 32 -30 84 Z" fill="${NAVY_LIGHT}" opacity="0.13"/>
+             <path d="M-30 -40 L830 -40 L830 8 C740 30 660 12 560 24 C420 40 200 6 -30 36 Z" fill="${NAVY}" opacity="0.10"/>
+           </g>
+         </svg>
+         <svg style="position:fixed;bottom:0;left:0;width:100%;height:130px;pointer-events:none;z-index:0" viewBox="0 0 800 130" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+           <defs><filter id="shBot" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="11"/></filter></defs>
+           <g filter="url(#shBot)">
+             <path d="M-30 170 L830 170 L830 112 C690 78 550 124 420 100 C280 74 130 116 -30 72 Z" fill="${NAVY_LIGHT}" opacity="0.22"/>
+             <path d="M-30 170 L830 170 L830 86 C650 52 510 100 370 78 C230 56 90 98 -30 46 Z" fill="${NAVY_LIGHT}" opacity="0.13"/>
+             <path d="M-30 170 L830 170 L830 122 C730 100 650 118 550 106 C410 90 190 124 -30 94 Z" fill="${NAVY}" opacity="0.10"/>
+           </g>
+         </svg>`
+      : ''
+
+    // Shade bleeds to the paper edge: zero the @page margin and carry it on the body instead
+    const pageMargin = bgStyle === 'shade' ? '0' : '15mm 12mm'
+    const bodyPad = bgStyle === 'shade' ? '20mm 19mm' : '24px 28px'
+
     const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -2028,12 +2052,12 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   <style>
     * { margin:0; padding:0; box-sizing:border-box }
     body { font-family: ${FONT}; color: #222; background:#fff; font-size:13px; ${bgCss} }
-    @page { margin: 15mm 12mm; size: A4 portrait }
+    @page { margin: ${pageMargin}; size: A4 portrait }
     @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact } }
   </style>
 </head>
-<body style="padding:24px 28px;max-width:800px;margin:0 auto;position:relative">
-  ${cornerSvg}
+<body style="padding:${bodyPad};max-width:${bgStyle === 'shade' ? '210mm' : '800px'};margin:0 auto;position:relative">
+  ${cornerSvg}${shadeSvg}
 
   <!-- ── HEADER ── -->
   <table style="width:100%;border-collapse:collapse;margin-bottom:16px">

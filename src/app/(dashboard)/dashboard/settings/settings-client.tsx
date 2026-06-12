@@ -1020,6 +1020,30 @@ export default function SettingsClient(props: Props) {
                         <path d="M180 0 L180 120 L60 0 Z" fill={companySettings['invoice_primary_color'] || '#1a2744'} opacity="0.07"/>
                       </svg>
                     )}
+                    {companySettings['invoice_bg_style'] === 'shade' && (() => {
+                      const sp = companySettings['invoice_primary_color'] || '#1a2744'
+                      const sa = companySettings['invoice_accent_color'] || '#3b5bdb'
+                      return (
+                        <>
+                          <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: 38, pointerEvents: 'none' }} viewBox="0 0 800 130" preserveAspectRatio="none">
+                            <defs><filter id="pvShTop" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="11"/></filter></defs>
+                            <g filter="url(#pvShTop)">
+                              <path d="M-30 -40 L830 -40 L830 18 C700 52 560 6 430 30 C290 56 140 14 -30 58 Z" fill={sa} opacity="0.22"/>
+                              <path d="M-30 -40 L830 -40 L830 44 C660 78 520 30 380 52 C240 74 100 32 -30 84 Z" fill={sa} opacity="0.13"/>
+                              <path d="M-30 -40 L830 -40 L830 8 C740 30 660 12 560 24 C420 40 200 6 -30 36 Z" fill={sp} opacity="0.10"/>
+                            </g>
+                          </svg>
+                          <svg style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: 38, pointerEvents: 'none' }} viewBox="0 0 800 130" preserveAspectRatio="none">
+                            <defs><filter id="pvShBot" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="11"/></filter></defs>
+                            <g filter="url(#pvShBot)">
+                              <path d="M-30 170 L830 170 L830 112 C690 78 550 124 420 100 C280 74 130 116 -30 72 Z" fill={sa} opacity="0.22"/>
+                              <path d="M-30 170 L830 170 L830 86 C650 52 510 100 370 78 C230 56 90 98 -30 46 Z" fill={sa} opacity="0.13"/>
+                              <path d="M-30 170 L830 170 L830 122 C730 100 650 118 550 106 C410 90 190 124 -30 94 Z" fill={sp} opacity="0.10"/>
+                            </g>
+                          </svg>
+                        </>
+                      )
+                    })()}
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex items-center gap-2">
                         {(companySettings['logo_url_light'] || companySettings['logo_url']) && companySettings['invoice_show_logo'] !== 'false' ? (
@@ -1207,6 +1231,7 @@ export default function SettingsClient(props: Props) {
                       { value: 'dots',     label: 'Dot Grid',      preview: 'bg-white' },
                       { value: 'corner',   label: 'Corner Accent', preview: 'bg-white' },
                       { value: 'diagonal', label: 'Diagonal',      preview: 'bg-white' },
+                      { value: 'shade',    label: 'Silk Shade',    preview: 'bg-white' },
                     ] as const).map(opt => {
                       const active = (companySettings['invoice_bg_style'] || 'none') === opt.value
                       const primary = companySettings['invoice_primary_color'] || '#1a2744'
@@ -1226,6 +1251,12 @@ export default function SettingsClient(props: Props) {
                           )}
                           {opt.value === 'diagonal' && (
                             <div style={{ position: 'absolute', inset: 0, backgroundImage: `repeating-linear-gradient(45deg, ${primary}18 0px, ${primary}18 1px, transparent 1px, transparent 12px)` }} />
+                          )}
+                          {opt.value === 'shade' && (
+                            <>
+                              <div style={{ position: 'absolute', top: -6, left: -8, right: -8, height: 18, filter: 'blur(4px)', background: `radial-gradient(ellipse 60% 100% at 15% 0%, ${primary}55, transparent 70%), radial-gradient(ellipse 50% 90% at 80% 0%, ${primary}40, transparent 70%)` }} />
+                              <div style={{ position: 'absolute', bottom: -6, left: -8, right: -8, height: 18, filter: 'blur(4px)', background: `radial-gradient(ellipse 60% 100% at 75% 100%, ${primary}55, transparent 70%), radial-gradient(ellipse 50% 90% at 20% 100%, ${primary}40, transparent 70%)` }} />
+                            </>
                           )}
                           <span style={{ position: 'relative', zIndex: 1, color: active ? primary : '#6b7280' }}>{opt.label}</span>
                         </button>
