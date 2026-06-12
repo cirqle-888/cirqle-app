@@ -1001,9 +1001,25 @@ export default function SettingsClient(props: Props) {
                     <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" />Live Preview
                   </div>
                   <div
-                    style={{ backgroundColor: '#fff', fontFamily: companySettings['invoice_font'] || 'Arial, sans-serif' }}
+                    style={{
+                      backgroundColor: '#fff',
+                      fontFamily: companySettings['invoice_font'] || 'Arial, sans-serif',
+                      position: 'relative',
+                      overflow: 'hidden',
+                      ...(companySettings['invoice_bg_style'] === 'dots'
+                        ? { backgroundImage: `radial-gradient(circle, ${companySettings['invoice_primary_color'] || '#1a2744'}1a 1.5px, transparent 1.5px)`, backgroundSize: '12px 12px' }
+                        : companySettings['invoice_bg_style'] === 'diagonal'
+                        ? { backgroundImage: `repeating-linear-gradient(45deg, ${companySettings['invoice_primary_color'] || '#1a2744'}12 0px, ${companySettings['invoice_primary_color'] || '#1a2744'}12 1px, transparent 1px, transparent 12px)` }
+                        : {}),
+                    }}
                     className="p-4"
                   >
+                    {companySettings['invoice_bg_style'] === 'corner' && (
+                      <svg style={{ position: 'absolute', top: 0, right: 0, width: 80, height: 80, pointerEvents: 'none' }} viewBox="0 0 180 180">
+                        <path d="M180 0 L180 180 L0 0 Z" fill={companySettings['invoice_primary_color'] || '#1a2744'} opacity="0.07"/>
+                        <path d="M180 0 L180 120 L60 0 Z" fill={companySettings['invoice_primary_color'] || '#1a2744'} opacity="0.07"/>
+                      </svg>
+                    )}
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex items-center gap-2">
                         {(companySettings['logo_url_light'] || companySettings['logo_url']) && companySettings['invoice_show_logo'] !== 'false' ? (
@@ -1015,16 +1031,18 @@ export default function SettingsClient(props: Props) {
                             <text x="21" y="26" textAnchor="middle" fill="white" fontSize="14" fontWeight="bold" fontFamily="Arial">c</text>
                           </svg>
                         )}
-                        <div>
-                          <div style={{ fontSize: 16, fontWeight: 900, color: companySettings['invoice_primary_color'] || '#1a2744', lineHeight: 1 }}>
-                            {companySettings['company_name'] || 'cirqle'}
-                          </div>
-                          {companySettings['invoice_show_tagline'] !== 'false' && (
-                            <div style={{ fontSize: 8, color: '#888', letterSpacing: 1, textTransform: 'uppercase' }}>
-                              {companySettings['company_tagline'] || 'Get Budget Designs'}
+                        {companySettings['invoice_show_company_name'] !== 'false' && (
+                          <div>
+                            <div style={{ fontSize: 16, fontWeight: 900, color: companySettings['invoice_primary_color'] || '#1a2744', lineHeight: 1 }}>
+                              {companySettings['company_name'] || 'cirqle'}
                             </div>
-                          )}
-                        </div>
+                            {companySettings['invoice_show_tagline'] !== 'false' && (
+                              <div style={{ fontSize: 8, color: '#888', letterSpacing: 1, textTransform: 'uppercase' }}>
+                                {companySettings['company_tagline'] || 'Get Budget Designs'}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                       <div style={{ fontSize: 22, fontWeight: 900, color: companySettings['invoice_primary_color'] || '#1a2744', letterSpacing: 2 }}>
                         INVOICE
@@ -1159,6 +1177,7 @@ export default function SettingsClient(props: Props) {
                   <p className="text-xs font-medium text-muted-foreground">Layout Options</p>
                   {[
                     { key: 'invoice_show_logo',        label: 'Show Logo on Documents',          desc: 'Display logo in invoice/statement header' },
+                    { key: 'invoice_show_company_name',label: 'Show Company Name',               desc: 'Show company name text beside the logo (turn off if your logo already has the name)' },
                     { key: 'invoice_show_tagline',     label: 'Show Tagline',                    desc: 'Show company tagline below the name' },
                     { key: 'invoice_show_payment_info',label: 'Show Payment Info on Invoice',    desc: 'Display bank/UPI details on printed invoices' },
                     { key: 'invoice_show_phone',       label: 'Show Phone & Website',            desc: 'Show contact details in header' },
@@ -1177,6 +1196,42 @@ export default function SettingsClient(props: Props) {
                       </button>
                     </div>
                   ))}
+                </div>
+
+                {/* Background Style */}
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">Background Design</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {([
+                      { value: 'none',     label: 'None',          preview: 'bg-white' },
+                      { value: 'dots',     label: 'Dot Grid',      preview: 'bg-white' },
+                      { value: 'corner',   label: 'Corner Accent', preview: 'bg-white' },
+                      { value: 'diagonal', label: 'Diagonal',      preview: 'bg-white' },
+                    ] as const).map(opt => {
+                      const active = (companySettings['invoice_bg_style'] || 'none') === opt.value
+                      const primary = companySettings['invoice_primary_color'] || '#1a2744'
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setCompanySettings(p => ({ ...p, invoice_bg_style: opt.value }))}
+                          className={`relative h-14 rounded-lg border-2 overflow-hidden text-xs font-medium transition-all ${active ? 'border-primary' : 'border-border hover:border-muted-foreground'}`}
+                          style={{ background: '#fff' }}
+                        >
+                          {opt.value === 'dots' && (
+                            <div style={{ position: 'absolute', inset: 0, backgroundImage: `radial-gradient(circle, ${primary}22 1px, transparent 1px)`, backgroundSize: '10px 10px' }} />
+                          )}
+                          {opt.value === 'corner' && (
+                            <div style={{ position: 'absolute', top: 0, right: 0, width: 36, height: 36, background: `linear-gradient(225deg, ${primary} 50%, transparent 50%)`, opacity: 0.25 }} />
+                          )}
+                          {opt.value === 'diagonal' && (
+                            <div style={{ position: 'absolute', inset: 0, backgroundImage: `repeating-linear-gradient(45deg, ${primary}18 0px, ${primary}18 1px, transparent 1px, transparent 12px)` }} />
+                          )}
+                          <span style={{ position: 'relative', zIndex: 1, color: active ? primary : '#6b7280' }}>{opt.label}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
 
                 {/* Footer text */}

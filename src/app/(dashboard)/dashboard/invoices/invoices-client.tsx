@@ -1931,9 +1931,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       footerText: companySettings.invoice_footer_text || 'Thank you for your Business!',
     }
     const showLogo       = companySettings.invoice_show_logo        !== 'false'
+    const showName       = companySettings.invoice_show_company_name !== 'false'
     const showTagline    = companySettings.invoice_show_tagline     !== 'false'
     const showPayInfo    = companySettings.invoice_show_payment_info !== 'false'
     const showContact    = companySettings.invoice_show_phone       !== 'false'
+    const bgStyle        = companySettings.invoice_bg_style || 'none'
 
     const NAVY       = companySettings.invoice_primary_color || '#1a2744'
     const NAVY_LIGHT = companySettings.invoice_accent_color  || '#243459'
@@ -2005,6 +2007,19 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         ${upiString ? `<div style="margin-top:10px;font-size:10px;color:#888">Scan to pay via UPI:<br/><span style="font-family:monospace;font-size:9px;word-break:break-all">${co.upi}</span></div>` : ''}
       </div>` : ''
 
+    const bgCss = bgStyle === 'dots'
+      ? `background-image:radial-gradient(circle,${NAVY}1a 1.5px,transparent 1.5px);background-size:18px 18px;`
+      : bgStyle === 'diagonal'
+      ? `background-image:repeating-linear-gradient(45deg,${NAVY}12 0px,${NAVY}12 1px,transparent 1px,transparent 16px);`
+      : ''
+
+    const cornerSvg = bgStyle === 'corner'
+      ? `<svg style="position:fixed;top:0;right:0;width:180px;height:180px;pointer-events:none;z-index:0" viewBox="0 0 180 180" xmlns="http://www.w3.org/2000/svg">
+           <path d="M180 0 L180 180 L0 0 Z" fill="${NAVY}" opacity="0.07"/>
+           <path d="M180 0 L180 120 L60 0 Z" fill="${NAVY}" opacity="0.07"/>
+         </svg>`
+      : ''
+
     const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -2012,12 +2027,13 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   <title>${inv.invoice_number}</title>
   <style>
     * { margin:0; padding:0; box-sizing:border-box }
-    body { font-family: ${FONT}; color: #222; background:#fff; font-size:13px }
+    body { font-family: ${FONT}; color: #222; background:#fff; font-size:13px; ${bgCss} }
     @page { margin: 15mm 12mm; size: A4 portrait }
     @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact } }
   </style>
 </head>
-<body style="padding:24px 28px;max-width:800px;margin:0 auto">
+<body style="padding:24px 28px;max-width:800px;margin:0 auto;position:relative">
+  ${cornerSvg}
 
   <!-- ── HEADER ── -->
   <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
@@ -2026,10 +2042,10 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         <!-- Logo + Company name -->
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
           ${logoBlock}
-          <div>
+          ${showName ? `<div>
             <div style="font-size:22px;font-weight:900;color:${NAVY};letter-spacing:-0.5px;line-height:1">${co.name}</div>
             ${showTagline ? `<div style="font-size:10px;color:#666;font-weight:600;letter-spacing:1px;text-transform:uppercase">${co.tagline}</div>` : ''}
-          </div>
+          </div>` : (showTagline && !showName ? `<div style="font-size:10px;color:#666;font-weight:600;letter-spacing:1px;text-transform:uppercase;margin-left:4px">${co.tagline}</div>` : '')}
         </div>
         ${showContact && (co.phone || co.website) ? `
         <div style="font-size:11px;color:#555;margin-top:4px;line-height:1.7">
