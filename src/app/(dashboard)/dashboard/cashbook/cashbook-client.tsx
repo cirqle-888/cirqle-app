@@ -1220,7 +1220,13 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               const isEditing = editingRow === entry.id
 
               return (
-                <div key={entry.id} data-entry-id={entry.id} className="hover-gradient-row flex flex-col">
+                <div key={entry.id} data-entry-id={entry.id} className={`hover-gradient-row flex flex-col ${bulkSelectMode && isInvoice && totalAlloc > 0 && selectedEntryIds.has(entry.id) ? 'ring-2 ring-inset ring-violet-500/40 bg-violet-500/5' : ''}`}>
+                  {bulkSelectMode && isInvoice && totalAlloc > 0 && (
+                    <label className="flex items-center gap-2 px-4 pt-3 cursor-pointer select-none">
+                      <input type="checkbox" checked={selectedEntryIds.has(entry.id)} onChange={() => toggleBulkEntry(entry.id)} className="accent-violet-500 w-3.5 h-3.5" />
+                      <span className="text-xs text-violet-400">{selectedEntryIds.has(entry.id) ? 'Selected' : 'Select for unallocate'}</span>
+                    </label>
+                  )}
                   <div className="p-4 flex justify-between items-start gap-4">
                     <div className="flex items-center gap-2">
                       <div className={`w-1.5 h-1.5 rounded-full ${entry.type === 'inflow' ? 'bg-green-400' : 'bg-red-400'}`} />
@@ -1368,6 +1374,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             <table className="w-full text-sm min-w-[600px]">
             <thead>
               <tr className="border-b border-border bg-secondary/50">
+                {bulkSelectMode && <th className="pl-4 py-3 w-8" />}
                 <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Date</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Category</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Description</th>
@@ -1393,7 +1400,15 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 const isEditing = editingRow === entry.id
 
                 return (
-                  <tr key={entry.id} data-entry-id={entry.id} className={`hover-gradient-row group ${isEditing ? 'ring-2 ring-inset ring-primary/30 bg-primary/3' : ''}`}>
+                  <tr key={entry.id} data-entry-id={entry.id} className={`hover-gradient-row group ${isEditing ? 'ring-2 ring-inset ring-primary/30 bg-primary/3' : ''} ${bulkSelectMode && isInvoice && totalAlloc > 0 && selectedEntryIds.has(entry.id) ? 'ring-2 ring-inset ring-violet-500/40 bg-violet-500/5' : ''}`}>
+                    {/* ── Bulk checkbox ───────────────────────────────────── */}
+                    {bulkSelectMode && (
+                      <td className="pl-4 py-3 w-8">
+                        {isInvoice && totalAlloc > 0 && (
+                          <input type="checkbox" checked={selectedEntryIds.has(entry.id)} onChange={() => toggleBulkEntry(entry.id)} className="accent-violet-500 w-3.5 h-3.5 cursor-pointer" />
+                        )}
+                      </td>
+                    )}
                     {/* ── Date ────────────────────────────────────────────── */}
                     <td className="px-4 py-3 text-muted-foreground text-xs">
                       {isEditing ? (
