@@ -32,7 +32,7 @@ export default async function InvoicesPage() {
           service:services(id, name)
         ),
         payments(id, amount, currency, exchange_rate, amount_inr, payment_date, payment_method, reference, notes),
-        cashbook_invoice_allocations(id, deleted_at)
+        cashbook_invoice_allocations(id, deleted_at, allocated_amount, cashbook_entry:cashbook_entries(id, reference, entry_date, description))
       `)
       .order('created_at', { ascending: false })
       .limit(500),

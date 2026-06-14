@@ -29,6 +29,7 @@ import {
   Calendar, Building2, IndianRupee, MoreHorizontal, Search, Filter,
   Printer, TrendingUp, BadgeCheck, CircleDollarSign, Receipt, Edit2, Save,
   History, Tag, Percent, ChevronDown, ChevronUp, ArrowDownToLine, Gift, ExternalLink, Copy,
+  Wallet, Link2,
 } from 'lucide-react'
 import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
@@ -44,6 +45,13 @@ import { ModalOverlay } from '@/components/ui/modal-overlay'
 // client menu. Split off the invoices chunk.
 const ClientEditModal = dynamic(
   () => import('@/components/ui/client-edit-modal').then(m => m.ClientEditModal),
+  { ssr: false },
+)
+
+// Invoice-side entry point into the existing cashbook allocation engine. Only
+// mounts when the user opens it from an invoice. See the component for details.
+const AllocateFromCashbookModal = dynamic(
+  () => import('@/components/invoices/allocate-from-cashbook-modal'),
   { ssr: false },
 )
 
@@ -99,7 +107,13 @@ interface Invoice {
   payments?: Payment[]
   // Active cashbook→invoice allocations. If any exist, this invoice is paid via
   // the allocation path and must NOT also take a direct "Record Payment".
-  cashbook_invoice_allocations?: { id: string; deleted_at?: string | null }[]
+  // allocated_amount + cashbook_entry are loaded for the relationship display.
+  cashbook_invoice_allocations?: {
+    id: string
+    deleted_at?: string | null
+    allocated_amount?: number
+    cashbook_entry?: { id: string; reference?: string | null; entry_date?: string; description?: string | null } | null
+  }[]
 }
 
 interface Props {
@@ -235,6 +249,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   const [confirmModal, setConfirmModal] = useState<{
     title: string; body: string; confirmLabel: string; danger?: boolean; onConfirm: () => void
   } | null>(null)
+
+  // "Allocate From Cash Book" — the invoice this modal is open for, if any.
+  const [allocatingInvoice, setAllocatingInvoice] = useState<Invoice | null>(null)
 
   // Payment form. `amount` is in the payment `currency`; `amountInr` is the
   // INR base; `rate` is rate_to_inr. Defaults to the invoice currency when the
@@ -2680,6 +2697,21 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                   <CreditCard className="w-3.5 h-3.5" />Quick Pay
                 </button>
               )}
+              {/* Allocate From Cash Book — alternate entry point into the same
+                  allocation engine. Shown when the invoice still has a balance
+                  and isn't already taking a direct "Record Payment" (mutual
+                  exclusion). Allocating MORE on top of existing allocations is
+                  allowed (multiple payments against one invoice). */}
+              {showAmounts
+                && !STATUS_GROUPS.closed.includes(inv.status)
+                && balanceDueInr(inv) > 0.01
+                && (inv.payments || []).length === 0 && (
+                <button
+                  onClick={() => setAllocatingInvoice(inv)}
+                  className="flex-1 min-w-[120px] py-1.5 px-3 bg-violet-600/10 hover:bg-violet-600/20 text-violet-300 border border-violet-500/30 text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 transition-colors">
+                  <Wallet className="w-3.5 h-3.5" />Allocate From Cash Book
+                </button>
+              )}
             </div>
             {hasActiveAllocations(inv) && (
               <p className="px-1 pt-2 text-[11px] text-amber-500/90">
@@ -2803,6 +2835,38 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               </>
             )}
           </div>
+
+          {/* Linked Cash Book payments — the allocation relationship. Lets the
+              user see which cashbook entries pay this invoice, how much, and
+              jump straight to the entry. */}
+          {(() => {
+            const links = (inv.cashbook_invoice_allocations || []).filter(a => !a.deleted_at && a.cashbook_entry)
+            if (links.length === 0) return null
+            return (
+              <div className="bg-violet-500/[0.04] rounded-xl border border-violet-500/20 p-3 space-y-2">
+                <h4 className="text-[11px] font-semibold text-violet-300/90 uppercase tracking-wider flex items-center gap-1.5">
+                  <Link2 className="w-3 h-3" />Cash Book Payments ({links.length})
+                </h4>
+                {links.map(a => (
+                  <div key={a.id} className="flex items-center justify-between gap-3 text-xs">
+                    <a
+                      href={`/dashboard/cashbook?client=${inv.client_id}&focus=${a.cashbook_entry!.id}`}
+                      className="group inline-flex items-center gap-1.5 text-foreground/90 hover:text-violet-300 transition-colors min-w-0">
+                      <span className="font-mono truncate">
+                        {a.cashbook_entry!.reference || a.cashbook_entry!.entry_date || 'Entry'}
+                      </span>
+                      <ExternalLink className="w-3 h-3 shrink-0 opacity-50 group-hover:opacity-100" />
+                    </a>
+                    {showAmounts && (
+                      <span className="font-mono font-semibold text-green-400 shrink-0">
+                        ₹{Number(a.allocated_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )
+          })()}
 
           {/* Line items */}
           <div>
@@ -5192,6 +5256,18 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
       {editClientId && (
         <ClientEditModal clientId={editClientId} onClose={() => setEditClientId(null)} />
+      )}
+
+      {allocatingInvoice && (
+        <AllocateFromCashbookModal
+          invoiceId={allocatingInvoice.id}
+          invoiceNumber={allocatingInvoice.invoice_number}
+          clientId={allocatingInvoice.client_id}
+          clientName={allocatingInvoice.client?.name}
+          balanceDueInr={balanceDueInr(allocatingInvoice)}
+          onClose={() => setAllocatingInvoice(null)}
+          onUpdate={() => { setAllocatingInvoice(null); router.refresh() }}
+        />
       )}
     </div>
   )

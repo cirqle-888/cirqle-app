@@ -248,6 +248,23 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     }
   }, [filterType, filterMonth, searchFacets, filterCategory, filterAllocStatus, filterClient, sortDir, filterMinAmount, filterMaxAmount, pathname, router, searchParams])
 
+  // Deep-link focus: when arriving via `?focus=<entryId>` (e.g. from an invoice's
+  // linked-payments list), scroll that row into view and flash a highlight once.
+  useEffect(() => {
+    const focusId = searchParams.get('focus')
+    if (!focusId) return
+    const t = setTimeout(() => {
+      const el = document.querySelector<HTMLElement>(`[data-entry-id="${focusId}"]`)
+      if (!el) return
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el.classList.add('ring-2', 'ring-inset', 'ring-violet-500/60', 'bg-violet-500/5')
+      setTimeout(() => el.classList.remove('ring-2', 'ring-inset', 'ring-violet-500/60', 'bg-violet-500/5'), 2600)
+    }, 350)
+    return () => clearTimeout(t)
+    // Run once on mount for the initial focus target.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const [recurringMonths, setRecurringMonths] = useState(0) // 0 = not recurring
 
   // Inline edit state
@@ -1143,7 +1160,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               const isEditing = editingRow === entry.id
 
               return (
-                <div key={entry.id} className="hover-gradient-row flex flex-col">
+                <div key={entry.id} data-entry-id={entry.id} className="hover-gradient-row flex flex-col">
                   <div className="p-4 flex justify-between items-start gap-4">
                     <div className="flex items-center gap-2">
                       <div className={`w-1.5 h-1.5 rounded-full ${entry.type === 'inflow' ? 'bg-green-400' : 'bg-red-400'}`} />
@@ -1311,7 +1328,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 const isEditing = editingRow === entry.id
 
                 return (
-                  <tr key={entry.id} className={`hover-gradient-row group ${isEditing ? 'ring-2 ring-inset ring-primary/30 bg-primary/3' : ''}`}>
+                  <tr key={entry.id} data-entry-id={entry.id} className={`hover-gradient-row group ${isEditing ? 'ring-2 ring-inset ring-primary/30 bg-primary/3' : ''}`}>
                     {/* ── Date ────────────────────────────────────────────── */}
                     <td className="px-4 py-3 text-muted-foreground text-xs">
                       {isEditing ? (
