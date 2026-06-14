@@ -2006,7 +2006,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
           entryBookRate={rateMap[(allocatingEntry.currency as string) || 'INR'] || 0}
           dueInvoices={sortedDueInvoices}
           onClose={() => setAllocatingEntry(null)}
-          onUpdate={() => window.location.reload()}
+          onUpdate={() => router.refresh()}
         />
       )}
       {allocatingPayrollEntry && (
