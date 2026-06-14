@@ -109,6 +109,11 @@ interface Entry {
       employee?: { name: string; cqid: string }
     }
   }[]
+  expense_billings?: {
+    id: string;
+    invoice_id: string;
+    invoice?: { invoice_number: string; status: string } | null
+  }[]
 }
 
 interface DueInvoice {
@@ -1283,13 +1288,18 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                     </div>
 
                     {/* Tags — single left-aligned wrapped row */}
-                    {(entry.transfer_ref || allocStatus) && (
+                    {(entry.transfer_ref || allocStatus || (entry.expense_billings || []).length > 0) && (
                       <div className="flex flex-wrap items-center gap-1 -mt-2">
                         {entry.transfer_ref && <span className="inline-flex items-center gap-1 bg-purple-500/10 text-purple-400 text-[9px] px-1.5 py-0.5 rounded font-medium"><ArrowLeftRight className="w-2.5 h-2.5" />Internal Transfer</span>}
                         {allocStatus === 'none' && <span className="inline-block bg-amber-500/10 text-amber-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Unallocated</span>}
                         {allocStatus === 'partial' && <span className="inline-block bg-blue-500/10 text-blue-400 text-[9px] px-1.5 py-0.5 rounded font-medium">Partially Allocated</span>}
                         {allocStatus === 'over' && <span className="inline-block bg-red-500/10 text-red-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Over-allocated!</span>}
                         {allocStatus === 'fully' && <span className="inline-block bg-green-500/10 text-green-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Fully Allocated</span>}
+                        {(entry.expense_billings || []).map(b => (
+                          <span key={b.id} className="inline-block bg-amber-500/10 text-amber-400 text-[9px] px-1.5 py-0.5 rounded font-medium">
+                            Invoiced · {b.invoice?.invoice_number || b.invoice_id.slice(0, 8)}
+                          </span>
+                        ))}
                       </div>
                     )}
                   </div>
@@ -1367,13 +1377,18 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                               </div>
                             )}
                           </div>
-                          {(entry.transfer_ref || (allocStatus && allocStatus !== 'none') || allocStatus === 'none') && (
+                          {(entry.transfer_ref || (allocStatus && allocStatus !== 'none') || allocStatus === 'none' || (entry.expense_billings || []).length > 0) && (
                             <div className="flex flex-wrap items-center gap-1 mt-1 ml-3.5">
                               {entry.transfer_ref && <span className="inline-flex items-center gap-1 bg-purple-500/10 text-purple-400 text-[9px] px-1.5 py-0.5 rounded font-medium"><ArrowLeftRight className="w-2.5 h-2.5" />Internal Transfer</span>}
                               {allocStatus === 'none'    && <span className="inline-block bg-amber-500/10  text-amber-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Unallocated</span>}
                               {allocStatus === 'partial' && <span className="inline-block bg-blue-500/10   text-blue-400  text-[9px] px-1.5 py-0.5 rounded font-medium">Partially Allocated</span>}
                               {allocStatus === 'over'    && <span className="inline-block bg-red-500/10    text-red-500   text-[9px] px-1.5 py-0.5 rounded font-medium">Over-allocated!</span>}
                               {allocStatus === 'fully'   && <span className="inline-block bg-green-500/10  text-green-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Fully Allocated</span>}
+                              {(entry.expense_billings || []).map(b => (
+                                <span key={b.id} className="inline-block bg-amber-500/10 text-amber-400 text-[9px] px-1.5 py-0.5 rounded font-medium">
+                                  Invoiced · {b.invoice?.invoice_number || b.invoice_id.slice(0, 8)}
+                                </span>
+                              ))}
                             </div>
                           )}
                         </>

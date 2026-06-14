@@ -108,7 +108,7 @@ interface Invoice {
   subtotal?: number; tax_rate?: number; tax_amount?: number
   discount_amount?: number; previous_balance?: number
   notes?: string; created_at: string; updated_at: string
-  expenses_mode?: string   // 'combined' | 'separate' — how expenses appear in the PDF
+  expenses_mode?: string   // 'mode_a' | 'mode_b' | 'mode_c' — client display style
   client?: { id: string; name: string; code: string; phone?: string; email?: string; address?: string }
   items?: InvoiceItem[]
   payments?: Payment[]
@@ -117,9 +117,15 @@ interface Invoice {
     id: string
     cashbook_entry_id: string
     description: string
-    amount: number
+    amount: number           // billing amount (what client sees)
     amount_inr: number
     currency: string
+    original_amount?: number
+    original_amount_inr?: number
+    markup_type?: string
+    markup_value?: number
+    markup_amount?: number
+    notes?: string | null
   }[]
   // Active cashbook→invoice allocations. If any exist, this invoice is paid via
   // the allocation path and must NOT also take a direct "Record Payment".
@@ -364,7 +370,10 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   const [genSelectedIds, setGenSelectedIds] = useState<Set<string>>(new Set())
 
   // Financial analytics panel
-  const [analyticsTab, setAnalyticsTab] = useState<'discounts' | 'bad_debts' | 'overdue' | 'advances' | 'job_losses'>('discounts')
+  const [analyticsTab, setAnalyticsTab] = useState<'discounts' | 'bad_debts' | 'overdue' | 'advances' | 'job_losses' | 'expenses'>('discounts')
+  const [expenseReport, setExpenseReport]     = useState<any[]>([])
+  const [expenseReportLoading, setExpenseReportLoading] = useState(false)
+  const [expenseReportLoaded, setExpenseReportLoaded]   = useState(false)
   const [discAnalytics, setDiscAnalytics]               = useState<any[]>([])
   const [discAnalyticsLoading, setDiscAnalyticsLoading] = useState(false)
   const [discAnalyticsLoaded, setDiscAnalyticsLoaded]   = useState(false)
@@ -2009,6 +2018,18 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     setAdvanceLoaded(true)
   }
 
+  async function loadExpenseReport() {
+    if (expenseReportLoaded) return
+    setExpenseReportLoading(true)
+    const { data } = await supabase
+      .from('invoice_expense_items')
+      .select('*, invoice:invoices(invoice_number, status, currency, client:clients(id, name))')
+      .order('created_at', { ascending: false })
+    setExpenseReport(data || [])
+    setExpenseReportLoading(false)
+    setExpenseReportLoaded(true)
+  }
+
   async function refreshInvoice(invoiceId: string) {
     const { data } = await supabase.from('invoices')
       .select('*, client:clients(id,name,code,phone,email), items:invoice_items(*, task:tasks(id,title,task_date,status,billing_amount_inr,currency), service:services(id,name)), payments(*)')
@@ -2121,12 +2142,14 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const THANK_DK  = shadeHex(NAVY_LIGHT, 0.5)         // "you" deep purple
     const THANK_MID = shadeHex(NAVY_LIGHT, 0.78)        // "for your / Business!"
 
-    // Expense items — either merged into the item table ('combined') or rendered separately below
+    // Expense items — rendered as a separate "Expenses" section after the item table.
+    // Display mode (A/B/C) controls what the client sees; internal costs are never shown in A or C.
     const expenseItems = inv.expense_items || []
-    const expensesMode = inv.expenses_mode || 'combined'
+    // Per-invoice override → company default → 'mode_a'
+    const expensesMode = inv.expenses_mode || companySettings.expense_display_mode || 'mode_a'
     const td = (extra: string) => `padding:9px 10px;border-bottom:1px solid ${CELL_BORD};border-left:1px solid ${CELL_BORD};font-size:13px;${extra}`
 
-    // Build table rows — centered columns, alternating lavender, reference dates
+    // Build task item rows
     const itemRows = sortedItems.map((it, idx) => {
       const taskDate = it.task?.task_date ? ddMon(it.task.task_date) : ''
       const bg = idx % 2 === 1 ? ALT_ROW : '#ffffff'
@@ -2140,27 +2163,45 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           <td style="${td('text-align:center;color:#111;font-weight:700;white-space:nowrap')}">${inr(it.total)}</td>
         </tr>`
     })
+    const allItemRows = itemRows.join('')
 
-    // 'combined' mode: expense items appended inline to the item table
-    const combinedExpenseRows = expensesMode === 'combined' ? expenseItems.map((exp, i) => {
-      const idx = sortedItems.length + i
-      const bg = idx % 2 === 1 ? ALT_ROW : '#ffffff'
-      return `
-        <tr style="background:${bg}">
-          <td style="${td('border-left:none;text-align:center;color:#222')}">${idx + 1}</td>
-          <td style="${td('text-align:center;color:#777;white-space:nowrap')}">—</td>
-          <td style="${td('text-align:left;color:#222')}">${exp.description}</td>
-          <td style="${td('text-align:center;color:#777')}">1</td>
-          <td style="${td('text-align:center;color:#222;white-space:nowrap')}">${inr(exp.amount)}</td>
-          <td style="${td('text-align:center;color:#111;font-weight:700;white-space:nowrap')}">${inr(exp.amount)}</td>
-        </tr>`
-    }) : []
-
-    const allItemRows = [...itemRows, ...combinedExpenseRows].join('')
-
-    // 'separate' mode: separate expenses table rendered after the main table
+    // Expenses section block (separate from main item table in all modes)
     const expensesTotal = expenseItems.reduce((s, e) => s + (e.amount || 0), 0)
-    const separateExpensesBlock = expensesMode === 'separate' && expenseItems.length > 0 ? `
+    const separateExpensesBlock = expenseItems.length > 0 ? (() => {
+      const expRows = expenseItems.map((exp, i) => {
+        const bg = i % 2 === 1 ? ALT_ROW : '#ffffff'
+        const tdE = `padding:8px 10px;border-bottom:1px solid ${CELL_BORD};font-size:12.5px;`
+        const hasMarkup = exp.markup_type !== 'none' && (exp.markup_amount || 0) > 0
+
+        if (expensesMode === 'mode_b' && hasMarkup) {
+          // Mode B: show cost + markup + total in a sub-table within the cell
+          return `<tr style="background:${bg}">
+            <td style="${tdE}color:#222">
+              <div style="font-weight:600">${exp.description}</div>
+              <table style="margin-top:4px;font-size:11px;color:#666;border-collapse:collapse">
+                <tr><td style="padding:1px 0">Cost</td><td style="padding:1px 8px">:</td><td style="text-align:right">${inr(exp.original_amount || 0)}</td></tr>
+                <tr><td style="padding:1px 0">Markup</td><td style="padding:1px 8px">:</td><td style="text-align:right">${inr(exp.markup_amount || 0)}</td></tr>
+              </table>
+            </td>
+            <td style="${tdE}border-left:1px solid ${CELL_BORD};font-weight:700;text-align:right;white-space:nowrap">${inr(exp.amount)}</td>
+          </tr>`
+        }
+        if (expensesMode === 'mode_c') {
+          return `<tr style="background:${bg}">
+            <td style="${tdE}color:#222">
+              <div style="font-weight:600">${exp.description}</div>
+              <div style="font-size:10.5px;color:#888;margin-top:2px;font-style:italic">Reimbursable Expense</div>
+            </td>
+            <td style="${tdE}border-left:1px solid ${CELL_BORD};font-weight:700;text-align:right;white-space:nowrap">${inr(exp.amount)}</td>
+          </tr>`
+        }
+        // Mode A (default): description + billing amount only
+        return `<tr style="background:${bg}">
+          <td style="${tdE}color:#222">${exp.description}</td>
+          <td style="${tdE}border-left:1px solid ${CELL_BORD};font-weight:700;text-align:right;white-space:nowrap">${inr(exp.amount)}</td>
+        </tr>`
+      }).join('')
+      return `
   <div style="margin-top:18px">
     <div style="font-weight:700;font-size:13px;color:${NAVY};margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em">Expenses</div>
     <table style="width:100%;border-collapse:collapse;border:1px solid ${CELL_BORD}">
@@ -2171,20 +2212,15 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         </tr>
       </thead>
       <tbody>
-        ${expenseItems.map((exp, i) => {
-          const bg = i % 2 === 1 ? ALT_ROW : '#ffffff'
-          return `<tr style="background:${bg}">
-            <td style="padding:8px 10px;border-bottom:1px solid ${CELL_BORD};font-size:12.5px;color:#222">${exp.description}</td>
-            <td style="padding:8px 10px;border-bottom:1px solid ${CELL_BORD};border-left:1px solid ${CELL_BORD};font-size:12.5px;font-weight:700;text-align:right;white-space:nowrap">${inr(exp.amount)}</td>
-          </tr>`
-        }).join('')}
+        ${expRows}
         <tr style="background:#f8f8f8">
           <td style="padding:8px 10px;font-size:12.5px;font-weight:700;color:#111;text-align:right">Expenses Total</td>
           <td style="padding:8px 10px;border-left:1px solid ${CELL_BORD};font-size:13px;font-weight:700;text-align:right;white-space:nowrap">${inr(expensesTotal)}</td>
         </tr>
       </tbody>
     </table>
-  </div>` : ''
+  </div>`
+    })() : ''
 
     const upiString = co.upi ? `upi://pay?pa=${co.upi}&pn=${encodeURIComponent(co.holder)}&cu=INR` : ''
 
@@ -3027,50 +3063,82 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           })()}
 
           {/* Client Expenses section */}
-          {(inv.expense_items || []).length > 0 && (
-            <div className="bg-amber-500/[0.04] rounded-xl border border-amber-500/20 p-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <h4 className="text-[11px] font-semibold text-amber-300/90 uppercase tracking-wider flex items-center gap-1.5">
-                  <ShoppingBag className="w-3 h-3" />Client Expenses ({(inv.expense_items || []).length})
-                </h4>
-                {/* Mode toggle: combined (merged with line items) or separate section in PDF */}
-                <div className="flex items-center gap-1 text-[10px]">
-                  <button
-                    onClick={() => updateExpensesMode(inv.id, 'combined')}
-                    className={`px-2 py-0.5 rounded-full border transition-colors ${(inv.expenses_mode || 'combined') === 'combined'
-                      ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
-                      : 'border-border/30 text-muted-foreground hover:border-border/60'}`}>
-                    With items
-                  </button>
-                  <button
-                    onClick={() => updateExpensesMode(inv.id, 'separate')}
-                    className={`px-2 py-0.5 rounded-full border transition-colors ${(inv.expenses_mode || 'combined') === 'separate'
-                      ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
-                      : 'border-border/30 text-muted-foreground hover:border-border/60'}`}>
-                    Separate section
-                  </button>
-                </div>
-              </div>
-              {(inv.expense_items || []).map(exp => (
-                <div key={exp.id} className="flex items-center justify-between gap-3 text-xs">
-                  <span className="text-foreground/80 truncate flex-1">{exp.description}</span>
+          {(inv.expense_items || []).length > 0 && (() => {
+            const expMode = inv.expenses_mode || companySettings.expense_display_mode || 'mode_a'
+            const expTotal = (inv.expense_items || []).reduce((s, e) => s + (e.amount || 0), 0)
+            const origTotal = (inv.expense_items || []).reduce((s, e) => s + (e.original_amount || e.amount || 0), 0)
+            const markupTotal = (inv.expense_items || []).reduce((s, e) => s + (e.markup_amount || 0), 0)
+            return (
+              <div className="bg-amber-500/[0.04] rounded-xl border border-amber-500/20 p-3 space-y-2">
+                <div className="flex items-center justify-between flex-wrap gap-1">
+                  <h4 className="text-[11px] font-semibold text-amber-300/90 uppercase tracking-wider flex items-center gap-1.5">
+                    <ShoppingBag className="w-3 h-3" />Client Expenses ({(inv.expense_items || []).length})
+                  </h4>
+                  {/* PDF display mode toggle A/B/C */}
                   {showAmounts && (
-                    <span className="font-mono text-amber-300/90 shrink-0">
-                      {fmt(exp.amount, exp.currency as Currency)}
-                    </span>
+                    <div className="flex items-center gap-1 text-[10px]">
+                      {[
+                        { id: 'mode_a', label: 'A · Clean' },
+                        { id: 'mode_b', label: 'B · Breakdown' },
+                        { id: 'mode_c', label: 'C · Reimbursable' },
+                      ].map(m => (
+                        <button key={m.id} onClick={() => updateExpensesMode(inv.id, m.id)}
+                          className={`px-2 py-0.5 rounded-full border transition-colors ${expMode === m.id
+                            ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                            : 'border-border/30 text-muted-foreground hover:border-border/60'}`}>
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
                   )}
                 </div>
-              ))}
-              {showAmounts && (inv.expense_items || []).length > 0 && (
-                <div className="pt-1 border-t border-amber-500/20 flex justify-between text-[11px] text-amber-300/70">
-                  <span>Expenses total</span>
-                  <span className="font-mono">
-                    {fmt((inv.expense_items || []).reduce((s, e) => s + (e.amount || 0), 0), inv.currency)}
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
+                {(inv.expense_items || []).map(exp => {
+                  const hasMarkup = exp.markup_type !== 'none' && (exp.markup_amount || 0) > 0
+                  return (
+                    <div key={exp.id} className="text-xs">
+                      <div className="flex items-start gap-2">
+                        <span className="text-foreground/80 truncate flex-1">{exp.description}</span>
+                        {showAmounts && (
+                          <span className="font-mono text-amber-300/90 shrink-0 font-semibold">
+                            {fmt(exp.amount, exp.currency as Currency)}
+                          </span>
+                        )}
+                      </div>
+                      {hasMarkup && showAmounts && (
+                        <div className="text-[10px] text-muted-foreground ml-0 mt-0.5">
+                          Cost {fmt(exp.original_amount || 0, exp.currency as Currency)} ·
+                          Markup {exp.markup_type === 'percentage'
+                            ? `${exp.markup_value}%`
+                            : fmt(exp.markup_amount || 0, exp.currency as Currency)} = {fmt(exp.amount, exp.currency as Currency)}
+                        </div>
+                      )}
+                      {exp.notes && <div className="text-[10px] text-muted-foreground/60 italic mt-0.5">{exp.notes}</div>}
+                    </div>
+                  )
+                })}
+                {showAmounts && (
+                  <div className="pt-1.5 border-t border-amber-500/20 space-y-0.5">
+                    {markupTotal > 0 && (
+                      <>
+                        <div className="flex justify-between text-[10px] text-muted-foreground">
+                          <span>Cost basis</span>
+                          <span className="font-mono">{fmt(origTotal, inv.currency)}</span>
+                        </div>
+                        <div className="flex justify-between text-[10px] text-amber-300/70">
+                          <span>Markup earned</span>
+                          <span className="font-mono">+{fmt(markupTotal, inv.currency)}</span>
+                        </div>
+                      </>
+                    )}
+                    <div className="flex justify-between text-[11px] text-amber-300/90 font-semibold">
+                      <span>Billed to client</span>
+                      <span className="font-mono">{fmt(expTotal, inv.currency)}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
 
           {/* Line items */}
           <div>
@@ -4568,6 +4636,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       { id: 'job_losses' as const, label: 'Job Losses', color: 'text-rose-400',   active: 'bg-rose-500/20 border-rose-500/40 text-rose-300',       count: jobLosses.length },
       { id: 'overdue'    as const, label: 'Overdue',    color: 'text-amber-400',  active: 'bg-amber-500/20 border-amber-500/40 text-amber-300',    count: overdueInvs.length },
       { id: 'advances'   as const, label: 'Advances',   color: 'text-blue-400',   active: 'bg-blue-500/20 border-blue-500/40 text-blue-300',       count: advancePayments.length },
+      { id: 'expenses'   as const, label: 'Expenses',   color: 'text-amber-400',  active: 'bg-amber-500/20 border-amber-500/40 text-amber-300',    count: expenseReport.length },
     ]
 
     return (
@@ -4593,6 +4662,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 setAnalyticsTab(t.id)
                 if (t.id === 'advances')  loadAdvancePayments()
                 if (t.id === 'job_losses') loadJobLosses()
+                if (t.id === 'expenses')  loadExpenseReport()
               }}
               className={`flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-medium rounded-t-lg border border-b-0 transition-colors ${analyticsTab === t.id ? t.active : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
               {t.label}
@@ -5141,6 +5211,69 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             </>
           )}
 
+          {/* ═══ EXPENSES TAB ════════════════════════════════════════════════ */}
+          {analyticsTab === 'expenses' && (
+            <>
+              {expenseReportLoading ? (
+                <div className="text-center text-sm text-muted-foreground py-8">Loading…</div>
+              ) : (() => {
+                const totalOrig   = expenseReport.reduce((s: number, e: any) => s + (e.original_amount || e.amount || 0), 0)
+                const totalMarkup = expenseReport.reduce((s: number, e: any) => s + (e.markup_amount || 0), 0)
+                const totalBilled = expenseReport.reduce((s: number, e: any) => s + (e.amount || 0), 0)
+                return (
+                  <>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="bg-foreground/[0.04] border border-border/40 rounded-xl p-3 text-center">
+                        <div className="text-[10px] text-muted-foreground mb-0.5">Original Expenses</div>
+                        <div className="text-sm font-bold">₹{totalOrig.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+                      </div>
+                      <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-center">
+                        <div className="text-[10px] text-amber-400/70 mb-0.5">Markup Earned</div>
+                        <div className="text-sm font-bold text-amber-300">+₹{totalMarkup.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+                      </div>
+                      <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-3 text-center">
+                        <div className="text-[10px] text-green-400/70 mb-0.5">Rebill Revenue</div>
+                        <div className="text-sm font-bold text-green-300">₹{totalBilled.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+                      </div>
+                    </div>
+                    {expenseReport.length === 0 ? (
+                      <div className="text-center text-xs text-muted-foreground py-6 border border-dashed border-border/40 rounded-xl">
+                        No billed expenses yet
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {expenseReport.map((e: any) => {
+                          const hasMarkup = e.markup_amount > 0
+                          return (
+                            <div key={e.id} className="flex items-start gap-3 p-2.5 bg-foreground/[0.02] border border-border/30 rounded-xl text-xs">
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium truncate">{e.description}</div>
+                                <div className="text-[10px] text-muted-foreground mt-0.5">
+                                  {e.invoice?.client?.name} · {e.invoice?.invoice_number}
+                                </div>
+                                {e.notes && <div className="text-[10px] text-muted-foreground/60 italic mt-0.5">{e.notes}</div>}
+                              </div>
+                              <div className="text-right shrink-0">
+                                <div className="font-mono font-semibold text-amber-300">
+                                  {fmt(e.amount, e.currency)}
+                                </div>
+                                {hasMarkup && (
+                                  <div className="text-[10px] text-muted-foreground">
+                                    Cost {fmt(e.original_amount, e.currency)} + {fmt(e.markup_amount, e.currency)}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
+            </>
+          )}
+
         </div>
       </div>
     )
@@ -5488,6 +5621,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           invoiceCurrency={addExpenseInvoice.currency}
           exchangeRate={addExpenseInvoice.exchange_rate || 1}
           existingExpenses={addExpenseInvoice.expense_items || []}
+          canMarkup={role === 'super_admin' || role === 'accounts'}
           onClose={() => setAddExpenseInvoice(null)}
           onUpdate={() => { setAddExpenseInvoice(null); router.refresh() }}
         />

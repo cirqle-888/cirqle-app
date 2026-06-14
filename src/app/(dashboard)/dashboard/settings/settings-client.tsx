@@ -1323,6 +1323,35 @@ export default function SettingsClient(props: Props) {
                 )}
               </div>
 
+              {/* Expense Display Mode — controls how rebilled client expenses appear on PDFs */}
+              <div className="space-y-3 border-t border-border pt-5">
+                <div>
+                  <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Client Expense Display Mode</h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">Controls how rebilled client expenses appear on invoice PDFs. Can be overridden per invoice.</p>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    { val: 'mode_a', label: 'Mode A — Clean', desc: 'Description + billing amount only. Internal costs hidden.' },
+                    { val: 'mode_b', label: 'Mode B — Breakdown', desc: 'Shows original cost, markup, and total separately.' },
+                    { val: 'mode_c', label: 'Mode C — Reimbursable', desc: 'Description + "Reimbursable Expense" label + billing amount.' },
+                  ] as const).map(({ val, label, desc }) => (
+                    <button key={val} type="button"
+                      onClick={() => {
+                        setCompanySettings(p => ({ ...p, expense_display_mode: val }))
+                        void saveSetting('expense_display_mode', val)
+                      }}
+                      className={`p-3 rounded-xl border text-left transition-colors ${
+                        (companySettings['expense_display_mode'] || 'mode_a') === val
+                          ? 'bg-primary/10 border-primary/50 text-primary'
+                          : 'bg-secondary border-border text-muted-foreground hover:text-foreground hover:border-border/70'
+                      }`}>
+                      <div className="text-xs font-semibold mb-1">{label}</div>
+                      <div className="text-[10px] leading-tight opacity-70">{desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Data Visibility — per-role access control */}
               <div className="space-y-4 border-t border-border pt-5">
                 <div>
