@@ -42,8 +42,14 @@ interface Props {
   invoiceCurrency?: string
   /** rate_to_inr stamped on the invoice (₹ per 1 unit of invoiceCurrency). */
   exchangeRate?: number
-  /** Invoice balance still due in the INVOICE currency (for display). */
+  /** Invoice balance still due in the INVOICE currency (for display + settle-in-full). */
   balanceDueNative?: number
+  /** Today's market rate (₹ per unit) for the invoice currency — used to show the
+   *  realized FX variance when settling a foreign invoice in full. */
+  marketRate?: number
+  /** True when this invoice has no settlement yet (paid = 0). Settle-in-full only
+   *  applies to a clean, unsettled foreign invoice. */
+  unsettled?: boolean
   onClose: () => void
   /** Called after a successful save/remove so the parent can resync from the DB. */
   onUpdate: () => void
@@ -55,7 +61,7 @@ const ccy = (n: number, c: string) => `${c} ${n.toLocaleString('en-IN', { minimu
 
 export default function AllocateFromCashbookModal({
   invoiceId, invoiceNumber, clientId, clientName, balanceDueInr,
-  invoiceCurrency = 'INR', exchangeRate, balanceDueNative, onClose, onUpdate,
+  invoiceCurrency = 'INR', exchangeRate, balanceDueNative, marketRate, unsettled, onClose, onUpdate,
 }: Props) {
   // Foreign-currency invoice paid from an INR cash book. The trigger converts
   // ₹allocated ÷ exchangeRate → invoice currency. If the invoice never got an FX
@@ -131,6 +137,22 @@ export default function AllocateFromCashbookModal({
   // Remaining invoice balance after the amounts typed so far.
   const remainingAfter = round2(balanceDueInr - enteredTotal)
 
+  // ── Settle-in-full (foreign invoice, cash-basis FX) ──────────────────────────
+  // For a foreign invoice settled by an INR payment, the ₹ received rarely equals
+  // foreign × today's rate. "Settle in full" books the invoice at the REALIZED
+  // rate (₹received ÷ foreign balance) so it flips to Paid with revenue = the ₹
+  // you actually got. The FX variance vs the market rate is shown for awareness —
+  // it is NOT posted as a separate expense (that would double-count income on a
+  // cash-basis book).
+  const canSettleInFull = isForeign && !rateUnset && !!unsettled && (balanceDueNative ?? 0) > 0
+  const realizedRate = canSettleInFull && enteredTotal > 0.01
+    ? Math.round((enteredTotal / (balanceDueNative as number)) * 1e6) / 1e6
+    : 0
+  // Negative = FX loss (received less than the foreign amount is worth at market).
+  const fxVariance = canSettleInFull && enteredTotal > 0.01 && (marketRate ?? 0) > 0
+    ? round2(enteredTotal - (balanceDueNative as number) * (marketRate as number))
+    : 0
+
   function setInput(entryId: string, value: string) {
     setError('')
     setInputs(prev => ({ ...prev, [entryId]: value }))
@@ -188,6 +210,53 @@ export default function AllocateFromCashbookModal({
       onUpdate()
     } catch (e: any) {
       setError(e?.message || 'Failed to save allocations.')
+      setSaving(false)
+    }
+  }
+
+  // Settle the foreign invoice in full at the realized rate, then allocate the cash.
+  async function handleSettleInFull() {
+    setError('')
+    const rows = entries
+      .map(e => ({ entry: e, amt: round2(parseFloat(inputs[e.id] || '0') || 0) }))
+      .filter(r => r.amt > 0.01)
+    if (rows.length === 0) { setError('Enter the ₹ amount received before settling in full.'); return }
+    for (const { entry, amt } of rows) {
+      if (amt > entry.available + 0.01) {
+        setError(`${inr(amt)} exceeds the ${inr(entry.available)} available on the ${entry.entry_date} entry.`)
+        return
+      }
+    }
+    if (!realizedRate || realizedRate <= 0) { setError('Cannot compute a realized rate.'); return }
+
+    setSaving(true)
+    try {
+      // 1. Re-stamp the invoice at the realized rate FIRST, so the allocation
+      //    trigger (paid = ₹allocated ÷ rate) computes a fully-paid invoice.
+      const { error: rErr } = await supabase
+        .from('invoices')
+        .update({ exchange_rate: realizedRate })
+        .eq('id', invoiceId)
+      if (rErr) { setError(`Could not update invoice rate: ${rErr.message}`); setSaving(false); return }
+
+      // 2. Allocate the cash (insert new / add onto existing).
+      const toInsert = rows
+        .filter(r => !r.entry.thisInvoiceAllocId)
+        .map(r => ({ cashbook_entry_id: r.entry.id, invoice_id: invoiceId, allocated_amount: r.amt }))
+      for (const r of rows.filter(r => r.entry.thisInvoiceAllocId)) {
+        const { error: e } = await supabase
+          .from('cashbook_invoice_allocations')
+          .update({ allocated_amount: round2(r.entry.thisInvoiceAmount + r.amt) })
+          .eq('id', r.entry.thisInvoiceAllocId!)
+        if (e) { setError(e.message); setSaving(false); return }
+      }
+      if (toInsert.length) {
+        const { error: e } = await supabase.from('cashbook_invoice_allocations').insert(toInsert)
+        if (e) { setError(e.message); setSaving(false); return }
+      }
+      onUpdate()
+    } catch (e: any) {
+      setError(e?.message || 'Failed to settle invoice.')
       setSaving(false)
     }
   }
@@ -334,6 +403,28 @@ export default function AllocateFromCashbookModal({
           )}
         </div>
 
+        {/* Settle-in-full preview: realized rate + FX variance (foreign, unsettled) */}
+        {canSettleInFull && enteredTotal > 0.01 && (
+          <div className="px-5 sm:px-6 pb-1">
+            <div className="flex items-start gap-2 p-3 rounded-lg border border-violet-500/25 bg-violet-500/[0.06] text-xs">
+              <Wallet className="w-4 h-4 text-violet-400 shrink-0 mt-0.5" />
+              <p className="text-muted-foreground">
+                <span className="text-foreground font-medium">Settle in full:</span> mark {invoiceNumber} fully paid at the
+                realized rate <span className="font-mono text-foreground">{realizedRate.toLocaleString('en-IN')} ₹/{invoiceCurrency}</span>
+                {' '}({ccy(balanceDueNative as number, invoiceCurrency)} = {inr(enteredTotal)}).
+                {fxVariance !== 0 && (marketRate ?? 0) > 0 && (
+                  <> Realized FX {fxVariance < 0 ? 'loss' : 'gain'}{' '}
+                    <span className={`font-mono font-semibold ${fxVariance < 0 ? 'text-red-400' : 'text-green-400'}`}>
+                      {fxVariance < 0 ? '−' : '+'}{inr(Math.abs(fxVariance))}
+                    </span>{' '}
+                    <span className="text-muted-foreground/70">vs ₹{(marketRate as number).toLocaleString('en-IN')}/{invoiceCurrency} market — shown for awareness, not booked as an expense.</span>
+                  </>
+                )}
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Footer */}
         <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-t border-border bg-secondary/20">
           <p className="text-xs text-muted-foreground">
@@ -341,6 +432,15 @@ export default function AllocateFromCashbookModal({
           </p>
           <div className="flex items-center gap-2">
             <button onClick={onClose} disabled={saving} className="px-4 py-2 text-sm rounded-lg hover:bg-secondary/80 text-muted-foreground transition-colors disabled:opacity-50">Cancel</button>
+            {canSettleInFull && (
+              <button
+                onClick={handleSettleInFull}
+                disabled={saving || loading || enteredTotal <= 0.01}
+                title="Mark this foreign invoice fully paid at the realized rate (₹ received ÷ amount)"
+                className="px-4 py-2 text-sm font-medium rounded-lg bg-green-600 hover:bg-green-500 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5">
+                {saving ? 'Saving…' : 'Settle in full'}
+              </button>
+            )}
             <button
               onClick={handleSave}
               disabled={saving || loading || rateUnset || enteredTotal <= 0.01 || remainingAfter < -0.01}

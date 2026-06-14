@@ -5268,6 +5268,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           invoiceCurrency={allocatingInvoice.currency}
           exchangeRate={allocatingInvoice.exchange_rate}
           balanceDueNative={balanceDue(allocatingInvoice)}
+          marketRate={rateMap[allocatingInvoice.currency]}
+          unsettled={invPaidInr(allocatingInvoice) === 0}
           onClose={() => setAllocatingInvoice(null)}
           onUpdate={() => { setAllocatingInvoice(null); router.refresh() }}
         />
