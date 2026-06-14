@@ -1265,15 +1265,16 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                       </div>
                     </div>
 
-                    {/* Allocation Badges */}
-                    {allocStatus && allocStatus !== 'none' && (
-                      <div className="-mt-2">
+                    {/* Tags — single left-aligned wrapped row */}
+                    {(entry.transfer_ref || allocStatus) && (
+                      <div className="flex flex-wrap items-center gap-1 -mt-2">
+                        {entry.transfer_ref && <span className="inline-flex items-center gap-1 bg-purple-500/10 text-purple-400 text-[9px] px-1.5 py-0.5 rounded font-medium"><ArrowLeftRight className="w-2.5 h-2.5" />Internal Transfer</span>}
+                        {allocStatus === 'none' && <span className="inline-block bg-amber-500/10 text-amber-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Unallocated</span>}
                         {allocStatus === 'partial' && <span className="inline-block bg-blue-500/10 text-blue-400 text-[9px] px-1.5 py-0.5 rounded font-medium">Partially Allocated</span>}
                         {allocStatus === 'over' && <span className="inline-block bg-red-500/10 text-red-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Over-allocated!</span>}
                         {allocStatus === 'fully' && <span className="inline-block bg-green-500/10 text-green-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Fully Allocated</span>}
                       </div>
                     )}
-                    {allocStatus === 'none' && <div className="-mt-2"><span className="inline-block bg-amber-500/10 text-amber-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Unallocated</span></div>}
                   </div>
                 </div>
               )
@@ -1349,11 +1350,15 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                               </div>
                             )}
                           </div>
-                          {entry.transfer_ref && <span className="inline-flex items-center gap-1 mt-1 bg-purple-500/10 text-purple-400 text-[9px] px-1.5 py-0.5 rounded font-medium"><ArrowLeftRight className="w-2.5 h-2.5" />Internal Transfer</span>}
-                          {allocStatus === 'none'    && <span className="inline-block mt-1 bg-amber-500/10  text-amber-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Unallocated</span>}
-                          {allocStatus === 'partial' && <span className="inline-block mt-1 bg-blue-500/10   text-blue-400  text-[9px] px-1.5 py-0.5 rounded font-medium">Partially Allocated</span>}
-                          {allocStatus === 'over'    && <span className="inline-block mt-1 bg-red-500/10    text-red-500   text-[9px] px-1.5 py-0.5 rounded font-medium">Over-allocated!</span>}
-                          {allocStatus === 'fully'   && <span className="inline-block mt-1 bg-green-500/10  text-green-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Fully Allocated</span>}
+                          {(entry.transfer_ref || (allocStatus && allocStatus !== 'none') || allocStatus === 'none') && (
+                            <div className="flex flex-wrap items-center gap-1 mt-1 ml-3.5">
+                              {entry.transfer_ref && <span className="inline-flex items-center gap-1 bg-purple-500/10 text-purple-400 text-[9px] px-1.5 py-0.5 rounded font-medium"><ArrowLeftRight className="w-2.5 h-2.5" />Internal Transfer</span>}
+                              {allocStatus === 'none'    && <span className="inline-block bg-amber-500/10  text-amber-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Unallocated</span>}
+                              {allocStatus === 'partial' && <span className="inline-block bg-blue-500/10   text-blue-400  text-[9px] px-1.5 py-0.5 rounded font-medium">Partially Allocated</span>}
+                              {allocStatus === 'over'    && <span className="inline-block bg-red-500/10    text-red-500   text-[9px] px-1.5 py-0.5 rounded font-medium">Over-allocated!</span>}
+                              {allocStatus === 'fully'   && <span className="inline-block bg-green-500/10  text-green-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Fully Allocated</span>}
+                            </div>
+                          )}
                         </>
                       )}
                     </td>

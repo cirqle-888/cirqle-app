@@ -398,11 +398,14 @@ export async function markPayrollPaid(
     detail:     { month: input.month, year: input.year, net: input.finalNet, cqid: input.employeeCqid },
   })
 
-  // Auto-create Cash Book outflow entry
+  // Auto-create Cash Book outflow entry AND allocate it to this payroll record,
+  // so the entry shows "Fully Allocated" instead of "Unallocated". (The cashbook
+  // computes salary allocation status from cashbook_payroll_allocations; creating
+  // the entry alone left it unallocated.)
   if (input.finalNet > 0) {
     const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
     const monthName = MONTHS[input.month - 1]
-    await admin.from('cashbook_entries').insert({
+    const { data: entry } = await admin.from('cashbook_entries').insert({
       entry_date:  today,
       type:        'outflow',
       category_id: input.salaryCategory,
@@ -412,7 +415,16 @@ export async function markPayrollPaid(
       amount_inr:  input.finalNet,
       currency:    'INR',
       reference:   `payroll:${input.id}`,
-    })
+    }).select('id').single()
+
+    if (entry) {
+      // Insert fires the trigger that marks the payroll allocation status.
+      await admin.from('cashbook_payroll_allocations').insert({
+        cashbook_entry_id: entry.id,
+        payroll_id:        input.id,
+        allocated_amount:  input.finalNet,
+      })
+    }
   }
 
   revalidatePath(REVALIDATE)
