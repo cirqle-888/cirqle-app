@@ -5265,6 +5265,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           clientId={allocatingInvoice.client_id}
           clientName={allocatingInvoice.client?.name}
           balanceDueInr={balanceDueInr(allocatingInvoice)}
+          invoiceCurrency={allocatingInvoice.currency}
+          exchangeRate={allocatingInvoice.exchange_rate}
+          balanceDueNative={balanceDue(allocatingInvoice)}
           onClose={() => setAllocatingInvoice(null)}
           onUpdate={() => { setAllocatingInvoice(null); router.refresh() }}
         />

@@ -34,8 +34,16 @@ interface Props {
   invoiceNumber: string
   clientId: string
   clientName?: string
-  /** Invoice balance still due, in INR — the hard cap for new allocations. */
+  /** Invoice balance still due, in INR — the hard cap for new allocations.
+   *  (Allocations are always in ₹; the DB trigger converts ₹ ÷ exchangeRate back
+   *  into the invoice currency to set paid_amount/status.) */
   balanceDueInr: number
+  /** Invoice billing currency, e.g. 'AED'. Defaults to INR. */
+  invoiceCurrency?: string
+  /** rate_to_inr stamped on the invoice (₹ per 1 unit of invoiceCurrency). */
+  exchangeRate?: number
+  /** Invoice balance still due in the INVOICE currency (for display). */
+  balanceDueNative?: number
   onClose: () => void
   /** Called after a successful save/remove so the parent can resync from the DB. */
   onUpdate: () => void
@@ -43,10 +51,18 @@ interface Props {
 
 const round2 = (n: number) => Math.round(n * 100) / 100
 const inr = (n: number) => `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const ccy = (n: number, c: string) => `${c} ${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
 export default function AllocateFromCashbookModal({
-  invoiceId, invoiceNumber, clientId, clientName, balanceDueInr, onClose, onUpdate,
+  invoiceId, invoiceNumber, clientId, clientName, balanceDueInr,
+  invoiceCurrency = 'INR', exchangeRate, balanceDueNative, onClose, onUpdate,
 }: Props) {
+  // Foreign-currency invoice paid from an INR cash book. The trigger converts
+  // ₹allocated ÷ exchangeRate → invoice currency. If the invoice never got an FX
+  // rate stamped (rate 1 on a non-INR invoice), its ₹ balance is the raw foreign
+  // figure (e.g. AED 120 shown as ₹120) and allocating would settle it at 1:1.
+  const isForeign = invoiceCurrency !== 'INR'
+  const rateUnset = isForeign && (!exchangeRate || exchangeRate === 1)
   const supabase = createClient()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -205,16 +221,42 @@ export default function AllocateFromCashbookModal({
         <div className="grid grid-cols-2 gap-3 px-5 sm:px-6 pt-5">
           <div className="bg-secondary/50 border border-border rounded-lg p-3 text-center">
             <p className="text-[10px] uppercase font-semibold tracking-wider text-muted-foreground mb-1">Balance Due</p>
-            <p className="font-mono text-lg font-bold">{inr(balanceDueInr)}</p>
+            {isForeign ? (
+              <>
+                <p className="font-mono text-lg font-bold">{ccy(balanceDueNative ?? balanceDueInr, invoiceCurrency)}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5 font-mono">
+                  ≈ {inr(balanceDueInr)} @ {Number(exchangeRate || 1).toLocaleString('en-IN')}
+                </p>
+              </>
+            ) : (
+              <p className="font-mono text-lg font-bold">{inr(balanceDueInr)}</p>
+            )}
           </div>
           <div className={`border rounded-lg p-3 text-center ${remainingAfter < -0.01 ? 'bg-red-500/10 border-red-500/20 text-red-500' : remainingAfter < 0.01 ? 'bg-green-500/10 border-green-500/20 text-green-500' : 'bg-amber-500/10 border-amber-500/20 text-amber-500'}`}>
-            <p className="text-[10px] uppercase font-semibold tracking-wider mb-1">Remaining After</p>
+            <p className="text-[10px] uppercase font-semibold tracking-wider mb-1">Remaining After (₹)</p>
             <p className="font-mono text-lg font-bold">{inr(remainingAfter)}</p>
           </div>
         </div>
 
         {/* Body */}
         <div className="px-5 sm:px-6 py-5 flex-1 overflow-y-auto space-y-4">
+          {/* FX guard: a non-INR invoice with no rate stamped (rate 1) would settle
+              at 1 unit = ₹1. Block allocation and tell the user to fix the rate. */}
+          {rateUnset && (
+            <div className="flex items-start gap-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-500 text-xs">
+              <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+              <p>
+                This invoice is billed in <strong>{invoiceCurrency}</strong> but has no exchange rate set
+                (treated as 1 {invoiceCurrency} = ₹1). Its ₹ balance below is the raw {invoiceCurrency} figure,
+                so allocating here would mark it paid at 1:1. Set the invoice&apos;s exchange rate first, then allocate.
+              </p>
+            </div>
+          )}
+          {isForeign && !rateUnset && (
+            <p className="text-[11px] text-muted-foreground">
+              Allocations are in ₹ (cash received). The invoice settles at {Number(exchangeRate).toLocaleString('en-IN')} ₹/{invoiceCurrency}.
+            </p>
+          )}
           {error && (
             <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-500 text-sm">
               <ShieldAlert className="w-4 h-4 shrink-0" /><p>{error}</p>
@@ -301,7 +343,8 @@ export default function AllocateFromCashbookModal({
             <button onClick={onClose} disabled={saving} className="px-4 py-2 text-sm rounded-lg hover:bg-secondary/80 text-muted-foreground transition-colors disabled:opacity-50">Cancel</button>
             <button
               onClick={handleSave}
-              disabled={saving || loading || enteredTotal <= 0.01 || remainingAfter < -0.01}
+              disabled={saving || loading || rateUnset || enteredTotal <= 0.01 || remainingAfter < -0.01}
+              title={rateUnset ? `Set the invoice's ${invoiceCurrency} exchange rate before allocating` : undefined}
               className="px-4 py-2 text-sm font-medium rounded-lg bg-violet-600 hover:bg-violet-500 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5">
               {saving ? 'Saving…' : <>Allocate <ArrowRight className="w-3.5 h-3.5" /></>}
             </button>
