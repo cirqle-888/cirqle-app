@@ -29,7 +29,7 @@ import {
   Calendar, Building2, IndianRupee, MoreHorizontal, Search, Filter,
   Printer, TrendingUp, BadgeCheck, CircleDollarSign, Receipt, Edit2, Save,
   History, Tag, Percent, ChevronDown, ChevronUp, ArrowDownToLine, Gift, ExternalLink, Copy,
-  Wallet, Link2,
+  Wallet, Link2, ShoppingBag, Share2,
 } from 'lucide-react'
 import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
@@ -52,6 +52,12 @@ const ClientEditModal = dynamic(
 // mounts when the user opens it from an invoice. See the component for details.
 const AllocateFromCashbookModal = dynamic(
   () => import('@/components/invoices/allocate-from-cashbook-modal'),
+  { ssr: false },
+)
+
+// Add cashbook outflow expenses to an invoice as billable line items.
+const AddExpenseModal = dynamic(
+  () => import('@/components/invoices/add-expense-modal'),
   { ssr: false },
 )
 
@@ -102,9 +108,19 @@ interface Invoice {
   subtotal?: number; tax_rate?: number; tax_amount?: number
   discount_amount?: number; previous_balance?: number
   notes?: string; created_at: string; updated_at: string
+  expenses_mode?: string   // 'combined' | 'separate' — how expenses appear in the PDF
   client?: { id: string; name: string; code: string; phone?: string; email?: string; address?: string }
   items?: InvoiceItem[]
   payments?: Payment[]
+  // Client expense items billed via cashbook outflow entries.
+  expense_items?: {
+    id: string
+    cashbook_entry_id: string
+    description: string
+    amount: number
+    amount_inr: number
+    currency: string
+  }[]
   // Active cashbook→invoice allocations. If any exist, this invoice is paid via
   // the allocation path and must NOT also take a direct "Record Payment".
   // allocated_amount + cashbook_entry are loaded for the relationship display.
@@ -252,6 +268,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
   // "Allocate From Cash Book" — the invoice this modal is open for, if any.
   const [allocatingInvoice, setAllocatingInvoice] = useState<Invoice | null>(null)
+
+  // "Add Client Expenses" — the invoice this modal is open for, if any.
+  const [addExpenseInvoice, setAddExpenseInvoice] = useState<Invoice | null>(null)
 
   // Payment form. `amount` is in the payment `currency`; `amountInr` is the
   // INR base; `rate` is rate_to_inr. Defaults to the invoice currency when the
@@ -595,6 +614,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       ? { ...i, exchange_rate: newRate, total_amount_inr: round2((i.total_amount || 0) * newRate) }
       : i
     ))
+  }
+
+  async function updateExpensesMode(invoiceId: string, mode: string) {
+    await supabase.from('invoices').update({ expenses_mode: mode, updated_at: new Date().toISOString() }).eq('id', invoiceId)
+    setInvoices(prev => prev.map(i => i.id === invoiceId ? { ...i, expenses_mode: mode } : i))
   }
 
   async function updateItemDescription(itemId: string, invoiceId: string, description: string) {
@@ -2097,11 +2121,15 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const THANK_DK  = shadeHex(NAVY_LIGHT, 0.5)         // "you" deep purple
     const THANK_MID = shadeHex(NAVY_LIGHT, 0.78)        // "for your / Business!"
 
+    // Expense items — either merged into the item table ('combined') or rendered separately below
+    const expenseItems = inv.expense_items || []
+    const expensesMode = inv.expenses_mode || 'combined'
+    const td = (extra: string) => `padding:9px 10px;border-bottom:1px solid ${CELL_BORD};border-left:1px solid ${CELL_BORD};font-size:13px;${extra}`
+
     // Build table rows — centered columns, alternating lavender, reference dates
     const itemRows = sortedItems.map((it, idx) => {
       const taskDate = it.task?.task_date ? ddMon(it.task.task_date) : ''
       const bg = idx % 2 === 1 ? ALT_ROW : '#ffffff'
-      const td = (extra: string) => `padding:9px 10px;border-bottom:1px solid ${CELL_BORD};border-left:1px solid ${CELL_BORD};font-size:13px;${extra}`
       return `
         <tr style="background:${bg}">
           <td style="${td('border-left:none;text-align:center;color:#222')}">${idx + 1}</td>
@@ -2111,7 +2139,52 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           <td style="${td('text-align:center;color:#222;white-space:nowrap')}">${inr(it.unit_price)}</td>
           <td style="${td('text-align:center;color:#111;font-weight:700;white-space:nowrap')}">${inr(it.total)}</td>
         </tr>`
-    }).join('')
+    })
+
+    // 'combined' mode: expense items appended inline to the item table
+    const combinedExpenseRows = expensesMode === 'combined' ? expenseItems.map((exp, i) => {
+      const idx = sortedItems.length + i
+      const bg = idx % 2 === 1 ? ALT_ROW : '#ffffff'
+      return `
+        <tr style="background:${bg}">
+          <td style="${td('border-left:none;text-align:center;color:#222')}">${idx + 1}</td>
+          <td style="${td('text-align:center;color:#777;white-space:nowrap')}">—</td>
+          <td style="${td('text-align:left;color:#222')}">${exp.description}</td>
+          <td style="${td('text-align:center;color:#777')}">1</td>
+          <td style="${td('text-align:center;color:#222;white-space:nowrap')}">${inr(exp.amount)}</td>
+          <td style="${td('text-align:center;color:#111;font-weight:700;white-space:nowrap')}">${inr(exp.amount)}</td>
+        </tr>`
+    }) : []
+
+    const allItemRows = [...itemRows, ...combinedExpenseRows].join('')
+
+    // 'separate' mode: separate expenses table rendered after the main table
+    const expensesTotal = expenseItems.reduce((s, e) => s + (e.amount || 0), 0)
+    const separateExpensesBlock = expensesMode === 'separate' && expenseItems.length > 0 ? `
+  <div style="margin-top:18px">
+    <div style="font-weight:700;font-size:13px;color:${NAVY};margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em">Expenses</div>
+    <table style="width:100%;border-collapse:collapse;border:1px solid ${CELL_BORD}">
+      <thead>
+        <tr style="background:linear-gradient(to bottom,${HEAD_TOP},${HEAD_BOT})">
+          <th style="padding:8px 10px;text-align:left;color:#fff;font-size:12.5px;font-weight:700">Description</th>
+          <th style="padding:8px 10px;text-align:right;color:#fff;font-size:12.5px;font-weight:700;white-space:nowrap;border-left:2px solid #fff">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${expenseItems.map((exp, i) => {
+          const bg = i % 2 === 1 ? ALT_ROW : '#ffffff'
+          return `<tr style="background:${bg}">
+            <td style="padding:8px 10px;border-bottom:1px solid ${CELL_BORD};font-size:12.5px;color:#222">${exp.description}</td>
+            <td style="padding:8px 10px;border-bottom:1px solid ${CELL_BORD};border-left:1px solid ${CELL_BORD};font-size:12.5px;font-weight:700;text-align:right;white-space:nowrap">${inr(exp.amount)}</td>
+          </tr>`
+        }).join('')}
+        <tr style="background:#f8f8f8">
+          <td style="padding:8px 10px;font-size:12.5px;font-weight:700;color:#111;text-align:right">Expenses Total</td>
+          <td style="padding:8px 10px;border-left:1px solid ${CELL_BORD};font-size:13px;font-weight:700;text-align:right;white-space:nowrap">${inr(expensesTotal)}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>` : ''
 
     const upiString = co.upi ? `upi://pay?pa=${co.upi}&pn=${encodeURIComponent(co.holder)}&cu=INR` : ''
 
@@ -2334,9 +2407,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       </tr>
     </thead>
     <tbody>
-      ${itemRows || `<tr><td colspan="6" style="padding:20px;text-align:center;color:#999;font-size:12px">No items</td></tr>`}
+      ${allItemRows || `<tr><td colspan="6" style="padding:20px;text-align:center;color:#999;font-size:12px">No items</td></tr>`}
     </tbody>
   </table>
+
+  ${separateExpensesBlock}
 
   <!-- ── TOTALS (right block, reference style) ── -->
   <table style="width:100%;border-collapse:collapse;margin-top:6px">
@@ -2644,6 +2719,21 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-foreground/5 rounded-lg transition-colors">
               <Printer className="w-3.5 h-3.5" />
             </button>
+            <button
+              onClick={() => {
+                const text = [
+                  `📄 Invoice ${inv.invoice_number}`,
+                  `Client: ${inv.client?.name || ''}`,
+                  showAmounts ? `Amount: ${fmt(inv.total_amount, inv.currency)}` : '',
+                  inv.due_date ? `Due: ${fmtDate(inv.due_date)}` : '',
+                  `\nhttps://app.cirqle.work/dashboard/invoices`,
+                ].filter(Boolean).join('\n')
+                window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank')
+              }}
+              title="Share via WhatsApp"
+              className="p-1.5 text-muted-foreground hover:text-green-400 hover:bg-green-500/10 rounded-lg transition-colors">
+              <Share2 className="w-3.5 h-3.5" />
+            </button>
             {/* Force-edit toggle — requires reason before unlocking */}
             {!isEditable(inv.status) && (
               <button
@@ -2732,6 +2822,13 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                   onClick={() => setAllocatingInvoice(inv)}
                   className="flex-1 min-w-[120px] py-1.5 px-3 bg-violet-600/10 hover:bg-violet-600/20 text-violet-300 border border-violet-500/30 text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 transition-colors">
                   <Wallet className="w-3.5 h-3.5" />Allocate From Cash Book
+                </button>
+              )}
+              {!STATUS_GROUPS.closed.includes(inv.status) && (
+                <button
+                  onClick={() => setAddExpenseInvoice(inv)}
+                  className="flex-1 min-w-[120px] py-1.5 px-3 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 transition-colors">
+                  <ShoppingBag className="w-3.5 h-3.5" />Add Expenses
                 </button>
               )}
             </div>
@@ -2928,6 +3025,52 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               </div>
             )
           })()}
+
+          {/* Client Expenses section */}
+          {(inv.expense_items || []).length > 0 && (
+            <div className="bg-amber-500/[0.04] rounded-xl border border-amber-500/20 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <h4 className="text-[11px] font-semibold text-amber-300/90 uppercase tracking-wider flex items-center gap-1.5">
+                  <ShoppingBag className="w-3 h-3" />Client Expenses ({(inv.expense_items || []).length})
+                </h4>
+                {/* Mode toggle: combined (merged with line items) or separate section in PDF */}
+                <div className="flex items-center gap-1 text-[10px]">
+                  <button
+                    onClick={() => updateExpensesMode(inv.id, 'combined')}
+                    className={`px-2 py-0.5 rounded-full border transition-colors ${(inv.expenses_mode || 'combined') === 'combined'
+                      ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                      : 'border-border/30 text-muted-foreground hover:border-border/60'}`}>
+                    With items
+                  </button>
+                  <button
+                    onClick={() => updateExpensesMode(inv.id, 'separate')}
+                    className={`px-2 py-0.5 rounded-full border transition-colors ${(inv.expenses_mode || 'combined') === 'separate'
+                      ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                      : 'border-border/30 text-muted-foreground hover:border-border/60'}`}>
+                    Separate section
+                  </button>
+                </div>
+              </div>
+              {(inv.expense_items || []).map(exp => (
+                <div key={exp.id} className="flex items-center justify-between gap-3 text-xs">
+                  <span className="text-foreground/80 truncate flex-1">{exp.description}</span>
+                  {showAmounts && (
+                    <span className="font-mono text-amber-300/90 shrink-0">
+                      {fmt(exp.amount, exp.currency as Currency)}
+                    </span>
+                  )}
+                </div>
+              ))}
+              {showAmounts && (inv.expense_items || []).length > 0 && (
+                <div className="pt-1 border-t border-amber-500/20 flex justify-between text-[11px] text-amber-300/70">
+                  <span>Expenses total</span>
+                  <span className="font-mono">
+                    {fmt((inv.expense_items || []).reduce((s, e) => s + (e.amount || 0), 0), inv.currency)}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Line items */}
           <div>
@@ -5333,6 +5476,20 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           unsettled={invPaidInr(allocatingInvoice) === 0}
           onClose={() => setAllocatingInvoice(null)}
           onUpdate={() => { setAllocatingInvoice(null); router.refresh() }}
+        />
+      )}
+
+      {addExpenseInvoice && (
+        <AddExpenseModal
+          invoiceId={addExpenseInvoice.id}
+          invoiceNumber={addExpenseInvoice.invoice_number}
+          clientId={addExpenseInvoice.client_id}
+          clientName={addExpenseInvoice.client?.name}
+          invoiceCurrency={addExpenseInvoice.currency}
+          exchangeRate={addExpenseInvoice.exchange_rate || 1}
+          existingExpenses={addExpenseInvoice.expense_items || []}
+          onClose={() => setAddExpenseInvoice(null)}
+          onUpdate={() => { setAddExpenseInvoice(null); router.refresh() }}
         />
       )}
     </div>
