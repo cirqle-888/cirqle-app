@@ -897,16 +897,21 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   async function deleteInvoice(invoiceId: string) {
     setConfirmModal(null)
     setDeleting(true)
-    const inv = invoices.find(i => i.id === invoiceId)
-    const taskIds = (inv?.items || []).map(it => it.task_id).filter(Boolean) as string[]
-    if (taskIds.length) await supabase.from('tasks').update({ status: 'done' }).in('id', taskIds)
-    await supabase.from('invoice_items').delete().eq('invoice_id', invoiceId)
-    await supabase.from('payments').delete().eq('invoice_id', invoiceId)
-    await supabase.from('invoices').delete().eq('id', invoiceId)
-    setInvoices(prev => prev.filter(i => i.id !== invoiceId))
-    if (selectedId === invoiceId) setSelectedId(null)
-    success('Invoice deleted')
-    setDeleting(false)
+    try {
+      const inv = invoices.find(i => i.id === invoiceId)
+      const taskIds = (inv?.items || []).map(it => it.task_id).filter(Boolean) as string[]
+      if (taskIds.length) await supabase.from('tasks').update({ status: 'done' }).in('id', taskIds)
+      await supabase.from('cashbook_invoice_allocations').delete().eq('invoice_id', invoiceId)
+      await supabase.from('invoice_items').delete().eq('invoice_id', invoiceId)
+      await supabase.from('payments').delete().eq('invoice_id', invoiceId)
+      const { error } = await supabase.from('invoices').delete().eq('id', invoiceId)
+      if (error) { toastError(error.message); return }
+      setInvoices(prev => prev.filter(i => i.id !== invoiceId))
+      if (selectedId === invoiceId) setSelectedId(null)
+      success('Invoice deleted')
+    } finally {
+      setDeleting(false)
+    }
   }
 
   // ── Bulk Status Update ─────────────────────────────────────────────────────
