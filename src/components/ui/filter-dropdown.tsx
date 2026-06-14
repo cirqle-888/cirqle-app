@@ -19,10 +19,19 @@ interface Props {
   maxLabelWidth?: string
   /** Smaller trigger height/padding for compact toolbars */
   compact?: boolean
+  /** Multi-select mode — pick several values; the panel stays open while picking. */
+  multiple?: boolean
+  /** Selected values (multi-select mode). */
+  values?: string[]
+  /** Toggle a single value on/off (multi-select mode). */
+  onToggle?: (value: string) => void
+  /** Clear all selected values (multi-select mode). */
+  onClear?: () => void
 }
 
 export function FilterDropdown({
   options, value, onChange, placeholder, sortKey, className = '', maxLabelWidth = 'max-w-[140px]', compact = false,
+  multiple = false, values = [], onToggle, onClear,
 }: Props) {
   const [open,     setOpen]     = useState(false)
   const [search,   setSearch]   = useState('')
@@ -87,7 +96,18 @@ export function FilterDropdown({
     if (open) requestAnimationFrame(() => searchRef.current?.focus())
   }, [open])
 
+  // Selected set works for both modes — single collapses to [value].
+  const selectedValues = multiple ? values : (value ? [value] : [])
+  const selectedSet = useMemo(() => new Set(selectedValues), [selectedValues])
   const selectedOption = options.find(o => o.value === value)
+
+  // Trigger label: single → the option label; multi → first label, "+N" suffix.
+  const triggerLabel = (() => {
+    if (!multiple) return selectedOption?.label || placeholder
+    if (selectedValues.length === 0) return placeholder
+    const first = options.find(o => o.value === selectedValues[0])?.label || selectedValues[0]
+    return selectedValues.length === 1 ? first : `${first} +${selectedValues.length - 1}`
+  })()
 
   // Smart-sorted + filtered list
   const { recent, frequent, rest } = useMemo(() => {
@@ -127,11 +147,17 @@ export function FilterDropdown({
       trackUsage(sortKey, v)
       setSortData(readSortData(sortKey))
     }
+    if (multiple) {
+      // Multi-select: empty value = "All" clears everything; otherwise toggle.
+      if (v === '') { onClear?.() ; setOpen(false); setSearch('') }
+      else { onToggle?.(v); setSearch('') }   // keep panel open to stack picks
+      return
+    }
     onChange(v)
     setOpen(false); setSearch('')
   }
 
-  const isActive = !!value
+  const isActive = selectedValues.length > 0
 
   return (
     <div ref={containerRef} className={`relative ${className}`}>
@@ -146,13 +172,13 @@ export function FilterDropdown({
           }
           ${open ? 'border-violet-500/50 ring-1 ring-violet-500/20' : ''}`}
       >
-        <span className={`truncate ${maxLabelWidth}`}>{selectedOption?.label || placeholder}</span>
+        <span className={`truncate ${maxLabelWidth}`}>{triggerLabel}</span>
         {isActive ? (
           <span
             role="button"
             tabIndex={0}
-            onClick={e => { e.stopPropagation(); onChange('') }}
-            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onChange('') } }}
+            onClick={e => { e.stopPropagation(); multiple ? onClear?.() : onChange('') }}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); multiple ? onClear?.() : onChange('') } }}
             className="shrink-0 opacity-60 hover:opacity-100 transition-opacity cursor-pointer"
             aria-label="Clear filter"
           >
@@ -199,14 +225,14 @@ export function FilterDropdown({
           <div className="max-h-64 overflow-y-auto py-1 overscroll-contain">
             {/* All / clear option */}
             {!search && (
-              <OptionRow opt={{ value: '', label: placeholder }} selected={!value} onSelect={() => select('')} />
+              <OptionRow opt={{ value: '', label: multiple ? `All ${placeholder.toLowerCase()}` : placeholder }} selected={selectedValues.length === 0} onSelect={() => select('')} multiple={multiple} />
             )}
 
             {/* Recently used */}
             {recent.length > 0 && (
               <>
                 <SectionLabel icon={<Clock size={9} />} label="Recently Used" />
-                {recent.map(o => <OptionRow key={o.value} opt={o} selected={value === o.value} onSelect={select} />)}
+                {recent.map(o => <OptionRow key={o.value} opt={o} selected={selectedSet.has(o.value)} onSelect={select} multiple={multiple} />)}
               </>
             )}
 
@@ -214,7 +240,7 @@ export function FilterDropdown({
             {frequent.length > 0 && (
               <>
                 <SectionLabel icon={<TrendingUp size={9} />} label="Frequently Used" />
-                {frequent.map(o => <OptionRow key={o.value} opt={o} selected={value === o.value} onSelect={select} />)}
+                {frequent.map(o => <OptionRow key={o.value} opt={o} selected={selectedSet.has(o.value)} onSelect={select} multiple={multiple} />)}
               </>
             )}
 
@@ -224,7 +250,7 @@ export function FilterDropdown({
                 {(recent.length > 0 || frequent.length > 0) && !search && (
                   <SectionLabel icon={null} label="All" />
                 )}
-                {rest.map(o => <OptionRow key={o.value} opt={o} selected={value === o.value} onSelect={select} />)}
+                {rest.map(o => <OptionRow key={o.value} opt={o} selected={selectedSet.has(o.value)} onSelect={select} multiple={multiple} />)}
               </>
             )}
 
@@ -249,13 +275,16 @@ function SectionLabel({ icon, label }: { icon: React.ReactNode; label: string })
   )
 }
 
-function OptionRow({ opt, selected, onSelect }: { opt: FilterOption; selected: boolean; onSelect: (v: string) => void }) {
+function OptionRow({ opt, selected, onSelect, multiple = false }: { opt: FilterOption; selected: boolean; onSelect: (v: string) => void; multiple?: boolean }) {
+  // Multi-select uses a square checkbox; single-select keeps the radio circle.
+  // The "All" row (value === '') always shows a radio so it reads as "reset".
+  const square = multiple && opt.value !== ''
   return (
     <button type="button" onClick={() => onSelect(opt.value)}
       className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left transition-colors
         ${selected ? 'bg-violet-500/15 text-violet-300' : 'text-foreground hover:bg-foreground/[0.06]'}`}
     >
-      <span className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 transition-all
+      <span className={`w-4 h-4 ${square ? 'rounded' : 'rounded-full'} border-2 flex items-center justify-center shrink-0 transition-all
         ${selected ? 'border-violet-500 bg-violet-500' : 'border-foreground/20'}`}>
         {selected && <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />}
       </span>

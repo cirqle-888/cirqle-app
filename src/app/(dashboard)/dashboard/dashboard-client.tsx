@@ -51,6 +51,8 @@ interface Props {
   todayTasks: any[]; unscoredDoneTasks: any[]; activeTasks: any[]; toBeInvoiced: any[]
   employees: any[]; scoresPromise: Promise<any[]>; payrollRecords: any[]
   pendingContribCount?: number
+  /** Employee view: open tasks assigned to me + done tasks awaiting my contribution. */
+  myActions?: { active: any[]; needContribution: any[] }
   todayStr: string
   isAdmin?: boolean
 }
@@ -194,6 +196,7 @@ export default function DashboardClient(props: Props) {
           scoresPromise={props.scoresPromise}
           payrollRecords={props.payrollRecords}
           pendingContribCount={props.pendingContribCount}
+          myActions={props.myActions}
         />
       </Suspense>
     )
@@ -487,8 +490,10 @@ function statusBadgeClass(status: string) {
 
 function EmployeeDashboard({
   todayStr, scoresPromise, payrollRecords: _payrollRecords, pendingContribCount = 0,
+  myActions = { active: [], needContribution: [] },
 }: {
   todayStr: string; scoresPromise: Promise<any[]>; payrollRecords: any[]; pendingContribCount?: number
+  myActions?: { active: any[]; needContribution: any[] }
 }) {
   // Unwrap the streamed (employee-scoped) scores. Suspends until resolved; the
   // <Suspense> boundary in the router shows EmployeeDashboardSkeleton meanwhile.
@@ -698,21 +703,71 @@ function EmployeeDashboard({
       <Header title="My Workspace" subtitle={todayLabel} />
       <div className="p-4 md:p-6 space-y-6">
 
-        {/* ── Pending-contributions nudge ──────────────────────────────────── */}
-        {pendingContribCount > 0 && (
-          <Link
-            href="/dashboard/contributions"
-            className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 hover:bg-amber-500/15 transition-colors group"
-          >
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-amber-300">
-                {pendingContribCount} task{pendingContribCount !== 1 ? 's' : ''} awaiting your contribution
-              </p>
-              <p className="text-[11px] text-amber-400/70 mt-0.5">Tap to open Contributions and log your work</p>
+        {/* ── Needs your action — first thing on load ─────────────────────── */}
+        {(myActions.needContribution.length > 0 || myActions.active.length > 0) && (
+          <div className="bg-card border border-border rounded-2xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-border/60 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+              <p className="text-sm font-semibold">Needs your action</p>
+              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/25">
+                {myActions.needContribution.length + myActions.active.length}
+              </span>
             </div>
-            <ChevronRight className="w-4 h-4 text-amber-400/60 shrink-0 group-hover:translate-x-0.5 transition-transform" />
-          </Link>
+            <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-border/60">
+              {/* Add your contribution */}
+              <div className="p-3.5">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-400/90 mb-2">
+                  Add your contribution · {myActions.needContribution.length}
+                </p>
+                {myActions.needContribution.length === 0 && (
+                  <p className="text-xs text-muted-foreground/60">All caught up 🎉</p>
+                )}
+                <div className="space-y-1.5">
+                  {myActions.needContribution.slice(0, 6).map((t: any) => (
+                    <Link key={t.id} href={`/dashboard/contributions?search=${encodeURIComponent('#' + (t.task_number ?? ''))}`}
+                      className="flex items-center gap-2 rounded-lg px-2 py-1.5 -mx-2 hover:bg-secondary/60 transition-colors group">
+                      <span className="text-[10px] font-mono text-muted-foreground shrink-0">#{t.task_number ?? '—'}</span>
+                      <span className="text-xs font-medium truncate flex-1">{t.title}</span>
+                      <span className="text-[10px] text-muted-foreground shrink-0 truncate max-w-[90px]">{t.client?.name || ''}</span>
+                      <ChevronRight className="w-3 h-3 text-muted-foreground/40 shrink-0 group-hover:translate-x-0.5 transition-transform" />
+                    </Link>
+                  ))}
+                  {myActions.needContribution.length > 6 && (
+                    <Link href="/dashboard/contributions" className="block text-[11px] text-violet-400 hover:text-violet-300 px-2 pt-1">
+                      +{myActions.needContribution.length - 6} more in Contributions →
+                    </Link>
+                  )}
+                </div>
+              </div>
+              {/* Open tasks on my plate */}
+              <div className="p-3.5">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-blue-400/90 mb-2">
+                  Your open tasks · {myActions.active.length}
+                </p>
+                {myActions.active.length === 0 && (
+                  <p className="text-xs text-muted-foreground/60">Nothing pending — nice.</p>
+                )}
+                <div className="space-y-1.5">
+                  {myActions.active.slice(0, 6).map((t: any) => (
+                    <Link key={t.id} href={`/dashboard/tasks?q=${encodeURIComponent('#' + (t.task_number ?? ''))}`}
+                      className="flex items-center gap-2 rounded-lg px-2 py-1.5 -mx-2 hover:bg-secondary/60 transition-colors group">
+                      <span className="text-[10px] font-mono text-muted-foreground shrink-0">#{t.task_number ?? '—'}</span>
+                      <span className="text-xs font-medium truncate flex-1">{t.title}</span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full shrink-0 ${t.status === 'in_progress' ? 'bg-blue-500/10 text-blue-400' : 'bg-secondary text-muted-foreground'}`}>
+                        {t.status === 'in_progress' ? 'in progress' : 'pending'}
+                      </span>
+                      <ChevronRight className="w-3 h-3 text-muted-foreground/40 shrink-0 group-hover:translate-x-0.5 transition-transform" />
+                    </Link>
+                  ))}
+                  {myActions.active.length > 6 && (
+                    <Link href="/dashboard/tasks" className="block text-[11px] text-violet-400 hover:text-violet-300 px-2 pt-1">
+                      +{myActions.active.length - 6} more in Tasks →
+                    </Link>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* ── Analytics filters (control KPI + breakdown + chart) ───────────── */}

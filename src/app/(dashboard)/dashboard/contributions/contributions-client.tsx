@@ -7,13 +7,16 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { recalculatePayrollForMonth } from '@/app/(dashboard)/dashboard/payroll/actions'
+import { serverFillTaskBilling } from '@/app/(dashboard)/dashboard/tasks/actions'
 import { applyTaskAgreements } from './actions'
 import { calculateCommission } from '@/lib/calculations/commission'
 import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
 import { taskCode, taskCodeMatches, nextTaskNumber } from '@/lib/utils/task-code'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
-import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
+import { DateFilter, matchesDateFilter, getDateFilterLabel } from '@/components/ui/date-filter'
+import { ActiveFilterChips } from '@/components/ui/active-filter-chips'
+import { TokenizedSearch, type SearchFacet, type FacetOp } from '@/components/ui/tokenized-search'
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from '@/lib/utils'
 import type { DateFilterValue } from '@/components/ui/date-filter'
 import {
@@ -90,6 +93,45 @@ function fmt(date: string) {
   } catch { return date }
 }
 
+/** Apply an operator to a string field value. */
+function cmpText(val: string | null | undefined, op: FacetOp, text: string): boolean {
+  const v = (val || '').toLowerCase()
+  const q = text.toLowerCase()
+  return op === 'is' ? v === q : v.includes(q)
+}
+/** Apply an operator to a numeric field value. */
+function cmpNum(val: number | null | undefined, op: FacetOp, text: string): boolean {
+  const n = Number(val ?? 0)
+  const m = Number(text)
+  if (!Number.isFinite(m)) return true            // non-numeric query → don't exclude
+  switch (op) {
+    case '>':  return n > m
+    case '<':  return n < m
+    case '>=': return n >= m
+    case '<=': return n <= m
+    case '!=': return n !== m
+    default:   return n === m                      // '=' and text ops fall back to equality
+  }
+}
+/** Does a single search facet match a task? Field-aware + operator-aware. */
+function facetMatchesTask(t: any, f: SearchFacet): boolean {
+  const op = f.op || 'contains'
+  switch (f.field) {
+    case 'client':  return cmpText(t.client?.name, op, f.text)
+    case 'service': return cmpText(t.service?.name, op, f.text)
+    case 'title':   return cmpText(t.title, op, f.text)
+    case 'task':    return cmpNum(t.task_number, op, f.text)
+    case 'amount':  return cmpNum(t.billing_amount_inr, op, f.text)
+    case 'any':
+    default:
+      // Generic: any of title / client / service / code contains the text.
+      return cmpText(t.title, 'contains', f.text)
+        || cmpText(t.client?.name, 'contains', f.text)
+        || cmpText(t.service?.name, 'contains', f.text)
+        || taskCodeMatches(t, f.text)
+  }
+}
+
 function StatusBadge({ done, total }: { done: number; total: number }) {
   if (total === 0) return null
   if (done === 0) return (
@@ -163,10 +205,26 @@ export default function ContributionsClient({
   const [duplicatingTaskId, setDuplicatingTaskId] = useState<string | null>(null)
 
   // ── Filters ─────────────────────────────────────────
-  const [search, setSearch] = useState(searchParams.get('search') || '')
-  const [filterClient, setFilterClient] = useState(searchParams.get('client') || '')
-  const [filterService, setFilterService] = useState(searchParams.get('service') || '')
+  // Odoo-style tokenized search: field-scoped facet pills + the live draft.
+  // Convention: same field OR (Client: a OR Client: b); generic text AND
+  // (narrows); across fields AND. The trimmed draft is a generic facet so
+  // typing still filters live before it's committed.
+  const [searchFacets, setSearchFacets] = useState<SearchFacet[]>(() => {
+    try { const raw = searchParams.get('sf'); return raw ? JSON.parse(raw) : [] } catch { return [] }
+  })
+  const [searchDraft, setSearchDraft] = useState('')
+  const activeFacets = useMemo<SearchFacet[]>(
+    () => searchDraft.trim() ? [...searchFacets, { field: 'any', op: 'contains', text: searchDraft.trim() }] : searchFacets,
+    [searchFacets, searchDraft],
+  )
+  const hasSearch = activeFacets.length > 0
+  // Client & Service are multi-value (stack several, OR within the category).
+  const [filterClients, setFilterClients] = useState<string[]>(() => (searchParams.get('client') || '').split(',').filter(Boolean))
+  const [filterServices, setFilterServices] = useState<string[]>(() => (searchParams.get('service') || '').split(',').filter(Boolean))
   const [filterEmployee, setFilterEmployee] = useState(searchParams.get('employee') || '')
+  // Toggle helpers for the multi-select dropdowns.
+  const toggleClient  = (id: string) => setFilterClients(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  const toggleService = (id: string) => setFilterServices(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   const [filterEmployeeMode, setFilterEmployeeMode] = useState<'worked' | 'solo' | 'any'>((searchParams.get('empmode') as any) || 'worked')
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'done' | 'missing'>((searchParams.get('status') as any) || 'all')
   const [sortBy, setSortBy] = useState<'today_first' | 'date_desc' | 'date_asc' | 'amount_desc' | 'client'>((searchParams.get('sort') as any) || 'today_first')
@@ -181,9 +239,9 @@ export default function ContributionsClient({
     const params = new URLSearchParams(searchParams.toString())
     
     if (listViewMode && listViewMode !== 'list') params.set('view', listViewMode); else params.delete('view')
-    if (search) params.set('search', search); else params.delete('search')
-    if (filterClient) params.set('client', filterClient); else params.delete('client')
-    if (filterService) params.set('service', filterService); else params.delete('service')
+    if (searchFacets.length) params.set('sf', JSON.stringify(searchFacets)); else params.delete('sf')
+    if (filterClients.length) params.set('client', filterClients.join(',')); else params.delete('client')
+    if (filterServices.length) params.set('service', filterServices.join(',')); else params.delete('service')
     if (filterEmployee) params.set('employee', filterEmployee); else params.delete('employee')
     if (filterEmployeeMode && filterEmployeeMode !== 'worked') params.set('empmode', filterEmployeeMode); else params.delete('empmode')
     if (statusFilter && statusFilter !== 'all') params.set('status', statusFilter); else params.delete('status')
@@ -194,7 +252,7 @@ export default function ContributionsClient({
     if (newQueryString !== searchParams.toString()) {
       router.replace(`${pathname}?${newQueryString}`, { scroll: false })
     }
-  }, [listViewMode, search, filterClient, filterService, filterEmployee, filterEmployeeMode, statusFilter, sortBy, filterDate, pathname, router, searchParams])
+  }, [listViewMode, searchFacets, filterClients, filterServices, filterEmployee, filterEmployeeMode, statusFilter, sortBy, filterDate, pathname, router, searchParams])
   const autoRecalcRan = useRef(false)
 
   // ── Financial visibility ─────────────────────────────
@@ -633,14 +691,14 @@ export default function ContributionsClient({
     const all = clients.map(c => ({ value: c.id, label: c.name }))
     if (!dateScopedTasks) return all
     const ids = new Set(dateScopedTasks.map((t: any) => t.client?.id).filter(Boolean))
-    return all.filter(o => ids.has(o.value) || o.value === filterClient)
-  }, [dateScopedTasks, clients, filterClient])
+    return all.filter(o => ids.has(o.value) || filterClients.includes(o.value))
+  }, [dateScopedTasks, clients, filterClients])
   const scopedServiceOptions = useMemo(() => {
     const all = services.map(s => ({ value: s.id, label: s.name }))
     if (!dateScopedTasks) return all
     const ids = new Set(dateScopedTasks.map((t: any) => t.service_id).filter(Boolean))
-    return all.filter(o => ids.has(o.value) || o.value === filterService)
-  }, [dateScopedTasks, services, filterService])
+    return all.filter(o => ids.has(o.value) || filterServices.includes(o.value))
+  }, [dateScopedTasks, services, filterServices])
 
   async function toggleAssignment(taskId: string, empId: string) {
     const isAssigned = taskAssignmentMap[taskId]?.has(empId)
@@ -661,13 +719,18 @@ export default function ContributionsClient({
   // ── Task filtering + grouping ─────────────────────────
   const filteredTasks = useMemo(() => {
     return localTasks.filter(t => {
-      const q = search.toLowerCase()
-      if (q && !t.title.toLowerCase().includes(q) &&
-          !(t.client?.name || '').toLowerCase().includes(q) &&
-          !(t.service?.name || '').toLowerCase().includes(q) &&
-          !taskCodeMatches(t, search)) return false
-      if (filterClient && t.client?.id !== filterClient) return false
-      if (filterService && t.service_id !== filterService) return false
+      // Search facets w/ operators: generic 'any' ANDs (each narrows); same
+      // named field ORs; across fields AND. See facetMatchesTask().
+      for (const f of activeFacets) {
+        if (f.field === 'any' && !facetMatchesTask(t, f)) return false
+      }
+      const namedByField: Record<string, SearchFacet[]> = {}
+      for (const f of activeFacets) if (f.field !== 'any') (namedByField[f.field] ||= []).push(f)
+      for (const fs of Object.values(namedByField)) {
+        if (!fs.some(f => facetMatchesTask(t, f))) return false
+      }
+      if (filterClients.length && !filterClients.includes(t.client?.id)) return false
+      if (filterServices.length && !filterServices.includes(t.service_id)) return false
       if (!matchesDateFilter(t.task_date, filterDate)) return false
       const contributed = taskScoreMap[t.id]
       const doneCount = contributed ? contributed.size : 0
@@ -696,7 +759,7 @@ export default function ContributionsClient({
       }
       return true
     })
-  }, [localTasks, search, filterClient, filterService, filterDate, filterEmployee, filterEmployeeMode, statusFilter, taskScoreMap, taskAssignmentMap, employees])
+  }, [localTasks, activeFacets, filterClients, filterServices, filterDate, filterEmployee, filterEmployeeMode, statusFilter, taskScoreMap, taskAssignmentMap, employees])
 
   // canSeeFinancials: requires (a) the legacy visibility-settings gate AND
   // (b) the new granular `contributions.view_earnings` permission. Both
@@ -745,7 +808,7 @@ export default function ContributionsClient({
     
     // To prevent massive DOM lag on mobile, we limit the initial render to mobileLimit tasks 
     // unless they are explicitly searching or filtering by employee.
-    const hasTightFilter = search.length > 0 || !!filterEmployee
+    const hasTightFilter = hasSearch || !!filterEmployee
     const tasksToRender = hasTightFilter ? myVisibleTasks : myVisibleTasks.slice(0, mobileLimit)
     
     tasksToRender.forEach(t => {
@@ -754,7 +817,7 @@ export default function ContributionsClient({
       map[d].push(t)
     })
     return Object.entries(map).sort(([a], [b]) => b.localeCompare(a))
-  }, [myVisibleTasks, search, filterEmployee])
+  }, [myVisibleTasks, hasSearch, filterEmployee])
 
   // ── Entry-view derived data ───────────────────────────
   const filteredGroups = useMemo(() => {
@@ -1055,10 +1118,14 @@ export default function ContributionsClient({
       title: task.title,
       status: 'pending',
       task_date: new Date().toISOString().split('T')[0],
+      quantity: task.quantity || 1,
     }
     if (task.client?.id) payload.client_id = task.client.id
     if (task.service_id) payload.service_id = task.service_id
+    // Carry the full billing snapshot so the copy bills identically.
     if (task.billing_amount_inr) payload.billing_amount_inr = task.billing_amount_inr
+    if (task.billing_amount) payload.billing_amount = task.billing_amount
+    if (task.currency) payload.currency = task.currency
 
     const { data, error } = await supabase
       .from('tasks')
@@ -1068,6 +1135,10 @@ export default function ContributionsClient({
 
     if (!error && data) {
       setLocalTasks(prev => [data, ...prev])
+      // No amount carried over → backfill from client/service pricing.
+      if (!(data as any).billing_amount_inr && (data as any).service_id) {
+        void serverFillTaskBilling((data as any).id, task.client?.id || null, (data as any).service_id, task.quantity || 1)
+      }
       toast.success('Task duplicated', `"${task.title}" copied to today`)
     } else if (error) {
       toast.error('Failed to duplicate', error.message)
@@ -1115,11 +1186,11 @@ export default function ContributionsClient({
 
     // Count of active filters inside the Filter popover (excludes statusFilter — that's the tabs row)
     const activeFilterCount =
-      (filterClient ? 1 : 0) +
-      (filterService ? 1 : 0) +
+      filterClients.length +
+      filterServices.length +
       (filterDate ? 1 : 0) +
       (filterEmployee ? 1 : 0)
-    const hasAnyFilter = activeFilterCount > 0 || !!search || statusFilter !== 'all'
+    const hasAnyFilter = activeFilterCount > 0 || hasSearch || statusFilter !== 'all'
 
     const headerActions = (
       <>
@@ -1190,14 +1261,26 @@ export default function ContributionsClient({
               </div>
             )}
 
-            {/* Search */}
-            <div className="order-1 sm:order-none w-full sm:w-auto flex items-center gap-2 bg-secondary border border-foreground/15 rounded-xl h-[34px] px-3 flex-1 min-w-0">
-              <Search size={14} className="text-muted-foreground shrink-0" />
-              <input value={search} onChange={e => setSearch(e.target.value)}
-                placeholder="Search tasks, clients, services, code…"
-                className="flex-1 min-w-0 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60" />
-              {search && <button onClick={() => setSearch('')} className="shrink-0 cursor-pointer"><X size={12} className="text-muted-foreground" /></button>}
-            </div>
+            {/* Search — Odoo-style tokenized search. Typing offers
+                "Search for / Search Client for / Search Service for: <text>".
+                Same field ORs (Client: a OR Client: b); generic text narrows
+                (AND); across fields AND. */}
+            <TokenizedSearch
+              className="order-1 sm:order-none w-full sm:w-auto flex-1 min-w-0"
+              facets={searchFacets}
+              onFacetsChange={setSearchFacets}
+              draft={searchDraft}
+              onDraftChange={setSearchDraft}
+              placeholder="Search tasks, clients, services, code…"
+              fields={[
+                { key: 'title', label: 'Title', type: 'text' },
+                { key: 'client', label: 'Client', type: 'text' },
+                { key: 'service', label: 'Service', type: 'text' },
+                { key: 'task', label: 'Task #', type: 'number' },
+                // Amount only when this user is allowed to see pricing.
+                ...(showBilling ? [{ key: 'amount', label: 'Amount ₹', type: 'number' as const }] : []),
+              ]}
+            />
 
             {/* Top Row My Tasks & Filters (Mobile focused) */}
             <div className="order-2 flex items-center gap-1.5 shrink-0">
@@ -1329,16 +1412,24 @@ export default function ContributionsClient({
                 </div>
               )}
               <FilterDropdown
+                multiple
                 options={scopedClientOptions}
-                value={filterClient}
-                onChange={setFilterClient}
+                value=""
+                onChange={() => {}}
+                values={filterClients}
+                onToggle={toggleClient}
+                onClear={() => setFilterClients([])}
                 placeholder="Client"
                 sortKey="clients"
               />
               <FilterDropdown
+                multiple
                 options={scopedServiceOptions}
-                value={filterService}
-                onChange={setFilterService}
+                value=""
+                onChange={() => {}}
+                values={filterServices}
+                onToggle={toggleService}
+                onClear={() => setFilterServices([])}
                 placeholder="Service"
                 sortKey="services"
               />
@@ -1395,7 +1486,7 @@ export default function ContributionsClient({
               ))}
               {hasAnyFilter && (
                 <button
-                  onClick={() => { setSearch(''); setFilterClient(''); setFilterService(''); setFilterEmployee(''); setFilterEmployeeMode('worked'); setFilterDate(null); setStatusFilter('all') }}
+                  onClick={() => { setSearchFacets([]); setSearchDraft(''); setFilterClients([]); setFilterServices([]); setFilterEmployee(''); setFilterEmployeeMode('worked'); setFilterDate(null); setStatusFilter('all') }}
                   className="ml-1 text-xs text-muted-foreground hover:text-foreground px-2 py-1.5 rounded-md hover:bg-foreground/[0.04] transition-colors flex items-center gap-1 shrink-0"
                 >
                   <X size={12} /> Clear all
@@ -1407,6 +1498,21 @@ export default function ContributionsClient({
         </PageChrome>
 
         <PageContent>
+
+          {/* ── Tokenized active filters (ERPNext-style chips) ── */}
+          <ActiveFilterChips
+            className="mb-3"
+            chips={[
+              // Search keywords show as pills inside the search bar itself, not here.
+              ...(statusFilter !== 'all' ? [{ key: 'status', label: 'Status', value: statusFilter === 'missing' ? 'Needs scoring' : statusFilter[0].toUpperCase() + statusFilter.slice(1), onRemove: () => setStatusFilter('all') }] : []),
+              // One chip per selected client / service (multi-value).
+              ...filterClients.map((id: string) => ({ key: 'client:' + id, label: 'Client', value: clients.find((c: any) => c.id === id)?.name || 'Selected', onRemove: () => toggleClient(id) })),
+              ...filterServices.map((id: string) => ({ key: 'service:' + id, label: 'Service', value: services.find((s: any) => s.id === id)?.name || 'Selected', onRemove: () => toggleService(id) })),
+              ...(filterEmployee ? [{ key: 'employee', label: 'Employee', value: dn(employees.find((e: any) => e.id === filterEmployee)) || 'Selected', onRemove: () => { setFilterEmployee(''); setFilterEmployeeMode('worked') } }] : []),
+              ...(filterDate ? [{ key: 'date', label: 'Date', value: getDateFilterLabel(filterDate), onRemove: () => setFilterDate(null) }] : []),
+            ]}
+            onClearAll={() => { setSearchFacets([]); setSearchDraft(''); setFilterClients([]); setFilterServices([]); setFilterEmployee(''); setFilterEmployeeMode('worked'); setFilterDate(null); setStatusFilter('all') }}
+          />
 
           {/* ── Missing-scores toast (bottom-right) — list view only ── */}
           {missingCount > 0 && listViewMode === 'list' && showMissingBanner && (
@@ -1453,6 +1559,12 @@ export default function ContributionsClient({
                   <div className="flex items-center gap-3 mb-2">
                     <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{fmt(date)}</div>
                     <div className="flex-1 h-px bg-border" />
+                    {showBilling && (() => {
+                      const dayTotal = dateTasks.reduce((s, t) => s + (t.billing_amount_inr ?? 0), 0)
+                      return dayTotal > 0 ? (
+                        <span className="text-xs font-semibold text-foreground tabular-nums">₹{dayTotal.toLocaleString('en-IN')}</span>
+                      ) : null
+                    })()}
                     <span className="text-xs text-muted-foreground">{dateTasks.length} task{dateTasks.length !== 1 ? 's' : ''}</span>
                   </div>
 
@@ -1610,7 +1722,7 @@ export default function ContributionsClient({
               ))}
               
               {/* Load More Button for Mobile */}
-              {myVisibleTasks.length > mobileLimit && !search && !filterEmployee && (
+              {myVisibleTasks.length > mobileLimit && !hasSearch && !filterEmployee && (
                 <button
                   onClick={() => setMobileLimit(l => l + 100)}
                   className="sm:hidden w-full mt-4 h-[44px] bg-secondary border border-border text-foreground hover:bg-secondary/60 rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-2"

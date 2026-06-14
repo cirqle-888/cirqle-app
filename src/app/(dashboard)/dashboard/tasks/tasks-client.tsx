@@ -14,17 +14,20 @@ import dynamic from 'next/dynamic'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { getStatusColor, getStatusLabel } from '@/lib/utils/invoice'
-import { Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, RefreshCw, TrendingDown, Users, Ban, Search, ExternalLink, ChevronDown, ChevronLeft, ChevronRight, Layers, LayoutGrid, List, CalendarDays, MoreVertical, Building2, BarChart2, Copy, GripVertical, Settings2, ChevronUp, Inbox } from 'lucide-react'
+import { Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, RefreshCw, TrendingDown, Users, Ban, Search, ExternalLink, ChevronDown, ChevronLeft, ChevronRight, Layers, LayoutGrid, List, CalendarDays, MoreVertical, Building2, BarChart2, Copy, GripVertical, Settings2, ChevronUp, Inbox, Loader2 } from 'lucide-react'
 import { formatCurrency } from '@/lib/calculations/currency'
 import Link from 'next/link'
 import Combobox from '@/components/ui/combobox'
 import { TitleAutocomplete } from '@/components/tasks/title-autocomplete'
 import { QuickCreateClientModal, QuickCreateServiceModal } from '@/components/tasks/quick-create-modals'
-import { markRequestPromoted } from '@/app/(dashboard)/dashboard/requests/actions'
+import { markRequestPromoted, getRequestBriefForTask } from '@/app/(dashboard)/dashboard/requests/actions'
 import AppSelect from '@/components/ui/app-select'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
-import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
+import { DateFilter, matchesDateFilter, getDateFilterLabel } from '@/components/ui/date-filter'
 import type { DateFilterValue } from '@/components/ui/date-filter'
+import { ActiveFilterChips } from '@/components/ui/active-filter-chips'
+import { TokenizedSearch, type SearchFacet } from '@/components/ui/tokenized-search'
+import { recordMatchesFacets, type FacetFieldDef } from '@/lib/search/match-facets'
 import type { Currency } from '@/types'
 import { getNextOccurrence, shouldGenerateNext } from '@/lib/utils/recurring'
 import { taskCode, taskCodeMatches, nextTaskNumber } from '@/lib/utils/task-code'
@@ -117,6 +120,12 @@ interface Props {
     id: string; ref_no: number; title: string; description: string
     client_id: string | null; service_id: string | null; due_date: string | null
   } | null
+  /** taskId → linked external request (REQ chip + brief modal on task rows). */
+  requestRefByTaskId?: Record<string, { id: string; ref_no: number }>
+  /** Pre-filled search (?q=… deep link, e.g. "#42" from a request). */
+  initialSearch?: string
+  /** Count of new/unstarted external requests — badge on the Requests button. */
+  pendingRequestCount?: number
   dbTaskTotal?: number
   initialTasks: Task[]
   initialTrash: (Task & { deleted_at: string })[]
@@ -260,7 +269,7 @@ function SortablePanelRow({ id, label, onUp, onDown, isFirst, isLast }: {
   )
 }
 
-export default function TasksClient({ promotionRequest, dbTaskTotal, initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, myTaskIds, visibilitySettings, permissionFlags }: Props) {
+export default function TasksClient({ promotionRequest, requestRefByTaskId = {}, pendingRequestCount = 0, initialSearch = '', dbTaskTotal, initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, myTaskIds, visibilitySettings, permissionFlags }: Props) {
   const { role, employee: currentEmployee } = useRole()
   const { can } = usePermissions()
   const { toasts, dismiss, success, error: toastError } = useToast()
@@ -470,7 +479,29 @@ export default function TasksClient({ promotionRequest, dbTaskTotal, initialTask
   const [filterStatus, setFilterStatus] = useState('')
   const [filterClient, setFilterClient] = useState('')
   const [filterService, setFilterService] = useState('')
-  const [searchQ, setSearchQ] = useState('')
+  // Tokenized search: field-scoped facet pills + operators. `searchQ` is derived
+  // from the generic ('any') facets so the existing #number/DB-mode logic keeps
+  // working unchanged; named-field facets are applied separately in filteredTasks.
+  const [searchFacets, setSearchFacets] = useState<SearchFacet[]>(
+    () => initialSearch ? [{ field: 'any', op: 'contains', text: initialSearch }] : [],
+  )
+  const [searchDraft, setSearchDraft] = useState('')
+  const activeFacets = useMemo<SearchFacet[]>(
+    () => searchDraft.trim() ? [...searchFacets, { field: 'any', op: 'contains' as const, text: searchDraft.trim() }] : searchFacets,
+    [searchFacets, searchDraft],
+  )
+  const searchQ = useMemo(() => activeFacets.filter(f => f.field === 'any').map(f => f.text).join(' '), [activeFacets])
+  const namedFacets = useMemo(() => activeFacets.filter(f => f.field !== 'any'), [activeFacets])
+  const clearSearch = () => { setSearchFacets([]); setSearchDraft('') }
+
+  // Request brief modal — opened from the REQ chip on a promoted task.
+  const [requestBrief, setRequestBrief] = useState<{ loading: boolean; data?: any; error?: string } | null>(null)
+  async function openRequestBrief(taskId: string) {
+    setRequestBrief({ loading: true })
+    const res = await getRequestBriefForTask(taskId)
+    if (res.ok) setRequestBrief({ loading: false, data: res.data })
+    else setRequestBrief({ loading: false, error: res.error })
+  }
 
   const [sortBy, setSortBy] = useState<'today_first' | 'date_desc' | 'date_asc' | 'amount_desc' | 'client'>('today_first')
   const [tablePage, setTablePage] = useState(0)
@@ -978,7 +1009,7 @@ export default function TasksClient({ promotionRequest, dbTaskTotal, initialTask
       const tn = nextTaskNumber(maxRow.data?.task_number)
       const { data, error } = await supabase.from('tasks').insert({
         task_number: tn,
-        title: task.title + ' (copy)',
+        title: task.title,
         description: task.description,
         client_id: task.client_id,
         service_id: task.service_id,
@@ -991,6 +1022,11 @@ export default function TasksClient({ promotionRequest, dbTaskTotal, initialTask
       }).select('*, client:clients(id,name,code), service:services(id,name)').single()
       if (data) {
         setTasks(prev => [data as Task, ...prev])
+        // Source had no amount (e.g. pricing was hidden or unset when it was
+        // created) → backfill from client/service pricing server-side.
+        if (!(data as Task).billing_amount_inr && data.service_id) {
+          void serverFillTaskBilling(data.id, data.client_id || null, data.service_id, data.quantity || 1)
+        }
         success(`Task duplicated as ${taskCode(data as Task)}`)
       } else if (error) {
         toastError('Failed to duplicate', error.message)
@@ -1437,11 +1473,24 @@ export default function TasksClient({ promotionRequest, dbTaskTotal, initialTask
     return s
   }, [filterAssignee, localAssignments, localGroupAssignments, localParamAssignments, role, currentEmployee, myTaskIdSet])
 
+  // Tokenized search field map — Amount only when pricing is visible.
+  const TASK_FIELDS: Record<string, FacetFieldDef> = useMemo(() => ({
+    title:   { type: 'text',   get: (x: Task) => x.title },
+    client:  { type: 'text',   get: (x: Task) => x.client?.name },
+    service: { type: 'text',   get: (x: Task) => x.service?.name },
+    task:    { type: 'number', get: (x: Task) => x.task_number },
+    ...(showBilling ? { amount: { type: 'number' as const, get: (x: Task) => x.billing_amount_inr } } : {}),
+  }), [showBilling])
+
   const filteredTasks = useMemo(() => {
     let t = tasks
     if (filterStatus)  t = t.filter(x => x.status === filterStatus)
     if (filterClient)  t = t.filter(x => x.client?.id === filterClient)
     if (filterService) t = t.filter(x => x.service?.id === filterService)
+    // Named search facets (Title / Client / Service / Task # / Amount) with
+    // operators — OR within a field, AND across. Generic text is handled by the
+    // searchQ block below (preserves #number exact + float-to-top).
+    if (namedFacets.length) t = t.filter(x => recordMatchesFacets(namedFacets, x, TASK_FIELDS, () => ''))
     if (searchQ) {
       const trimmed = searchQ.trim()
       if (trimmed.startsWith('#')) {
@@ -1497,7 +1546,7 @@ export default function TasksClient({ promotionRequest, dbTaskTotal, initialTask
     if (sortBy === 'amount_desc') t = [...t].sort((a, b) => ((b.billing_amount_inr ?? 0)) - ((a.billing_amount_inr ?? 0)))
     if (sortBy === 'client')      t = [...t].sort((a, b) => (a.client?.name || '').localeCompare(b.client?.name || ''))
     return t
-  }, [tasks, filterStatus, filterClient, filterService, searchQ, sortBy, filterDate, assigneeTaskIdSet])
+  }, [tasks, filterStatus, filterClient, filterService, searchQ, namedFacets, sortBy, filterDate, assigneeTaskIdSet])
 
   // visibleTasks is a passthrough — filtering is fully handled by filteredTasks above.
   // (The comment "only show their assigned tasks" was stale — server already scopes the array.)
@@ -1744,11 +1793,16 @@ export default function TasksClient({ promotionRequest, dbTaskTotal, initialTask
                 {can('requests.view') && (
                   <Link
                     href="/dashboard/requests"
-                    title="External requests from clients & agencies"
-                    className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-2 bg-secondary hover:bg-secondary/80 transition-colors"
+                    title={pendingRequestCount > 0 ? `${pendingRequestCount} pending request${pendingRequestCount !== 1 ? 's' : ''}` : 'External requests from clients & agencies'}
+                    className="relative flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-2 bg-secondary hover:bg-secondary/80 transition-colors"
                   >
                     <Inbox className="w-4 h-4 text-violet-400" />
                     <span className="hidden sm:inline">Requests</span>
+                    {pendingRequestCount > 0 && (
+                      <span className="ml-0.5 min-w-[18px] h-[18px] px-1 inline-flex items-center justify-center rounded-full bg-violet-500 text-white text-[10px] font-bold leading-none">
+                        {pendingRequestCount}
+                      </span>
+                    )}
                   </Link>
                 )}
                 {/* Workload Report — requires tasks.workload permission */}
@@ -1919,11 +1973,21 @@ export default function TasksClient({ promotionRequest, dbTaskTotal, initialTask
             {/* Search — full-width on mobile (order-first so it sits at top of wrapped row),
                 flex-1 on desktop so it fills the gap between action group and view toggle.
                 h-[34px] matches the other toolbar buttons for visual rhythm. */}
-            <div className="order-1 sm:order-none w-full sm:w-auto flex items-center gap-2 bg-secondary border border-foreground/15 rounded-xl h-[34px] px-3 flex-1 min-w-0">
-              <Search size={14} className="text-muted-foreground shrink-0" />
-              <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search title, client, service, #number…" className="flex-1 min-w-0 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60" />
-              {searchQ && <button onClick={() => setSearchQ('')} className="shrink-0 cursor-pointer"><X size={12} className="text-muted-foreground" /></button>}
-            </div>
+            <TokenizedSearch
+              className="order-1 sm:order-none w-full sm:w-auto flex-1 min-w-0"
+              facets={searchFacets}
+              onFacetsChange={setSearchFacets}
+              draft={searchDraft}
+              onDraftChange={setSearchDraft}
+              placeholder="Search title, client, service, #number…"
+              fields={[
+                { key: 'title', label: 'Title', type: 'text' },
+                { key: 'client', label: 'Client', type: 'text' },
+                { key: 'service', label: 'Service', type: 'text' },
+                { key: 'task', label: 'Task #', type: 'number' },
+                ...(showBilling ? [{ key: 'amount', label: 'Amount ₹', type: 'number' as const }] : []),
+              ]}
+            />
 
             {/* Top Row My Tasks & Filters (Mobile focused) */}
             <div className="order-2 flex items-center gap-1.5 shrink-0">
@@ -2111,7 +2175,7 @@ export default function TasksClient({ promotionRequest, dbTaskTotal, initialTask
                 )
               })}
               {hasActiveFilters && (
-                <button onClick={() => { setFilterStatus(''); setFilterClient(''); setFilterService(''); setSearchQ(''); setSortBy('today_first'); setFilterAssignee(''); setFilterDate(null) }}
+                <button onClick={() => { setFilterStatus(''); setFilterClient(''); setFilterService(''); clearSearch(); setSortBy('today_first'); setFilterAssignee(''); setFilterDate(null) }}
                   className="text-xs text-muted-foreground hover:text-foreground px-1.5 py-1 rounded-md hover:bg-foreground/[0.04] transition-colors flex items-center gap-0.5 shrink-0">
                   <X size={11} /> Clear
                 </button>
@@ -2173,6 +2237,18 @@ export default function TasksClient({ promotionRequest, dbTaskTotal, initialTask
 
           </div>
 
+          {/* ── Active filter chips (tokenized filters, ERPNext-style) ── */}
+          <ActiveFilterChips
+            chips={[
+              ...(filterStatus ? [{ key: 'status', label: 'Status', value: getStatusLabel(filterStatus), onRemove: () => setFilterStatus('') }] : []),
+              ...(filterClient ? [{ key: 'client', label: 'Client', value: clientList.find(c => c.id === filterClient)?.name || 'Selected', onRemove: () => setFilterClient('') }] : []),
+              ...(filterService ? [{ key: 'service', label: 'Service', value: services.find(s => s.id === filterService)?.name || 'Selected', onRemove: () => setFilterService('') }] : []),
+              ...(filterAssignee ? [{ key: 'assignee', label: 'Assignee', value: employees.find(e => e.id === filterAssignee)?.name || 'Selected', onRemove: () => setFilterAssignee('') }] : []),
+              ...(filterDate ? [{ key: 'date', label: 'Date', value: getDateFilterLabel(filterDate), onRemove: () => setFilterDate(null) }] : []),
+            ]}
+            onClearAll={() => { clearSearch(); setFilterStatus(''); setFilterClient(''); setFilterService(''); setFilterAssignee(''); setFilterDate(null) }}
+          />
+
           {/* ── DB mode banner ── */}
           {dbMode && (
             <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-violet-500/10 border border-violet-500/20 text-xs text-violet-300">
@@ -2192,14 +2268,17 @@ export default function TasksClient({ promotionRequest, dbTaskTotal, initialTask
         {/* Table */}
         {viewMode === 'table' && (
         <>
-        {/* Desktop: full table — hidden below sm */}
-        <div className="hidden sm:block bg-card border border-border rounded-xl overflow-clip">
+        {/* Desktop: full table — hidden below sm.
+            overflow-auto + max-height makes this the scroll container so the
+            sticky thead pins to its top AND wide tables scroll horizontally
+            (so the actions column is always reachable, never clipped). */}
+        <div className="hidden sm:block bg-card border border-border rounded-xl overflow-auto max-h-[calc(100dvh-230px)]">
           <table className="w-full text-sm">
             {/* Sticky table header — sits flush below the toolbar.
                 top is measured dynamically by a ResizeObserver on the toolbar,
                 so it always matches the toolbar bottom regardless of how it
                 wraps or which optional buttons are visible. */}
-            <thead className="sticky z-10 bg-card" style={{ top: theadTop }}>
+            <thead className="sticky z-10 bg-card" style={{ top: 0 }}>
               <tr className="border-b border-border bg-secondary/50">
                 {/* Bulk select checkbox column */}
                 {bulkMode && (
@@ -2216,7 +2295,7 @@ export default function TasksClient({ promotionRequest, dbTaskTotal, initialTask
                   </th>
                 )}
                 <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground w-20 bg-secondary/95 backdrop-blur-sm">Task No.</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm">Task Title</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground w-full bg-secondary/95 backdrop-blur-sm">Task Title</th>
                 {/* Reorderable columns — drag handle on hover (desktop), panel for mobile */}
                 <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleColHeaderDragEnd}>
                   <SortableContext items={visibleCols} strategy={horizontalListSortingStrategy}>
@@ -2273,7 +2352,7 @@ export default function TasksClient({ promotionRequest, dbTaskTotal, initialTask
                     })}
                   </SortableContext>
                 </DndContext>
-                <th className="px-4 py-3 bg-secondary/95 backdrop-blur-sm"></th>
+                <th className="w-px px-2 py-3 bg-secondary/95 backdrop-blur-sm"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -2324,6 +2403,12 @@ export default function TasksClient({ promotionRequest, dbTaskTotal, initialTask
                               : 'No date'}
                           </span>
                           <div className="flex-1 h-px bg-border/60" />
+                          {showBilling && (() => {
+                            const dayTotal = dateTasks.reduce((s, t) => s + (t.billing_amount_inr ?? 0), 0)
+                            return dayTotal > 0 ? (
+                              <span className="text-[11px] font-semibold text-foreground tabular-nums">₹{dayTotal.toLocaleString('en-IN')}</span>
+                            ) : null
+                          })()}
                           <span className="text-[11px] font-medium text-muted-foreground">{dateTasks.length} task{dateTasks.length !== 1 ? 's' : ''}</span>
                         </div>
                       </td>
@@ -2400,6 +2485,15 @@ export default function TasksClient({ promotionRequest, dbTaskTotal, initialTask
                               <RefreshCw className="w-3 h-3 text-muted-foreground/50 flex-shrink-0" />
                             </span>
                           )}
+                          {requestRefByTaskId[task.id] && (
+                            <button
+                              title="From a client request — click for the brief (design plan, links)"
+                              onClick={e => { e.stopPropagation(); openRequestBrief(task.id) }}
+                              className="text-[9px] font-mono font-semibold text-violet-400 bg-violet-500/10 border border-violet-500/25 px-1.5 py-0.5 rounded hover:bg-violet-500/20 transition-colors shrink-0"
+                            >
+                              REQ-{String(requestRefByTaskId[task.id].ref_no).padStart(4, '0')}
+                            </button>
+                          )}
                         </div>
                         {task.description && <p className="text-xs text-muted-foreground truncate max-w-[200px]">{task.description}</p>}
                       </div>
@@ -2453,8 +2547,8 @@ export default function TasksClient({ promotionRequest, dbTaskTotal, initialTask
                   </td>
                   {/* Reorderable column cells — rendered in user's chosen order */}
                   {visibleCols.map(key => renderCell(key, task))}
-                  <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
-                    <div className="flex items-center gap-1">
+                  <td className="w-px px-2 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                    <div className="flex items-center gap-0.5 justify-end">
                       {can('tasks.assign') && (
                         <button
                           onClick={e => { e.stopPropagation(); openAssignModal(task) }}
@@ -2985,6 +3079,15 @@ export default function TasksClient({ promotionRequest, dbTaskTotal, initialTask
                                     >
                                       {taskCode(task)}
                                     </span>
+                                    {requestRefByTaskId[task.id] && (
+                                      <span
+                                        title="From a client request — click for the brief"
+                                        onClick={e => { e.stopPropagation(); openRequestBrief(task.id) }}
+                                        className="text-[9px] font-mono font-semibold text-violet-400 bg-violet-500/10 border border-violet-500/25 px-1 py-0.5 rounded shrink-0 cursor-pointer hover:bg-violet-500/20 transition-colors"
+                                      >
+                                        REQ-{String(requestRefByTaskId[task.id].ref_no).padStart(4, '0')}
+                                      </span>
+                                    )}
                                   </div>
                                   <p className="text-sm font-medium text-foreground leading-tight truncate">{task.title}</p>
                                   {section.paramName && <p className="text-[10px] text-purple-400 mt-0.5">{section.paramName}</p>}
@@ -4671,6 +4774,76 @@ export default function TasksClient({ promotionRequest, dbTaskTotal, initialTask
             success(`Service "${service.name}" added`, pricingPending ? 'Flagged for pricing by an admin' : undefined)
           }}
         />
+      )}
+
+      {/* Request brief — the client's original request behind a promoted task */}
+      {requestBrief && (
+        <ModalOverlay onClose={() => setRequestBrief(null)}>
+          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-xl shadow-2xl max-h-[88dvh] flex flex-col overflow-hidden">
+            <div className="flex items-start justify-between px-5 py-4 border-b border-border shrink-0 gap-3">
+              <div className="min-w-0">
+                {requestBrief.data ? (
+                  <>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] font-mono text-muted-foreground">REQ-{String(requestBrief.data.ref_no ?? 0).padStart(4, '0')}</span>
+                      {requestBrief.data.priority && requestBrief.data.priority !== 'normal' && (
+                        <span className="text-[11px] font-medium text-amber-400">⚑ {requestBrief.data.priority}</span>
+                      )}
+                    </div>
+                    <h2 className="font-bold text-base mt-1 leading-snug">{requestBrief.data.title}</h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {requestBrief.data.client?.name || requestBrief.data.agency?.name || 'Guest'}
+                      {requestBrief.data.due_date ? ` · due ${new Date(requestBrief.data.due_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : ''}
+                    </p>
+                  </>
+                ) : (
+                  <h2 className="font-bold text-base">Request brief</h2>
+                )}
+              </div>
+              <button onClick={() => setRequestBrief(null)} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground shrink-0"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-5 space-y-4 text-sm">
+              {requestBrief.loading && <p className="text-xs text-muted-foreground flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading brief…</p>}
+              {requestBrief.error && <p className="text-xs text-red-400">{requestBrief.error}</p>}
+              {requestBrief.data && (
+                <>
+                  {requestBrief.data.description && (
+                    <div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1">Details</p><p className="whitespace-pre-wrap text-foreground/90">{requestBrief.data.description}</p></div>
+                  )}
+                  {requestBrief.data.design_plan && (
+                    <div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1">Design plan</p><p className="whitespace-pre-wrap text-foreground/90">{requestBrief.data.design_plan}</p></div>
+                  )}
+                  {requestBrief.data.remarks && (
+                    <div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1">Requester remarks</p><p className="whitespace-pre-wrap text-foreground/90">{requestBrief.data.remarks}</p></div>
+                  )}
+                  {(requestBrief.data.drive_folder_link || requestBrief.data.content_link || requestBrief.data.reference_link || requestBrief.data.deliverables_link || (requestBrief.data.extra_links || []).length > 0) && (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1.5">Links</p>
+                      <div className="space-y-1">
+                        {requestBrief.data.drive_folder_link && <a href={requestBrief.data.drive_folder_link} target="_blank" rel="noreferrer" className="block text-xs text-blue-400 hover:underline">Drive folder</a>}
+                        {requestBrief.data.content_link && <a href={requestBrief.data.content_link} target="_blank" rel="noreferrer" className="block text-xs text-blue-400 hover:underline">Content</a>}
+                        {requestBrief.data.reference_link && <a href={requestBrief.data.reference_link} target="_blank" rel="noreferrer" className="block text-xs text-blue-400 hover:underline">Reference</a>}
+                        {requestBrief.data.deliverables_link && <a href={requestBrief.data.deliverables_link} target="_blank" rel="noreferrer" className="block text-xs text-emerald-400 hover:underline">Deliverables</a>}
+                        {(requestBrief.data.extra_links || []).map((l: any, i: number) => (
+                          <a key={i} href={l.url} target="_blank" rel="noreferrer" className="block text-xs text-blue-400 hover:underline">{l.label || l.url}</a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {!requestBrief.data.description && !requestBrief.data.design_plan && !requestBrief.data.remarks && (
+                    <p className="text-xs text-muted-foreground/60">No extra details on this request.</p>
+                  )}
+                  {can('requests.view') && (
+                    <a href={`/dashboard/requests?focus=${requestBrief.data.id}`}
+                      className="inline-flex items-center gap-1.5 text-xs text-violet-400 hover:text-violet-300 transition-colors">
+                      Open in Requests inbox →
+                    </a>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </ModalOverlay>
       )}
     </div>
   )

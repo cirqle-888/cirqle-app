@@ -10,6 +10,9 @@ import { formatCompact, round2 } from '@/lib/calculations/currency'
 import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
 import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, RefreshCw, Landmark, CheckCircle, ArrowLeftRight, Copy } from 'lucide-react'
 import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
+import { ActiveFilterChips } from '@/components/ui/active-filter-chips'
+import { TokenizedSearch, type SearchFacet } from '@/components/ui/tokenized-search'
+import { recordMatchesFacets, type FacetFieldDef } from '@/lib/search/match-facets'
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from '@/lib/utils'
 import type { DateFilterValue } from '@/components/ui/date-filter'
 import Combobox from '@/components/ui/combobox'
@@ -208,7 +211,14 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
 
   const [filterType, setFilterType] = useState(searchParams.get('type') || '')
   const [filterMonth, setFilterMonth] = useState(searchParams.get('month') || '')
-  const [filterSearch, setFilterSearch] = useState(searchParams.get('search') || '')
+  const [searchFacets, setSearchFacets] = useState<SearchFacet[]>(() => {
+    try { const raw = searchParams.get('sf'); return raw ? JSON.parse(raw) : [] } catch { return [] }
+  })
+  const [searchDraft, setSearchDraft] = useState('')
+  const activeFacets = useMemo<SearchFacet[]>(
+    () => searchDraft.trim() ? [...searchFacets, { field: 'any', op: 'contains' as const, text: searchDraft.trim() }] : searchFacets,
+    [searchFacets, searchDraft],
+  )
   const [filterCategory, setFilterCategory] = useState(searchParams.get('category') || '')
   const [filterAllocStatus, setFilterAllocStatus] = useState(searchParams.get('alloc') || '')
   const [filterClient, setFilterClient] = useState(searchParams.get('client') || '')
@@ -224,7 +234,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
 
     if (filterType) params.set('type', filterType); else params.delete('type')
     if (filterMonth) params.set('month', filterMonth); else params.delete('month')
-    if (filterSearch) params.set('search', filterSearch); else params.delete('search')
+    if (searchFacets.length) params.set('sf', JSON.stringify(searchFacets)); else params.delete('sf')
     if (filterCategory) params.set('category', filterCategory); else params.delete('category')
     if (filterAllocStatus) params.set('alloc', filterAllocStatus); else params.delete('alloc')
     if (filterClient) params.set('client', filterClient); else params.delete('client')
@@ -236,7 +246,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     if (newQueryString !== searchParams.toString()) {
       router.replace(`${pathname}?${newQueryString}`, { scroll: false })
     }
-  }, [filterType, filterMonth, filterSearch, filterCategory, filterAllocStatus, filterClient, sortDir, filterMinAmount, filterMaxAmount, pathname, router, searchParams])
+  }, [filterType, filterMonth, searchFacets, filterCategory, filterAllocStatus, filterClient, sortDir, filterMinAmount, filterMaxAmount, pathname, router, searchParams])
 
   const [recurringMonths, setRecurringMonths] = useState(0) // 0 = not recurring
 
@@ -628,6 +638,17 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   const selectedCat = categories.find(c => c.id === form.category_id)
   const smartMode = selectedCat ? (SMART[selectedCat.name.toLowerCase()] || null) : null
 
+  // Tokenized search field map (Description / Reference / Category / Amount + operators).
+  const CASHBOOK_FIELDS: Record<string, FacetFieldDef> = useMemo(() => ({
+    description: { type: 'text',   get: (e: any) => e.description },
+    reference:   { type: 'text',   get: (e: any) => e.reference },
+    category:    { type: 'text',   get: (e: any) => e.category?.name },
+    ...(showAmounts ? { amount: { type: 'number' as const, get: (e: any) => e.amount_inr } } : {}),
+  }), [showAmounts])
+  const cashbookGeneric = (e: any) =>
+    `${e.description || ''} ${e.reference || ''} ${e.category?.name || ''} ${e.bank_account?.name || ''} ` +
+    (e.allocations || []).map((a: any) => `${a.invoice?.invoice_number || ''} ${a.invoice?.client?.name || ''}`).join(' ')
+
   // Extra smart state (credit given/return, salary, client link)
   const [smartExtra, setSmartExtra] = useState<Record<string, string>>({})
 
@@ -639,18 +660,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     if (filterMonth) result = result.filter(e => e.entry_date?.startsWith(filterMonth))
     if (filterCategory) result = result.filter(e => e.category_id === filterCategory)
     
-    if (filterSearch) {
-      const q = filterSearch.toLowerCase()
-      result = result.filter(e => 
-        e.description?.toLowerCase().includes(q) ||
-        e.reference?.toLowerCase().includes(q) ||
-        e.category?.name.toLowerCase().includes(q) ||
-        e.bank_account?.name.toLowerCase().includes(q) ||
-        e.allocations?.some(a => 
-          a.invoice?.invoice_number.toLowerCase().includes(q) || 
-          a.invoice?.client?.name.toLowerCase().includes(q)
-        )
-      )
+    if (activeFacets.length) {
+      result = result.filter(e => recordMatchesFacets(activeFacets, e, CASHBOOK_FIELDS, cashbookGeneric))
     }
 
     if (filterAllocStatus) {
@@ -697,7 +708,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     })
 
     return result
-  }, [entries, filterType, filterMonth, filterSearch, filterCategory, filterAllocStatus, filterClient, sortDir, filterMinAmount, filterMaxAmount, invoiceCategoryId, salaryCategoryId])
+  }, [entries, filterType, filterMonth, activeFacets, filterCategory, filterAllocStatus, filterClient, sortDir, filterMinAmount, filterMaxAmount, invoiceCategoryId, salaryCategoryId])
 
   const totalInflow  = filteredEntries.filter(e => e.type === 'inflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
   const totalOutflow = filteredEntries.filter(e => e.type === 'outflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
@@ -1058,12 +1069,19 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             Date {sortDir === 'desc' ? '↓ Newest' : '↑ Oldest'}
           </button>
 
-          <input
-            type="text"
+          <TokenizedSearch
+            className="w-full sm:w-auto flex-1 min-w-[200px]"
+            facets={searchFacets}
+            onFacetsChange={setSearchFacets}
+            draft={searchDraft}
+            onDraftChange={setSearchDraft}
             placeholder="Search descriptions, clients..."
-            value={filterSearch}
-            onChange={e => setFilterSearch(e.target.value)}
-            className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 w-full sm:w-auto flex-1 min-w-[160px]"
+            fields={[
+              { key: 'description', label: 'Description', type: 'text' },
+              { key: 'reference', label: 'Reference', type: 'text' },
+              { key: 'category', label: 'Category', type: 'text' },
+              ...(showAmounts ? [{ key: 'amount', label: 'Amount ₹', type: 'number' as const }] : []),
+            ]}
           />
 
           {/* Amount range */}
@@ -1085,10 +1103,25 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             />
           </div>
 
-          {(filterType || filterMonth || filterCategory || filterSearch || filterAllocStatus || filterMinAmount || filterMaxAmount) && (
-            <button onClick={() => { setFilterType(''); setFilterMonth(''); setFilterCategory(''); setFilterSearch(''); setFilterAllocStatus(''); setFilterMinAmount(''); setFilterMaxAmount('') }} className="text-xs text-muted-foreground hover:text-foreground px-2">Clear</button>
+          {(filterType || filterMonth || filterCategory || searchFacets.length || filterAllocStatus || filterMinAmount || filterMaxAmount) && (
+            <button onClick={() => { setFilterType(''); setFilterMonth(''); setFilterCategory(''); setSearchFacets([]); setSearchDraft(''); setFilterAllocStatus(''); setFilterMinAmount(''); setFilterMaxAmount('') }} className="text-xs text-muted-foreground hover:text-foreground px-2">Clear</button>
           )}
         </div>
+
+        {/* Tokenized active filters (ERPNext-style chips) */}
+        <ActiveFilterChips
+          className="mb-3"
+          chips={[
+            ...(filterType ? [{ key: 'type', label: 'Type', value: filterType === 'inflow' ? 'Inflow' : 'Outflow', onRemove: () => setFilterType('') }] : []),
+            ...(filterCategory ? [{ key: 'category', label: 'Category', value: categories.find((c: any) => c.id === filterCategory)?.name || 'Selected', onRemove: () => setFilterCategory('') }] : []),
+            ...(filterClient ? [{ key: 'client', label: 'Client', value: clients.find((c: any) => c.id === filterClient)?.name || 'Selected', onRemove: () => setFilterClient('') }] : []),
+            ...(filterMonth ? [{ key: 'month', label: 'Month', value: filterMonth, onRemove: () => setFilterMonth('') }] : []),
+            ...(filterAllocStatus ? [{ key: 'alloc', label: 'Allocation', value: filterAllocStatus, onRemove: () => setFilterAllocStatus('') }] : []),
+            ...(filterMinAmount ? [{ key: 'min', label: 'Min ₹', value: filterMinAmount, onRemove: () => setFilterMinAmount('') }] : []),
+            ...(filterMaxAmount ? [{ key: 'max', label: 'Max ₹', value: filterMaxAmount, onRemove: () => setFilterMaxAmount('') }] : []),
+          ]}
+          onClearAll={() => { setFilterType(''); setFilterMonth(''); setFilterCategory(''); setSearchFacets([]); setSearchDraft(''); setFilterAllocStatus(''); setFilterMinAmount(''); setFilterMaxAmount(''); setFilterClient('') }}
+        />
 
         {/* Entries */}
         <div className="bg-card border border-border rounded-xl overflow-hidden">

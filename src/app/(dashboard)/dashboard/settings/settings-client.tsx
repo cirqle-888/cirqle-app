@@ -1205,6 +1205,7 @@ export default function SettingsClient(props: Props) {
                     { key: 'invoice_show_tagline',     label: 'Show Tagline',                    desc: 'Show company tagline below the name' },
                     { key: 'invoice_show_payment_info',label: 'Show Payment Info on Invoice',    desc: 'Display bank/UPI details on printed invoices' },
                     { key: 'invoice_show_phone',       label: 'Show Phone & Website',            desc: 'Show contact details in header' },
+                    { key: 'invoice_show_qr',          label: 'Show UPI QR Code',                desc: 'Scannable UPI payment QR in the invoice footer' },
                   ].map(({ key, label, desc }) => (
                     <div key={key} className="flex items-center justify-between py-1">
                       <div>

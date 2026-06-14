@@ -254,11 +254,42 @@ export default async function TasksPage({
   // Pending-to-price banner — only for users who can see/set pricing.
   const pendingPricing = vis.tasksPricing ? await getPendingPricing(supabase) : { clients: [], services: [], total: 0 }
 
+  // Tasks promoted from external requests → "REQ-xxxx" chip on task rows so
+  // employees can open the request brief (design plan, links) from the task.
+  // Defensive: the portal tables may not exist pre-migration.
+  let requestRefByTaskId: Record<string, { id: string; ref_no: number }> = {}
+  try {
+    const { data: promoted } = await supabase
+      .from('task_requests')
+      .select('id, ref_no, promoted_task_id')
+      .not('promoted_task_id', 'is', null)
+    for (const r of promoted || []) {
+      if (r.promoted_task_id) requestRefByTaskId[r.promoted_task_id] = { id: r.id, ref_no: r.ref_no }
+    }
+  } catch { /* portal not migrated */ }
+
+  // Pending (new, unstarted) external requests — count for the Requests button
+  // badge. Server-side (admin client) since task_requests is admin-scoped.
+  let pendingRequestCount = 0
+  try {
+    const { count } = await supabase
+      .from('task_requests')
+      .select('id', { count: 'exact', head: true })
+      .in('status', ['submitted', 'under_review', 'approved'])
+    pendingRequestCount = count ?? 0
+  } catch { /* portal not migrated */ }
+
+  // ?q=… deep link (e.g. "View Task #42" from a request) pre-fills the search.
+  const initialSearch = typeof sp?.q === 'string' ? sp.q : ''
+
   return (
     <>
     {vis.tasksPricing && <PricingPendingBanner clients={pendingPricing.clients} services={pendingPricing.services} />}
     <TasksClient
       promotionRequest={promotionRequest}
+      requestRefByTaskId={requestRefByTaskId}
+      pendingRequestCount={pendingRequestCount}
+      initialSearch={initialSearch}
       dbTaskTotal={dbCountRes.count ?? undefined}
       initialTasks={initialTasks}
       initialTrash={initialTrash}

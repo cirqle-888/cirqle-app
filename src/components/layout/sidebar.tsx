@@ -112,8 +112,8 @@ const navSections: NavSection[] = [
   {
     items: [
       { label: 'Dashboard',     href: '/dashboard',               icon: LayoutDashboard, requiredPerm: 'dashboard.view' },
-      { label: 'Tasks',         href: '/dashboard/tasks',         icon: CheckSquare },
       { label: 'Requests',      href: '/dashboard/requests',      icon: Inbox, requiredPerm: 'requests.view' },
+      { label: 'Tasks',         href: '/dashboard/tasks',         icon: CheckSquare },
       { label: 'Contributions', href: '/dashboard/contributions', icon: TrendingUp },
     ],
   },

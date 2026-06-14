@@ -202,6 +202,42 @@ export default async function DashboardPage() {
   const canSeePricing = isAdmin || !!me?.permissions?.has('tasks.view_pricing')
   const pendingPricing = canSeePricing ? await getPendingPricing(supabase) : { clients: [], services: [], total: 0 }
 
+  // ── My pending actions (employee view) ─────────────────────────────────────
+  // What needs THIS employee's attention right now: open tasks assigned to
+  // them + done tasks where they haven't logged their contribution yet.
+  // Bounded to the 90-day display window like the other widgets.
+  let myActions: { active: any[]; needContribution: any[] } = { active: [], needContribution: [] }
+  if (!isAdmin && employeeId) {
+    try {
+      const { data: assigns } = await supabase
+        .from('task_assignments')
+        .select('task_id, task:tasks!inner(id, task_number, title, status, task_date, deleted_at, client:clients(id, name))')
+        .eq('employee_id', employeeId)
+        .is('task.deleted_at', null)
+        .gte('task.task_date', displayFromStr)
+      const rows = (assigns || []).map((a: any) => a.task).filter(Boolean)
+      const ids = rows.map((t: any) => t.id)
+      let contributed = new Set<string>()
+      if (ids.length) {
+        const { data: contribs } = await supabase
+          .from('contributions')
+          .select('task_id')
+          .eq('employee_id', employeeId)
+          .gt('value', 0)
+          .in('task_id', ids)
+        contributed = new Set((contribs || []).map((c: any) => c.task_id))
+      }
+      myActions = {
+        active: rows
+          .filter((t: any) => t.status === 'pending' || t.status === 'in_progress')
+          .sort((a: any, b: any) => (a.task_date || '').localeCompare(b.task_date || '')),
+        needContribution: rows
+          .filter((t: any) => t.status === 'done' && !contributed.has(t.id))
+          .sort((a: any, b: any) => (b.task_date || '').localeCompare(a.task_date || '')),
+      }
+    } catch { /* defensive — widget simply stays hidden */ }
+  }
+
   return (
     <>
     {canSeePricing && <PricingPendingBanner clients={pendingPricing.clients} services={pendingPricing.services} />}
@@ -220,6 +256,8 @@ export default async function DashboardPage() {
       scoresPromise={scoresPromise}
       payrollRecords={payrollRecords as any[]}
       todayStr={todayStr}
+      pendingContribCount={myActions.needContribution.length}
+      myActions={myActions}
       stats={{
         totalBilled,
         totalPaid,

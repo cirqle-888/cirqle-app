@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
@@ -15,6 +15,8 @@ import { useRole } from '@/contexts/role-context'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from "@/lib/utils"
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
+import { TokenizedSearch, type SearchFacet } from '@/components/ui/tokenized-search'
+import { recordMatchesFacets, type FacetFieldDef } from '@/lib/search/match-facets'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { ClientEditModal } from '@/components/ui/client-edit-modal'
 
@@ -170,18 +172,26 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
   const [showForm, setShowForm] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [search, setSearch] = useState(searchParams.get('search') || '')
+  // Tokenized search facets (field-scoped + operators) + live draft.
+  const [searchFacets, setSearchFacets] = useState<SearchFacet[]>(() => {
+    try { const raw = searchParams.get('sf'); return raw ? JSON.parse(raw) : [] } catch { return [] }
+  })
+  const [searchDraft, setSearchDraft] = useState('')
+  const activeFacets = useMemo<SearchFacet[]>(
+    () => searchDraft.trim() ? [...searchFacets, { field: 'any', op: 'contains' as const, text: searchDraft.trim() }] : searchFacets,
+    [searchFacets, searchDraft],
+  )
 
   useEffect(() => {
     const params = new URLSearchParams(searchParams.toString())
-    
-    if (search) params.set('search', search); else params.delete('search')
+
+    if (searchFacets.length) params.set('sf', JSON.stringify(searchFacets)); else params.delete('sf')
 
     const newQueryString = params.toString()
     if (newQueryString !== searchParams.toString()) {
       router.replace(`${pathname}?${newQueryString}`, { scroll: false })
     }
-  }, [search, pathname, router, searchParams])
+  }, [searchFacets, pathname, router, searchParams])
   const [convertingId, setConvertingId] = useState<string | null>(null)
   const [toast, setToast] = useState<{ message: string; show: boolean }>({ message: '', show: false })
 
@@ -405,16 +415,16 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
     }
   }
 
-  // ── Client-side search filter ────────────────────────────────────────────
-  const filteredQuotations = search.trim()
-    ? quotations.filter(q => {
-        const q_ = search.toLowerCase()
-        return (
-          q.quotation_number.toLowerCase().includes(q_) ||
-          q.client?.name.toLowerCase().includes(q_) ||
-          q.client?.code.toLowerCase().includes(q_)
-        )
-      })
+  // ── Tokenized facet search ───────────────────────────────────────────────
+  const QUOTE_FIELDS: Record<string, FacetFieldDef> = useMemo(() => ({
+    number:  { type: 'text',   get: (q: Quotation) => q.quotation_number },
+    client:  { type: 'text',   get: (q: Quotation) => q.client?.name },
+    amount:  { type: 'number', get: (q: Quotation) => q.total_amount },
+  }), [])
+  const quoteGeneric = (q: Quotation) =>
+    `${q.quotation_number} ${q.client?.name || ''} ${q.client?.code || ''}`
+  const filteredQuotations = activeFacets.length
+    ? quotations.filter(q => recordMatchesFacets(activeFacets, q, QUOTE_FIELDS, quoteGeneric))
     : quotations
 
   // ── Client combobox options ──────────────────────────────────────────────
@@ -451,36 +461,32 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
         </div>
       )}
 
-      {/* ── Search bar ──────────────────────────────────────────────────── */}
+      {/* ── Search bar (tokenized: Client / Quotation # / Amount + operators) ── */}
       <div className="px-6 pt-5 pb-2">
-        <div className="relative max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search by client or quotation number…"
-            className="w-full bg-secondary border border-foreground/15 rounded-xl pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-colors placeholder:text-muted-foreground/60"
-          />
-          {search && (
-            <button
-              onClick={() => setSearch('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
+        <TokenizedSearch
+          className="max-w-lg"
+          facets={searchFacets}
+          onFacetsChange={setSearchFacets}
+          draft={searchDraft}
+          onDraftChange={setSearchDraft}
+          placeholder="Search by client or quotation number…"
+          fields={[
+            { key: 'number', label: 'Quotation #', type: 'text' },
+            { key: 'client', label: 'Client', type: 'text' },
+            { key: 'amount', label: 'Amount ₹', type: 'number' },
+          ]}
+        />
       </div>
 
       {/* ── Quotation list ────────────────────────────────────────────────── */}
       <div className="p-6 space-y-2">
-        {filteredQuotations.length === 0 && search && (
+        {filteredQuotations.length === 0 && activeFacets.length > 0 && (
           <div className="bg-card border border-border rounded-xl p-10 text-center text-sm text-muted-foreground">
             No quotations match your search.
           </div>
         )}
 
-        {filteredQuotations.length === 0 && !search && (
+        {filteredQuotations.length === 0 && activeFacets.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <div className="w-16 h-16 rounded-2xl bg-foreground/[0.04] border border-foreground/15 flex items-center justify-center mb-4">
               <FileText className="w-7 h-7 text-muted-foreground/40" />

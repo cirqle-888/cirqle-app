@@ -9,10 +9,10 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/auth/enforce'
+import { requirePermission, resolveCurrentEmployeeId } from '@/lib/auth/enforce'
 import { PERMS } from '@/lib/permissions/keys'
 import {
-  setRequestStatus, logRequestActivity, type RequestStatus,
+  setRequestStatus, logRequestActivity, requestStatusFromTask, type RequestStatus,
 } from '@/lib/requests/core'
 import { notifyRequesterStatus } from '@/lib/requests/notify'
 
@@ -29,6 +29,8 @@ const STATUS_PERM: Partial<Record<RequestStatus, string>> = {
   completed:           PERMS.REQUESTS_MANAGE,
   delivered:           PERMS.REQUESTS_MANAGE,
   archived:            PERMS.REQUESTS_MANAGE,
+  cancelled:           PERMS.REQUESTS_MANAGE,   // "cancel anytime" (needs migration 20260612120000)
+  submitted:           PERMS.REQUESTS_MANAGE,   // unarchive → back to the New tab
 }
 
 export async function setRequestStatusAction(
@@ -139,7 +141,7 @@ export async function markRequestPromoted(
   const admin = createAdminClient()
   const { data: req, error } = await admin
     .from('task_requests')
-    .select('id, ref_no, title, status, source, track_token, client_id, agency_id, submitter_email, promoted_task_id')
+    .select('id, ref_no, title, status, source, track_token, client_id, agency_id, submitter_email, promoted_task_id, assigned_employee_id')
     .eq('id', requestId).single()
   if (error || !req) return { ok: false, error: 'Request not found.' }
   if (req.promoted_task_id) return { ok: false, error: 'This request was already promoted.' }
@@ -154,6 +156,15 @@ export async function markRequestPromoted(
     updated_at: new Date().toISOString(),
   }).eq('id', requestId)
   if (upErr) return { ok: false, error: upErr.message }
+
+  // Carry the request's planned assignee onto the new task (plain assignment —
+  // contribution scoring still happens in the task's Contributions tab).
+  if (req.assigned_employee_id) {
+    try {
+      await admin.from('task_assignments')
+        .insert({ task_id: taskId, employee_id: req.assigned_employee_id })
+    } catch { /* best-effort */ }
+  }
 
   // Internal promotion record + requester-visible Started milestone.
   await logRequestActivity(admin, {
@@ -171,6 +182,208 @@ export async function markRequestPromoted(
 
   revalidatePath(REVALIDATE)
   return { ok: true }
+}
+
+/**
+ * Assign (or clear) an employee on a request. Pre-promotion this is just a
+ * planning marker — it does NOT create a task or task_assignment. When the
+ * request is started (promoted), markRequestPromoted carries it onto the task.
+ */
+export async function assignRequestEmployee(
+  requestId: string, employeeId: string | null, employeeName?: string | null,
+): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.REQUESTS_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const admin = createAdminClient()
+  const { error } = await admin.from('task_requests')
+    .update({ assigned_employee_id: employeeId, updated_at: new Date().toISOString() })
+    .eq('id', requestId)
+  if (error) return { ok: false, error: error.message }
+  await logRequestActivity(admin, {
+    requestId, actorType: 'admin', actorId: guard.employeeId, actorLabel: 'Cirqle',
+    action: employeeId ? 'assigned' : 'unassigned', visibility: 'internal',
+    detail: employeeId ? { employee_id: employeeId, employee_name: employeeName || null } : null,
+  })
+  revalidatePath(REVALIDATE)
+  return { ok: true }
+}
+
+/**
+ * Staff-created request (source = 'manual') — the "opportunity inbox" entry.
+ * Lands in the New tab exactly like a client submission and, because the
+ * portal scopes client links by client_id, it automatically appears on that
+ * client's intake page ("Track My Requests") too. It only becomes a task
+ * (and gets a task number) when someone presses Start.
+ */
+const OPEN_STATUSES = ['submitted', 'under_review', 'approved', 'started', 'in_progress', 'waiting_for_content', 'revision_requested']
+
+export async function createManualRequest(input: {
+  clientId: string
+  title: string
+  description?: string
+  designPlan?: string
+  remarks?: string
+  contentLink?: string
+  referenceLink?: string
+  extraLinks?: { label: string; url: string }[]
+  isPlanned?: boolean
+  serviceId?: string | null
+  priority?: string
+  dueDate?: string | null
+  assignedEmployeeId?: string | null
+  estimatedValue?: number | null
+}): Promise<ActionResult<any>> {
+  const guard = await requirePermission(PERMS.REQUESTS_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const title = (input.title || '').trim()
+  if (!title) return { ok: false, error: 'Title is required.' }
+  if (!input.clientId) return { ok: false, error: 'Pick a client — the request shows on their intake portal.' }
+
+  const admin = createAdminClient()
+  const now = new Date().toISOString()
+
+  // Same rule as the intake form: join the END of the client's open queue.
+  let nextRank: number | null = null
+  try {
+    const { count } = await admin.from('task_requests')
+      .select('id', { count: 'exact', head: true })
+      .eq('client_id', input.clientId)
+      .in('status', OPEN_STATUSES)
+    nextRank = (count ?? 0) + 1
+  } catch { /* defensive */ }
+
+  const payload: Record<string, unknown> = {
+    source: 'manual',
+    client_id: input.clientId,
+    title,
+    description: (input.description || '').trim() || null,
+    design_plan: (input.designPlan || '').trim() || null,
+    remarks: (input.remarks || '').trim() || null,
+    content_link: (input.contentLink || '').trim() || null,
+    reference_link: (input.referenceLink || '').trim() || null,
+    extra_links: (input.extraLinks || []).filter(l => l.url?.trim()).slice(0, 10),
+    is_planned: !!input.isPlanned,
+    service_id: input.serviceId || null,
+    priority: ['low', 'normal', 'high', 'urgent'].includes(input.priority || '') ? input.priority : 'normal',
+    priority_rank: nextRank,
+    due_date: input.dueDate || null,
+    assigned_employee_id: input.assignedEmployeeId || null,
+    status: 'submitted',
+    client_status: 'submitted',
+    // Staff created it — don't let it flag itself as "new external activity".
+    last_staff_viewed_at: now,
+  }
+  if (input.estimatedValue != null && !isNaN(input.estimatedValue)) payload.estimated_value = input.estimatedValue
+  const SELECT_COLS = '*, client:clients(id, name, code), agency:agencies(id, name), service:services(id, name), assigned_employee:employees!task_requests_assigned_employee_id_fkey(id, name), promoted_task:tasks!task_requests_promoted_task_id_fkey(id, task_number, title, status)'
+  let { data, error } = await admin.from('task_requests').insert(payload).select(SELECT_COLS).single()
+  // Graceful pre-patch fallbacks: columns from later migrations may be missing.
+  if (error && /priority_rank/i.test(error.message || '')) {
+    delete payload.priority_rank
+    ;({ data, error } = await admin.from('task_requests').insert(payload).select(SELECT_COLS).single())
+  }
+  if (error && /estimated_value/i.test(error.message || '')) {
+    delete payload.estimated_value
+    ;({ data, error } = await admin.from('task_requests').insert(payload).select(SELECT_COLS).single())
+  }
+  if (error || !data) return { ok: false, error: error?.message || 'Could not create the request.' }
+
+  // Client-visible "submitted" entry so it reads naturally on their portal timeline.
+  await logRequestActivity(admin, {
+    requestId: data.id, actorType: 'admin', actorId: guard.employeeId, actorLabel: 'Cirqle',
+    action: 'submitted', visibility: 'client', detail: { title },
+  })
+
+  revalidatePath(REVALIDATE)
+  return { ok: true, data }
+}
+
+/**
+ * Search tasks to link to a request (tasks already created on the Tasks page).
+ * Excludes deleted tasks and tasks already linked to another request.
+ * "#42" → exact task-number; otherwise title match (and number prefix).
+ */
+export async function searchTasksForLink(
+  q: string, clientId?: string | null,
+): Promise<ActionResult<any[]>> {
+  const guard = await requirePermission(PERMS.REQUESTS_START)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const query = (q || '').trim()
+  if (!query) return { ok: true, data: [] }
+
+  const admin = createAdminClient()
+  let builder = admin.from('tasks')
+    .select('id, task_number, title, status, task_date, client:clients(id, name)')
+    .is('deleted_at', null)
+    .order('task_date', { ascending: false })
+    .limit(25)
+  if (clientId) builder = builder.eq('client_id', clientId)
+  const num = query.startsWith('#') ? parseInt(query.slice(1), 10) : (/^\d+$/.test(query) ? parseInt(query, 10) : NaN)
+  if (!isNaN(num)) builder = builder.eq('task_number', num)
+  else builder = builder.ilike('title', `%${query}%`)
+
+  const [{ data: tasks, error }, linked] = await Promise.all([
+    builder,
+    admin.from('task_requests').select('promoted_task_id').not('promoted_task_id', 'is', null),
+  ])
+  if (error) return { ok: false, error: error.message }
+  const linkedIds = new Set((linked.data || []).map((r: any) => r.promoted_task_id))
+  return { ok: true, data: (tasks || []).filter((t: any) => !linkedIds.has(t.id)).slice(0, 10) }
+}
+
+/**
+ * Link an EXISTING task to a request (work already started on the Tasks page
+ * before the request was promoted). Same semantics as Start — sets started,
+ * logs + emails — then mirrors the task's current status onto the request
+ * (e.g. linking an already-done task lands the request on Completed).
+ */
+export async function linkRequestToTask(
+  requestId: string, taskId: string,
+): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.REQUESTS_START)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+  const { data: task, error } = await admin.from('tasks')
+    .select('id, task_number, status, deleted_at')
+    .eq('id', taskId).maybeSingle()
+  if (error || !task || task.deleted_at) return { ok: false, error: 'Task not found.' }
+  const { data: taken } = await admin.from('task_requests')
+    .select('id, ref_no').eq('promoted_task_id', taskId).maybeSingle()
+  if (taken && taken.id !== requestId) {
+    return { ok: false, error: `That task is already linked to ${`REQ-${String(taken.ref_no ?? 0).padStart(4, '0')}`}.` }
+  }
+
+  const res = await markRequestPromoted(requestId, taskId, task.task_number ?? null)
+  if (!res.ok) return res
+
+  // Mirror the task's current status (it may already be past "started").
+  const mirrored = requestStatusFromTask(task.status)
+  if (mirrored && mirrored !== 'started') {
+    await setRequestStatus(admin, requestId, mirrored, { type: 'admin', id: guard.employeeId, label: 'Cirqle' })
+  }
+  revalidatePath(REVALIDATE)
+  return { ok: true }
+}
+
+/**
+ * Request brief for a promoted task — readable by ANY signed-in employee so
+ * designers can open the client's design plan / links straight from the task
+ * card. Returns staff-safe fields only (internal_notes stay manager-side).
+ */
+export async function getRequestBriefForTask(taskId: string): Promise<ActionResult<any>> {
+  const employeeId = await resolveCurrentEmployeeId()
+  if (!employeeId) return { ok: false, error: 'Not signed in.' }
+  const admin = createAdminClient()
+  try {
+    const { data } = await admin.from('task_requests')
+      .select('id, ref_no, title, description, design_plan, remarks, priority, due_date, status, source, created_at, ' +
+        'content_link, reference_link, deliverables_link, drive_folder_link, extra_links, ' +
+        'client:clients(id, name, code), agency:agencies(id, name), service:services(id, name), ' +
+        'assigned_employee:employees!task_requests_assigned_employee_id_fkey(id, name)')
+      .eq('promoted_task_id', taskId).maybeSingle()
+    if (!data) return { ok: false, error: 'No request linked to this task.' }
+    return { ok: true, data }
+  } catch { return { ok: false, error: 'Request portal not set up.' } }
 }
 
 /** Close a revision item. */
