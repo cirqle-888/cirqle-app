@@ -1385,6 +1385,55 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             })
           )
         }
+        // Auto-add unbilled client expense outflows for the same task month
+        const [taskYr, taskMo] = group.month.split('-').map(Number)
+        const monthStart = group.month + '-01'
+        const monthEnd = new Date(taskYr, taskMo, 0).toISOString().split('T')[0]
+        const { data: expEntries } = await supabase
+          .from('cashbook_entries')
+          .select('id, amount_inr, description, currency, amount')
+          .eq('client_id', group.client_id)
+          .eq('type', 'outflow')
+          .is('deleted_at', null)
+          .gte('entry_date', monthStart)
+          .lte('entry_date', monthEnd)
+        if (expEntries?.length) {
+          const { data: alreadyBilled } = await supabase
+            .from('invoice_expense_items')
+            .select('cashbook_entry_id, invoice:invoices(status)')
+            .in('cashbook_entry_id', expEntries.map((e: any) => e.id))
+          const billedIds = new Set(
+            (alreadyBilled || []).filter((b: any) => b.invoice?.status !== 'cancelled').map((b: any) => b.cashbook_entry_id)
+          )
+          const toAddExp = expEntries.filter((e: any) => !billedIds.has(e.id))
+          if (toAddExp.length) {
+            const invCur = group.currency || 'INR'
+            const invRate = creationRate(invCur)
+            let expTotal = 0
+            const expRows = toAddExp.map((e: any) => {
+              const amtInInvCur = invCur === 'INR' ? e.amount_inr : round2(e.amount_inr / (invRate || 1))
+              expTotal += amtInInvCur
+              return {
+                invoice_id: inv.id,
+                cashbook_entry_id: e.id,
+                description: e.description || 'Expense',
+                amount: amtInInvCur,
+                amount_inr: e.amount_inr,
+                currency: invCur,
+                original_amount: amtInInvCur,
+                original_amount_inr: e.amount_inr,
+                markup_type: 'none',
+                markup_value: 0,
+                markup_amount: 0,
+              }
+            })
+            await supabase.from('invoice_expense_items').insert(expRows)
+            // Update invoice total to include auto-added expenses
+            const newTotal = round2(group.total + expTotal)
+            await supabase.from('invoices').update({ total_amount: newTotal, subtotal: newTotal }).eq('id', inv.id)
+          }
+        }
+
         doneCount++
         setBatchDone(doneCount)
       } catch { errorCount++ }
