@@ -393,6 +393,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     month: string; taskCount: number; total: number; currency: string;
     taskIds: string[]; default_currency?: string
     tasks?: { id: string; title: string; task_date: string; billing_amount_inr: number; currency: string }[]
+    expenses?: { id: string; description: string | null; amount_inr: number; entry_date: string }[]
   }[]>([])
   const [batchExpandedKey, setBatchExpandedKey] = useState<string | null>(null)
   const [batchLoading, setBatchLoading] = useState(false)
@@ -1325,6 +1326,34 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       if (a.client_name > b.client_name) return 1
       return a.month < b.month ? -1 : 1
     })
+
+    // Fetch unbilled outflow expenses for all client IDs that appear in groups
+    const uniqueClientIds = [...new Set(groups.map(g => g.client_id))]
+    const { data: allExpEntries } = await supabase
+      .from('cashbook_entries')
+      .select('id, client_id, entry_date, description, amount_inr')
+      .in('client_id', uniqueClientIds)
+      .eq('type', 'outflow')
+      .is('deleted_at', null)
+    const expEntriesRaw = (allExpEntries || []) as { id: string; client_id: string; entry_date: string; description: string | null; amount_inr: number }[]
+    // Find already-billed entries
+    const { data: billedExpItems } = expEntriesRaw.length
+      ? await supabase.from('invoice_expense_items').select('cashbook_entry_id, invoice:invoices(status)').in('cashbook_entry_id', expEntriesRaw.map(e => e.id))
+      : { data: [] }
+    const billedExpIds = new Set((billedExpItems || []).filter((b: any) => b.invoice?.status !== 'cancelled').map((b: any) => b.cashbook_entry_id))
+    // Attach expenses to matching groups
+    for (const g of groups) {
+      const [yr, mo] = g.month.split('-').map(Number)
+      const monthStart = g.month + '-01'
+      const monthEnd = new Date(yr, mo, 0).toISOString().split('T')[0]
+      g.expenses = expEntriesRaw.filter(e =>
+        e.client_id === g.client_id &&
+        !billedExpIds.has(e.id) &&
+        e.entry_date >= monthStart &&
+        e.entry_date <= monthEnd
+      )
+    }
+
     setBatchGroups(groups)
     setBatchSelected(new Set(groups.map(g => g.key)))
     setBatchLoading(false)
@@ -4224,7 +4253,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                       />
                       <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setBatchExpandedKey(expanded ? null : group.key)}>
                         <div className="text-xs font-medium truncate">{group.client_name}</div>
-                        <div className="text-[10px] text-muted-foreground">{monthLabel} · {group.taskCount} task{group.taskCount !== 1 ? 's' : ''}</div>
+                        <div className="text-[10px] text-muted-foreground">{monthLabel} · {group.taskCount} task{group.taskCount !== 1 ? 's' : ''}{(group.expenses || []).length > 0 ? ` + ${group.expenses!.length} expense${group.expenses!.length > 1 ? 's' : ''}` : ''}</div>
                       </div>
                       <div className="text-right shrink-0">
                         <div className="text-xs font-semibold text-emerald-300">{fmt(group.total, group.currency as any)}</div>
@@ -4259,10 +4288,27 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                             </div>
                           </div>
                         ))}
+                        {/* Expense entries for this month */}
+                        {(group.expenses || []).map(exp => (
+                          <div key={exp.id} className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-amber-500/[0.04] border border-amber-500/20">
+                            <span className="text-[9px] text-amber-400/50 font-mono w-4 text-right shrink-0">
+                              <ShoppingBag className="w-2.5 h-2.5" />
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-[11px] text-amber-300/80 truncate">{exp.description || 'Expense'}</div>
+                              <div className="text-[9px] text-muted-foreground">
+                                {exp.entry_date ? new Date(exp.entry_date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}
+                              </div>
+                            </div>
+                            <div className="text-[11px] font-semibold text-amber-300/80 shrink-0 tabular-nums">
+                              {fmt(exp.amount_inr, 'INR')}
+                            </div>
+                          </div>
+                        ))}
                         {/* Group total */}
                         <div className="flex items-center justify-between px-2 pt-1.5 mt-0.5 border-t border-border/20">
-                          <span className="text-[10px] text-muted-foreground">{groupTasks.length} tasks · subtotal</span>
-                          <span className="text-[11px] font-bold text-emerald-400">{fmt(group.total, group.currency as any)}</span>
+                          <span className="text-[10px] text-muted-foreground">{groupTasks.length} tasks{(group.expenses || []).length > 0 ? ` + ${group.expenses!.length} expense${group.expenses!.length > 1 ? 's' : ''}` : ''} · subtotal</span>
+                          <span className="text-[11px] font-bold text-emerald-400">{fmt(group.total + (group.expenses || []).reduce((s, e) => s + e.amount_inr, 0), group.currency as any)}</span>
                         </div>
                       </div>
                     )}
