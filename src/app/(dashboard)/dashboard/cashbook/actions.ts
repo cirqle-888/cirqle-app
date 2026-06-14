@@ -197,6 +197,7 @@ export interface CashbookEntryUpdate {
   bank_account_id: string | null
   description: string
   reference: string
+  client_id?: string | null
 }
 
 export async function updateCashbookEntry(

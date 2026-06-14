@@ -452,6 +452,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       client_filter_id:  entry.client_id  ?? '',
       fully_paid:      false,
     })
+    setSmartExtra(entry.client_id ? { client_id: entry.client_id } : {})
     setFormEditingId(entry.id)
     setRecurringMonths(0)
     setShowForm(true)
@@ -479,6 +480,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
 
     // ── EDIT MODE: update existing entry ────────────────────────────────────
     if (formEditingId) {
+      const savedClientId = smartExtra.client_id || form.client_filter_id || null
       const result = await updateCashbookEntry(formEditingId, {
         entry_date:      form.entry_date,
         amount,
@@ -491,6 +493,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         bank_account_id: form.bank_account_id || null,
         description:     form.description,
         reference:       form.reference,
+        client_id:       savedClientId,
       })
       if (result.ok) {
         setEntries(prev => prev.map(e =>
@@ -508,6 +511,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 entry_date:      form.entry_date,
                 description:     form.description,
                 reference:       form.reference,
+                client_id:       savedClientId || undefined,
               }
             : e,
         ))
