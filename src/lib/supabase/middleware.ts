@@ -151,6 +151,7 @@ export async function updateSession(request: NextRequest) {
   const isPublic   = pathname === '/'
                   || pathname.startsWith('/portal')
                   || pathname.startsWith('/intake')   // client/agency request portal — tokenized, no login
+                  || pathname.startsWith('/api/shortcut') // iOS Shortcuts API — its own bearer-token auth
 
   if (!user && !isAuthPage && !isPublic) {
     const url = request.nextUrl.clone()
