@@ -203,8 +203,36 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   const [saving, setSaving] = useState(false)
   // Unallocate-all-invoices flow: idle → confirm → working → done(count)
   const [unallocate, setUnallocate] = useState<'closed' | 'confirm' | 'working' | { done: number }>('closed')
+  // Bulk-select unallocate
+  const [bulkSelectMode, setBulkSelectMode] = useState(false)
+  const [selectedEntryIds, setSelectedEntryIds] = useState<Set<string>>(new Set())
+  const [bulkWorking, setBulkWorking] = useState(false)
   const router = useRouter()
   const pathname = usePathname()
+
+  function toggleBulkEntry(id: string) {
+    setSelectedEntryIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  async function runBulkUnallocate() {
+    if (selectedEntryIds.size === 0) return
+    setBulkWorking(true)
+    const supabase = createClient()
+    const { error } = await supabase
+      .from('cashbook_invoice_allocations')
+      .update({ deleted_at: new Date().toISOString() })
+      .in('cashbook_entry_id', Array.from(selectedEntryIds))
+      .is('deleted_at', null)
+    setBulkWorking(false)
+    if (error) { alert(error.message); return }
+    setSelectedEntryIds(new Set())
+    setBulkSelectMode(false)
+    router.refresh()
+  }
 
   async function runUnallocateAll() {
     setUnallocate('working')
@@ -962,6 +990,14 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 <span className="hidden sm:inline">Unallocate All</span>
               </button>
             )}
+            {isAdmin && (
+              <button onClick={() => { setBulkSelectMode(p => !p); setSelectedEntryIds(new Set()) }}
+                className={`flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg transition-colors whitespace-nowrap border ${bulkSelectMode ? 'bg-violet-500/20 border-violet-500/40 text-violet-300' : 'bg-secondary border-violet-500/20 text-violet-400 hover:bg-secondary/80'}`}
+                title="Select entries to bulk-unallocate">
+                <CheckCircle className="w-4 h-4 shrink-0" />
+                <span className="hidden sm:inline">{bulkSelectMode ? 'Cancel Select' : 'Bulk Select'}</span>
+              </button>
+            )}
             <Link href="/dashboard/import?tab=cashbook_entries"
               className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap">
               <Upload className="w-4 h-4 shrink-0" />
@@ -1144,6 +1180,25 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
           ]}
           onClearAll={() => { setFilterType(''); setFilterMonth(''); setFilterCategory(''); setSearchFacets([]); setSearchDraft(''); setFilterAllocStatus(''); setFilterMinAmount(''); setFilterMaxAmount(''); setFilterClient('') }}
         />
+
+        {/* Bulk-select action banner */}
+        {bulkSelectMode && (
+          <div className="sticky top-0 z-20 flex items-center justify-between gap-3 px-4 py-2.5 bg-violet-600/90 backdrop-blur rounded-xl border border-violet-500/40 text-white text-sm">
+            <span>{selectedEntryIds.size > 0 ? `${selectedEntryIds.size} entr${selectedEntryIds.size === 1 ? 'y' : 'ies'} selected` : 'Select allocated invoice entries to unallocate'}</span>
+            <div className="flex items-center gap-2">
+              {selectedEntryIds.size > 0 && (
+                <button onClick={() => setSelectedEntryIds(new Set())} className="text-violet-200 hover:text-white text-xs px-2 py-1 rounded hover:bg-violet-500/30 transition-colors">Clear</button>
+              )}
+              <button
+                onClick={runBulkUnallocate}
+                disabled={selectedEntryIds.size === 0 || bulkWorking}
+                className="flex items-center gap-1.5 bg-white text-violet-700 font-semibold text-xs px-3 py-1.5 rounded-lg hover:bg-violet-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                <ShieldAlert className="w-3.5 h-3.5" />
+                {bulkWorking ? 'Unallocating…' : `Unallocate ${selectedEntryIds.size > 0 ? selectedEntryIds.size : ''}`}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Entries */}
         <div className="bg-card border border-border rounded-xl overflow-hidden">

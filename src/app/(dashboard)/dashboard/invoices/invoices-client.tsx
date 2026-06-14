@@ -546,8 +546,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const { error } = await supabase.from('invoices').update(updates).eq('id', invoiceId)
     if (error) { toastError(error.message); setSaving(false); return }
 
-    // When reverting to draft, free tasks back to done
-    if (newStatus === 'draft') {
+    // When reverting to draft OR cancelling, free tasks back to done
+    if (newStatus === 'draft' || newStatus === 'cancelled') {
       const inv = invoices.find(i => i.id === invoiceId)
       const taskIds = (inv?.items || []).map(it => it.task_id).filter(Boolean) as string[]
       if (taskIds.length) await supabase.from('tasks').update({ status: 'done' }).in('id', taskIds)
