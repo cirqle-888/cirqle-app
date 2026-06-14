@@ -580,6 +580,23 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     ))
   }
 
+  // Manually correct a foreign invoice's exchange rate. total_amount_inr is a
+  // generated column (total_amount × exchange_rate) so it recomputes server-side;
+  // we mirror it locally for instant display. Lets the user override the
+  // auto-fetched Settings rate with the real rate the invoice was billed at.
+  async function updateExchangeRate(invoiceId: string, newRate: number) {
+    const inv = invoices.find(i => i.id === invoiceId)
+    if (!inv || !(newRate > 0)) return
+    await supabase.from('invoices')
+      .update({ exchange_rate: newRate, updated_at: new Date().toISOString() })
+      .eq('id', invoiceId)
+    if (forceEditId === invoiceId) await logChange(invoiceId, 'exchange_rate', String(inv.exchange_rate ?? 1), String(newRate))
+    setInvoices(prev => prev.map(i => i.id === invoiceId
+      ? { ...i, exchange_rate: newRate, total_amount_inr: round2((i.total_amount || 0) * newRate) }
+      : i
+    ))
+  }
+
   async function updateItemDescription(itemId: string, invoiceId: string, description: string) {
     const inv = invoices.find(i => i.id === invoiceId)
     const oldDesc = inv?.items?.find(it => it.id === itemId)?.description || ''
@@ -2822,6 +2839,45 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               <span className="font-semibold">Total</span>
               <span className="font-bold text-base">{fmt(inv.total_amount, inv.currency)}</span>
             </div>
+
+            {/* Exchange rate — manual override for foreign invoices. The auto-fetched
+                Settings rate is the default; correct it to the rate actually billed.
+                total_amount_inr (the ₹ booked value) recomputes from it. */}
+            {inv.currency !== 'INR' && showAmounts && (
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-muted-foreground">Exchange rate</span>
+                {/* Editable only while unsettled — once cash is allocated the rate is
+                    effectively locked by the settlement (use Settle-in-full to change it). */}
+                {!['paid', 'cancelled', 'bad_debt'].includes(inv.status) && invPaidInr(inv) === 0 ? (
+                  <div className="flex items-center gap-1">
+                    <span className="text-muted-foreground text-xs">1 {inv.currency} = ₹</span>
+                    <input
+                      type="number" min="0" step="0.0001"
+                      key={`rate-${inv.id}-${inv.exchange_rate}`}
+                      defaultValue={inv.exchange_rate || ''}
+                      onBlur={e => { const v = parseFloat(e.target.value); if (v > 0 && v !== inv.exchange_rate) updateExchangeRate(inv.id, v) }}
+                      className="w-24 bg-background border border-border/40 rounded px-1.5 py-0.5 text-xs text-right font-mono focus:outline-none focus:border-violet-500/50"
+                    />
+                    {(rateMap[inv.currency] || 0) > 0 && Math.abs((inv.exchange_rate || 0) - rateMap[inv.currency]) > 0.0001 && (
+                      <button
+                        onClick={() => updateExchangeRate(inv.id, rateMap[inv.currency])}
+                        title={`Reset to Settings rate ₹${rateMap[inv.currency]}`}
+                        className="p-0.5 text-violet-400/70 hover:text-violet-300 hover:bg-violet-500/10 rounded transition-colors">
+                        <RefreshCw className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <span className="font-mono text-xs">1 {inv.currency} = ₹{(inv.exchange_rate || 1).toLocaleString('en-IN')}</span>
+                )}
+              </div>
+            )}
+            {inv.currency !== 'INR' && showAmounts && (
+              <div className="flex justify-between text-[11px] text-muted-foreground">
+                <span>Value in ₹ (booked)</span>
+                <span className="font-mono">₹{(inv.total_amount_inr ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+              </div>
+            )}
             {(inv.paid_amount ?? 0) > 0 && (
               <>
                 <div className="flex justify-between text-sm text-green-400">
