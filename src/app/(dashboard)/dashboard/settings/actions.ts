@@ -81,12 +81,24 @@ export async function updateEmployee(
 
 // ── Clients ───────────────────────────────────────────────────────────────────
 
+// The clients list is loaded with the pricing matrix embedded
+// (`service_pricings:client_service_pricing(*)`). When the edit form spreads a
+// loaded client, that embedded relation rides along — but it's not a real
+// `clients` column, so PostgREST rejects the write ("Could not find the
+// 'service_pricings' column of 'clients'"). Strip embedded relations before any
+// insert/update; pricing rows are saved separately via upsertClientServicePricings.
+function sanitizeClientForm(form: Record<string, unknown>): Record<string, unknown> {
+  const { service_pricings, ...columns } = form
+  void service_pricings
+  return columns
+}
+
 export async function createClient(form: Record<string, unknown>): Promise<ActionResult<any>> {
   const auth = await requirePermission('settings.access')
   if (!auth.ok) return { ok: false, error: auth.error }
 
   const admin = createAdminClient()
-  const { data, error } = await admin.from('clients').insert(form).select().single()
+  const { data, error } = await admin.from('clients').insert(sanitizeClientForm(form)).select().single()
   if (error) return { ok: false, error: error.message }
   return { ok: true, data }
 }
@@ -99,7 +111,7 @@ export async function updateClient(
   if (!auth.ok) return { ok: false, error: auth.error }
 
   const admin = createAdminClient()
-  const { data, error } = await admin.from('clients').update(form).eq('id', id).select().single()
+  const { data, error } = await admin.from('clients').update(sanitizeClientForm(form)).eq('id', id).select().single()
   if (error) return { ok: false, error: error.message }
   return { ok: true, data }
 }
