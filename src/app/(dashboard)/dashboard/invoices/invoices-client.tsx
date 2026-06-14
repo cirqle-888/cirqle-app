@@ -625,6 +625,28 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     ))
   }
 
+  async function updateInvoiceCurrency(invoiceId: string, newCurrency: Currency) {
+    const inv = invoices.find(i => i.id === invoiceId)
+    if (!inv || !isEditable(inv.status)) return
+    const newRate = newCurrency === 'INR' ? 1 : (rateMap[newCurrency] || 1)
+    await supabase.from('invoices')
+      .update({ currency: newCurrency, exchange_rate: newRate, updated_at: new Date().toISOString() })
+      .eq('id', invoiceId)
+    await supabase.from('invoice_items')
+      .update({ currency: newCurrency })
+      .eq('invoice_id', invoiceId)
+    setInvoices(prev => prev.map(i => i.id === invoiceId
+      ? {
+          ...i,
+          currency: newCurrency,
+          exchange_rate: newRate,
+          total_amount_inr: round2((i.total_amount || 0) * newRate),
+          items: (i.items || []).map(it => ({ ...it, currency: newCurrency })),
+        }
+      : i
+    ))
+  }
+
   async function updateExpensesMode(invoiceId: string, mode: string) {
     await supabase.from('invoices').update({ expenses_mode: mode, updated_at: new Date().toISOString() }).eq('id', invoiceId)
     setInvoices(prev => prev.map(i => i.id === invoiceId ? { ...i, expenses_mode: mode } : i))
@@ -767,7 +789,10 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       discount_percentage: sub > 0 ? (amt / sub) * 100 : 0,
       invoice_total: inv.total_amount, reason: discountReason || 'No reason provided',
     })
-    setInvoices(prev => prev.map(i => i.id === invoiceId ? { ...i, discount_amount: amt, total_amount: newTotal } : i))
+    setInvoices(prev => prev.map(i => i.id === invoiceId
+      ? { ...i, discount_amount: amt, total_amount: newTotal, total_amount_inr: round2(newTotal * (i.exchange_rate || 1)) }
+      : i
+    ))
     success(`Discount of ${fmt(amt)} applied`)
     setManualDiscount(''); setDiscountReason('')
     // Keep discount section open so user can see the result
@@ -811,9 +836,27 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       discount_amount: discount, total_amount: total, updated_at: new Date().toISOString(),
     }).eq('id', invoiceId)
     setInvoices(prev => prev.map(i => i.id === invoiceId
-      ? { ...i, discount_amount: discount, total_amount: total }
+      ? { ...i, discount_amount: discount, total_amount: total, total_amount_inr: round2(total * (i.exchange_rate || 1)) }
       : i
     ))
+  }
+
+  async function removeDiscountLog(logId: string, invoiceId: string) {
+    await supabase.from('discount_logs').delete().eq('id', logId)
+    const inv = invoices.find(i => i.id === invoiceId)
+    if (inv) {
+      const sub = inv.subtotal || 0
+      const taxAmt = sub * (inv.tax_rate || 0) / 100
+      const newTotal = Math.max(0, sub + taxAmt)
+      await supabase.from('invoices')
+        .update({ discount_amount: 0, total_amount: newTotal, updated_at: new Date().toISOString() })
+        .eq('id', invoiceId)
+      setInvoices(prev => prev.map(i => i.id === invoiceId
+        ? { ...i, discount_amount: 0, total_amount: newTotal, total_amount_inr: round2(newTotal * (i.exchange_rate || 1)) }
+        : i
+      ))
+    }
+    setDiscAnalytics(prev => prev.filter((d: any) => d.id !== logId))
   }
 
   // Derive { rate, amountInr, rateSource } for a foreign amount set
@@ -2894,6 +2937,18 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
           {/* Amounts */}
           <div className="bg-foreground/[0.03] rounded-xl border border-border/40 p-3 space-y-2">
+            {/* Currency selector — only on editable drafts (no payments yet) */}
+            {editable && invPaidInr(inv) === 0 && (
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-muted-foreground">Invoice currency</span>
+                <select
+                  value={inv.currency}
+                  onChange={e => updateInvoiceCurrency(inv.id, e.target.value as Currency)}
+                  className="bg-background border border-border/40 rounded px-2 py-0.5 text-xs font-mono focus:outline-none focus:border-violet-500/50">
+                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+            )}
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Subtotal</span>
               <span className="font-medium">{fmt(inv.subtotal || inv.total_amount, inv.currency)}</span>
@@ -4759,11 +4814,19 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                             <div className="text-xs font-medium">{d.client?.name || '—'}</div>
                             <div className="text-[10px] text-muted-foreground font-mono">{d.invoice?.invoice_number || '—'}</div>
                           </div>
-                          <div className="text-right shrink-0">
-                            <div className="text-sm font-bold text-orange-400">{fmt(d.discount_amount || 0, d.client?.default_currency || d.invoice?.currency || 'INR')}</div>
-                            {(d.discount_percentage || 0) > 0 && (
-                              <div className="text-[10px] text-muted-foreground">{(d.discount_percentage || 0).toFixed(1)}% off</div>
-                            )}
+                          <div className="flex items-start gap-2 shrink-0">
+                            <div className="text-right">
+                              <div className="text-sm font-bold text-orange-400">{fmt(d.discount_amount || 0, d.client?.default_currency || d.invoice?.currency || 'INR')}</div>
+                              {(d.discount_percentage || 0) > 0 && (
+                                <div className="text-[10px] text-muted-foreground">{(d.discount_percentage || 0).toFixed(1)}% off</div>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => removeDiscountLog(d.id, d.invoice_id)}
+                              title="Remove discount from invoice"
+                              className="mt-0.5 p-1 text-red-400/50 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors">
+                              <Trash2 className="w-3 h-3" />
+                            </button>
                           </div>
                         </div>
                         {d.reason && d.reason !== 'No reason provided' && (
