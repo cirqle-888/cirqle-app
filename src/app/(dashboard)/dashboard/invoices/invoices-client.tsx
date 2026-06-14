@@ -3166,8 +3166,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             )
           })()}
 
-          {/* Client Expenses section */}
-          {(inv.expense_items || []).length > 0 && (() => {
+          {/* Client Expenses section — hidden here, expenses now shown inline in LINE ITEMS above */}
+          {false && (inv.expense_items || []).length > 0 && (() => {
             const expMode = inv.expenses_mode || companySettings.expense_display_mode || 'mode_a'
             const expTotal = (inv.expense_items || []).reduce((s, e) => s + (e.amount || 0), 0)
             const origTotal = (inv.expense_items || []).reduce((s, e) => s + (e.original_amount || e.amount || 0), 0)
@@ -3248,7 +3248,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           <div>
             <div className="flex items-center justify-between mb-2">
               <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                Line Items ({inv.items?.length || 0})
+                Line Items ({(inv.items?.length || 0) + (inv.expense_items?.length || 0)})
               </h4>
               <div className="flex items-center gap-2">
                 {forceEdit && (
@@ -3312,6 +3312,49 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                       onClick={e => { e.stopPropagation(); removeItem(inv.id, item.id) }}
                       disabled={removingItemId === item.id}
                       className="lg:opacity-0 opacity-100 group-hover:opacity-100 p-0.5 text-muted-foreground hover:text-red-400 transition-all">
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              ))}
+
+              {/* Expense items inline in line items */}
+              {(inv.expense_items || []).map(exp => (
+                <div key={`exp-${exp.id}`} className="flex items-start gap-2 p-2 bg-amber-500/[0.04] rounded-lg border border-amber-500/20 hover:border-amber-500/30 transition-colors group">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <ShoppingBag className="w-2.5 h-2.5 text-amber-400/70 shrink-0" />
+                      <div className="text-xs font-medium truncate">{exp.description}</div>
+                    </div>
+                    {exp.markup_type !== 'none' && (exp.markup_amount || 0) > 0 && showAmounts && (
+                      <div className="text-[10px] text-muted-foreground mt-0.5 ml-4">
+                        Cost {fmt(exp.original_amount || 0, exp.currency as Currency)} + markup {fmt(exp.markup_amount || 0, exp.currency as Currency)}
+                      </div>
+                    )}
+                    {exp.notes && <div className="text-[10px] text-muted-foreground/60 italic mt-0.5 ml-4">{exp.notes}</div>}
+                  </div>
+                  <div className="text-right shrink-0">
+                    {showAmounts && <div className="text-xs font-medium text-amber-300/90">{fmt(exp.amount, inv.currency as Currency)}</div>}
+                  </div>
+                  {editable && (
+                    <button
+                      onClick={async () => {
+                        const { error } = await supabase.from('invoice_expense_items').delete().eq('id', exp.id)
+                        if (!error) {
+                          const newExps = (inv.expense_items || []).filter(e => e.id !== exp.id)
+                          const newExpTotal = newExps.reduce((s, e) => s + (e.amount || 0), 0)
+                          const taskTotal = (inv.items || []).reduce((s, i) => s + (i.total || 0), 0)
+                          const newTotal = round2(taskTotal + newExpTotal - (inv.discount_amount || 0) + (inv.tax_amount || 0))
+                          await supabase.from('invoices').update({ total_amount: newTotal, subtotal: round2(taskTotal + newExpTotal) }).eq('id', inv.id)
+                          setInvoices(prev => prev.map(i => i.id === inv.id
+                            ? { ...i, expense_items: newExps, total_amount: newTotal, total_amount_inr: round2(newTotal * (i.exchange_rate || 1)), subtotal: round2(taskTotal + newExpTotal) }
+                            : i
+                          ))
+                        }
+                      }}
+                      className="lg:opacity-0 opacity-100 group-hover:opacity-100 p-0.5 text-muted-foreground hover:text-red-400 transition-all shrink-0 mt-0.5"
+                      title="Remove expense from invoice"
+                    >
                       <X className="w-3 h-3" />
                     </button>
                   )}
