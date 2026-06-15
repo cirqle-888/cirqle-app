@@ -77,7 +77,7 @@ export default async function DashboardPage() {
     isAdmin
       ? fetchAll(supabase
           .from('invoices')
-          .select('id, invoice_number, total_amount, paid_amount, total_amount_inr, paid_amount_inr, status, currency, due_date, client:clients(id, name)')
+          .select('id, invoice_number, total_amount, paid_amount, total_amount_inr, paid_amount_inr, status, currency, due_date, issue_date, client:clients(id, name)')
           .order('due_date', { ascending: true })
           .order('id', { ascending: true }))
       : Promise.resolve({ data: [] }),
@@ -189,8 +189,14 @@ export default async function DashboardPage() {
   // To be invoiced = draft + reviewed totals (prepared but not sent yet)
   const toBeInvoicedAmount = draftInvoices.reduce((s, i) => s + invTotalInr(i), 0)
 
-  const overdueInvoices  = invoices.filter(i => i.status !== 'paid' && i.due_date && new Date(i.due_date) < today)
-  const dueInvoices      = invoices.filter(i => ['sent','partial'].includes(i.status) && i.due_date && new Date(i.due_date) >= today)
+  const effectiveDue = (i: any): Date => {
+    if (i.due_date) { const d = new Date(i.due_date); if (!isNaN(d.getTime())) return d }
+    if (i.issue_date) { const d = new Date(i.issue_date); if (!isNaN(d.getTime())) { d.setDate(d.getDate() + 30); return d } }
+    return new Date(8640000000000000) // far future — never overdue
+  }
+  const closedStatuses = ['paid', 'cancelled', 'bad_debt']
+  const overdueInvoices  = invoices.filter(i => !closedStatuses.includes(i.status) && effectiveDue(i) < today)
+  const dueInvoices      = invoices.filter(i => ['sent','partial'].includes(i.status) && effectiveDue(i) >= today)
 
   // ── Task stats ───────────────────────────────────────────────────────────────
   // toBeInvoiced = done tasks not yet in any invoice (billing_cycle=none clients)

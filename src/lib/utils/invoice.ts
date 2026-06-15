@@ -20,9 +20,22 @@ export function generateQuotationNumber(date: Date, clientCode: string): string 
 /**
  * Check if invoice is overdue
  */
-export function isOverdue(dueDate: string, status: string): boolean {
-  if (status === 'paid' || status === 'cancelled') return false
-  return new Date(dueDate) < new Date()
+export function isOverdue(dueDate: string, status: string, issueDate?: string): boolean {
+  if (status === 'paid' || status === 'cancelled' || status === 'bad_debt') return false
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  if (dueDate) {
+    const due = new Date(dueDate)
+    if (!isNaN(due.getTime())) return due < today
+  }
+  // No due_date set — treat as net-30 from issue date
+  if (issueDate) {
+    const iss = new Date(issueDate)
+    if (!isNaN(iss.getTime())) {
+      iss.setDate(iss.getDate() + 30)
+      return iss < today
+    }
+  }
+  return false
 }
 
 /**

@@ -487,7 +487,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   const filtered = useMemo(() => {
     let list = invoices.filter(inv => {
       const inTab = tab === 'active'
-        ? STATUS_GROUPS.active.includes(inv.status) || (isOverdue(inv.due_date || '', inv.status) && inv.status !== 'paid')
+        ? STATUS_GROUPS.active.includes(inv.status) || (isOverdue(inv.due_date || '', inv.status, inv.issue_date) && inv.status !== 'paid')
         : STATUS_GROUPS.closed.includes(inv.status)
       if (!inTab) return false
       if (filterStatus && inv.status !== filterStatus) return false
@@ -508,7 +508,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   const stats = useMemo(() => {
     const active = invoices.filter(i => !['paid', 'cancelled', 'bad_debt'].includes(i.status))
     const drafts = invoices.filter(i => i.status === 'draft')
-    const overdue = invoices.filter(i => isOverdue(i.due_date || '', i.status))
+    const overdue = invoices.filter(i => isOverdue(i.due_date || '', i.status, i.issue_date))
     return {
       // Company-wide KPI cards are shown in ₹ — sum the INR snapshots, not the
       // raw invoice-currency amounts (which would mix SAR/USD/INR together).
@@ -1553,7 +1553,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
     const invoiceRows = stmtInvoices.map((inv, idx) => {
       const balance = Math.max(0, (inv.total_amount || 0) - (inv.paid_amount || 0))
-      const overdue = isOverdue(inv.due_date || '', inv.status)
+      const overdue = isOverdue(inv.due_date || '', inv.status, inv.issue_date)
       const bg = idx % 2 === 0 ? '#f7f9fc' : '#ffffff'
       const statusLabel = overdue && inv.status !== 'paid' ? 'Overdue' : getStatusLabel(inv.status)
       const statusColor = (overdue && inv.status !== 'paid') || inv.status === 'overdue' ? '#c0392b'
@@ -2754,7 +2754,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           )}
           {filtered.map(inv => {
             const balance = balanceDue(inv)
-            const overdue = isOverdue(inv.due_date || '', inv.status)
+            const overdue = isOverdue(inv.due_date || '', inv.status, inv.issue_date)
             const isSelected = selectedId === inv.id
             return (
               <div
@@ -2832,7 +2832,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const forceEdit = forceEditId === inv.id
     const editable = isEditable(inv.status) || forceEdit
     const balance = balanceDue(inv)
-    const overdue = isOverdue(inv.due_date || '', inv.status)
+    const overdue = isOverdue(inv.due_date || '', inv.status, inv.issue_date)
     const nextAct = getNextAction(inv.status)
     const periodLabel = inv.billing_period_start ? formatBillingPeriod(inv.billing_period_start) : null
 
@@ -4256,7 +4256,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                         <div className="text-[10px] text-muted-foreground">{monthLabel} · {group.taskCount} task{group.taskCount !== 1 ? 's' : ''}{(group.expenses || []).length > 0 ? ` + ${group.expenses!.length} expense${group.expenses!.length > 1 ? 's' : ''}` : ''}</div>
                       </div>
                       <div className="text-right shrink-0">
-                        <div className="text-xs font-semibold text-emerald-300">{fmt(group.total, group.currency as any)}</div>
+                        <div className="text-xs font-semibold text-emerald-300">{fmt(group.total + (group.expenses || []).reduce((s, e) => s + e.amount_inr, 0), group.currency as any)}</div>
                         <div className="text-[10px] text-muted-foreground font-mono">INV-{invoiceYYMM}-NNN</div>
                       </div>
                       {/* Expand toggle */}
@@ -4538,7 +4538,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                   {sInvoices.map(inv => {
                     const balance     = Math.max(0, (inv.total_amount || 0) - (inv.paid_amount || 0))
                     const isExpanded  = stmtExpandedIds.has(inv.id)
-                    const overdue     = isOverdue(inv.due_date || '', inv.status)
+                    const overdue     = isOverdue(inv.due_date || '', inv.status, inv.issue_date)
                     const statusLbl   = overdue && inv.status !== 'paid' ? 'Overdue' : getStatusLabel(inv.status)
                     const isPaid      = inv.status === 'paid' || balance === 0
                     const isOver      = (overdue && inv.status !== 'paid') || inv.status === 'overdue'
@@ -4781,7 +4781,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     ).sort((a: any, b: any) => b.unpaid - a.unpaid)
 
     // ── Overdue aging tab data ─────────────────────────────────────────────
-    const overdueInvs = invoices.filter(i => isOverdue(i.due_date || '', i.status) && i.status !== 'paid')
+    const overdueInvs = invoices.filter(i => isOverdue(i.due_date || '', i.status, i.issue_date) && i.status !== 'paid')
     const today       = new Date()
     function ageBucket(dueDate: string) {
       const days = Math.floor((today.getTime() - new Date(dueDate + 'T00:00:00').getTime()) / 86400000)
@@ -5626,7 +5626,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           <button key={t}
             onClick={() => { setTab(t); setFilterStatus('') }}
             className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${tab === t ? 'border-violet-500 text-violet-300' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
-            {t === 'active' ? `Active (${invoices.filter(i => STATUS_GROUPS.active.includes(i.status) || (isOverdue(i.due_date || '', i.status) && i.status !== 'paid')).length})` : `Closed`}
+            {t === 'active' ? `Active (${invoices.filter(i => STATUS_GROUPS.active.includes(i.status) || (isOverdue(i.due_date || '', i.status, i.issue_date) && i.status !== 'paid')).length})` : `Closed`}
           </button>
         ))}
         <div className="flex-1" />
