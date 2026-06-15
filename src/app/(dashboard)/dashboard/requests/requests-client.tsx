@@ -38,7 +38,9 @@ const TABS: { key: string; label: string; statuses: string[] }[] = [
   { key: 'reviewed', label: 'Reviewed',             statuses: ['under_review'] },
   { key: 'approved', label: 'Approved',             statuses: ['approved'] },
   { key: 'started',  label: 'Started',              statuses: ['started'] },
-  { key: 'ongoing',  label: 'On Going',             statuses: ['in_progress', 'waiting_for_content', 'revision_requested', 'completed', 'delivered'] },
+  { key: 'ongoing',  label: 'On Going',             statuses: ['in_progress', 'waiting_for_content', 'revision_requested'] },
+  { key: 'done',     label: 'Done',                 statuses: ['completed', 'delivered'] },
+  { key: 'all',      label: 'All',                  statuses: ['submitted', 'under_review', 'approved', 'started', 'in_progress', 'waiting_for_content', 'revision_requested', 'completed', 'delivered', 'rejected', 'cancelled'] },
   { key: 'rejected', label: 'Rejected / Cancelled', statuses: ['rejected', 'cancelled'] },
   { key: 'archived', label: 'Archived',             statuses: ['archived'] },
 ]
@@ -495,7 +497,7 @@ export default function RequestsClient({
       return TABS.map(t => ({
         key: t.key, label: t.label,
         rows: boardRows.filter(r => t.statuses.includes(r.status)),
-      })).filter(c => c.key !== 'archived' || c.rows.length > 0)
+      })).filter(c => c.key !== 'all' && (c.key !== 'archived' || c.rows.length > 0))
     }
     // By client: one column per requester, with pending/active/done summary.
     const groups = new Map<string, { label: string; rows: any[] }>()
