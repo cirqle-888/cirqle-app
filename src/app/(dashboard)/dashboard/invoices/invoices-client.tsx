@@ -415,7 +415,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   const [stmtExpandedIds, setStmtExpandedIds] = useState<Set<string>>(new Set())
   const [stmtForm, setStmtForm] = useState({
     client_id: '',
-    mode: 'month' as 'month' | 'year' | 'range' | 'day',
+    mode: 'month' as 'month' | 'year' | 'range' | 'day' | 'all',
     month: new Date().toISOString().slice(0, 7),
     year: String(new Date().getFullYear()),
     date_from: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
@@ -1523,6 +1523,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     } else if (stmtForm.mode === 'day') {
       from = to = stmtForm.specific_date
       periodLabel = fmtDate(stmtForm.specific_date)
+    } else if (stmtForm.mode === 'all') {
+      from = '0000-01-01'; to = '9999-12-31'
+      periodLabel = 'All time'
     } else {
       from = stmtForm.date_from; to = stmtForm.date_to
       periodLabel = `${fmtDate(from)} – ${fmtDate(to)}`
@@ -1696,6 +1699,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     } else if (stmtForm.mode === 'day') {
       from = to = stmtForm.specific_date
       periodLabel = fmtDate(stmtForm.specific_date)
+    } else if (stmtForm.mode === 'all') {
+      from = '0000-01-01'; to = '9999-12-31'
+      periodLabel = 'All time'
     } else {
       from = stmtForm.date_from; to = stmtForm.date_to
       periodLabel = `${fmtDate(from)} – ${fmtDate(to)}`
@@ -1922,6 +1928,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     } else if (stmtForm.mode === 'day') {
       from = to = stmtForm.specific_date
       periodLabel = fmtDate(stmtForm.specific_date)
+    } else if (stmtForm.mode === 'all') {
+      from = '0000-01-01'; to = '9999-12-31'
+      periodLabel = 'All time'
     } else {
       from = stmtForm.date_from; to = stmtForm.date_to
       periodLabel = from && to ? `${fmtDate(from)} – ${fmtDate(to)}` : 'Custom range'
@@ -4402,6 +4411,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     } else if (stmtForm.mode === 'day') {
       sFrom = sTo = stmtForm.specific_date
       sPeriodLabel = fmtDate(stmtForm.specific_date)
+    } else if (stmtForm.mode === 'all') {
+      sFrom = '0000-01-01'; sTo = '9999-12-31'
+      sPeriodLabel = 'All time'
     } else {
       sFrom = stmtForm.date_from; sTo = stmtForm.date_to
       sPeriodLabel = sFrom && sTo ? `${fmtDate(sFrom)} – ${fmtDate(sTo)}` : 'Custom range'
@@ -4476,8 +4488,19 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                     {lbl}
                   </button>
                 ))}
+                <button type="button"
+                  onClick={() => { setStmtForm(p => ({ ...p, mode: 'all' })); setStmtExpandedIds(new Set()) }}
+                  className={`col-span-2 py-1.5 text-xs rounded-lg border transition-colors ${stmtForm.mode === 'all' ? 'bg-blue-500/20 border-blue-500/50 text-blue-300' : 'border-border/40 text-muted-foreground hover:border-border/70'}`}>
+                  ♾️ All time (lifetime)
+                </button>
               </div>
             </div>
+
+            {stmtForm.mode === 'all' && (
+              <p className="text-[11px] text-muted-foreground">
+                Includes every invoice for {stmtForm.client_id ? 'this client' : 'all clients'}, across all dates.
+              </p>
+            )}
 
             {/* Date value inputs */}
             {stmtForm.mode === 'month' && (
