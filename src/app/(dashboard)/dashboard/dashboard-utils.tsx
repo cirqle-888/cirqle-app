@@ -13,6 +13,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import dynamic from 'next/dynamic'
+import { useState, useEffect, useCallback } from 'react'
 import { TrendingUp, TrendingDown } from 'lucide-react'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -50,6 +51,25 @@ export const ContributionActivityBar = dynamic(
   () => import('./_charts').then(m => m.ContributionActivityBar),
   { ssr: false, loading: () => <ChartSkeleton h={240} /> },
 )
+
+// ─── Amount display mode (short = 1.5L / full = 1,50,000) ────────────────────
+const AMOUNT_DISPLAY_KEY = 'cirqle-amount-display'
+export type AmountDisplay = 'short' | 'full'
+
+export function useAmountDisplay() {
+  const [mode, setModeState] = useState<AmountDisplay>('short')
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(AMOUNT_DISPLAY_KEY)
+      if (stored === 'full') setModeState('full')
+    } catch { /* localStorage unavailable */ }
+  }, [])
+  const setMode = useCallback((m: AmountDisplay) => {
+    setModeState(m)
+    try { localStorage.setItem(AMOUNT_DISPLAY_KEY, m) } catch { /* ignore */ }
+  }, [])
+  return [mode, setMode] as const
+}
 
 // ─── Formatters ────────────────────────────────────────────────────────────────
 export function fmt(n: number) {

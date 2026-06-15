@@ -29,8 +29,8 @@ import {
   FileText, BarChart3, TrendingUp, TrendingDown, Zap,
 } from 'lucide-react'
 import {
-  fmt, fmtDate, daysLate, daysToGo, getPeriodKey, getPeriodLabel,
-  StatusBadge, ContributionActivityBar,
+  fmt, fmtFull, fmtDate, daysLate, daysToGo, getPeriodKey, getPeriodLabel,
+  StatusBadge, ContributionActivityBar, useAmountDisplay,
 } from './dashboard-utils'
 import type { Granularity, DrawerType } from './dashboard-utils'
 import DashboardAnalytics from './dashboard-analytics'
@@ -252,6 +252,8 @@ function AdminDashboard({
   const [granularity, setGranularity] = useState<Granularity>((searchParams.get('granularity') as any) || 'monthly')
   const [drawer, setDrawer] = useState<DrawerType>(null)
   const [fxMode, setFxMode] = useFxMode()
+  const [amountDisplay, setAmountDisplay] = useAmountDisplay()
+  const f = amountDisplay === 'full' ? fmtFull : fmt
 
   useEffect(() => {
     const params = new URLSearchParams(searchParams.toString())
@@ -330,8 +332,25 @@ function AdminDashboard({
                 </button>
               ))}
             </div>
-            <div className="flex items-center gap-3 shrink-0">
+            <div className="flex items-center gap-2 shrink-0">
               <p className="text-xs text-muted-foreground hidden sm:block">{periodLabel}</p>
+              {/* Amount display toggle */}
+              <div className="flex items-center bg-secondary rounded-lg p-0.5 gap-0">
+                <button
+                  onClick={() => setAmountDisplay('short')}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${amountDisplay === 'short' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                  title="Abbreviated (₹1.5L)"
+                >
+                  1.5L
+                </button>
+                <button
+                  onClick={() => setAmountDisplay('full')}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${amountDisplay === 'full' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                  title="Full figures (₹1,50,000)"
+                >
+                  Full
+                </button>
+              </div>
               {/* FX Mode toggle */}
               <div
                 className="flex items-center bg-secondary rounded-lg p-0.5 gap-0"
@@ -379,8 +398,8 @@ function AdminDashboard({
               {overdueInvoices.length > 0 && (
                 <FocusCard icon={<AlertTriangle className="w-4 h-4 text-red-400" />} color="red"
                   title="Overdue Invoices" count={overdueInvoices.length} unit="invoice"
-                  sub={fmt(effectiveStats.overdueAmount) + ' owed'}
-                  items={overdueInvoices.slice(0,3).map(i => `${i.client?.name || i.invoice_number} — ${fmt((i.total_amount||0)-(i.paid_amount||0))}`)}
+                  sub={f(effectiveStats.overdueAmount) + ' owed'}
+                  items={overdueInvoices.slice(0,3).map(i => `${i.client?.name || i.invoice_number} — ${f((i.total_amount||0)-(i.paid_amount||0))}`)}
                   onClick={() => setDrawer('overdue')} />
               )}
             </div>
@@ -401,17 +420,17 @@ function AdminDashboard({
                     </span>
                   )}
                 </div>
-                <p className="text-3xl font-black gradient-text leading-tight">{fmt(effectiveStats.totalExpectedCash)}</p>
+                <p className="text-3xl font-black gradient-text leading-tight">{f(effectiveStats.totalExpectedCash)}</p>
                 <p className="text-xs text-muted-foreground mt-1.5">Bank balance + all outstanding + to be invoiced</p>
               </div>
               <div className="shrink-0 text-right space-y-0.5">
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Breakdown</p>
-                <p className="text-xs"><span className="text-muted-foreground">Bank balance</span> <span className="font-semibold">{fmt(stats.bankBalance)}</span></p>
+                <p className="text-xs"><span className="text-muted-foreground">Bank balance</span> <span className="font-semibold">{f(stats.bankBalance)}</span></p>
                 <p className="text-xs">
                   <span className="text-muted-foreground">Outstanding invoices</span>{' '}
-                  <span className="font-semibold text-orange-400">{fmt(effectiveStats.outstanding)}</span>
+                  <span className="font-semibold text-orange-400">{f(effectiveStats.outstanding)}</span>
                 </p>
-                <p className="text-xs"><span className="text-muted-foreground">To be invoiced</span> <span className="font-semibold text-yellow-400">{fmt(stats.toBeInvoicedAmount)}</span></p>
+                <p className="text-xs"><span className="text-muted-foreground">To be invoiced</span> <span className="font-semibold text-yellow-400">{f(stats.toBeInvoicedAmount)}</span></p>
               </div>
             </div>
             {effectiveStats.totalExpectedCash > 0 && (
@@ -432,7 +451,7 @@ function AdminDashboard({
                 title="Outstanding using exchange rate locked at invoice date">
                 Booked Outstanding
               </p>
-              <p className="text-lg font-bold">{fmt(stats.outstanding)}</p>
+              <p className="text-lg font-bold">{f(stats.outstanding)}</p>
               <p className="text-[10px] text-muted-foreground mt-0.5">Locked rate</p>
             </div>
             <div>
@@ -440,7 +459,7 @@ function AdminDashboard({
                 title="Outstanding using today's exchange rate from Settings">
                 Live Outstanding
               </p>
-              <p className="text-lg font-bold text-violet-600 dark:text-violet-300">{fmt(liveFx.outstanding)}</p>
+              <p className="text-lg font-bold text-violet-600 dark:text-violet-300">{f(liveFx.outstanding)}</p>
               <p className="text-[10px] text-muted-foreground mt-0.5">Today's rate</p>
             </div>
             <div>
@@ -450,14 +469,14 @@ function AdminDashboard({
               ) : liveFx.varianceOutstanding > 0 ? (
                 <>
                   <p className="text-lg font-bold text-emerald-500 flex items-center gap-1">
-                    <TrendingUp className="w-4 h-4" />{fmt(liveFx.varianceOutstanding)}
+                    <TrendingUp className="w-4 h-4" />{f(liveFx.varianceOutstanding)}
                   </p>
                   <p className="text-[10px] text-emerald-500/70 mt-0.5">Unrealized gain</p>
                 </>
               ) : (
                 <>
                   <p className="text-lg font-bold text-red-400 flex items-center gap-1">
-                    <TrendingDown className="w-4 h-4" />{fmt(Math.abs(liveFx.varianceOutstanding))}
+                    <TrendingDown className="w-4 h-4" />{f(Math.abs(liveFx.varianceOutstanding))}
                   </p>
                   <p className="text-[10px] text-red-400/70 mt-0.5">Unrealized loss</p>
                 </>
@@ -485,6 +504,7 @@ function AdminDashboard({
             dateFilter={dateFilter}
             granularity={granularity}
             setDrawer={setDrawer}
+            displayFull={amountDisplay === 'full'}
           />
         </Suspense>
       </div>

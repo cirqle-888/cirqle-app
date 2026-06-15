@@ -55,6 +55,7 @@ interface DashboardAnalyticsProps {
   dateFilter: DateFilterValue
   granularity: Granularity
   setDrawer: React.Dispatch<React.SetStateAction<DrawerType>>
+  displayFull?: boolean
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -64,11 +65,13 @@ export default function DashboardAnalytics({
   allAnalyticsTasksPromise, scoresPromise,
   stats, invoices, overdueInvoices, dueInvoices, allCashbook,
   activeTasks, toBeInvoiced, employees, payrollRecords,
-  dateFilter, granularity, setDrawer,
+  dateFilter, granularity, setDrawer, displayFull,
 }: DashboardAnalyticsProps) {
   // ── Unwrap the streamed promises (suspends until resolved) ──────────────────
   const allAnalyticsTasks = use(allAnalyticsTasksPromise)
   const scores            = use(scoresPromise)
+
+  const f = displayFull ? fmtFull : fmt
 
   const { dn } = usePrivacy()
   const [pulseTab, setPulseTab] = useState<PulseTab>('trends')
@@ -347,12 +350,12 @@ export default function DashboardAnalytics({
     <>
       {/* ── KPI Cards ─────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
-        <KpiCard label="Total Billed"    value={fmt(stats.totalBilled)}       icon={<DollarSign className="w-3.5 h-3.5"/>} color="purple" trend={periodComparison ? { pct: periodComparison.valueChange } : null} />
-        <KpiCard label="Collected"       value={fmt(stats.totalPaid)}          icon={<CheckCircle className="w-3.5 h-3.5"/>} color="green"  trend={periodComparison ? { pct: periodComparison.incomeChange } : null} />
-        <KpiCard label="Bank Balance"    value={fmt(stats.bankBalance)}        icon={<TrendingUp className="w-3.5 h-3.5"/>}  color={stats.bankBalance >= 0 ? 'teal' : 'red'} sub="net cash" />
-        <KpiCard label="Outstanding"     value={fmt(stats.outstanding)}        icon={<Clock className="w-3.5 h-3.5"/>}       color={stats.outstanding > 0 ? 'orange' : 'green'} trend={stats.outstanding > 0 ? { pct: null } : null} />
-        <KpiCard label="Overdue"         value={fmt(stats.overdueAmount)}      icon={<AlertTriangle className="w-3.5 h-3.5"/>} color="red"    badge={stats.overdueCount} trend={stats.overdueCount > 0 ? { pct: null, invert: true } : null} clickable onClick={() => setDrawer('overdue')} />
-        <KpiCard label="To Be Invoiced"  value={fmt(stats.toBeInvoicedAmount)} icon={<FileText className="w-3.5 h-3.5"/>}  color="yellow" badge={stats.toBeInvoicedCount} clickable onClick={() => setDrawer('toBeInvoiced')} />
+        <KpiCard label="Total Billed"    value={f(stats.totalBilled)}       icon={<DollarSign className="w-3.5 h-3.5"/>} color="purple" trend={periodComparison ? { pct: periodComparison.valueChange } : null} />
+        <KpiCard label="Collected"       value={f(stats.totalPaid)}          icon={<CheckCircle className="w-3.5 h-3.5"/>} color="green"  trend={periodComparison ? { pct: periodComparison.incomeChange } : null} />
+        <KpiCard label="Bank Balance"    value={f(stats.bankBalance)}        icon={<TrendingUp className="w-3.5 h-3.5"/>}  color={stats.bankBalance >= 0 ? 'teal' : 'red'} sub="net cash" />
+        <KpiCard label="Outstanding"     value={f(stats.outstanding)}        icon={<Clock className="w-3.5 h-3.5"/>}       color={stats.outstanding > 0 ? 'orange' : 'green'} trend={stats.outstanding > 0 ? { pct: null } : null} />
+        <KpiCard label="Overdue"         value={f(stats.overdueAmount)}      icon={<AlertTriangle className="w-3.5 h-3.5"/>} color="red"    badge={stats.overdueCount} trend={stats.overdueCount > 0 ? { pct: null, invert: true } : null} clickable onClick={() => setDrawer('overdue')} />
+        <KpiCard label="To Be Invoiced"  value={f(stats.toBeInvoicedAmount)} icon={<FileText className="w-3.5 h-3.5"/>}  color="yellow" badge={stats.toBeInvoicedCount} clickable onClick={() => setDrawer('toBeInvoiced')} />
       </div>
 
       {/* ── Production Output ─────────────────────────── */}
@@ -387,23 +390,23 @@ export default function DashboardAnalytics({
             {/* Comparison stats */}
             {periodComparison && (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <StatChange label="Income" current={periodComparison.cur.inflow} prev={periodComparison.prev?.inflow} pct={periodComparison.incomeChange} format={fmt} />
-                <StatChange label="Outflow" current={periodComparison.cur.outflow} prev={periodComparison.prev?.outflow} pct={null} format={fmt} invert />
+                <StatChange label="Income" current={periodComparison.cur.inflow} prev={periodComparison.prev?.inflow} pct={periodComparison.incomeChange} format={f} />
+                <StatChange label="Outflow" current={periodComparison.cur.outflow} prev={periodComparison.prev?.outflow} pct={null} format={f} invert />
                 <StatChange label="Job Count" current={periodComparison.cur.taskCount} prev={periodComparison.prev?.taskCount} pct={periodComparison.taskChange} format={String} />
-                <StatChange label="Job Value" current={periodComparison.cur.taskValue} prev={periodComparison.prev?.taskValue} pct={periodComparison.valueChange} format={fmt} />
+                <StatChange label="Job Value" current={periodComparison.cur.taskValue} prev={periodComparison.prev?.taskValue} pct={periodComparison.valueChange} format={f} />
               </div>
             )}
 
             {/* Income vs Outflow chart */}
             <div className="bg-card border border-border rounded-xl p-4">
               <p className="text-xs font-semibold text-muted-foreground mb-3 uppercase tracking-wider">Income vs Outflow ({granularity})</p>
-              <IncomeOutflowBar data={trendData} fmt={fmt} />
+              <IncomeOutflowBar data={trendData} fmt={f} />
             </div>
 
             {/* Job value + count chart */}
             <div className="bg-card border border-border rounded-xl p-4">
               <p className="text-xs font-semibold text-muted-foreground mb-3 uppercase tracking-wider">Jobs Done ({granularity})</p>
-              <JobsDoneBar data={trendData} fmt={fmt} />
+              <JobsDoneBar data={trendData} fmt={f} />
             </div>
 
             {/* Trend data table */}
@@ -423,10 +426,10 @@ export default function DashboardAnalytics({
                     {[...trendData].reverse().map((row, i) => (
                       <tr key={i} className="hover:bg-secondary/30">
                         <td className="px-4 py-2 font-medium">{row.period}</td>
-                        <td className="px-4 py-2 text-right text-green-400">{fmt(row.inflow)}</td>
-                        <td className="px-4 py-2 text-right text-red-400">{fmt(row.outflow)}</td>
-                        <td className={`px-4 py-2 text-right font-semibold ${row.net >= 0 ? 'text-green-400' : 'text-red-400'}`}>{fmt(row.net)}</td>
-                        <td className="px-4 py-2 text-right text-foreground">{fmt(row.taskValue)}</td>
+                        <td className="px-4 py-2 text-right text-green-400">{f(row.inflow)}</td>
+                        <td className="px-4 py-2 text-right text-red-400">{f(row.outflow)}</td>
+                        <td className={`px-4 py-2 text-right font-semibold ${row.net >= 0 ? 'text-green-400' : 'text-red-400'}`}>{f(row.net)}</td>
+                        <td className="px-4 py-2 text-right text-foreground">{f(row.taskValue)}</td>
                         <td className="px-4 py-2 text-right text-muted-foreground">{row.taskCount}</td>
                       </tr>
                     ))}
@@ -445,17 +448,17 @@ export default function DashboardAnalytics({
               <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3 cursor-pointer hover:border-red-500/40 transition-colors" onClick={() => setDrawer('overdue')}>
                 <p className="text-xs text-red-400 font-semibold">Overdue Invoices</p>
                 <p className="text-xl font-bold text-foreground mt-0.5">{stats.overdueCount}</p>
-                <p className="text-xs text-red-400 mt-0.5">{fmt(stats.overdueAmount)}</p>
+                <p className="text-xs text-red-400 mt-0.5">{f(stats.overdueAmount)}</p>
               </div>
               <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-4 py-3 cursor-pointer hover:border-yellow-500/40 transition-colors" onClick={() => setDrawer('due')}>
                 <p className="text-xs text-yellow-400 font-semibold">Due Invoices</p>
                 <p className="text-xl font-bold text-foreground mt-0.5">{stats.dueCount}</p>
-                <p className="text-xs text-yellow-400 mt-0.5">{fmt(stats.dueAmount)}</p>
+                <p className="text-xs text-yellow-400 mt-0.5">{f(stats.dueAmount)}</p>
               </div>
               <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3 cursor-pointer hover:border-blue-500/40 transition-colors" onClick={() => setDrawer('toBeInvoiced')}>
                 <p className="text-xs text-blue-400 font-semibold">To Be Invoiced</p>
                 <p className="text-xl font-bold text-foreground mt-0.5">{stats.toBeInvoicedCount}</p>
-                <p className="text-xs text-blue-400 mt-0.5">{fmt(stats.toBeInvoicedAmount)}</p>
+                <p className="text-xs text-blue-400 mt-0.5">{f(stats.toBeInvoicedAmount)}</p>
               </div>
             </div>
 
@@ -510,9 +513,9 @@ export default function DashboardAnalytics({
               const pct = totals.jobsDone > 0 ? Math.round((totals.profit/totals.jobsDone)*100) : 0
               return (
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <div className="bg-card border border-border rounded-xl px-4 py-3"><p className="text-[11px] text-muted-foreground">Total Payroll</p><p className="text-lg font-bold text-red-400 mt-0.5">{fmt(totals.payroll)}</p></div>
-                  <div className="bg-card border border-border rounded-xl px-4 py-3"><p className="text-[11px] text-muted-foreground">Total Jobs Done</p><p className="text-lg font-bold text-green-400 mt-0.5">{fmt(totals.jobsDone)}</p></div>
-                  <div className="bg-card border border-border rounded-xl px-4 py-3"><p className="text-[11px] text-muted-foreground">Total Profit</p><p className={`text-lg font-bold mt-0.5 ${totals.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>{fmt(totals.profit)}</p></div>
+                  <div className="bg-card border border-border rounded-xl px-4 py-3"><p className="text-[11px] text-muted-foreground">Total Payroll</p><p className="text-lg font-bold text-red-400 mt-0.5">{f(totals.payroll)}</p></div>
+                  <div className="bg-card border border-border rounded-xl px-4 py-3"><p className="text-[11px] text-muted-foreground">Total Jobs Done</p><p className="text-lg font-bold text-green-400 mt-0.5">{f(totals.jobsDone)}</p></div>
+                  <div className="bg-card border border-border rounded-xl px-4 py-3"><p className="text-[11px] text-muted-foreground">Total Profit</p><p className={`text-lg font-bold mt-0.5 ${totals.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>{f(totals.profit)}</p></div>
                   <div className="bg-card border border-border rounded-xl px-4 py-3"><p className="text-[11px] text-muted-foreground">Avg Profit %</p><p className="text-lg font-bold mt-0.5">{pct}%</p></div>
                 </div>
               )
@@ -538,13 +541,13 @@ export default function DashboardAnalytics({
                     {jobsVsPayroll.map((row, i) => (
                       <tr key={i} className="hover:bg-secondary/30 transition-colors">
                         <td className="px-3 py-2 font-medium">{row.label}</td>
-                        <td className="px-3 py-2 text-right text-muted-foreground">{row.payroll ? fmt(row.payroll) : '—'}</td>
-                        <td className="px-3 py-2 text-right text-green-400">{row.jobsDone ? fmt(row.jobsDone) : '—'}</td>
-                        <td className={`px-3 py-2 text-right font-semibold ${row.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>{row.profit ? fmt(row.profit) : '—'}</td>
+                        <td className="px-3 py-2 text-right text-muted-foreground">{row.payroll ? f(row.payroll) : '—'}</td>
+                        <td className="px-3 py-2 text-right text-green-400">{row.jobsDone ? f(row.jobsDone) : '—'}</td>
+                        <td className={`px-3 py-2 text-right font-semibold ${row.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>{row.profit ? f(row.profit) : '—'}</td>
                         <td className={`px-3 py-2 text-right font-semibold ${row.pct >= 50 ? 'text-green-400' : row.pct >= 30 ? 'text-yellow-400' : 'text-red-400'}`}>{row.jobsDone ? `${row.pct}%` : '—'}</td>
-                        <td className="px-3 py-2 text-right text-green-400 border-l border-border/30">{row.inflow ? fmt(row.inflow) : '—'}</td>
-                        <td className="px-3 py-2 text-right text-red-400">{row.outflow ? fmt(row.outflow) : '—'}</td>
-                        <td className={`px-3 py-2 text-right font-semibold ${row.netCash >= 0 ? 'text-green-400' : 'text-red-400'}`}>{fmt(row.netCash)}</td>
+                        <td className="px-3 py-2 text-right text-green-400 border-l border-border/30">{row.inflow ? f(row.inflow) : '—'}</td>
+                        <td className="px-3 py-2 text-right text-red-400">{row.outflow ? f(row.outflow) : '—'}</td>
+                        <td className={`px-3 py-2 text-right font-semibold ${row.netCash >= 0 ? 'text-green-400' : 'text-red-400'}`}>{f(row.netCash)}</td>
                         <td className={`px-3 py-2 text-right text-[11px] ${row.cashChange == null ? 'text-muted-foreground' : row.cashChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                           {row.cashChange == null ? '—' : `${row.cashChange >= 0 ? '+' : ''}${row.cashChange}%`}
                         </td>
@@ -612,7 +615,7 @@ export default function DashboardAnalytics({
                   <p className="text-xs text-muted-foreground">{t.client?.name || '—'}{t.service ? ` · ${t.service.name}` : ''}</p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  {t.billing_amount_inr > 0 && <span className="text-xs text-muted-foreground font-mono">{fmt(t.billing_amount_inr)}</span>}
+                  {t.billing_amount_inr > 0 && <span className="text-xs text-muted-foreground font-mono">{f(t.billing_amount_inr)}</span>}
                   <StatusBadge status={t.status} />
                 </div>
               </div>
@@ -626,7 +629,7 @@ export default function DashboardAnalytics({
             <div className="px-4 py-3.5 border-b border-border flex items-center justify-between">
               <div>
                 <h2 className="font-semibold text-sm">Cash Flow</h2>
-                <p className="text-[11px] text-muted-foreground mt-0.5">In: <span className="text-green-400">{fmt(periodInflow)}</span> · Out: <span className="text-red-400">{fmt(periodOutflow)}</span></p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">In: <span className="text-green-400">{f(periodInflow)}</span> · Out: <span className="text-red-400">{f(periodOutflow)}</span></p>
               </div>
               <Link href="/dashboard/cashbook" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">Cash Book <ArrowRight className="w-3 h-3" /></Link>
             </div>
@@ -636,7 +639,7 @@ export default function DashboardAnalytics({
               ) : filteredCashbook.slice(-10).reverse().map((e, i) => (
                 <div key={i} className="px-4 py-2 flex items-center gap-3">
                   <div className="flex-1 min-w-0"><p className="text-xs truncate">{e.description || (e.type==='inflow' ? 'Income' : 'Expense')}</p><p className="text-[11px] text-muted-foreground/60">{fmtDate(e.entry_date)}</p></div>
-                  <span className={`text-sm font-semibold shrink-0 ${e.type==='inflow' ? 'text-green-400' : 'text-red-400'}`}>{e.type==='inflow' ? '+' : '−'}{fmt(e.amount_inr||0)}</span>
+                  <span className={`text-sm font-semibold shrink-0 ${e.type==='inflow' ? 'text-green-400' : 'text-red-400'}`}>{e.type==='inflow' ? '+' : '−'}{f(e.amount_inr||0)}</span>
                 </div>
               ))}
             </div>
@@ -660,7 +663,7 @@ export default function DashboardAnalytics({
                       <div>
                         <p className="text-xs font-semibold leading-tight">{dn(emp)}</p>
                         <p className={`text-[11px] font-semibold leading-tight ${emp.earnings > 0 ? 'text-green-400' : 'text-muted-foreground'}`}>
-                          {emp.earnings > 0 ? fmt(emp.earnings) : emp.taskCount > 0 ? `${emp.taskCount} tasks` : 'No data'}
+                          {emp.earnings > 0 ? f(emp.earnings) : emp.taskCount > 0 ? `${emp.taskCount} tasks` : 'No data'}
                         </p>
                         {emp.taskCount > 0 && (
                           <p className="text-[10px] text-muted-foreground/70 leading-tight mt-0.5">
