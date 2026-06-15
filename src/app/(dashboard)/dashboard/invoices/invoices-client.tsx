@@ -1091,7 +1091,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     // Base insert with columns that always exist
     const { data: inv, error } = await supabase.from('invoices').insert({
       invoice_number: invNum, client_id: newForm.client_id, status: 'draft',
-      issue_date: newForm.issue_date, due_date: newForm.due_date || null,
+      issue_date: newForm.issue_date,
+      due_date: newForm.due_date || (() => { const d = new Date(newForm.issue_date); d.setDate(d.getDate() + 30); return d.toISOString().split('T')[0] })(),
       currency: newForm.currency, total_amount: subtotal, paid_amount: 0,
       notes: newForm.notes || null,
     }).select('*, client:clients(id,name,code,phone,email)').single()
@@ -1373,11 +1374,15 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         const { invoiceNumber: invNum, sequenceMonth } =
           await generateInvoiceNumber(supabase, invoiceDate, group.client_code)
 
+        const issueDateStr = invoiceDate.toISOString().split('T')[0]
+        const dueDateObj = new Date(invoiceDate); dueDateObj.setDate(dueDateObj.getDate() + 30)
+        const dueDateStr = dueDateObj.toISOString().split('T')[0]
         const { data: inv, error } = await supabase.from('invoices').insert({
           invoice_number: invNum,
           client_id: group.client_id,
           status: 'draft',
-          issue_date: invoiceDate.toISOString().split('T')[0],
+          issue_date: issueDateStr,
+          due_date: dueDateStr,
           total_amount: group.total,
           paid_amount: 0,
           currency: group.currency || 'INR',
@@ -2860,7 +2865,23 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             <div className="flex items-center gap-3 mt-0.5 text-[11px] text-muted-foreground">
               {periodLabel && <span><Calendar className="inline w-3 h-3 mr-0.5" />{periodLabel}</span>}
               <span>Issued {fmtDate(inv.issue_date)}</span>
-              {inv.due_date && <span className={overdue ? 'text-red-400' : ''}>Due {fmtDate(inv.due_date)}</span>}
+              {editable ? (
+                <span className="flex items-center gap-1">
+                  <span className="text-muted-foreground">Due</span>
+                  <input
+                    type="date"
+                    value={inv.due_date || ''}
+                    onChange={async e => {
+                      const val = e.target.value
+                      await supabase.from('invoices').update({ due_date: val || null }).eq('id', inv.id)
+                      setInvoices(prev => prev.map(i => i.id === inv.id ? { ...i, due_date: val } : i))
+                    }}
+                    className="bg-transparent border-b border-dashed border-muted-foreground/40 hover:border-violet-500/60 focus:border-violet-500 focus:outline-none text-[11px] text-muted-foreground cursor-pointer"
+                  />
+                </span>
+              ) : inv.due_date ? (
+                <span className={overdue ? 'text-red-400' : ''}>Due {fmtDate(inv.due_date)}</span>
+              ) : null}
             </div>
           </div>
           <div className="flex gap-1.5 items-start shrink-0">
