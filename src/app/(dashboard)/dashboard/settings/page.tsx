@@ -6,8 +6,8 @@ const normalizeTab = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-')
 
 export const dynamic = 'force-dynamic'
 
-export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string; editClient?: string; returnTo?: string }> }) {
-  const { tab: rawTab, editClient, returnTo } = await searchParams
+export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string; editClient?: string; editService?: string; returnTo?: string }> }) {
+  const { tab: rawTab, editClient, editService, returnTo } = await searchParams
   const initialTab = ALL_TABS.find(t => normalizeTab(t) === normalizeTab(rawTab ?? '')) ?? 'Company'
 
   const supabase = await createClient()
@@ -65,6 +65,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       designations={designations}
       initialTab={initialTab}
       initialEditClientId={editClient}
+      initialEditServiceId={editService}
       returnTo={returnTo}
     />
   )

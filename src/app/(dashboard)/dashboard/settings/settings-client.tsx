@@ -94,6 +94,7 @@ interface Props {
   designations?: { id: string; name: string; is_admin: boolean; is_system: boolean }[]
   initialTab?: string
   initialEditClientId?: string
+  initialEditServiceId?: string
   returnTo?: string
 }
 
@@ -132,6 +133,18 @@ export default function SettingsClient(props: Props) {
     const client = props.clients.find((c: any) => c.id === props.initialEditClientId)
     if (client) openClientForm(client)
   // openClientForm is stable across renders; props.clients is the initial value
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Auto-open service edit form when arriving from the "needs pricing" banner.
+  useEffect(() => {
+    if (!props.initialEditServiceId) return
+    const svc = props.services.find((s: any) => s.id === props.initialEditServiceId)
+    if (!svc) return
+    setEditingId(svc.id)
+    setShowForm('service')
+    const gids = props.groupServices.filter((gs: any) => gs.service_id === svc.id).map((gs: any) => gs.group_id)
+    setForm({ ...svc, _groupIds: gids })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -468,7 +481,7 @@ export default function SettingsClient(props: Props) {
     setShowForm(null)
   }
 
-  function closeClientForm() {
+  function closeForm() {
     setShowForm(null)
     if (props.returnTo) router.push(props.returnTo)
   }
@@ -503,7 +516,7 @@ export default function SettingsClient(props: Props) {
       }
     }
     setSaving(false)
-    closeClientForm()
+    closeForm()
   }
 
   // --- Services ---
@@ -542,7 +555,7 @@ export default function SettingsClient(props: Props) {
       } catch {}
     }
 
-    setSaving(false); setShowForm(null)
+    setSaving(false); closeForm()
   }
 
   // --- Groups ---
@@ -2416,19 +2429,19 @@ export default function SettingsClient(props: Props) {
 
       {/* Modal Forms */}
       {showForm && (
-        <ModalOverlay onClose={() => showForm === 'client' ? closeClientForm() : setShowForm(null)}>
+        <ModalOverlay onClose={() => (showForm === 'client' || showForm === 'service') ? closeForm() : setShowForm(null)}>
           <div className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-card rounded-t-2xl">
               <div>
-                {props.returnTo && showForm === 'client' && (
-                  <button type="button" onClick={closeClientForm} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mb-1 transition-colors">
+                {props.returnTo && (showForm === 'client' || showForm === 'service') && (
+                  <button type="button" onClick={closeForm} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mb-1 transition-colors">
                     <ChevronLeft className="w-3 h-3" />
                     Back to {props.returnTo.split('/').pop()}
                   </button>
                 )}
                 <h2 className="font-semibold capitalize">{editingId ? 'Edit' : 'Add'} {showForm}</h2>
               </div>
-              <button onClick={() => showForm === 'client' ? closeClientForm() : setShowForm(null)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+              <button onClick={() => (showForm === 'client' || showForm === 'service') ? closeForm() : setShowForm(null)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
             </div>
 
             <form onSubmit={
@@ -3037,7 +3050,7 @@ export default function SettingsClient(props: Props) {
               )}
 
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => showForm === 'client' ? closeClientForm() : setShowForm(null)} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80">Cancel</button>
+                <button type="button" onClick={() => showForm === 'client' ? closeForm() : setShowForm(null)} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80">Cancel</button>
                 <button type="submit" disabled={saving} className="flex-1 gradient-bg text-white text-sm font-medium py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>
               </div>
             </form>
