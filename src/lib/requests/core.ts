@@ -45,25 +45,25 @@ export function projectClientStatus(status: RequestStatus): string {
 
 /** Internal inbox chip styling per status. */
 export const STATUS_CHIP: Record<string, string> = {
-  submitted:           'bg-blue-500/12 text-blue-400 border-blue-500/25',
-  under_review:        'bg-amber-500/12 text-amber-400 border-amber-500/25',
-  approved:            'bg-violet-500/12 text-violet-300 border-violet-500/25',
-  started:             'bg-green-500/12 text-green-400 border-green-500/25',
-  in_progress:         'bg-green-500/12 text-green-400 border-green-500/25',
-  waiting_for_content: 'bg-orange-500/12 text-orange-400 border-orange-500/25',
-  revision_requested:  'bg-pink-500/12 text-pink-400 border-pink-500/25',
-  completed:           'bg-emerald-500/12 text-emerald-400 border-emerald-500/25',
-  delivered:           'bg-violet-500/12 text-violet-300 border-violet-500/25',
-  rejected:            'bg-red-500/12 text-red-400 border-red-500/25',
+  submitted:           'bg-blue-500/12 text-blue-700 border-blue-500/25 dark:text-blue-400',
+  under_review:        'bg-amber-500/12 text-amber-700 border-amber-500/25 dark:text-amber-400',
+  approved:            'bg-violet-500/12 text-violet-700 border-violet-500/25 dark:text-violet-300',
+  started:             'bg-green-500/12 text-green-700 border-green-500/25 dark:text-green-400',
+  in_progress:         'bg-green-500/12 text-green-700 border-green-500/25 dark:text-green-400',
+  waiting_for_content: 'bg-orange-500/12 text-orange-700 border-orange-500/25 dark:text-orange-400',
+  revision_requested:  'bg-pink-500/12 text-pink-700 border-pink-500/25 dark:text-pink-400',
+  completed:           'bg-emerald-500/12 text-emerald-700 border-emerald-500/25 dark:text-emerald-400',
+  delivered:           'bg-violet-500/12 text-violet-700 border-violet-500/25 dark:text-violet-300',
+  rejected:            'bg-red-500/12 text-red-700 border-red-500/25 dark:text-red-400',
   archived:            'bg-secondary text-muted-foreground border-border',
-  cancelled:           'bg-red-500/10 text-red-400/80 border-red-500/20',
+  cancelled:           'bg-red-500/10 text-red-700/80 border-red-500/20 dark:text-red-400/80',
 }
 
 export const PRIORITY_CHIP: Record<string, string> = {
   low:    'text-muted-foreground',
   normal: 'text-foreground/70',
-  high:   'text-amber-400',
-  urgent: 'text-red-400',
+  high:   'text-amber-600 dark:text-amber-400',
+  urgent: 'text-red-600 dark:text-red-400',
 }
 
 export function refLabel(refNo: number | null | undefined): string {

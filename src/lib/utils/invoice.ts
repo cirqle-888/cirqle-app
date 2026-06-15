@@ -42,26 +42,28 @@ export function isOverdue(dueDate: string, status: string, issueDate?: string): 
  * Get status color for UI
  */
 export function getStatusColor(status: string): string {
+  // Light mode uses darker -700 text for contrast on the tinted background;
+  // dark mode keeps the lighter -300/-400 text via the `dark:` variant.
   const colors: Record<string, string> = {
-    draft:     'bg-gray-500/20 text-gray-400 border border-gray-500/30',
-    reviewed:  'bg-violet-500/20 text-violet-400 border border-violet-500/30',
-    finalized: 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30',
-    sent:      'bg-blue-500/20 text-blue-400 border border-blue-500/30',
-    partial:   'bg-orange-500/20 text-orange-400 border border-orange-500/30',
-    paid:      'bg-green-500/20 text-green-400 border border-green-500/30',
-    overdue:   'bg-red-500/20 text-red-400 border border-red-500/30',
-    cancelled: 'bg-gray-500/20 text-gray-500 border border-gray-500/20',
-    bad_debt:  'bg-red-900/30 text-red-500 border border-red-900/40',
-    approved:  'bg-green-500/20 text-green-400 border border-green-500/30',
-    rejected:  'bg-red-500/20 text-red-400 border border-red-500/30',
-    converted: 'bg-purple-500/20 text-purple-400 border border-purple-500/30',
-    pending:   'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30',
-    in_progress: 'bg-blue-500/20 text-blue-300 border border-blue-500/30',
-    delivered: 'bg-violet-500/20 text-violet-300 border border-violet-500/30',
-    done:      'bg-green-500/20 text-green-400 border border-green-500/30',
-    invoiced:  'bg-blue-500/20 text-blue-400 border border-blue-500/30',
+    draft:       'bg-gray-500/20 text-gray-700 border border-gray-500/30 dark:text-gray-400',
+    reviewed:    'bg-violet-500/20 text-violet-700 border border-violet-500/30 dark:text-violet-400',
+    finalized:   'bg-indigo-500/20 text-indigo-700 border border-indigo-500/30 dark:text-indigo-400',
+    sent:        'bg-blue-500/20 text-blue-700 border border-blue-500/30 dark:text-blue-400',
+    partial:     'bg-orange-500/20 text-orange-700 border border-orange-500/30 dark:text-orange-400',
+    paid:        'bg-green-500/20 text-green-700 border border-green-500/30 dark:text-green-400',
+    overdue:     'bg-red-500/20 text-red-700 border border-red-500/30 dark:text-red-400',
+    cancelled:   'bg-gray-500/20 text-gray-600 border border-gray-500/20 dark:text-gray-500',
+    bad_debt:    'bg-red-900/30 text-red-700 border border-red-900/40 dark:text-red-500',
+    approved:    'bg-green-500/20 text-green-700 border border-green-500/30 dark:text-green-400',
+    rejected:    'bg-red-500/20 text-red-700 border border-red-500/30 dark:text-red-400',
+    converted:   'bg-purple-500/20 text-purple-700 border border-purple-500/30 dark:text-purple-400',
+    pending:     'bg-yellow-500/20 text-yellow-700 border border-yellow-500/30 dark:text-yellow-400',
+    in_progress: 'bg-blue-500/20 text-blue-700 border border-blue-500/30 dark:text-blue-300',
+    delivered:   'bg-violet-500/20 text-violet-700 border border-violet-500/30 dark:text-violet-300',
+    done:        'bg-green-500/20 text-green-700 border border-green-500/30 dark:text-green-400',
+    invoiced:    'bg-blue-500/20 text-blue-700 border border-blue-500/30 dark:text-blue-400',
   }
-  return colors[status] || 'bg-gray-500/20 text-gray-400 border border-gray-500/30'
+  return colors[status] || 'bg-gray-500/20 text-gray-700 border border-gray-500/30 dark:text-gray-400'
 }
 
 export function getStatusLabel(status: string): string {

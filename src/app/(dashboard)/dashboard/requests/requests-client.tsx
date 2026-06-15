@@ -755,10 +755,10 @@ export default function RequestsClient({
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-[11px] font-mono text-muted-foreground shrink-0">{refLabel(r.ref_no)}</span>
                           <p className="text-sm font-semibold truncate">{r.title}</p>
-                          {r.is_planned && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">planned</span>}
+                          {r.is_planned && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-700 border border-blue-500/20 dark:text-blue-400">planned</span>}
                           {hasNewExternal(r) && (
-                            <span className="flex items-center gap-1 text-[10px] font-semibold text-amber-400">
-                              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                            <span className="flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-amber-400 animate-pulse" />
                               New {r.source === 'agency' ? 'Agency' : 'Client'} Update
                             </span>
                           )}
@@ -766,17 +766,17 @@ export default function RequestsClient({
                         <div className="flex items-center gap-2.5 mt-1 text-[11px] text-muted-foreground flex-wrap">
                           <span className="truncate max-w-[220px]">{requesterOf(r)}</span>
                           {!isDraggableTab && r.priority_rank != null && !['completed', 'delivered', 'rejected', 'archived'].includes(r.status) && (
-                            <span className="font-bold text-violet-400" title="Requester's priority order">P#{r.priority_rank}</span>
+                            <span className="font-bold text-violet-700 dark:text-violet-400" title="Requester's priority order">P#{r.priority_rank}</span>
                           )}
                           {r.priority !== 'normal' && <span className={`flex items-center gap-0.5 font-medium ${PRIORITY_CHIP[r.priority]}`}><Flag className="w-3 h-3" />{r.priority}</span>}
                           {r.due_date && <span className="flex items-center gap-1"><CalendarDays className="w-3 h-3" />due {fmtDate(r.due_date)}</span>}
                           <span>{ago(r.created_at)}</span>
-                          {r.service?.name && <span className="text-cyan-400/70">{r.service.name}</span>}
+                          {r.service?.name && <span className="text-cyan-700 dark:text-cyan-400/70">{r.service.name}</span>}
                           {r.assigned_employee?.name && (
-                            <span className="flex items-center gap-1 text-violet-300/80"><UserRound className="w-3 h-3" />{r.assigned_employee.name}</span>
+                            <span className="flex items-center gap-1 text-violet-700 dark:text-violet-300/80"><UserRound className="w-3 h-3" />{r.assigned_employee.name}</span>
                           )}
                           {r.promoted_task?.task_number != null && (
-                            <span className="font-mono text-green-400/80" title={`Linked task: ${r.promoted_task.title}`}>Task #{r.promoted_task.task_number}</span>
+                            <span className="font-mono text-green-700 dark:text-green-400/80" title={`Linked task: ${r.promoted_task.title}`}>Task #{r.promoted_task.task_number}</span>
                           )}
                           {r.source === 'manual' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary border border-border text-muted-foreground">added by you</span>}
                         </div>

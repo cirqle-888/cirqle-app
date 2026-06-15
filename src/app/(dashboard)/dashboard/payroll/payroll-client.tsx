@@ -136,6 +136,18 @@ function daysUntil(date: Date): number {
   return Math.ceil((date.getTime() - new Date().setHours(0,0,0,0)) / 86400000)
 }
 
+/** Clean avatar text: initials from the (privacy-aware) display name when it's
+ *  a real name, otherwise the numeric part of the CQID (e.g. "001"). Keeps the
+ *  gradient circles legible instead of cramming the full "CQID001". */
+function avatarText(displayName: string | undefined, cqid: string): string {
+  const n = (displayName || '').trim()
+  if (n && !/^CQID/i.test(n)) {
+    const parts = n.split(/\s+/).filter(Boolean)
+    return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase()
+  }
+  return (cqid || '').replace(/^CQID/i, '') || '–'
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function PayrollClient({
@@ -750,12 +762,12 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                   Total: <span className="font-semibold text-foreground">₹{monthStats.total.toLocaleString('en-IN')}</span>
                 </div>
                 {monthStats.paid > 0 && (
-                  <div className="text-xs px-3 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400">
+                  <div className="text-xs px-3 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20 text-green-700 dark:text-green-400">
                     Paid: ₹{monthStats.paid.toLocaleString('en-IN')} ({monthStats.paidCount})
                   </div>
                 )}
                 {monthStats.pending > 0 && (
-                  <div className="text-xs px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400">
+                  <div className="text-xs px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400">
                     Pending: ₹{monthStats.pending.toLocaleString('en-IN')}
                   </div>
                 )}
@@ -775,26 +787,26 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
 
             {/* Missing contributions alert */}
             {missingContribTasks.length > 0 && (
-              <div className="bg-amber-500/8 border border-amber-500/25 rounded-xl p-4">
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 dark:bg-amber-500/8 dark:border-amber-500/25">
                 <div className="flex items-start gap-3">
-                  <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+                  <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0 dark:text-amber-400" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-amber-300 mb-2">
+                    <p className="text-sm font-semibold text-amber-700 mb-2 dark:text-amber-300">
                       {missingContribTasks.length} completed task{missingContribTasks.length !== 1 ? 's' : ''} missing contribution scores in {MONTHS[viewMonth - 1]}
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 mb-3">
                       {missingContribTasks.slice(0, 6).map(t => (
-                        <div key={t.id} className="flex items-center gap-2 text-xs text-amber-200/60">
-                          <span className="w-1 h-1 rounded-full bg-amber-500/50 shrink-0" />
+                        <div key={t.id} className="flex items-center gap-2 text-xs text-amber-800/80 dark:text-amber-200/60">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0 dark:bg-amber-500/50" />
                           <span className="truncate">{t.title}</span>
-                          <span className="text-amber-500/50 shrink-0 ml-auto">{t.task_date}</span>
+                          <span className="text-amber-700/70 shrink-0 ml-auto dark:text-amber-500/50">{t.task_date}</span>
                         </div>
                       ))}
                       {missingContribTasks.length > 6 && (
-                        <p className="text-xs text-amber-500/50">+{missingContribTasks.length - 6} more tasks</p>
+                        <p className="text-xs text-amber-700/70 dark:text-amber-500/50">+{missingContribTasks.length - 6} more tasks</p>
                       )}
                     </div>
-                    <a href="/dashboard/contributions" className="inline-flex items-center gap-1 text-xs text-amber-400 hover:underline">
+                    <a href="/dashboard/contributions" className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 hover:underline dark:text-amber-400">
                       Go to Contributions to add scores <ArrowRight className="w-3 h-3" />
                     </a>
                   </div>
@@ -839,7 +851,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-center gap-2.5">
                         <div className="w-9 h-9 rounded-xl gradient-bg flex items-center justify-center shrink-0">
-                          <span className="text-white text-[10px] font-bold">{emp.cqid}</span>
+                          <span className="text-white text-xs font-bold tracking-wide">{avatarText(dn(emp), emp.cqid)}</span>
                         </div>
                         <div>
                           <p className="text-sm font-semibold leading-tight">{dn(emp)}</p>
@@ -848,10 +860,10 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                       </div>
                       {record
                         ? record.status === 'paid'
-                          ? <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-green-500/15 text-green-400 shrink-0">Paid</span>
-                          : <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-400 shrink-0">Pending</span>
+                          ? <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-green-500/15 text-green-700 shrink-0 dark:text-green-400">Paid</span>
+                          : <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-700 shrink-0 dark:text-amber-400">Pending</span>
                         : commission > 0
-                          ? <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-blue-500/15 text-blue-400 shrink-0">Ready</span>
+                          ? <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-blue-500/15 text-blue-700 shrink-0 dark:text-blue-400">Ready</span>
                           : <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-secondary text-muted-foreground shrink-0">No data</span>
                       }
                     </div>
@@ -865,7 +877,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                       <div className="flex justify-between items-center group/comm">
                         <span className="text-muted-foreground">Commission</span>
                         <div className="flex items-center gap-1.5">
-                          <span className={commission > 0 ? 'text-green-400' : 'text-muted-foreground'}>
+                          <span className={commission > 0 ? 'text-green-700 dark:text-green-400' : 'text-muted-foreground'}>
                             {commission > 0 ? `+₹${commission.toLocaleString('en-IN')}` : '—'}
                           </span>
                         </div>
@@ -1022,13 +1034,13 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{MONTHS[record.month - 1]} {record.year}</td>
                       <td className="px-4 py-3 text-right text-muted-foreground">₹{(record.base_salary || 0).toLocaleString('en-IN')}</td>
-                      <td className="px-4 py-3 text-right text-green-400">+₹{(record.commission_earned || 0).toLocaleString('en-IN')}</td>
-                      <td className="px-4 py-3 text-right text-red-400">{ded > 0 ? `-₹${ded.toLocaleString('en-IN')}` : '—'}</td>
+                      <td className="px-4 py-3 text-right text-green-700 dark:text-green-400">+₹{(record.commission_earned || 0).toLocaleString('en-IN')}</td>
+                      <td className="px-4 py-3 text-right text-red-700 dark:text-red-400">{ded > 0 ? `-₹${ded.toLocaleString('en-IN')}` : '—'}</td>
                       <td className="px-4 py-3 text-right font-semibold">₹{(record.net_salary || 0).toLocaleString('en-IN')}</td>
                       <td className="px-4 py-3">
                         {record.status === 'paid'
                           ? <div className="flex items-center gap-1.5">
-                              <span className="text-xs px-2 py-0.5 rounded-md bg-green-500/15 text-green-400">Paid {record.paid_date}</span>
+                              <span className="text-xs px-2 py-0.5 rounded-md bg-green-500/15 text-green-700 dark:text-green-400">Paid {record.paid_date}</span>
                               <button onClick={() => confirmMarkUnpaid(record.id)} title="Undo payment"
                                 className="text-xs px-1.5 py-0.5 rounded-md text-muted-foreground/50 hover:text-red-400 hover:bg-red-500/10 transition-colors">
                                 Undo
@@ -1076,7 +1088,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                       <div className="text-right">₹{(record.base_salary || 0).toLocaleString('en-IN')}</div>
                       
                       <div className="text-muted-foreground">Commission</div>
-                      <div className="text-right text-green-400">+₹{(record.commission_earned || 0).toLocaleString('en-IN')}</div>
+                      <div className="text-right text-green-700 dark:text-green-400">+₹{(record.commission_earned || 0).toLocaleString('en-IN')}</div>
                       
                       <div className="text-muted-foreground">Deductions</div>
                       <div className="text-right text-red-400">{ded > 0 ? `-₹${ded.toLocaleString('en-IN')}` : '—'}</div>
@@ -1158,7 +1170,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                         <td className="px-4 py-3 sticky left-0 bg-transparent align-top z-10">
                           <div className="flex items-center gap-2">
                             <div className="w-7 h-7 rounded-lg gradient-bg flex items-center justify-center shrink-0">
-                              <span className="text-white text-[9px] font-bold">{emp.cqid.replace('CQID','')}</span>
+                              <span className="text-white text-[10px] font-bold tracking-wide">{avatarText(dn(emp), emp.cqid)}</span>
                             </div>
                             <div>
                               <p className="text-xs font-semibold text-foreground">{dn(emp)}</p>
@@ -1250,7 +1262,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                     <div className="flex items-center justify-between mb-3 pb-3 border-b border-border/50">
                       <div className="flex items-center gap-2.5">
                         <div className="w-8 h-8 rounded-lg gradient-bg flex items-center justify-center shrink-0">
-                          <span className="text-white text-[10px] font-bold">{emp.cqid.replace('CQID','')}</span>
+                          <span className="text-white text-[11px] font-bold tracking-wide">{avatarText(dn(emp), emp.cqid)}</span>
                         </div>
                         <div>
                           <p className="text-sm font-semibold">{dn(emp)}</p>
@@ -1340,7 +1352,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex items-center gap-3">
                       <div className="w-11 h-11 rounded-xl gradient-bg flex items-center justify-center shrink-0">
-                        <span className="text-white font-bold text-xs">{emp.cqid}</span>
+                        <span className="text-white font-bold text-sm tracking-wide">{avatarText(dn(emp), emp.cqid)}</span>
                       </div>
                       <div>
                         <p className="font-semibold">{dn(emp)}</p>
@@ -1499,7 +1511,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
               <div className="flex items-center justify-between px-6 py-4 border-b border-foreground/15 sticky top-0 bg-secondary z-10">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl gradient-bg flex items-center justify-center shrink-0">
-                    <span className="text-white font-bold text-xs">{emp.cqid}</span>
+                    <span className="text-white font-bold text-sm tracking-wide">{avatarText(dn(emp), emp.cqid)}</span>
                   </div>
                   <div>
                     <h2 className="font-semibold">{dn(emp)}</h2>
