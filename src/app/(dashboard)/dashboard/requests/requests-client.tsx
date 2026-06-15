@@ -37,16 +37,27 @@ import {
 // requestStatusFromTask): New → On Going → Under Review → Completed → Cancelled.
 // under_review/approved are legacy pre-start states folded into "New".
 const TABS: { key: string; label: string; statuses: string[] }[] = [
+  { key: 'all',       label: 'All',                  statuses: ['submitted', 'under_review', 'approved', 'started', 'in_progress', 'waiting_for_content', 'revision_requested', 'delivered', 'completed', 'rejected', 'cancelled'] },
   { key: 'new',       label: 'New',                  statuses: ['submitted', 'under_review', 'approved'] },
   { key: 'ongoing',   label: 'On Going',             statuses: ['started', 'in_progress', 'waiting_for_content', 'revision_requested'] },
   { key: 'review',    label: 'Under Review',         statuses: ['delivered'] },
   { key: 'completed', label: 'Completed',            statuses: ['completed'] },
-  { key: 'all',       label: 'All',                  statuses: ['submitted', 'under_review', 'approved', 'started', 'in_progress', 'waiting_for_content', 'revision_requested', 'delivered', 'completed', 'rejected', 'cancelled'] },
   { key: 'rejected',  label: 'Rejected / Cancelled', statuses: ['rejected', 'cancelled'] },
   { key: 'archived',  label: 'Archived',             statuses: ['archived'] },
 ]
 
 const SORTABLE_TABS = new Set(['new', 'ongoing'])
+
+/** Stage ordering for the "All" tab — active work on top, Completed/closed at
+ *  the bottom. Within the same stage, priority_rank still decides order. */
+const STATUS_SORT_RANK: Record<string, number> = {
+  submitted: 0, under_review: 0, approved: 0,
+  started: 1, in_progress: 1, waiting_for_content: 1, revision_requested: 1,
+  delivered: 2,
+  completed: 3,
+  rejected: 4, cancelled: 4,
+  archived: 5,
+}
 
 const STATUS_LABEL: Record<string, string> = {
   ...CLIENT_STATUS_LABEL,
@@ -301,7 +312,15 @@ export default function RequestsClient({
       if (activeFacets.length && !recordMatchesFacets(activeFacets, r, REQUEST_FIELDS, requestGeneric)) return false
       return true
     })
-    return filtered.sort((a, b) => (a.priority_rank ?? 9999) - (b.priority_rank ?? 9999))
+    // On the "All" tab, group by stage (active first, Completed/closed last);
+    // otherwise plain priority order. Priority_rank breaks ties within a stage.
+    return filtered.sort((a, b) => {
+      if (tab === 'all') {
+        const sr = (STATUS_SORT_RANK[a.status] ?? 9) - (STATUS_SORT_RANK[b.status] ?? 9)
+        if (sr !== 0) return sr
+      }
+      return (a.priority_rank ?? 9999) - (b.priority_rank ?? 9999)
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requests, tab, activeFacets, clientFilter])
 
