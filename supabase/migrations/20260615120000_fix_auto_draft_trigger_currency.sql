@@ -156,8 +156,8 @@ BEGIN
       NEW.id,
       NEW.title,
       COALESCE(NEW.quantity, 1),
-      COALESCE(NEW.billing_amount, 0),     -- FIXED: was billing_amount_inr
-      COALESCE(NEW.billing_amount, 0),     -- FIXED: was billing_amount_inr
+      COALESCE(NEW.billing_amount, NEW.billing_amount_inr, 0),   -- FIXED: was billing_amount_inr; fallback for legacy INR rows
+      COALESCE(NEW.billing_amount, NEW.billing_amount_inr, 0),   -- FIXED: was billing_amount_inr; fallback for legacy INR rows
       COALESCE(NEW.currency, 'INR'),
       v_display_order + 1
     )
@@ -206,8 +206,8 @@ BEGIN
       UPDATE invoice_items
          SET description = NEW.title,
              quantity    = COALESCE(NEW.quantity, 1),
-             unit_price  = COALESCE(NEW.billing_amount, 0),   -- FIXED: was billing_amount_inr
-             total       = COALESCE(NEW.billing_amount, 0),   -- FIXED: was billing_amount_inr
+             unit_price  = COALESCE(NEW.billing_amount, NEW.billing_amount_inr, 0),  -- FIXED: was billing_amount_inr; fallback for legacy INR rows
+             total       = COALESCE(NEW.billing_amount, NEW.billing_amount_inr, 0),  -- FIXED: was billing_amount_inr; fallback for legacy INR rows
              currency    = COALESCE(NEW.currency, 'INR')
        WHERE task_id     = NEW.id;
 
