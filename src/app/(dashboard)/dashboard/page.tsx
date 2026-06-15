@@ -67,6 +67,7 @@ export default async function DashboardPage() {
   // Only fetch invoices, cashbook, and all payroll history if admin
   const [
     invoicesRes,
+    exchangeRatesRes,
     cashbookRes,
     displayTasksRes,
     employeesRes,
@@ -77,9 +78,15 @@ export default async function DashboardPage() {
     isAdmin
       ? fetchAll(supabase
           .from('invoices')
-          .select('id, invoice_number, total_amount, paid_amount, total_amount_inr, paid_amount_inr, status, currency, due_date, issue_date, client:clients(id, name)')
+          .select('id, invoice_number, total_amount, paid_amount, total_amount_inr, paid_amount_inr, exchange_rate, status, currency, due_date, issue_date, client:clients(id, name)')
           .order('due_date', { ascending: true })
           .order('id', { ascending: true }))
+      : Promise.resolve({ data: [] }),
+
+    // Live exchange rates — used by the FX toggle on the dashboard (pure UI, no DB writes).
+    // Small table (~10 rows), negligible overhead. Non-admins get an empty array.
+    isAdmin
+      ? supabase.from('exchange_rates').select('currency, rate_to_inr')
       : Promise.resolve({ data: [] }),
 
     // Cashbook — admin only, all-time for accurate bank balance calculation.
@@ -156,6 +163,7 @@ export default async function DashboardPage() {
   ])
 
   const invoices           = invoicesRes.data || []
+  const exchangeRates      = exchangeRatesRes.data || []
   const allCashbook        = cashbookRes.data || []
   const displayTasks       = displayTasksRes.data || []
   const employees          = employeesRes.data || []
@@ -278,6 +286,7 @@ export default async function DashboardPage() {
         totalExpectedCash:   bankBalance + outstanding + toBeInvoicedAmount,
         totalDues:           overdueInvoices.length + dueInvoices.length + toBeInvoiced.length,
       }}
+      exchangeRates={exchangeRates as any[]}
       isAdmin={isAdmin}
     />
     </>

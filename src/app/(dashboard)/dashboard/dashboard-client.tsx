@@ -18,7 +18,7 @@
 // the two array props became promise props read via `use()`.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useState, useMemo, use, Suspense, useEffect } from 'react'
+import { useState, useMemo, use, Suspense, useEffect, useCallback } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
@@ -26,7 +26,7 @@ import { DateFilter, matchesDateFilter, getDateFilterLabel } from '@/components/
 import type { DateFilterValue } from '@/components/ui/date-filter'
 import {
   AlertTriangle, ClipboardList, ArrowRight, CheckCircle, X, ChevronRight,
-  FileText, BarChart3,
+  FileText, BarChart3, TrendingUp, TrendingDown, Zap,
 } from 'lucide-react'
 import {
   fmt, fmtDate, daysLate, daysToGo, getPeriodKey, getPeriodLabel,
@@ -55,6 +55,29 @@ interface Props {
   myActions?: { active: any[]; needContribution: any[] }
   todayStr: string
   isAdmin?: boolean
+  /** Live rates from exchange_rates table — used only for the FX toggle, no accounting impact. */
+  exchangeRates?: { currency: string; rate_to_inr: number }[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FX mode helpers
+// ─────────────────────────────────────────────────────────────────────────────
+const FX_MODE_KEY = 'cirqle-fx-mode'
+
+function useFxMode() {
+  const [mode, setModeState] = useState<'booked' | 'live'>('booked')
+  // Hydrate from localStorage after mount (SSR-safe)
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(FX_MODE_KEY)
+      if (stored === 'live') setModeState('live')
+    } catch { /* localStorage unavailable */ }
+  }, [])
+  const setMode = useCallback((m: 'booked' | 'live') => {
+    setModeState(m)
+    try { localStorage.setItem(FX_MODE_KEY, m) } catch { /* ignore */ }
+  }, [])
+  return [mode, setMode] as const
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -216,7 +239,7 @@ function AdminDashboard({
   stats, invoices, overdueInvoices, dueInvoices, allCashbook,
   allAnalyticsTasksPromise, todayTasks, unscoredDoneTasks,
   activeTasks, toBeInvoiced, employees, scoresPromise, payrollRecords,
-  todayStr,
+  todayStr, exchangeRates = [],
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
@@ -228,6 +251,7 @@ function AdminDashboard({
   })
   const [granularity, setGranularity] = useState<Granularity>((searchParams.get('granularity') as any) || 'monthly')
   const [drawer, setDrawer] = useState<DrawerType>(null)
+  const [fxMode, setFxMode] = useFxMode()
 
   useEffect(() => {
     const params = new URLSearchParams(searchParams.toString())
@@ -245,6 +269,38 @@ function AdminDashboard({
   const periodLabel = dateFilter ? getDateFilterLabel(dateFilter) : 'All time'
 
   const urgentCount = unscoredDoneTasks.length + overdueInvoices.length
+
+  // ── FX live calculations ─────────────────────────────────────────────────
+  // Build a rate map from the live exchange_rates table (fetched server-side).
+  const liveRateMap = useMemo(
+    () => new Map(exchangeRates.map(r => [r.currency, r.rate_to_inr])),
+    [exchangeRates]
+  )
+  // Revalue a single invoice at today's rate. INR invoices are unchanged.
+  const liveInrOf = useCallback((inv: any): number => {
+    if (!inv.currency || inv.currency === 'INR') return inv.total_amount_inr ?? inv.total_amount ?? 0
+    const rate = liveRateMap.get(inv.currency) ?? inv.exchange_rate ?? 1
+    return (inv.total_amount ?? 0) * rate
+  }, [liveRateMap])
+  const paidInrOf = (inv: any): number => inv.paid_amount_inr ?? inv.paid_amount ?? 0
+
+  const liveFx = useMemo(() => {
+    const sentInvs = invoices.filter((i: any) => ['sent', 'partial', 'overdue'].includes(i.status))
+    const liveOutstanding  = sentInvs.reduce((s, i) => s + Math.max(0, liveInrOf(i) - paidInrOf(i)), 0)
+    const liveOverdueAmt   = overdueInvoices.reduce((s, i) => s + Math.max(0, liveInrOf(i) - paidInrOf(i)), 0)
+    return {
+      outstanding:    liveOutstanding,
+      overdueAmount:  liveOverdueAmt,
+      totalExpectedCash: stats.bankBalance + liveOutstanding + stats.toBeInvoicedAmount,
+      varianceOutstanding: liveOutstanding - stats.outstanding,
+      varianceOverdue:     liveOverdueAmt  - stats.overdueAmount,
+    }
+  }, [invoices, overdueInvoices, liveInrOf, stats])
+
+  // The stats used throughout the shell — identical to server values in Booked mode.
+  const effectiveStats = fxMode === 'live'
+    ? { ...stats, outstanding: liveFx.outstanding, overdueAmount: liveFx.overdueAmount, totalExpectedCash: liveFx.totalExpectedCash }
+    : stats
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
@@ -264,7 +320,7 @@ function AdminDashboard({
               </button>
             )}
           </div>
-          {/* Row 2: granularity + period label */}
+          {/* Row 2: granularity + period label + FX toggle */}
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center bg-secondary rounded-lg p-0.5 gap-0.5">
               {(['daily','monthly','quarterly','yearly'] as Granularity[]).map(g => (
@@ -274,7 +330,28 @@ function AdminDashboard({
                 </button>
               ))}
             </div>
-            <p className="text-xs text-muted-foreground shrink-0">{periodLabel}</p>
+            <div className="flex items-center gap-3 shrink-0">
+              <p className="text-xs text-muted-foreground hidden sm:block">{periodLabel}</p>
+              {/* FX Mode toggle */}
+              <div
+                className="flex items-center bg-secondary rounded-lg p-0.5 gap-0"
+                title="Booked = invoice exchange rate at invoice date&#10;Live = today's exchange rate from Settings"
+              >
+                <button
+                  onClick={() => setFxMode('booked')}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${fxMode === 'booked' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  Booked
+                </button>
+                <button
+                  onClick={() => setFxMode('live')}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all flex items-center gap-1 ${fxMode === 'live' ? 'bg-violet-500/20 text-violet-600 dark:text-violet-300 shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  <Zap className="w-2.5 h-2.5" />
+                  Live
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -302,7 +379,7 @@ function AdminDashboard({
               {overdueInvoices.length > 0 && (
                 <FocusCard icon={<AlertTriangle className="w-4 h-4 text-red-400" />} color="red"
                   title="Overdue Invoices" count={overdueInvoices.length} unit="invoice"
-                  sub={fmt(stats.overdueAmount) + ' owed'}
+                  sub={fmt(effectiveStats.overdueAmount) + ' owed'}
                   items={overdueInvoices.slice(0,3).map(i => `${i.client?.name || i.invoice_number} — ${fmt((i.total_amount||0)-(i.paid_amount||0))}`)}
                   onClick={() => setDrawer('overdue')} />
               )}
@@ -316,26 +393,78 @@ function AdminDashboard({
           <div className="relative">
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div>
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Total Expected Cash</p>
-                <p className="text-3xl font-black gradient-text leading-tight">{fmt(stats.totalExpectedCash)}</p>
+                <div className="flex items-center gap-2 mb-1">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total Expected Cash</p>
+                  {fxMode === 'live' && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-violet-500/15 text-violet-600 dark:text-violet-300 border border-violet-500/20 px-1.5 py-0.5 rounded-full">
+                      <Zap className="w-2.5 h-2.5" /> Live FX
+                    </span>
+                  )}
+                </div>
+                <p className="text-3xl font-black gradient-text leading-tight">{fmt(effectiveStats.totalExpectedCash)}</p>
                 <p className="text-xs text-muted-foreground mt-1.5">Bank balance + all outstanding + to be invoiced</p>
               </div>
               <div className="shrink-0 text-right space-y-0.5">
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Breakdown</p>
                 <p className="text-xs"><span className="text-muted-foreground">Bank balance</span> <span className="font-semibold">{fmt(stats.bankBalance)}</span></p>
-                <p className="text-xs"><span className="text-muted-foreground">Outstanding invoices</span> <span className="font-semibold text-orange-400">{fmt(stats.outstanding)}</span></p>
+                <p className="text-xs">
+                  <span className="text-muted-foreground">Outstanding invoices</span>{' '}
+                  <span className="font-semibold text-orange-400">{fmt(effectiveStats.outstanding)}</span>
+                </p>
                 <p className="text-xs"><span className="text-muted-foreground">To be invoiced</span> <span className="font-semibold text-yellow-400">{fmt(stats.toBeInvoicedAmount)}</span></p>
               </div>
             </div>
-            {stats.totalExpectedCash > 0 && (
+            {effectiveStats.totalExpectedCash > 0 && (
               <div className="mt-4 h-1.5 bg-border rounded-full overflow-hidden flex gap-px">
-                <div className="h-full bg-gradient-to-r from-violet-500 to-purple-500 rounded-full" style={{ width: `${Math.round((stats.bankBalance/stats.totalExpectedCash)*100)}%` }} />
-                <div className="h-full bg-orange-400/70" style={{ width: `${Math.round((stats.outstanding/stats.totalExpectedCash)*100)}%` }} />
-                <div className="h-full bg-yellow-400/70" style={{ width: `${Math.round((stats.toBeInvoicedAmount/stats.totalExpectedCash)*100)}%` }} />
+                <div className="h-full bg-gradient-to-r from-violet-500 to-purple-500 rounded-full" style={{ width: `${Math.round((stats.bankBalance/effectiveStats.totalExpectedCash)*100)}%` }} />
+                <div className="h-full bg-orange-400/70" style={{ width: `${Math.round((effectiveStats.outstanding/effectiveStats.totalExpectedCash)*100)}%` }} />
+                <div className="h-full bg-yellow-400/70" style={{ width: `${Math.round((stats.toBeInvoicedAmount/effectiveStats.totalExpectedCash)*100)}%` }} />
               </div>
             )}
           </div>
         </div>
+
+        {/* ── FX Variance card (Live mode only) ────────── */}
+        {fxMode === 'live' && (
+          <div className="bg-card border border-violet-500/20 rounded-2xl p-4 grid grid-cols-3 gap-3">
+            <div>
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1"
+                title="Outstanding using exchange rate locked at invoice date">
+                Booked Outstanding
+              </p>
+              <p className="text-lg font-bold">{fmt(stats.outstanding)}</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Locked rate</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1"
+                title="Outstanding using today's exchange rate from Settings">
+                Live Outstanding
+              </p>
+              <p className="text-lg font-bold text-violet-600 dark:text-violet-300">{fmt(liveFx.outstanding)}</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Today's rate</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">FX Variance</p>
+              {liveFx.varianceOutstanding === 0 ? (
+                <p className="text-lg font-bold text-muted-foreground">—</p>
+              ) : liveFx.varianceOutstanding > 0 ? (
+                <>
+                  <p className="text-lg font-bold text-emerald-500 flex items-center gap-1">
+                    <TrendingUp className="w-4 h-4" />{fmt(liveFx.varianceOutstanding)}
+                  </p>
+                  <p className="text-[10px] text-emerald-500/70 mt-0.5">Unrealized gain</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-lg font-bold text-red-400 flex items-center gap-1">
+                    <TrendingDown className="w-4 h-4" />{fmt(Math.abs(liveFx.varianceOutstanding))}
+                  </p>
+                  <p className="text-[10px] text-red-400/70 mt-0.5">Unrealized loss</p>
+                </>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* ── Streamed analytics (KPIs · Production · Pulse · bottom grid) ──── */}
         {/* These read the two heavy promises via use(); the shell above already
@@ -344,7 +473,7 @@ function AdminDashboard({
           <DashboardAnalytics
             allAnalyticsTasksPromise={allAnalyticsTasksPromise}
             scoresPromise={scoresPromise}
-            stats={stats}
+            stats={effectiveStats}
             invoices={invoices}
             overdueInvoices={overdueInvoices}
             dueInvoices={dueInvoices}
