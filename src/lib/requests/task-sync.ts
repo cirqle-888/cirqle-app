@@ -22,8 +22,8 @@ export async function syncRequestStatusFromTask(taskId: string, taskStatus: stri
 
     for (const req of reqs) {
       if (req.status === mapped) continue
-      // Don't resurrect closed requests when an old task is touched.
-      if (req.status === 'rejected' || req.status === 'archived') continue
+      // Don't resurrect / reopen a closed request when an old task is touched.
+      if (req.status === 'rejected' || req.status === 'archived' || req.status === 'cancelled') continue
 
       await admin.from('task_requests').update({
         status: mapped,

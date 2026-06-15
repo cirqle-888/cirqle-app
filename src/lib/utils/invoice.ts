@@ -57,6 +57,7 @@ export function getStatusColor(status: string): string {
     converted: 'bg-purple-500/20 text-purple-400 border border-purple-500/30',
     pending:   'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30',
     in_progress: 'bg-blue-500/20 text-blue-300 border border-blue-500/30',
+    delivered: 'bg-violet-500/20 text-violet-300 border border-violet-500/30',
     done:      'bg-green-500/20 text-green-400 border border-green-500/30',
     invoiced:  'bg-blue-500/20 text-blue-400 border border-blue-500/30',
   }
@@ -77,9 +78,10 @@ export function getStatusLabel(status: string): string {
     approved:    'Approved',
     rejected:    'Rejected',
     converted:   'Converted',
-    pending:     'Pending',
+    pending:     'New',
     in_progress: 'In Progress',
-    done:        'Done',
+    delivered:   'Delivered',
+    done:        'Completed',
     invoiced:    'Invoiced',
   }
   return labels[status] || status

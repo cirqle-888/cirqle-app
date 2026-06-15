@@ -17,17 +17,22 @@ export type RequestStatus =
 export type Visibility = 'internal' | 'client' | 'agency'
 export type ActorType = 'client' | 'agency' | 'admin' | 'system'
 
-/** External-facing labels (the ONLY statuses shown on the portal). */
+/** External-facing labels (the ONLY statuses shown on the portal).
+ *  Simplified 5-stage client view (task-driven): New · On Going ·
+ *  Under Review · Completed · Cancelled. `delivered` = work is with the
+ *  client awaiting their review; `waiting_for_content`/`revision_requested`
+ *  surface as "Action Required". under_review/approved are legacy (no longer
+ *  produced) and fold back into the simplified set. */
 export const CLIENT_STATUS_LABEL: Record<string, string> = {
-  submitted:           'Request Submitted',
-  under_review:        'Under Review',
-  approved:            'Approved',
-  started:             'Started',
-  in_progress:         'In Progress',
-  waiting_for_content: 'Waiting for Content',
-  revision_requested:  'Revision Requested',
+  submitted:           'New',
+  under_review:        'New',
+  approved:            'New',
+  started:             'On Going',
+  in_progress:         'On Going',
+  waiting_for_content: 'Action Required',
+  revision_requested:  'Action Required',
+  delivered:           'Under Review',
   completed:           'Completed',
-  delivered:           'Delivered',
   cancelled:           'Cancelled',
 }
 
@@ -48,7 +53,7 @@ export const STATUS_CHIP: Record<string, string> = {
   waiting_for_content: 'bg-orange-500/12 text-orange-400 border-orange-500/25',
   revision_requested:  'bg-pink-500/12 text-pink-400 border-pink-500/25',
   completed:           'bg-emerald-500/12 text-emerald-400 border-emerald-500/25',
-  delivered:           'bg-emerald-500/12 text-emerald-300 border-emerald-500/25',
+  delivered:           'bg-violet-500/12 text-violet-300 border-violet-500/25',
   rejected:            'bg-red-500/12 text-red-400 border-red-500/25',
   archived:            'bg-secondary text-muted-foreground border-border',
   cancelled:           'bg-red-500/10 text-red-400/80 border-red-500/20',
@@ -65,12 +70,21 @@ export function refLabel(refNo: number | null | undefined): string {
   return `REQ-${String(refNo ?? 0).padStart(4, '0')}`
 }
 
-/** Map a promoted task's status onto the request status (mirroring, §3). */
+/**
+ * Map a promoted task's status onto the request status (task-driven mirroring).
+ * The Task page is the single source of truth — staff never set request status
+ * manually. Stage mapping:
+ *   New / In Progress (pending, in_progress) → On Going    (in_progress)
+ *   Delivered         (delivered)            → Under Review (delivered)
+ *   Completed         (done, invoiced, paid) → Completed    (completed)
+ *   Cancelled         (cancelled)            → Cancelled    (cancelled)
+ */
 export function requestStatusFromTask(taskStatus: string): RequestStatus | null {
   if (taskStatus === 'pending' || taskStatus === 'in_progress') return 'in_progress'
-  if (taskStatus === 'done') return 'completed'
-  if (taskStatus === 'delivered' || taskStatus === 'invoiced' || taskStatus === 'paid') return 'delivered'
-  return null // cancelled etc. — leave the request as-is
+  if (taskStatus === 'delivered') return 'delivered'
+  if (taskStatus === 'done' || taskStatus === 'invoiced' || taskStatus === 'paid') return 'completed'
+  if (taskStatus === 'cancelled') return 'cancelled'
+  return null // unknown — leave the request as-is
 }
 
 // ─── Activity logging (server-side, fire-safe) ────────────────────────────────

@@ -21,7 +21,7 @@ import {
   Inbox, AlertTriangle, ChevronRight, Clock, Link2, Loader2, Play,
   CalendarDays, MessageSquarePlus, Save, CheckCircle2, X, Flag,
   Search, Plus, UserRound, List, LayoutGrid, Link as LinkIcon, Trash2,
-  ExternalLink, GripVertical, Share2,
+  ExternalLink, GripVertical, Share2, RefreshCw,
 } from 'lucide-react'
 import {
   CLIENT_STATUS_LABEL, STATUS_CHIP, PRIORITY_CHIP, refLabel, type RequestStatus,
@@ -33,36 +33,42 @@ import {
   reorderStaffPriority,
 } from './actions'
 
+// Task-driven 5-stage flow. Request status mirrors the linked task (see
+// requestStatusFromTask): New → On Going → Under Review → Completed → Cancelled.
+// under_review/approved are legacy pre-start states folded into "New".
 const TABS: { key: string; label: string; statuses: string[] }[] = [
-  { key: 'new',      label: 'New',                 statuses: ['submitted'] },
-  { key: 'reviewed', label: 'Reviewed',             statuses: ['under_review'] },
-  { key: 'approved', label: 'Approved',             statuses: ['approved'] },
-  { key: 'started',  label: 'Started',              statuses: ['started'] },
-  { key: 'ongoing',  label: 'On Going',             statuses: ['in_progress', 'waiting_for_content', 'revision_requested'] },
-  { key: 'done',     label: 'Done',                 statuses: ['completed', 'delivered'] },
-  { key: 'all',      label: 'All',                  statuses: ['submitted', 'under_review', 'approved', 'started', 'in_progress', 'waiting_for_content', 'revision_requested', 'completed', 'delivered', 'rejected', 'cancelled'] },
-  { key: 'rejected', label: 'Rejected / Cancelled', statuses: ['rejected', 'cancelled'] },
-  { key: 'archived', label: 'Archived',             statuses: ['archived'] },
+  { key: 'new',       label: 'New',                  statuses: ['submitted', 'under_review', 'approved'] },
+  { key: 'ongoing',   label: 'On Going',             statuses: ['started', 'in_progress', 'waiting_for_content', 'revision_requested'] },
+  { key: 'review',    label: 'Under Review',         statuses: ['delivered'] },
+  { key: 'completed', label: 'Completed',            statuses: ['completed'] },
+  { key: 'all',       label: 'All',                  statuses: ['submitted', 'under_review', 'approved', 'started', 'in_progress', 'waiting_for_content', 'revision_requested', 'delivered', 'completed', 'rejected', 'cancelled'] },
+  { key: 'rejected',  label: 'Rejected / Cancelled', statuses: ['rejected', 'cancelled'] },
+  { key: 'archived',  label: 'Archived',             statuses: ['archived'] },
 ]
 
-const SORTABLE_TABS = new Set(['new', 'reviewed', 'approved', 'started', 'ongoing'])
+const SORTABLE_TABS = new Set(['new', 'ongoing'])
 
 const STATUS_LABEL: Record<string, string> = {
   ...CLIENT_STATUS_LABEL,
   rejected: 'Rejected', archived: 'Archived',
 }
 
-/** Staff transitions offered per current status (Start is separate — Phase promotion). */
+/**
+ * Manual override transitions. Status is normally TASK-DRIVEN — these are only
+ * surfaced when a request has NO linked task (pre-start Reject/Cancel, or the
+ * rare exception that's tracked outside the Tasks page). Once a task is linked
+ * the menu is hidden and the request mirrors the task automatically.
+ */
 const TRANSITIONS: Record<string, { to: RequestStatus; label: string }[]> = {
-  submitted:           [{ to: 'under_review', label: 'Mark Under Review' }, { to: 'approved', label: 'Approve' }, { to: 'rejected', label: 'Reject' }],
-  under_review:        [{ to: 'approved', label: 'Approve' }, { to: 'rejected', label: 'Reject' }],
-  approved:            [{ to: 'waiting_for_content', label: 'Waiting for Content' }, { to: 'rejected', label: 'Reject' }, { to: 'cancelled', label: 'Cancel' }],
-  started:             [{ to: 'waiting_for_content', label: 'Waiting for Content' }, { to: 'completed', label: 'Mark Completed' }, { to: 'cancelled', label: 'Cancel' }],
-  in_progress:         [{ to: 'waiting_for_content', label: 'Waiting for Content' }, { to: 'completed', label: 'Mark Completed' }, { to: 'cancelled', label: 'Cancel' }],
-  waiting_for_content: [{ to: 'completed', label: 'Mark Completed' }, { to: 'cancelled', label: 'Cancel' }],
-  revision_requested:  [{ to: 'waiting_for_content', label: 'Waiting for Content' }, { to: 'completed', label: 'Mark Completed' }, { to: 'cancelled', label: 'Cancel' }],
-  completed:           [{ to: 'delivered', label: 'Mark Delivered' }],
-  delivered:           [],
+  submitted:           [{ to: 'rejected', label: 'Reject' }, { to: 'cancelled', label: 'Cancel' }],
+  under_review:        [{ to: 'rejected', label: 'Reject' }, { to: 'cancelled', label: 'Cancel' }],
+  approved:            [{ to: 'rejected', label: 'Reject' }, { to: 'cancelled', label: 'Cancel' }],
+  started:             [{ to: 'delivered', label: 'Mark Under Review' }, { to: 'completed', label: 'Mark Completed' }, { to: 'cancelled', label: 'Cancel' }],
+  in_progress:         [{ to: 'delivered', label: 'Mark Under Review' }, { to: 'completed', label: 'Mark Completed' }, { to: 'cancelled', label: 'Cancel' }],
+  waiting_for_content: [{ to: 'delivered', label: 'Mark Under Review' }, { to: 'completed', label: 'Mark Completed' }, { to: 'cancelled', label: 'Cancel' }],
+  revision_requested:  [{ to: 'delivered', label: 'Mark Under Review' }, { to: 'completed', label: 'Mark Completed' }, { to: 'cancelled', label: 'Cancel' }],
+  delivered:           [{ to: 'completed', label: 'Mark Completed' }, { to: 'cancelled', label: 'Cancel' }],
+  completed:           [{ to: 'in_progress', label: 'Reopen' }],
   rejected:            [],
   archived:            [{ to: 'submitted', label: 'Unarchive' }],
   cancelled:           [],
@@ -114,10 +120,10 @@ const EMPTY_NEW = {
 const inrFmt = (n: number) =>
   '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 0 })
 
-/** Status buckets for the by-client board summary (pending / active / done). */
+/** Status buckets for the by-client board summary (new / active / done). */
 const PENDING_STATUSES = ['submitted', 'under_review', 'approved']
-const ACTIVE_STATUSES  = ['started', 'in_progress', 'waiting_for_content', 'revision_requested']
-const DONE_STATUSES    = ['completed', 'delivered']
+const ACTIVE_STATUSES  = ['started', 'in_progress', 'waiting_for_content', 'revision_requested', 'delivered']
+const DONE_STATUSES    = ['completed']
 
 function SortableListItem({ id, disabled, children }: {
   id: string
@@ -161,7 +167,7 @@ function getShareStatusStyle(status: string): React.CSSProperties {
     waiting_for_content: { color: '#fb923c', borderColor: 'rgba(251,146,60,0.4)',  background: 'rgba(234,88,12,0.12)' },
     revision_requested:  { color: '#f472b6', borderColor: 'rgba(244,114,182,0.4)', background: 'rgba(219,39,119,0.12)' },
     completed:           { color: '#34d399', borderColor: 'rgba(52,211,153,0.4)',  background: 'rgba(16,185,129,0.12)' },
-    delivered:           { color: '#6ee7b7', borderColor: 'rgba(110,231,183,0.4)', background: 'rgba(5,150,105,0.12)' },
+    delivered:           { color: '#c4b5fd', borderColor: 'rgba(167,139,250,0.4)', background: 'rgba(124,58,237,0.12)' },
   }
   return map[status] || { color: '#9ca3af', borderColor: 'rgba(156,163,175,0.4)', background: 'rgba(107,114,128,0.12)' }
 }
@@ -460,8 +466,8 @@ export default function RequestsClient({
 
   const shareRequests = useMemo(() => {
     if (!shareClientId) return []
-    const SHARE_ACTIVE = ['submitted', 'under_review', 'approved', 'started', 'in_progress', 'waiting_for_content', 'revision_requested']
-    const SHARE_DONE   = ['completed', 'delivered']
+    const SHARE_ACTIVE = ['submitted', 'under_review', 'approved', 'started', 'in_progress', 'waiting_for_content', 'revision_requested', 'delivered']
+    const SHARE_DONE   = ['completed']
     return requests
       .filter(r => r.client?.id === shareClientId && (SHARE_ACTIVE.includes(r.status) || (shareIncludeCompleted && SHARE_DONE.includes(r.status))))
       .sort((a, b) => (a.priority_rank ?? 999) - (b.priority_rank ?? 999))
@@ -812,14 +818,28 @@ export default function RequestsClient({
                     <ExternalLink className="w-3 h-3" />
                   </Link>
                 )}
-                {(TRANSITIONS[open.status] || []).map(t => (
-                  (t.to === 'rejected' || t.to === 'under_review' || t.to === 'approved' ? perms.review : perms.manage) && (
+                {/* Status is task-driven once linked — show a note instead of manual controls. */}
+                {open.promoted_task_id && !['completed', 'rejected', 'cancelled', 'archived'].includes(open.status) && (
+                  <span className="flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg bg-secondary/60 border border-border text-muted-foreground">
+                    <RefreshCw className="w-3.5 h-3.5" /> Status follows Task{open.promoted_task?.task_number != null ? ` #${open.promoted_task.task_number}` : ''}
+                  </span>
+                )}
+                {/* Manual override — only when there's no linked task to drive the status. */}
+                {!open.promoted_task_id && (TRANSITIONS[open.status] || []).map(t => (
+                  (t.to === 'rejected' ? perms.review : perms.manage) && (
                     <button key={t.to} disabled={busy} onClick={() => doStatus(open, t.to)}
                       className="px-3 py-2 text-xs font-medium rounded-lg bg-secondary border border-border hover:bg-secondary/70 transition-colors disabled:opacity-50">
                       {t.label}
                     </button>
                   )
                 ))}
+                {/* Archived requests can always be unarchived even if a task was linked. */}
+                {open.promoted_task_id && open.status === 'archived' && perms.manage && (
+                  <button disabled={busy} onClick={() => doStatus(open, 'submitted')}
+                    className="px-3 py-2 text-xs font-medium rounded-lg bg-secondary border border-border hover:bg-secondary/70 transition-colors disabled:opacity-50">
+                    Unarchive
+                  </button>
+                )}
                 {perms.manage && open.status !== 'archived' && (
                   <button disabled={busy} onClick={() => doStatus(open, 'archived')}
                     className="px-3 py-2 text-xs font-medium rounded-lg bg-secondary border border-border text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50">

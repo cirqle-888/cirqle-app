@@ -13,7 +13,7 @@ import { CSS } from '@dnd-kit/utilities'
 import {
   Send, Loader2, CheckCircle2, Plus, X, Link2, ChevronDown, ChevronUp,
   Clock, RefreshCw, MessageSquarePlus, CalendarDays, FolderOpen,
-  Pencil, Ban, GripVertical,
+  Pencil, Ban, GripVertical, Eye, AlertCircle,
 } from 'lucide-react'
 import { CLIENT_STATUS_LABEL } from '@/lib/requests/core'
 import {
@@ -28,14 +28,14 @@ const labelCls = 'block text-xs font-medium text-muted-foreground mb-1.5'
 
 const STATUS_CLS: Record<string, string> = {
   submitted:           'bg-blue-500/12 text-blue-400 border-blue-500/25',
-  under_review:        'bg-amber-500/12 text-amber-400 border-amber-500/25',
-  approved:            'bg-violet-500/12 text-violet-300 border-violet-500/25',
+  under_review:        'bg-blue-500/12 text-blue-400 border-blue-500/25',
+  approved:            'bg-blue-500/12 text-blue-400 border-blue-500/25',
   started:             'bg-green-500/12 text-green-400 border-green-500/25',
   in_progress:         'bg-green-500/12 text-green-400 border-green-500/25',
   waiting_for_content: 'bg-orange-500/12 text-orange-400 border-orange-500/25',
-  revision_requested:  'bg-pink-500/12 text-pink-400 border-pink-500/25',
+  revision_requested:  'bg-orange-500/12 text-orange-400 border-orange-500/25',
+  delivered:           'bg-violet-500/12 text-violet-300 border-violet-500/25',
   completed:           'bg-emerald-500/12 text-emerald-400 border-emerald-500/25',
-  delivered:           'bg-emerald-500/12 text-emerald-300 border-emerald-500/25',
   cancelled:           'bg-red-500/10 text-red-400/80 border-red-500/20',
 }
 
@@ -65,8 +65,10 @@ function activityText(a: any): string {
   }
 }
 
-/** Externally-open statuses (reorderable). Completed/Delivered fall out. */
-const OPEN_SET = new Set(['submitted', 'under_review', 'approved', 'started', 'in_progress', 'waiting_for_content', 'revision_requested'])
+/** Externally-open statuses. `delivered` (Under Review) stays open so the
+ *  client can see the work is waiting on their review. Only Completed/
+ *  Cancelled fall into the closed list. */
+const OPEN_SET = new Set(['submitted', 'under_review', 'approved', 'started', 'in_progress', 'waiting_for_content', 'revision_requested', 'delivered'])
 
 function SortableIntakeItem({ id, children }: {
   id: string
@@ -473,6 +475,19 @@ export default function IntakeClient({
 
                 {isOpen && (
                   <div className="border-t border-border px-4 py-4 space-y-4">
+                    {/* Action-pending banners — make it obvious when the ball is in the client's court. */}
+                    {r.client_status === 'delivered' && (
+                      <div className="flex items-start gap-2 text-xs font-medium text-violet-200 bg-violet-500/10 border border-violet-500/30 rounded-lg px-3 py-2.5">
+                        <Eye className="w-4 h-4 shrink-0 mt-0.5" />
+                        <span><strong>Under review — action needed from you.</strong> Your work is ready. Please review it and approve, or use “Request revision” below if anything needs changing.</span>
+                      </div>
+                    )}
+                    {(r.client_status === 'waiting_for_content' || r.client_status === 'revision_requested') && (
+                      <div className="flex items-start gap-2 text-xs font-medium text-orange-200 bg-orange-500/10 border border-orange-500/30 rounded-lg px-3 py-2.5">
+                        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                        <span><strong>Action needed from you.</strong> We’re waiting on something from your side to continue — please add the content or details below.</span>
+                      </div>
+                    )}
                     {/* Full request details — every section editable (logged to activity) */}
                     <div className="space-y-3">
                       {([

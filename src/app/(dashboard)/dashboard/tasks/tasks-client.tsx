@@ -163,9 +163,12 @@ interface Props {
   }
 }
 
-// 'invoiced' is system-managed (set automatically when invoice is sent) — excluded from manual dropdown
-const STATUSES = ['pending', 'in_progress', 'done', 'invoiced', 'cancelled']
-const MANUAL_STATUSES = ['pending', 'in_progress', 'done', 'cancelled']
+// Task-driven status flow: New(pending) → In Progress → Delivered → Completed(done) → Cancelled.
+// 'delivered' = work sent to client for review (auto-sets the linked request to "Under Review",
+// NOT yet billable). 'done' = Completed/finalized (billable). 'invoiced' is system-managed
+// (set automatically when invoice is sent) — excluded from the manual dropdown.
+const STATUSES = ['pending', 'in_progress', 'delivered', 'done', 'invoiced', 'cancelled']
+const MANUAL_STATUSES = ['pending', 'in_progress', 'delivered', 'done', 'cancelled']
 const CURRENCIES: Currency[] = ['INR', 'AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
 
 const RECURRING_INTERVALS = [
@@ -1279,8 +1282,8 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       if (task) {
         setCancelForm({
           cancelled_by:        'client',
-          completion_pct:      task.status === 'done' ? 100 : task.status === 'in_progress' ? 70 : 10,
-          honor_contributions: task.status === 'in_progress' || task.status === 'done',
+          completion_pct:      task.status === 'done' ? 100 : task.status === 'delivered' ? 90 : task.status === 'in_progress' ? 70 : 10,
+          honor_contributions: task.status === 'in_progress' || task.status === 'done' || task.status === 'delivered',
           loss_amount:         task.billing_amount_inr ? String(Math.round(task.billing_amount_inr * 0.7)) : '',
           notes:               '',
           record_cashbook:     true,
@@ -2906,9 +2909,10 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
           }
           else if (boardGroupBy === 'status') {
             const statusOrder: { key: string; label: string; color: string; badge: string }[] = [
-              { key: 'pending',     label: 'Pending',     color: 'bg-amber-500/15 border-amber-500/20 text-amber-400',  badge: '⋯' },
+              { key: 'pending',     label: 'New',         color: 'bg-amber-500/15 border-amber-500/20 text-amber-400',  badge: '⋯' },
               { key: 'in_progress', label: 'In Progress', color: 'bg-blue-500/15 border-blue-500/20 text-blue-400',     badge: '▶' },
-              { key: 'done',        label: 'Done',        color: 'bg-green-500/15 border-green-500/20 text-green-400',  badge: '✓' },
+              { key: 'delivered',   label: 'Delivered',   color: 'bg-violet-500/15 border-violet-500/20 text-violet-300', badge: '↗' },
+              { key: 'done',        label: 'Completed',   color: 'bg-green-500/15 border-green-500/20 text-green-400',  badge: '✓' },
               { key: 'invoiced',    label: 'Invoiced',    color: 'bg-purple-500/15 border-purple-500/20 text-purple-400', badge: '$' },
               { key: 'cancelled',   label: 'Cancelled',   color: 'bg-red-500/15 border-red-500/20 text-red-400',         badge: '✗' },
             ]
@@ -3473,7 +3477,11 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
             </span>
             <button onClick={() => bulkUpdateStatus('done')}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 text-xs font-semibold transition-colors border border-emerald-500/20">
-              <CheckCircle className="w-3.5 h-3.5" /> Mark Done
+              <CheckCircle className="w-3.5 h-3.5" /> Completed
+            </button>
+            <button onClick={() => bulkUpdateStatus('delivered')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-500/15 text-violet-300 hover:bg-violet-500/25 text-xs font-semibold transition-colors border border-violet-500/20">
+              <CheckCircle className="w-3.5 h-3.5" /> Delivered
             </button>
             <button onClick={() => bulkUpdateStatus('in_progress')}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 text-xs font-semibold transition-colors border border-blue-500/20">
@@ -3481,7 +3489,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
             </button>
             <button onClick={() => bulkUpdateStatus('pending')}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-yellow-500/15 text-yellow-400 hover:bg-yellow-500/25 text-xs font-semibold transition-colors border border-yellow-500/20">
-              <Hash className="w-3.5 h-3.5" /> Pending
+              <Hash className="w-3.5 h-3.5" /> New
             </button>
             <button onClick={() => { setSelectedTasks(new Set()); setBulkMode(false) }}
               className="ml-1 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] transition-colors">

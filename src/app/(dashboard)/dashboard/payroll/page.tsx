@@ -69,12 +69,14 @@ export default async function PayrollPage() {
         .gte('calculated_at', scoresWindowFromStr)
         .order('calculated_at', { ascending: false })
     )),
-    // Done/delivered tasks for missing-contributions detection — already bounded.
+    // Completed tasks for missing-contributions detection — already bounded.
+    // 'delivered' is excluded: contribution scoring is prompted only once a task
+    // is Completed (done), keeping commission tied to the billable state.
     fetchAll(stablePaginationQuery(
       supabase
         .from('tasks')
         .select('id, title, task_date, status, client:clients(name), service:services(name)')
-        .in('status', ['done', 'delivered', 'invoiced', 'paid'])
+        .in('status', ['done', 'invoiced', 'paid'])
         .gte('task_date', `${currentYear - 1}-01-01`)
         .order('task_date', { ascending: false })
     )),

@@ -1,7 +1,7 @@
 import type { FieldDef } from '../types'
 import { normalizeDate, norm } from '../engine'
 
-const VALID_STATUSES   = ['pending','in_progress','done','invoiced','cancelled'] as const
+const VALID_STATUSES   = ['pending','in_progress','delivered','done','invoiced','cancelled'] as const
 const VALID_CURRENCIES = ['INR','AED','SAR','USD','QAR','GBP','EUR'] as const
 const VALID_INTERVALS  = ['daily','weekly','biweekly','monthly'] as const
 

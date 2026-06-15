@@ -26,6 +26,7 @@ const STATUS_PERM: Partial<Record<RequestStatus, string>> = {
   rejected:            PERMS.REQUESTS_REVIEW,
   waiting_for_content: PERMS.REQUESTS_MANAGE,
   revision_requested:  PERMS.REQUESTS_MANAGE,
+  in_progress:         PERMS.REQUESTS_MANAGE,   // manual "Reopen" override (no-task requests)
   completed:           PERMS.REQUESTS_MANAGE,
   delivered:           PERMS.REQUESTS_MANAGE,
   archived:            PERMS.REQUESTS_MANAGE,
