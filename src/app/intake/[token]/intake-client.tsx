@@ -2,9 +2,18 @@
 
 import { useState } from 'react'
 import {
+  DndContext, closestCenter, PointerSensor, TouchSensor,
+  useSensor, useSensors, type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext, verticalListSortingStrategy,
+  useSortable, arrayMove,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import {
   Send, Loader2, CheckCircle2, Plus, X, Link2, ChevronDown, ChevronUp,
   Clock, RefreshCw, MessageSquarePlus, CalendarDays, FolderOpen,
-  ArrowUp, ArrowDown, Pencil, Ban,
+  Pencil, Ban, GripVertical,
 } from 'lucide-react'
 import { CLIENT_STATUS_LABEL } from '@/lib/requests/core'
 import {
@@ -59,6 +68,35 @@ function activityText(a: any): string {
 /** Externally-open statuses (reorderable). Completed/Delivered fall out. */
 const OPEN_SET = new Set(['submitted', 'under_review', 'approved', 'started', 'in_progress', 'waiting_for_content', 'revision_requested'])
 
+function SortableIntakeItem({ id, children }: {
+  id: string
+  children: (handle: React.ReactNode) => React.ReactNode
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.55 : undefined,
+        zIndex: isDragging ? 10 : undefined,
+        position: isDragging ? 'relative' : undefined,
+      }}
+    >
+      {children(
+        <div
+          {...attributes} {...listeners}
+          className="cursor-grab active:cursor-grabbing p-1 text-muted-foreground/40 hover:text-muted-foreground/70 touch-none select-none"
+          title="Hold and drag to reorder"
+        >
+          <GripVertical className="w-4 h-4" />
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Auto-grow a textarea with its content, capped at 600px (then scrolls).
  *  Keeps the initial min-height from the className. */
 function autoGrow(e: React.FormEvent<HTMLTextAreaElement>) {
@@ -96,6 +134,12 @@ export default function IntakeClient({
   const [actionText, setActionText] = useState('')
   const [actionUrl, setActionUrl] = useState('')
   const [actionBusy, setActionBusy] = useState(false)
+  const [intakeEditRank, setIntakeEditRank] = useState<{ id: string; val: string } | null>(null)
+
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+  )
 
   async function refreshRequests() {
     const res = await getMyRequests(token)
@@ -131,18 +175,27 @@ export default function IntakeClient({
     .sort((a, b) => (a.priority_rank ?? 999) - (b.priority_rank ?? 999) || (a.created_at || '').localeCompare(b.created_at || ''))
   const closedRequests = requests.filter(r => !OPEN_SET.has(r.client_status))
 
-  function moveRank(id: string, dir: -1 | 1) {
-    const idx = openRequests.findIndex(r => r.id === id)
-    const j = idx + dir
-    if (idx < 0 || j < 0 || j >= openRequests.length) return
-    const order = openRequests.map(r => r.id)
-    ;[order[idx], order[j]] = [order[j], order[idx]]
-    // Optimistic rank update, then persist.
-    setRequests(prev => prev.map(r => {
-      const k = order.indexOf(r.id)
-      return k >= 0 ? { ...r, priority_rank: k + 1 } : r
-    }))
-    void reorderMyRequests(token, order)
+  function handleIntakeDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = openRequests.findIndex(r => r.id === active.id)
+    const newIndex = openRequests.findIndex(r => r.id === over.id)
+    if (oldIndex < 0 || newIndex < 0) return
+    const newOrder = arrayMove(openRequests, oldIndex, newIndex)
+    const rankMap = new Map(newOrder.map((r, i) => [r.id, i + 1]))
+    setRequests(prev => prev.map(r => rankMap.has(r.id) ? { ...r, priority_rank: rankMap.get(r.id) } : r))
+    void reorderMyRequests(token, newOrder.map(r => r.id))
+  }
+
+  function applyIntakeManualRank(id: string, targetPos: number) {
+    const n = Math.max(1, Math.min(openRequests.length, Math.round(targetPos)))
+    const currentIndex = openRequests.findIndex(r => r.id === id)
+    if (currentIndex < 0) return
+    const newOrder = arrayMove(openRequests, currentIndex, n - 1)
+    const rankMap = new Map(newOrder.map((r, i) => [r.id, i + 1]))
+    setRequests(prev => prev.map(r => rankMap.has(r.id) ? { ...r, priority_rank: rankMap.get(r.id) } : r))
+    void reorderMyRequests(token, newOrder.map(r => r.id))
+    setIntakeEditRank(null)
   }
 
   /** Statuses the requester can still cancel (work not started yet). */
@@ -361,31 +414,47 @@ export default function IntakeClient({
             </div>
           )}
           {openRequests.length > 1 && (
-            <p className="text-[11px] text-muted-foreground/70 px-1">
-              Use the ↑↓ arrows to set your priority order — #1 is what we work on first.
+            <p className="text-[11px] text-muted-foreground/70 px-1 flex items-center gap-1">
+              <GripVertical className="w-3.5 h-3.5" /> Hold and drag to set priority — #1 is what we work on first. Tap #N to type a position.
             </p>
           )}
-          {[...openRequests, ...closedRequests].map(r => {
-            const isOpen = expanded === r.id
-            const rankIdx = openRequests.findIndex(x => x.id === r.id)
-            return (
-              <div key={r.id} className="bg-card border border-border rounded-2xl overflow-hidden">
-                <div role="button" tabIndex={0} onClick={() => toggleExpand(r.id)}
-                  onKeyDown={e => { if (e.key === 'Enter') toggleExpand(r.id) }}
-                  className="w-full text-left px-4 py-3.5 flex items-center gap-3 cursor-pointer">
-                  {rankIdx >= 0 && (
-                    <div className="flex flex-col items-center gap-0.5 shrink-0" onClick={e => e.stopPropagation()}>
-                      <button onClick={() => moveRank(r.id, -1)} disabled={rankIdx === 0}
-                        className="p-0.5 rounded text-muted-foreground hover:text-foreground disabled:opacity-20" title="Higher priority">
-                        <ArrowUp className="w-3.5 h-3.5" />
-                      </button>
-                      <span className="text-[10px] font-bold text-violet-400">#{rankIdx + 1}</span>
-                      <button onClick={() => moveRank(r.id, 1)} disabled={rankIdx === openRequests.length - 1}
-                        className="p-0.5 rounded text-muted-foreground hover:text-foreground disabled:opacity-20" title="Lower priority">
-                        <ArrowDown className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  )}
+          <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleIntakeDragEnd}>
+            <SortableContext items={openRequests.map(r => r.id)} strategy={verticalListSortingStrategy}>
+              {openRequests.map(r => {
+                const isOpen = expanded === r.id
+                const rankIdx = openRequests.findIndex(x => x.id === r.id)
+                return (
+                  <SortableIntakeItem key={r.id} id={r.id}>
+                    {(handle) => (
+                  <div className="bg-card border border-border rounded-2xl overflow-hidden">
+                    <div role="button" tabIndex={0} onClick={() => toggleExpand(r.id)}
+                      onKeyDown={e => { if (e.key === 'Enter') toggleExpand(r.id) }}
+                      className="w-full text-left px-4 py-3.5 flex items-center gap-3 cursor-pointer">
+                      {rankIdx >= 0 && (
+                        <div className="flex flex-col items-center gap-0.5 shrink-0" onClick={e => e.stopPropagation()}>
+                          {handle}
+                          {intakeEditRank !== null && intakeEditRank.id === r.id ? (
+                            <input
+                              type="number" min={1} max={openRequests.length}
+                              value={intakeEditRank.val}
+                              onChange={e => setIntakeEditRank({ id: r.id, val: e.target.value })}
+                              onBlur={() => { const n = parseInt(intakeEditRank!.val, 10); if (!isNaN(n)) applyIntakeManualRank(r.id, n); else setIntakeEditRank(null) }}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') { const n = parseInt(intakeEditRank!.val, 10); if (!isNaN(n)) applyIntakeManualRank(r.id, n); else setIntakeEditRank(null) }
+                                else if (e.key === 'Escape') setIntakeEditRank(null)
+                              }}
+                              autoFocus
+                              className="w-7 text-center text-[10px] font-bold text-violet-400 bg-transparent border-b border-violet-400/50 focus:outline-none"
+                            />
+                          ) : (
+                            <button
+                              onClick={() => setIntakeEditRank({ id: r.id, val: String(rankIdx + 1) })}
+                              className="text-[10px] font-bold text-violet-400 hover:text-violet-300 transition-colors"
+                              title="Tap to type a priority position"
+                            >#{rankIdx + 1}</button>
+                          )}
+                        </div>
+                      )}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-[11px] font-mono text-muted-foreground">REQ-{String(r.ref_no).padStart(4, '0')}</span>
@@ -540,6 +609,40 @@ export default function IntakeClient({
                         {timeline[r.id]?.length === 0 && <p className="text-xs text-muted-foreground/50">No activity yet.</p>}
                       </div>
                     </div>
+                  </div>
+                )}
+              </div>
+                    )}
+                  </SortableIntakeItem>
+                )
+              })}
+            </SortableContext>
+          </DndContext>
+          {closedRequests.map(r => {
+            const isOpen = expanded === r.id
+            return (
+              <div key={r.id} className="bg-card border border-border rounded-2xl overflow-hidden">
+                <div role="button" tabIndex={0} onClick={() => toggleExpand(r.id)}
+                  onKeyDown={e => { if (e.key === 'Enter') toggleExpand(r.id) }}
+                  className="w-full text-left px-4 py-3.5 flex items-center gap-3 cursor-pointer">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] font-mono text-muted-foreground">REQ-{String(r.ref_no).padStart(4, '0')}</span>
+                      <p className="text-sm font-semibold break-words">{r.title}</p>
+                    </div>
+                    <div className="flex items-center gap-2.5 mt-1 text-[11px] text-muted-foreground">
+                      {r.due_date && <span className="flex items-center gap-1"><CalendarDays className="w-3 h-3" />{fmtDate(r.due_date)}</span>}
+                      <span>Submitted {fmtDate(r.created_at)}</span>
+                    </div>
+                  </div>
+                  <span className={`text-[11px] px-2.5 py-1 rounded-full border shrink-0 ${STATUS_CLS[r.client_status] || STATUS_CLS.submitted}`}>
+                    {CLIENT_STATUS_LABEL[r.client_status] || 'Submitted'}
+                  </span>
+                  {isOpen ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />}
+                </div>
+                {isOpen && (
+                  <div className="border-t border-border px-4 py-4">
+                    <p className="text-xs text-muted-foreground/60">This request is {r.client_status}.</p>
                   </div>
                 )}
               </div>

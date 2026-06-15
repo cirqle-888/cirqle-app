@@ -398,3 +398,25 @@ export async function markRevisionAddressed(revisionId: string): Promise<ActionR
   revalidatePath(REVALIDATE)
   return { ok: true }
 }
+
+/**
+ * Staff priority reorder — updates priority_rank for each request in the
+ * supplied ordered array. Called from the drag-and-drop list on the Requests
+ * page (and manual rank override). Rank 1 = highest priority.
+ */
+export async function reorderStaffPriority(requestIds: string[]): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.REQUESTS_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!requestIds.length) return { ok: true }
+  const admin = createAdminClient()
+  const now = new Date().toISOString()
+  await Promise.all(
+    requestIds.map((id, i) =>
+      admin.from('task_requests')
+        .update({ priority_rank: i + 1, updated_at: now })
+        .eq('id', id)
+    )
+  )
+  revalidatePath(REVALIDATE)
+  return { ok: true }
+}

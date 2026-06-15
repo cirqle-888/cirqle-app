@@ -1,8 +1,17 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import {
+  DndContext, closestCenter, PointerSensor, TouchSensor,
+  useSensor, useSensors, type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext, verticalListSortingStrategy,
+  useSortable, arrayMove,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { ActiveFilterChips } from '@/components/ui/active-filter-chips'
 import { TokenizedSearch, type SearchFacet } from '@/components/ui/tokenized-search'
@@ -12,7 +21,7 @@ import {
   Inbox, AlertTriangle, ChevronRight, Clock, Link2, Loader2, Play,
   CalendarDays, MessageSquarePlus, Save, CheckCircle2, X, Flag,
   Search, Plus, UserRound, List, LayoutGrid, Link as LinkIcon, Trash2,
-  ExternalLink,
+  ExternalLink, GripVertical, Share2,
 } from 'lucide-react'
 import {
   CLIENT_STATUS_LABEL, STATUS_CHIP, PRIORITY_CHIP, refLabel, type RequestStatus,
@@ -21,16 +30,20 @@ import {
   setRequestStatusAction, markRequestViewed, getRequestTimeline,
   postExternalUpdate, updateInternalNotes, markRevisionAddressed,
   assignRequestEmployee, createManualRequest, searchTasksForLink, linkRequestToTask,
+  reorderStaffPriority,
 } from './actions'
 
 const TABS: { key: string; label: string; statuses: string[] }[] = [
-  { key: 'new',      label: 'New',      statuses: ['submitted'] },
-  { key: 'reviewed', label: 'Reviewed', statuses: ['under_review'] },
-  { key: 'approved', label: 'Approved', statuses: ['approved'] },
-  { key: 'started',  label: 'Started',  statuses: ['started', 'in_progress', 'waiting_for_content', 'revision_requested', 'completed', 'delivered'] },
+  { key: 'new',      label: 'New',                 statuses: ['submitted'] },
+  { key: 'reviewed', label: 'Reviewed',             statuses: ['under_review'] },
+  { key: 'approved', label: 'Approved',             statuses: ['approved'] },
+  { key: 'started',  label: 'Started',              statuses: ['started'] },
+  { key: 'ongoing',  label: 'On Going',             statuses: ['in_progress', 'waiting_for_content', 'revision_requested', 'completed', 'delivered'] },
   { key: 'rejected', label: 'Rejected / Cancelled', statuses: ['rejected', 'cancelled'] },
-  { key: 'archived', label: 'Archived', statuses: ['archived'] },
+  { key: 'archived', label: 'Archived',             statuses: ['archived'] },
 ]
+
+const SORTABLE_TABS = new Set(['new', 'reviewed', 'approved', 'started', 'ongoing'])
 
 const STATUS_LABEL: Record<string, string> = {
   ...CLIENT_STATUS_LABEL,
@@ -104,6 +117,53 @@ const PENDING_STATUSES = ['submitted', 'under_review', 'approved']
 const ACTIVE_STATUSES  = ['started', 'in_progress', 'waiting_for_content', 'revision_requested']
 const DONE_STATUSES    = ['completed', 'delivered']
 
+function SortableListItem({ id, disabled, children }: {
+  id: string
+  disabled?: boolean
+  children: (handle: React.ReactNode) => React.ReactNode
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id, disabled })
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.55 : undefined,
+        zIndex: isDragging ? 10 : undefined,
+        position: isDragging ? 'relative' : undefined,
+      }}
+    >
+      {children(
+        disabled ? null : (
+          <div
+            {...attributes} {...listeners}
+            className="cursor-grab active:cursor-grabbing p-1.5 text-muted-foreground/30 hover:text-muted-foreground/60 transition-colors touch-none select-none"
+            title="Drag to reorder"
+          >
+            <GripVertical className="w-4 h-4" />
+          </div>
+        )
+      )}
+    </div>
+  )
+}
+
+function getShareStatusStyle(status: string): React.CSSProperties {
+  const map: Record<string, React.CSSProperties> = {
+    submitted:           { color: '#60a5fa', borderColor: 'rgba(96,165,250,0.4)',  background: 'rgba(59,130,246,0.12)' },
+    under_review:        { color: '#fbbf24', borderColor: 'rgba(251,191,36,0.4)',  background: 'rgba(245,158,11,0.12)' },
+    approved:            { color: '#a78bfa', borderColor: 'rgba(167,139,250,0.4)', background: 'rgba(124,58,237,0.12)' },
+    started:             { color: '#4ade80', borderColor: 'rgba(74,222,128,0.4)',  background: 'rgba(34,197,94,0.12)' },
+    in_progress:         { color: '#4ade80', borderColor: 'rgba(74,222,128,0.4)',  background: 'rgba(34,197,94,0.12)' },
+    waiting_for_content: { color: '#fb923c', borderColor: 'rgba(251,146,60,0.4)',  background: 'rgba(234,88,12,0.12)' },
+    revision_requested:  { color: '#f472b6', borderColor: 'rgba(244,114,182,0.4)', background: 'rgba(219,39,119,0.12)' },
+    completed:           { color: '#34d399', borderColor: 'rgba(52,211,153,0.4)',  background: 'rgba(16,185,129,0.12)' },
+    delivered:           { color: '#6ee7b7', borderColor: 'rgba(110,231,183,0.4)', background: 'rgba(5,150,105,0.12)' },
+  }
+  return map[status] || { color: '#9ca3af', borderColor: 'rgba(156,163,175,0.4)', background: 'rgba(107,114,128,0.12)' }
+}
+
 export default function RequestsClient({
   migrated, initialRequests, perms, clients = [], employees = [], services = [],
   servicePricing = [], initialFocusId = null,
@@ -152,6 +212,23 @@ export default function RequestsClient({
   // View mode: flat list (tabbed) or kanban board (all statuses at once)
   const [view, setView] = useState<'list' | 'board'>('list')
   const [boardBy, setBoardBy] = useState<'status' | 'client'>('status')
+
+  // Priority drag + manual rank override
+  const [editRank, setEditRank] = useState<{ id: string; val: string } | null>(null)
+
+  // Share modal
+  const [showShare, setShowShare] = useState(false)
+  const [shareClientId, setShareClientId] = useState('')
+  const [shareIncludeCompleted, setShareIncludeCompleted] = useState(false)
+  const [shareGenerating, setShareGenerating] = useState(false)
+  const shareCardRef = useRef<HTMLDivElement>(null)
+
+  // DnD sensors — require 8px move (pointer) or 200ms hold (touch) before drag activates,
+  // so normal taps still open the drawer.
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+  )
 
   // Link-an-existing-task picker (inside the drawer)
   const [linkOpen, setLinkOpen] = useState(false)
@@ -210,12 +287,13 @@ export default function RequestsClient({
 
   const rows = useMemo(() => {
     const t = TABS.find(x => x.key === tab)!
-    return requests.filter(r => {
+    const filtered = requests.filter(r => {
       if (!t.statuses.includes(r.status)) return false
       if (clientFilter && r.client?.id !== clientFilter) return false
       if (activeFacets.length && !recordMatchesFacets(activeFacets, r, REQUEST_FIELDS, requestGeneric)) return false
       return true
     })
+    return filtered.sort((a, b) => (a.priority_rank ?? 9999) - (b.priority_rank ?? 9999))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requests, tab, activeFacets, clientFilter])
 
@@ -347,6 +425,61 @@ export default function RequestsClient({
     } else toastError('Could not link the task', res.error)
   }
 
+  const isDraggableTab = view === 'list' && SORTABLE_TABS.has(tab) && perms.manage && !activeFacets.length && !searchDraft.trim()
+
+  async function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = rows.findIndex(r => r.id === active.id)
+    const newIndex = rows.findIndex(r => r.id === over.id)
+    if (oldIndex < 0 || newIndex < 0) return
+    const newOrder = arrayMove(rows, oldIndex, newIndex)
+    const rankMap = new Map(newOrder.map((r, i) => [r.id, i + 1]))
+    setRequests(prev => prev.map(r => rankMap.has(r.id) ? { ...r, priority_rank: rankMap.get(r.id) } : r))
+    void reorderStaffPriority(newOrder.map(r => r.id))
+  }
+
+  function applyManualRank(id: string, targetPos: number) {
+    const n = Math.max(1, Math.min(rows.length, Math.round(targetPos)))
+    const currentIndex = rows.findIndex(r => r.id === id)
+    if (currentIndex < 0) return
+    const newOrder = arrayMove(rows, currentIndex, n - 1)
+    const rankMap = new Map(newOrder.map((r, i) => [r.id, i + 1]))
+    setRequests(prev => prev.map(r => rankMap.has(r.id) ? { ...r, priority_rank: rankMap.get(r.id) } : r))
+    void reorderStaffPriority(newOrder.map(r => r.id))
+    setEditRank(null)
+  }
+
+  const shareClientName = useMemo(
+    () => filterClients.find(([id]) => id === shareClientId)?.[1] || clients.find(c => c.id === shareClientId)?.name || '',
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [shareClientId, filterClients, clients],
+  )
+
+  const shareRequests = useMemo(() => {
+    if (!shareClientId) return []
+    const SHARE_ACTIVE = ['submitted', 'under_review', 'approved', 'started', 'in_progress', 'waiting_for_content', 'revision_requested']
+    const SHARE_DONE   = ['completed', 'delivered']
+    return requests
+      .filter(r => r.client?.id === shareClientId && (SHARE_ACTIVE.includes(r.status) || (shareIncludeCompleted && SHARE_DONE.includes(r.status))))
+      .sort((a, b) => (a.priority_rank ?? 999) - (b.priority_rank ?? 999))
+  }, [requests, shareClientId, shareIncludeCompleted])
+
+  const downloadShareImage = useCallback(async () => {
+    if (!shareCardRef.current) return
+    setShareGenerating(true)
+    try {
+      const { default: html2canvas } = await import('html2canvas')
+      const canvas = await html2canvas(shareCardRef.current, { backgroundColor: '#111827', scale: 2, useCORS: true, logging: false })
+      const url = canvas.toDataURL('image/png')
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `cirqle-${(shareClientName || 'requests').toLowerCase().replace(/\s+/g, '-')}-${new Date().toISOString().slice(0, 10)}.png`
+      a.click()
+    } catch { /* silent */ }
+    setShareGenerating(false)
+  }, [shareClientName])
+
   // Board columns (board ignores tabs; search + client filters still apply)
   const boardRows = useMemo(() => {
     return requests.filter(r => {
@@ -431,10 +564,18 @@ export default function RequestsClient({
           </>
         )}
         {perms.manage && migrated && (
-          <button onClick={() => setShowNew(true)}
-            className="ml-auto flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap gradient-bg text-white hover:opacity-90 transition-opacity shrink-0">
-            <Plus className="w-3.5 h-3.5" /> New Request
-          </button>
+          <div className="ml-auto flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={() => { setShowShare(true); setShareClientId(clientFilter || ''); setShareIncludeCompleted(false) }}
+              title="Share a client's request status as an image"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap bg-secondary border border-border hover:text-foreground text-muted-foreground transition-colors">
+              <Share2 className="w-3.5 h-3.5" /> Share
+            </button>
+            <button onClick={() => setShowNew(true)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap gradient-bg text-white hover:opacity-90 transition-opacity">
+              <Plus className="w-3.5 h-3.5" /> New Request
+            </button>
+          </div>
         )}
       </div>
 
@@ -546,45 +687,84 @@ export default function RequestsClient({
             Nothing here yet.
           </div>
         )}
-        {rows.map(r => (
-          <button key={r.id} onClick={() => openRequest(r)}
-            className="w-full text-left bg-card border border-border rounded-xl px-4 py-3 flex items-center gap-3 hover:border-violet-500/40 transition-colors">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[11px] font-mono text-muted-foreground shrink-0">{refLabel(r.ref_no)}</span>
-                <p className="text-sm font-semibold truncate">{r.title}</p>
-                {r.is_planned && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">planned</span>}
-                {hasNewExternal(r) && (
-                  <span className="flex items-center gap-1 text-[10px] font-semibold text-amber-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                    New {r.source === 'agency' ? 'Agency' : 'Client'} Update
-                  </span>
+        {isDraggableTab && rows.length > 1 && (
+          <p className="text-[11px] text-muted-foreground/50 px-1 flex items-center gap-1">
+            <GripVertical className="w-3.5 h-3.5" /> Drag to reorder · tap #N to set manually
+          </p>
+        )}
+        <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={rows.map(r => r.id)} strategy={verticalListSortingStrategy}>
+            {rows.map((r, idx) => (
+              <SortableListItem key={r.id} id={r.id} disabled={!isDraggableTab}>
+                {(handle) => (
+                  <div className="flex items-center bg-card border border-border rounded-xl hover:border-violet-500/40 transition-colors">
+                    {isDraggableTab && (
+                      <div className="flex flex-col items-center shrink-0 px-1 py-3 gap-0.5" onClick={e => e.stopPropagation()}>
+                        {handle}
+                        {editRank !== null && editRank.id === r.id ? (
+                          <input
+                            type="number" min={1} max={rows.length}
+                            value={editRank.val}
+                            onChange={e => setEditRank({ id: r.id, val: e.target.value })}
+                            onBlur={() => { const n = parseInt(editRank!.val, 10); if (!isNaN(n)) applyManualRank(r.id, n); else setEditRank(null) }}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') { const n = parseInt(editRank!.val, 10); if (!isNaN(n)) applyManualRank(r.id, n); else setEditRank(null) }
+                              else if (e.key === 'Escape') setEditRank(null)
+                            }}
+                            autoFocus
+                            className="w-8 text-center text-[10px] font-bold text-violet-400 bg-transparent border-b border-violet-400/60 focus:outline-none"
+                          />
+                        ) : (
+                          <button
+                            onClick={() => setEditRank({ id: r.id, val: String(idx + 1) })}
+                            className="text-[10px] font-bold text-violet-400/50 hover:text-violet-400 transition-colors leading-none"
+                            title="Tap to set rank manually"
+                          >#{idx + 1}</button>
+                        )}
+                      </div>
+                    )}
+                    <button className="flex-1 min-w-0 text-left px-3 py-3 flex items-center gap-3" onClick={() => openRequest(r)}>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[11px] font-mono text-muted-foreground shrink-0">{refLabel(r.ref_no)}</span>
+                          <p className="text-sm font-semibold truncate">{r.title}</p>
+                          {r.is_planned && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">planned</span>}
+                          {hasNewExternal(r) && (
+                            <span className="flex items-center gap-1 text-[10px] font-semibold text-amber-400">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                              New {r.source === 'agency' ? 'Agency' : 'Client'} Update
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2.5 mt-1 text-[11px] text-muted-foreground flex-wrap">
+                          <span className="truncate max-w-[220px]">{requesterOf(r)}</span>
+                          {!isDraggableTab && r.priority_rank != null && !['completed', 'delivered', 'rejected', 'archived'].includes(r.status) && (
+                            <span className="font-bold text-violet-400" title="Requester's priority order">P#{r.priority_rank}</span>
+                          )}
+                          {r.priority !== 'normal' && <span className={`flex items-center gap-0.5 font-medium ${PRIORITY_CHIP[r.priority]}`}><Flag className="w-3 h-3" />{r.priority}</span>}
+                          {r.due_date && <span className="flex items-center gap-1"><CalendarDays className="w-3 h-3" />due {fmtDate(r.due_date)}</span>}
+                          <span>{ago(r.created_at)}</span>
+                          {r.service?.name && <span className="text-cyan-400/70">{r.service.name}</span>}
+                          {r.assigned_employee?.name && (
+                            <span className="flex items-center gap-1 text-violet-300/80"><UserRound className="w-3 h-3" />{r.assigned_employee.name}</span>
+                          )}
+                          {r.promoted_task?.task_number != null && (
+                            <span className="font-mono text-green-400/80" title={`Linked task: ${r.promoted_task.title}`}>Task #{r.promoted_task.task_number}</span>
+                          )}
+                          {r.source === 'manual' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary border border-border text-muted-foreground">added by you</span>}
+                        </div>
+                      </div>
+                      <span className={`text-[11px] px-2.5 py-1 rounded-full border shrink-0 ${STATUS_CHIP[r.status] || STATUS_CHIP.submitted}`}>
+                        {STATUS_LABEL[r.status] || r.status}
+                      </span>
+                      <ChevronRight className="w-4 h-4 text-muted-foreground/40 shrink-0" />
+                    </button>
+                  </div>
                 )}
-              </div>
-              <div className="flex items-center gap-2.5 mt-1 text-[11px] text-muted-foreground flex-wrap">
-                <span className="truncate max-w-[220px]">{requesterOf(r)}</span>
-                {r.priority_rank != null && !['completed', 'delivered', 'rejected', 'archived'].includes(r.status) && (
-                  <span className="font-bold text-violet-400" title="Requester's priority order">P#{r.priority_rank}</span>
-                )}
-                {r.priority !== 'normal' && <span className={`flex items-center gap-0.5 font-medium ${PRIORITY_CHIP[r.priority]}`}><Flag className="w-3 h-3" />{r.priority}</span>}
-                {r.due_date && <span className="flex items-center gap-1"><CalendarDays className="w-3 h-3" />due {fmtDate(r.due_date)}</span>}
-                <span>{ago(r.created_at)}</span>
-                {r.service?.name && <span className="text-cyan-400/70">{r.service.name}</span>}
-                {r.assigned_employee?.name && (
-                  <span className="flex items-center gap-1 text-violet-300/80"><UserRound className="w-3 h-3" />{r.assigned_employee.name}</span>
-                )}
-                {r.promoted_task?.task_number != null && (
-                  <span className="font-mono text-green-400/80" title={`Linked task: ${r.promoted_task.title}`}>Task #{r.promoted_task.task_number}</span>
-                )}
-                {r.source === 'manual' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary border border-border text-muted-foreground">added by you</span>}
-              </div>
-            </div>
-            <span className={`text-[11px] px-2.5 py-1 rounded-full border shrink-0 ${STATUS_CHIP[r.status] || STATUS_CHIP.submitted}`}>
-              {STATUS_LABEL[r.status] || r.status}
-            </span>
-            <ChevronRight className="w-4 h-4 text-muted-foreground/40 shrink-0" />
-          </button>
-        ))}
+              </SortableListItem>
+            ))}
+          </SortableContext>
+        </DndContext>
       </div>
       )}
 
@@ -948,6 +1128,87 @@ export default function RequestsClient({
               <button onClick={doCreate} disabled={creating || !newForm.clientId || !newForm.title.trim()}
                 className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-xl gradient-bg text-white hover:opacity-90 disabled:opacity-50 transition-opacity">
                 {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Create Request
+              </button>
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* ── Share modal ── */}
+      {showShare && (
+        <ModalOverlay onClose={() => setShowShare(false)}>
+          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-xl shadow-2xl max-h-[92dvh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+              <div>
+                <h2 className="font-bold text-base flex items-center gap-2"><Share2 className="w-4 h-4 text-violet-400" /> Share Status</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Download a PNG of a client&rsquo;s pending &amp; ongoing works.</p>
+              </div>
+              <button onClick={() => setShowShare(false)} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-5 space-y-4">
+              <div className="flex flex-wrap gap-3 items-end">
+                <div className="flex-1 min-w-40">
+                  <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Client</label>
+                  <select value={shareClientId} onChange={e => setShareClientId(e.target.value)}
+                    className="mt-1 w-full bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50">
+                    <option value="">Select client…</option>
+                    {filterClients.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                  </select>
+                </div>
+                <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none pb-2">
+                  <input type="checkbox" checked={shareIncludeCompleted}
+                    onChange={e => setShareIncludeCompleted(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded accent-violet-500" />
+                  Include completed
+                </label>
+              </div>
+
+              {shareClientId && shareRequests.length === 0 && (
+                <p className="text-xs text-muted-foreground/60 text-center py-4">No pending or ongoing requests for this client.</p>
+              )}
+
+              {shareClientId && shareRequests.length > 0 && (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-2">Preview</p>
+                  <div
+                    ref={shareCardRef}
+                    style={{ background: '#111827', padding: '24px', borderRadius: '16px', fontFamily: 'system-ui, -apple-system, sans-serif', color: '#f9fafb' }}
+                  >
+                    <div style={{ marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                      <div style={{ fontSize: '15px', fontWeight: 700, letterSpacing: '-0.01em' }}>Cirqle Design</div>
+                      <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '3px' }}>Works in Progress — {shareClientName}</div>
+                      <div style={{ fontSize: '10px', color: '#6b7280', marginTop: '3px' }}>
+                        {new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
+                      </div>
+                    </div>
+                    {shareRequests.map((r, i) => (
+                      <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px', padding: '10px 12px', background: '#1f2937', borderRadius: '10px' }}>
+                        <span style={{ fontSize: '10px', fontWeight: 700, color: '#8b5cf6', minWidth: '18px', textAlign: 'right' }}>#{i + 1}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: '13px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title}</div>
+                          {r.due_date && <div style={{ fontSize: '10px', color: '#9ca3af', marginTop: '2px' }}>due {fmtDate(r.due_date)}</div>}
+                        </div>
+                        <span style={{ fontSize: '10px', padding: '3px 8px', borderRadius: '20px', border: '1px solid', whiteSpace: 'nowrap', flexShrink: 0, ...getShareStatusStyle(r.status) }}>
+                          {CLIENT_STATUS_LABEL[r.client_status] || STATUS_LABEL[r.status] || r.status}
+                        </span>
+                      </div>
+                    ))}
+                    <div style={{ marginTop: '14px', fontSize: '10px', color: '#4b5563', textAlign: 'center', letterSpacing: '0.05em' }}>
+                      CIRQLE DESIGN · cirqle.work
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="px-5 py-4 border-t border-border flex justify-end gap-2 shrink-0">
+              <button onClick={() => setShowShare(false)}
+                className="px-4 py-2 text-sm rounded-xl bg-secondary border border-border hover:bg-secondary/70 transition-colors">Cancel</button>
+              <button
+                onClick={downloadShareImage}
+                disabled={!shareClientId || shareRequests.length === 0 || shareGenerating}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-xl gradient-bg text-white hover:opacity-90 disabled:opacity-50 transition-opacity">
+                {shareGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Share2 className="w-4 h-4" />}
+                Download PNG
               </button>
             </div>
           </div>
