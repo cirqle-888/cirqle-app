@@ -1980,6 +1980,8 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
               draft={searchDraft}
               onDraftChange={setSearchDraft}
               placeholder="Search title, client, service, #number…"
+              resultCount={filteredTasks.length}
+              resultNoun="task"
               fields={[
                 { key: 'title', label: 'Title', type: 'text' },
                 { key: 'client', label: 'Client', type: 'text' },

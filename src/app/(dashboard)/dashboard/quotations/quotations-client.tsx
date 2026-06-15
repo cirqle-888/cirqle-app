@@ -470,6 +470,8 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
           draft={searchDraft}
           onDraftChange={setSearchDraft}
           placeholder="Search by client or quotation number…"
+          resultCount={filteredQuotations.length}
+          resultNoun="quotation"
           fields={[
             { key: 'number', label: 'Quotation #', type: 'text' },
             { key: 'client', label: 'Client', type: 'text' },

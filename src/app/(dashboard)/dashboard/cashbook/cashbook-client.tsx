@@ -1138,6 +1138,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             draft={searchDraft}
             onDraftChange={setSearchDraft}
             placeholder="Search descriptions, clients..."
+            resultCount={filteredEntries.length}
+            resultNoun="entry"
             fields={[
               { key: 'description', label: 'Description', type: 'text' },
               { key: 'reference', label: 'Reference', type: 'text' },

@@ -27,6 +27,8 @@ export function opLabel(op: FacetOp): string {
 const isNumeric = (s: string) => s.trim() !== '' && Number.isFinite(Number(s.trim()))
 const defaultOp = (type?: string): FacetOp => (type === 'number' ? '=' : 'contains')
 const opsForType = (type?: string): FacetOp[] => (type === 'number' ? NUM_OPS : TEXT_OPS)
+const pluralize = (n: number, noun: string) =>
+  n === 1 ? noun : noun.endsWith('y') ? noun.slice(0, -1) + 'ies' : noun + 's'
 
 /**
  * Odoo-style tokenized search bar with field-scoped facets + operators.
@@ -45,6 +47,7 @@ const opsForType = (type?: string): FacetOp[] => (type === 'number' ? NUM_OPS : 
 export function TokenizedSearch({
   facets, onFacetsChange, draft, onDraftChange,
   placeholder = 'Search…', className = '', fields = [],
+  resultCount, resultNoun = 'result',
 }: {
   facets: SearchFacet[]
   onFacetsChange: (facets: SearchFacet[]) => void
@@ -53,6 +56,11 @@ export function TokenizedSearch({
   placeholder?: string
   className?: string
   fields?: SearchField[]
+  /** Live count of records matching the current draft+facets — shows a
+   *  "N matching <noun>s" header in the dropdown so the user knows at a glance
+   *  whether the search hits any data. Omit to hide the header. */
+  resultCount?: number
+  resultNoun?: string
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -138,12 +146,12 @@ export function TokenizedSearch({
           const canChangeOp = f.field !== 'any' && ops.length > 1
           return (
             <span key={f.field + f.op + f.text + i}
-              className="relative inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-md text-xs bg-violet-500/15 text-violet-300 border border-violet-500/30">
-              {f.field !== 'any' && <span className="text-violet-400/70 font-medium">{fieldLabel(f.field)}</span>}
+              className="relative inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-md text-xs bg-violet-500/15 text-violet-700 dark:text-violet-300 border border-violet-500/30">
+              {f.field !== 'any' && <span className="text-violet-700/70 dark:text-violet-400/70 font-medium">{fieldLabel(f.field)}</span>}
               {canChangeOp && (
                 <button type="button"
                   onClick={e => { e.stopPropagation(); setOpMenu(opMenu === i ? null : i) }}
-                  className="inline-flex items-center gap-0.5 px-1 rounded bg-violet-500/20 hover:bg-violet-500/35 text-violet-200 transition-colors"
+                  className="inline-flex items-center gap-0.5 px-1 rounded bg-violet-500/20 hover:bg-violet-500/35 text-violet-700 dark:text-violet-200 transition-colors"
                   title="Change operator">
                   {opLabel(f.op)}<ChevronDown className="w-2.5 h-2.5" />
                 </button>
@@ -157,10 +165,10 @@ export function TokenizedSearch({
 
               {opMenu === i && (
                 <div onMouseDown={e => e.stopPropagation()}
-                  className="absolute z-50 top-full left-0 mt-1 bg-secondary border border-foreground/15 rounded-lg shadow-xl shadow-black/40 py-1 min-w-[112px]">
+                  className="absolute z-50 top-full left-0 mt-1 bg-card/55 backdrop-blur-xl backdrop-saturate-150 border border-foreground/10 ring-1 ring-black/5 rounded-lg shadow-xl shadow-black/25 py-1 min-w-[112px]">
                   {ops.map(op => (
                     <button key={op} type="button" onClick={() => changeOp(i, op)}
-                      className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${f.op === op ? 'bg-violet-500/15 text-violet-200' : 'text-foreground hover:bg-foreground/[0.06]'}`}>
+                      className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${f.op === op ? 'bg-violet-500/20 text-violet-700 dark:text-violet-200' : 'text-foreground hover:bg-foreground/10'}`}>
                       {opLabel(op)}
                     </button>
                   ))}
@@ -193,15 +201,22 @@ export function TokenizedSearch({
       {showDropdown && (
         <div
           onMouseDown={e => e.preventDefault() /* keep input focus */}
-          className="absolute z-50 left-0 right-0 mt-1.5 bg-secondary border border-foreground/15 rounded-xl shadow-2xl shadow-black/40 overflow-hidden py-1 max-h-[22rem] overflow-y-auto"
+          className="absolute z-50 left-0 right-0 mt-1.5 bg-card/25 backdrop-blur-xl backdrop-saturate-150 border border-foreground/10 ring-1 ring-black/5 rounded-xl shadow-2xl shadow-black/25 overflow-hidden py-1 max-h-[22rem] overflow-y-auto"
         >
+          {typeof resultCount === 'number' && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 mb-1 border-b border-foreground/10 text-xs font-semibold">
+              {resultCount > 0
+                ? <span className="text-violet-600 dark:text-violet-300">{resultCount} matching {pluralize(resultCount, resultNoun)}</span>
+                : <span className="text-muted-foreground">No matching {pluralize(0, resultNoun)}</span>}
+            </div>
+          )}
           {rows.map((r, idx) => {
             const active = activeIndex === idx
             return (
               <button key={r.field} type="button" onClick={() => commit(r.field, r.op)}
                 onMouseEnter={() => setActiveIndex(idx)}
-                className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors ${active ? 'bg-violet-500/15 text-violet-200' : 'hover:bg-foreground/[0.06]'}`}>
-                <Search size={13} className="text-muted-foreground shrink-0" />
+                className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors ${active ? 'bg-violet-500/20 text-violet-700 dark:text-violet-100 font-medium' : 'text-foreground hover:bg-foreground/10'}`}>
+                <Search size={13} className={`shrink-0 ${active ? 'text-violet-600 dark:text-violet-200' : 'text-muted-foreground'}`} />
                 <span className="flex-1 truncate">
                   {r.field === 'any'
                     ? <>Search for: <span className="font-semibold italic">{q}</span></>
@@ -209,7 +224,7 @@ export function TokenizedSearch({
                       ? <>Search <span className="font-semibold">{r.label}</span> = <span className="font-semibold italic">{q}</span></>
                       : <>Search <span className="font-semibold">{r.label}</span> for: <span className="font-semibold italic">{q}</span></>}
                 </span>
-                {active && <CornerDownLeft size={12} className="text-muted-foreground/60 shrink-0" />}
+                {active && <CornerDownLeft size={12} className="text-violet-500/70 dark:text-muted-foreground/60 shrink-0" />}
               </button>
             )
           })}

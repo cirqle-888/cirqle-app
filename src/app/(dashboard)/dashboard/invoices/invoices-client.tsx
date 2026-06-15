@@ -1203,12 +1203,16 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     // legacy rows that only have the INR column working.
     const taskAmt = (t: any) => t.billing_amount ?? t.billing_amount_inr ?? 0
     const subtotal = selected.reduce((s, t) => s + taskAmt(t), 0)
+    // Invoice currency follows the tasks (line amounts are in each task's OWN
+    // currency via billing_amount), not client.default_currency — which can be
+    // unset/stale and would mislabel foreign amounts (e.g. AED) as ₹.
+    const invCurrency = selected.find(t => t.currency)?.currency || client?.default_currency || 'INR'
     // Base insert — columns that always exist
     const { data: inv, error } = await supabase.from('invoices').insert({
       invoice_number: invNum, client_id: genForm.client_id, status: 'draft',
       issue_date: invoiceDate.toISOString().split('T')[0],
       total_amount: subtotal, paid_amount: 0,
-      currency: client?.default_currency || 'INR',
+      currency: invCurrency,
     }).select('*, client:clients(id,name,code,phone,email,address)').single()
 
     if (error) { toastError(error.message); setSaving(false); return }
@@ -1218,7 +1222,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       billing_period_start: from, billing_period_end: to,
       subtotal, tax_rate: 0, tax_amount: 0, discount_amount: 0, previous_balance: 0,
       invoice_sequence_month: sequenceMonth,
-      exchange_rate: creationRate(client?.default_currency || 'INR'), paid_amount_inr: 0,
+      exchange_rate: creationRate(invCurrency), paid_amount_inr: 0,
     }).eq('id', inv.id)
 
     await supabase.from('invoice_items').insert(
@@ -1304,7 +1308,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         groupMap[key] = {
           key, client_id: clientId, client_name: clientName,
           client_code: clientCode, month, taskCount: 0, total: 0,
-          currency: t.client?.default_currency || 'INR',
+          // Invoice currency MUST match the currency the line amounts are in.
+          // Amounts come from each task's billing_amount (its OWN currency), so
+          // the invoice currency is driven by the task — NOT client.default_currency,
+          // which can be unset/stale and would mislabel e.g. AED amounts as ₹.
+          currency: t.currency || t.client?.default_currency || 'INR',
           taskIds: [], default_currency: t.client?.default_currency,
           tasks: [],
         }
@@ -2683,6 +2691,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             draft={searchDraft}
             onDraftChange={setSearchDraft}
             placeholder="Search invoice or client…"
+            resultCount={filtered.length}
+            resultNoun="invoice"
             fields={[
               { key: 'number', label: 'Invoice #', type: 'text' },
               { key: 'client', label: 'Client', type: 'text' },

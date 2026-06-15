@@ -1272,6 +1272,8 @@ export default function ContributionsClient({
               draft={searchDraft}
               onDraftChange={setSearchDraft}
               placeholder="Search tasks, clients, services, code…"
+              resultCount={filteredTasks.length}
+              resultNoun="task"
               fields={[
                 { key: 'title', label: 'Title', type: 'text' },
                 { key: 'client', label: 'Client', type: 'text' },

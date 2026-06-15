@@ -447,6 +447,8 @@ export default function RequestsClient({
           draft={searchDraft}
           onDraftChange={setSearchDraft}
           placeholder="Search title, client, REQ number…"
+          resultCount={rows.length}
+          resultNoun="request"
           fields={[
             { key: 'title', label: 'Title', type: 'text' },
             { key: 'client', label: 'Client', type: 'text' },
