@@ -42,7 +42,7 @@ interface DashboardAnalyticsProps {
   scoresPromise: Promise<any[]>
   // Light data (already awaited on the server, needed for the analytics widgets)
   stats: {
-    totalBilled: number; totalPaid: number; outstanding: number; bankBalance: number
+    totalBilled: number; totalPaid: number; outstanding: number; outstandingThisMonth: number; bankBalance: number
     overdueCount: number; overdueAmount: number
     dueCount: number; dueAmount: number
     toBeInvoicedCount: number; toBeInvoicedAmount: number
@@ -353,7 +353,7 @@ export default function DashboardAnalytics({
         <KpiCard label="Total Billed"    value={f(stats.totalBilled)}       icon={<DollarSign className="w-3.5 h-3.5"/>} color="purple" trend={periodComparison ? { pct: periodComparison.valueChange } : null} />
         <KpiCard label="Collected"       value={f(stats.totalPaid)}          icon={<CheckCircle className="w-3.5 h-3.5"/>} color="green"  trend={periodComparison ? { pct: periodComparison.incomeChange } : null} />
         <KpiCard label="Bank Balance"    value={f(stats.bankBalance)}        icon={<TrendingUp className="w-3.5 h-3.5"/>}  color={stats.bankBalance >= 0 ? 'teal' : 'red'} sub="net cash" />
-        <KpiCard label="Outstanding"     value={f(stats.outstanding)}        icon={<Clock className="w-3.5 h-3.5"/>}       color={stats.outstanding > 0 ? 'orange' : 'green'} trend={stats.outstanding > 0 ? { pct: null } : null} />
+        <KpiCard label="Outstanding"     value={f(stats.outstanding)}        icon={<Clock className="w-3.5 h-3.5"/>}       color={stats.outstanding > 0 ? 'orange' : 'green'} sub={`${f(stats.outstandingThisMonth)} this month`} />
         <KpiCard label="Overdue"         value={f(stats.overdueAmount)}      icon={<AlertTriangle className="w-3.5 h-3.5"/>} color="red"    badge={stats.overdueCount} trend={stats.overdueCount > 0 ? { pct: null, invert: true } : null} clickable onClick={() => setDrawer('overdue')} />
         <KpiCard label="To Be Invoiced"  value={f(stats.toBeInvoicedAmount)} icon={<FileText className="w-3.5 h-3.5"/>}  color="yellow" badge={stats.toBeInvoicedCount} clickable onClick={() => setDrawer('toBeInvoiced')} />
       </div>

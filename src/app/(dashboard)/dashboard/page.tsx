@@ -194,6 +194,15 @@ export default async function DashboardPage() {
   const totalPaid     = invoices.reduce((s, i) => s + invPaidInr(i), 0)
   // Outstanding = unpaid from invoices already sent to clients (not drafts)
   const outstanding   = sentInvoices.reduce((s, i) => s + Math.max(0, invTotalInr(i) - invPaidInr(i)), 0)
+  // Sub-figure: outstanding from invoices ISSUED this calendar month — shows
+  // current-month receivable activity without hiding older receivables from
+  // the headline Outstanding total.
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
+  const outstandingThisMonth = sentInvoices.reduce((s, i) => {
+    const iss = i.issue_date ? new Date(i.issue_date) : null
+    if (!iss || isNaN(iss.getTime()) || iss < monthStart) return s
+    return s + Math.max(0, invTotalInr(i) - invPaidInr(i))
+  }, 0)
   // To be invoiced = draft + reviewed totals (prepared but not sent yet)
   const toBeInvoicedAmount = draftInvoices.reduce((s, i) => s + invTotalInr(i), 0)
 
@@ -276,6 +285,7 @@ export default async function DashboardPage() {
         totalBilled,
         totalPaid,
         outstanding,
+        outstandingThisMonth,
         bankBalance,
         overdueCount:        overdueInvoices.length,
         overdueAmount:       overdueInvoices.reduce((s, i) => s + (invTotalInr(i) - invPaidInr(i)), 0),

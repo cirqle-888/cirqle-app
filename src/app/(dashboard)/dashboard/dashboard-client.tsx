@@ -40,7 +40,7 @@ import DashboardAnalytics from './dashboard-analytics'
 // ─────────────────────────────────────────────────────────────────────────────
 interface Props {
   stats: {
-    totalBilled: number; totalPaid: number; outstanding: number; bankBalance: number
+    totalBilled: number; totalPaid: number; outstanding: number; outstandingThisMonth: number; bankBalance: number
     overdueCount: number; overdueAmount: number
     dueCount: number; dueAmount: number
     toBeInvoicedCount: number; toBeInvoicedAmount: number
