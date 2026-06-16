@@ -539,10 +539,14 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   async function updateStatus(invoiceId: string, newStatus: string) {
     setSaving(true)
     const updates: any = { status: newStatus, updated_at: new Date().toISOString() }
-    // Auto-set due date when sending (30 days from today)
+    // Auto-set due date when sending: net-30 from the invoice's ISSUE date
+    // (not "today") so back-dated invoices get a correct — possibly already
+    // overdue — due date instead of always landing 30 days in the future.
     if (newStatus === 'sent' && !invoices.find(i => i.id === invoiceId)?.due_date) {
-      const dd = new Date(); dd.setDate(dd.getDate() + 30)
-      updates.due_date = dd.toISOString().split('T')[0]
+      const inv = invoices.find(i => i.id === invoiceId)
+      const base = inv?.issue_date ? new Date(inv.issue_date) : new Date()
+      base.setDate(base.getDate() + 30)
+      updates.due_date = base.toISOString().split('T')[0]
     }
     const { error } = await supabase.from('invoices').update(updates).eq('id', invoiceId)
     if (error) { toastError(error.message); setSaving(false); return }
@@ -1002,23 +1006,27 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     // sent_at 400s the whole batch, which is why bulk Mark Sent never worked.
     const baseUpdates: any = { status: newStatus, updated_at: new Date().toISOString() }
 
-    // For 'sent', auto-fill a due date (today + 30 days, same as the single-
-    // invoice flow) on any selected invoice that lacks one — instead of refusing
-    // the whole batch. A bulk .update().in() can only write one value, so split:
-    // invoices missing a due date get it set in their own update.
-    let dueStr: string | null = null
+    // For 'sent', auto-fill a due date on any selected invoice that lacks one —
+    // net-30 from each invoice's own ISSUE date (not "today"), so back-dated
+    // invoices get a correct (possibly already-overdue) due date. Because each
+    // invoice can have a different issue date, these are written one-by-one;
+    // the rest go out in a single batched update.
+    const dueById = new Map<string, string>()
     let missingDueIds: string[] = []
     if (newStatus === 'sent') {
-      missingDueIds = invoices.filter(i => idsToUpdate.includes(i.id) && !i.due_date).map(i => i.id)
-      if (missingDueIds.length) {
-        const dd = new Date(); dd.setDate(dd.getDate() + 30)
-        dueStr = dd.toISOString().split('T')[0]
+      const missing = invoices.filter(i => idsToUpdate.includes(i.id) && !i.due_date)
+      missingDueIds = missing.map(i => i.id)
+      for (const inv of missing) {
+        const base = inv.issue_date ? new Date(inv.issue_date) : new Date()
+        base.setDate(base.getDate() + 30)
+        dueById.set(inv.id, base.toISOString().split('T')[0])
       }
     }
 
     let error: { message: string } | null = null
-    if (missingDueIds.length && dueStr) {
-      const r = await supabase.from('invoices').update({ ...baseUpdates, due_date: dueStr }).in('id', missingDueIds)
+    for (const [id, dueStr] of dueById) {
+      if (error) break
+      const r = await supabase.from('invoices').update({ ...baseUpdates, due_date: dueStr }).eq('id', id)
       error = r.error
     }
     const remainingIds = idsToUpdate.filter(id => !missingDueIds.includes(id))
@@ -1033,13 +1041,14 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       setInvoices(prev => prev.map(i => {
         if (!idsToUpdate.includes(i.id)) return i
         const patch: any = { ...baseUpdates }
-        if (dueStr && missingDueIds.includes(i.id)) patch.due_date = dueStr
+        const dd = dueById.get(i.id)
+        if (dd) patch.due_date = dd
         return { ...i, ...patch }
       }))
       setSelectedForBulk(new Set())
       success(
         `Updated ${idsToUpdate.length} invoice(s) to ${newStatus}`,
-        missingDueIds.length ? `${missingDueIds.length} due date(s) set to +30 days` : undefined,
+        missingDueIds.length ? `${missingDueIds.length} due date(s) set to net-30 from issue date` : undefined,
       )
     }
     setIsUpdatingBulk(false)
