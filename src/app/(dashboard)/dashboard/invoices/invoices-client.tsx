@@ -538,6 +538,14 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   }
 
   async function updateStatus(invoiceId: string, newStatus: string) {
+    if (newStatus === 'paid') {
+      const inv = invoices.find(i => i.id === invoiceId)
+      const due = inv ? balanceDueInr(inv) : 0
+      if (due > 0.5) {
+        toastError(`Can't mark Paid — ${fmt(due)} still outstanding. Record the payment or allocation first.`)
+        return
+      }
+    }
     setSaving(true)
     const updates: any = { status: newStatus, updated_at: new Date().toISOString() }
     // Auto-set due date when sending: net-30 from the invoice's ISSUE date
@@ -5660,38 +5668,38 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             </div>
             <button
               onClick={() => { setPanelMode('generate'); setSelectedId(null); setGenTasks([]) }}
-              className={`rounded-xl p-3 border flex items-center gap-2 text-left transition-colors ${panelMode === 'generate' ? 'bg-amber-500/20 border-amber-500/40' : 'bg-amber-600/10 hover:bg-amber-600/20 border-amber-500/20'}`}>
-              <Calendar className="w-4 h-4 text-amber-400 shrink-0" />
+              className={`rounded-xl p-3 border flex items-center gap-2 text-left transition-colors ${panelMode === 'generate' ? 'bg-amber-500/20 border-amber-500/40' : 'bg-amber-50 dark:bg-amber-600/10 hover:bg-amber-100 dark:hover:bg-amber-600/20 border-amber-200 dark:border-amber-500/20'}`}>
+              <Calendar className="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" />
               <div>
-                <div className="text-[10px] text-amber-300/70">Add-on</div>
-                <div className="text-xs font-semibold text-amber-300">Generate</div>
+                <div className="text-[10px] text-amber-600/70 dark:text-amber-300/70">Add-on</div>
+                <div className="text-xs font-semibold text-amber-700 dark:text-amber-300">Generate</div>
               </div>
             </button>
             <button
               onClick={() => { setPanelMode('batch_generate'); setSelectedId(null); setBatchGroups([]); setBatchDone(0) }}
-              className={`rounded-xl p-3 border flex items-center gap-2 text-left transition-colors ${panelMode === 'batch_generate' ? 'bg-emerald-500/20 border-emerald-500/40' : 'bg-emerald-600/10 hover:bg-emerald-600/20 border-emerald-500/20'}`}>
-              <History className="w-4 h-4 text-emerald-400 shrink-0" />
+              className={`rounded-xl p-3 border flex items-center gap-2 text-left transition-colors ${panelMode === 'batch_generate' ? 'bg-emerald-500/20 border-emerald-500/40' : 'bg-emerald-50 dark:bg-emerald-600/10 hover:bg-emerald-100 dark:hover:bg-emerald-600/20 border-emerald-200 dark:border-emerald-500/20'}`}>
+              <History className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
               <div>
-                <div className="text-[10px] text-emerald-300/70">Batch</div>
-                <div className="text-xs font-semibold text-emerald-300">Historical</div>
+                <div className="text-[10px] text-emerald-700/70 dark:text-emerald-300/70">Batch</div>
+                <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">Historical</div>
               </div>
             </button>
             <button
               onClick={() => { setPanelMode('statement'); setSelectedId(null) }}
-              className={`rounded-xl p-3 border flex items-center gap-2 text-left transition-colors ${panelMode === 'statement' ? 'bg-blue-500/20 border-blue-500/40' : 'bg-blue-600/10 hover:bg-blue-600/20 border-blue-500/20'}`}>
-              <Receipt className="w-4 h-4 text-blue-400 shrink-0" />
+              className={`rounded-xl p-3 border flex items-center gap-2 text-left transition-colors ${panelMode === 'statement' ? 'bg-blue-500/20 border-blue-500/40' : 'bg-blue-50 dark:bg-blue-600/10 hover:bg-blue-100 dark:hover:bg-blue-600/20 border-blue-200 dark:border-blue-500/20'}`}>
+              <Receipt className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
               <div>
-                <div className="text-[10px] text-blue-300/70">Account</div>
-                <div className="text-xs font-semibold text-blue-300">Statement</div>
+                <div className="text-[10px] text-blue-700/70 dark:text-blue-300/70">Account</div>
+                <div className="text-xs font-semibold text-blue-700 dark:text-blue-300">Statement</div>
               </div>
             </button>
             <button
               onClick={() => { setPanelMode('discounts'); setSelectedId(null); loadDiscountAnalytics() }}
-              className={`rounded-xl p-3 border flex items-center gap-2 text-left transition-colors ${panelMode === 'discounts' ? 'bg-violet-500/20 border-violet-500/40' : 'bg-violet-600/10 hover:bg-violet-600/20 border-violet-500/20'}`}>
-              <TrendingUp className="w-4 h-4 text-violet-400 shrink-0" />
+              className={`rounded-xl p-3 border flex items-center gap-2 text-left transition-colors ${panelMode === 'discounts' ? 'bg-violet-500/20 border-violet-500/40' : 'bg-violet-50 dark:bg-violet-600/10 hover:bg-violet-100 dark:hover:bg-violet-600/20 border-violet-200 dark:border-violet-500/20'}`}>
+              <TrendingUp className="w-4 h-4 text-violet-600 dark:text-violet-400 shrink-0" />
               <div>
-                <div className="text-[10px] text-violet-300/70">Financial</div>
-                <div className="text-xs font-semibold text-violet-300">Analytics</div>
+                <div className="text-[10px] text-violet-700/70 dark:text-violet-300/70">Financial</div>
+                <div className="text-xs font-semibold text-violet-700 dark:text-violet-300">Analytics</div>
               </div>
             </button>
           </div>

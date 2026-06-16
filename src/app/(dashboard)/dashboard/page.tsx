@@ -111,6 +111,7 @@ export default async function DashboardPage() {
           .from('tasks')
           .select('id, title, status, billing_amount_inr, task_date, client:clients(id, name), service:services(id, name)')
           .not('status', 'eq', 'cancelled')
+          .is('deleted_at', null)
           .gte('task_date', displayFromStr)
           .order('task_date', { ascending: false })))
       : Promise.resolve({ data: [] }),
