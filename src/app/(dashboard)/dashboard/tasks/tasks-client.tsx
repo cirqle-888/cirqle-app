@@ -43,6 +43,7 @@ import {
   serverCancelTask,
   serverFillTaskBilling,
   logTaskCreated,
+  logTaskAssignment,
   serverInlineTaskUpdate,
 } from './actions'
 import { useToast, ToastContainer } from '@/components/ui/toast'
@@ -1410,6 +1411,13 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
         ...paramRows
       ])
     } catch { /* task_parameter_assignments table may not exist yet */ }
+
+    // Record the assignment on the task's activity timeline (fire-and-forget).
+    logTaskAssignment(tid, {
+      employees: [...assignSelected]
+        .map(id => { const e = employees.find(x => x.id === id); return e ? dn(e) : null })
+        .filter((s): s is string => !!s),
+    }).catch(() => { /* logging is best-effort */ })
 
     setAssignSaving(false)
     setAssignModal(null)

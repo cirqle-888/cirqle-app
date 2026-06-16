@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import dynamic from 'next/dynamic'
-import { X, Trash2, BarChart2 } from 'lucide-react'
+import { X, Trash2, BarChart2, Clock } from 'lucide-react'
 import { serverSaveTask, serverDeleteTask } from '@/app/(dashboard)/dashboard/tasks/actions'
 import { ModalOverlay } from './modal-overlay'
 import AppSelect from './app-select'
@@ -13,6 +13,7 @@ const ContributionEntryPanel = dynamic(
   () => import('./contribution-entry-panel').then(m => m.ContributionEntryPanel),
   { ssr: false },
 )
+const ActivityPanel = dynamic(() => import('@/components/activity/activity-panel'), { ssr: false })
 
 interface TaskEditModalProps {
   task: any
@@ -61,7 +62,7 @@ export function TaskEditModal({
   employees = [], groups = [], parameters = [], groupServices = [],
   onSaved, onDeleted, onClose,
 }: TaskEditModalProps) {
-  const [activeTab, setActiveTab] = useState<'details' | 'contributions'>(
+  const [activeTab, setActiveTab] = useState<'details' | 'contributions' | 'activity'>(
     canViewContributions && initialTab === 'contributions' ? 'contributions' : 'details'
   )
 
@@ -189,29 +190,35 @@ export function TaskEditModal({
             <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
           </div>
 
-          {/* Tab bar — only shown when the Contributions tab is available */}
-          {canViewContributions && (
-            <div className="flex shrink-0 border-b border-border px-6 bg-card">
-              {(['details', 'contributions'] as const).map(tab => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setActiveTab(tab)}
-                  className={`py-2.5 px-1 mr-5 text-sm font-medium border-b-2 transition-colors capitalize ${
-                    activeTab === tab
-                      ? 'border-primary text-foreground'
-                      : 'border-transparent text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  {tab === 'contributions' ? (
-                    <span className="flex items-center gap-1.5">
-                      <BarChart2 className="w-3.5 h-3.5" /> Contributions
-                    </span>
-                  ) : tab}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* Tab bar — Details + Activity always; Contributions when permitted */}
+          <div className="flex shrink-0 border-b border-border px-6 bg-card">
+            {([
+              'details',
+              ...(canViewContributions ? ['contributions'] as const : []),
+              'activity',
+            ] as const).map(tab => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setActiveTab(tab)}
+                className={`py-2.5 px-1 mr-5 text-sm font-medium border-b-2 transition-colors capitalize ${
+                  activeTab === tab
+                    ? 'border-primary text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {tab === 'contributions' ? (
+                  <span className="flex items-center gap-1.5">
+                    <BarChart2 className="w-3.5 h-3.5" /> Contributions
+                  </span>
+                ) : tab === 'activity' ? (
+                  <span className="flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5" /> Activity
+                  </span>
+                ) : tab}
+              </button>
+            ))}
+          </div>
 
           {/* ── Details tab ── */}
           {activeTab === 'details' && (
@@ -427,6 +434,21 @@ export function TaskEditModal({
                 >
                   <BarChart2 className="w-3.5 h-3.5" /> Full report
                 </a>
+              </div>
+            </div>
+          )}
+
+          {/* ── Activity tab ── */}
+          {activeTab === 'activity' && (
+            <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <div className="overflow-y-auto flex-1 p-6">
+                <ActivityPanel entityType="task" entityId={task.id} />
+              </div>
+              <div
+                className="flex gap-3 px-6 pt-3 border-t border-border bg-card sm:rounded-b-2xl shrink-0"
+                style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 12px)' }}
+              >
+                <button type="button" onClick={onClose} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80">Close</button>
               </div>
             </div>
           )}

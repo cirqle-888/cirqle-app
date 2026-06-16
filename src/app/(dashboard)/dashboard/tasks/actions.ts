@@ -443,3 +443,23 @@ export async function logTaskCreated(
     detail:     { title: taskTitle, task_number: taskNumber },
   })
 }
+
+/**
+ * Record a team-assignment change on the task's activity timeline.
+ * Called fire-and-forget from the client after assignments are saved.
+ */
+export async function logTaskAssignment(
+  taskId: string,
+  detail?: { employees?: string[]; title?: string },
+): Promise<void> {
+  const guard = await requirePermission(PERMS.TASKS_ASSIGN)
+  if (!guard.ok) return
+
+  void logActivity({
+    actorId:    guard.employeeId,
+    entityType: 'task',
+    entityId:   taskId,
+    action:     'assigned',
+    detail:     detail ?? null,
+  })
+}

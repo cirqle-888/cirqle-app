@@ -109,6 +109,37 @@ export async function postExternalUpdate(
   return { ok: true }
 }
 
+/**
+ * Append an internal-only log note to the request timeline (Odoo-style comment).
+ * Visibility is always 'internal' — never reaches the client/agency portal, so
+ * the external-projection invariant holds. The note is attributed to the acting
+ * staff member's CQID so the timeline shows who wrote what.
+ */
+export async function postRequestNote(
+  requestId: string, note: string,
+): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.REQUESTS_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const msg = (note || '').trim()
+  if (!msg) return { ok: false, error: 'Write a note first.' }
+
+  const admin = createAdminClient()
+  // Resolve the actor's CQID for the timeline label (internal-only, so safe).
+  let label = 'Cirqle'
+  try {
+    const { data: emp } = await admin.from('employees').select('cqid').eq('id', guard.employeeId).single()
+    if (emp?.cqid) label = emp.cqid
+  } catch { /* fall back to 'Cirqle' */ }
+
+  await logRequestActivity(admin, {
+    requestId, actorType: 'admin', actorId: guard.employeeId, actorLabel: label,
+    action: 'note', visibility: 'internal',
+    detail: { message: msg.slice(0, 1000) },
+  })
+  revalidatePath(REVALIDATE)
+  return { ok: true }
+}
+
 /** Internal-only note (never visible externally). */
 export async function updateInternalNotes(
   requestId: string, notes: string,

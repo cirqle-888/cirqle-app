@@ -28,7 +28,7 @@ import {
 } from '@/lib/requests/core'
 import {
   setRequestStatusAction, markRequestViewed, getRequestTimeline,
-  postExternalUpdate, updateInternalNotes, markRevisionAddressed,
+  postExternalUpdate, updateInternalNotes, markRevisionAddressed, postRequestNote,
   assignRequestEmployee, createManualRequest, searchTasksForLink, linkRequestToTask,
   reorderStaffPriority,
 } from './actions'
@@ -207,6 +207,7 @@ export default function RequestsClient({
   const [busy, setBusy] = useState(false)
   const [updateMsg, setUpdateMsg] = useState('')
   const [notes, setNotes] = useState('')
+  const [noteMsg, setNoteMsg] = useState('')
 
   // Filters + staff-created request modal
   const [searchFacets, setSearchFacets] = useState<SearchFacet[]>([])
@@ -379,6 +380,19 @@ export default function RequestsClient({
       setRequests(prev => prev.map(x => x.id === open.id ? { ...x, internal_notes: notes } : x))
       success('Internal notes saved')
     } else toastError('Could not save notes', res.error)
+  }
+
+  async function doPostNote() {
+    if (!open || !noteMsg.trim()) return
+    setBusy(true)
+    const res = await postRequestNote(open.id, noteMsg.trim())
+    setBusy(false)
+    if (res.ok) {
+      setNoteMsg('')
+      success('Note added', 'Internal — not visible to the requester')
+      const tl = await getRequestTimeline(open.id)
+      if (tl.ok && tl.data) setTimeline(tl.data.rows)
+    } else toastError('Could not add note', res.error)
   }
 
   async function doAssign(r: any, employeeId: string) {
@@ -994,6 +1008,23 @@ export default function RequestsClient({
                     <button onClick={doSaveNotes} disabled={busy}
                       className="px-3 rounded-xl bg-secondary border border-border hover:bg-secondary/70 disabled:opacity-50 transition-colors shrink-0">
                       <Save className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Internal log note → appends to the timeline (Odoo-style comment) */}
+              {perms.manage && (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1.5">Log note <span className="normal-case text-muted-foreground/40">(internal comment on the timeline)</span></p>
+                  <div className="flex gap-2">
+                    <input value={noteMsg} onChange={e => setNoteMsg(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && noteMsg.trim()) { e.preventDefault(); doPostNote() } }}
+                      className="flex-1 bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50"
+                      placeholder='e.g. "Called client, awaiting brand assets"' />
+                    <button onClick={doPostNote} disabled={busy || !noteMsg.trim()}
+                      className="px-3 rounded-xl bg-secondary border border-border hover:bg-secondary/70 disabled:opacity-50 transition-colors shrink-0">
+                      <MessageSquarePlus className="w-4 h-4" />
                     </button>
                   </div>
                 </div>

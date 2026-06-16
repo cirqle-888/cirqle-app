@@ -8,7 +8,7 @@ import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { recalculatePayrollForMonth } from '@/app/(dashboard)/dashboard/payroll/actions'
 import { serverFillTaskBilling } from '@/app/(dashboard)/dashboard/tasks/actions'
-import { applyTaskAgreements } from './actions'
+import { applyTaskAgreements, logContributionSaved } from './actions'
 import { calculateCommission } from '@/lib/calculations/commission'
 import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
 import { taskCode, taskCodeMatches, nextTaskNumber } from '@/lib/utils/task-code'
@@ -33,6 +33,7 @@ import { QuickCreateClientModal, QuickCreateServiceModal } from '@/components/ta
 import { usePermissions } from '@/contexts/permission-context'
 import { useRole } from '@/contexts/role-context'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+const ActivityPanel = dynamic(() => import('@/components/activity/activity-panel'), { ssr: false })
 import { PageShell, PageContent, StickyToolbar, PageChrome } from '@/components/layout/page-shell'
 
 // Heavy task editor — only mount when opened; bundle splits off the
@@ -1038,6 +1039,12 @@ export default function ContributionsClient({
     }
     if (contribInserts.length) await supabase.from('contributions').insert(contribInserts)
     if (toolInserts.length) await supabase.from('task_tools').insert(toolInserts)
+
+    // Record on the task's activity timeline (fire-and-forget — never blocks save).
+    logContributionSaved(selectedTask.id, {
+      employees: calculatedResult?.employeeEarnings?.length ?? contribInserts.length,
+      title: selectedTask.title,
+    }).catch(() => { /* logging is best-effort */ })
 
     // Auto-recalculate pending payroll for this month when contributions change
     if (selectedTask.task_date) {
@@ -2854,6 +2861,13 @@ export default function ContributionsClient({
                 <span className="text-xs text-muted-foreground ml-1.5">/ ₹{calculatedResult.remainingPool.toFixed(0)} pool</span>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* ── Activity timeline (unified per-task thread) ── */}
+        {selectedTask && (
+          <div className="bg-card border border-border rounded-xl p-4">
+            <ActivityPanel entityType="task" entityId={selectedTask.id} />
           </div>
         )}
 
