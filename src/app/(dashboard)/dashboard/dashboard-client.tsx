@@ -26,7 +26,7 @@ import { DateFilter, matchesDateFilter, getDateFilterLabel } from '@/components/
 import type { DateFilterValue } from '@/components/ui/date-filter'
 import {
   AlertTriangle, ClipboardList, ArrowRight, CheckCircle, X, ChevronRight,
-  FileText, BarChart3, TrendingUp, TrendingDown, Zap,
+  FileText, BarChart3, TrendingUp, TrendingDown, Zap, PhoneCall, Send, BellRing,
 } from 'lucide-react'
 import {
   fmt, fmtFull, fmtDate, daysLate, daysToGo, getPeriodKey, getPeriodLabel,
@@ -57,6 +57,8 @@ interface Props {
   isAdmin?: boolean
   /** Live rates from exchange_rates table — used only for the FX toggle, no accounting impact. */
   exchangeRates?: { currency: string; rate_to_inr: number }[]
+  /** Collections follow-up counts — powers the dashboard Follow-ups widget. */
+  followupCounts?: { needsSent: number; urgent: number; regular: number }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -239,7 +241,7 @@ function AdminDashboard({
   stats, invoices, overdueInvoices, dueInvoices, allCashbook,
   allAnalyticsTasksPromise, todayTasks, unscoredDoneTasks,
   activeTasks, toBeInvoiced, employees, scoresPromise, payrollRecords,
-  todayStr, exchangeRates = [],
+  todayStr, exchangeRates = [], followupCounts,
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
@@ -406,6 +408,25 @@ function AdminDashboard({
           </section>
         )}
 
+        {/* ── Collections follow-up widget ──────────────── */}
+        {followupCounts && (followupCounts.urgent + followupCounts.regular + followupCounts.needsSent) > 0 && (
+          <Link
+            href="/dashboard/invoices/follow-ups"
+            className="block bg-card border border-border rounded-2xl p-4 hover:border-primary/30 transition-colors group"
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <PhoneCall className="w-4 h-4 text-primary" />
+              <h2 className="text-sm font-semibold">Invoice Follow-ups</h2>
+              <ArrowRight className="w-3.5 h-3.5 text-muted-foreground ml-auto group-hover:translate-x-0.5 transition-transform" />
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <FollowupTile icon={<AlertTriangle className="w-3.5 h-3.5" />} label="Urgent"      count={followupCounts.urgent}    tint="text-red-600 dark:text-red-400" />
+              <FollowupTile icon={<BellRing className="w-3.5 h-3.5" />}      label="Regular"     count={followupCounts.regular}   tint="text-amber-600 dark:text-amber-400" />
+              <FollowupTile icon={<Send className="w-3.5 h-3.5" />}          label="To be sent"  count={followupCounts.needsSent} tint="text-blue-600 dark:text-blue-400" />
+            </div>
+          </Link>
+        )}
+
         {/* ── Total Expected Cash hero ──────────────────── */}
         <div className="bg-card border border-primary/20 rounded-2xl p-5 relative overflow-hidden">
           <div className="absolute -right-8 -top-8 w-36 h-36 rounded-full bg-gradient-to-br from-violet-500/10 to-purple-600/5 pointer-events-none" />
@@ -521,6 +542,18 @@ function AdminDashboard({
 // ─────────────────────────────────────────────────────────────────────────────
 // Sub-components
 // ─────────────────────────────────────────────────────────────────────────────
+function FollowupTile({ icon, label, count, tint }: { icon: React.ReactNode; label: string; count: number; tint: string }) {
+  return (
+    <div className="rounded-lg bg-secondary/50 border border-border px-3 py-2.5">
+      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mb-1">
+        <span className={tint}>{icon}</span>
+        <span className="truncate">{label}</span>
+      </div>
+      <div className={`text-xl font-bold ${count > 0 ? tint : 'text-muted-foreground/50'}`}>{count}</div>
+    </div>
+  )
+}
+
 function FocusCard({ icon, color, title, count, unit, sub, items, onClick }: {
   icon: React.ReactNode; color: string; title: string; count: number; unit: string
   sub?: string; items: string[]; onClick: () => void

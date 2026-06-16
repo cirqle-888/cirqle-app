@@ -21,6 +21,7 @@ import {
   getStatusColor, getStatusLabel, isOverdue,
   isEditable, formatBillingPeriod, getNextAction,
 } from '@/lib/utils/invoice'
+import { publicInvoiceUrl, buildInvoiceShareText, whatsappShareUrl } from '@/lib/invoices/share'
 import { formatCurrency, getCurrencySymbol, round2 } from '@/lib/calculations/currency'
 import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
 import {
@@ -2939,14 +2940,16 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             </button>
             <button
               onClick={() => {
-                const text = [
-                  `📄 Invoice ${inv.invoice_number}`,
-                  `Client: ${inv.client?.name || ''}`,
-                  showAmounts ? `Amount: ${fmt(inv.total_amount, inv.currency)}` : '',
-                  inv.due_date ? `Due: ${fmtDate(inv.due_date)}` : '',
-                  `\nhttps://app.cirqle.work/dashboard/invoices`,
-                ].filter(Boolean).join('\n')
-                window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank')
+                const text = buildInvoiceShareText({
+                  invoiceNumber: inv.invoice_number,
+                  clientName:    inv.client?.name ?? null,
+                  companyName:   companySettings.company_name || 'Cirqle Design',
+                  amount:        inv.total_amount,
+                  dueDate:       inv.due_date,
+                  showAmounts,
+                  link:          publicInvoiceUrl((inv as any).public_token),
+                })
+                window.open(whatsappShareUrl(text, inv.client?.phone ?? null), '_blank', 'noopener,noreferrer')
               }}
               title="Share via WhatsApp"
               className="p-1.5 text-muted-foreground hover:text-green-400 hover:bg-green-500/10 rounded-lg transition-colors">

@@ -2,6 +2,7 @@ import { createAdminClient, fetchAll, stablePaginationQuery } from '@/lib/supaba
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { getPendingPricing } from '@/lib/pricing/pending'
 import { PricingPendingBanner } from '@/components/pricing/pricing-pending-banner'
+import { summarizeFollowups } from '@/lib/followups/grouping'
 import DashboardClient from './dashboard-client'
 
 export const dynamic = 'force-dynamic'
@@ -203,6 +204,23 @@ export default async function DashboardPage() {
     if (!iss || isNaN(iss.getTime()) || iss < monthStart) return s
     return s + Math.max(0, invTotalInr(i) - invPaidInr(i))
   }, 0)
+
+  // ── Follow-up widget counts (admin only) ─────────────────────────────────────
+  // Uses the SAME classifier as the Follow-ups page so counts never drift.
+  // Defensive: if invoice_followups doesn't exist yet, fu is null → counts fall
+  // back to status-only buckets (drafts→to-send, overdue→urgent), still useful.
+  let followupCounts = { needsSent: 0, urgent: 0, regular: 0 }
+  if (isAdmin) {
+    const pendingForFollowup = invoices.filter(i =>
+      ['draft', 'reviewed', 'sent', 'partial', 'overdue'].includes(i.status))
+    if (pendingForFollowup.length) {
+      const { data: fu } = await supabase
+        .from('invoice_followups')
+        .select('id, invoice_id, promised_date, next_followup_date, created_at')
+        .in('invoice_id', pendingForFollowup.map(i => i.id))
+      followupCounts = summarizeFollowups(pendingForFollowup as any[], (fu || []) as any[])
+    }
+  }
   // To be invoiced = draft + reviewed totals (prepared but not sent yet)
   const toBeInvoicedAmount = draftInvoices.reduce((s, i) => s + invTotalInr(i), 0)
 
@@ -298,6 +316,7 @@ export default async function DashboardPage() {
       }}
       exchangeRates={exchangeRates as any[]}
       isAdmin={isAdmin}
+      followupCounts={followupCounts}
     />
     </>
   )

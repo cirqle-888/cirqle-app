@@ -33,6 +33,7 @@ import {
   UserCircle,
   ChevronDown,
   Inbox,
+  PhoneCall,
 } from 'lucide-react'
 import { CommandPaletteTrigger } from '@/components/ui/command-palette'
 import { EmployeeAvatar } from '@/components/ui/employee-avatar'
@@ -122,6 +123,7 @@ const navSections: NavSection[] = [
     items: [
       { label: 'Quotations',  href: '/dashboard/quotations', icon: BookOpen, requiredPerm: 'billing.view_quotations' },
       { label: 'Invoices',    href: '/dashboard/invoices',   icon: FileText, requiredPerm: 'billing.view_invoices' },
+      { label: 'Follow-ups',  href: '/dashboard/invoices/follow-ups', icon: PhoneCall, requiredPerm: 'billing.view_invoices' },
       { label: 'Cash Book',   href: '/dashboard/cashbook',   icon: Wallet,   requiredPerm: 'cashbook.view' },
     ],
   },
@@ -310,6 +312,16 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
     [can, user.isAdmin],
   )
 
+  // Most-specific matching nav href wins, so a parent ("Invoices") doesn't also
+  // light up when a child route ("Invoices › Follow-ups") is active.
+  const activeHref = useMemo(() => {
+    const candidates = visibleNavSections
+      .flatMap(s => s.items.map(i => i.href))
+      .filter(h => pathname === h || (h !== '/dashboard' && pathname.startsWith(h + '/')))
+    if (candidates.length === 0) return null
+    return candidates.reduce((a, b) => (b.length > a.length ? b : a))
+  }, [visibleNavSections, pathname])
+
   async function handleSignOut() {
     const supabase = createClient()
     await supabase.auth.signOut()
@@ -418,7 +430,7 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
               )}
               <div className="space-y-0.5">
                 {visibleItems.map(({ label, href, icon: Icon }) => {
-                  const active = pathname === href || (href !== '/dashboard' && pathname.startsWith(href))
+                  const active = href === activeHref
                   return (
                     <Link
                       key={href}

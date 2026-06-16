@@ -1,0 +1,785 @@
+'use client'
+
+import { useState, useMemo, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
+import Link from 'next/link'
+import Header from '@/components/layout/header'
+import AppSelect from '@/components/ui/app-select'
+import { useToast, ToastContainer } from '@/components/ui/toast'
+import { getStatusColor, getStatusLabel } from '@/lib/utils/invoice'
+import {
+  classifyInvoice, latestByInvoice, countByInvoice, isPromiseMissed,
+  lastFollowupAge, daysOverdue, buildReminderText,
+  type FollowupRow, type FollowupGroup,
+} from '@/lib/followups/grouping'
+import { logFollowup, markInvoiceSent, deleteFollowup, recordPayment } from './actions'
+import { publicInvoiceUrl, buildInvoiceShareText, whatsappShareUrl } from '@/lib/invoices/share'
+import {
+  PhoneCall, MessageCircle, Send, Clock, AlertTriangle, CalendarClock,
+  ChevronDown, ChevronRight, ExternalLink, Copy, Trash2, History,
+  Plus, X, Phone, Inbox, BellRing, CircleDollarSign, CheckCircle2, CreditCard,
+} from 'lucide-react'
+
+// ── Types ────────────────────────────────────────────────────────────
+interface FUInvoice {
+  id:             string
+  invoice_number: string
+  status:         string
+  issue_date:     string | null
+  due_date:       string | null
+  currency:       string
+  client:         { id: string; name: string; code: string | null; phone: string | null } | null
+  outstanding:    number | null
+  total:          number | null
+  hasAllocations: boolean
+  public_token:   string | null
+}
+
+interface Props {
+  invoices:    FUInvoice[]
+  followups:   FollowupRow[]
+  companyName: string
+  showAmounts: boolean
+  setupNeeded: boolean
+}
+
+// ── Outcome metadata ─────────────────────────────────────────────────
+const OUTCOME_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'promised',         label: 'Promised to pay' },
+  { value: 'partial_promised', label: 'Promised partial' },
+  { value: 'callback',         label: 'Will call back' },
+  { value: 'no_response',      label: 'No response' },
+  { value: 'disputed',         label: 'Disputed / query' },
+  { value: 'sent',             label: 'Reminder sent' },
+  { value: 'other',            label: 'Other' },
+]
+const OUTCOME_LABEL: Record<string, string> = Object.fromEntries(OUTCOME_OPTIONS.map(o => [o.value, o.label]))
+function outcomeColor(o: string | null): string {
+  switch (o) {
+    case 'promised':         return 'bg-emerald-500/15 text-emerald-700 border-emerald-500/30 dark:text-emerald-400'
+    case 'partial_promised': return 'bg-teal-500/15 text-teal-700 border-teal-500/30 dark:text-teal-400'
+    case 'callback':         return 'bg-blue-500/15 text-blue-700 border-blue-500/30 dark:text-blue-400'
+    case 'no_response':      return 'bg-amber-500/15 text-amber-700 border-amber-500/30 dark:text-amber-400'
+    case 'disputed':         return 'bg-red-500/15 text-red-700 border-red-500/30 dark:text-red-400'
+    case 'sent':             return 'bg-violet-500/15 text-violet-700 border-violet-500/30 dark:text-violet-400'
+    default:                 return 'bg-gray-500/15 text-gray-700 border-gray-500/30 dark:text-gray-400'
+  }
+}
+
+// ── Formatting helpers ───────────────────────────────────────────────
+const fmtINR = (n: number | null) =>
+  n == null ? '—' : `₹${Math.round(n).toLocaleString('en-IN')}`
+const fmtDate = (s: string | null) => {
+  if (!s) return '—'
+  const d = new Date(s)
+  return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+const GROUP_META: Record<FollowupGroup, { label: string; hint: string; icon: typeof BellRing; accent: string; dot: string }> = {
+  needs_sent: { label: 'Needs to be sent', hint: 'Draft invoices not yet sent to the client', icon: Inbox,    accent: 'text-blue-600 dark:text-blue-400',   dot: 'bg-blue-500' },
+  urgent:     { label: 'Urgent follow-up',  hint: 'Overdue, promised date reached, or a chase is due', icon: AlertTriangle, accent: 'text-red-600 dark:text-red-400',  dot: 'bg-red-500' },
+  regular:    { label: 'Regular follow-up', hint: 'Sent and unpaid, not yet urgent', icon: BellRing, accent: 'text-amber-600 dark:text-amber-400', dot: 'bg-amber-500' },
+}
+const GROUP_ORDER: FollowupGroup[] = ['needs_sent', 'urgent', 'regular']
+
+export default function FollowUpsClient({ invoices, followups, companyName, showAmounts, setupNeeded }: Props) {
+  const router = useRouter()
+  const { toasts, dismiss, success, error: toastError, info } = useToast()
+
+  const [openForm, setOpenForm]       = useState<string | null>(null)
+  const [openHistory, setOpenHistory] = useState<Set<string>>(new Set())
+  const [waInvoice, setWaInvoice]     = useState<string | null>(null) // invoice id whose WhatsApp popover is open
+  const [waText, setWaText]           = useState('')
+  const [collapsed, setCollapsed]     = useState<Set<FollowupGroup>>(new Set())
+  const [busy, setBusy]               = useState<string | null>(null)
+
+  // Form state (single shared form — only one open at a time)
+  const [fNote, setFNote]             = useState('')
+  const [fOutcome, setFOutcome]       = useState('')
+  const [fPromised, setFPromised]     = useState('')
+  const [fNext, setFNext]             = useState('')
+
+  // ── Derived maps ───────────────────────────────────────────────────
+  const latest   = useMemo(() => latestByInvoice(followups), [followups])
+  const counts   = useMemo(() => countByInvoice(followups), [followups])
+  const byInvoice = useMemo(() => {
+    const m = new Map<string, FollowupRow[]>()
+    for (const r of followups) {
+      const arr = m.get(r.invoice_id) ?? []
+      arr.push(r)
+      m.set(r.invoice_id, arr)
+    }
+    return m // already newest-first from the query
+  }, [followups])
+
+  // Client → their sent/partial/overdue invoices (for the aggregated reminder)
+  const pendingByClient = useMemo(() => {
+    const m = new Map<string, FUInvoice[]>()
+    for (const inv of invoices) {
+      if (!inv.client) continue
+      if (!['sent', 'partial', 'overdue'].includes(inv.status)) continue
+      const arr = m.get(inv.client.id) ?? []
+      arr.push(inv)
+      m.set(inv.client.id, arr)
+    }
+    return m
+  }, [invoices])
+
+  // ── Grouping ───────────────────────────────────────────────────────
+  const groups = useMemo(() => {
+    const out: Record<FollowupGroup, FUInvoice[]> = { needs_sent: [], urgent: [], regular: [] }
+    for (const inv of invoices) {
+      const g = classifyInvoice(inv, latest.get(inv.id))
+      if (g) out[g].push(inv)
+    }
+    out.needs_sent.sort((a, b) => (a.issue_date || '').localeCompare(b.issue_date || ''))
+    out.urgent.sort((a, b) => {
+      const od = (daysOverdue(b) ?? -9999) - (daysOverdue(a) ?? -9999)
+      if (od !== 0) return od
+      return (b.outstanding ?? 0) - (a.outstanding ?? 0)
+    })
+    out.regular.sort((a, b) => {
+      const an = latest.get(a.id)?.next_followup_date || '9999'
+      const bn = latest.get(b.id)?.next_followup_date || '9999'
+      if (an !== bn) return an.localeCompare(bn)
+      return (a.issue_date || '').localeCompare(b.issue_date || '')
+    })
+    return out
+  }, [invoices, latest])
+
+  const totalOutstanding = useMemo(
+    () => invoices.reduce((s, i) => s + (i.outstanding ?? 0), 0),
+    [invoices],
+  )
+
+  // ── Actions ────────────────────────────────────────────────────────
+  const resetForm = () => { setFNote(''); setFOutcome(''); setFPromised(''); setFNext('') }
+
+  const toggleForm = (id: string) => {
+    setOpenForm(prev => (prev === id ? null : id))
+    resetForm()
+  }
+  const toggleHistory = (id: string) => {
+    setOpenHistory(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  }
+  const toggleGroup = (g: FollowupGroup) => {
+    setCollapsed(prev => { const n = new Set(prev); n.has(g) ? n.delete(g) : n.add(g); return n })
+  }
+
+  const submitFollowup = useCallback(async (invoiceId: string) => {
+    setBusy(invoiceId)
+    const res = await logFollowup({
+      invoiceId,
+      note:             fNote,
+      outcome:          fOutcome || null,
+      promisedDate:     fPromised || null,
+      nextFollowupDate: fNext || null,
+    })
+    setBusy(null)
+    if (!res.ok) { toastError('Could not save', res.error); return }
+    success('Follow-up logged')
+    setOpenForm(null)
+    resetForm()
+    router.refresh()
+  }, [fNote, fOutcome, fPromised, fNext, router, success, toastError])
+
+  const doMarkSent = useCallback(async (invoiceId: string) => {
+    setBusy(invoiceId)
+    const res = await markInvoiceSent(invoiceId)
+    setBusy(null)
+    if (!res.ok) { toastError('Could not mark sent', res.error); return }
+    success('Invoice marked sent', res.dueDate ? `Due ${fmtDate(res.dueDate)}` : undefined)
+    router.refresh()
+  }, [router, success, toastError])
+
+  const doDeleteFollowup = useCallback(async (id: string) => {
+    const res = await deleteFollowup(id)
+    if (!res.ok) { toastError('Could not delete', res.error); return }
+    success('Follow-up removed')
+    router.refresh()
+  }, [router, success, toastError])
+
+  const doRecordPayment = useCallback(async (
+    invoiceId: string,
+    args: { amount: number; date: string; method: string; reference: string },
+  ): Promise<boolean> => {
+    setBusy(invoiceId)
+    const res = await recordPayment({
+      invoiceId,
+      amount:      args.amount,
+      paymentDate: args.date || null,
+      method:      args.method || null,
+      reference:   args.reference || null,
+    })
+    setBusy(null)
+    if (!res.ok) { toastError('Could not record payment', res.error); return false }
+    success(res.status === 'paid' ? 'Payment recorded — invoice fully paid' : 'Partial payment recorded')
+    router.refresh()
+    return true
+  }, [router, success, toastError])
+
+  // ── WhatsApp reminder ──────────────────────────────────────────────
+  const openWa = (inv: FUInvoice) => {
+    if (waInvoice === inv.id) { setWaInvoice(null); return }
+    const clientInvoices = inv.client ? (pendingByClient.get(inv.client.id) ?? [inv]) : [inv]
+    const text = buildReminderText({
+      clientName:  inv.client?.name ?? 'there',
+      companyName,
+      invoices:    clientInvoices.map(ci => ({
+        invoice_number: ci.invoice_number,
+        issue_date:     ci.issue_date,
+        outstanding:    ci.outstanding ?? 0,
+        link:           publicInvoiceUrl(ci.public_token),
+      })),
+      showAmounts,
+    })
+    setWaText(text)
+    setWaInvoice(inv.id)
+  }
+
+  // Single-invoice share (the client-safe hosted link). Opened synchronously
+  // within the click gesture so it isn't blocked as a popup.
+  const invoiceShareText = (inv: FUInvoice) => buildInvoiceShareText({
+    invoiceNumber: inv.invoice_number,
+    clientName:    inv.client?.name ?? null,
+    companyName,
+    amount:        inv.outstanding,
+    dueDate:       inv.due_date,
+    showAmounts,
+    link:          publicInvoiceUrl(inv.public_token),
+  })
+  const shareInvoice = (inv: FUInvoice) => {
+    window.open(whatsappShareUrl(invoiceShareText(inv), inv.client?.phone ?? null), '_blank', 'noopener,noreferrer')
+  }
+  const markSentAndShare = (inv: FUInvoice) => {
+    // Open WhatsApp first (preserves the user gesture), then mark sent in the background.
+    window.open(whatsappShareUrl(invoiceShareText(inv), inv.client?.phone ?? null), '_blank', 'noopener,noreferrer')
+    void doMarkSent(inv.id)
+  }
+  const copyText = async (text: string) => {
+    try { await navigator.clipboard.writeText(text); success('Copied', 'Reminder text copied') }
+    catch { toastError('Copy failed', 'Select the text and copy manually') }
+  }
+  const sendWhatsApp = (phone: string | null, text: string) => {
+    let digits = (phone || '').replace(/\D/g, '')
+    if (!digits) { copyText(text); info('No phone on file', 'Reminder copied — paste into WhatsApp'); return }
+    if (digits.length === 10) digits = '91' + digits // assume India when no country code
+    window.open(`https://wa.me/${digits}?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer')
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────
+  return (
+    <div className="min-h-screen">
+      <Header
+        title="Follow-ups"
+        subtitle="Chase unpaid invoices — log what clients say, track promised dates, send reminders"
+      />
+
+      <div className="px-4 sm:px-6 lg:px-8 pb-16 max-w-5xl mx-auto">
+        {/* Summary KPIs */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2 mb-6">
+          <KpiTile label="Pending invoices" value={String(invoices.length)} icon={Inbox} tint="text-foreground" />
+          <KpiTile label="Urgent" value={String(groups.urgent.length)} icon={AlertTriangle} tint="text-red-600 dark:text-red-400" />
+          <KpiTile label="To be sent" value={String(groups.needs_sent.length)} icon={Send} tint="text-blue-600 dark:text-blue-400" />
+          <KpiTile label="Total outstanding" value={showAmounts ? fmtINR(totalOutstanding) : '—'} icon={CircleDollarSign} tint="text-foreground" />
+        </div>
+
+        {setupNeeded && (
+          <div className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
+            Follow-up history is unavailable until the database migration runs. Apply
+            <code className="mx-1 px-1.5 py-0.5 rounded bg-amber-500/20 text-xs">20260616120000_invoice_followups.sql</code>
+            in the Supabase SQL editor. Grouping and reminders still work; logged notes will appear once the table exists.
+          </div>
+        )}
+
+        {invoices.length === 0 && (
+          <div className="rounded-xl border border-border bg-card p-10 text-center">
+            <CheckCircle2 className="w-10 h-10 mx-auto text-emerald-500 mb-3" />
+            <p className="font-medium text-foreground">All clear — nothing to follow up</p>
+            <p className="text-sm text-muted-foreground mt-1">No draft or unpaid invoices right now.</p>
+          </div>
+        )}
+
+        {/* Groups */}
+        {GROUP_ORDER.map(g => {
+          const list = groups[g]
+          if (list.length === 0) return null
+          const meta = GROUP_META[g]
+          const GroupIcon = meta.icon
+          const isCollapsed = collapsed.has(g)
+          const groupOutstanding = list.reduce((s, i) => s + (i.outstanding ?? 0), 0)
+          return (
+            <section key={g} className="mb-6">
+              <button
+                onClick={() => toggleGroup(g)}
+                className="w-full flex items-center gap-2.5 mb-3 group"
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
+                <GroupIcon className={`w-4 h-4 ${meta.accent}`} />
+                <span className={`text-sm font-semibold ${meta.accent}`}>{meta.label}</span>
+                <span className="text-xs font-medium text-muted-foreground bg-secondary border border-border rounded-full px-2 py-0.5">
+                  {list.length}
+                </span>
+                {showAmounts && (
+                  <span className="text-xs text-muted-foreground ml-auto mr-1">{fmtINR(groupOutstanding)}</span>
+                )}
+                {isCollapsed
+                  ? <ChevronRight className={`w-4 h-4 text-muted-foreground ${showAmounts ? '' : 'ml-auto'}`} />
+                  : <ChevronDown className={`w-4 h-4 text-muted-foreground ${showAmounts ? '' : 'ml-auto'}`} />}
+              </button>
+              <p className="text-[11px] text-muted-foreground/70 -mt-2 mb-3 ml-6">{meta.hint}</p>
+
+              {!isCollapsed && (
+                <div className="space-y-3">
+                  {list.map(inv => (
+                    <InvoiceCard
+                      key={inv.id}
+                      inv={inv}
+                      group={g}
+                      latest={latest.get(inv.id)}
+                      history={byInvoice.get(inv.id) ?? []}
+                      followupCount={counts.get(inv.id) ?? 0}
+                      showAmounts={showAmounts}
+                      busy={busy === inv.id}
+                      formOpen={openForm === inv.id}
+                      historyOpen={openHistory.has(inv.id)}
+                      waOpen={waInvoice === inv.id}
+                      waText={waText}
+                      setWaText={setWaText}
+                      onToggleForm={() => toggleForm(inv.id)}
+                      onToggleHistory={() => toggleHistory(inv.id)}
+                      onToggleWa={() => openWa(inv)}
+                      onCopyWa={() => copyText(waText)}
+                      onSendWa={() => sendWhatsApp(inv.client?.phone ?? null, waText)}
+                      onMarkSent={() => doMarkSent(inv.id)}
+                      onMarkSentAndShare={() => markSentAndShare(inv)}
+                      onShareInvoice={() => shareInvoice(inv)}
+                      onRecordPayment={(args) => doRecordPayment(inv.id, args)}
+                      onSubmit={() => submitFollowup(inv.id)}
+                      onDeleteFollowup={doDeleteFollowup}
+                      fNote={fNote} setFNote={setFNote}
+                      fOutcome={fOutcome} setFOutcome={setFOutcome}
+                      fPromised={fPromised} setFPromised={setFPromised}
+                      fNext={fNext} setFNext={setFNext}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+          )
+        })}
+      </div>
+
+      <ToastContainer toasts={toasts} onDismiss={dismiss} />
+    </div>
+  )
+}
+
+// ── KPI tile ──────────────────────────────────────────────────────────
+function KpiTile({ label, value, icon: Icon, tint }: { label: string; value: string; icon: typeof Inbox; tint: string }) {
+  return (
+    <div className="rounded-xl border border-border bg-card px-4 py-3">
+      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mb-1">
+        <Icon className="w-3.5 h-3.5" />
+        <span className="truncate">{label}</span>
+      </div>
+      <div className={`text-lg font-bold ${tint}`}>{value}</div>
+    </div>
+  )
+}
+
+// ── Invoice card ────────────────────────────────────────────────────
+interface CardProps {
+  inv:            FUInvoice
+  group:          FollowupGroup
+  latest:         FollowupRow | undefined
+  history:        FollowupRow[]
+  followupCount:  number
+  showAmounts:    boolean
+  busy:           boolean
+  formOpen:       boolean
+  historyOpen:    boolean
+  waOpen:         boolean
+  waText:         string
+  setWaText:      (s: string) => void
+  onToggleForm:   () => void
+  onToggleHistory:() => void
+  onToggleWa:     () => void
+  onCopyWa:       () => void
+  onSendWa:       () => void
+  onMarkSent:     () => void
+  onMarkSentAndShare: () => void
+  onShareInvoice: () => void
+  onRecordPayment:(args: { amount: number; date: string; method: string; reference: string }) => Promise<boolean>
+  onSubmit:       () => void
+  onDeleteFollowup: (id: string) => void
+  fNote: string;     setFNote: (s: string) => void
+  fOutcome: string;  setFOutcome: (s: string) => void
+  fPromised: string; setFPromised: (s: string) => void
+  fNext: string;     setFNext: (s: string) => void
+}
+
+function InvoiceCard(p: CardProps) {
+  const { inv, group, latest, history, followupCount, showAmounts } = p
+  const promiseMissed = isPromiseMissed(inv, latest)
+  const od = daysOverdue(inv)
+  const isDraftGroup = group === 'needs_sent'
+
+  // Inline payment (card-local state)
+  const [payOpen, setPayOpen]     = useState(false)
+  const [payAmount, setPayAmount] = useState('')
+  const [payDate, setPayDate]     = useState(() => new Date().toISOString().split('T')[0])
+  const [payMethod, setPayMethod] = useState('bank_transfer')
+  const [payRef, setPayRef]       = useState('')
+  const togglePay = () => {
+    setPayOpen(o => {
+      const next = !o
+      if (next && inv.outstanding != null) setPayAmount(String(Math.round(inv.outstanding)))
+      return next
+    })
+  }
+  const submitPay = async () => {
+    const amt = parseFloat(payAmount)
+    if (!(amt > 0)) return
+    const ok = await p.onRecordPayment({ amount: amt, date: payDate, method: payMethod, reference: payRef })
+    if (ok) { setPayOpen(false); setPayRef('') }
+  }
+
+  // Due-date helper line
+  let dueLine: React.ReactNode = null
+  if (!isDraftGroup) {
+    if (od != null && od > 0)       dueLine = <span className="text-red-600 dark:text-red-400 font-medium">{od}d overdue</span>
+    else if (od != null && od === 0) dueLine = <span className="text-amber-600 dark:text-amber-400 font-medium">due today</span>
+    else if (od != null)             dueLine = <span className="text-muted-foreground">{Math.abs(od)}d to go</span>
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <div className="p-4">
+        {/* Top row */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-semibold text-foreground text-sm">{inv.invoice_number}</span>
+              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${getStatusColor(inv.status)}`}>
+                {getStatusLabel(inv.status)}
+              </span>
+              {promiseMissed && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-700 border border-red-500/30 dark:text-red-400">
+                  <AlertTriangle className="w-3 h-3" /> Promise missed
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5 mt-1 text-sm text-muted-foreground min-w-0">
+              <span className="truncate">{inv.client?.name ?? 'Unknown client'}</span>
+              {inv.client?.phone && (
+                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground/70 shrink-0">
+                  <Phone className="w-3 h-3" /> {inv.client.phone}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="text-right shrink-0">
+            <div className="font-bold text-foreground">{fmtINR(inv.outstanding)}</div>
+            {showAmounts && inv.total != null && inv.total !== (inv.outstanding ?? 0) && (
+              <div className="text-[11px] text-muted-foreground">of {fmtINR(inv.total)}</div>
+            )}
+          </div>
+        </div>
+
+        {/* Meta line: dates + follow-up age + count */}
+        <div className="flex items-center gap-x-4 gap-y-1 mt-3 text-[11px] text-muted-foreground flex-wrap">
+          <span className="inline-flex items-center gap-1"><CalendarClock className="w-3 h-3" /> Issued {fmtDate(inv.issue_date)}</span>
+          {!isDraftGroup && <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3" /> Due {fmtDate(inv.due_date)} {dueLine && <>· {dueLine}</>}</span>}
+          <span className={`inline-flex items-center gap-1 ${latest ? '' : 'text-muted-foreground/60'}`}>
+            <History className="w-3 h-3" /> {lastFollowupAge(latest)}
+          </span>
+          {followupCount > 0 && (
+            <span className="inline-flex items-center gap-1">
+              <MessageCircle className="w-3 h-3" /> {followupCount} follow-up{followupCount === 1 ? '' : 's'}
+            </span>
+          )}
+        </div>
+
+        {/* Latest note preview */}
+        {latest && (latest.note || latest.outcome || latest.promised_date) && (
+          <div className="mt-3 rounded-lg bg-secondary/60 border border-border px-3 py-2">
+            <div className="flex items-center gap-2 flex-wrap mb-1">
+              {latest.outcome && (
+                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${outcomeColor(latest.outcome)}`}>
+                  {OUTCOME_LABEL[latest.outcome] ?? latest.outcome}
+                </span>
+              )}
+              {latest.promised_date && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 border border-emerald-500/30 dark:text-emerald-400">
+                  <CalendarClock className="w-3 h-3" /> Promised {fmtDate(latest.promised_date)}
+                </span>
+              )}
+              {latest.next_followup_date && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-700 border border-blue-500/30 dark:text-blue-400">
+                  <BellRing className="w-3 h-3" /> Next {fmtDate(latest.next_followup_date)}
+                </span>
+              )}
+            </div>
+            {latest.note && <p className="text-xs text-foreground/90 whitespace-pre-wrap">{latest.note}</p>}
+            <p className="text-[10px] text-muted-foreground/70 mt-1">
+              {latest.creator?.cqid ?? 'Someone'} · {lastFollowupAge(latest)}
+            </p>
+          </div>
+        )}
+
+        {/* Actions */}
+        <div className="flex items-center gap-2 mt-3 flex-wrap">
+          {isDraftGroup ? (
+            <>
+              <button
+                onClick={p.onMarkSent}
+                disabled={p.busy}
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-blue-500/15 text-blue-700 border border-blue-500/30 hover:bg-blue-500/25 dark:text-blue-400 disabled:opacity-50 transition-colors"
+              >
+                <Send className="w-3.5 h-3.5" /> {p.busy ? 'Marking…' : 'Mark Sent'}
+              </button>
+              <button
+                onClick={p.onMarkSentAndShare}
+                disabled={p.busy}
+                title="Mark sent and open WhatsApp with the client invoice link"
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-700 border border-emerald-500/30 hover:bg-emerald-500/25 dark:text-emerald-400 disabled:opacity-50 transition-colors"
+              >
+                <MessageCircle className="w-3.5 h-3.5" /> Mark Sent &amp; Share
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={p.onShareInvoice}
+                title="Share the invoice link via WhatsApp"
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-700 border border-emerald-500/30 hover:bg-emerald-500/25 dark:text-emerald-400 transition-colors"
+              >
+                <MessageCircle className="w-3.5 h-3.5" /> Share invoice
+              </button>
+              <button
+                onClick={p.onToggleWa}
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-secondary border border-border hover:bg-secondary/70 text-foreground transition-colors"
+              >
+                <BellRing className="w-3.5 h-3.5" /> Reminder text
+              </button>
+            </>
+          )}
+          {!isDraftGroup && (
+            inv.hasAllocations ? (
+              <span
+                title="Settled via Cash Book allocations — record payment from the Invoices page"
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-secondary border border-border text-muted-foreground/50 cursor-not-allowed"
+              >
+                <CreditCard className="w-3.5 h-3.5" /> Record payment
+              </span>
+            ) : (
+              <button
+                onClick={togglePay}
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-violet-500/15 text-violet-700 border border-violet-500/30 hover:bg-violet-500/25 dark:text-violet-400 transition-colors"
+              >
+                <CreditCard className="w-3.5 h-3.5" /> {payOpen ? 'Cancel payment' : 'Record payment'}
+              </button>
+            )
+          )}
+          <button
+            onClick={p.onToggleForm}
+            className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-secondary border border-border hover:bg-secondary/70 text-foreground transition-colors"
+          >
+            {p.formOpen ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+            {p.formOpen ? 'Cancel' : 'Log follow-up'}
+          </button>
+          {history.length > 0 && (
+            <button
+              onClick={p.onToggleHistory}
+              className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+            >
+              <History className="w-3.5 h-3.5" /> History {p.historyOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+            </button>
+          )}
+          <Link
+            href="/dashboard/invoices"
+            className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors ml-auto"
+          >
+            <ExternalLink className="w-3.5 h-3.5" /> Open invoice
+          </Link>
+        </div>
+
+        {/* WhatsApp reminder popover */}
+        {p.waOpen && (
+          <div className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 mb-2">
+              <MessageCircle className="w-3.5 h-3.5" /> Reminder message
+              <span className="text-muted-foreground font-normal">(edit before sending)</span>
+            </div>
+            <textarea
+              value={p.waText}
+              onChange={e => p.setWaText(e.target.value)}
+              rows={Math.min(12, p.waText.split('\n').length + 1)}
+              className="w-full text-xs bg-background border border-border rounded-lg px-3 py-2 text-foreground font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-emerald-500/40 resize-y"
+            />
+            <div className="flex items-center gap-2 mt-2">
+              <button
+                onClick={p.onSendWa}
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+              >
+                <Send className="w-3.5 h-3.5" /> Open WhatsApp
+              </button>
+              <button
+                onClick={p.onCopyWa}
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-secondary border border-border hover:bg-secondary/70 text-foreground transition-colors"
+              >
+                <Copy className="w-3.5 h-3.5" /> Copy text
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Record payment form */}
+        {payOpen && !isDraftGroup && (
+          <div className="mt-3 rounded-lg border border-violet-500/30 bg-violet-500/5 p-3">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-violet-700 dark:text-violet-400 mb-2">
+              <CreditCard className="w-3.5 h-3.5" /> Record payment received
+              {inv.outstanding != null && <span className="text-muted-foreground font-normal">· outstanding {fmtINR(inv.outstanding)}</span>}
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+              <div>
+                <label className="block text-[10px] font-medium text-muted-foreground mb-1">Amount (₹)</label>
+                <input
+                  type="number" min="0" step="0.01" value={payAmount} autoFocus
+                  onChange={e => setPayAmount(e.target.value)}
+                  className="w-full text-sm bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-medium text-muted-foreground mb-1">Date</label>
+                <input
+                  type="date" value={payDate}
+                  onChange={e => setPayDate(e.target.value)}
+                  className="w-full text-sm bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-medium text-muted-foreground mb-1">Method</label>
+                <AppSelect value={payMethod} onChange={e => setPayMethod(e.target.value)}>
+                  <option value="bank_transfer">Bank transfer</option>
+                  <option value="upi">UPI</option>
+                  <option value="cash">Cash</option>
+                  <option value="cheque">Cheque</option>
+                  <option value="online">Online</option>
+                  <option value="other">Other</option>
+                </AppSelect>
+              </div>
+              <div>
+                <label className="block text-[10px] font-medium text-muted-foreground mb-1">Reference</label>
+                <input
+                  type="text" value={payRef} placeholder="UTR / ref"
+                  onChange={e => setPayRef(e.target.value)}
+                  className="w-full text-sm bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-2 mt-2.5">
+              <button
+                onClick={submitPay}
+                disabled={p.busy || !(parseFloat(payAmount) > 0)}
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors"
+              >
+                <CreditCard className="w-3.5 h-3.5" /> {p.busy ? 'Saving…' : 'Record payment'}
+              </button>
+              <p className="text-[10px] text-muted-foreground">Paying the full outstanding marks the invoice paid and removes it from this list.</p>
+            </div>
+          </div>
+        )}
+
+        {/* Log follow-up form */}
+        {p.formOpen && (
+          <div className="mt-3 rounded-lg border border-border bg-secondary/40 p-3 space-y-2.5">
+            <textarea
+              value={p.fNote}
+              onChange={e => p.setFNote(e.target.value)}
+              placeholder='What did the client say? e.g. "Spoke to accounts — will transfer by Friday"'
+              rows={2}
+              autoFocus
+              className="w-full text-sm bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 resize-y"
+            />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div>
+                <label className="block text-[10px] font-medium text-muted-foreground mb-1">Outcome</label>
+                <AppSelect value={p.fOutcome} onChange={e => p.setFOutcome(e.target.value)}>
+                  <option value="">—</option>
+                  {OUTCOME_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </AppSelect>
+              </div>
+              <div>
+                <label className="block text-[10px] font-medium text-muted-foreground mb-1">Promised payment date</label>
+                <input
+                  type="date"
+                  value={p.fPromised}
+                  onChange={e => p.setFPromised(e.target.value)}
+                  className="w-full text-sm bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-medium text-muted-foreground mb-1">Next follow-up</label>
+                <input
+                  type="date"
+                  value={p.fNext}
+                  onChange={e => p.setFNext(e.target.value)}
+                  className="w-full text-sm bg-background border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={p.onSubmit}
+                disabled={p.busy}
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg gradient-bg text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+              >
+                <Send className="w-3.5 h-3.5" /> {p.busy ? 'Saving…' : 'Save follow-up'}
+              </button>
+              <p className="text-[10px] text-muted-foreground">A promised or next-follow-up date that's today/past moves this invoice to Urgent.</p>
+            </div>
+          </div>
+        )}
+
+        {/* Full history */}
+        {p.historyOpen && history.length > 0 && (
+          <div className="mt-3 border-t border-border pt-3 space-y-2.5">
+            {history.map(h => (
+              <div key={h.id} className="flex items-start gap-2 group/h">
+                <div className="w-1.5 h-1.5 rounded-full bg-border mt-1.5 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {h.outcome && (
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${outcomeColor(h.outcome)}`}>
+                        {OUTCOME_LABEL[h.outcome] ?? h.outcome}
+                      </span>
+                    )}
+                    {h.promised_date && (
+                      <span className="text-[10px] text-emerald-700 dark:text-emerald-400">Promised {fmtDate(h.promised_date)}</span>
+                    )}
+                    {h.next_followup_date && (
+                      <span className="text-[10px] text-blue-700 dark:text-blue-400">Next {fmtDate(h.next_followup_date)}</span>
+                    )}
+                  </div>
+                  {h.note && <p className="text-xs text-foreground/90 whitespace-pre-wrap mt-0.5">{h.note}</p>}
+                  <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                    {h.creator?.cqid ?? 'Someone'} · {fmtDate(h.created_at)} {new Date(h.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                </div>
+                <button
+                  onClick={() => p.onDeleteFollowup(h.id)}
+                  title="Delete this entry"
+                  className="opacity-0 group-hover/h:opacity-100 text-muted-foreground hover:text-red-500 transition-all shrink-0"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
