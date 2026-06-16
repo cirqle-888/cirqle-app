@@ -1038,6 +1038,18 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     if (error) {
       toastError(error.message)
     } else {
+      // Mirror the single-invoice task-status sync that the bulk path was missing.
+      // When bulk-marking sent → tasks become 'invoiced'; draft/cancelled → revert to 'done'.
+      const bulkTaskStatus = newStatus === 'sent' ? 'invoiced' : (newStatus === 'draft' || newStatus === 'cancelled') ? 'done' : null
+      if (bulkTaskStatus) {
+        const taskIds = invoices
+          .filter(i => idsToUpdate.includes(i.id))
+          .flatMap(i => (i.items || []).map((it: any) => it.task_id).filter(Boolean)) as string[]
+        if (taskIds.length) {
+          await supabase.from('tasks').update({ status: bulkTaskStatus }).in('id', taskIds)
+        }
+      }
+
       setInvoices(prev => prev.map(i => {
         if (!idsToUpdate.includes(i.id)) return i
         const patch: any = { ...baseUpdates }
