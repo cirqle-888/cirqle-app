@@ -241,16 +241,16 @@ export function renderInvoiceHtml(
     ? (customQr ? `<img src="${customQr}" alt="QR Code" style="width:104px;height:104px;object-fit:contain;display:block;margin:0 auto"/>` : (upiString ? qrSvgBlock(upiString, NAVY_LIGHT) : ''))
     : ''
 
-  // Thank-you block: first two words get the bold two-tone treatment,
-  // the rest wraps naturally in a narrow column → matches the reference
-  // 3-line layout for the default "Thank you for your Business!" text.
+  // Thank-you block: gradient from Figma design (#8D66DB→#52117E→#4548A5), fills QR height
+  const GRAD_THANK_CSS = 'background:linear-gradient(135deg,#8D66DB 0%,#52117E 52%,#4548A5 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text'
   const ftWords = (co.footerText || '').trim().split(/\s+/)
-  const thankBlock = ftWords.length >= 2 ? `
-    <div style="font-family:'Poppins',${FONT};max-width:175px;line-height:1.3">
-      <div style="font-size:23px;font-weight:700"><span style="color:${THANK_LT}">${ftWords[0]} </span><span style="color:${THANK_DK}">${ftWords[1]}</span></div>
-      ${ftWords.length > 2 ? `<div style="font-size:22px;font-weight:500;color:${THANK_MID};text-shadow:0 0 6px #ffffff,0 0 2px #ffffff">${ftWords.slice(2).join(' ')}</div>` : ''}
-    </div>` : `
-    <div style="font-family:'Poppins',${FONT};max-width:175px;font-size:22px;font-weight:700;color:${THANK_DK}">${co.footerText}</div>`
+  const line1 = ftWords.length >= 2 ? `${ftWords[0]} ${ftWords[1]}` : (co.footerText || 'Thank you')
+  const line2 = ftWords.length > 2 ? ftWords.slice(2).join(' ') : ''
+  const thankBlock = `
+    <div style="font-family:'Airbnb Cereal App',${FONT};min-height:104px;display:flex;flex-direction:column;justify-content:center;max-width:200px;line-height:1.2">
+      <div style="font-size:31px;font-weight:800;${GRAD_THANK_CSS}">${line1}</div>
+      ${line2 ? `<div style="font-size:27px;font-weight:700;${GRAD_THANK_CSS}">${line2}</div>` : ''}
+    </div>`
 
   const bgCss = bgStyle === 'dots'
     ? `background-image:radial-gradient(circle,${NAVY}1a 1.5px,transparent 1.5px);background-size:18px 18px;`
@@ -354,10 +354,11 @@ export function renderInvoiceHtml(
   ${cornerSvg}${shadeSvg}${customImagesHtml}
   <div style="position:relative;z-index:1;display:flex;flex-direction:column;min-height:${(bgStyle === 'shade' || bgStyle === 'custom_images') ? '258mm' : '248mm'}">
 
-  <!-- ── HEADER: logo | divider | tagline ..... INVOICE ── -->
-  <table style="width:100%;border-collapse:collapse;margin-bottom:4px">
+  <!-- ── UNIFIED HEADER + CONTACT + META (single table keeps column widths consistent) ── -->
+  <table style="width:100%;border-collapse:collapse;margin-bottom:14px">
     <tr>
-      <td style="vertical-align:middle;width:62%">
+      <td style="vertical-align:top;width:62%;padding-right:16px">
+        <!-- Logo + Name + Tagline -->
         <div style="display:flex;align-items:center;gap:0">
           ${logoBlock}
           ${showName ? `<div class="disp" style="font-size:22px;font-weight:800;color:#111;letter-spacing:-0.5px;margin-left:8px;line-height:1">${co.name}</div>` : ''}
@@ -369,23 +370,14 @@ export function renderInvoiceHtml(
               : `<div style="font-weight:600">${co.tagline}</div>`}
           </div>` : ''}
         </div>
-      </td>
-      <td style="vertical-align:top;text-align:right;width:38%;padding-top:0">
-        <div class="disp" style="display:inline-block;font-size:33px;font-weight:800;color:#0f0f0f;letter-spacing:0.5px;line-height:1;border-bottom:4px solid #0f0f0f;padding-bottom:5px">INVOICE</div>
-      </td>
-    </tr>
-  </table>
-
-  <!-- ── CONTACT + INVOICE META (left) · BILL TO (right) ── -->
-  <table style="width:100%;border-collapse:collapse;margin-bottom:10px">
-    <tr>
-      <td style="vertical-align:top;width:62%">
+        <!-- Phone + Website — same column, guaranteed to fit within 62% -->
         ${showContact && (co.phone || co.website) ? `
-        <div style="display:flex;align-items:center;flex-wrap:wrap;gap:16px 24px;font-size:13px;font-weight:600;color:#111;margin-top:10px;letter-spacing:0.05px;max-width:100%;overflow:hidden">
+        <div style="display:flex;align-items:center;flex-wrap:wrap;gap:14px 22px;font-size:13px;font-weight:600;color:#111;margin-top:10px;letter-spacing:0.05px">
           ${co.phone ? `<span style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap">${waIcon}<a href="tel:${co.phone.replace(/\\D/g, '')}" style="color:inherit;text-decoration:none">${co.phone}</a></span>` : ''}
           ${co.website ? `<span style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap">${globeIcon}${co.website.replace(/^https?:\/\//, '')}</span>` : ''}
         </div>` : ''}
-        <table style="border-collapse:collapse;margin-top:22px">
+        <!-- Invoice meta -->
+        <table style="border-collapse:collapse;margin-top:18px">
           <tr>
             <td style="font-size:13.5px;font-weight:700;color:#111;padding:2.5px 0;white-space:nowrap">Invoice No.</td>
             <td style="font-size:13.5px;color:#222;padding:2.5px 12px">:</td>
@@ -410,12 +402,17 @@ export function renderInvoiceHtml(
           </tr>` : ''}
         </table>
       </td>
-      <td style="vertical-align:top;width:38%;padding-top:10px">
-        <div style="font-size:14.5px;color:#222">Bill to :</div>
-        <div style="font-size:16px;font-weight:700;color:#111;margin-top:3px">${inv.client?.name || ''}</div>
-        ${inv.client?.address ? `<div style="font-size:13px;color:#222;margin-top:2px;line-height:1.5">${inv.client.address}</div>` : ''}
-        ${inv.client?.phone   ? `<div style="font-size:13px;color:#222;margin-top:2px">${inv.client.phone}</div>` : ''}
-        ${inv.client?.email   ? `<div style="font-size:13px;color:#222">${inv.client.email}</div>` : ''}
+      <td style="vertical-align:top;text-align:right;width:38%">
+        <!-- INVOICE title -->
+        <div class="disp" style="display:inline-block;font-size:33px;font-weight:800;color:#0f0f0f;letter-spacing:0.5px;line-height:1;border-bottom:4px solid #0f0f0f;padding-bottom:5px">INVOICE</div>
+        <!-- Bill To (below INVOICE in same td, aligned right then left for content) -->
+        <div style="margin-top:16px;text-align:left">
+          <div style="font-size:14.5px;color:#222">Bill to :</div>
+          <div style="font-size:16px;font-weight:700;color:#111;margin-top:3px">${inv.client?.name || ''}</div>
+          ${inv.client?.address ? `<div style="font-size:13px;color:#222;margin-top:2px;line-height:1.5">${inv.client.address}</div>` : ''}
+          ${inv.client?.phone   ? `<div style="font-size:13px;color:#222;margin-top:2px">${inv.client.phone}</div>` : ''}
+          ${inv.client?.email   ? `<div style="font-size:13px;color:#222">${inv.client.email}</div>` : ''}
+        </div>
       </td>
     </tr>
   </table>
@@ -498,7 +495,7 @@ export function renderInvoiceHtml(
   ${inv.notes ? `<div style="margin-top:14px;font-size:11.5px;color:#444;font-style:italic">${inv.notes}</div>` : ''}
 
   <!-- ── FOOTER: payment info | QR | thank-you (pinned to page bottom) ── -->
-  <div style="margin-top:auto;padding-top:20px">
+  <div style="margin-top:auto;padding-top:44px">
     <table style="width:100%;border-collapse:collapse">
       <tr>
         <td style="vertical-align:bottom;padding-left:0">${paymentBlock}</td>
