@@ -30,7 +30,7 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
   ;(settingsRows || []).forEach((s: any) => { settings[s.key] = s.value })
 
   const companyName = settings.company_name || 'Cirqle Design'
-  const logo = settings.logo_url_dark || settings.logo_url || 'https://app.cirqle.work/icon.svg'
+  const logoUrl = `https://app.cirqle.work/api/logo?v=${token}`
 
   const title = `Invoice ${inv.invoice_number} from ${companyName}`
   const description = `View and download your invoice for ${(inv.client as any)?.name || 'your project'} from ${companyName}.`
@@ -41,14 +41,14 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
     openGraph: {
       title,
       description,
-      images: [logo],
+      images: [logoUrl],
       type: 'website',
     },
     twitter: {
       card: 'summary_large_image',
       title,
       description,
-      images: [logo],
+      images: [logoUrl],
     }
   }
 }
