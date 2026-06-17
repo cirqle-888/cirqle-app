@@ -19,6 +19,7 @@ import {
   PhoneCall, MessageCircle, Send, Clock, AlertTriangle, CalendarClock,
   ChevronDown, ChevronRight, ExternalLink, Copy, Trash2, History,
   Plus, X, Phone, Inbox, BellRing, CircleDollarSign, CheckCircle2, CreditCard,
+  TrendingUp,
 } from 'lucide-react'
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -84,6 +85,51 @@ const GROUP_META: Record<FollowupGroup, { label: string; hint: string; icon: typ
 }
 const GROUP_ORDER: FollowupGroup[] = ['needs_sent', 'urgent', 'regular']
 
+// ── Group-by clustering (within each section) ──────────────────────────
+type ViewMode = 'flat' | 'client' | 'overdue' | 'amount'
+const VIEW_MODE_LABEL: Record<ViewMode, string> = { flat: 'Flat', client: 'By Client', overdue: 'By Overdue', amount: 'By Amount' }
+
+function overdueBucket(days: number | null): { key: string; label: string; order: number } {
+  if (days == null || days <= 0) return { key: 'not_due', label: 'Not yet due', order: 0 }
+  if (days <= 30) return { key: 'd0_30', label: '1–30 days overdue', order: 1 }
+  if (days <= 60) return { key: 'd31_60', label: '31–60 days overdue', order: 2 }
+  if (days <= 90) return { key: 'd61_90', label: '61–90 days overdue', order: 3 }
+  return { key: 'd90p', label: '90+ days overdue', order: 4 }
+}
+function amountBucket(amt: number): { key: string; label: string; order: number } {
+  if (amt < 1000)  return { key: 'lt1k',   label: 'Under ₹1,000',        order: 0 }
+  if (amt < 5000)  return { key: 'k1_5',   label: '₹1,000 – ₹5,000',     order: 1 }
+  if (amt < 20000) return { key: 'k5_20',  label: '₹5,000 – ₹20,000',    order: 2 }
+  return                   { key: 'k20p',  label: '₹20,000+',            order: 3 }
+}
+
+interface Cluster { key: string; label: string; items: FUInvoice[] }
+
+function clusterInvoices(list: FUInvoice[], mode: ViewMode): Cluster[] {
+  if (mode === 'flat') return [{ key: 'all', label: '', items: list }]
+  if (mode === 'client') {
+    const map = new Map<string, Cluster>()
+    for (const inv of list) {
+      const key = inv.client?.id ?? 'none'
+      const e = map.get(key) ?? { key, label: inv.client?.name ?? 'No client', items: [] }
+      e.items.push(inv)
+      map.set(key, e)
+    }
+    return [...map.values()].sort((a, b) => a.label.localeCompare(b.label))
+  }
+  const bucketFn = mode === 'overdue'
+    ? (inv: FUInvoice) => overdueBucket(daysOverdue(inv))
+    : (inv: FUInvoice) => amountBucket(inv.outstanding ?? 0)
+  const map = new Map<string, Cluster & { order: number }>()
+  for (const inv of list) {
+    const b = bucketFn(inv)
+    const e = map.get(b.key) ?? { key: b.key, label: b.label, order: b.order, items: [] }
+    e.items.push(inv)
+    map.set(b.key, e)
+  }
+  return [...map.values()].sort((a, b) => a.order - b.order)
+}
+
 export default function FollowUpsClient({ invoices, followups, companyName, showAmounts, setupNeeded, templates }: Props) {
   const router = useRouter()
   const { toasts, dismiss, success, error: toastError, info } = useToast()
@@ -92,7 +138,9 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
   const [openHistory, setOpenHistory] = useState<Set<string>>(new Set())
   const [waInvoice, setWaInvoice]     = useState<string | null>(null) // invoice id whose WhatsApp popover is open
   const [waText, setWaText]           = useState('')
-  const [collapsed, setCollapsed]     = useState<Set<FollowupGroup>>(new Set())
+  // "Needs to be sent" starts collapsed (drafts are lower priority); Urgent/Regular start open.
+  const [collapsed, setCollapsed]     = useState<Set<FollowupGroup>>(new Set(['needs_sent']))
+  const [viewMode, setViewMode]       = useState<Record<FollowupGroup, ViewMode>>({ needs_sent: 'flat', urgent: 'flat', regular: 'flat' })
   const [busy, setBusy]               = useState<string | null>(null)
 
   // Form state (single shared form — only one open at a time)
@@ -277,6 +325,18 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
       <Header
         title="Follow-ups"
         subtitle="Chase unpaid invoices — log what clients say, track promised dates, send reminders"
+        actions={
+          <div className="flex items-center gap-2">
+            <Link href="/dashboard/invoices/follow-ups/activity"
+              className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:border-border/80 transition-colors">
+              <History className="w-3.5 h-3.5" /> Activity Log
+            </Link>
+            <Link href="/dashboard/clients/ranking"
+              className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:border-border/80 transition-colors">
+              <TrendingUp className="w-3.5 h-3.5" /> Client Ranking
+            </Link>
+          </div>
+        }
       />
 
       <div className="px-4 sm:px-6 lg:px-8 pb-16 max-w-5xl mx-auto">
@@ -334,40 +394,70 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
               <p className="text-[11px] text-muted-foreground/70 -mt-2 mb-3 ml-6">{meta.hint}</p>
 
               {!isCollapsed && (
-                <div className="space-y-3">
-                  {list.map(inv => (
-                    <InvoiceCard
-                      key={inv.id}
-                      inv={inv}
-                      group={g}
-                      latest={latest.get(inv.id)}
-                      history={byInvoice.get(inv.id) ?? []}
-                      followupCount={counts.get(inv.id) ?? 0}
-                      showAmounts={showAmounts}
-                      busy={busy === inv.id}
-                      formOpen={openForm === inv.id}
-                      historyOpen={openHistory.has(inv.id)}
-                      waOpen={waInvoice === inv.id}
-                      waText={waText}
-                      setWaText={setWaText}
-                      onToggleForm={() => toggleForm(inv.id)}
-                      onToggleHistory={() => toggleHistory(inv.id)}
-                      onToggleWa={() => openWa(inv)}
-                      onCopyWa={() => copyText(waText)}
-                      onSendWa={() => sendWhatsApp(inv.client?.phone ?? null, waText)}
-                      onMarkSent={() => doMarkSent(inv.id)}
-                      onMarkSentAndShare={() => markSentAndShare(inv)}
-                      onShareInvoice={() => shareInvoice(inv)}
-                      onRecordPayment={(args) => doRecordPayment(inv.id, args)}
-                      onSubmit={() => submitFollowup(inv.id)}
-                      onDeleteFollowup={doDeleteFollowup}
-                      fNote={fNote} setFNote={setFNote}
-                      fOutcome={fOutcome} setFOutcome={setFOutcome}
-                      fPromised={fPromised} setFPromised={setFPromised}
-                      fNext={fNext} setFNext={setFNext}
-                    />
-                  ))}
-                </div>
+                <>
+                  <div className="flex items-center gap-1.5 mb-3 ml-6">
+                    {(['flat', 'client', 'overdue', 'amount'] as const).map(m => (
+                      <button
+                        key={m}
+                        onClick={() => setViewMode(p => ({ ...p, [g]: m }))}
+                        className={`text-[10px] font-medium px-2 py-1 rounded-full border transition-colors ${
+                          viewMode[g] === m
+                            ? 'bg-violet-500/15 border-violet-500/40 text-violet-600 dark:text-violet-300'
+                            : 'border-border/40 text-muted-foreground hover:text-foreground'
+                        }`}
+                      >{VIEW_MODE_LABEL[m]}</button>
+                    ))}
+                  </div>
+                  <div className="space-y-3">
+                    {clusterInvoices(list, viewMode[g]).map(cluster => (
+                      <div key={cluster.key}>
+                        {cluster.label && (
+                          <div className="flex items-center gap-2 mb-2 ml-6">
+                            <span className="text-xs font-semibold text-foreground">{cluster.label}</span>
+                            <span className="text-[10px] text-muted-foreground">
+                              {cluster.items.length} invoice{cluster.items.length === 1 ? '' : 's'}
+                              {showAmounts && ` · ${fmtINR(cluster.items.reduce((s, i) => s + (i.outstanding ?? 0), 0))}`}
+                            </span>
+                          </div>
+                        )}
+                        <div className="space-y-3">
+                          {cluster.items.map(inv => (
+                            <InvoiceCard
+                              key={inv.id}
+                              inv={inv}
+                              group={g}
+                              latest={latest.get(inv.id)}
+                              history={byInvoice.get(inv.id) ?? []}
+                              followupCount={counts.get(inv.id) ?? 0}
+                              showAmounts={showAmounts}
+                              busy={busy === inv.id}
+                              formOpen={openForm === inv.id}
+                              historyOpen={openHistory.has(inv.id)}
+                              waOpen={waInvoice === inv.id}
+                              waText={waText}
+                              setWaText={setWaText}
+                              onToggleForm={() => toggleForm(inv.id)}
+                              onToggleHistory={() => toggleHistory(inv.id)}
+                              onToggleWa={() => openWa(inv)}
+                              onCopyWa={() => copyText(waText)}
+                              onSendWa={() => sendWhatsApp(inv.client?.phone ?? null, waText)}
+                              onMarkSent={() => doMarkSent(inv.id)}
+                              onMarkSentAndShare={() => markSentAndShare(inv)}
+                              onShareInvoice={() => shareInvoice(inv)}
+                              onRecordPayment={(args) => doRecordPayment(inv.id, args)}
+                              onSubmit={() => submitFollowup(inv.id)}
+                              onDeleteFollowup={doDeleteFollowup}
+                              fNote={fNote} setFNote={setFNote}
+                              fOutcome={fOutcome} setFOutcome={setFOutcome}
+                              fPromised={fPromised} setFPromised={setFPromised}
+                              fNext={fNext} setFNext={setFNext}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
             </section>
           )

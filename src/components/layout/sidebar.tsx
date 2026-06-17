@@ -34,6 +34,7 @@ import {
   ChevronDown,
   Inbox,
   PhoneCall,
+  Award,
 } from 'lucide-react'
 import { CommandPaletteTrigger } from '@/components/ui/command-palette'
 import { EmployeeAvatar } from '@/components/ui/employee-avatar'
@@ -142,6 +143,8 @@ const navSections: NavSection[] = [
       // Contribution Analysis: spreadsheet-style per-task profitability / earnings
       // BI report. Same reports.view gate. Lives under Insights, NOT Settings.
       { label: 'Contribution Analysis', href: '/dashboard/reports/contribution-analysis', icon: Sheet, requiredPerm: 'reports.view' },
+      // Client Ranking: payment reliability + business value scoring per client.
+      { label: 'Client Ranking', href: '/dashboard/clients/ranking', icon: Award, requiredPerm: 'reports.view' },
     ],
   },
   {
