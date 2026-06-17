@@ -89,8 +89,8 @@ export function renderInvoiceHtml(
 
   const NAVY       = companySettings.invoice_primary_color || '#1a2744'
   const NAVY_LIGHT = companySettings.invoice_accent_color  || '#243459'
-  const FONT       = companySettings.invoice_font          || 'Arial, Helvetica, sans-serif'
-  const sortedItems = [...(inv.items || [])].sort((a, b) => a.display_order - b.display_order)
+  const FONT       = companySettings.invoice_font          || "'Airbnb Cereal App', Arial, Helvetica, sans-serif"
+  const sortedItems = [...(inv.items || [])].sort((a: any, b: any) => a.display_order - b.display_order)
   const subtotal = inv.subtotal || ((inv.total_amount || 0) + (inv.discount_amount || 0) - (inv.tax_amount || 0) - (inv.previous_balance || 0))
   const prevBal  = inv.previous_balance || 0
   const totalDue = subtotal + prevBal
@@ -344,8 +344,8 @@ export function renderInvoiceHtml(
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=Open+Sans:ital,wght@0,400;0,600;0,700;1,400;1,700&display=swap" rel="stylesheet">
   <style>
     * { margin:0; padding:0; box-sizing:border-box }
-    body { font-family: 'Open Sans', ${FONT}; color: #222; background:#fff; font-size:13px; ${bgCss} }
-    .disp { font-family: 'Poppins', 'Open Sans', ${FONT} }
+    body { font-family: ${FONT}; color: #222; background:#fff; font-size:13px; ${bgCss} }
+    .disp { font-family: 'Poppins', ${FONT} }
     @page { margin: ${pageMargin}; size: A4 portrait }
     @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact } }
   </style>
@@ -382,7 +382,7 @@ export function renderInvoiceHtml(
       <td style="vertical-align:top;width:62%">
         ${showContact && (co.phone || co.website) ? `
         <div style="font-size:14px;font-weight:700;color:#111;margin-top:8px;letter-spacing:0.1px">
-          ${co.phone ? `${waIcon}&nbsp; ${co.phone}` : ''}
+          ${co.phone ? `${waIcon}&nbsp; <a href="tel:${co.phone.replace(/\\D/g, '')}" style="color:inherit;text-decoration:none">${co.phone}</a>` : ''}
           ${co.website ? `&nbsp;&nbsp;&nbsp;&nbsp;${globeIcon}&nbsp; ${co.website}` : ''}
         </div>` : ''}
         <table style="border-collapse:collapse;margin-top:22px">
