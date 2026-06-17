@@ -235,8 +235,11 @@ export function renderInvoiceHtml(
       </table>
     </div>` : ''
 
-  // QR (encodes the UPI pay link) with brand centre badge
-  const qrBlock = showQr && upiString ? qrSvgBlock(upiString, NAVY_LIGHT) : ''
+  // QR (encodes the UPI pay link or uses a custom uploaded QR image)
+  const customQr = companySettings.invoice_qr_image_url
+  const qrBlock = showQr 
+    ? (customQr ? `<img src="${customQr}" alt="QR Code" style="width:104px;height:104px;object-fit:contain;display:block;margin:0 auto"/>` : (upiString ? qrSvgBlock(upiString, NAVY_LIGHT) : ''))
+    : ''
 
   // Thank-you block: first two words get the bold two-tone treatment,
   // the rest wraps naturally in a narrow column → matches the reference

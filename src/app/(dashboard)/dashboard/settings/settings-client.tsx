@@ -1003,6 +1003,44 @@ export default function SettingsClient(props: Props) {
                     />
                   </div>
                 ))}
+                
+                {/* Custom QR Code Upload */}
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">
+                    Custom UPI QR Code <span className="ml-1.5 text-[10px] text-muted-foreground/50 font-normal">(Optional)</span>
+                  </label>
+                  <div className="flex gap-2 items-center mb-2">
+                    <label className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-secondary border border-border text-sm text-muted-foreground hover:text-foreground hover:border-border/80 cursor-pointer transition-colors">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                      Upload custom QR
+                      <input
+                        type="file" accept="image/*" className="hidden"
+                        onChange={e => {
+                          const file = e.target.files?.[0]
+                          if (!file) return
+                          const reader = new FileReader()
+                          reader.onload = ev => setCompanySettings(p => ({ ...p, invoice_qr_image_url: ev.target?.result as string }))
+                          reader.readAsDataURL(file)
+                        }}
+                      />
+                    </label>
+                    <span className="text-xs text-muted-foreground/50">or URL</span>
+                  </div>
+                  <input
+                    value={companySettings['invoice_qr_image_url'] || ''}
+                    onChange={e => setCompanySettings(p => ({ ...p, invoice_qr_image_url: e.target.value }))}
+                    placeholder="https://… (leave empty to auto-generate from UPI ID)"
+                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  />
+                  {companySettings['invoice_qr_image_url'] && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <img src={companySettings['invoice_qr_image_url']} alt="QR preview" className="h-16 object-contain rounded border border-border bg-white p-1" />
+                      <button type="button" onClick={() => setCompanySettings(p => ({ ...p, invoice_qr_image_url: '' }))}
+                        className="text-xs text-red-400 hover:text-red-300 transition-colors">Remove</button>
+                    </div>
+                  )}
+                  <p className="text-[10px] text-muted-foreground mt-1">If provided, this image will be used instead of auto-generating a QR code.</p>
+                </div>
               </div>
 
               {/* Invoice & Statement Design */}
