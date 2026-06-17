@@ -22,6 +22,7 @@ import {
   isEditable, formatBillingPeriod, getNextAction,
 } from '@/lib/utils/invoice'
 import { publicInvoiceUrl, buildInvoiceShareText, whatsappShareUrl } from '@/lib/invoices/share'
+import { TEMPLATE_KEYS } from '@/lib/messaging/templates'
 import { formatCurrency, getCurrencySymbol, round2 } from '@/lib/calculations/currency'
 import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
 import {
@@ -2956,6 +2957,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                   dueDate:       inv.due_date,
                   showAmounts,
                   link:          publicInvoiceUrl((inv as any).public_token),
+                  template:      companySettings[TEMPLATE_KEYS.invoiceShare],
                 })
                 window.open(whatsappShareUrl(text, inv.client?.phone ?? null), '_blank', 'noopener,noreferrer')
               }}

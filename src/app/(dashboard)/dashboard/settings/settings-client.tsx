@@ -31,6 +31,9 @@ import { RecalcBillingModal } from './recalc-billing-modal'
 import { RecalcCommissionsModal } from './recalc-commissions-modal'
 import { EmployeeAvatar, AvatarPicker } from '@/components/ui/employee-avatar'
 import { PerformanceHistoryModal } from './performance-history-modal'
+import { DEFAULT_TEMPLATES, TEMPLATE_KEYS, TEMPLATE_DOCS, templatesFromSettings, type MessageTemplates } from '@/lib/messaging/templates'
+import { buildInvoiceShareText } from '@/lib/invoices/share'
+import { buildReminderText } from '@/lib/followups/grouping'
 
 // ── Module-level search bar (stable reference — never defined inside a component) ──
 function SearchBar({ value, onChange, placeholder = 'Search…', className = '' }: {
@@ -57,7 +60,7 @@ function SearchBar({ value, onChange, placeholder = 'Search…', className = '' 
 const SETTINGS_TABS = [
   'Company', 'Employees', 'Clients', 'Services',
   'Groups & Params', 'Tools', 'Bank Accounts', 'Cash Categories', 'Exchange Rates',
-  'Pricing Matrix', 'Privacy & Security'
+  'Pricing Matrix', 'Privacy & Security', 'Message Templates'
 ] as const
 type SettingsTab = typeof SETTINGS_TABS[number]
 
@@ -68,6 +71,7 @@ const SETTINGS_GROUPS: { label: string; emoji: string; tabs: SettingsTab[] }[] =
   { label: 'Clients & Pricing', emoji: '🤝', tabs: ['Clients', 'Pricing Matrix'] },
   { label: 'Service Catalog', emoji: '📦', tabs: ['Services', 'Groups & Params', 'Tools'] },
   { label: 'Finance',         emoji: '💸', tabs: ['Bank Accounts', 'Cash Categories', 'Exchange Rates'] },
+  { label: 'Communication',   emoji: '💬', tabs: ['Message Templates'] },
 ]
 
 const CURRENCIES: Currency[] = ['AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
@@ -2424,6 +2428,15 @@ export default function SettingsClient(props: Props) {
               </div>
             </div>
           )}
+
+          {tab === 'Message Templates' && (
+            <MessageTemplatesTab
+              companySettings={companySettings}
+              setCompanySettings={setCompanySettings}
+              saveCompanySettings={saveCompanySettings}
+              saving={saving}
+            />
+          )}
         </div>
       </div>
 
@@ -3253,6 +3266,103 @@ export default function SettingsClient(props: Props) {
 }
 
 const inputCls = 'w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50'
+
+// ─── Message Templates tab ───────────────────────────────────────────────────
+// Lets Settings own the wording of every client-facing WhatsApp text (invoice
+// share + payment reminders) without a code change. Each template is stored
+// as a plain string in company_settings (key = TEMPLATE_KEYS[...]); an empty
+// override falls back to DEFAULT_TEMPLATES (see src/lib/messaging/templates.ts).
+function MessageTemplatesTab({ companySettings, setCompanySettings, saveCompanySettings, saving }: {
+  companySettings: Record<string, string>
+  setCompanySettings: React.Dispatch<React.SetStateAction<Record<string, string>>>
+  saveCompanySettings: () => Promise<void>
+  saving: boolean
+}) {
+  const templates = templatesFromSettings(companySettings)
+  const companyName = companySettings.company_name || 'Cirqle Design'
+
+  // Sample data so admins can see exactly what a client would receive.
+  const sampleLink = 'https://app.cirqle.work/i/sample-token'
+  const previewFor = (key: keyof MessageTemplates): string => {
+    if (key === 'invoiceShare') {
+      return buildInvoiceShareText({
+        invoiceNumber: 'INV-2606-014', clientName: 'Sea Star Supermarket', companyName,
+        amount: 4250, dueDate: '2026-07-15', showAmounts: true, link: sampleLink,
+        template: templates.invoiceShare,
+      })
+    }
+    if (key === 'reminderSingle') {
+      return buildReminderText({
+        clientName: 'Sea Star Supermarket', companyName, showAmounts: true, templates,
+        invoices: [{ invoice_number: 'INV-2606-014', issue_date: '2026-06-01', outstanding: 4250, link: sampleLink }],
+      })
+    }
+    // reminderMulti + reminderItem share one preview (the multi-invoice message).
+    return buildReminderText({
+      clientName: 'Sea Star Supermarket', companyName, showAmounts: true, templates,
+      invoices: [
+        { invoice_number: 'INV-2606-014', issue_date: '2026-06-01', outstanding: 4250, link: sampleLink },
+        { invoice_number: 'INV-2607-009', issue_date: '2026-07-01', outstanding: 1750, link: sampleLink },
+      ],
+    })
+  }
+
+  return (
+    <div className="max-w-3xl space-y-6">
+      <div>
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">WhatsApp Message Templates</h2>
+        <p className="text-xs text-muted-foreground mt-1">
+          Customize the wording of every client-facing WhatsApp message — invoice shares and payment reminders.
+          Use <code className="px-1 py-0.5 rounded bg-secondary text-[11px]">{'{placeholder}'}</code> for dynamic values
+          and <code className="px-1 py-0.5 rounded bg-secondary text-[11px]">{'{{if:placeholder}}'}</code> at the start of a line
+          to show that line only when the placeholder has a value. Leave a template blank to use the default wording.
+        </p>
+      </div>
+
+      {TEMPLATE_DOCS.map(({ key, label, description, placeholders }) => {
+        const settingKey = TEMPLATE_KEYS[key]
+        const value = companySettings[settingKey] ?? ''
+        return (
+          <div key={key} className="border border-border rounded-xl p-4 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">{label}</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+              </div>
+              {value && (
+                <button
+                  type="button"
+                  onClick={() => setCompanySettings(p => ({ ...p, [settingKey]: '' }))}
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                >Reset to default</button>
+              )}
+            </div>
+            <textarea
+              value={value}
+              onChange={e => setCompanySettings(p => ({ ...p, [settingKey]: e.target.value }))}
+              placeholder={DEFAULT_TEMPLATES[key]}
+              rows={key === 'reminderItem' ? 3 : 7}
+              className={`${inputCls} font-mono text-xs leading-relaxed`}
+            />
+            <div className="flex flex-wrap gap-1.5">
+              {placeholders.map(p => (
+                <span key={p} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">{`{${p}}`}</span>
+              ))}
+            </div>
+            <details className="text-xs">
+              <summary className="cursor-pointer text-muted-foreground hover:text-foreground transition-colors select-none">Preview with sample data</summary>
+              <pre className="mt-2 whitespace-pre-wrap bg-secondary/50 border border-border rounded-lg p-3 text-[12px] leading-relaxed text-foreground">{previewFor(key)}</pre>
+            </details>
+          </div>
+        )
+      })}
+
+      <button onClick={saveCompanySettings} disabled={saving} className="gradient-bg text-white text-sm font-medium px-5 py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50">
+        {saving ? 'Saving…' : 'Save Settings'}
+      </button>
+    </div>
+  )
+}
 
 function FieldRow({ label, required, children }: { label: React.ReactNode; required?: boolean; children: React.ReactNode }) {
   return (

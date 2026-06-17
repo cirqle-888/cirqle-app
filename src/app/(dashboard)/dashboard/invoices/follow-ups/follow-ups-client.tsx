@@ -14,6 +14,7 @@ import {
 } from '@/lib/followups/grouping'
 import { logFollowup, markInvoiceSent, deleteFollowup, recordPayment } from './actions'
 import { publicInvoiceUrl, buildInvoiceShareText, whatsappShareUrl } from '@/lib/invoices/share'
+import type { MessageTemplates } from '@/lib/messaging/templates'
 import {
   PhoneCall, MessageCircle, Send, Clock, AlertTriangle, CalendarClock,
   ChevronDown, ChevronRight, ExternalLink, Copy, Trash2, History,
@@ -41,6 +42,7 @@ interface Props {
   companyName: string
   showAmounts: boolean
   setupNeeded: boolean
+  templates:   MessageTemplates
 }
 
 // ── Outcome metadata ─────────────────────────────────────────────────
@@ -82,7 +84,7 @@ const GROUP_META: Record<FollowupGroup, { label: string; hint: string; icon: typ
 }
 const GROUP_ORDER: FollowupGroup[] = ['needs_sent', 'urgent', 'regular']
 
-export default function FollowUpsClient({ invoices, followups, companyName, showAmounts, setupNeeded }: Props) {
+export default function FollowUpsClient({ invoices, followups, companyName, showAmounts, setupNeeded, templates }: Props) {
   const router = useRouter()
   const { toasts, dismiss, success, error: toastError, info } = useToast()
 
@@ -232,6 +234,7 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
         link:           publicInvoiceUrl(ci.public_token),
       })),
       showAmounts,
+      templates,
     })
     setWaText(text)
     setWaInvoice(inv.id)
@@ -247,6 +250,7 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
     dueDate:       inv.due_date,
     showAmounts,
     link:          publicInvoiceUrl(inv.public_token),
+    template:      templates.invoiceShare,
   })
   const shareInvoice = (inv: FUInvoice) => {
     window.open(whatsappShareUrl(invoiceShareText(inv), inv.client?.phone ?? null), '_blank', 'noopener,noreferrer')

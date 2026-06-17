@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility } from '@/lib/permissions/strip'
+import { templatesFromSettings } from '@/lib/messaging/templates'
 import FollowUpsClient from './follow-ups-client'
 
 export const dynamic = 'force-dynamic'
@@ -56,6 +57,7 @@ export default async function FollowUpsPage() {
   const settings: Record<string, string> = {}
   ;(settingsRows || []).forEach((s: any) => { settings[s.key] = s.value })
   const companyName = settings.company_name || 'Cirqle Design'
+  const templates = templatesFromSettings(settings)
 
   // Shape the payload; strip ₹ figures when the user can't see billing amounts.
   const prepared = invoices.map(i => {
@@ -87,6 +89,7 @@ export default async function FollowUpsPage() {
       companyName={companyName}
       showAmounts={!!showAmounts}
       setupNeeded={setupNeeded}
+      templates={templates}
     />
   )
 }

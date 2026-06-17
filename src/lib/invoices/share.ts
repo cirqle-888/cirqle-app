@@ -4,6 +4,8 @@
  * so every "Share via WhatsApp" entry point uses the same client-safe link.
  */
 
+import { DEFAULT_TEMPLATES, renderTemplate } from '@/lib/messaging/templates'
+
 const DEFAULT_ORIGIN = 'https://app.cirqle.work'
 
 /** Absolute URL of the public (no-login) hosted invoice page. */
@@ -30,20 +32,17 @@ export function buildInvoiceShareText(opts: {
   dueDate?:      string | null
   showAmounts:   boolean
   link:          string
+  template?:     string   // editable override from Settings → Message Templates
 }): string {
-  const { invoiceNumber, clientName, companyName, amount, dueDate, showAmounts, link } = opts
-  const lines: string[] = []
-  if (clientName) { lines.push(`Hi ${clientName},`); lines.push('') }
-  lines.push(`📄 Invoice *${invoiceNumber}* from ${companyName}`)
-  if (showAmounts && amount != null) lines.push(`Amount: *${fmtAmt(amount)}*`)
-  const due = fmtDate(dueDate)
-  if (due) lines.push(`Due: ${due}`)
-  if (link) {
-    lines.push('')
-    lines.push('View & download your invoice:')
-    lines.push(link)
-  }
-  return lines.join('\n')
+  const { invoiceNumber, clientName, companyName, amount, dueDate, showAmounts, link, template } = opts
+  return renderTemplate(template || DEFAULT_TEMPLATES.invoiceShare, {
+    client_name:    clientName || '',
+    invoice_number: invoiceNumber,
+    company_name:   companyName,
+    amount:         showAmounts && amount != null ? fmtAmt(amount) : '',
+    due_date:       fmtDate(dueDate),
+    link:           link || '',
+  })
 }
 
 /** Build a wa.me deep link. 10-digit numbers are assumed Indian (prefix 91). */

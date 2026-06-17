@@ -8,6 +8,8 @@
  * old due-date bug).
  */
 
+import { DEFAULT_TEMPLATES, renderTemplate, type MessageTemplates } from '@/lib/messaging/templates'
+
 export type FollowupGroup = 'needs_sent' | 'urgent' | 'regular'
 
 export interface FollowupRow {
@@ -192,8 +194,10 @@ export function buildReminderText(opts: {
   invoices:        ReminderInvoice[]
   showAmounts:     boolean
   currencySymbol?: string
+  templates?:      MessageTemplates   // editable overrides from Settings → Message Templates
 }): string {
   const { clientName, companyName, invoices, showAmounts } = opts
+  const tpl = opts.templates ?? DEFAULT_TEMPLATES
   const sym = opts.currencySymbol ?? '₹'
   const fmtAmt  = (n: number) => `${sym}${Math.round(n).toLocaleString('en-IN')}`
   const fmtDate = (s: string | null) => {
@@ -202,37 +206,33 @@ export function buildReminderText(opts: {
       ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
       : ''
   }
-
-  const lines: string[] = []
-  lines.push(`Hi ${clientName || 'there'},`)
-  lines.push('')
+  const issueSuffix = (s: string | null) => { const d = fmtDate(s); return d ? ` (issued ${d})` : '' }
 
   if (invoices.length === 1) {
     const inv = invoices[0]
-    const amt = showAmounts ? ` — due *${fmtAmt(inv.outstanding)}*` : ''
-    const iss = fmtDate(inv.issue_date)
-    lines.push(`This is a gentle reminder from ${companyName} regarding your pending payment:`)
-    lines.push('')
-    lines.push(`*${inv.invoice_number}*${amt}${iss ? ` (issued ${iss})` : ''}`)
-    if (inv.link) lines.push(`View & download: ${inv.link}`)
-  } else {
-    lines.push(`This is a gentle reminder from ${companyName} regarding your pending payments:`)
-    lines.push('')
-    for (const inv of invoices) {
-      const amt = showAmounts ? ` — ${fmtAmt(inv.outstanding)}` : ''
-      const iss = fmtDate(inv.issue_date)
-      lines.push(`• *${inv.invoice_number}*${amt}${iss ? ` (issued ${iss})` : ''}`)
-      if (inv.link) lines.push(`   ${inv.link}`)
-    }
-    lines.push('')
-    lines.push(`Total invoices pending: *${invoices.length}*`)
-    if (showAmounts) {
-      const total = invoices.reduce((s, i) => s + i.outstanding, 0)
-      lines.push(`Total outstanding: *${fmtAmt(total)}*`)
-    }
+    return renderTemplate(tpl.reminderSingle, {
+      client_name:    clientName || 'there',
+      company_name:   companyName,
+      invoice_number: inv.invoice_number,
+      amount_suffix:  showAmounts ? ` — due *${fmtAmt(inv.outstanding)}*` : '',
+      issue_suffix:   issueSuffix(inv.issue_date),
+      link:           inv.link || '',
+    })
   }
 
-  lines.push('')
-  lines.push('Kindly arrange the payment at your earliest convenience. Thank you!')
-  return lines.join('\n')
+  const itemsBlock = invoices.map(inv => renderTemplate(tpl.reminderItem, {
+    invoice_number: inv.invoice_number,
+    amount_suffix:  showAmounts ? ` — ${fmtAmt(inv.outstanding)}` : '',
+    issue_suffix:   issueSuffix(inv.issue_date),
+    link:           inv.link || '',
+  })).join('\n')
+
+  const total = invoices.reduce((s, i) => s + i.outstanding, 0)
+  return renderTemplate(tpl.reminderMulti, {
+    client_name:   clientName || 'there',
+    company_name:  companyName,
+    items_block:   itemsBlock,
+    count:         String(invoices.length),
+    total_amount:  showAmounts ? fmtAmt(total) : '',
+  })
 }
