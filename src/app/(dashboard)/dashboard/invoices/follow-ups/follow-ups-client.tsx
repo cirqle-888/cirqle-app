@@ -141,6 +141,9 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
   // "Needs to be sent" starts collapsed (drafts are lower priority); Urgent/Regular start open.
   const [collapsed, setCollapsed]     = useState<Set<FollowupGroup>>(new Set(['needs_sent']))
   const [viewMode, setViewMode]       = useState<Record<FollowupGroup, ViewMode>>({ needs_sent: 'flat', urgent: 'flat', regular: 'flat' })
+  // Collapsed clusters within a grouped (non-flat) view. Keyed by `${group}:${mode}:${clusterKey}`
+  // so switching view modes (or groups) doesn't carry over unrelated collapse state.
+  const [collapsedClusters, setCollapsedClusters] = useState<Set<string>>(new Set())
   const [busy, setBusy]               = useState<string | null>(null)
 
   // Form state (single shared form — only one open at a time)
@@ -214,6 +217,16 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
   }
   const toggleGroup = (g: FollowupGroup) => {
     setCollapsed(prev => { const n = new Set(prev); n.has(g) ? n.delete(g) : n.add(g); return n })
+  }
+  const toggleCluster = (id: string) => {
+    setCollapsedClusters(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  }
+  const setAllClusters = (g: FollowupGroup, clusterIds: string[], collapse: boolean) => {
+    setCollapsedClusters(prev => {
+      const n = new Set(prev)
+      for (const id of clusterIds) collapse ? n.add(id) : n.delete(id)
+      return n
+    })
   }
 
   const submitFollowup = useCallback(async (invoiceId: string) => {
@@ -393,72 +406,96 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
               </button>
               <p className="text-[11px] text-muted-foreground/70 -mt-2 mb-3 ml-6">{meta.hint}</p>
 
-              {!isCollapsed && (
-                <>
-                  <div className="flex items-center gap-1.5 mb-3 ml-6">
-                    {(['flat', 'client', 'overdue', 'amount'] as const).map(m => (
-                      <button
-                        key={m}
-                        onClick={() => setViewMode(p => ({ ...p, [g]: m }))}
-                        className={`text-[10px] font-medium px-2 py-1 rounded-full border transition-colors ${
-                          viewMode[g] === m
-                            ? 'bg-violet-500/15 border-violet-500/40 text-violet-600 dark:text-violet-300'
-                            : 'border-border/40 text-muted-foreground hover:text-foreground'
-                        }`}
-                      >{VIEW_MODE_LABEL[m]}</button>
-                    ))}
-                  </div>
-                  <div className="space-y-3">
-                    {clusterInvoices(list, viewMode[g]).map(cluster => (
-                      <div key={cluster.key}>
-                        {cluster.label && (
-                          <div className="flex items-center gap-2 mb-2 ml-6">
-                            <span className="text-xs font-semibold text-foreground">{cluster.label}</span>
-                            <span className="text-[10px] text-muted-foreground">
-                              {cluster.items.length} invoice{cluster.items.length === 1 ? '' : 's'}
-                              {showAmounts && ` · ${fmtINR(cluster.items.reduce((s, i) => s + (i.outstanding ?? 0), 0))}`}
-                            </span>
+              {!isCollapsed && (() => {
+                const mode = viewMode[g]
+                const clusters = clusterInvoices(list, mode)
+                const clusterIds = clusters.map(c => `${g}:${mode}:${c.key}`)
+                const allCollapsed = mode !== 'flat' && clusterIds.length > 0 && clusterIds.every(id => collapsedClusters.has(id))
+                return (
+                  <>
+                    <div className="flex items-center gap-1.5 mb-3 ml-6 flex-wrap">
+                      {(['flat', 'client', 'overdue', 'amount'] as const).map(m => (
+                        <button
+                          key={m}
+                          onClick={() => setViewMode(p => ({ ...p, [g]: m }))}
+                          className={`text-[10px] font-medium px-2 py-1 rounded-full border transition-colors ${
+                            viewMode[g] === m
+                              ? 'bg-violet-500/15 border-violet-500/40 text-violet-600 dark:text-violet-300'
+                              : 'border-border/40 text-muted-foreground hover:text-foreground'
+                          }`}
+                        >{VIEW_MODE_LABEL[m]}</button>
+                      ))}
+                      {mode !== 'flat' && clusterIds.length > 0 && (
+                        <button
+                          onClick={() => setAllClusters(g, clusterIds, !allCollapsed)}
+                          className="text-[10px] font-medium px-2 py-1 rounded-full border border-border/40 text-muted-foreground hover:text-foreground transition-colors"
+                        >{allCollapsed ? 'Expand all' : 'Collapse all'}</button>
+                      )}
+                    </div>
+                    <div className="space-y-3">
+                      {clusters.map(cluster => {
+                        const clusterId = `${g}:${mode}:${cluster.key}`
+                        const clusterCollapsed = cluster.label !== '' && collapsedClusters.has(clusterId)
+                        return (
+                          <div key={cluster.key}>
+                            {cluster.label && (
+                              <button
+                                onClick={() => toggleCluster(clusterId)}
+                                className="w-full flex items-center gap-2 mb-2 ml-6 group"
+                              >
+                                {clusterCollapsed
+                                  ? <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                                  : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
+                                <span className="text-xs font-semibold text-foreground">{cluster.label}</span>
+                                <span className="text-[10px] text-muted-foreground">
+                                  {cluster.items.length} invoice{cluster.items.length === 1 ? '' : 's'}
+                                  {showAmounts && ` · ${fmtINR(cluster.items.reduce((s, i) => s + (i.outstanding ?? 0), 0))}`}
+                                </span>
+                              </button>
+                            )}
+                            {!clusterCollapsed && (
+                              <div className="space-y-3">
+                                {cluster.items.map(inv => (
+                                  <InvoiceCard
+                                    key={inv.id}
+                                    inv={inv}
+                                    group={g}
+                                    latest={latest.get(inv.id)}
+                                    history={byInvoice.get(inv.id) ?? []}
+                                    followupCount={counts.get(inv.id) ?? 0}
+                                    showAmounts={showAmounts}
+                                    busy={busy === inv.id}
+                                    formOpen={openForm === inv.id}
+                                    historyOpen={openHistory.has(inv.id)}
+                                    waOpen={waInvoice === inv.id}
+                                    waText={waText}
+                                    setWaText={setWaText}
+                                    onToggleForm={() => toggleForm(inv.id)}
+                                    onToggleHistory={() => toggleHistory(inv.id)}
+                                    onToggleWa={() => openWa(inv)}
+                                    onCopyWa={() => copyText(waText)}
+                                    onSendWa={() => sendWhatsApp(inv.client?.phone ?? null, waText)}
+                                    onMarkSent={() => doMarkSent(inv.id)}
+                                    onMarkSentAndShare={() => markSentAndShare(inv)}
+                                    onShareInvoice={() => shareInvoice(inv)}
+                                    onRecordPayment={(args) => doRecordPayment(inv.id, args)}
+                                    onSubmit={() => submitFollowup(inv.id)}
+                                    onDeleteFollowup={doDeleteFollowup}
+                                    fNote={fNote} setFNote={setFNote}
+                                    fOutcome={fOutcome} setFOutcome={setFOutcome}
+                                    fPromised={fPromised} setFPromised={setFPromised}
+                                    fNext={fNext} setFNext={setFNext}
+                                  />
+                                ))}
+                              </div>
+                            )}
                           </div>
-                        )}
-                        <div className="space-y-3">
-                          {cluster.items.map(inv => (
-                            <InvoiceCard
-                              key={inv.id}
-                              inv={inv}
-                              group={g}
-                              latest={latest.get(inv.id)}
-                              history={byInvoice.get(inv.id) ?? []}
-                              followupCount={counts.get(inv.id) ?? 0}
-                              showAmounts={showAmounts}
-                              busy={busy === inv.id}
-                              formOpen={openForm === inv.id}
-                              historyOpen={openHistory.has(inv.id)}
-                              waOpen={waInvoice === inv.id}
-                              waText={waText}
-                              setWaText={setWaText}
-                              onToggleForm={() => toggleForm(inv.id)}
-                              onToggleHistory={() => toggleHistory(inv.id)}
-                              onToggleWa={() => openWa(inv)}
-                              onCopyWa={() => copyText(waText)}
-                              onSendWa={() => sendWhatsApp(inv.client?.phone ?? null, waText)}
-                              onMarkSent={() => doMarkSent(inv.id)}
-                              onMarkSentAndShare={() => markSentAndShare(inv)}
-                              onShareInvoice={() => shareInvoice(inv)}
-                              onRecordPayment={(args) => doRecordPayment(inv.id, args)}
-                              onSubmit={() => submitFollowup(inv.id)}
-                              onDeleteFollowup={doDeleteFollowup}
-                              fNote={fNote} setFNote={setFNote}
-                              fOutcome={fOutcome} setFOutcome={setFOutcome}
-                              fPromised={fPromised} setFPromised={setFPromised}
-                              fNext={fNext} setFNext={setFNext}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
+                        )
+                      })}
+                    </div>
+                  </>
+                )
+              })()}
             </section>
           )
         })}
