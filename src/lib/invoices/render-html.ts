@@ -319,13 +319,13 @@ export function renderInvoiceHtml(
     : ''
 
   const customImagesHtml = bgStyle === 'custom_images' 
-    ? `${companySettings.invoice_bg_image_top_url ? `<img src="${companySettings.invoice_bg_image_top_url}" style="position:fixed;top:0;left:0;width:100%;pointer-events:none;z-index:0;" />` : ''}
-       ${companySettings.invoice_bg_image_bottom_url ? `<img src="${companySettings.invoice_bg_image_bottom_url}" style="position:fixed;bottom:0;left:0;width:100%;pointer-events:none;z-index:0;" />` : ''}`
+    ? `${companySettings.invoice_bg_image_top_url ? `<img src="${companySettings.invoice_bg_image_top_url}" style="position:fixed;top:0;left:0;width:100%;height:auto;pointer-events:none;z-index:0;display:block;" />` : ''}
+       ${companySettings.invoice_bg_image_bottom_url ? `<img src="${companySettings.invoice_bg_image_bottom_url}" style="position:fixed;bottom:0;left:0;width:100%;height:auto;pointer-events:none;z-index:0;display:block;" />` : ''}`
     : ''
 
   // Shade bleeds to the paper edge: zero the @page margin and carry it on the body instead
-  const pageMargin = bgStyle === 'shade' ? '0' : '15mm 12mm'
-  const bodyPad = bgStyle === 'shade' ? '20mm 16mm 14mm' : '24px 28px'
+  const pageMargin = (bgStyle === 'shade' || bgStyle === 'custom_images') ? '0' : '15mm 12mm'
+  const bodyPad = (bgStyle === 'shade' || bgStyle === 'custom_images') ? '53px 64px 46px' : '53px 64px 46px'
 
   // Tagline splits into "Get Budget" / "Designs" (last word bold on its own line)
   const tagWords = (co.tagline || '').trim().split(/\s+/)
@@ -350,27 +350,27 @@ export function renderInvoiceHtml(
     @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact } }
   </style>
 </head>
-<body style="padding:${bodyPad};max-width:${bgStyle === 'shade' ? '210mm' : '800px'};margin:0 auto;position:relative">
+<body style="padding:${bodyPad};max-width:${(bgStyle === 'shade' || bgStyle === 'custom_images') ? '210mm' : '800px'};margin:0 auto;position:relative">
   ${cornerSvg}${shadeSvg}${customImagesHtml}
-  <div style="position:relative;z-index:1;display:flex;flex-direction:column;min-height:${bgStyle === 'shade' ? '258mm' : '248mm'}">
+  <div style="position:relative;z-index:1;display:flex;flex-direction:column;min-height:${(bgStyle === 'shade' || bgStyle === 'custom_images') ? '258mm' : '248mm'}">
 
   <!-- ── HEADER: logo | divider | tagline ..... INVOICE ── -->
   <table style="width:100%;border-collapse:collapse;margin-bottom:4px">
     <tr>
       <td style="vertical-align:middle;width:62%">
-        <div style="display:flex;align-items:center">
+        <div style="display:flex;align-items:center;gap:0">
           ${logoBlock}
-          ${showName ? `<div class="disp" style="font-size:24px;font-weight:800;color:#111;letter-spacing:-0.5px;margin-left:10px">${co.name}</div>` : ''}
+          ${showName ? `<div class="disp" style="font-size:22px;font-weight:800;color:#111;letter-spacing:-0.5px;margin-left:8px;line-height:1">${co.name}</div>` : ''}
           ${showTagline && tagWords[0] ? `
-          <div style="width:1.5px;height:44px;background:#c4c4c4;margin:0 14px;flex-shrink:0"></div>
-          <div class="disp" style="font-size:17.5px;line-height:1.3;color:#161616">
+          <div style="width:1.5px;height:40px;background:#c4c4c4;margin:0 12px;flex-shrink:0"></div>
+          <div class="disp" style="font-size:16px;line-height:1.25;color:#161616">
             ${tagWords.length > 1
               ? `<div style="font-weight:400">${tagWords.slice(0, -1).join(' ')}</div><div style="font-weight:700">${tagWords[tagWords.length - 1]}</div>`
               : `<div style="font-weight:600">${co.tagline}</div>`}
           </div>` : ''}
         </div>
       </td>
-      <td style="vertical-align:top;text-align:right;width:38%;padding-top:4px">
+      <td style="vertical-align:top;text-align:right;width:38%;padding-top:0">
         <div class="disp" style="display:inline-block;font-size:33px;font-weight:800;color:#0f0f0f;letter-spacing:0.5px;line-height:1;border-bottom:4px solid #0f0f0f;padding-bottom:5px">INVOICE</div>
       </td>
     </tr>
@@ -381,9 +381,9 @@ export function renderInvoiceHtml(
     <tr>
       <td style="vertical-align:top;width:62%">
         ${showContact && (co.phone || co.website) ? `
-        <div style="font-size:14px;font-weight:700;color:#111;margin-top:8px;letter-spacing:0.1px">
-          ${co.phone ? `${waIcon}&nbsp; <a href="tel:${co.phone.replace(/\\D/g, '')}" style="color:inherit;text-decoration:none">${co.phone}</a>` : ''}
-          ${co.website ? `&nbsp;&nbsp;&nbsp;&nbsp;${globeIcon}&nbsp; ${co.website}` : ''}
+        <div style="display:flex;align-items:center;gap:20px;font-size:13.5px;font-weight:600;color:#111;margin-top:10px;letter-spacing:0.1px">
+          ${co.phone ? `<span style="display:inline-flex;align-items:center;gap:5px">${waIcon}<a href="tel:${co.phone.replace(/\\D/g, '')}" style="color:inherit;text-decoration:none">${co.phone}</a></span>` : ''}
+          ${co.website ? `<span style="display:inline-flex;align-items:center;gap:5px">${globeIcon}${co.website}</span>` : ''}
         </div>` : ''}
         <table style="border-collapse:collapse;margin-top:22px">
           <tr>
@@ -498,12 +498,12 @@ export function renderInvoiceHtml(
   ${inv.notes ? `<div style="margin-top:14px;font-size:11.5px;color:#444;font-style:italic">${inv.notes}</div>` : ''}
 
   <!-- ── FOOTER: payment info | QR | thank-you (pinned to page bottom) ── -->
-  <div style="margin-top:auto;padding-top:30px">
+  <div style="margin-top:auto;padding-top:20px">
     <table style="width:100%;border-collapse:collapse">
       <tr>
-        <td style="vertical-align:bottom;width:46%">${paymentBlock}</td>
-        <td style="vertical-align:bottom;text-align:center;width:23%">${qrBlock}</td>
-        <td style="vertical-align:bottom;width:31%">
+        <td style="vertical-align:bottom;padding-left:0">${paymentBlock}</td>
+        <td style="vertical-align:bottom;text-align:center;width:110px;padding:0 10px">${qrBlock}</td>
+        <td style="vertical-align:bottom;white-space:nowrap">
           <div style="display:flex;justify-content:flex-end">${thankBlock}</div>
         </td>
       </tr>
