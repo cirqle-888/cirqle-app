@@ -5371,14 +5371,17 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 </button>
               </div>
             </div>
-            {/* Invoice rendered in iframe */}
-            <div className="flex-1 overflow-hidden bg-[#f5f7fa] rounded-b-2xl">
-              <iframe
-                srcDoc={buildInvoiceHtml(previewInv)}
-                className="w-full h-full border-0"
-                title="Invoice Preview"
-                sandbox="allow-same-origin"
-              />
+            {/* Invoice rendered in iframe — scrollable on mobile */}
+            <div className="flex-1 overflow-auto bg-[#f5f7fa] rounded-b-2xl" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
+              <div style={{ minWidth: 680, height: '100%' }}>
+                <iframe
+                  srcDoc={buildInvoiceHtml(previewInv)}
+                  className="w-full h-full border-0"
+                  style={{ minHeight: 600 }}
+                  title="Invoice Preview"
+                  sandbox="allow-same-origin"
+                />
+              </div>
             </div>
           </div>
         </ModalOverlay>

@@ -242,14 +242,17 @@ export function renderInvoiceHtml(
     : ''
 
   // Thank-you block: gradient from Figma design (#8D66DB→#52117E→#4548A5), fills QR height
+  // Split into 3 lines: "Thank you" | "for your" | "Business!" to prevent cropping
   const GRAD_THANK_CSS = 'background:linear-gradient(135deg,#8D66DB 0%,#52117E 52%,#4548A5 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text'
   const ftWords = (co.footerText || '').trim().split(/\s+/)
   const line1 = ftWords.length >= 2 ? `${ftWords[0]} ${ftWords[1]}` : (co.footerText || 'Thank you')
-  const line2 = ftWords.length > 2 ? ftWords.slice(2).join(' ') : ''
+  const line2 = ftWords.length > 2 ? ftWords.slice(2, 4).join(' ') : ''  // e.g. "for your"
+  const line3 = ftWords.length > 4 ? ftWords.slice(4).join(' ') : ''     // e.g. "Business!"
   const thankBlock = `
-    <div style="font-family:'Airbnb Cereal App',${FONT};min-height:104px;display:flex;flex-direction:column;justify-content:center;max-width:200px;line-height:1.2">
+    <div style="font-family:'Airbnb Cereal App',${FONT};min-height:104px;display:flex;flex-direction:column;justify-content:center;line-height:1.2">
       <div style="font-size:31px;font-weight:800;${GRAD_THANK_CSS}">${line1}</div>
       ${line2 ? `<div style="font-size:27px;font-weight:700;${GRAD_THANK_CSS}">${line2}</div>` : ''}
+      ${line3 ? `<div style="font-size:27px;font-weight:700;${GRAD_THANK_CSS}">${line3}</div>` : ''}
     </div>`
 
   const bgCss = bgStyle === 'dots'
@@ -500,7 +503,7 @@ export function renderInvoiceHtml(
       <tr>
         <td style="vertical-align:bottom;padding-left:0">${paymentBlock}</td>
         <td style="vertical-align:bottom;text-align:center;width:110px;padding:0 10px">${qrBlock}</td>
-        <td style="vertical-align:bottom;white-space:nowrap">
+        <td style="vertical-align:bottom">
           <div style="display:flex;justify-content:flex-end">${thankBlock}</div>
         </td>
       </tr>
