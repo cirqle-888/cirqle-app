@@ -35,6 +35,7 @@ import {
   Wallet, Link2, ShoppingBag, Share2,
 } from 'lucide-react'
 import { logFollowup } from "./follow-ups/actions"
+import { recordInvoicePayment } from "./actions"
 
 import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
@@ -937,38 +938,61 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       payForm.notes || null,
     ].filter(Boolean).join(' — ') || null
 
-    const { data: pmt, error } = await supabase.from('payments').insert({
-      invoice_id: invoiceId,
-      amount: foreign,                 // in payForm.currency
-      currency: payForm.currency,
-      exchange_rate: rate,
-      amount_inr: amountInr,           // INR base
-      rate_source: rateSource,
-      rate_date: rateDate,
-      payment_date: payForm.payment_date,
-      payment_method: payForm.payment_method,
-      reference: payForm.reference || null,
-      notes: noteText,
-      bank_account_id: payForm.bank_account_id || null,
-    }).select().single()
-
-    if (error) { toastError(error.message); setSaving(false); return }
-
     const newPaid = round2((inv.paid_amount || 0) + appliedInvoiceCcy)  // invoice currency
     const newPaidInr = round2((inv.paid_amount_inr || 0) + amountInr)   // INR base
     const balance = (inv.total_amount || 0) - newPaid
-    // Status is driven by the foreign (invoice-currency) balance.
     const newStatus = balance <= 0 ? 'paid' : 'partial'
 
-    await supabase.from('invoices').update({ paid_amount: newPaid, paid_amount_inr: newPaidInr, status: newStatus }).eq('id', invoiceId)
     const prevPaid = inv.paid_amount || 0
     const prevPaidInr = inv.paid_amount_inr || 0
     const prevStatus = inv.status
+
+    // Call server action — records payment + creates cashbook inflow entry atomically
+    const res = await recordInvoicePayment({
+      invoiceId,
+      invoiceNumber:  inv.invoice_number,
+      clientId:       inv.client_id || null,
+      clientCode:     inv.client?.code || null,
+      clientName:     inv.client?.name || null,
+      amount:         foreign,
+      currency:       payForm.currency,
+      amountInr,
+      exchangeRate:   rate,
+      rateSource,
+      rateDate,
+      paymentDate:    payForm.payment_date,
+      paymentMethod:  payForm.payment_method,
+      reference:      payForm.reference || null,
+      notes:          noteText,
+      bankAccountId:  payForm.bank_account_id || null,
+      newPaid,
+      newPaidInr,
+      newStatus,
+      categoryId:     null,  // cashbook entry created without category; user can set it in cashbook
+    })
+
+    if (!res.ok) { toastError(res.error ?? 'Payment failed'); setSaving(false); return }
+
+    // Build a synthetic payment object for optimistic UI update
+    const pmt: Payment = {
+      id: res.data!.paymentId,
+      amount: foreign,
+      currency: payForm.currency,
+      exchange_rate: rate,
+      amount_inr: amountInr,
+      rate_source: rateSource as any,
+      rate_date: rateDate,
+      payment_date: payForm.payment_date,
+      payment_method: payForm.payment_method,
+      reference: payForm.reference || undefined,
+      notes: noteText ?? undefined,
+    }
+
     setInvoices(prev => prev.map(i => i.id === invoiceId
       ? { ...i, paid_amount: newPaid, paid_amount_inr: newPaidInr, status: newStatus, payments: [...(i.payments || []), pmt] }
       : i
     ))
-    const label = isAdvancePayment ? `Advance ${fmt(foreign, payForm.currency)} recorded` : `Payment of ${fmt(foreign, payForm.currency)} recorded`
+    const label = isAdvancePayment ? `Advance ${fmt(foreign, payForm.currency)} recorded` : `Payment of ${fmt(foreign, payForm.currency)} recorded — added to Cashbook`
     success(label, undefined, 5000, {
       label: 'Undo',
       onClick: async () => {
