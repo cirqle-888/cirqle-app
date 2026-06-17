@@ -319,8 +319,8 @@ export function renderInvoiceHtml(
     : ''
 
   const customImagesHtml = bgStyle === 'custom_images' 
-    ? `${companySettings.invoice_bg_image_top_url ? `<img src="${companySettings.invoice_bg_image_top_url}" style="position:fixed;top:0;left:0;width:100%;height:auto;pointer-events:none;z-index:0;display:block;" />` : ''}
-       ${companySettings.invoice_bg_image_bottom_url ? `<img src="${companySettings.invoice_bg_image_bottom_url}" style="position:fixed;bottom:0;left:0;width:100%;height:auto;pointer-events:none;z-index:0;display:block;" />` : ''}`
+    ? `${companySettings.invoice_bg_image_top_url ? `<img src="${companySettings.invoice_bg_image_top_url}" style="position:absolute;top:0;left:0;width:100%;height:auto;pointer-events:none;z-index:0;display:block;" />` : ''}
+       ${companySettings.invoice_bg_image_bottom_url ? `<img src="${companySettings.invoice_bg_image_bottom_url}" style="position:absolute;bottom:0;left:0;width:100%;height:auto;pointer-events:none;z-index:0;display:block;" />` : ''}`
     : ''
 
   // Shade bleeds to the paper edge: zero the @page margin and carry it on the body instead
@@ -350,7 +350,7 @@ export function renderInvoiceHtml(
     @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact } }
   </style>
 </head>
-<body style="padding:${bodyPad};max-width:${(bgStyle === 'shade' || bgStyle === 'custom_images') ? '210mm' : '800px'};margin:0 auto;position:relative">
+<body style="padding:${bodyPad};max-width:${(bgStyle === 'shade' || bgStyle === 'custom_images') ? '210mm' : '800px'};margin:0 auto;position:relative;min-height:297mm">
   ${cornerSvg}${shadeSvg}${customImagesHtml}
   <div style="position:relative;z-index:1;display:flex;flex-direction:column;min-height:${(bgStyle === 'shade' || bgStyle === 'custom_images') ? '258mm' : '248mm'}">
 
@@ -381,9 +381,9 @@ export function renderInvoiceHtml(
     <tr>
       <td style="vertical-align:top;width:62%">
         ${showContact && (co.phone || co.website) ? `
-        <div style="display:flex;align-items:center;gap:20px;font-size:13.5px;font-weight:600;color:#111;margin-top:10px;letter-spacing:0.1px">
-          ${co.phone ? `<span style="display:inline-flex;align-items:center;gap:5px">${waIcon}<a href="tel:${co.phone.replace(/\\D/g, '')}" style="color:inherit;text-decoration:none">${co.phone}</a></span>` : ''}
-          ${co.website ? `<span style="display:inline-flex;align-items:center;gap:5px">${globeIcon}${co.website}</span>` : ''}
+        <div style="display:flex;align-items:center;flex-wrap:wrap;gap:16px 24px;font-size:13px;font-weight:600;color:#111;margin-top:10px;letter-spacing:0.05px;max-width:100%;overflow:hidden">
+          ${co.phone ? `<span style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap">${waIcon}<a href="tel:${co.phone.replace(/\\D/g, '')}" style="color:inherit;text-decoration:none">${co.phone}</a></span>` : ''}
+          ${co.website ? `<span style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap">${globeIcon}${co.website.replace(/^https?:\/\//, '')}</span>` : ''}
         </div>` : ''}
         <table style="border-collapse:collapse;margin-top:22px">
           <tr>
