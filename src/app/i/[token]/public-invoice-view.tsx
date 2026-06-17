@@ -52,13 +52,14 @@ export default function PublicInvoiceView({
       </div>
 
       {/* Invoice document */}
-      <div style={{ flex: 1, display: 'flex', justifyContent: 'center', padding: '16px 8px', overflow: 'auto' }}>
+      <div style={{ flex: 1, padding: '16px', overflowX: 'auto' }}>
         <iframe
           ref={frameRef}
           srcDoc={html}
           title={`Invoice ${invoiceNumber}`}
           style={{
-            width: '100%', maxWidth: 860, height: '80vh', minHeight: 600,
+            display: 'block', margin: '0 auto',
+            width: '100%', minWidth: 750, maxWidth: 860, height: '80vh', minHeight: 600,
             border: 'none', background: '#fff', borderRadius: 12,
             boxShadow: '0 10px 40px rgba(0,0,0,0.35)',
           }}
