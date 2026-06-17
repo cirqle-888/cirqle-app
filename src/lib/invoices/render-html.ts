@@ -220,14 +220,14 @@ export function renderInvoiceHtml(
   // Payment information — italic block, reference style
   const payRow = (label: string, value: string) => `
     <tr>
-      <td style="font-size:11.5px;font-style:italic;color:#222;padding:2.5px 0;white-space:nowrap">${label}</td>
-      <td style="padding:2.5px 10px;font-size:11.5px;font-style:italic;color:#222">:</td>
-      <td style="font-size:11.5px;font-style:italic;font-weight:700;color:#111">${value}</td>
+      <td style="font-family:'Open Sans',sans-serif;font-size:11.5px;font-style:italic;color:#222;padding:2.5px 0;white-space:nowrap">${label}</td>
+      <td style="font-family:'Open Sans',sans-serif;padding:2.5px 10px;font-size:11.5px;font-style:italic;color:#222">:</td>
+      <td style="font-family:'Open Sans',sans-serif;font-size:11.5px;font-style:italic;font-weight:700;color:#111">${value}</td>
     </tr>`
   const paymentBlock = showPayInfo && (co.holder || co.account || co.upi) ? `
-    <div>
-      <div style="font-weight:700;font-style:italic;font-size:13.5px;color:#111;margin-bottom:6px;text-decoration:underline;text-underline-offset:3px">Payment Information</div>
-      <table style="border-collapse:collapse">
+    <div style="font-family:'Open Sans',sans-serif">
+      <div style="font-family:'Open Sans',sans-serif;font-weight:700;font-style:italic;font-size:13.5px;color:#111;margin-bottom:6px;text-decoration:underline;text-underline-offset:3px">Payment Information</div>
+      <table style="border-collapse:collapse;font-family:'Open Sans',sans-serif">
         ${co.holder  ? payRow('A/C Holder Name', co.holder.toUpperCase()) : ''}
         ${co.account ? payRow('A/C Number', co.account) : ''}
         ${co.ifsc    ? payRow('IFSC Code', co.ifsc) : ''}
@@ -318,6 +318,11 @@ export function renderInvoiceHtml(
        </svg>`
     : ''
 
+  const customImagesHtml = bgStyle === 'custom_images' 
+    ? `${companySettings.invoice_bg_image_top_url ? `<img src="${companySettings.invoice_bg_image_top_url}" style="position:fixed;top:0;left:0;width:100%;pointer-events:none;z-index:0;" />` : ''}
+       ${companySettings.invoice_bg_image_bottom_url ? `<img src="${companySettings.invoice_bg_image_bottom_url}" style="position:fixed;bottom:0;left:0;width:100%;pointer-events:none;z-index:0;" />` : ''}`
+    : ''
+
   // Shade bleeds to the paper edge: zero the @page margin and carry it on the body instead
   const pageMargin = bgStyle === 'shade' ? '0' : '15mm 12mm'
   const bodyPad = bgStyle === 'shade' ? '20mm 16mm 14mm' : '24px 28px'
@@ -346,7 +351,7 @@ export function renderInvoiceHtml(
   </style>
 </head>
 <body style="padding:${bodyPad};max-width:${bgStyle === 'shade' ? '210mm' : '800px'};margin:0 auto;position:relative">
-  ${cornerSvg}${shadeSvg}
+  ${cornerSvg}${shadeSvg}${customImagesHtml}
   <div style="position:relative;z-index:1;display:flex;flex-direction:column;min-height:${bgStyle === 'shade' ? '258mm' : '248mm'}">
 
   <!-- ── HEADER: logo | divider | tagline ..... INVOICE ── -->

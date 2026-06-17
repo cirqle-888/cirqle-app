@@ -1230,6 +1230,7 @@ export default function SettingsClient(props: Props) {
                   <label className="block text-xs font-medium text-muted-foreground mb-1.5">Document Font</label>
                   <div className="grid grid-cols-3 gap-2">
                     {[
+                      { value: 'Airbnb Cereal App, Arial, sans-serif', label: 'Airbnb', sample: 'Aa' },
                       { value: 'Arial, Helvetica, sans-serif',     label: 'Arial',    sample: 'Aa' },
                       { value: 'Georgia, Times New Roman, serif',  label: 'Georgia',  sample: 'Aa' },
                       { value: 'Helvetica Neue, Helvetica, Arial, sans-serif', label: 'Helvetica', sample: 'Aa' },
@@ -1288,6 +1289,7 @@ export default function SettingsClient(props: Props) {
                       { value: 'corner',   label: 'Corner Accent', preview: 'bg-white' },
                       { value: 'diagonal', label: 'Diagonal',      preview: 'bg-white' },
                       { value: 'shade',    label: 'Silk Shade',    preview: 'bg-white' },
+                      { value: 'custom_images', label: 'Custom Images', preview: 'bg-white' },
                     ] as const).map(opt => {
                       const active = (companySettings['invoice_bg_style'] || 'none') === opt.value
                       const primary = companySettings['invoice_primary_color'] || '#1a2744'
@@ -1319,6 +1321,52 @@ export default function SettingsClient(props: Props) {
                       )
                     })}
                   </div>
+                  
+                  {companySettings['invoice_bg_style'] === 'custom_images' && (
+                    <div className="mt-4 p-3 border border-border rounded-lg bg-secondary/30">
+                      <p className="text-[10px] text-muted-foreground mb-3">Upload images to be placed at the top and bottom edges of your invoices.</p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[10px] font-medium text-muted-foreground mb-1">Top Image</label>
+                          <label className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-secondary border border-border text-xs text-muted-foreground hover:text-foreground hover:border-border/80 cursor-pointer transition-colors">
+                            Upload Top
+                            <input type="file" accept="image/*" className="hidden" onChange={e => {
+                              const file = e.target.files?.[0]
+                              if (!file) return
+                              const reader = new FileReader()
+                              reader.onload = ev => setCompanySettings(p => ({ ...p, invoice_bg_image_top_url: ev.target?.result as string }))
+                              reader.readAsDataURL(file)
+                            }} />
+                          </label>
+                          {companySettings['invoice_bg_image_top_url'] && (
+                            <div className="mt-2 flex items-center justify-between">
+                              <img src={companySettings['invoice_bg_image_top_url']} alt="Top preview" className="h-10 object-contain rounded border border-border bg-white" />
+                              <button type="button" onClick={() => setCompanySettings(p => ({ ...p, invoice_bg_image_top_url: '' }))} className="text-[10px] text-red-400 hover:text-red-300">Remove</button>
+                            </div>
+                          )}
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-medium text-muted-foreground mb-1">Bottom Image</label>
+                          <label className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-secondary border border-border text-xs text-muted-foreground hover:text-foreground hover:border-border/80 cursor-pointer transition-colors">
+                            Upload Bottom
+                            <input type="file" accept="image/*" className="hidden" onChange={e => {
+                              const file = e.target.files?.[0]
+                              if (!file) return
+                              const reader = new FileReader()
+                              reader.onload = ev => setCompanySettings(p => ({ ...p, invoice_bg_image_bottom_url: ev.target?.result as string }))
+                              reader.readAsDataURL(file)
+                            }} />
+                          </label>
+                          {companySettings['invoice_bg_image_bottom_url'] && (
+                            <div className="mt-2 flex items-center justify-between">
+                              <img src={companySettings['invoice_bg_image_bottom_url']} alt="Bottom preview" className="h-10 object-contain rounded border border-border bg-white" />
+                              <button type="button" onClick={() => setCompanySettings(p => ({ ...p, invoice_bg_image_bottom_url: '' }))} className="text-[10px] text-red-400 hover:text-red-300">Remove</button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Footer text */}
