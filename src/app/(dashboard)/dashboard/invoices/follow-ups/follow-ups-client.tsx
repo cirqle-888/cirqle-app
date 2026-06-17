@@ -246,6 +246,22 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
     router.refresh()
   }, [fNote, fOutcome, fPromised, fNext, router, success, toastError])
 
+  const doBulkFollowup = useCallback(async (clientInvoices: FUInvoice[]) => {
+    setBusy('bulk')
+    const promises = clientInvoices.map(ci => logFollowup({
+      invoiceId: ci.id,
+      note: 'Consolidated reminder sent',
+      outcome: 'sent',
+      promisedDate: null,
+      nextFollowupDate: null,
+    }))
+    await Promise.allSettled(promises)
+    success(`Logged follow-up for ${clientInvoices.length} invoice${clientInvoices.length === 1 ? '' : 's'}`)
+    setWaInvoice(null)
+    setBusy(null)
+    router.refresh()
+  }, [router, success])
+
   const doMarkSent = useCallback(async (invoiceId: string) => {
     setBusy(invoiceId)
     const res = await markInvoiceSent(invoiceId)
@@ -475,6 +491,10 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
                                     onToggleWa={() => openWa(inv)}
                                     onCopyWa={() => copyText(waText)}
                                     onSendWa={() => sendWhatsApp(inv.client?.phone ?? null, waText)}
+                                    onLogBulk={() => {
+                                      const clientInvoices = inv.client ? (pendingByClient.get(inv.client.id) ?? [inv]) : [inv]
+                                      doBulkFollowup(clientInvoices)
+                                    }}
                                     onMarkSent={() => doMarkSent(inv.id)}
                                     onMarkSentAndShare={() => markSentAndShare(inv)}
                                     onShareInvoice={() => shareInvoice(inv)}
@@ -538,6 +558,7 @@ interface CardProps {
   onToggleWa:     () => void
   onCopyWa:       () => void
   onSendWa:       () => void
+  onLogBulk:      () => void
   onMarkSent:     () => void
   onMarkSentAndShare: () => void
   onShareInvoice: () => void
@@ -604,9 +625,9 @@ function InvoiceCard(p: CardProps) {
             <div className="flex items-center gap-1.5 mt-1 text-sm text-muted-foreground min-w-0">
               <span className="truncate">{inv.client?.name ?? 'Unknown client'}</span>
               {inv.client?.phone && (
-                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground/70 shrink-0">
+                <a href={`tel:${inv.client.phone.replace(/[^0-9+]/g, '')}`} className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:underline shrink-0">
                   <Phone className="w-3 h-3" /> {inv.client.phone}
-                </span>
+                </a>
               )}
             </div>
           </div>
@@ -761,6 +782,14 @@ function InvoiceCard(p: CardProps) {
                 className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-secondary border border-border hover:bg-secondary/70 text-foreground transition-colors"
               >
                 <Copy className="w-3.5 h-3.5" /> Copy text
+              </button>
+              <button
+                onClick={p.onLogBulk}
+                disabled={p.busy}
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors ml-auto"
+                title="Mark all these invoices as 'Reminder sent'"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" /> Log "Reminder sent" for all
               </button>
             </div>
           </div>
