@@ -1010,6 +1010,58 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     setSaving(false)
   }
 
+  async function deletePayment(invoiceId: string, paymentId: string) {
+    const inv = invoices.find(i => i.id === invoiceId)
+    if (!inv) return
+    const pmt = (inv.payments || []).find(p => p.id === paymentId)
+    if (!pmt) return
+
+    setConfirmModal({
+      title: 'Remove Payment',
+      body: `Remove this payment of ${fmt(pmt.amount, (pmt.currency as Currency) || inv.currency)} from ${inv.invoice_number}? The invoice balance will be restored.`,
+      confirmLabel: 'Remove Payment',
+      danger: true,
+      onConfirm: async () => {
+        // Reverse the paid_amount in invoice currency
+        const invRate = (inv.exchange_rate && inv.exchange_rate > 0) ? inv.exchange_rate : (rateMap[inv.currency] || 1)
+        const appliedInvCcy = pmt.currency === inv.currency
+          ? (pmt.amount || 0)
+          : round2((pmt.amount_inr || 0) / (invRate || 1))
+        const newPaid    = Math.max(0, round2((inv.paid_amount    || 0) - appliedInvCcy))
+        const newPaidInr = Math.max(0, round2((inv.paid_amount_inr || 0) - (pmt.amount_inr || pmt.amount || 0)))
+        const newStatus  = newPaid <= 0 ? (inv.status === 'paid' || inv.status === 'partial' ? 'sent' : inv.status) : 'partial'
+
+        // Delete payment row
+        await supabase.from('payments').delete().eq('id', paymentId)
+        // Restore invoice amounts
+        await supabase.from('invoices').update({ paid_amount: newPaid, paid_amount_inr: newPaidInr, status: newStatus }).eq('id', invoiceId)
+        // Delete any auto-created cashbook entry linked to this invoice on the same date
+        // (we look for an inflow entry with the payment date + invoice_id that has an allocation)
+        const { data: allocRows } = await supabase
+          .from('cashbook_invoice_allocations')
+          .select('cashbook_entry_id, cashbook_entries!inner(entry_date, type)')
+          .eq('invoice_id', invoiceId)
+        if (allocRows && allocRows.length > 0) {
+          // Find entry matching the payment date and type=inflow
+          const matchEntry = (allocRows as any[]).find(
+            r => r.cashbook_entries?.type === 'inflow' && r.cashbook_entries?.entry_date === pmt.payment_date
+          )
+          if (matchEntry) {
+            await supabase.from('cashbook_invoice_allocations').delete().eq('cashbook_entry_id', matchEntry.cashbook_entry_id)
+            await supabase.from('cashbook_entries').delete().eq('id', matchEntry.cashbook_entry_id)
+          }
+        }
+
+        // Update local state
+        setInvoices(prev => prev.map(i => i.id === invoiceId
+          ? { ...i, paid_amount: newPaid, paid_amount_inr: newPaidInr, status: newStatus, payments: (i.payments || []).filter(p => p.id !== paymentId) }
+          : i
+        ))
+        success('Payment removed and invoice balance restored')
+      },
+    })
+  }
+
   function confirmDelete(invoiceId: string) {
     const inv = invoices.find(i => i.id === invoiceId)
     setConfirmModal({
@@ -3259,7 +3311,13 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                         )}
                       </div>
                     </div>
-                    <CheckCircle className="w-3.5 h-3.5 text-green-400" />
+                    <button
+                      onClick={() => deletePayment(inv.id, p.id)}
+                      title="Remove this payment"
+                      className="p-1 rounded hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors ml-2 shrink-0"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
                   </div>
                 ))}
               </div>
