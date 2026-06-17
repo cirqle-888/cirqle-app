@@ -750,7 +750,7 @@ function InvoiceCard(p: CardProps) {
             </button>
           )}
           <Link
-            href="/dashboard/invoices"
+            href={`/dashboard/invoices?id=${inv.id}`}
             className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors ml-auto"
           >
             <ExternalLink className="w-3.5 h-3.5" /> Open invoice

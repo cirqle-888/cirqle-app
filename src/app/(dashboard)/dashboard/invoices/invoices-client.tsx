@@ -228,10 +228,10 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     discount_amount: inv.discount_amount ?? 0,
     previous_balance: inv.previous_balance ?? 0,
   })))
-  const [selectedId, setSelectedId] = useState<string | null>(null)
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
+  const [selectedId, setSelectedId] = useState<string | null>(searchParams.get('id') || null)
 
   const [filterStatus, setFilterStatus] = useState<string>(searchParams.get('status') || '')
   const [filterClient, setFilterClient] = useState<string>(searchParams.get('client') || '')
@@ -245,6 +245,14 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   )
   const [tab, setTab] = useState<'active' | 'closed'>((searchParams.get('tab') as any) || 'active')
 
+  const idFromUrl = searchParams.get('id')
+  useEffect(() => {
+    if (idFromUrl && idFromUrl !== selectedId) {
+      setSelectedId(idFromUrl)
+      setPanelMode('detail')
+    }
+  }, [idFromUrl])
+
   useEffect(() => {
     const params = new URLSearchParams(searchParams.toString())
 
@@ -252,12 +260,13 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     if (filterClient) params.set('client', filterClient); else params.delete('client')
     if (searchFacets.length) params.set('sf', JSON.stringify(searchFacets)); else params.delete('sf')
     if (tab && tab !== 'active') params.set('tab', tab); else params.delete('tab')
+    if (selectedId) params.set('id', selectedId); else params.delete('id')
 
     const newQueryString = params.toString()
     if (newQueryString !== searchParams.toString()) {
       router.replace(`${pathname}?${newQueryString}`, { scroll: false })
     }
-  }, [filterStatus, filterClient, searchFacets, tab, pathname, router, searchParams])
+  }, [filterStatus, filterClient, searchFacets, tab, selectedId, pathname, router, searchParams])
   const [editClientId, setEditClientId] = useState<string | null>(null)
 
   // Panel modes
