@@ -137,6 +137,9 @@ export async function serverUpdateTaskStatus(
     detail:     { title: taskTitle, from: fromStatus, to: toStatus },
   })
 
+  // Mirror onto any promoted requests (no-op when none are linked).
+  void syncRequestStatusFromTask(taskId, toStatus).catch(() => {})
+
   return { ok: true }
 }
 
@@ -241,6 +244,9 @@ export async function serverCancelTask(
       loss_amount:   input.lossAmount,
     },
   })
+
+  // Mirror onto any promoted requests (no-op when none are linked).
+  void syncRequestStatusFromTask(input.taskId, 'cancelled').catch(() => {})
 
   revalidatePath(REVALIDATE)
   return { ok: true }
