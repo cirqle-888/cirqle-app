@@ -32,6 +32,7 @@ import { RecalcCommissionsModal } from './recalc-commissions-modal'
 import { EmployeeAvatar, AvatarPicker } from '@/components/ui/employee-avatar'
 import { PerformanceHistoryModal } from './performance-history-modal'
 import { DEFAULT_TEMPLATES, TEMPLATE_KEYS, TEMPLATE_DOCS, templatesFromSettings, type MessageTemplates } from '@/lib/messaging/templates'
+import { INTAKE_KINDS, INTAKE_KIND_META } from '@/lib/services/intake'
 import { buildInvoiceShareText } from '@/lib/invoices/share'
 import { buildReminderText } from '@/lib/followups/grouping'
 
@@ -3026,6 +3027,12 @@ export default function SettingsClient(props: Props) {
                       <option value="true">Active</option>
                       <option value="false">Inactive</option>
                     </AppSelect>
+                  </FieldRow>
+                  <FieldRow label={<span className="flex items-center">Intake Form <InfoTip text="Which client-facing form this service exposes. A client's available request/intake forms are derived from the services assigned to them." /></span>}>
+                    <AppSelect value={form.intake_kind || 'none'} onChange={e => setForm(p => ({ ...p, intake_kind: e.target.value }))}>
+                      {INTAKE_KINDS.map(k => <option key={k} value={k}>{INTAKE_KIND_META[k].label}</option>)}
+                    </AppSelect>
+                    <p className="mt-1.5 text-xs text-muted-foreground">{INTAKE_KIND_META[(form.intake_kind as string) || 'none']?.description}</p>
                   </FieldRow>
                   <FieldRow label="Description"><textarea value={form.description || ''} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} rows={2} className={inputCls + ' resize-none'} placeholder="Optional notes about this service" /></FieldRow>
                 </>
