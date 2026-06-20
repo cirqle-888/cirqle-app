@@ -20,6 +20,7 @@ import { fetchEntityActivity, postEntityNote } from '@/lib/activity/actions'
 import type { ActivityLogRow } from '@/lib/activity/actions'
 import type { EntityType } from '@/lib/activity/log'
 import { usePermissions } from '@/contexts/permission-context'
+import { usePrivacy } from '@/contexts/privacy-context'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -159,6 +160,9 @@ const NOTE_PERM: Partial<Record<EntityType, string>> = {
 
 export default function ActivityPanel({ entityType, entityId, canNote, title = 'Activity Log' }: Props) {
   const { user, can } = usePermissions()
+  // Actor names respect the global privacy lock — show the real name only when
+  // privacy is unlocked, otherwise fall back to CQID (matches the rest of the app).
+  const { dn } = usePrivacy()
   const permKey = NOTE_PERM[entityType]
   const allowNote = canNote ?? (permKey ? can(permKey) : user.isAdmin)
 
@@ -284,7 +288,7 @@ export default function ActivityPanel({ entityType, entityId, canNote, title = '
                     </span>
                     {actor?.cqid && (
                       <span className="text-[10px] text-muted-foreground">
-                        by {actor.name || actor.cqid}
+                        by {dn(actor)}
                       </span>
                     )}
                     <span className="text-[10px] text-muted-foreground/50 ml-auto shrink-0">

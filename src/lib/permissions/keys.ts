@@ -30,6 +30,8 @@ export const PERMS = {
   CONTRIBUTIONS_EDIT:          'contributions.edit',
   /** See ₹ earned per contribution row in addition to score percentage. */
   CONTRIBUTIONS_VIEW_EARNINGS: 'contributions.view_earnings',
+  /** See the per-task activity log + post log notes on the contribution detail. */
+  CONTRIBUTIONS_VIEW_ACTIVITY: 'contributions.view_activity',
 
   // Employees
   EMPLOYEES_VIEW:                   'employees.view',

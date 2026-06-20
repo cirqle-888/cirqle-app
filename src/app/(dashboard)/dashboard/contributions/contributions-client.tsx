@@ -82,6 +82,8 @@ interface Props {
     pricing:  boolean
     /** true = admin/view_all; false = employee sees only their own contributions */
     viewAll?: boolean
+    /** true = may see the per-task activity log + post log notes */
+    viewActivity?: boolean
   }
 }
 
@@ -2864,8 +2866,10 @@ export default function ContributionsClient({
           </div>
         )}
 
-        {/* ── Activity timeline (unified per-task thread) ── */}
-        {selectedTask && (
+        {/* ── Activity timeline (unified per-task thread) ──
+            Gated by `contributions.view_activity`; basic employees without it
+            see neither the timeline nor the Log note affordance. */}
+        {selectedTask && (permissionFlags.viewActivity ?? false) && (
           <div className="bg-card border border-border rounded-xl p-4">
             <ActivityPanel entityType="task" entityId={selectedTask.id} />
           </div>

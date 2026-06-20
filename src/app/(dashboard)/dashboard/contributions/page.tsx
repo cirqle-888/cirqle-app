@@ -16,6 +16,17 @@ export default async function ContributionsPage() {
   const isEmployee = !isAdmin
   const vis = financialVisibility(me)
 
+  // Access control (decided with the user):
+  //  • viewAll        — see EVERY employee's contributions/scores/names. Without
+  //    it, the payload below is stripped server-side to the viewer's OWN rows so
+  //    other contributors never reach the browser at all (real privacy, not just
+  //    a UI hide). Tasks themselves stay full — all tasks show, other contributors
+  //    are simply absent.
+  //  • canViewActivity — see the per-task activity log + post log notes.
+  const viewAll         = isAdmin || userCanSee(me, PERMS.CONTRIBUTIONS_VIEW_ALL)
+  const canViewActivity = isAdmin || userCanSee(me, PERMS.CONTRIBUTIONS_VIEW_ACTIVITY)
+  const myEmployeeId    = me?.employeeId ?? null
+
   // Every viewer sees the full task list and contributor graph. Pricing
   // fields (billing_amount_inr, currency, etc.) are included ONLY when the
   // viewer holds `tasks.view_pricing` — otherwise they're stripped from the
@@ -124,21 +135,36 @@ export default async function ContributionsPage() {
   }
   const mergedAssignments = Array.from(uniqueAssignmentsMap.values())
 
+  // ── Server-side privacy strip ──────────────────────────────────────────────
+  // When the viewer lacks `contributions.view_all`, drop every row that belongs
+  // to another employee BEFORE it leaves the server, and send only the viewer's
+  // own employee record. The contributor graph for other people then simply
+  // doesn't exist client-side — nothing to leak via dev tools or network tab.
+  const mine = <T extends { employee_id?: string }>(rows: T[]): T[] =>
+    viewAll ? rows : rows.filter(r => r.employee_id === myEmployeeId)
+
+  const outEmployees = viewAll
+    ? (employeesRes.data || [])
+    : (employeesRes.data || []).filter((e: any) => e.id === myEmployeeId)
+  const outScores             = mine(scoresRes.data || [])
+  const outContributorRecords = mine(contributorRecordsRes.data || [])
+  const outAssignments        = mine(mergedAssignments)
+
   return (
     <ContributionsClient
       tasks={tasksRes.data || []}
-      employees={employeesRes.data || []}
+      employees={outEmployees}
       groups={groupsRes.data || []}
       parameters={parametersRes.data || []}
       tools={toolsRes.data || []}
       parameterServices={paramServicesRes.data || []}
       toolServices={toolServicesRes.data || []}
       groupServices={groupServicesRes.data || []}
-      scores={scoresRes.data || []}
+      scores={outScores}
       clients={clientsRes.data || []}
       services={servicesRes.data || []}
-      taskAssignments={mergedAssignments}
-      contributorRecords={contributorRecordsRes.data || []}
+      taskAssignments={outAssignments}
+      contributorRecords={outContributorRecords}
       taskToolRecords={taskToolRecordsRes.data || []}
       pricingMatrix={pricingRes.data || []}
       performanceHistory={performanceHistoryRes.data || []}
@@ -148,9 +174,10 @@ export default async function ContributionsPage() {
         employee_names: (visibilityNamesRes.data?.value as string) || 'all',
       }}
       permissionFlags={{
-        earnings: vis.contributionEarnings,
-        pricing:  vis.tasksPricing,
-        viewAll:  isAdmin || userCanSee(me, PERMS.CONTRIBUTIONS_VIEW_ALL),
+        earnings:     vis.contributionEarnings,
+        pricing:      vis.tasksPricing,
+        viewAll,
+        viewActivity: canViewActivity,
       }}
     />
   )
