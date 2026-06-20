@@ -1,0 +1,147 @@
+/**
+ * Google Sheets sync — Apps Script Webhook approach
+ *
+ * No Google Cloud Console, no Service Account, no billing, no org policy issues.
+ *
+ * Each client's Google Sheet has a small Apps Script deployed as a Web App.
+ * Cirqle App POSTs JSON to that URL and the script writes the rows.
+ *
+ * Setup per client (2 min):
+ *   1. Open client's Google Sheet
+ *   2. Extensions → Apps Script → paste the script from GOOGLE_SHEETS_SETUP.md
+ *   3. Deploy → New deployment → Web App → Execute as: Me → Who has access: Anyone → Deploy
+ *   4. Copy the Web App URL → paste into client record in Cirqle App (offer_sheet_webhook_url)
+ */
+
+import type { SupabaseClient } from '@supabase/supabase-js'
+
+interface SyncResult { ok: boolean; error?: string }
+
+function formatDate(campaign: {
+  date_type: string
+  offer_date?: string | null
+  offer_date_from?: string | null
+  offer_date_to?: string | null
+}): string {
+  if (campaign.date_type === 'single' && campaign.offer_date) {
+    return new Date(campaign.offer_date + 'T00:00:00').toLocaleDateString('en-IN', {
+      day: 'numeric', month: 'short', year: 'numeric',
+    })
+  }
+  if (campaign.date_type === 'range') {
+    const fmt = (d?: string | null) => d
+      ? new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+      : ''
+    const from = fmt(campaign.offer_date_from)
+    const to = fmt(campaign.offer_date_to)
+    return [from, to].filter(Boolean).join(' – ')
+  }
+  return ''
+}
+
+function splitPrice(price?: number | null): [string, string] {
+  if (!price) return ['', '']
+  const parts = price.toFixed(2).split('.')
+  return [parts[0], parts[1] === '00' ? '' : parts[1]]
+}
+
+export async function syncCampaignToSheet(
+  admin: SupabaseClient,
+  campaignId: string,
+  clientId: string,
+): Promise<SyncResult> {
+
+  // 1. Load client webhook URL
+  const { data: client } = await admin
+    .from('clients')
+    .select('offer_sheet_webhook_url, name')
+    .eq('id', clientId)
+    .maybeSingle()
+
+  if (!client?.offer_sheet_webhook_url) {
+    await admin.from('offer_campaigns')
+      .update({ sheet_sync_error: 'No Google Sheet webhook configured for this client.' })
+      .eq('id', campaignId)
+    return { ok: false, error: 'No sheet webhook URL configured.' }
+  }
+
+  // 2. Load campaign + products
+  const { data: campaign } = await admin
+    .from('offer_campaigns')
+    .select(`
+      id, title, date_type, offer_date, offer_date_from, offer_date_to,
+      products:offer_products(
+        name, weight, price, mrp, offer_type, offer_text,
+        badge:offer_badges(label),
+        image_url, display_order
+      )
+    `)
+    .eq('id', campaignId)
+    .maybeSingle()
+
+  if (!campaign) return { ok: false, error: 'Campaign not found.' }
+
+  const offerDate = formatDate(campaign)
+  const products = (campaign.products as any[] || [])
+    .sort((a: any, b: any) => a.display_order - b.display_order)
+
+  // 3. Build rows
+  const rows = products.map((p: any) => {
+    const [price1, price2] = splitPrice(p.price)
+    let offerText = p.offer_text || ''
+    if (p.offer_type === 'bogo') offerText = 'Buy 1 Get 1'
+    return [
+      p.name || '',
+      p.weight || '',
+      price1,
+      price2,
+      p.mrp ? String(p.mrp) : '',
+      offerText,
+      p.badge?.label || '',
+      p.image_url || '',
+      offerDate,
+    ]
+  })
+
+  // 4. POST to Apps Script Web App
+  const payload = {
+    offerTitle: campaign.title || '',
+    offerDate,
+    headers: ['Product', 'Weight', 'Price 1', 'Price 2', 'MRP', 'Offer Text', 'Badge', 'Image URL', 'Offer Date'],
+    rows,
+  }
+
+  try {
+    const res = await fetch(client.offer_sheet_webhook_url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15_000),
+    })
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      const errMsg = `Sheet sync failed (HTTP ${res.status}): ${body.slice(0, 200)}`
+      await admin.from('offer_campaigns')
+        .update({ sheet_sync_error: errMsg })
+        .eq('id', campaignId)
+      return { ok: false, error: errMsg }
+    }
+
+    // 5. Update sync timestamp
+    await admin.from('offer_campaigns')
+      .update({ sheet_last_synced_at: new Date().toISOString(), sheet_sync_error: null })
+      .eq('id', campaignId)
+
+    return { ok: true }
+
+  } catch (err: any) {
+    const errMsg = err?.name === 'TimeoutError'
+      ? 'Sheet sync timed out. Check the Apps Script URL is correct.'
+      : `Sheet sync error: ${err?.message || 'Unknown error'}`
+    await admin.from('offer_campaigns')
+      .update({ sheet_sync_error: errMsg })
+      .eq('id', campaignId)
+    return { ok: false, error: errMsg }
+  }
+}

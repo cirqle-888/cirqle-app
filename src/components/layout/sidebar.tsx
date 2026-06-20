@@ -35,6 +35,7 @@ import {
   Inbox,
   PhoneCall,
   Award,
+  Tag,
 } from 'lucide-react'
 import { CommandPaletteTrigger } from '@/components/ui/command-palette'
 import { EmployeeAvatar } from '@/components/ui/employee-avatar'
@@ -117,6 +118,7 @@ const navSections: NavSection[] = [
       { label: 'Requests',      href: '/dashboard/requests',      icon: Inbox, requiredPerm: 'requests.view' },
       { label: 'Tasks',         href: '/dashboard/tasks',         icon: CheckSquare },
       { label: 'Contributions', href: '/dashboard/contributions', icon: TrendingUp },
+      { label: 'Campaigns',     href: '/dashboard/campaigns',     icon: Tag, requiredPerm: 'requests.view' },
     ],
   },
   {

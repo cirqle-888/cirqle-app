@@ -1,0 +1,4 @@
+-- This migration was created for an alternative approach and is no longer needed.
+-- The Service Account approach (google_sheet_id on clients table) is used instead.
+-- See migration 20240001_offer_campaigns.sql for the correct schema.
+-- This file is intentionally a no-op.
