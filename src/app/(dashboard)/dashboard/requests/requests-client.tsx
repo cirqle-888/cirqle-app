@@ -17,6 +17,7 @@ import { ActiveFilterChips } from '@/components/ui/active-filter-chips'
 import { TokenizedSearch, type SearchFacet } from '@/components/ui/tokenized-search'
 import { recordMatchesFacets, type FacetFieldDef } from '@/lib/search/match-facets'
 import { useToast, ToastContainer } from '@/components/ui/toast'
+import { usePrivacy } from '@/contexts/privacy-context'
 import {
   Inbox, AlertTriangle, ChevronRight, Clock, Link2, Loader2, Play,
   CalendarDays, MessageSquarePlus, Save, CheckCircle2, X, Flag,
@@ -197,6 +198,8 @@ export default function RequestsClient({
   initialFocusId?: string | null
 }) {
   const router = useRouter()
+  // Assigned-employee names respect the global privacy lock — name only when unlocked, else CQID.
+  const { dn } = usePrivacy()
   const { toasts, dismiss, success, error: toastError } = useToast()
   const [requests, setRequests] = useState(initialRequests)
   const [tab, setTab] = useState('new')
@@ -401,7 +404,7 @@ export default function RequestsClient({
     const res = await assignRequestEmployee(r.id, employeeId || null, emp?.name || null)
     setBusy(false)
     if (res.ok) {
-      const patch = { assigned_employee_id: employeeId || null, assigned_employee: emp ? { id: emp.id, name: emp.name } : null }
+      const patch = { assigned_employee_id: employeeId || null, assigned_employee: emp ? { id: emp.id, cqid: emp.cqid, name: emp.name } : null }
       setRequests(prev => prev.map(x => x.id === r.id ? { ...x, ...patch } : x))
       setOpen((o: any) => o && o.id === r.id ? { ...o, ...patch } : o)
       success(emp ? `Assigned to ${emp.name}` : 'Assignment cleared',
@@ -704,7 +707,7 @@ export default function RequestsClient({
                           ? <span className="text-[10px] text-muted-foreground truncate max-w-[140px]">{requesterOf(r)}</span>
                           : <span className={`text-[9px] px-1.5 py-0.5 rounded-full border ${STATUS_CHIP[r.status] || ''}`}>{STATUS_LABEL[r.status] || r.status}</span>}
                         {r.assigned_employee?.name && (
-                          <span className="flex items-center gap-0.5 text-[10px] text-violet-300/80"><UserRound className="w-2.5 h-2.5" />{r.assigned_employee.name.split(' ')[0]}</span>
+                          <span className="flex items-center gap-0.5 text-[10px] text-violet-300/80"><UserRound className="w-2.5 h-2.5" />{dn(r.assigned_employee).split(' ')[0]}</span>
                         )}
                         {r.promoted_task?.task_number != null && (
                           <span className="text-[10px] font-mono text-green-400/80">#{r.promoted_task.task_number}</span>
@@ -787,7 +790,7 @@ export default function RequestsClient({
                           <span>{ago(r.created_at)}</span>
                           {r.service?.name && <span className="text-cyan-700 dark:text-cyan-400/70">{r.service.name}</span>}
                           {r.assigned_employee?.name && (
-                            <span className="flex items-center gap-1 text-violet-700 dark:text-violet-300/80"><UserRound className="w-3 h-3" />{r.assigned_employee.name}</span>
+                            <span className="flex items-center gap-1 text-violet-700 dark:text-violet-300/80"><UserRound className="w-3 h-3" />{dn(r.assigned_employee)}</span>
                           )}
                           {r.promoted_task?.task_number != null && (
                             <span className="font-mono text-green-700 dark:text-green-400/80" title={`Linked task: ${r.promoted_task.title}`}>Task #{r.promoted_task.task_number}</span>

@@ -25,7 +25,7 @@ export default async function RequestsPage({
   try {
     const { data, error } = await admin
       .from('task_requests')
-      .select('*, client:clients(id, name, code), agency:agencies(id, name), service:services(id, name), assigned_employee:employees!task_requests_assigned_employee_id_fkey(id, name), promoted_task:tasks!task_requests_promoted_task_id_fkey(id, task_number, title, status)')
+      .select('*, client:clients(id, name, code), agency:agencies(id, name), service:services(id, name), assigned_employee:employees!task_requests_assigned_employee_id_fkey(id, cqid, name), promoted_task:tasks!task_requests_promoted_task_id_fkey(id, task_number, title, status)')
       .order('created_at', { ascending: false })
       .limit(500)
     if (error) migrated = false

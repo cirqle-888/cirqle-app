@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
 import { History, Search, ExternalLink, Users, BarChart3 } from 'lucide-react'
+import { usePrivacy } from '@/contexts/privacy-context'
 
 interface ActivityRow {
   id:                 string
@@ -43,6 +44,8 @@ const fmtDate = (s: string | null) => {
 }
 
 export default function ActivityClient({ rows, setupNeeded }: { rows: ActivityRow[]; setupNeeded: boolean }) {
+  // Actor names respect the global privacy lock — real name only when unlocked, else CQID.
+  const { dn } = usePrivacy()
   const [search, setSearch]     = useState('')
   const [employee, setEmployee] = useState('')
   const [outcome, setOutcome]   = useState('')
@@ -77,10 +80,10 @@ export default function ActivityClient({ rows, setupNeeded }: { rows: ActivityRo
     const last30 = rows.filter(r => now - new Date(r.created_at).getTime() <= 30 * day).length
     const byOutcome = new Map<string, number>()
     for (const r of rows) byOutcome.set(r.outcome || 'other', (byOutcome.get(r.outcome || 'other') ?? 0) + 1)
-    const byEmployee = new Map<string, { name: string; count: number }>()
+    const byEmployee = new Map<string, { cqid: string; name: string; count: number }>()
     for (const r of rows) {
       if (!r.employee) continue
-      const e = byEmployee.get(r.employee.cqid) ?? { name: r.employee.name, count: 0 }
+      const e = byEmployee.get(r.employee.cqid) ?? { cqid: r.employee.cqid, name: r.employee.name, count: 0 }
       e.count++
       byEmployee.set(r.employee.cqid, e)
     }
@@ -157,8 +160,8 @@ export default function ActivityClient({ rows, setupNeeded }: { rows: ActivityRo
             </h3>
             <div className="space-y-1.5">
               {stats.topEmployees.map(e => (
-                <div key={e.name} className="flex items-center justify-between text-xs">
-                  <span className="text-foreground">{e.name}</span>
+                <div key={e.cqid} className="flex items-center justify-between text-xs">
+                  <span className="text-foreground">{dn(e)}</span>
                   <span className="font-semibold text-muted-foreground">{e.count}</span>
                 </div>
               ))}
@@ -194,7 +197,7 @@ export default function ActivityClient({ rows, setupNeeded }: { rows: ActivityRo
           <select value={employee} onChange={e => setEmployee(e.target.value)}
             className="bg-secondary border border-border rounded-lg px-2.5 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50">
             <option value="">All employees</option>
-            {employees.map(([cqid, name]) => <option key={cqid} value={cqid}>{name}</option>)}
+            {employees.map(([cqid, name]) => <option key={cqid} value={cqid}>{dn({ cqid, name })}</option>)}
           </select>
           <select value={outcome} onChange={e => setOutcome(e.target.value)}
             className="bg-secondary border border-border rounded-lg px-2.5 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50">
@@ -231,7 +234,7 @@ export default function ActivityClient({ rows, setupNeeded }: { rows: ActivityRo
                       )}
                       {r.client && <span className="text-xs text-muted-foreground">{r.client.name}</span>}
                       {r.outcome && <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${outcomeColor(r.outcome)}`}>{OUTCOME_LABEL[r.outcome] || r.outcome}</span>}
-                      {r.employee && <span className="text-[10px] text-muted-foreground/70">· {r.employee.cqid}</span>}
+                      {r.employee && <span className="text-[10px] text-muted-foreground/70">· {dn(r.employee)}</span>}
                     </div>
                     {r.note && <p className="text-xs text-foreground/80">{r.note}</p>}
                     <div className="flex items-center gap-2 mt-1">
