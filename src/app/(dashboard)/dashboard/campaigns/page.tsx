@@ -1,11 +1,14 @@
 import { createAdminClient } from '@/lib/supabase/admin'
-import { enforceAuth } from '@/lib/auth/enforce'
+import { resolveCurrentEmployeeId } from '@/lib/auth/enforce'
+import { redirect } from 'next/navigation'
 import CampaignsClient from './campaigns-client'
 
 export const dynamic = 'force-dynamic'
 
 export default async function CampaignsPage() {
-  await enforceAuth()
+  const employeeId = await resolveCurrentEmployeeId()
+  if (!employeeId) redirect('/login')
+
   const admin = createAdminClient()
 
   const [campaignsRes, clientsRes] = await Promise.all([

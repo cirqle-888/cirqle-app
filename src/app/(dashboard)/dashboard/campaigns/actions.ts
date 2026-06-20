@@ -1,7 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { enforceAuth } from '@/lib/auth/enforce'
+import { requireAdmin, resolveCurrentEmployeeId } from '@/lib/auth/enforce'
 import { syncCampaignToSheet } from '@/lib/google-sheets/sync'
 import { revalidatePath } from 'next/cache'
 
@@ -11,14 +11,15 @@ export async function acknowledgeLogs(
   campaignId: string,
   logIds: string[],
 ): Promise<ActionResult> {
-  const { employee } = await enforceAuth()
+  const employeeId = await resolveCurrentEmployeeId()
+  if (!employeeId) return { ok: false, error: 'Not signed in.' }
   if (!logIds.length) return { ok: true }
 
   const admin = createAdminClient()
   const { error } = await admin.from('offer_change_logs')
     .update({
       acknowledged: true,
-      acknowledged_by: employee.id,
+      acknowledged_by: employeeId,
       acknowledged_at: new Date().toISOString(),
     })
     .in('id', logIds)
@@ -30,7 +31,8 @@ export async function acknowledgeLogs(
 }
 
 export async function finaliseCampaign(campaignId: string): Promise<ActionResult> {
-  await enforceAuth()
+  const guard = await requireAdmin()
+  if (!guard.ok) return { ok: false, error: guard.error }
   const admin = createAdminClient()
   const { error } = await admin.from('offer_campaigns')
     .update({ status: 'finalised', updated_at: new Date().toISOString() })
@@ -41,7 +43,8 @@ export async function finaliseCampaign(campaignId: string): Promise<ActionResult
 }
 
 export async function archiveCampaign(campaignId: string): Promise<ActionResult> {
-  await enforceAuth()
+  const guard = await requireAdmin()
+  if (!guard.ok) return { ok: false, error: guard.error }
   const admin = createAdminClient()
   const { error } = await admin.from('offer_campaigns')
     .update({ status: 'archived', updated_at: new Date().toISOString() })
@@ -52,7 +55,8 @@ export async function archiveCampaign(campaignId: string): Promise<ActionResult>
 }
 
 export async function resyncSheet(campaignId: string, clientId: string): Promise<ActionResult> {
-  await enforceAuth()
+  const employeeId = await resolveCurrentEmployeeId()
+  if (!employeeId) return { ok: false, error: 'Not signed in.' }
   const admin = createAdminClient()
   const result = await syncCampaignToSheet(admin, campaignId, clientId)
   if (!result.ok) {
@@ -66,7 +70,8 @@ export async function resyncSheet(campaignId: string, clientId: string): Promise
 }
 
 export async function generateOfferLink(clientId: string): Promise<ActionResult<{ token: string }>> {
-  await enforceAuth()
+  const employeeId = await resolveCurrentEmployeeId()
+  if (!employeeId) return { ok: false, error: 'Not signed in.' }
   const admin = createAdminClient()
   const { data } = await admin.from('clients')
     .select('offer_intake_token').eq('id', clientId).maybeSingle()

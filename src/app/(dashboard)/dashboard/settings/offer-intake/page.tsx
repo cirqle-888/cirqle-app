@@ -1,12 +1,15 @@
 import { createAdminClient } from '@/lib/supabase/admin'
-import { enforceAuth } from '@/lib/auth/enforce'
+import { resolveCurrentEmployeeId } from '@/lib/auth/enforce'
+import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
 import OfferIntakeSettingsClient from './offer-intake-settings-client'
 
 export const dynamic = 'force-dynamic'
 
 export default async function OfferIntakeSettingsPage() {
-  await enforceAuth()
+  const employeeId = await resolveCurrentEmployeeId()
+  if (!employeeId) redirect('/login')
+
   const admin = createAdminClient()
 
   const { data: clients } = await admin

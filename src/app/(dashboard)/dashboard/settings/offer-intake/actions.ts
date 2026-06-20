@@ -1,7 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { enforceAuth } from '@/lib/auth/enforce'
+import { requireAdmin, resolveCurrentEmployeeId } from '@/lib/auth/enforce'
 import { syncCampaignToSheet } from '@/lib/google-sheets/sync'
 import { revalidatePath } from 'next/cache'
 
@@ -10,7 +10,7 @@ interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
 // ── Load all clients with offer fields ───────────────────────────────────────
 
 export async function getOfferClients(): Promise<ActionResult<{ clients: any[] }>> {
-  await enforceAuth()
+  const _guard = await requireAdmin(); if (!_guard.ok) return { ok: false, error: _guard.error }
   const admin = createAdminClient()
   const { data, error } = await admin
     .from('clients')
@@ -27,7 +27,7 @@ export async function saveWebhookUrl(
   clientId: string,
   webhookUrl: string,
 ): Promise<ActionResult> {
-  await enforceAuth()
+  const _guard = await requireAdmin(); if (!_guard.ok) return { ok: false, error: _guard.error }
   const admin = createAdminClient()
   const url = webhookUrl.trim()
 
@@ -48,7 +48,7 @@ export async function saveWebhookUrl(
 // ── Reset / regenerate offer intake token ────────────────────────────────────
 
 export async function resetOfferToken(clientId: string): Promise<ActionResult<{ token: string }>> {
-  await enforceAuth()
+  const _guard = await requireAdmin(); if (!_guard.ok) return { ok: false, error: _guard.error }
   const admin = createAdminClient()
 
   // Generate a new random token
@@ -67,7 +67,7 @@ export async function resetOfferToken(clientId: string): Promise<ActionResult<{ 
 // ── Test sheet sync (uses most recent active campaign) ───────────────────────
 
 export async function testSheetSync(clientId: string): Promise<ActionResult<{ message: string }>> {
-  await enforceAuth()
+  const _guard = await requireAdmin(); if (!_guard.ok) return { ok: false, error: _guard.error }
   const admin = createAdminClient()
 
   // Find the most recent active campaign for this client
@@ -95,7 +95,7 @@ export async function testSheetSync(clientId: string): Promise<ActionResult<{ me
 // ── Ensure offer token exists (generate if missing) ──────────────────────────
 
 export async function ensureOfferToken(clientId: string): Promise<ActionResult<{ token: string }>> {
-  await enforceAuth()
+  const _guard = await requireAdmin(); if (!_guard.ok) return { ok: false, error: _guard.error }
   const admin = createAdminClient()
 
   const { data: client } = await admin
