@@ -4,7 +4,8 @@ import { useState, useRef } from 'react'
 import {
   Plus, Loader2, CheckCircle2, Check, X, ChevronDown, ChevronUp,
   Upload, Search, Tag, Calendar, MessageSquare, RefreshCw,
-  ImageIcon, Trash2, GripVertical, Copy, FilePlus, CopyPlus, LayoutGrid, List
+  ImageIcon, Trash2, GripVertical, Copy, FilePlus, CopyPlus, LayoutGrid, List,
+  ArrowUp, ArrowDown, Shuffle,
 } from 'lucide-react'
 import { saveCampaign, getImageUploadUrl, type ProductInput, type ProductBadgeInput, type CampaignInput } from './actions'
 import { ImageLightbox } from '@/components/ui/image-lightbox'
@@ -727,6 +728,28 @@ export default function OfferIntakeClient({
     setProducts(prev => prev.map(p => p._key === key ? { ...p, ...updates } : p))
   }
 
+  // Reorder one page's products (price sort or shuffle). Other pages are left
+  // exactly as they were — only the target page's relative order changes.
+  function sortPageProducts(pageNum: number, mode: 'price_asc' | 'price_desc' | 'shuffle') {
+    setProducts(prev => {
+      const pageItems = prev.filter(p => (p.page || 1) === pageNum)
+      const otherItems = prev.filter(p => (p.page || 1) !== pageNum)
+      const sorted = [...pageItems]
+      if (mode === 'price_asc') {
+        sorted.sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity))
+      } else if (mode === 'price_desc') {
+        sorted.sort((a, b) => (b.price ?? -Infinity) - (a.price ?? -Infinity))
+      } else {
+        // Fisher–Yates shuffle
+        for (let i = sorted.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1))
+          ;[sorted[i], sorted[j]] = [sorted[j], sorted[i]]
+        }
+      }
+      return [...otherItems, ...sorted].map((p, i) => ({ ...p, display_order: i }))
+    })
+  }
+
   function removeProduct(key: string) {
     setProducts(prev => prev.filter(p => p._key !== key).map((p, i) => ({ ...p, display_order: i })))
   }
@@ -986,6 +1009,22 @@ export default function OfferIntakeClient({
                         Page {pageNum}
                      </h3>
                      <div className="flex items-center gap-2">
+                       {pageProducts.length > 1 && (
+                         <div className="flex items-center bg-white/5 border border-white/10 rounded-lg p-0.5 mr-1">
+                           <button onClick={() => sortPageProducts(pageNum, 'price_asc')} title="Sort by price: low to high"
+                             className="p-1 rounded-md text-white/40 hover:text-white hover:bg-white/10 transition-colors">
+                             <ArrowUp className="w-3 h-3" />
+                           </button>
+                           <button onClick={() => sortPageProducts(pageNum, 'price_desc')} title="Sort by price: high to low"
+                             className="p-1 rounded-md text-white/40 hover:text-white hover:bg-white/10 transition-colors">
+                             <ArrowDown className="w-3 h-3" />
+                           </button>
+                           <button onClick={() => sortPageProducts(pageNum, 'shuffle')} title="Shuffle order"
+                             className="p-1 rounded-md text-white/40 hover:text-white hover:bg-white/10 transition-colors">
+                             <Shuffle className="w-3 h-3" />
+                           </button>
+                         </div>
+                       )}
                        <button onClick={() => { setCatalogPageTarget(pageNum); setShowCatalog(true) }} className="text-xs font-medium text-white/50 hover:text-white transition-colors flex items-center gap-1">
                          <Search className="w-3 h-3" /> Search past
                        </button>
