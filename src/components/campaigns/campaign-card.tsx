@@ -247,35 +247,37 @@ export function CampaignCard({
             </div>
           )}
 
-          {/* ── Products list ── */}
+          {/* ── Products grid — flyer-style reference for whoever is designing the offer ── */}
           <div>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/60 mb-2 flex items-center gap-1.5">
               <FileText className="w-3.5 h-3.5" /> Products ({products.length})
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
               {products.map((p: any) => (
-                <div key={p.id} className="flex items-center gap-3 bg-secondary/40 rounded-xl px-3 py-2.5">
-                  {p.image_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={p.image_url} alt={p.name} className="w-8 h-8 rounded-lg object-cover border border-border shrink-0" />
-                  ) : (
-                    <div className="w-8 h-8 rounded-lg bg-secondary border border-border flex items-center justify-center shrink-0">
-                      <ImageIcon className="w-3.5 h-3.5 text-muted-foreground/40" />
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-foreground truncate">{p.name}</p>
+                <div key={p.id} className="bg-secondary/40 border border-border/60 rounded-xl overflow-hidden">
+                  <div className="aspect-square bg-secondary relative">
+                    {p.image_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <ImageIcon className="w-6 h-6 text-muted-foreground/30" />
+                      </div>
+                    )}
+                    {p.badge && (
+                      <span className={`absolute top-1.5 left-1.5 text-[9px] px-1.5 py-0.5 rounded-md border font-medium ${BADGE_COLOR[p.badge.color] || BADGE_COLOR.amber}`}>
+                        {p.badge.label}
+                      </span>
+                    )}
+                  </div>
+                  <div className="p-2">
+                    <p className="text-xs font-medium text-foreground truncate" title={p.name}>{p.name}</p>
                     <p className="text-[10px] text-muted-foreground truncate">
                       {p.offer_type === 'price' && p.price ? `₹${p.price}${p.mrp ? ` (MRP ₹${p.mrp})` : ''}` : ''}
                       {p.offer_type === 'bogo' ? 'Buy 1 Get 1' : ''}
                       {(p.offer_type === 'percent' || p.offer_type === 'other') ? p.offer_text || '' : ''}
                     </p>
                   </div>
-                  {p.badge && (
-                    <span className={`text-[9px] px-1.5 py-0.5 rounded-md border font-medium shrink-0 ${BADGE_COLOR[p.badge.color] || BADGE_COLOR.amber}`}>
-                      {p.badge.label}
-                    </span>
-                  )}
                 </div>
               ))}
             </div>

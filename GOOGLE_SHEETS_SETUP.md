@@ -47,16 +47,15 @@ function doPost(e) {
     // Clear existing content
     tab.clearContents();
 
-    // Row 1: Offer title + date
-    var titleRow = [data.offerTitle || "Cirqle Offers", data.offerDate || ""];
-    tab.getRange(1, 1, 1, titleRow.length).setValues([titleRow]);
+    // Row 1: Column headers — kept as the FIRST row (no title row above it) so
+    // tools that data-merge from a sheet (e.g. a Figma plugin) treat row 1 as
+    // the header row. Offer date already travels per-product in the
+    // "Offer Date" column, so a separate title row isn't needed.
+    tab.getRange(1, 1, 1, data.headers.length).setValues([data.headers]);
 
-    // Row 2: Column headers
-    tab.getRange(2, 1, 1, data.headers.length).setValues([data.headers]);
-
-    // Rows 3+: Product data
+    // Rows 2+: Product data
     if (data.rows && data.rows.length > 0) {
-      tab.getRange(3, 1, data.rows.length, data.rows[0].length).setValues(data.rows);
+      tab.getRange(2, 1, data.rows.length, data.rows[0].length).setValues(data.rows);
     }
 
     // Auto-resize columns
@@ -102,7 +101,15 @@ That's it. The next time the client saves their offer list, it will automaticall
 
 ## Sheet columns written
 
+Row 1 is the header row (Product / Weight / Price 1 / Price 2 / MRP / Offer Text / Badge / Image URL / Offer Date); product data starts at row 2 — no separate title row, so the sheet is ready to use directly as a data-merge source (e.g. in a Figma plugin).
+
 | Product | Weight | Price 1 | Price 2 | MRP | Offer Text | Badge | Image URL | Offer Date |
+
+---
+
+## Updating an already-deployed client sheet
+
+If a client's sheet was set up before 2026-06-21, its row 1 still has a "Cirqle Offers" title row above the headers. To fix it: open that sheet → **Extensions → Apps Script** → replace the script with the version above (Step 3) → **Deploy → Manage deployments → Edit (pencil) → New version → Deploy**. No need to generate a new Web App URL — the existing one in Cirqle App keeps working.
 
 ---
 

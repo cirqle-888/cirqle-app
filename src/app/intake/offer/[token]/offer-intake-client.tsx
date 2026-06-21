@@ -293,32 +293,36 @@ function CatalogPicker({
             <X className="w-4 h-4" />
           </button>
         </div>
-        <div className="max-h-80 overflow-y-auto p-2">
+        <div className="max-h-80 overflow-y-auto p-3">
           {filtered.length === 0 && (
             <p className="text-sm text-white/30 text-center py-6">No products found</p>
           )}
-          {filtered.map(item => (
-            <button
-              key={item.id}
-              onClick={() => { onSelect(item); onClose() }}
-              className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition-colors text-left"
-            >
-              {item.image_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={item.image_url} alt={item.name} className="w-9 h-9 rounded-lg object-cover border border-white/10 shrink-0" />
-              ) : (
-                <div className="w-9 h-9 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
-                  <ImageIcon className="w-4 h-4 text-white/20" />
+          <div className="grid grid-cols-3 gap-2">
+            {filtered.map(item => (
+              <button
+                key={item.id}
+                onClick={() => { onSelect(item); onClose() }}
+                className="rounded-xl overflow-hidden hover:ring-2 hover:ring-violet-500/50 transition-all text-left bg-white/5 border border-white/10"
+              >
+                <div className="aspect-square bg-white/5 relative">
+                  {item.image_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={item.image_url} alt={item.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <ImageIcon className="w-5 h-5 text-white/20" />
+                    </div>
+                  )}
                 </div>
-              )}
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-white/90 truncate">{item.name}</p>
-                {(item.weight || item.category) && (
-                  <p className="text-xs text-white/40 truncate">{[item.weight, item.category].filter(Boolean).join(' · ')}</p>
-                )}
-              </div>
-            </button>
-          ))}
+                <div className="p-1.5">
+                  <p className="text-[11px] font-medium text-white/90 truncate" title={item.name}>{item.name}</p>
+                  {(item.weight || item.category) && (
+                    <p className="text-[10px] text-white/40 truncate">{[item.weight, item.category].filter(Boolean).join(' · ')}</p>
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>
         </div>
         <div className="p-3 border-t border-white/10">
           <button
@@ -406,13 +410,20 @@ export default function OfferIntakeClient({
 
   async function handleUploadImage(productKey: string, file: File): Promise<string | null> {
     const res = await getImageUploadUrl(token, file.name, file.type)
-    if (!res.ok || !res.data) return null
+    if (!res.ok || !res.data) {
+      setError(res.error || 'Could not prepare image upload. Please try again or contact Cirqle.')
+      return null
+    }
     const uploadRes = await fetch(res.data.uploadUrl, {
       method: 'PUT',
       headers: { 'Content-Type': file.type },
       body: file,
     })
-    if (!uploadRes.ok) return null
+    if (!uploadRes.ok) {
+      setError('Image upload failed. Please try again or contact Cirqle.')
+      return null
+    }
+    setError('')
     return res.data.publicUrl
   }
 
