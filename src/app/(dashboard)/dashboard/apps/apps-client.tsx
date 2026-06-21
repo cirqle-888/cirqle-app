@@ -1,9 +1,11 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
-import { Inbox, Tag, Settings as SettingsIcon, ArrowRight, Sparkles } from 'lucide-react'
+import { Inbox, Tag, Settings as SettingsIcon, ArrowRight, Sparkles, Link2, Copy, Check, MessageCircle, Users } from 'lucide-react'
 import { INTAKE_KIND_META } from '@/lib/services/intake'
+import { whatsappShareUrl } from '@/lib/invoices/share'
 
 // Intake apps available today, in display order, with their config route.
 const APPS: { kind: string; configHref: string; icon: typeof Inbox }[] = [
@@ -20,7 +22,50 @@ const COMING: { label: string; description: string }[] = [
   { label: 'SEO',                description: 'SEO task and report intake.' },
 ]
 
-export default function AppsClient({ clientCounts }: { clientCounts: Record<string, number> }) {
+interface MultiServiceClient { id: string; name: string; phone: string | null; hub_token: string; kinds: string[] }
+
+function HubLinkRow({ client }: { client: MultiServiceClient }) {
+  const [copied, setCopied] = useState(false)
+
+  function hubUrl() {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.cirqle.work'
+    return `${origin}/start/${client.hub_token}`
+  }
+  async function handleCopy() {
+    await navigator.clipboard.writeText(hubUrl())
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+  function handleShare() {
+    const text = `Hi ${client.name},\n\nHere's your Cirqle link — use it to submit ${client.kinds.map(k => INTAKE_KIND_META[k]?.label.toLowerCase() || k).join(' or ')}:\n${hubUrl()}`
+    window.open(whatsappShareUrl(text, client.phone), '_blank', 'noopener,noreferrer')
+  }
+
+  return (
+    <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-secondary/40 border border-border/60">
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-foreground truncate">{client.name}</p>
+        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+          {client.kinds.map(k => (
+            <span key={k} className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20">
+              {INTAKE_KIND_META[k]?.label || k}
+            </span>
+          ))}
+        </div>
+      </div>
+      <button onClick={handleCopy} title="Copy hub link"
+        className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors shrink-0">
+        {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+      </button>
+      <button onClick={handleShare} title="Share via WhatsApp"
+        className="p-1.5 rounded-lg text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors shrink-0">
+        <MessageCircle className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  )
+}
+
+export default function AppsClient({ clientCounts, multiServiceClients = [] }: { clientCounts: Record<string, number>; multiServiceClients?: MultiServiceClient[] }) {
   return (
     <div className="min-h-screen">
       <Header
@@ -61,6 +106,25 @@ export default function AppsClient({ clientCounts }: { clientCounts: Record<stri
             )
           })}
         </div>
+
+        {/* Multi-service clients — these are the ones who need the single
+            Client Hub link (/start/<token>) instead of one app's direct link,
+            since they have more than one intake app enabled. */}
+        {multiServiceClients.length > 0 && (
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1 flex items-center gap-1.5">
+              <Link2 className="w-3.5 h-3.5" /> Client Hub Links
+            </h3>
+            <p className="text-xs text-muted-foreground mb-3 flex items-start gap-1.5">
+              <Users className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              These {multiServiceClients.length} client{multiServiceClients.length === 1 ? '' : 's'} have more than one app enabled — share this ONE link
+              instead of separate app links; it shows them only the form(s) they need.
+            </p>
+            <div className="space-y-2">
+              {multiServiceClients.map(c => <HubLinkRow key={c.id} client={c} />)}
+            </div>
+          </div>
+        )}
 
         {/* Roadmap */}
         <div>

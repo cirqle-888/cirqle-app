@@ -152,6 +152,7 @@ export async function updateSession(request: NextRequest) {
                   || pathname.startsWith('/portal')
                   || pathname.startsWith('/intake')   // client/agency request portal — tokenized, no login
                   || pathname.startsWith('/i/')        // public hosted invoice — tokenized, no login
+                  || pathname.startsWith('/start/')    // client hub — single link to all that client's intake apps
                   || pathname.startsWith('/api/shortcut') // iOS Shortcuts API — its own bearer-token auth
 
   if (!user && !isAuthPage && !isPublic) {
