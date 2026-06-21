@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { resolveCurrentEmployeeId } from '@/lib/auth/enforce'
 import { redirect } from 'next/navigation'
+import { getIntakeKindsByClient } from '@/lib/services/intake-server'
 import CatalogClient from './catalog-client'
 
 export const dynamic = 'force-dynamic'
@@ -11,7 +12,7 @@ export default async function CatalogPage() {
 
   const admin = createAdminClient()
 
-  const [productsRes, clientsRes] = await Promise.all([
+  const [productsRes, clientsRes, kindsByClient] = await Promise.all([
     admin
       .from('product_catalog')
       .select(`
@@ -24,13 +25,15 @@ export default async function CatalogPage() {
       .limit(500),
     admin
       .from('clients')
-      .select('id, name')
+      .select('id, name, has_offer_flyer_service')
       .eq('is_active', true)
       .order('name'),
+    getIntakeKindsByClient(),
   ])
 
   const products = productsRes.data || []
-  const clients = clientsRes.data || []
+  const clientsRaw = clientsRes.data || []
+  const clients = clientsRaw.filter(c => kindsByClient.get(c.id)?.includes('offer_intake') || c.has_offer_flyer_service)
 
   // Derive filter options from loaded products
   const categories = [...new Set(products.map((p: any) => p.category).filter(Boolean))].sort()

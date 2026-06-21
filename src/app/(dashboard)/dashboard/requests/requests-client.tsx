@@ -282,8 +282,13 @@ export default function RequestsClient({
   const offerItems = useMemo(() => (offerCampaigns || []).map((c: any) => ({
     kind: 'offer' as const,
     id: c.id,
+    ref_no: null,
+    title: `Offer List — ${c.client?.name || 'Unknown Client'}`,
     status: c.status === 'finalised' ? 'completed' : 'submitted',
+    priority: 'normal',
+    source: 'client',
     client: c.client || null,
+    service: { name: 'Offer Intake' },
     created_at: c.created_at,
     updated_at: c.updated_at,
     _unacked: (c.logs || []).filter((l: any) => !l.acknowledged).length,
@@ -786,7 +791,44 @@ export default function RequestsClient({
           <SortableContext items={rows.filter(r => r.kind !== 'offer').map(r => r.id)} strategy={verticalListSortingStrategy}>
             {(() => { let ri = -1; return rows.map((r) => {
               if (r.kind === 'offer') {
-                return <CampaignCard key={r.id} campaign={r.campaign} onRefresh={() => router.refresh()} />
+                ri += 1
+                const idx = ri
+                return (
+                <SortableListItem key={r.id} id={r.id} disabled={!isDraggableTab}>
+                  {(handle) => (
+                    <div className="flex items-center bg-card border border-border rounded-xl hover:border-violet-500/40 transition-colors">
+                      {isDraggableTab && (
+                        <div className="flex flex-col items-center shrink-0 px-1 py-3 gap-0.5" onClick={e => e.stopPropagation()}>
+                          {handle}
+                          <button
+                            className="text-[10px] font-bold text-violet-400/50 hover:text-violet-400 transition-colors leading-none"
+                            title="Cannot reorder offer items manually"
+                          >#{idx + 1}</button>
+                        </div>
+                      )}
+                      <button className="flex-1 min-w-0 text-left px-3 py-3 flex items-center gap-3" onClick={() => openRequest(r)}>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-amber-500/10 text-amber-600 border border-amber-500/20 dark:text-amber-400">Offer Campaign</span>
+                            <p className="text-sm font-semibold truncate">{r.title}</p>
+                            {r._unacked > 0 && (
+                              <span className="flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-amber-400 animate-pulse" />
+                                {r._unacked} New Update{r._unacked > 1 ? 's' : ''}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2.5 mt-1 text-[11px] text-muted-foreground flex-wrap">
+                            <span className="truncate max-w-[220px]">{r.client?.name || 'Unknown Client'}</span>
+                            <span>{ago(r.created_at)}</span>
+                            {r.service?.name && <span className="text-cyan-700 dark:text-cyan-400/70">{r.service.name}</span>}
+                          </div>
+                        </div>
+                      </button>
+                    </div>
+                  )}
+                </SortableListItem>
+                )
               }
               ri += 1
               const idx = ri
@@ -869,21 +911,44 @@ export default function RequestsClient({
       {open && (
         <ModalOverlay onClose={() => setOpen(null)}>
           <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-3xl shadow-2xl max-h-[92dvh] flex flex-col overflow-hidden">
-            {/* Header */}
-            <div className="flex items-start justify-between px-5 py-4 border-b border-border shrink-0 gap-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-[11px] font-mono text-muted-foreground">{refLabel(open.ref_no)}</span>
-                  <span className={`text-[11px] px-2 py-0.5 rounded-full border ${STATUS_CHIP[open.status] || ''}`}>{STATUS_LABEL[open.status] || open.status}</span>
-                  {open.priority !== 'normal' && <span className={`text-[11px] font-medium ${PRIORITY_CHIP[open.priority]}`}>⚑ {open.priority}</span>}
+            {open.kind === 'offer' ? (
+              <>
+                {/* Offer Campaign Header */}
+                <div className="flex items-start justify-between px-5 py-4 border-b border-border shrink-0 gap-3 bg-secondary/30">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <span className="text-[11px] px-1.5 py-0.5 rounded font-semibold bg-amber-500/10 text-amber-600 border border-amber-500/20 dark:text-amber-400">Offer Campaign</span>
+                      <span className={`text-[11px] px-2 py-0.5 rounded-full border ${STATUS_CHIP[open.status] || ''}`}>{STATUS_LABEL[open.status] || open.status}</span>
+                    </div>
+                    <h2 className="font-bold text-base leading-snug">{open.client?.name || 'Unknown Client'}</h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {open.campaign?.products?.length || 0} Products · Last updated {fmtDate(open.updated_at)}
+                    </p>
+                  </div>
+                  <button onClick={() => setOpen(null)} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground shrink-0"><X className="w-4 h-4" /></button>
                 </div>
-                <h2 className="font-bold text-base mt-1 leading-snug">{open.title}</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">{requesterOf(open)} · submitted {fmtDate(open.created_at)}{open.due_date ? ` · due ${fmtDate(open.due_date)}` : ''}</p>
-              </div>
-              <button onClick={() => setOpen(null)} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground shrink-0"><X className="w-4 h-4" /></button>
-            </div>
+                {/* App-Owned Operational Component */}
+                <div className="overflow-y-auto flex-1 p-5 bg-background">
+                  <CampaignCard campaign={open.campaign} onRefresh={() => router.refresh()} defaultExpanded={true} />
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Standard Request Header */}
+                <div className="flex items-start justify-between px-5 py-4 border-b border-border shrink-0 gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] font-mono text-muted-foreground">{refLabel(open.ref_no)}</span>
+                      <span className={`text-[11px] px-2 py-0.5 rounded-full border ${STATUS_CHIP[open.status] || ''}`}>{STATUS_LABEL[open.status] || open.status}</span>
+                      {open.priority !== 'normal' && <span className={`text-[11px] font-medium ${PRIORITY_CHIP[open.priority]}`}>⚑ {open.priority}</span>}
+                    </div>
+                    <h2 className="font-bold text-base mt-1 leading-snug">{open.title}</h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">{requesterOf(open)} · submitted {fmtDate(open.created_at)}{open.due_date ? ` · due ${fmtDate(open.due_date)}` : ''}</p>
+                  </div>
+                  <button onClick={() => setOpen(null)} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground shrink-0"><X className="w-4 h-4" /></button>
+                </div>
 
-            <div className="overflow-y-auto flex-1 p-5 space-y-5">
+                <div className="overflow-y-auto flex-1 p-5 space-y-5">
               {/* Action bar */}
               <div className="flex flex-wrap gap-2">
                 {perms.start && !open.promoted_task_id && ['submitted', 'under_review', 'approved'].includes(open.status) && (
@@ -1112,6 +1177,8 @@ export default function RequestsClient({
                 </div>
               )}
             </div>
+              </>
+            )}
           </div>
         </ModalOverlay>
       )}

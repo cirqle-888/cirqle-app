@@ -25,11 +25,13 @@ export default async function OfferIntakeSettingsPage() {
   // Capability is SERVICE-DRIVEN: a client has the offer service when any of
   // their assigned services has intake_kind = 'offer_intake'. The legacy
   // has_offer_flyer_service column is kept only as a manual override.
-  const clients = (clientsRaw || []).map(c => ({
-    ...c,
-    has_offer_flyer_service:
-      (kindsByClient.get(c.id)?.includes('offer_intake') ?? false) || !!c.has_offer_flyer_service,
-  }))
+  const clients = (clientsRaw || [])
+    .map(c => ({
+      ...c,
+      has_offer_flyer_service:
+        (kindsByClient.get(c.id)?.includes('offer_intake') ?? false) || !!c.has_offer_flyer_service,
+    }))
+    .filter(c => c.has_offer_flyer_service)
 
   // Derive app URL for generating intake links
   const headersList = await headers()
