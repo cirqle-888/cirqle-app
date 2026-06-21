@@ -33,6 +33,7 @@ import {
   assignRequestEmployee, createManualRequest, searchTasksForLink, linkRequestToTask,
   reorderStaffPriority,
 } from './actions'
+import { CampaignCard } from '@/components/campaigns/campaign-card'
 
 // Task-driven 5-stage flow. Request status mirrors the linked task (see
 // requestStatusFromTask): New → On Going → Under Review → Completed → Cancelled.
@@ -186,7 +187,7 @@ function getShareStatusStyle(status: string): React.CSSProperties {
 
 export default function RequestsClient({
   migrated, initialRequests, perms, clients = [], employees = [], services = [],
-  servicePricing = [], initialFocusId = null,
+  servicePricing = [], offerCampaigns = [], initialFocusId = null,
 }: {
   migrated: boolean
   initialRequests: any[]
@@ -195,6 +196,8 @@ export default function RequestsClient({
   employees?: { id: string; cqid?: string | null; name: string }[]
   services?: { id: string; name: string }[]
   servicePricing?: { client_id: string; service_id: string; price: number | null }[]
+  /** Offer-campaign submissions — shown in the same inbox as a different request type. */
+  offerCampaigns?: any[]
   initialFocusId?: string | null
 }) {
   const router = useRouter()
@@ -228,6 +231,8 @@ export default function RequestsClient({
   const requestGeneric = (r: any) =>
     `${refLabel(r.ref_no)} ${r.title || ''} ${r.client?.name || ''} ${r.agency?.name || ''} ${r.submitter_name || ''} ${r.assigned_employee?.name || ''}`
   const [clientFilter, setClientFilter] = useState('')
+  // Inbox type filter: design requests vs offer-campaign submissions.
+  const [typeFilter, setTypeFilter] = useState<'all' | 'request' | 'offer'>('all')
   const [showNew, setShowNew] = useState(false)
   const [newForm, setNewForm] = useState(EMPTY_NEW)
   const [creating, setCreating] = useState(false)
@@ -271,18 +276,39 @@ export default function RequestsClient({
     window.history.replaceState(null, '', '/dashboard/requests')
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Offer-campaign submissions normalized into request-like rows so they flow
+  // through the same tabs/filters. Offer status maps into the request buckets:
+  // active → New (submitted), finalised → Completed.
+  const offerItems = useMemo(() => (offerCampaigns || []).map((c: any) => ({
+    kind: 'offer' as const,
+    id: c.id,
+    status: c.status === 'finalised' ? 'completed' : 'submitted',
+    client: c.client || null,
+    created_at: c.created_at,
+    updated_at: c.updated_at,
+    _unacked: (c.logs || []).filter((l: any) => !l.acknowledged).length,
+    campaign: c,
+  })), [offerCampaigns])
+
   const counts = useMemo(() => {
     const m: Record<string, number> = {}
-    for (const t of TABS) m[t.key] = requests.filter(r => t.statuses.includes(r.status)).length
+    const inclReq = typeFilter !== 'offer'
+    const inclOff = typeFilter !== 'request'
+    for (const t of TABS) {
+      m[t.key] =
+        (inclReq ? requests.filter(r => t.statuses.includes(r.status)).length : 0) +
+        (inclOff ? offerItems.filter(o => t.statuses.includes(o.status)).length : 0)
+    }
     return m
-  }, [requests])
+  }, [requests, offerItems, typeFilter])
 
   // Only offer clients that actually have requests in the filter dropdown.
   const filterClients = useMemo(() => {
     const seen = new Map<string, string>()
     for (const r of requests) if (r.client?.id && !seen.has(r.client.id)) seen.set(r.client.id, r.client.name)
+    for (const o of offerItems) if (o.client?.id && !seen.has(o.client.id)) seen.set(o.client.id, o.client.name)
     return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]))
-  }, [requests])
+  }, [requests, offerItems])
 
   // Per-client Drive folder (configured on Settings → Intake Links).
   const driveLinkOf = (clientId?: string | null) =>
@@ -310,23 +336,34 @@ export default function RequestsClient({
 
   const rows = useMemo(() => {
     const t = TABS.find(x => x.key === tab)!
-    const filtered = requests.filter(r => {
+    const reqRows = typeFilter === 'offer' ? [] : requests.filter(r => {
       if (!t.statuses.includes(r.status)) return false
       if (clientFilter && r.client?.id !== clientFilter) return false
       if (activeFacets.length && !recordMatchesFacets(activeFacets, r, REQUEST_FIELDS, requestGeneric)) return false
       return true
+    }).map((r: any) => ({ ...r, kind: 'request' as const }))
+    const offRows = typeFilter === 'request' ? [] : offerItems.filter(o => {
+      if (!t.statuses.includes(o.status)) return false
+      if (clientFilter && o.client?.id !== clientFilter) return false
+      // Facet/text search is request-oriented — keep offers out of search results.
+      if (activeFacets.length) return false
+      return true
     })
+    const merged: any[] = [...reqRows, ...offRows]
     // On the "All" tab, group by stage (active first, Completed/closed last);
-    // otherwise plain priority order. Priority_rank breaks ties within a stage.
-    return filtered.sort((a, b) => {
+    // otherwise plain priority order. Priority_rank breaks ties; offers (no
+    // rank) fall back to most-recently-updated.
+    return merged.sort((a, b) => {
       if (tab === 'all') {
         const sr = (STATUS_SORT_RANK[a.status] ?? 9) - (STATUS_SORT_RANK[b.status] ?? 9)
         if (sr !== 0) return sr
       }
-      return (a.priority_rank ?? 9999) - (b.priority_rank ?? 9999)
+      const ar = a.priority_rank ?? 9999, br = b.priority_rank ?? 9999
+      if (ar !== br) return ar - br
+      return (b.updated_at || '').localeCompare(a.updated_at || '')
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requests, tab, activeFacets, clientFilter])
+  }, [requests, offerItems, tab, activeFacets, clientFilter, typeFilter])
 
   async function openRequest(r: any) {
     setOpen(r); setNotes(r.internal_notes || ''); setUpdateMsg('')
@@ -646,6 +683,15 @@ export default function RequestsClient({
           <option value="">All clients</option>
           {filterClients.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select>
+        {offerItems.length > 0 && (
+          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value as any)}
+            title="Filter by submission type"
+            className="bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 sm:w-44">
+            <option value="all">All types</option>
+            <option value="request">Design Requests</option>
+            <option value="offer">Offer Campaigns</option>
+          </select>
+        )}
         <div className="flex rounded-xl border border-border overflow-hidden shrink-0">
           <button onClick={() => setView('list')} title="List view"
             className={`px-3 py-2 transition-colors ${view === 'list' ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}>
@@ -737,8 +783,14 @@ export default function RequestsClient({
           </p>
         )}
         <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={rows.map(r => r.id)} strategy={verticalListSortingStrategy}>
-            {rows.map((r, idx) => (
+          <SortableContext items={rows.filter(r => r.kind !== 'offer').map(r => r.id)} strategy={verticalListSortingStrategy}>
+            {(() => { let ri = -1; return rows.map((r) => {
+              if (r.kind === 'offer') {
+                return <CampaignCard key={r.id} campaign={r.campaign} onRefresh={() => router.refresh()} />
+              }
+              ri += 1
+              const idx = ri
+              return (
               <SortableListItem key={r.id} id={r.id} disabled={!isDraggableTab}>
                 {(handle) => (
                   <div className="flex items-center bg-card border border-border rounded-xl hover:border-violet-500/40 transition-colors">
@@ -806,7 +858,8 @@ export default function RequestsClient({
                   </div>
                 )}
               </SortableListItem>
-            ))}
+              )
+            }) })()}
           </SortableContext>
         </DndContext>
       </div>

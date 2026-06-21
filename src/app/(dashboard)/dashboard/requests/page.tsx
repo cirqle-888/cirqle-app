@@ -46,6 +46,26 @@ export default async function RequestsPage({
     admin.from('client_service_pricing').select('client_id, service_id, price').not('price', 'is', null),
   ])
 
+  // Offer-campaign submissions surface in this same inbox (service-based intake
+  // routing — Offer Flyer clients submit via the Offer Intake app). Defensive:
+  // offer tables may not exist until that migration runs.
+  let offerCampaigns: any[] = []
+  try {
+    const { data } = await admin
+      .from('offer_campaigns')
+      .select(`
+        id, title, status, date_type, offer_date, offer_date_from, offer_date_to,
+        sheet_last_synced_at, sheet_sync_error, created_at, updated_at,
+        client:clients(id, name),
+        products:offer_products(id, name, offer_type, price, mrp, offer_text, image_url, badge:offer_badges(label, color)),
+        logs:offer_change_logs(id, log_type, product_name, field, old_value, new_value, note, acknowledged, acknowledged_by, acknowledged_at, created_at)
+      `)
+      .not('status', 'eq', 'archived')
+      .order('updated_at', { ascending: false })
+      .limit(200)
+    offerCampaigns = data || []
+  } catch { /* offer intake not set up yet */ }
+
   const perms = {
     review:   isAdmin || !!me?.permissions?.has('requests.review'),
     start:    isAdmin || !!me?.permissions?.has('requests.start'),
@@ -62,6 +82,7 @@ export default async function RequestsPage({
       employees={employeesRes.data || []}
       services={servicesRes.data || []}
       servicePricing={pricingRes.data || []}
+      offerCampaigns={offerCampaigns}
       initialFocusId={focusId}
     />
   )
