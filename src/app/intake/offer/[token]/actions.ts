@@ -236,6 +236,15 @@ export async function saveCampaign(
           })
         }
       }
+
+      // Mirror into the global Product Catalog (/dashboard/catalog) so client-
+      // submitted products are visible there too, not just in this client's own
+      // "pick from past products" picker. Dedup by name (case-insensitive) since
+      // product_catalog is shared across all clients; client_product_assignments
+      // tracks which clients use which global product. Best-effort — never blocks
+      // the client's save, and tolerates the table not existing pre-migration.
+      void mirrorProductToGlobalCatalog(admin, client.id, p.name.trim(), p.weight?.trim() || null, p.image_url || null)
+        .catch(() => {})
     }
   }
 
@@ -324,4 +333,42 @@ function offerSummary(p: ProductInput): string {
   if (p.offer_type === 'percent') return p.offer_text || ''
   if (p.offer_type === 'bogo') return 'Buy 1 Get 1'
   return p.offer_text || ''
+}
+
+/** Find-or-create the global product_catalog row for this name, then assign it
+ * to the client. See the call site for why this mirror exists. */
+async function mirrorProductToGlobalCatalog(
+  admin: ReturnType<typeof createAdminClient>,
+  clientId: string,
+  name: string,
+  weight: string | null,
+  imageUrl: string | null,
+): Promise<void> {
+  if (!name) return
+
+  const { data: existing } = await admin
+    .from('product_catalog')
+    .select('id, image_url')
+    .ilike('name', name)
+    .maybeSingle()
+
+  let productId = existing?.id as string | undefined
+
+  if (!productId) {
+    const { data: created } = await admin
+      .from('product_catalog')
+      .insert({ name, weight, image_url: imageUrl })
+      .select('id')
+      .single()
+    productId = created?.id
+  } else if (!existing!.image_url && imageUrl) {
+    // Backfill a missing image on the existing global product.
+    await admin.from('product_catalog').update({ image_url: imageUrl }).eq('id', productId)
+  }
+
+  if (!productId) return
+
+  await admin
+    .from('client_product_assignments')
+    .upsert({ client_id: clientId, product_id: productId, is_active: true }, { onConflict: 'client_id,product_id' })
 }
