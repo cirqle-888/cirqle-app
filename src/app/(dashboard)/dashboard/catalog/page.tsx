@@ -18,7 +18,7 @@ export default async function CatalogPage() {
       .select(`
         id, product_code, name, weight, category, brand, barcode,
         image_url, status, notes, created_at, updated_at,
-        images:product_catalog_images(id, version, url, is_primary),
+        images:product_catalog_images(id, version, url, is_primary, created_at),
         assignments:client_product_assignments(client_id, is_active, client:clients(name))
       `)
       .order('name')

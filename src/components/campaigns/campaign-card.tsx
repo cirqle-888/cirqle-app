@@ -264,10 +264,14 @@ export function CampaignCard({
                         <ImageIcon className="w-6 h-6 text-muted-foreground/30" />
                       </div>
                     )}
-                    {p.badge && (
-                      <span className={`absolute top-1.5 left-1.5 text-[9px] px-1.5 py-0.5 rounded-md border font-medium ${BADGE_COLOR[p.badge.color] || BADGE_COLOR.amber}`}>
-                        {p.badge.label}
-                      </span>
+                    {!!(p.badges || []).length && (
+                      <div className="absolute top-1.5 left-1.5 flex flex-col gap-0.5 items-start">
+                        {p.badges.map((b: any, i: number) => (
+                          <span key={i} className={`text-[9px] px-1.5 py-0.5 rounded-md border font-medium ${BADGE_COLOR[b.color] || BADGE_COLOR.amber}`}>
+                            {b.custom_label || b.badge?.label}
+                          </span>
+                        ))}
+                      </div>
                     )}
                   </div>
                   <div className="p-2">

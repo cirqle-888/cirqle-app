@@ -57,7 +57,7 @@ export default async function RequestsPage({
         id, title, status, date_type, offer_date, offer_date_from, offer_date_to,
         sheet_last_synced_at, sheet_sync_error, created_at, updated_at,
         client:clients(id, name),
-        products:offer_products(id, name, offer_type, price, mrp, offer_text, image_url, badge:offer_badges(label, color)),
+        products:offer_products(id, name, offer_type, price, mrp, offer_text, image_url, page, badges:offer_product_badges(badge_id, custom_label, color, badge:offer_badges(label))),
         logs:offer_change_logs(id, log_type, product_name, field, old_value, new_value, note, acknowledged, acknowledged_by, acknowledged_at, created_at)
       `)
       .not('status', 'eq', 'archived')

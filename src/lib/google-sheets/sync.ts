@@ -72,8 +72,8 @@ export async function syncCampaignToSheet(
       id, title, date_type, offer_date, offer_date_from, offer_date_to,
       products:offer_products(
         name, weight, price, mrp, offer_type, offer_text,
-        badge:offer_badges(label),
-        image_url, display_order
+        badges:offer_product_badges(custom_label, badge:offer_badges(label)),
+        image_url, display_order, page
       )
     `)
     .eq('id', campaignId)
@@ -90,6 +90,10 @@ export async function syncCampaignToSheet(
     const [price1, price2] = splitPrice(p.price)
     let offerText = p.offer_text || ''
     if (p.offer_type === 'bogo') offerText = 'Buy 1 Get 1'
+    const badgeLabels = ((p.badges || []) as any[])
+      .map(b => b.custom_label || (Array.isArray(b.badge) ? b.badge[0] : b.badge)?.label)
+      .filter(Boolean)
+      .join(', ')
     return [
       p.name || '',
       p.weight || '',
@@ -97,9 +101,10 @@ export async function syncCampaignToSheet(
       price2,
       p.mrp ? String(p.mrp) : '',
       offerText,
-      p.badge?.label || '',
+      badgeLabels,
       p.image_url || '',
       offerDate,
+      String(p.page || 1),
     ]
   })
 
@@ -107,7 +112,7 @@ export async function syncCampaignToSheet(
   const payload = {
     offerTitle: campaign.title || '',
     offerDate,
-    headers: ['Product', 'Weight', 'Price 1', 'Price 2', 'MRP', 'Offer Text', 'Badge', 'Image URL', 'Offer Date'],
+    headers: ['Product', 'Weight', 'Price 1', 'Price 2', 'MRP', 'Offer Text', 'Badge', 'Image URL', 'Offer Date', 'Page'],
     rows,
   }
 

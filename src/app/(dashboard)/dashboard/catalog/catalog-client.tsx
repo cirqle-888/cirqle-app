@@ -5,12 +5,14 @@ import Link from 'next/link'
 import {
   Search, Plus, Upload, ImageIcon, Tag, Building2, Filter,
   X, Check, Loader2, Pencil, Users, ChevronDown, ChevronUp,
-  Package, AlertCircle, ExternalLink, RefreshCw,
+  Package, AlertCircle, ExternalLink, RefreshCw, Trash2, Star,
 } from 'lucide-react'
 import {
   createProduct, updateProduct, assignProductToClients,
   removeClientAssignment, getProductImageUploadUrl, saveProductImage,
+  setPrimaryImage, deleteProductImage,
 } from './actions'
+import { ImageLightbox } from '@/components/ui/image-lightbox'
 
 const inputCls = 'w-full bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20'
 const labelCls = 'block text-xs font-medium text-muted-foreground mb-1.5'
@@ -128,7 +130,11 @@ function ProductCard({
   const [imgUploading, setImgUploading] = useState(false)
   const [assignBusy, setAssignBusy] = useState<string | null>(null)
   const [flash, setFlash] = useState('')
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
+  const [imgBusy, setImgBusy] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  // Newest-first — uploading a new image should surface it ahead of older ones.
+  const sortedImages = [...(product.images || [])].sort((a: any, b: any) => (b.created_at || '').localeCompare(a.created_at || ''))
 
   const img = getPrimaryImage(product)
   const assignedIds = new Set((product.assignments || []).filter((a: any) => a.is_active).map((a: any) => a.client_id))
@@ -145,11 +151,49 @@ function ProductCard({
     const { uploadUrl, publicUrl, storagePath } = urlRes.data
     const uploadRes = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file })
     if (!uploadRes.ok) { setImgUploading(false); showFlash('Upload failed'); return }
-    await saveProductImage(product.id, publicUrl, storagePath, 'original', true)
-    onUpdate({ ...product, image_url: publicUrl })
+    const saveRes = await saveProductImage(product.id, publicUrl, storagePath, 'original', true)
+    const newImage = {
+      id: saveRes.ok ? (saveRes as any).data?.imageId : `tmp-${Date.now()}`,
+      version: 'original', url: publicUrl, is_primary: true, created_at: new Date().toISOString(),
+    }
+    onUpdate({
+      ...product,
+      image_url: publicUrl,
+      images: [newImage, ...(product.images || []).map((i: any) => ({ ...i, is_primary: false }))],
+    })
     setImgUploading(false)
-    showFlash('Image updated ✓')
+    showFlash('Image added — set as primary ✓')
     e.target.value = ''
+  }
+
+  async function handleSetPrimary(imageId: string, url: string) {
+    setImgBusy(imageId)
+    const res = await setPrimaryImage(product.id, imageId)
+    if (res.ok) {
+      onUpdate({
+        ...product,
+        image_url: url,
+        images: (product.images || []).map((i: any) => ({ ...i, is_primary: i.id === imageId })),
+      })
+    } else showFlash(res.error || 'Could not set primary')
+    setImgBusy(null)
+  }
+
+  async function handleDeleteImage(imageId: string) {
+    if (!confirm('Delete this image? This removes it permanently from storage.')) return
+    setImgBusy(imageId)
+    const res = await deleteProductImage(imageId)
+    if (res.ok) {
+      const remaining = (product.images || []).filter((i: any) => i.id !== imageId)
+      const wasPrimary = !remaining.some((i: any) => i.is_primary)
+      const next = wasPrimary ? [...remaining].sort((a: any, b: any) => (b.created_at || '').localeCompare(a.created_at || ''))[0] : null
+      onUpdate({
+        ...product,
+        image_url: next ? next.url : (wasPrimary ? null : product.image_url),
+        images: next ? remaining.map((i: any) => ({ ...i, is_primary: i.id === next.id })) : remaining,
+      })
+    } else showFlash(res.error || 'Could not delete image')
+    setImgBusy(null)
   }
 
   async function handleToggleClient(clientId: string) {
@@ -298,22 +342,43 @@ function ProductCard({
               )}
             </div>
 
-            {/* Images section */}
+            {/* Images section — newest first; click to enlarge, hover to set primary / delete */}
             <div>
               <p className="text-xs font-semibold text-muted-foreground/60 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                 <ImageIcon className="w-3.5 h-3.5" /> Images
               </p>
               <div className="flex gap-2 flex-wrap">
-                {(product.images || []).map((img: any) => (
+                {sortedImages.map((img: any) => (
                   <div key={img.id} className="relative group">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={img.url} alt={product.name} className="w-16 h-16 rounded-lg object-cover border border-border" />
-                    <span className="absolute bottom-0 left-0 right-0 text-center text-[9px] bg-black/60 text-white rounded-b-lg py-0.5 capitalize">
+                    <button onClick={() => setLightboxUrl(img.url)} className="block">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={img.url} alt={product.name} className="w-16 h-16 rounded-lg object-cover border border-border" />
+                    </button>
+                    <span className="absolute bottom-0 left-0 right-0 text-center text-[9px] bg-black/60 text-white rounded-b-lg py-0.5 capitalize pointer-events-none">
                       {img.version}
                     </span>
                     {img.is_primary && (
                       <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-violet-500 border border-background" title="Primary" />
                     )}
+                    {/* Hover actions */}
+                    <div className="absolute inset-0 rounded-lg bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                      {imgBusy === img.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+                      ) : (
+                        <>
+                          {!img.is_primary && (
+                            <button onClick={() => handleSetPrimary(img.id, img.url)} title="Set as primary"
+                              className="p-1 rounded-md bg-white/10 hover:bg-white/20 text-white transition-colors">
+                              <Star className="w-3 h-3" />
+                            </button>
+                          )}
+                          <button onClick={() => handleDeleteImage(img.id)} title="Delete"
+                            className="p-1 rounded-md bg-white/10 hover:bg-red-500/40 text-white transition-colors">
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 ))}
                 <button
@@ -325,10 +390,14 @@ function ProductCard({
                   <span className="text-[9px]">Add</span>
                 </button>
               </div>
+              {sortedImages.length > 1 && (
+                <p className="text-[10px] text-muted-foreground/50 mt-1.5">Sorted newest first · ⭐ sets primary · the newest upload becomes primary automatically</p>
+              )}
             </div>
           </div>
         )}
       </div>
+      {lightboxUrl && <ImageLightbox src={lightboxUrl} alt={product.name} onClose={() => setLightboxUrl(null)} />}
     </>
   )
 }

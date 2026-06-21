@@ -103,7 +103,7 @@ That's it. The next time the client saves their offer list, it will automaticall
 
 Row 1 is the header row (Product / Weight / Price 1 / Price 2 / MRP / Offer Text / Badge / Image URL / Offer Date); product data starts at row 2 — no separate title row, so the sheet is ready to use directly as a data-merge source (e.g. in a Figma plugin).
 
-| Product | Weight | Price 1 | Price 2 | MRP | Offer Text | Badge | Image URL | Offer Date |
+| Product | Weight | Price 1 | Price 2 | MRP | Offer Text | Badge | Image URL | Offer Date | Page |
 
 ---
 

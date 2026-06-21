@@ -35,7 +35,7 @@ export async function getProducts(filters?: {
     .select(`
       id, product_code, name, weight, category, brand, barcode,
       image_url, status, notes, created_at, updated_at,
-      images:product_catalog_images(id, version, url, is_primary),
+      images:product_catalog_images(id, version, url, is_primary, created_at),
       assignments:client_product_assignments(client_id, is_active)
     `)
     .order('name')
@@ -213,6 +213,52 @@ export async function saveProductImage(
 
   revalidatePath('/dashboard/catalog')
   return { ok: true, data: { imageId: data.id } }
+}
+
+// ── Set an existing image as primary ─────────────────────────────────────────
+
+export async function setPrimaryImage(productId: string, imageId: string): Promise<ActionResult> {
+  const empId = await resolveCurrentEmployeeId()
+  if (!empId) return { ok: false, error: 'Not signed in.' }
+
+  const admin = createAdminClient()
+  await admin.from('product_catalog_images').update({ is_primary: false }).eq('product_id', productId).eq('is_primary', true)
+  const { data, error } = await admin.from('product_catalog_images')
+    .update({ is_primary: true }).eq('id', imageId).select('url').single()
+  if (error || !data) return { ok: false, error: error?.message || 'Image not found.' }
+
+  await admin.from('product_catalog').update({ image_url: data.url }).eq('id', productId)
+  revalidatePath('/dashboard/catalog')
+  return { ok: true }
+}
+
+// ── Delete an image (manual cleanup — separate from the scheduled retention job) ──
+
+export async function deleteProductImage(imageId: string): Promise<ActionResult> {
+  const empId = await resolveCurrentEmployeeId()
+  if (!empId) return { ok: false, error: 'Not signed in.' }
+
+  const admin = createAdminClient()
+  const { data: img } = await admin.from('product_catalog_images').select('storage_path, product_id, is_primary').eq('id', imageId).maybeSingle()
+  if (!img) return { ok: false, error: 'Image not found.' }
+
+  if (img.storage_path) await admin.storage.from('product-images').remove([img.storage_path])
+  await admin.from('product_catalog_images').delete().eq('id', imageId)
+
+  // If the deleted image was primary, promote the next-newest remaining image.
+  if (img.is_primary) {
+    const { data: next } = await admin.from('product_catalog_images')
+      .select('id, url').eq('product_id', img.product_id).order('created_at', { ascending: false }).limit(1).maybeSingle()
+    if (next) {
+      await admin.from('product_catalog_images').update({ is_primary: true }).eq('id', next.id)
+      await admin.from('product_catalog').update({ image_url: next.url }).eq('id', img.product_id)
+    } else {
+      await admin.from('product_catalog').update({ image_url: null }).eq('id', img.product_id)
+    }
+  }
+
+  revalidatePath('/dashboard/catalog')
+  return { ok: true }
 }
 
 // ── Assign / unassign product to clients ────────────────────────────────────

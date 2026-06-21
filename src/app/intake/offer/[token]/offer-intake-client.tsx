@@ -2,16 +2,18 @@
 
 import { useState, useRef } from 'react'
 import {
-  Plus, Loader2, CheckCircle2, X, ChevronDown, ChevronUp,
+  Plus, Loader2, CheckCircle2, Check, X, ChevronDown, ChevronUp,
   Upload, Search, Tag, Calendar, MessageSquare, RefreshCw,
   ImageIcon, Trash2, GripVertical,
 } from 'lucide-react'
-import { saveCampaign, getImageUploadUrl, type ProductInput, type CampaignInput } from './actions'
+import { saveCampaign, getImageUploadUrl, type ProductInput, type ProductBadgeInput, type CampaignInput } from './actions'
+import { ImageLightbox } from '@/components/ui/image-lightbox'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface Badge { id: string; label: string; color: string }
-interface CatalogItem { id: string; name: string; weight?: string; image_url?: string; category?: string }
+interface CatalogImage { id: string; url: string; is_primary: boolean; created_at: string }
+interface CatalogItem { id: string; name: string; weight?: string; image_url?: string; category?: string; images?: CatalogImage[] }
 interface Campaign {
   id: string
   title?: string
@@ -21,6 +23,7 @@ interface Campaign {
   offer_date_to?: string
   products: OfferProduct[]
 }
+interface ProductBadge { id: string; badge_id?: string | null; custom_label?: string | null; color: string; badge?: Badge | null }
 interface OfferProduct {
   id: string
   catalog_id?: string
@@ -31,8 +34,8 @@ interface OfferProduct {
   price?: number | null
   mrp?: number | null
   offer_text?: string
-  badge_id?: string | null
-  badge?: Badge | null
+  badges?: ProductBadge[]
+  page?: number
   display_order: number
 }
 
@@ -65,7 +68,8 @@ function emptyProduct(order: number): ProductInput & { _key: string } {
     price: null,
     mrp: null,
     offer_text: '',
-    badge_id: null,
+    badges: [],
+    page: 1,
     display_order: order,
   }
 }
@@ -73,16 +77,22 @@ function emptyProduct(order: number): ProductInput & { _key: string } {
 // ── Product Row ───────────────────────────────────────────────────────────────
 
 function ProductRow({
-  product, badges, onUpdate, onRemove, onUploadImage, uploading,
+  product, badges, catalogImages, onUpdate, onRemove, onUploadImage, uploading,
 }: {
   product: (ProductInput & { _key: string; id?: string })
   badges: Badge[]
+  catalogImages?: CatalogImage[]
   onUpdate: (updates: Partial<ProductInput>) => void
   onRemove: () => void
   onUploadImage: (file: File) => Promise<string | null>
   uploading: boolean
 }) {
   const [imgUploading, setImgUploading] = useState(false)
+  const [showGallery, setShowGallery] = useState(false)
+  const [lightbox, setLightbox] = useState<string | null>(null)
+  const [customBadgeOpen, setCustomBadgeOpen] = useState(false)
+  const [customLabel, setCustomLabel] = useState('')
+  const [customColor, setCustomColor] = useState('amber')
   const fileRef = useRef<HTMLInputElement>(null)
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -95,6 +105,25 @@ function ProductRow({
     e.target.value = ''
   }
 
+  const productBadges = product.badges || []
+  function togglePredefinedBadge(b: Badge) {
+    const has = productBadges.some(pb => pb.badge_id === b.id)
+    onUpdate({
+      badges: has
+        ? productBadges.filter(pb => pb.badge_id !== b.id)
+        : [...productBadges, { badge_id: b.id, color: b.color } as ProductBadgeInput],
+    })
+  }
+  function addCustomBadge() {
+    const label = customLabel.trim()
+    if (!label) return
+    onUpdate({ badges: [...productBadges, { custom_label: label, color: customColor } as ProductBadgeInput] })
+    setCustomLabel(''); setCustomColor('amber'); setCustomBadgeOpen(false)
+  }
+  function removeBadge(idx: number) {
+    onUpdate({ badges: productBadges.filter((_, i) => i !== idx) })
+  }
+
   const offerType = product.offer_type
 
   return (
@@ -102,7 +131,7 @@ function ProductRow({
       {/* Row header */}
       <div className="flex items-center gap-2">
         <GripVertical className="w-4 h-4 text-white/20 shrink-0" />
-        <div className="flex-1 grid grid-cols-2 gap-2">
+        <div className="flex-1 grid grid-cols-[2fr_1.3fr_70px] gap-2">
           <div>
             <label className={labelCls}>Product name *</label>
             <input
@@ -119,6 +148,15 @@ function ProductRow({
               onChange={e => onUpdate({ weight: e.target.value })}
               className={inputCls}
               placeholder="e.g. 1L, 5kg"
+            />
+          </div>
+          <div>
+            <label className={labelCls} title="Which flyer page this product belongs to">Page</label>
+            <input
+              type="number" min={1}
+              value={product.page ?? 1}
+              onChange={e => onUpdate({ page: Math.max(1, parseInt(e.target.value) || 1) })}
+              className={inputCls}
             />
           </div>
         </div>
@@ -201,60 +239,100 @@ function ProductRow({
         </div>
       )}
 
-      {/* Badge + image row */}
-      <div className="flex gap-2 items-start">
-        {/* Badge selector */}
-        <div className="flex-1">
-          <label className={labelCls}>Badge <span className="text-white/30">(optional)</span></label>
-          <div className="flex flex-wrap gap-1.5">
-            <button
-              onClick={() => onUpdate({ badge_id: null })}
-              className={`px-2.5 py-1 rounded-lg text-xs border transition-all ${
-                !product.badge_id ? 'bg-white/10 text-white/70 border-white/20' : 'bg-transparent text-white/30 border-white/10 hover:border-white/20'
-              }`}
-            >
-              None
-            </button>
-            {badges.map(b => (
+      {/* Badges — multiple predefined and/or custom labels per product */}
+      <div>
+        <label className={labelCls}>Badges <span className="text-white/30">(optional, pick any number)</span></label>
+        <div className="flex flex-wrap gap-1.5 items-center">
+          {badges.map(b => {
+            const active = productBadges.some(pb => pb.badge_id === b.id)
+            return (
               <button
                 key={b.id}
-                onClick={() => onUpdate({ badge_id: product.badge_id === b.id ? null : b.id })}
+                onClick={() => togglePredefinedBadge(b)}
                 className={`px-2.5 py-1 rounded-lg text-xs border transition-all ${
-                  product.badge_id === b.id
-                    ? BADGE_COLOR[b.color] || BADGE_COLOR.amber
-                    : 'bg-transparent text-white/30 border-white/10 hover:border-white/20 hover:text-white/60'
+                  active ? BADGE_COLOR[b.color] || BADGE_COLOR.amber : 'bg-transparent text-white/30 border-white/10 hover:border-white/20 hover:text-white/60'
                 }`}
               >
                 {b.label}
               </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Image */}
-        <div className="shrink-0">
-          <label className={labelCls}>Image</label>
-          <div className="flex items-center gap-2">
-            {product.image_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={product.image_url} alt={product.name} className="w-10 h-10 rounded-lg object-cover border border-white/10" />
-            ) : (
-              <div className="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center">
-                <ImageIcon className="w-4 h-4 text-white/20" />
-              </div>
-            )}
-            <button
-              onClick={() => fileRef.current?.click()}
-              disabled={imgUploading}
-              className="px-3 py-1.5 rounded-lg text-xs bg-white/5 border border-white/10 hover:border-white/20 text-white/50 hover:text-white/80 transition-all flex items-center gap-1.5 disabled:opacity-40"
-            >
-              {imgUploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
-              {product.image_url ? 'Change' : 'Upload'}
+            )
+          })}
+          {productBadges.filter(pb => !pb.badge_id).map((pb, i) => {
+            const idx = productBadges.indexOf(pb)
+            return (
+              <span key={`custom-${i}`} className={`px-2.5 py-1 rounded-lg text-xs border flex items-center gap-1 ${BADGE_COLOR[pb.color] || BADGE_COLOR.amber}`}>
+                {pb.custom_label}
+                <button onClick={() => removeBadge(idx)} className="hover:opacity-70"><X className="w-3 h-3" /></button>
+              </span>
+            )
+          })}
+          {!customBadgeOpen ? (
+            <button onClick={() => setCustomBadgeOpen(true)}
+              className="px-2.5 py-1 rounded-lg text-xs border border-dashed border-white/15 text-white/40 hover:text-white/70 hover:border-white/30 transition-all flex items-center gap-1">
+              <Plus className="w-3 h-3" /> Custom
             </button>
-            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
-          </div>
+          ) : (
+            <div className="flex items-center gap-1.5 bg-white/5 border border-white/15 rounded-lg px-2 py-1">
+              <input
+                autoFocus value={customLabel} onChange={e => setCustomLabel(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') addCustomBadge(); if (e.key === 'Escape') setCustomBadgeOpen(false) }}
+                placeholder="Custom label" className="bg-transparent text-xs text-white/80 placeholder:text-white/30 focus:outline-none w-24"
+              />
+              {Object.keys(BADGE_COLOR).map(c => (
+                <button key={c} onClick={() => setCustomColor(c)}
+                  className={`w-3.5 h-3.5 rounded-full border ${customColor === c ? 'ring-2 ring-white/50' : ''} ${BADGE_COLOR[c].split(' ')[0]}`} />
+              ))}
+              <button onClick={addCustomBadge} className="text-emerald-400 hover:text-emerald-300"><Check className="w-3.5 h-3.5" /></button>
+              <button onClick={() => setCustomBadgeOpen(false)} className="text-white/30 hover:text-white/60"><X className="w-3.5 h-3.5" /></button>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Image — current photo, upload/change, and a gallery of past photos for this product */}
+      <div>
+        <label className={labelCls}>Image</label>
+        <div className="flex items-center gap-2 flex-wrap">
+          {product.image_url ? (
+            <button onClick={() => setLightbox(product.image_url!)}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={product.image_url} alt={product.name} className="w-10 h-10 rounded-lg object-cover border border-white/10" />
+            </button>
+          ) : (
+            <div className="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center">
+              <ImageIcon className="w-4 h-4 text-white/20" />
+            </div>
+          )}
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={imgUploading}
+            className="px-3 py-1.5 rounded-lg text-xs bg-white/5 border border-white/10 hover:border-white/20 text-white/50 hover:text-white/80 transition-all flex items-center gap-1.5 disabled:opacity-40"
+          >
+            {imgUploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+            {product.image_url ? 'Change' : 'Upload'}
+          </button>
+          {!!catalogImages?.length && catalogImages.length > 1 && (
+            <button onClick={() => setShowGallery(g => !g)}
+              className="px-3 py-1.5 rounded-lg text-xs bg-white/5 border border-white/10 hover:border-white/20 text-white/50 hover:text-white/80 transition-all flex items-center gap-1.5">
+              <ImageIcon className="w-3 h-3" /> Past photos ({catalogImages.length})
+            </button>
+          )}
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+        </div>
+        {showGallery && !!catalogImages?.length && (
+          <div className="mt-2 flex gap-1.5 flex-wrap bg-white/5 border border-white/10 rounded-xl p-2">
+            {catalogImages.map(img => (
+              <button key={img.id} onClick={() => { onUpdate({ image_url: img.url }); setShowGallery(false) }}
+                className={`relative rounded-lg overflow-hidden border ${product.image_url === img.url ? 'border-violet-400' : 'border-white/10'}`}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={img.url} alt="" className="w-12 h-12 object-cover" />
+                {img.is_primary && <span className="absolute bottom-0 inset-x-0 text-[8px] text-center bg-black/60 text-white">latest</span>}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {lightbox && <ImageLightbox src={lightbox} alt={product.name} onClose={() => setLightbox(null)} />}
     </div>
   )
 }
@@ -451,7 +529,8 @@ export default function OfferIntakeClient({
         price: p.price ?? null,
         mrp: p.mrp ?? null,
         offer_text: p.offer_text?.trim() || undefined,
-        badge_id: p.badge_id || null,
+        badges: (p.badges || []).map(b => ({ badge_id: b.badge_id || null, custom_label: b.custom_label || null, color: b.color })),
+        page: p.page || 1,
         display_order: i,
       })),
     }
@@ -583,6 +662,7 @@ export default function OfferIntakeClient({
                 key={p._key}
                 product={p}
                 badges={badges}
+                catalogImages={catalog.find(c => c.id === p.catalog_id)?.images}
                 onUpdate={updates => updateProduct(p._key, updates)}
                 onRemove={() => removeProduct(p._key)}
                 onUploadImage={file => handleUploadImage(p._key, file)}
