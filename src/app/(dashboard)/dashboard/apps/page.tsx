@@ -1,11 +1,11 @@
 import { resolveCurrentEmployeeId } from '@/lib/auth/enforce'
 import { redirect } from 'next/navigation'
 import { getIntakeKindsByClient } from '@/lib/services/intake-server'
-import IntakeAppsClient from './intake-apps-client'
+import AppsClient from './apps-client'
 
 export const dynamic = 'force-dynamic'
 
-export default async function IntakeAppsPage() {
+export default async function AppsDirectoryPage() {
   // Route is permission-gated by middleware (/^\/dashboard\/settings/ → settings.access).
   const employeeId = await resolveCurrentEmployeeId()
   if (!employeeId) redirect('/login')
@@ -17,5 +17,5 @@ export default async function IntakeAppsPage() {
     for (const k of kinds) clientCounts[k] = (clientCounts[k] || 0) + 1
   }
 
-  return <IntakeAppsClient clientCounts={clientCounts} />
+  return <AppsClient clientCounts={clientCounts} />
 }

@@ -7,8 +7,8 @@ import { INTAKE_KIND_META } from '@/lib/services/intake'
 
 // Intake apps available today, in display order, with their config route.
 const APPS: { kind: string; configHref: string; icon: typeof Inbox }[] = [
-  { kind: 'request_portal', configHref: '/dashboard/settings/intake-links', icon: Inbox },
-  { kind: 'offer_intake',   configHref: '/dashboard/settings/offer-intake',  icon: Tag },
+  { kind: 'request_portal', configHref: '/dashboard/apps/standard-request', icon: Inbox },
+  { kind: 'offer_intake',   configHref: '/dashboard/apps/offer-intake',  icon: Tag },
 ]
 
 // Planned modules (no portal yet) — surfaced so the roadmap is visible and the
@@ -20,11 +20,11 @@ const COMING: { label: string; description: string }[] = [
   { label: 'SEO',                description: 'SEO task and report intake.' },
 ]
 
-export default function IntakeAppsClient({ clientCounts }: { clientCounts: Record<string, number> }) {
+export default function AppsClient({ clientCounts }: { clientCounts: Record<string, number> }) {
   return (
     <div className="min-h-screen">
       <Header
-        title="Intake Apps"
+        title="Apps Directory"
         subtitle="Client-facing intake add-ons — each feeds submissions into the Requests inbox"
       />
       <div className="px-4 sm:px-6 lg:px-8 pb-16 max-w-4xl mx-auto mt-2 space-y-6">

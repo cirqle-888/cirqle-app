@@ -36,6 +36,8 @@ import {
   PhoneCall,
   Award,
   Tag,
+  Package,
+  Blocks,
 } from 'lucide-react'
 import { CommandPaletteTrigger } from '@/components/ui/command-palette'
 import { EmployeeAvatar } from '@/components/ui/employee-avatar'
@@ -118,7 +120,7 @@ const navSections: NavSection[] = [
       { label: 'Requests',      href: '/dashboard/requests',      icon: Inbox, requiredPerm: 'requests.view' },
       { label: 'Tasks',         href: '/dashboard/tasks',         icon: CheckSquare },
       { label: 'Contributions', href: '/dashboard/contributions', icon: TrendingUp },
-      { label: 'Campaigns',     href: '/dashboard/campaigns',     icon: Tag, requiredPerm: 'requests.view' },
+      { label: 'Campaigns',     href: '/dashboard/campaigns',     icon: Tag,     requiredPerm: 'requests.view' },
     ],
   },
   {
@@ -147,6 +149,12 @@ const navSections: NavSection[] = [
       { label: 'Contribution Analysis', href: '/dashboard/reports/contribution-analysis', icon: Sheet, requiredPerm: 'reports.view' },
       // Client Ranking: payment reliability + business value scoring per client.
       { label: 'Client Ranking', href: '/dashboard/clients/ranking', icon: Award, requiredPerm: 'reports.view' },
+    ],
+  },
+  {
+    label: 'Apps',
+    items: [
+      { label: 'Apps Directory', href: '/dashboard/apps', icon: Blocks },
     ],
   },
   {

@@ -12,7 +12,7 @@ import { requirePermission, requireAnyPermission } from '@/lib/auth/enforce'
 import { PERMS } from '@/lib/permissions/keys'
 
 interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
-const REVALIDATE = '/dashboard/settings/intake-links'
+const REVALIDATE = '/dashboard/apps/standard-request'
 
 /**
  * Friendly-but-unguessable token: a readable prefix (client/agency name slug)

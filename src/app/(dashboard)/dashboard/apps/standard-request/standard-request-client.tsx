@@ -23,7 +23,7 @@ const TYPE_META: Record<string, { label: string; icon: any; cls: string }> = {
   generic: { label: 'Generic', icon: Globe,     cls: 'bg-secondary text-muted-foreground border-border' },
 }
 
-export default function IntakeLinksClient({
+export default function StandardRequestClient({
   migrated, initialLinks, initialAgencies, clients, appUrl,
 }: {
   migrated: boolean
@@ -129,14 +129,14 @@ export default function IntakeLinksClient({
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6">
-      <Link href="/dashboard/settings" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-3">
-        <ArrowLeft className="w-4 h-4" /> Back to Settings
+      <Link href="/dashboard/apps" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-3">
+        <ArrowLeft className="w-4 h-4" /> Back to Apps Directory
       </Link>
       <div className="flex items-center gap-2.5 mb-1">
         <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center"><Link2 className="w-4.5 h-4.5 text-primary" /></div>
         <div>
-          <h1 className="text-lg font-bold">Client &amp; Agency Intake Links</h1>
-          <p className="text-xs text-muted-foreground">Share a link so clients/agencies can submit requests — no login, no app access.</p>
+          <h1 className="text-lg font-bold">Standard Request Configuration</h1>
+          <p className="text-xs text-muted-foreground">Manage client &amp; agency intake links for standard requests.</p>
         </div>
       </div>
 

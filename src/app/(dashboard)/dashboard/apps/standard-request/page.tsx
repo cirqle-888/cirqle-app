@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/server'
 import { loadCurrentUser } from '@/lib/permissions/check'
-import IntakeLinksClient from './intake-links-client'
+import StandardRequestClient from './standard-request-client'
 
 export const dynamic = 'force-dynamic'
 
@@ -44,7 +44,7 @@ export default async function IntakeLinksPage() {
   }
 
   return (
-    <IntakeLinksClient
+    <StandardRequestClient
       migrated={migrated}
       initialLinks={links}
       initialAgencies={agencies}

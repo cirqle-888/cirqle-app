@@ -41,7 +41,7 @@ export async function saveWebhookUrl(
     .eq('id', clientId)
 
   if (error) return { ok: false, error: error.message }
-  revalidatePath('/dashboard/settings/offer-intake')
+  revalidatePath('/dashboard/apps/offer-intake')
   return { ok: true }
 }
 
@@ -60,7 +60,7 @@ export async function resetOfferToken(clientId: string): Promise<ActionResult<{ 
     .eq('id', clientId)
 
   if (error) return { ok: false, error: error.message }
-  revalidatePath('/dashboard/settings/offer-intake')
+  revalidatePath('/dashboard/apps/offer-intake')
   return { ok: true, data: { token: newToken } }
 }
 
@@ -92,6 +92,23 @@ export async function testSheetSync(clientId: string): Promise<ActionResult<{ me
   return { ok: true, data: { message: 'Sheet synced successfully ✓' } }
 }
 
+// ── Toggle offer flyer service for a client ───────────────────────────────────
+
+export async function toggleOfferFlyerService(
+  clientId: string,
+  enabled: boolean,
+): Promise<ActionResult> {
+  const _guard = await requireAdmin(); if (!_guard.ok) return { ok: false, error: _guard.error }
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('clients')
+    .update({ has_offer_flyer_service: enabled })
+    .eq('id', clientId)
+  if (error) return { ok: false, error: error.message }
+  revalidatePath('/dashboard/apps/offer-intake')
+  return { ok: true }
+}
+
 // ── Ensure offer token exists (generate if missing) ──────────────────────────
 
 export async function ensureOfferToken(clientId: string): Promise<ActionResult<{ token: string }>> {
@@ -116,6 +133,6 @@ export async function ensureOfferToken(clientId: string): Promise<ActionResult<{
     .eq('id', clientId)
 
   if (error) return { ok: false, error: error.message }
-  revalidatePath('/dashboard/settings/offer-intake')
+  revalidatePath('/dashboard/apps/offer-intake')
   return { ok: true, data: { token: newToken } }
 }
