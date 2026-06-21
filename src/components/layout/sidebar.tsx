@@ -120,7 +120,6 @@ const navSections: NavSection[] = [
       { label: 'Requests',      href: '/dashboard/requests',      icon: Inbox, requiredPerm: 'requests.view' },
       { label: 'Tasks',         href: '/dashboard/tasks',         icon: CheckSquare },
       { label: 'Contributions', href: '/dashboard/contributions', icon: TrendingUp },
-      { label: 'Campaigns',     href: '/dashboard/campaigns',     icon: Tag,     requiredPerm: 'requests.view' },
     ],
   },
   {
