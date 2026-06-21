@@ -268,18 +268,35 @@ export async function saveCampaign(
         new_value: offerSummary(p),
       })
 
-      // Add to catalog if not already there
-      if (!p.catalog_id && p.name) {
-        const { data: existing } = await admin.from('client_product_catalog')
-          .select('id').eq('client_id', client.id).eq('name', p.name).maybeSingle()
-        if (!existing) {
-          await admin.from('client_product_catalog').insert({
-            client_id: client.id,
-            name: p.name.trim(),
-            weight: p.weight?.trim() || null,
-            image_url: p.image_url || null,
-          })
-        }
+
+    }
+
+    // Sync to client's local past product catalog
+    if (p.name) {
+      let catId = p.catalog_id
+      let existingCatRow = null
+
+      if (catId) {
+        const { data } = await admin.from('client_product_catalog').select('id, image_url').eq('id', catId).maybeSingle()
+        existingCatRow = data
+      } else {
+        const { data } = await admin.from('client_product_catalog').select('id, image_url').eq('client_id', client.id).eq('name', p.name).maybeSingle()
+        existingCatRow = data
+        catId = data?.id
+      }
+
+      if (!existingCatRow) {
+        await admin.from('client_product_catalog').insert({
+          client_id: client.id,
+          name: p.name.trim(),
+          weight: p.weight?.trim() || null,
+          image_url: p.image_url || null,
+        })
+      } else if (p.image_url && !existingCatRow.image_url) {
+        // Safe patch: only update local client catalog if missing image
+        await admin.from('client_product_catalog')
+          .update({ image_url: p.image_url })
+          .eq('id', existingCatRow.id)
       }
     }
 
