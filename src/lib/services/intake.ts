@@ -35,3 +35,15 @@ export function deriveIntakeKinds(services: Array<{ intake_kind?: string | null 
     services.map(s => s.intake_kind || 'none').filter(k => k && k !== 'none'),
   )]
 }
+
+/** Which app a multi-service client lands on first when opening their Hub link
+ *  — Offer Intake is the primary workflow for supermarket/retail clients. */
+export const INTAKE_KIND_PRIORITY = ['offer_intake', 'request_portal'] as const
+
+/** Route for a given kind, given that client's per-app tokens. Null if the
+ *  client doesn't have that app's token (kind not enabled / not provisioned). */
+export function intakeKindHref(kind: string, tokens: { requestToken?: string | null; offerToken?: string | null }): string | null {
+  if (kind === 'request_portal') return tokens.requestToken ? `/intake/${tokens.requestToken}` : null
+  if (kind === 'offer_intake') return tokens.offerToken ? `/intake/offer/${tokens.offerToken}` : null
+  return null
+}

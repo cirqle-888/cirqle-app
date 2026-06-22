@@ -1,4 +1,6 @@
 import { getOfferPageData } from './actions'
+import { getClientHubData } from '@/app/start/[token]/actions'
+import { intakeKindHref, INTAKE_KIND_META } from '@/lib/services/intake'
 import OfferIntakeClient from './offer-intake-client'
 
 export const dynamic = 'force-dynamic'
@@ -15,8 +17,12 @@ function InvalidLink({ reason }: { reason: string }) {
   )
 }
 
-export default async function OfferIntakePage({ params }: { params: Promise<{ token: string }> }) {
+export default async function OfferIntakePage({ params, searchParams }: {
+  params: Promise<{ token: string }>
+  searchParams: Promise<{ hub?: string }>
+}) {
   const { token } = await params
+  const { hub } = await searchParams
 
   // Delegates to the same loader the client used to call for refreshes
   // (getOfferPageData) instead of duplicating the query here — page.tsx had
@@ -30,6 +36,22 @@ export default async function OfferIntakePage({ params }: { params: Promise<{ to
 
   const { client, campaign, catalog, badges, logoUrl, logoDarkUrl } = res.data
 
+  // Reached via the client's Hub link with more than one app enabled —
+  // render a tab switcher to the other app(s) instead of leaving the client
+  // stranded on this one form.
+  let switcher: { kind: string; label: string; href: string }[] | undefined
+  if (hub) {
+    const hubRes = await getClientHubData(hub)
+    if (hubRes.ok && hubRes.data && hubRes.data.kinds.length > 1) {
+      switcher = hubRes.data.kinds
+        .map(k => {
+          const href = intakeKindHref(k, hubRes.data!)
+          return href ? { kind: k, label: INTAKE_KIND_META[k]?.short || k, href: `${href}?hub=${hub}` } : null
+        })
+        .filter((o): o is { kind: string; label: string; href: string } => !!o)
+    }
+  }
+
   return (
     <OfferIntakeClient
       token={token}
@@ -38,6 +60,7 @@ export default async function OfferIntakePage({ params }: { params: Promise<{ to
       catalog={catalog}
       badges={badges}
       logoUrl={logoDarkUrl || logoUrl}
+      switcher={switcher}
     />
   )
 }

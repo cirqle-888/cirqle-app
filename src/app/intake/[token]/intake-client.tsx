@@ -16,6 +16,7 @@ import {
   Pencil, Ban, GripVertical, Eye, AlertCircle,
 } from 'lucide-react'
 import { CLIENT_STATUS_LABEL } from '@/lib/requests/core'
+import { IntakeAppSwitcher } from '@/components/intake/app-switcher'
 import {
   submitIntakeRequest, getExternalTimeline, addRequestLink,
   updateRequestRemarks, submitRevisionRequest, getMyRequests,
@@ -109,7 +110,7 @@ function autoGrow(e: React.FormEvent<HTMLTextAreaElement>) {
 
 export default function IntakeClient({
   token, linkType, requesterName, services, initialRequests,
-  logoUrl, lastTaskTitle, driveFolderLink,
+  logoUrl, lastTaskTitle, driveFolderLink, switcher,
 }: {
   token: string
   linkType: 'client' | 'agency' | 'generic'
@@ -119,6 +120,7 @@ export default function IntakeClient({
   logoUrl?: string | null
   lastTaskTitle?: string | null
   driveFolderLink?: string | null
+  switcher?: { kind: string; label: string; href: string }[]
 }) {
   // Single-window layout: collapsible submit form on top, requests list below.
   // The form starts open for first-time visitors (no requests yet).
@@ -256,6 +258,7 @@ export default function IntakeClient({
         <p className="text-sm text-muted-foreground mt-1">
           Send us your {linkType === 'agency' ? 'campaign and design requests' : 'design requests'} and track their progress.
         </p>
+        {switcher && <IntakeAppSwitcher options={switcher} current="request_portal" />}
       </div>
 
       {/* Success banner (after submit) */}

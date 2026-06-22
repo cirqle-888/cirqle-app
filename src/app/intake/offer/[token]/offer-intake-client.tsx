@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { saveCampaign, getImageUploadUrl, type ProductInput, type ProductBadgeInput, type CampaignInput } from './actions'
 import { ImageLightbox } from '@/components/ui/image-lightbox'
+import { IntakeAppSwitcher } from '@/components/intake/app-switcher'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -666,7 +667,7 @@ const getTomorrowStr = () => {
 }
 
 export default function OfferIntakeClient({
-  token, client, campaign: initialCampaign, catalog, badges, logoUrl,
+  token, client, campaign: initialCampaign, catalog, badges, logoUrl, switcher,
 }: {
   token: string
   client: { id: string; name: string }
@@ -674,6 +675,7 @@ export default function OfferIntakeClient({
   catalog: CatalogItem[]
   badges: Badge[]
   logoUrl: string | null
+  switcher?: { kind: string; label: string; href: string }[]
 }) {
   // ── Header state ────────────────────────────────────────────────────────────
   const [title, setTitle] = useState(initialCampaign?.title || '')
@@ -867,6 +869,7 @@ export default function OfferIntakeClient({
             {client.name} · Add your products and prices for this offer
           </p>
         </div>
+        {switcher && <IntakeAppSwitcher options={switcher} current="offer_intake" dark />}
       </div>
 
       {/* Working area — the part the client actually edits. Widens progressively

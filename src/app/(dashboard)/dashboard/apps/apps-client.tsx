@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
-import { Inbox, Tag, Settings as SettingsIcon, ArrowRight, Sparkles, Link2, Copy, Check, MessageCircle, Users } from 'lucide-react'
+import { Inbox, Tag, Settings as SettingsIcon, ArrowRight, Sparkles, Link2, Copy, Check, MessageCircle, Users, ExternalLink } from 'lucide-react'
 import { INTAKE_KIND_META } from '@/lib/services/intake'
 import { whatsappShareUrl } from '@/lib/invoices/share'
 
@@ -22,7 +22,21 @@ const COMING: { label: string; description: string }[] = [
   { label: 'SEO',                description: 'SEO task and report intake.' },
 ]
 
-interface MultiServiceClient { id: string; name: string; phone: string | null; hub_token: string; kinds: string[] }
+interface MultiServiceClient {
+  id: string; name: string; phone: string | null; hub_token: string; kinds: string[]
+  lastActivity: string | null; requestCount: number
+}
+
+function relativeTime(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime()
+  const days = Math.floor(ms / 86400000)
+  if (days <= 0) return 'today'
+  if (days === 1) return 'yesterday'
+  if (days < 30) return `${days}d ago`
+  const months = Math.floor(days / 30)
+  if (months < 12) return `${months}mo ago`
+  return `${Math.floor(months / 12)}y ago`
+}
 
 function HubLinkRow({ client }: { client: MultiServiceClient }) {
   const [copied, setCopied] = useState(false)
@@ -40,6 +54,9 @@ function HubLinkRow({ client }: { client: MultiServiceClient }) {
     const text = `Hi ${client.name},\n\nHere's your Cirqle link — use it to submit ${client.kinds.map(k => INTAKE_KIND_META[k]?.label.toLowerCase() || k).join(' or ')}:\n${hubUrl()}`
     window.open(whatsappShareUrl(text, client.phone), '_blank', 'noopener,noreferrer')
   }
+  function handleOpen() {
+    window.open(hubUrl(), '_blank', 'noopener,noreferrer')
+  }
 
   return (
     <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-secondary/40 border border-border/60">
@@ -51,8 +68,17 @@ function HubLinkRow({ client }: { client: MultiServiceClient }) {
               {INTAKE_KIND_META[k]?.label || k}
             </span>
           ))}
+          {client.lastActivity && (
+            <span className="text-[10px] text-muted-foreground">
+              {relativeTime(client.lastActivity)} · {client.requestCount} request{client.requestCount === 1 ? '' : 's'}
+            </span>
+          )}
         </div>
       </div>
+      <button onClick={handleOpen} title="Open link"
+        className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors shrink-0">
+        <ExternalLink className="w-3.5 h-3.5" />
+      </button>
       <button onClick={handleCopy} title="Copy hub link"
         className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors shrink-0">
         {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}

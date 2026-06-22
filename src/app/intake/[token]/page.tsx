@@ -1,4 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getClientHubData } from '@/app/start/[token]/actions'
+import { intakeKindHref, INTAKE_KIND_META } from '@/lib/services/intake'
 import IntakeClient from './intake-client'
 
 export const dynamic = 'force-dynamic'
@@ -20,8 +22,12 @@ function InvalidLink({ reason }: { reason: string }) {
   )
 }
 
-export default async function IntakePage({ params }: { params: Promise<{ token: string }> }) {
+export default async function IntakePage({ params, searchParams }: {
+  params: Promise<{ token: string }>
+  searchParams: Promise<{ hub?: string }>
+}) {
   const { token } = await params
+  const { hub } = await searchParams
 
   let admin: ReturnType<typeof createAdminClient>
   try { admin = createAdminClient() } catch {
@@ -91,6 +97,21 @@ export default async function IntakePage({ params }: { params: Promise<{ token: 
     } catch { /* column not migrated yet */ }
   }
 
+  // Reached via the client's Hub link with more than one app enabled —
+  // render a tab switcher to the other app(s).
+  let switcher: { kind: string; label: string; href: string }[] | undefined
+  if (hub) {
+    const hubRes = await getClientHubData(hub)
+    if (hubRes.ok && hubRes.data && hubRes.data.kinds.length > 1) {
+      switcher = hubRes.data.kinds
+        .map(k => {
+          const href = intakeKindHref(k, hubRes.data!)
+          return href ? { kind: k, label: INTAKE_KIND_META[k]?.short || k, href: `${href}?hub=${hub}` } : null
+        })
+        .filter((o): o is { kind: string; label: string; href: string } => !!o)
+    }
+  }
+
   return (
     <IntakeClient
       token={token}
@@ -101,6 +122,7 @@ export default async function IntakePage({ params }: { params: Promise<{ token: 
       logoUrl={(logoDarkRes.data?.value as string) || (logoRes.data?.value as string) || null}
       lastTaskTitle={lastTaskTitle}
       driveFolderLink={driveFolderLink}
+      switcher={switcher}
     />
   )
 }
