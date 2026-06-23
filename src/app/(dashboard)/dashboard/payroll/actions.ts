@@ -18,6 +18,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission } from '@/lib/auth/enforce'
 import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
+import { computeMonthlyCommissions } from '@/lib/payroll/compute'
 
 const REVALIDATE = '/dashboard/payroll'
 
@@ -113,62 +114,11 @@ export async function recalculatePayrollForMonth(
 
   const admin = createAdminClient()
 
-  // Month window: [monthStart, nextMonthStart)
-  const monthStr = `${input.year}-${String(input.month).padStart(2, '0')}`
-  const nextMonth = input.month === 12 ? 1 : input.month + 1
-  const nextYear = input.month === 12 ? input.year + 1 : input.year
-  const nextMonthStr = `${nextYear}-${String(nextMonth).padStart(2, '0')}`
-  const monthStart = `${monthStr}-01`
-  const nextMonthStart = `${nextMonthStr}-01`
-
-  // Commission per employee for this month — computed the SAME way the payroll
-  // client does it (group scores by the linked task's month). NOTE: a PostgREST
-  // filter on an embedded resource (.gte('task.task_date', …)) does NOT filter
-  // the parent contribution_scores rows, so we resolve the month's task ids
-  // first and filter scores by task_id. Scores with no task fall back to their
-  // calculated_at month (mirrors the client's monthCommissions logic).
-  const commissionByEmployee: Record<string, number> = {}
-
-  // 1) Task-linked scores: find this month's task ids, then sum their scores.
-  const { data: monthTasks, error: tasksErr } = await admin
-    .from('tasks')
-    .select('id')
-    .gte('task_date', monthStart)
-    .lt('task_date', nextMonthStart)
-    .is('deleted_at', null)
-  if (tasksErr) return { ok: false, error: tasksErr.message }
-
-  const taskIds = (monthTasks ?? []).map((t: any) => t.id)
-  if (taskIds.length > 0) {
-    // Chunk the id list to stay well under URL-length limits.
-    const CHUNK = 200
-    for (let i = 0; i < taskIds.length; i += CHUNK) {
-      const chunk = taskIds.slice(i, i + CHUNK)
-      const { data: scores, error: scoresErr } = await admin
-        .from('contribution_scores')
-        .select('employee_id, earnings_inr')
-        .in('task_id', chunk)
-      if (scoresErr) return { ok: false, error: scoresErr.message }
-      scores?.forEach((s: any) => {
-        commissionByEmployee[s.employee_id] =
-          (commissionByEmployee[s.employee_id] || 0) + (s.earnings_inr || 0)
-      })
-    }
-  }
-
-  // 2) Orphan scores (no task_id, e.g. earnings-only CSV imports): bucket them
-  //    into the month by calculated_at, matching the client's fallback.
-  const { data: orphanScores, error: orphanErr } = await admin
-    .from('contribution_scores')
-    .select('employee_id, earnings_inr, calculated_at')
-    .is('task_id', null)
-    .gte('calculated_at', monthStart)
-    .lt('calculated_at', nextMonthStart)
-  if (orphanErr) return { ok: false, error: orphanErr.message }
-  orphanScores?.forEach((s: any) => {
-    commissionByEmployee[s.employee_id] =
-      (commissionByEmployee[s.employee_id] || 0) + (s.earnings_inr || 0)
-  })
+  // Commission per employee for this month — shared with the payroll-draft
+  // cron (src/lib/payroll/compute.ts) so both paths use identical math.
+  const commissionRes = await computeMonthlyCommissions(admin, input.month, input.year)
+  if (!commissionRes.ok) return { ok: false, error: commissionRes.error }
+  const { commissionByEmployee } = commissionRes
 
   // Get all pending payroll for this month with employee info
   const { data: payroll, error: payrollErr } = await admin

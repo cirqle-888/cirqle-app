@@ -29,7 +29,6 @@ import { ActiveFilterChips } from '@/components/ui/active-filter-chips'
 import { TokenizedSearch, type SearchFacet } from '@/components/ui/tokenized-search'
 import { recordMatchesFacets, type FacetFieldDef } from '@/lib/search/match-facets'
 import type { Currency } from '@/types'
-import { getNextOccurrence, shouldGenerateNext } from '@/lib/utils/recurring'
 import { taskCode, taskCodeMatches, nextTaskNumber } from '@/lib/utils/task-code'
 import { seedFromTasks } from '@/lib/hooks/use-smart-sort'
 import { useRole } from '@/contexts/role-context'
@@ -1040,68 +1039,11 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
     }
   }
 
-  async function generateRecurringInstances(
-    parentTask: Task,
-    interval: string,
-    endDate: string | null,
-    baseAmount: number,
-    baseCurrency: string,
-    baseQty: number,
-  ) {
-    const sixMonthsOut = new Date()
-    sixMonthsOut.setMonth(sixMonthsOut.getMonth() + 6)
-    const hardLimit = sixMonthsOut.toISOString().split('T')[0]
-    const effectiveEnd = endDate || hardLimit
-
-    const instances: Array<{
-      title: string
-      description: string | null
-      client_id: string
-      service_id: string
-      status: string
-      billing_amount: number
-      billing_amount_inr: number
-      quantity: number
-      currency: string
-      task_date: string
-      is_recurring: boolean
-      recurring_parent_id: string
-    }> = []
-
-    let nextDate = getNextOccurrence(parentTask.task_date, interval)
-    let count = 0
-    const MAX_INSTANCES = 52
-
-    while (
-      shouldGenerateNext({ recurring_end_date: effectiveEnd }, nextDate) &&
-      count < MAX_INSTANCES
-    ) {
-      instances.push({
-        title: parentTask.title,
-        description: parentTask.description || null,
-        client_id: parentTask.client_id,
-        service_id: parentTask.service_id,
-        status: 'pending',
-        billing_amount: baseAmount,
-        billing_amount_inr: baseAmount,
-        quantity: baseQty,
-        currency: baseCurrency,
-        task_date: nextDate,
-        is_recurring: false,
-        recurring_parent_id: parentTask.id,
-      })
-      nextDate = getNextOccurrence(nextDate, interval)
-      count++
-    }
-
-    if (instances.length > 0) {
-      // Assign sequential task numbers
-      const maxRow = await supabase.from('tasks').select('task_number').order('task_number', { ascending: false, nullsFirst: false }).limit(1).maybeSingle()
-      let next = nextTaskNumber(maxRow.data?.task_number)
-      const numbered = instances.map(ins => ({ ...ins, task_number: next++ }))
-      await supabase.from('tasks').insert(numbered)
-    }
-  }
+  // Recurring instances are generated just-in-time by the daily
+  // /api/cron/recurring-tasks job (see src/app/api/cron/recurring-tasks/route.ts)
+  // — not pre-generated here. A series' parent task only needs
+  // is_recurring/recurring_interval/recurring_end_date saved on it; the cron
+  // creates each occurrence the day it's actually due.
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -1249,16 +1191,12 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
         }
       }
 
-      if (form.is_recurring && form.recurring_interval) {
-        await generateRecurringInstances(
-          data as Task,
-          form.recurring_interval,
-          form.recurring_end_date || null,
-          computedAmount,
-          unitCurrency,
-          qty,
-        )
-      }
+      // Recurring instances are NOT pre-generated here — the daily
+      // /api/cron/recurring-tasks job creates each occurrence only once its
+      // own scheduled date arrives (just-in-time), so Tasks never fills up
+      // with months of not-yet-actionable future work. The parent row saved
+      // above (is_recurring/recurring_interval/recurring_end_date) is all
+      // that cron needs.
 
       setShowForm(false)
       setForm({ ...EMPTY_FORM, task_date: new Date().toISOString().split('T')[0] })

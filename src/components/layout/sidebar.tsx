@@ -40,6 +40,7 @@ import {
   Blocks,
 } from 'lucide-react'
 import { CommandPaletteTrigger } from '@/components/ui/command-palette'
+import { NotificationBell } from '@/components/layout/notification-bell'
 import { EmployeeAvatar } from '@/components/ui/employee-avatar'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 
@@ -417,9 +418,10 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
         )}
       </div>
 
-      {/* Search trigger */}
-      <div className={`py-2 border-b border-sidebar-border transition-all duration-300 ${isCollapsed ? 'flex justify-center px-0' : 'px-3'}`}>
-        <CommandPaletteTrigger className={isCollapsed ? '' : 'w-full'} isCollapsed={isCollapsed} />
+      {/* Search trigger + notifications */}
+      <div className={`py-2 border-b border-sidebar-border transition-all duration-300 flex items-center gap-1.5 ${isCollapsed ? 'flex-col px-0' : 'px-3'}`}>
+        <CommandPaletteTrigger className={isCollapsed ? '' : 'w-full flex-1'} isCollapsed={isCollapsed} />
+        <NotificationBell isCollapsed={isCollapsed} />
       </div>
 
       {/* Nav */}

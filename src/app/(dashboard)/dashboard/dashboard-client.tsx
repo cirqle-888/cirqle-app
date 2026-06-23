@@ -59,6 +59,11 @@ interface Props {
   exchangeRates?: { currency: string; rate_to_inr: number }[]
   /** Collections follow-up counts — powers the dashboard Follow-ups widget. */
   followupCounts?: { needsSent: number; urgent: number; regular: number }
+  /** Smart Focus extras — everything else it needs is derived from props already above. */
+  notifications?: { rows: any[]; unreadCount: number }
+  pendingRequests?: { count: number; items: { id: string; title: string }[] }
+  draftInvoicesSample?: string[]
+  payrollPendingCount?: number
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -242,6 +247,7 @@ function AdminDashboard({
   allAnalyticsTasksPromise, todayTasks, unscoredDoneTasks,
   activeTasks, toBeInvoiced, employees, scoresPromise, payrollRecords,
   todayStr, exchangeRates = [], followupCounts,
+  notifications, pendingRequests, draftInvoicesSample = [], payrollPendingCount = 0,
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
@@ -273,6 +279,7 @@ function AdminDashboard({
   const periodLabel = dateFilter ? getDateFilterLabel(dateFilter) : 'All time'
 
   const urgentCount = unscoredDoneTasks.length + overdueInvoices.length
+  const smartFocusCount = urgentCount + (pendingRequests?.count || 0) + draftInvoicesSample.length + payrollPendingCount + (notifications?.unreadCount || 0)
 
   // ── FX live calculations ─────────────────────────────────────────────────
   // Build a rate map from the live exchange_rates table (fetched server-side).
@@ -376,20 +383,37 @@ function AdminDashboard({
           </div>
         </div>
 
-        {/* ── Today's Focus ──────────────────────────────── */}
-        {(urgentCount > 0 || todayTasks.length > 0) && (
+        {/* ── Smart Focus — "what should I do now?" ──────── */}
+        {/* Single prioritized action feed: today's work + everything across
+            the app waiting on a decision (notifications, requests, drafts,
+            payroll, contributions, overdue money). Replaces the old narrower
+            "Today's Focus" (3 tiles) rather than stacking a second, competing
+            "what needs attention" section next to it. */}
+        {(smartFocusCount > 0 || todayTasks.length > 0) && (
           <section>
             <div className="flex items-center gap-2 mb-3">
               <div className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
-              <h2 className="text-sm font-semibold">Today's Focus</h2>
-              {urgentCount > 0 && <span className="text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/20 px-2 py-0.5 rounded-full">{urgentCount} need attention</span>}
+              <h2 className="text-sm font-semibold">Smart Focus</h2>
+              {smartFocusCount > 0 && <span className="text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/20 px-2 py-0.5 rounded-full">{smartFocusCount} need attention</span>}
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {!!notifications?.unreadCount && (
+                <FocusCard icon={<BellRing className="w-4 h-4 text-violet-400" />} color="violet"
+                  title="Notifications" count={notifications.unreadCount} unit="unread"
+                  items={notifications.rows.filter(r => !r.read).slice(0,3).map(r => r.title)}
+                  onClick={() => router.push((notifications.rows.find(r => !r.read)?.link) || '/dashboard')} />
+              )}
               {todayTasks.length > 0 && (
                 <FocusCard icon={<CheckCircle className="w-4 h-4 text-blue-400" />} color="blue"
                   title="Today's Tasks" count={todayTasks.length} unit="task"
                   items={todayTasks.slice(0,3).map(t => t.title)}
                   onClick={() => setDrawer('today')} />
+              )}
+              {!!pendingRequests?.count && (
+                <FocusCard icon={<ClipboardList className="w-4 h-4 text-cyan-400" />} color="cyan"
+                  title="Requests Awaiting Action" count={pendingRequests.count} unit="request"
+                  items={pendingRequests.items.map(r => r.title)}
+                  onClick={() => router.push('/dashboard/requests')} />
               )}
               {unscoredDoneTasks.length > 0 && (
                 <FocusCard icon={<ClipboardList className="w-4 h-4 text-orange-400" />} color="orange"
@@ -403,6 +427,19 @@ function AdminDashboard({
                   sub={f(effectiveStats.overdueAmount) + ' owed'}
                   items={overdueInvoices.slice(0,3).map(i => `${i.client?.name || i.invoice_number} — ${f((i.total_amount||0)-(i.paid_amount||0))}`)}
                   onClick={() => setDrawer('overdue')} />
+              )}
+              {draftInvoicesSample.length > 0 && (
+                <FocusCard icon={<Send className="w-4 h-4 text-amber-400" />} color="amber"
+                  title="Drafts to Send" count={stats.toBeInvoicedCount} unit="invoice"
+                  sub={f(stats.toBeInvoicedAmount)}
+                  items={draftInvoicesSample}
+                  onClick={() => router.push('/dashboard/invoices')} />
+              )}
+              {payrollPendingCount > 0 && (
+                <FocusCard icon={<FileText className="w-4 h-4 text-emerald-400" />} color="emerald"
+                  title="Payroll to Review" count={payrollPendingCount} unit="record"
+                  items={[]}
+                  onClick={() => router.push('/dashboard/payroll')} />
               )}
             </div>
           </section>
@@ -558,8 +595,14 @@ function FocusCard({ icon, color, title, count, unit, sub, items, onClick }: {
   icon: React.ReactNode; color: string; title: string; count: number; unit: string
   sub?: string; items: string[]; onClick: () => void
 }) {
-  const borders: Record<string, string> = { blue: 'border-blue-500/25 hover:border-blue-500/50', orange: 'border-orange-500/25 hover:border-orange-500/50', red: 'border-red-500/25 hover:border-red-500/50' }
-  const bgs: Record<string, string> = { blue: 'bg-blue-500/15', orange: 'bg-orange-500/15', red: 'bg-red-500/15' }
+  const borders: Record<string, string> = {
+    blue: 'border-blue-500/25 hover:border-blue-500/50', orange: 'border-orange-500/25 hover:border-orange-500/50', red: 'border-red-500/25 hover:border-red-500/50',
+    violet: 'border-violet-500/25 hover:border-violet-500/50', cyan: 'border-cyan-500/25 hover:border-cyan-500/50', amber: 'border-amber-500/25 hover:border-amber-500/50', emerald: 'border-emerald-500/25 hover:border-emerald-500/50',
+  }
+  const bgs: Record<string, string> = {
+    blue: 'bg-blue-500/15', orange: 'bg-orange-500/15', red: 'bg-red-500/15',
+    violet: 'bg-violet-500/15', cyan: 'bg-cyan-500/15', amber: 'bg-amber-500/15', emerald: 'bg-emerald-500/15',
+  }
   return (
     <button onClick={onClick} className={`group text-left bg-card border ${borders[color]} rounded-xl p-4 transition-all`}>
       <div className="flex items-start gap-3">

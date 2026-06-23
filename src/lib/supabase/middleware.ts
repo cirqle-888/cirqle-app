@@ -154,6 +154,11 @@ export async function updateSession(request: NextRequest) {
                   || pathname.startsWith('/i/')        // public hosted invoice — tokenized, no login
                   || pathname.startsWith('/start/')    // client hub — single link to all that client's intake apps
                   || pathname.startsWith('/api/shortcut') // iOS Shortcuts API — its own bearer-token auth
+                  || pathname.startsWith('/api/cron/')  // Vercel Cron — its own CRON_SECRET bearer-token auth, no Supabase session.
+                                                         // Pre-existing bug fixed here: this prefix was missing, so every cron
+                                                         // request (including the original cleanup-product-images) was getting
+                                                         // 307-redirected to /login before reaching the route's own auth check —
+                                                         // i.e. silently never executing in production.
 
   if (!user && !isAuthPage && !isPublic) {
     const url = request.nextUrl.clone()

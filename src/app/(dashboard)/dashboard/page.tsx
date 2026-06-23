@@ -3,6 +3,7 @@ import { loadCurrentUser } from '@/lib/permissions/check'
 import { getPendingPricing } from '@/lib/pricing/pending'
 import { PricingPendingBanner } from '@/components/pricing/pricing-pending-banner'
 import { summarizeFollowups } from '@/lib/followups/grouping'
+import { getMyNotifications } from '@/app/api/notifications/actions'
 import DashboardClient from './dashboard-client'
 
 export const dynamic = 'force-dynamic'
@@ -244,6 +245,29 @@ export default async function DashboardPage() {
   const canSeePricing = isAdmin || !!me?.permissions?.has('tasks.view_pricing')
   const pendingPricing = canSeePricing ? await getPendingPricing(supabase) : { clients: [], services: [], total: 0 }
 
+  // ── Smart Focus extras (admin only) ─────────────────────────────────────────
+  // Everything else this section needs (overdueInvoices, draftInvoices,
+  // unscoredDoneTasks, payrollRecords) is ALREADY computed above — these are
+  // the only genuinely new, lightweight reads.
+  let notifications: { rows: any[]; unreadCount: number } = { rows: [], unreadCount: 0 }
+  let pendingRequests: { count: number; items: { id: string; title: string }[] } = { count: 0, items: [] }
+  if (isAdmin) {
+    const notifRes = await getMyNotifications(5).catch(() => null)
+    if (notifRes?.ok && notifRes.data) notifications = notifRes.data
+
+    try {
+      const { data: reqRows } = await supabase
+        .from('task_requests')
+        .select('id, title')
+        .in('status', ['submitted', 'under_review'])
+        .order('created_at', { ascending: true })
+        .limit(50)
+      pendingRequests = { count: reqRows?.length || 0, items: (reqRows || []).slice(0, 3) }
+    } catch { /* table not migrated yet */ }
+  }
+  const draftInvoicesSample = draftInvoices.slice(0, 3).map(i => `${i.invoice_number} — ${i.client?.name || ''}`)
+  const payrollPendingCount = isAdmin ? payrollRecords.filter((p: any) => p.status === 'pending').length : 0
+
   // ── My pending actions (employee view) ─────────────────────────────────────
   // What needs THIS employee's attention right now: open tasks assigned to
   // them + done tasks where they haven't logged their contribution yet.
@@ -318,6 +342,10 @@ export default async function DashboardPage() {
       exchangeRates={exchangeRates as any[]}
       isAdmin={isAdmin}
       followupCounts={followupCounts}
+      notifications={notifications}
+      pendingRequests={pendingRequests}
+      draftInvoicesSample={draftInvoicesSample}
+      payrollPendingCount={payrollPendingCount}
     />
     </>
   )

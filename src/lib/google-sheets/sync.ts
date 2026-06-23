@@ -14,6 +14,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { notifyAdmins } from '@/lib/notifications/create'
 
 interface SyncResult { ok: boolean; error?: string }
 
@@ -58,18 +59,13 @@ export async function syncCampaignToSheet(
     .eq('id', clientId)
     .maybeSingle()
 
-  if (!client?.offer_sheet_webhook_url) {
-    await admin.from('offer_campaigns')
-      .update({ sheet_sync_error: 'No Google Sheet webhook configured for this client.' })
-      .eq('id', campaignId)
-    return { ok: false, error: 'No sheet webhook URL configured.' }
-  }
-
-  // 2. Load campaign + products
+  // 2. Load campaign + products (sheet_sync_error included so we can tell a
+  // BRAND NEW failure apart from "still broken since last sync attempt" —
+  // only notify admins on that transition, not on every retry).
   const { data: campaign } = await admin
     .from('offer_campaigns')
     .select(`
-      id, title, date_type, offer_date, offer_date_from, offer_date_to,
+      id, title, date_type, offer_date, offer_date_from, offer_date_to, sheet_sync_error,
       products:offer_products(
         name, weight, price, mrp, offer_type, offer_text,
         badges:offer_product_badges(custom_label, badge:offer_badges(label)),
@@ -80,6 +76,27 @@ export async function syncCampaignToSheet(
     .maybeSingle()
 
   if (!campaign) return { ok: false, error: 'Campaign not found.' }
+  const wasHealthy = !campaign.sheet_sync_error
+
+  function notifyNewFailure(errMsg: string) {
+    if (!wasHealthy) return // already broken — don't re-notify on every retry
+    void notifyAdmins({
+      type: 'offer_sync_failed',
+      title: `Sheet sync failed — ${client?.name || 'client'}`,
+      message: errMsg,
+      link: '/dashboard/requests',
+      sourceKey: `offer_sync_failed:${campaignId}:${new Date().toISOString().slice(0, 10)}`,
+    })
+  }
+
+  if (!client?.offer_sheet_webhook_url) {
+    const errMsg = 'No Google Sheet webhook configured for this client.'
+    await admin.from('offer_campaigns')
+      .update({ sheet_sync_error: errMsg })
+      .eq('id', campaignId)
+    notifyNewFailure(errMsg)
+    return { ok: false, error: 'No sheet webhook URL configured.' }
+  }
 
   const offerDate = formatDate(campaign)
   const products = (campaign.products as any[] || [])
@@ -130,6 +147,7 @@ export async function syncCampaignToSheet(
       await admin.from('offer_campaigns')
         .update({ sheet_sync_error: errMsg })
         .eq('id', campaignId)
+      notifyNewFailure(errMsg)
       return { ok: false, error: errMsg }
     }
 
@@ -147,6 +165,7 @@ export async function syncCampaignToSheet(
     await admin.from('offer_campaigns')
       .update({ sheet_sync_error: errMsg })
       .eq('id', campaignId)
+    notifyNewFailure(errMsg)
     return { ok: false, error: errMsg }
   }
 }
