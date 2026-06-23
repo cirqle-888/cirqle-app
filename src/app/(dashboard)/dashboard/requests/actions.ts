@@ -59,6 +59,42 @@ export async function setRequestStatusAction(
   return { ok: true }
 }
 
+/**
+ * Bulk status change — loops setRequestStatusAction per request rather than
+ * writing a separate bulk SQL path, so every per-row side effect (milestone
+ * emails on completed/delivered, activity logging, permission check per
+ * target status) stays IDENTICAL to the single-request action. Returns which
+ * ids failed (if any) so the UI can report a partial-failure count.
+ */
+export async function bulkSetRequestStatus(
+  requestIds: string[], status: RequestStatus,
+): Promise<ActionResult<{ succeeded: string[]; failed: string[] }>> {
+  if (!requestIds.length) return { ok: false, error: 'No requests selected.' }
+  const succeeded: string[] = []
+  const failed: string[] = []
+  for (const id of requestIds) {
+    const res = await setRequestStatusAction(id, status)
+    if (res.ok) succeeded.push(id)
+    else failed.push(id)
+  }
+  return { ok: failed.length === 0, data: { succeeded, failed }, error: failed.length ? `${failed.length} could not be updated` : undefined }
+}
+
+/** Bulk assign/reassign — same reuse approach as bulkSetRequestStatus. */
+export async function bulkAssignRequestEmployee(
+  requestIds: string[], employeeId: string | null, employeeName?: string | null,
+): Promise<ActionResult<{ succeeded: string[]; failed: string[] }>> {
+  if (!requestIds.length) return { ok: false, error: 'No requests selected.' }
+  const succeeded: string[] = []
+  const failed: string[] = []
+  for (const id of requestIds) {
+    const res = await assignRequestEmployee(id, employeeId, employeeName)
+    if (res.ok) succeeded.push(id)
+    else failed.push(id)
+  }
+  return { ok: failed.length === 0, data: { succeeded, failed }, error: failed.length ? `${failed.length} could not be updated` : undefined }
+}
+
 /** Staff opened a request — clears the "new external activity" indicator. */
 export async function markRequestViewed(requestId: string): Promise<ActionResult> {
   const guard = await requirePermission(PERMS.REQUESTS_VIEW)

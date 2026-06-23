@@ -31,9 +31,11 @@ import {
   setRequestStatusAction, markRequestViewed, getRequestTimeline,
   postExternalUpdate, updateInternalNotes, markRevisionAddressed, postRequestNote,
   assignRequestEmployee, createManualRequest, searchTasksForLink, linkRequestToTask,
-  reorderStaffPriority,
+  reorderStaffPriority, bulkSetRequestStatus, bulkAssignRequestEmployee,
 } from './actions'
 import { CampaignCard } from '@/components/campaigns/campaign-card'
+import { useBatchSelection } from '@/lib/hooks/use-batch-selection'
+import { BatchActionBar, type BatchAction } from '@/components/ui/batch-action-bar'
 
 // Task-driven 5-stage flow. Request status mirrors the linked task (see
 // requestStatusFromTask): New → On Going → Under Review → Completed → Cancelled.
@@ -240,6 +242,14 @@ export default function RequestsClient({
   // View mode: flat list (tabbed) or kanban board (all statuses at once)
   const [view, setView] = useState<'list' | 'board'>('list')
   const [boardBy, setBoardBy] = useState<'status' | 'client'>('status')
+
+  // Batch selection (design requests only — offer campaigns excluded, same
+  // as drag-reorder above). Mutually exclusive with drag mode: you're either
+  // reordering or bulk-selecting, not both at once.
+  const batchSel = useBatchSelection()
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkAssignOpen, setBulkAssignOpen] = useState(false)
+  const [bulkAssignEmpId, setBulkAssignEmpId] = useState<string>('')
 
   // Priority drag + manual rank override
   const [editRank, setEditRank] = useState<{ id: string; val: string } | null>(null)
@@ -454,6 +464,45 @@ export default function RequestsClient({
     } else toastError('Could not assign', res.error)
   }
 
+  // ── Batch actions ──────────────────────────────────────────────────────
+  async function doBulkStatus(status: RequestStatus) {
+    const ids = [...batchSel.selected]
+    setBulkBusy(true)
+    const res = await bulkSetRequestStatus(ids, status)
+    setBulkBusy(false)
+    if (res.data) {
+      const succeededSet = new Set(res.data.succeeded)
+      setRequests(prev => prev.map(x => succeededSet.has(x.id) ? { ...x, status } : x))
+    }
+    if (res.ok) {
+      success(`${ids.length} request${ids.length !== 1 ? 's' : ''} updated`)
+      batchSel.clear()
+    } else {
+      toastError('Some requests could not be updated', res.error)
+    }
+  }
+
+  async function doBulkAssign() {
+    const ids = [...batchSel.selected]
+    const emp = employees.find(e => e.id === bulkAssignEmpId) || null
+    setBulkBusy(true)
+    const res = await bulkAssignRequestEmployee(ids, bulkAssignEmpId || null, emp?.name || null)
+    setBulkBusy(false)
+    if (res.data) {
+      const succeededSet = new Set(res.data.succeeded)
+      const patch = { assigned_employee_id: bulkAssignEmpId || null, assigned_employee: emp ? { id: emp.id, cqid: emp.cqid, name: emp.name } : null }
+      setRequests(prev => prev.map(x => succeededSet.has(x.id) ? { ...x, ...patch } : x))
+    }
+    if (res.ok) {
+      success(`${ids.length} request${ids.length !== 1 ? 's' : ''} ${emp ? `assigned to ${emp.name}` : 'unassigned'}`)
+      setBulkAssignOpen(false)
+      setBulkAssignEmpId('')
+      batchSel.clear()
+    } else {
+      toastError('Some requests could not be assigned', res.error)
+    }
+  }
+
   async function doCreate() {
     if (creating) return
     setCreating(true)
@@ -511,7 +560,7 @@ export default function RequestsClient({
     } else toastError('Could not link the task', res.error)
   }
 
-  const isDraggableTab = view === 'list' && SORTABLE_TABS.has(tab) && perms.manage && !activeFacets.length && !searchDraft.trim()
+  const isDraggableTab = view === 'list' && SORTABLE_TABS.has(tab) && perms.manage && !activeFacets.length && !searchDraft.trim() && !batchSel.mode
 
   async function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event
@@ -707,6 +756,12 @@ export default function RequestsClient({
             <LayoutGrid className="w-4 h-4" />
           </button>
         </div>
+        {view === 'list' && perms.manage && (
+          <button onClick={() => { if (batchSel.mode) batchSel.clear(); else batchSel.setMode(true) }}
+            className={`px-3 py-2 rounded-xl text-xs font-medium border transition-colors shrink-0 ${batchSel.mode ? 'gradient-bg text-white border-transparent' : 'bg-secondary border-border text-muted-foreground hover:text-foreground'}`}>
+            {batchSel.mode ? 'Exit Select' : 'Select'}
+          </button>
+        )}
       </div>
 
       {/* Tokenized active filters (client dropdown chip; search shows in the bar) */}
@@ -835,7 +890,12 @@ export default function RequestsClient({
               return (
               <SortableListItem key={r.id} id={r.id} disabled={!isDraggableTab}>
                 {(handle) => (
-                  <div className="flex items-center bg-card border border-border rounded-xl hover:border-violet-500/40 transition-colors">
+                  <div className={`flex items-center bg-card border rounded-xl transition-colors ${batchSel.mode && batchSel.isSelected(r.id) ? 'border-violet-500/60 bg-violet-500/[0.04]' : 'border-border hover:border-violet-500/40'}`}>
+                    {batchSel.mode && (
+                      <label className="flex items-center justify-center shrink-0 w-10 self-stretch cursor-pointer" onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" className="accent-violet-500 w-3.5 h-3.5" checked={batchSel.isSelected(r.id)} onChange={() => batchSel.toggle(r.id)} />
+                      </label>
+                    )}
                     {isDraggableTab && (
                       <div className="flex flex-col items-center shrink-0 px-1 py-3 gap-0.5" onClick={e => e.stopPropagation()}>
                         {handle}
@@ -1408,6 +1468,46 @@ export default function RequestsClient({
             </div>
           </div>
         </ModalOverlay>
+      )}
+
+      {/* ── Bulk action toolbar ── */}
+      {batchSel.mode && (
+        <BatchActionBar
+          count={batchSel.count}
+          onClear={batchSel.clear}
+          busy={bulkBusy}
+          actions={[
+            { key: 'in_progress', label: 'On Going', icon: <Clock className="w-3.5 h-3.5" />, tint: 'blue', onClick: () => doBulkStatus('in_progress') },
+            { key: 'completed', label: 'Completed', icon: <CheckCircle2 className="w-3.5 h-3.5" />, tint: 'emerald', onClick: () => doBulkStatus('completed') },
+            { key: 'archived', label: 'Archive', icon: <Inbox className="w-3.5 h-3.5" />, tint: 'amber', onClick: () => doBulkStatus('archived') },
+            { key: 'cancelled', label: 'Cancel', icon: <X className="w-3.5 h-3.5" />, tint: 'red', onClick: () => doBulkStatus('cancelled') },
+            { key: 'assign', label: 'Assign', icon: <UserRound className="w-3.5 h-3.5" />, tint: 'cyan', onClick: () => setBulkAssignOpen(true) },
+          ] as BatchAction[]}
+        />
+      )}
+
+      {/* ── Bulk Assign modal ── */}
+      {bulkAssignOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-card border border-border rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Assign {batchSel.count} request{batchSel.count !== 1 ? 's' : ''}</h3>
+              <button onClick={() => setBulkAssignOpen(false)} className="p-1 rounded text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+            </div>
+            <select value={bulkAssignEmpId} onChange={e => setBulkAssignEmpId(e.target.value)}
+              className="w-full bg-secondary border border-foreground/15 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-violet-500/50">
+              <option value="">Unassign</option>
+              {employees.map(e => <option key={e.id} value={e.id}>{e.cqid ? `${e.cqid} · ` : ''}{e.name}</option>)}
+            </select>
+            <div className="flex gap-2">
+              <button onClick={() => setBulkAssignOpen(false)} className="flex-1 px-4 py-2 rounded-xl border border-border text-sm font-medium hover:bg-secondary">Cancel</button>
+              <button onClick={doBulkAssign} disabled={bulkBusy}
+                className="flex-1 px-4 py-2 rounded-xl bg-violet-600 text-white text-sm font-semibold hover:bg-violet-500 disabled:opacity-50">
+                {bulkBusy ? 'Saving…' : 'Apply'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <ToastContainer toasts={toasts} onDismiss={dismiss} />

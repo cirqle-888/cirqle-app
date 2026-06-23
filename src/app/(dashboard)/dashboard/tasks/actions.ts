@@ -179,6 +179,73 @@ export async function serverBulkUpdateStatus(
   return { ok: true }
 }
 
+// ── Bulk assign employees ───────────────────────────────────────────────────
+// Lighter-weight than the full "Assign team" modal (which also sets up
+// per-employee group/parameter contribution splits) — this just sets which
+// employees are on each selected task via task_assignments. Replaces each
+// task's existing assignee set with the chosen one (== "reassign").
+
+export async function serverBulkAssignEmployees(
+  taskIds:     string[],
+  employeeIds: string[],
+): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.TASKS_ASSIGN)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!taskIds.length) return { ok: false, error: 'No tasks selected.' }
+
+  const admin = createAdminClient()
+
+  const { error: delErr } = await admin.from('task_assignments').delete().in('task_id', taskIds)
+  if (delErr) return { ok: false, error: delErr.message }
+
+  if (employeeIds.length > 0) {
+    const rows = taskIds.flatMap(task_id => employeeIds.map(employee_id => ({ task_id, employee_id })))
+    const { error: insErr } = await admin.from('task_assignments').insert(rows)
+    if (insErr) return { ok: false, error: insErr.message }
+  }
+
+  void logActivity({
+    actorId:    guard.employeeId,
+    entityType: 'task',
+    entityId:   null,
+    action:     'assigned',
+    detail:     { bulk: true, taskCount: taskIds.length, employeeIds },
+  })
+
+  return { ok: true }
+}
+
+// ── Bulk delete (soft) ──────────────────────────────────────────────────────
+
+export async function serverBulkDeleteTasks(
+  tasks: { id: string; title: string }[],
+): Promise<ActionResult<{ deletedAt: string }>> {
+  const guard = await requirePermission(PERMS.TASKS_DELETE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!tasks.length) return { ok: false, error: 'No tasks selected.' }
+
+  const admin = createAdminClient()
+  const deletedAt = new Date().toISOString()
+  const ids = tasks.map(t => t.id)
+
+  const CHUNK = 100
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK)
+    const { error } = await admin.from('tasks').update({ deleted_at: deletedAt }).in('id', chunk)
+    if (error) return { ok: false, error: error.message }
+  }
+
+  void logActivity({
+    actorId:    guard.employeeId,
+    entityType: 'task',
+    entityId:   null,
+    action:     'deleted',
+    detail:     { bulk: true, count: tasks.length, titles: tasks.map(t => t.title).slice(0, 20) },
+  })
+
+  return { ok: true, data: { deletedAt } }
+}
+
 // ── Cancel task ───────────────────────────────────────────────────────────────
 
 export interface CancelTaskInput {

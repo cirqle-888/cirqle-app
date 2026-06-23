@@ -39,6 +39,8 @@ import {
   serverPermanentDeleteTask,
   serverUpdateTaskStatus,
   serverBulkUpdateStatus,
+  serverBulkAssignEmployees,
+  serverBulkDeleteTasks,
   serverCancelTask,
   serverFillTaskBilling,
   logTaskCreated,
@@ -46,6 +48,7 @@ import {
   serverInlineTaskUpdate,
 } from './actions'
 import { useToast, ToastContainer } from '@/components/ui/toast'
+import { BatchActionBar, type BatchAction } from '@/components/ui/batch-action-bar'
 import { formatTaskDate, fullTaskDate } from '@/lib/utils/format-date'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { usePrivacy } from "@/contexts/privacy-context"
@@ -1001,6 +1004,54 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       success(`${ids.length} task${ids.length !== 1 ? 's' : ''} updated to ${getStatusLabel(status)}`)
     } else {
       toastError('Bulk update failed', res.error)
+    }
+  }
+
+  // ── Bulk assign employees ───────────────────────────────────────────────
+  const [bulkAssignOpen, setBulkAssignOpen] = useState(false)
+  const [bulkAssignSelected, setBulkAssignSelected] = useState<Set<string>>(new Set())
+  const [bulkAssignSaving, setBulkAssignSaving] = useState(false)
+
+  function openBulkAssign() {
+    setBulkAssignSelected(new Set())
+    setBulkAssignOpen(true)
+  }
+
+  async function saveBulkAssign() {
+    setBulkAssignSaving(true)
+    const ids = [...selectedTasks]
+    const empIds = [...bulkAssignSelected]
+    const res = await serverBulkAssignEmployees(ids, empIds)
+    setBulkAssignSaving(false)
+    if (res.ok) {
+      setBulkAssignOpen(false)
+      setSelectedTasks(new Set())
+      setBulkMode(false)
+      success(`${ids.length} task${ids.length !== 1 ? 's' : ''} reassigned`)
+    } else {
+      toastError('Bulk assign failed', res.error)
+    }
+  }
+
+  // ── Bulk delete (soft) ──────────────────────────────────────────────────
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+
+  async function confirmBulkDelete() {
+    setBulkDeleting(true)
+    const targets = tasks.filter(t => selectedTasks.has(t.id)).map(t => ({ id: t.id, title: t.title }))
+    const res = await serverBulkDeleteTasks(targets)
+    setBulkDeleting(false)
+    if (res.ok) {
+      setTrash(prev => [...targets.map(t => ({ ...(tasks.find(tk => tk.id === t.id) as Task), deleted_at: res.data!.deletedAt })), ...prev])
+      setTasks(prev => prev.filter(t => !selectedTasks.has(t.id)))
+      setSelectedTasks(new Set())
+      setBulkMode(false)
+      setBulkDeleteConfirm(false)
+      success(`${targets.length} task${targets.length !== 1 ? 's' : ''} moved to trash`)
+    } else {
+      toastError('Bulk delete failed', res.error)
+      setBulkDeleteConfirm(false)
     }
   }
 
@@ -3415,32 +3466,78 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       )}
 
       {/* ── Bulk action toolbar ── */}
-      {bulkMode && selectedTasks.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-2 duration-200">
-          <div className="flex items-center gap-2 bg-secondary border border-foreground/20 rounded-2xl shadow-2xl shadow-black/60 px-4 py-3">
-            <span className="text-xs font-semibold text-muted-foreground pr-2 border-r border-foreground/15">
-              {selectedTasks.size} selected
-            </span>
-            <button onClick={() => bulkUpdateStatus('done')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 text-xs font-semibold transition-colors border border-emerald-500/20">
-              <CheckCircle className="w-3.5 h-3.5" /> Completed
-            </button>
-            <button onClick={() => bulkUpdateStatus('delivered')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-500/15 text-violet-300 hover:bg-violet-500/25 text-xs font-semibold transition-colors border border-violet-500/20">
-              <CheckCircle className="w-3.5 h-3.5" /> Delivered
-            </button>
-            <button onClick={() => bulkUpdateStatus('in_progress')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 text-xs font-semibold transition-colors border border-blue-500/20">
-              <Clock className="w-3.5 h-3.5" /> In Progress
-            </button>
-            <button onClick={() => bulkUpdateStatus('pending')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-yellow-500/15 text-yellow-400 hover:bg-yellow-500/25 text-xs font-semibold transition-colors border border-yellow-500/20">
-              <Hash className="w-3.5 h-3.5" /> New
-            </button>
-            <button onClick={() => { setSelectedTasks(new Set()); setBulkMode(false) }}
-              className="ml-1 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] transition-colors">
-              <X className="w-4 h-4" />
-            </button>
+      {bulkMode && (
+        <BatchActionBar
+          count={selectedTasks.size}
+          onClear={() => { setSelectedTasks(new Set()); setBulkMode(false) }}
+          actions={[
+            { key: 'done', label: 'Completed', icon: <CheckCircle className="w-3.5 h-3.5" />, tint: 'emerald', onClick: () => bulkUpdateStatus('done') },
+            { key: 'delivered', label: 'Delivered', icon: <CheckCircle className="w-3.5 h-3.5" />, tint: 'violet', onClick: () => bulkUpdateStatus('delivered') },
+            { key: 'in_progress', label: 'In Progress', icon: <Clock className="w-3.5 h-3.5" />, tint: 'blue', onClick: () => bulkUpdateStatus('in_progress') },
+            { key: 'pending', label: 'New', icon: <Hash className="w-3.5 h-3.5" />, tint: 'yellow', onClick: () => bulkUpdateStatus('pending') },
+            { key: 'assign', label: 'Assign', icon: <Users className="w-3.5 h-3.5" />, tint: 'cyan', onClick: openBulkAssign },
+            { key: 'delete', label: 'Delete', icon: <Trash2 className="w-3.5 h-3.5" />, tint: 'red', onClick: () => setBulkDeleteConfirm(true) },
+          ] as BatchAction[]}
+        />
+      )}
+
+      {/* ── Bulk Assign modal ── */}
+      {bulkAssignOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-card border border-border rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Reassign {selectedTasks.size} task{selectedTasks.size !== 1 ? 's' : ''}</h3>
+              <button onClick={() => setBulkAssignOpen(false)} className="p-1 rounded text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+            </div>
+            <p className="text-xs text-muted-foreground">Replaces each task's current assignees with the employees selected below.</p>
+            <div className="max-h-64 overflow-y-auto space-y-1 border border-border rounded-xl p-2">
+              {employees.filter(e => e.is_active).map(emp => (
+                <label key={emp.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-secondary cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={bulkAssignSelected.has(emp.id)}
+                    onChange={() => setBulkAssignSelected(prev => {
+                      const next = new Set(prev)
+                      next.has(emp.id) ? next.delete(emp.id) : next.add(emp.id)
+                      return next
+                    })}
+                    className="accent-violet-500"
+                  />
+                  <span className="text-sm">{emp.name || emp.cqid}</span>
+                </label>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setBulkAssignOpen(false)} className="flex-1 px-4 py-2 rounded-xl border border-border text-sm font-medium hover:bg-secondary">Cancel</button>
+              <button onClick={saveBulkAssign} disabled={bulkAssignSaving}
+                className="flex-1 px-4 py-2 rounded-xl bg-violet-600 text-white text-sm font-semibold hover:bg-violet-500 disabled:opacity-50">
+                {bulkAssignSaving ? 'Saving…' : 'Apply'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Bulk Delete confirm ── */}
+      {bulkDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-card border border-border rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle className="w-5 h-5 text-red-400" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold">Delete {selectedTasks.size} task{selectedTasks.size !== 1 ? 's' : ''}?</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">Moved to Trash — recoverable for a limited time.</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setBulkDeleteConfirm(false)} className="flex-1 px-4 py-2 rounded-xl border border-border text-sm font-medium hover:bg-secondary">Cancel</button>
+              <button onClick={confirmBulkDelete} disabled={bulkDeleting}
+                className="flex-1 px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-500 disabled:opacity-50">
+                {bulkDeleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
           </div>
         </div>
       )}

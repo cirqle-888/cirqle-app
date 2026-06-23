@@ -1195,6 +1195,53 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     })
   }
 
+  // Cancel reuses the same status-update path as Mark Reviewed/Mark Sent above
+  // (handleBulkStatusUpdate already handles the due-date + linked-task-status
+  // side effects per status) — just a new target status, not a new mechanism.
+  function handleBulkCancel() {
+    void handleBulkStatusUpdate('cancelled')
+  }
+
+  // Export the CURRENT SELECTION as a CSV (distinct from the existing
+  // statement exporter, which exports a date-range/single-client ledger —
+  // this is just "what I've got selected right now").
+  function exportSelectedCSV() {
+    if (selectedForBulk.size === 0) return
+    const esc = (v: any) => {
+      const s = String(v ?? '')
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    }
+    const rows = invoices.filter(i => selectedForBulk.has(i.id))
+    const header = ['Invoice #', 'Client', 'Issue Date', 'Due Date', 'Status', 'Total', 'Paid', 'Balance', 'Currency']
+    const lines = [header.join(',')]
+    for (const inv of rows) {
+      const balance = Math.max(0, (inv.total_amount || 0) - (inv.paid_amount || 0))
+      lines.push([
+        inv.invoice_number, inv.client?.name || '', inv.issue_date || '', inv.due_date || '',
+        getStatusLabel(inv.status), inv.total_amount || 0, inv.paid_amount || 0, balance, inv.currency || 'INR',
+      ].map(esc).join(','))
+    }
+    const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', `invoices_export_${new Date().toISOString().slice(0, 10)}.csv`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
+  // Generate an all-time statement for each DISTINCT client among the
+  // current selection — reuses printStatement(overrideClientId) (the exact
+  // same generator the single-client "Generate Statement" modal uses) rather
+  // than building a second statement renderer. One print tab per client.
+  function generateStatementsForSelected() {
+    if (selectedForBulk.size === 0) return
+    const clientIds = [...new Set(invoices.filter(i => selectedForBulk.has(i.id)).map(i => i.client_id).filter(Boolean))] as string[]
+    clientIds.forEach((cid, i) => setTimeout(() => printStatement(cid), i * 500))
+  }
+
   function toggleSelectAllBulk() {
     const visibleIds = filtered.map(i => i.id)
     setSelectedForBulk(prev => {
@@ -1647,23 +1694,28 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   }
 
   // ── Statement generator ────────────────────────────────────────────────────
-  function printStatement() {
+  // overrideClientId: used by the batch "Generate statement for selected
+  // clients" action to print an all-time statement for one specific client
+  // without touching the stmtForm modal state — reuses this exact function
+  // (same HTML/theming/totals logic) instead of building a second generator.
+  function printStatement(overrideClientId?: string) {
     // Determine date range
     let from = '', to = '', periodLabel = ''
-    if (stmtForm.mode === 'month') {
+    const mode = overrideClientId ? 'all' : stmtForm.mode
+    if (mode === 'month') {
       from = stmtForm.month + '-01'
       const d = new Date(stmtForm.month + '-01')
       const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
       to = `${stmtForm.month}-${lastDay}`
       periodLabel = new Date(from + 'T00:00:00').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
-    } else if (stmtForm.mode === 'year') {
+    } else if (mode === 'year') {
       from = `${stmtForm.year}-01-01`
       to   = `${stmtForm.year}-12-31`
       periodLabel = stmtForm.year
-    } else if (stmtForm.mode === 'day') {
+    } else if (mode === 'day') {
       from = to = stmtForm.specific_date
       periodLabel = fmtDate(stmtForm.specific_date)
-    } else if (stmtForm.mode === 'all') {
+    } else if (mode === 'all') {
       from = '0000-01-01'; to = '9999-12-31'
       periodLabel = 'All time'
     } else {
@@ -1671,9 +1723,10 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       periodLabel = `${fmtDate(from)} – ${fmtDate(to)}`
     }
 
-    const client = stmtForm.client_id ? clients.find(c => c.id === stmtForm.client_id) : null
+    const effectiveClientId = overrideClientId ?? stmtForm.client_id
+    const client = effectiveClientId ? clients.find(c => c.id === effectiveClientId) : null
     const stmtInvoices = invoices.filter(inv => {
-      if (stmtForm.client_id && inv.client_id !== stmtForm.client_id) return false
+      if (effectiveClientId && inv.client_id !== effectiveClientId) return false
       const d = inv.issue_date || inv.created_at?.slice(0, 10) || ''
       return d >= from && d <= to
     }).sort((a, b) => (a.issue_date || '').localeCompare(b.issue_date || ''))
@@ -1720,7 +1773,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         <tr style="background:${bg}">
           <td style="padding:7px 10px;border-bottom:1px solid #e8edf5;font-size:12px;font-family:monospace;color:#555">${inv.invoice_number}</td>
           <td style="padding:7px 10px;border-bottom:1px solid #e8edf5;font-size:12px;white-space:nowrap">${dd(inv.issue_date)}</td>
-          ${!stmtForm.client_id ? `<td style="padding:7px 10px;border-bottom:1px solid #e8edf5;font-size:12px">${inv.client?.name || '—'}</td>` : ''}
+          ${!effectiveClientId ? `<td style="padding:7px 10px;border-bottom:1px solid #e8edf5;font-size:12px">${inv.client?.name || '—'}</td>` : ''}
           <td style="padding:7px 10px;border-bottom:1px solid #e8edf5;font-size:12px;text-align:right">${inr(inv.total_amount || 0)}</td>
           <td style="padding:7px 10px;border-bottom:1px solid #e8edf5;font-size:12px;text-align:right;color:#27ae60">${inr(inv.paid_amount || 0)}</td>
           <td style="padding:7px 10px;border-bottom:1px solid #e8edf5;font-size:12px;text-align:right;font-weight:600;color:${balance > 0 ? '#c0392b' : '#27ae60'}">${inr(balance)}</td>
@@ -1774,7 +1827,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       <tr style="background:${NAVY}">
         <th style="padding:8px 10px;text-align:left;color:white;font-size:11px">Invoice #</th>
         <th style="padding:8px 10px;text-align:left;color:white;font-size:11px;white-space:nowrap">Date</th>
-        ${!stmtForm.client_id ? `<th style="padding:8px 10px;text-align:left;color:white;font-size:11px">Client</th>` : ''}
+        ${!effectiveClientId ? `<th style="padding:8px 10px;text-align:left;color:white;font-size:11px">Client</th>` : ''}
         <th style="padding:8px 10px;text-align:right;color:white;font-size:11px">Billed</th>
         <th style="padding:8px 10px;text-align:right;color:white;font-size:11px">Paid</th>
         <th style="padding:8px 10px;text-align:right;color:white;font-size:11px">Balance</th>
@@ -2393,11 +2446,22 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             onClearAll={() => { setFilterStatus(''); setFilterClient('') }}
           />
           
-          {/* Bulk Action Bar */}
+          {/* Bulk Action Bar — wraps onto multiple lines: this list panel is a
+              narrow (~300px) master-detail column, not a full-width table, so
+              a single-row flex layout silently overflows off-screen once more
+              than ~4 buttons are present. */}
           {selectedForBulk.size > 0 && (
-            <div className="flex items-center justify-between bg-violet-500/10 border border-violet-500/30 rounded-lg px-3 py-2 mt-2 animate-in slide-in-from-top-2">
-              <span className="text-xs font-medium text-violet-300">{selectedForBulk.size} selected</span>
-              <div className="flex items-center gap-2">
+            <div className="bg-violet-500/10 border border-violet-500/30 rounded-lg px-3 py-2 mt-2 animate-in slide-in-from-top-2">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-medium text-violet-300">{selectedForBulk.size} selected</span>
+                <button
+                  onClick={() => setSelectedForBulk(new Set())}
+                  className="p-1 text-muted-foreground hover:text-foreground rounded"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <button 
                   onClick={() => handleBulkStatusUpdate('reviewed')}
                   disabled={isUpdatingBulk}
@@ -2419,11 +2483,27 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 >
                   Mark Sent
                 </button>
-                <button 
-                  onClick={() => setSelectedForBulk(new Set())}
-                  className="p-1 text-muted-foreground hover:text-foreground rounded"
+                <button
+                  onClick={handleBulkCancel}
+                  disabled={isUpdatingBulk}
+                  className="text-[10px] font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 px-2 py-1 rounded transition-colors disabled:opacity-50"
                 >
-                  <X className="w-3.5 h-3.5" />
+                  Cancel
+                </button>
+                <button
+                  onClick={exportSelectedCSV}
+                  disabled={isUpdatingBulk}
+                  title="Export just the selected rows (the page-level Export CSV button exports everything)"
+                  className="text-[10px] font-medium bg-background border border-border hover:bg-secondary px-2 py-1 rounded transition-colors disabled:opacity-50"
+                >
+                  Export Selected
+                </button>
+                <button
+                  onClick={generateStatementsForSelected}
+                  disabled={isUpdatingBulk}
+                  className="text-[10px] font-medium bg-background border border-border hover:bg-secondary px-2 py-1 rounded transition-colors disabled:opacity-50"
+                >
+                  Statement
                 </button>
               </div>
             </div>
@@ -4450,7 +4530,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
           {/* ── Print buttons ── */}
           <div className="px-4 pt-3 pb-5 space-y-2 border-t border-border/20 mt-3">
-            <button type="button" onClick={printStatement} disabled={sInvoices.length === 0}
+            <button type="button" onClick={() => printStatement()} disabled={sInvoices.length === 0}
               className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2 transition-colors">
               <Printer className="w-4 h-4" />Print Statement
             </button>
