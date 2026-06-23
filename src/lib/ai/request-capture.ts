@@ -3,6 +3,9 @@
  * so the dashboard's "AI Capture" feature (Requests page) and the iOS
  * Shortcuts API use the exact same parsing + fuzzy-match logic instead of
  * two copies drifting apart.
+ *
+ * AI parsing runs on Groq (free tier, no billing required) rather than a
+ * paid/billing-gated provider — see aiParse() below.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -49,59 +52,53 @@ export function normalizeDate(d?: string | null): string | null {
 /**
  * AI-parse free text (a dictated note, a pasted WhatsApp message, an email
  * body) into structured work-request fields.
- * Uses Google Gemini (free tier — set GEMINI_API_KEY from Google AI Studio).
- * Model is overridable via GEMINI_MODEL; defaults to a free-tier Flash model.
+ * Uses Groq (genuinely free tier, no billing/card required — set GROQ_API_KEY
+ * from console.groq.com/keys). OpenAI-compatible chat-completions API.
+ * Model is overridable via GROQ_MODEL; defaults to Qwen3 32B.
  */
 export async function aiParse(text: string): Promise<{ client?: string; title?: string; service?: string; dueDate?: string }> {
-  const key = process.env.GEMINI_API_KEY
-  if (!key) throw new Error('AI parsing is not configured (set GEMINI_API_KEY).')
-  const model = process.env.GEMINI_MODEL || 'gemini-2.0-flash'
+  const key = process.env.GROQ_API_KEY
+  if (!key) throw new Error('AI parsing is not configured (set GROQ_API_KEY).')
+  const model = process.env.GROQ_MODEL || 'qwen/qwen3-32b'
   const todayStr = today()
   const body = JSON.stringify({
-    system_instruction: {
-      parts: [{ text:
-        `You convert a short note (dictated, WhatsApp message, or email) into a design-agency work request. Today is ${todayStr}. ` +
-        `Extract: client (the customer/business name), title (a short task title), service (the kind of work, ` +
-        `e.g. "Menu Design", "Offer Flyer"), dueDate (resolve "tomorrow"/"next friday" etc. against today as ` +
-        `yyyy-mm-dd, else null).` }],
-    },
-    contents: [{ parts: [{ text }] }],
-    generationConfig: {
-      temperature: 0,
-      maxOutputTokens: 300,
-      responseMimeType: 'application/json',
-      responseSchema: {
-        type: 'object',
-        properties: {
-          client:  { type: 'string' },
-          title:   { type: 'string' },
-          service: { type: 'string' },
-          dueDate: { type: 'string', nullable: true },
-        },
+    model,
+    temperature: 0,
+    max_tokens: 300,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content:
+          `You convert a short note (dictated, WhatsApp message, or email) into a design-agency work request. Today is ${todayStr}. ` +
+          `Extract: client (the customer/business name), title (a short task title), service (the kind of work, ` +
+          `e.g. "Menu Design", "Offer Flyer"), dueDate (resolve "tomorrow"/"next friday" etc. against today as ` +
+          `yyyy-mm-dd, else null). Respond with ONLY a JSON object with keys client, title, service, dueDate — no other text.`,
       },
-    },
+      { role: 'user', content: text },
+    ],
   })
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
+  const url = 'https://api.groq.com/openai/v1/chat/completions'
   // Free-tier per-minute limits can throw a transient 429; retry a couple times.
   let res!: Response
   for (let attempt = 0; attempt < 3; attempt++) {
     res = await fetch(url, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
       body,
     })
     if (res.ok || res.status !== 429) break
     if (attempt < 2) await new Promise(r => setTimeout(r, 1500 * (attempt + 1)))
   }
   if (!res.ok) {
-    // Surface Gemini's real reason (quota exceeded, model not found, key invalid…)
+    // Surface Groq's real reason (quota exceeded, model not found, key invalid…)
     const detail = await res.text().catch(() => '')
     let msg = ''
     try { msg = JSON.parse(detail)?.error?.message || '' } catch { /* not json */ }
     throw new Error(`AI request failed (${res.status})${msg ? `: ${msg}` : ''}.`)
   }
   const data = await res.json()
-  const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
+  const raw = data?.choices?.[0]?.message?.content || '{}'
   const match = raw.match(/\{[\s\S]*\}/)
   try { return JSON.parse(match ? match[0] : raw) } catch { return {} }
 }
