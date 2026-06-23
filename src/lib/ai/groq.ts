@@ -23,6 +23,13 @@ export async function callGroqJSON(
     temperature: 0,
     max_tokens: opts?.maxTokens ?? 300,
     response_format: { type: 'json_object' },
+    // Qwen3 (and other Groq "reasoning" models) prepend <think>...</think>
+    // chain-of-thought before the actual answer by default — that breaks
+    // Groq's strict json_object validator since the raw content isn't pure
+    // JSON. reasoning_format: 'hidden' strips the thinking tokens server-side
+    // so only the final JSON answer comes back. Harmless no-op on
+    // non-reasoning models (e.g. Llama).
+    reasoning_format: 'hidden',
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userText },
