@@ -15,6 +15,7 @@ import {
   setRequestStatus, logRequestActivity, requestStatusFromTask, type RequestStatus,
 } from '@/lib/requests/core'
 import { notifyRequesterStatus } from '@/lib/requests/notify'
+import { aiParse, findClient, findService, normalizeDate } from '@/lib/ai/request-capture'
 
 interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
 const REVALIDATE = '/dashboard/requests'
@@ -93,6 +94,58 @@ export async function bulkAssignRequestEmployee(
     else failed.push(id)
   }
   return { ok: failed.length === 0, data: { succeeded, failed }, error: failed.length ? `${failed.length} could not be updated` : undefined }
+}
+
+/**
+ * AI Capture — parse pasted free text (a WhatsApp message, an email, a
+ * dictated note) into request fields and pre-fill the New Request form.
+ * Deliberately does NOT create the request itself — returns matched
+ * client/service so staff can review and edit before submitting through the
+ * normal createManualRequest path. Reuses the exact same aiParse/findClient/
+ * findService the iOS Shortcuts API uses (src/lib/ai/request-capture.ts),
+ * not a second implementation.
+ */
+export async function aiCaptureRequest(text: string): Promise<ActionResult<{
+  title: string
+  description: string
+  clientId: string | null
+  clientName: string | null
+  clientMatched: boolean
+  serviceId: string | null
+  serviceName: string | null
+  dueDate: string | null
+}>> {
+  const guard = await requirePermission(PERMS.REQUESTS_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const trimmed = text.trim()
+  if (!trimmed) return { ok: false, error: 'Paste some text first.' }
+
+  let parsed: { client?: string; title?: string; service?: string; dueDate?: string }
+  try {
+    parsed = await aiParse(trimmed)
+  } catch (e: any) {
+    return { ok: false, error: e?.message || 'AI parsing failed.' }
+  }
+
+  const admin = createAdminClient()
+  const [client, service] = await Promise.all([
+    findClient(admin, parsed.client),
+    findService(admin, parsed.service),
+  ])
+
+  return {
+    ok: true,
+    data: {
+      title: parsed.title || trimmed.slice(0, 80),
+      description: trimmed,
+      clientId: client?.id || null,
+      clientName: client?.name || parsed.client || null,
+      clientMatched: !!client,
+      serviceId: service?.id || null,
+      serviceName: service?.name || parsed.service || null,
+      dueDate: normalizeDate(parsed.dueDate),
+    },
+  }
 }
 
 /** Staff opened a request — clears the "new external activity" indicator. */
