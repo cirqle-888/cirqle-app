@@ -2,6 +2,7 @@
 
 import { createAdminClient } from '@/lib/supabase/admin'
 import { syncCampaignToSheet } from '@/lib/google-sheets/sync'
+import { aiParseOfferProducts, type ParsedOfferProduct } from '@/lib/ai/offer-capture'
 
 interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
 
@@ -402,6 +403,31 @@ export async function getImageUploadUrl(
       publicUrl: pub.publicUrl,
       path,
     },
+  }
+}
+
+// ── Bulk paste (AI) ─────────────────────────────────────────────────────────
+
+/**
+ * Parse a pasted product list into structured rows. Pure parsing — does NOT
+ * touch the campaign/products tables. The client adds the returned rows to
+ * its local form state for the customer to review/edit before "Update offer
+ * list" actually saves anything.
+ */
+export async function aiParseProductList(
+  token: string,
+  text: string,
+): Promise<ActionResult<{ products: ParsedOfferProduct[] }>> {
+  const client = await resolveOfferToken(token)
+  if (!client) return { ok: false, error: 'Invalid link.' }
+  if (!text.trim()) return { ok: false, error: 'Paste a product list first.' }
+
+  try {
+    const result = await aiParseOfferProducts(text)
+    if (!result.products.length) return { ok: false, error: 'No products found in that text.' }
+    return { ok: true, data: result }
+  } catch (e: any) {
+    return { ok: false, error: e?.message || 'AI parsing failed.' }
   }
 }
 

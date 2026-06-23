@@ -5,9 +5,10 @@ import {
   Plus, Loader2, CheckCircle2, Check, X, ChevronDown, ChevronUp,
   Upload, Search, Tag, Calendar, MessageSquare, RefreshCw,
   ImageIcon, Trash2, GripVertical, Copy, FilePlus, CopyPlus, LayoutGrid, List,
-  ArrowUp, ArrowDown, Shuffle,
+  ArrowUp, ArrowDown, Shuffle, Sparkles, ClipboardPaste,
 } from 'lucide-react'
-import { saveCampaign, getImageUploadUrl, type ProductInput, type ProductBadgeInput, type CampaignInput } from './actions'
+import { saveCampaign, getImageUploadUrl, aiParseProductList, type ProductInput, type ProductBadgeInput, type CampaignInput } from './actions'
+import type { ParsedOfferProduct } from '@/lib/ai/offer-capture'
 import { ImageLightbox } from '@/components/ui/image-lightbox'
 import { IntakeAppSwitcher } from '@/components/intake/app-switcher'
 
@@ -709,6 +710,80 @@ export default function OfferIntakeClient({
 
   const [catalogPageTarget, setCatalogPageTarget] = useState<number>(1)
 
+  // ── Bulk paste (AI) ─────────────────────────────────────────────────────
+  type BulkPasteRow = ParsedOfferProduct & { _key: string; include: boolean; matchedCatalogId?: string }
+  const [bulkPasteOpen, setBulkPasteOpen] = useState(false)
+  const [bulkPasteText, setBulkPasteText] = useState('')
+  const [bulkPasteBusy, setBulkPasteBusy] = useState(false)
+  const [bulkPasteReview, setBulkPasteReview] = useState<BulkPasteRow[] | null>(null)
+  const [bulkPasteTargetPage, setBulkPasteTargetPage] = useState(1)
+
+  function openBulkPaste() {
+    setBulkPasteText('')
+    setBulkPasteReview(null)
+    setBulkPasteTargetPage(Math.max(1, ...products.map(p => p.page || 1)))
+    setBulkPasteOpen(true)
+  }
+
+  async function runBulkPasteParse() {
+    if (!bulkPasteText.trim()) return
+    setBulkPasteBusy(true)
+    const res = await aiParseProductList(token, bulkPasteText)
+    setBulkPasteBusy(false)
+    if (res.ok && res.data) {
+      // Fuzzy-match each parsed name against this client's existing catalog
+      // (already loaded in memory) so a reused product picks up its known
+      // image/weight instead of starting blank.
+      const rows: BulkPasteRow[] = res.data.products.map((p, i) => {
+        const lower = p.name.toLowerCase()
+        const match = catalog.find(c => c.name.toLowerCase() === lower)
+          || catalog.find(c => c.name.toLowerCase().includes(lower) || lower.includes(c.name.toLowerCase()))
+        return {
+          ...p,
+          weight: p.weight || match?.weight || null,
+          _key: `bulk-${Date.now()}-${i}`,
+          include: true,
+          matchedCatalogId: match?.id,
+        }
+      })
+      setBulkPasteReview(rows)
+    } else {
+      setError(res.error || 'Could not parse that text.')
+    }
+  }
+
+  function updateBulkPasteRow(key: string, updates: Partial<BulkPasteRow>) {
+    setBulkPasteReview(prev => prev?.map(r => r._key === key ? { ...r, ...updates } : r) || null)
+  }
+
+  function confirmBulkPaste() {
+    if (!bulkPasteReview) return
+    const included = bulkPasteReview.filter(r => r.include && r.name.trim())
+    if (!included.length) return
+    let order = products.length
+    const newRows = included.map(r => {
+      const match = r.matchedCatalogId ? catalog.find(c => c.id === r.matchedCatalogId) : undefined
+      return {
+        _key: `bulk-add-${Date.now()}-${order}`,
+        catalog_id: match?.id,
+        name: r.name,
+        weight: r.weight || '',
+        image_url: match?.image_url || '',
+        offer_type: 'price' as const,
+        price: r.price ?? null,
+        mrp: r.mrp ?? null,
+        offer_text: '',
+        badges: [],
+        page: bulkPasteTargetPage,
+        display_order: order++,
+      }
+    })
+    setProducts(prev => [...prev, ...newRows])
+    setBulkPasteOpen(false)
+    setBulkPasteReview(null)
+    setBulkPasteText('')
+  }
+
   function addBlankProduct(page: number) {
     const order = products.length
     setProducts(prev => [...prev, { ...emptyProduct(order), page }])
@@ -968,15 +1043,23 @@ export default function OfferIntakeClient({
              <h2 className="text-sm font-semibold text-white/70">
                Products <span className="text-white/30">({products.length})</span>
              </h2>
+             <div className="flex items-center gap-2">
+             <button
+               onClick={openBulkPaste}
+               title="Paste a product list and let AI fill in the rows"
+               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-violet-600/20 text-violet-300 hover:bg-violet-600/40 transition-colors"
+             >
+               <Sparkles className="w-3.5 h-3.5" /> Bulk Paste
+             </button>
              {products.length > 0 && (
                <div className="flex items-center bg-white/5 border border-white/10 rounded-lg p-0.5">
-                 <button 
+                 <button
                    onClick={() => setViewMode('list')}
                    className={`p-1.5 rounded-md transition-colors ${viewMode === 'list' ? 'bg-white/10 text-white' : 'text-white/30 hover:text-white/60'}`}
                  >
                    <List className="w-3.5 h-3.5" />
                  </button>
-                 <button 
+                 <button
                    onClick={() => setViewMode('grid')}
                    className={`p-1.5 rounded-md transition-colors ${viewMode === 'grid' ? 'bg-white/10 text-white' : 'text-white/30 hover:text-white/60'}`}
                  >
@@ -984,6 +1067,7 @@ export default function OfferIntakeClient({
                  </button>
                </div>
              )}
+             </div>
           </div>
 
           <div className="space-y-6">
@@ -1152,6 +1236,104 @@ export default function OfferIntakeClient({
         </p>
        </div>
       </div>
+
+      {/* Bulk Paste modal */}
+      {bulkPasteOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-[#1a1a24] border border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl max-h-[90dvh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 shrink-0">
+              <div>
+                <h2 className="font-bold text-white/90 flex items-center gap-1.5"><Sparkles className="w-4 h-4 text-violet-400" /> Bulk Paste</h2>
+                <p className="text-xs text-white/40 mt-0.5">
+                  {bulkPasteReview ? 'Review what was found — uncheck or edit anything before adding.' : 'Paste your product list — one product per line, any format.'}
+                </p>
+              </div>
+              <button onClick={() => setBulkPasteOpen(false)} className="p-1.5 rounded-lg hover:bg-white/10 text-white/50"><X className="w-4 h-4" /></button>
+            </div>
+
+            {!bulkPasteReview ? (
+              <>
+                <div className="p-5 space-y-3 overflow-y-auto">
+                  <textarea
+                    value={bulkPasteText}
+                    onChange={e => setBulkPasteText(e.target.value)}
+                    placeholder={'Rice 5kg  350\nSugar 1kg  42\nEastern Chilli Powder 500gm  109.90'}
+                    rows={10}
+                    autoFocus
+                    className={`${inputCls} resize-none font-mono`}
+                  />
+                </div>
+                <div className="px-5 py-4 border-t border-white/10 flex justify-end gap-2 shrink-0">
+                  <button onClick={() => setBulkPasteOpen(false)} className="px-4 py-2 text-sm rounded-xl bg-white/5 border border-white/10 text-white/70 hover:bg-white/10 transition-colors">Cancel</button>
+                  <button
+                    onClick={runBulkPasteParse}
+                    disabled={!bulkPasteText.trim() || bulkPasteBusy}
+                    className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-xl bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-50 transition-colors"
+                  >
+                    {bulkPasteBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ClipboardPaste className="w-4 h-4" />}
+                    {bulkPasteBusy ? 'Reading…' : 'Parse Products'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="p-5 space-y-2 overflow-y-auto">
+                  {bulkPasteReview.length === 0 ? (
+                    <p className="text-sm text-white/40 text-center py-6">No products found.</p>
+                  ) : bulkPasteReview.map(row => (
+                    <div key={row._key} className={`flex items-center gap-2 rounded-xl border px-3 py-2 ${row.include ? 'bg-white/5 border-white/10' : 'bg-transparent border-white/5 opacity-40'}`}>
+                      <input type="checkbox" checked={row.include} onChange={e => updateBulkPasteRow(row._key, { include: e.target.checked })} className="accent-violet-500 shrink-0" />
+                      <input
+                        value={row.name}
+                        onChange={e => updateBulkPasteRow(row._key, { name: e.target.value })}
+                        className="flex-1 min-w-0 bg-transparent text-sm text-white/90 focus:outline-none"
+                      />
+                      <input
+                        value={row.weight || ''}
+                        onChange={e => updateBulkPasteRow(row._key, { weight: e.target.value })}
+                        placeholder="weight"
+                        className="w-20 shrink-0 bg-white/5 rounded-lg px-2 py-1 text-xs text-white/70 focus:outline-none"
+                      />
+                      <input
+                        type="number"
+                        value={row.price ?? ''}
+                        onChange={e => updateBulkPasteRow(row._key, { price: e.target.value ? parseFloat(e.target.value) : null })}
+                        placeholder="price"
+                        className="w-20 shrink-0 bg-white/5 rounded-lg px-2 py-1 text-xs text-white/70 focus:outline-none"
+                      />
+                      {row.matchedCatalogId && (
+                        <span title="Matched an existing catalog product — image will be reused" className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">matched</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="px-5 py-4 border-t border-white/10 flex items-center justify-between gap-2 shrink-0">
+                  <div className="flex items-center gap-2 text-xs text-white/50">
+                    <span>Add to</span>
+                    <select value={bulkPasteTargetPage} onChange={e => setBulkPasteTargetPage(parseInt(e.target.value, 10))}
+                      className="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-white/80">
+                      {Array.from({ length: Math.max(1, ...products.map(p => p.page || 1)) }, (_, i) => i + 1).map(n => (
+                        <option key={n} value={n}>Page {n}</option>
+                      ))}
+                      <option value={Math.max(1, ...products.map(p => p.page || 1)) + 1}>New Page {Math.max(1, ...products.map(p => p.page || 1)) + 1}</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setBulkPasteReview(null)} className="px-4 py-2 text-sm rounded-xl bg-white/5 border border-white/10 text-white/70 hover:bg-white/10 transition-colors">Back</button>
+                    <button
+                      onClick={confirmBulkPaste}
+                      disabled={!bulkPasteReview.some(r => r.include)}
+                      className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-xl bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-50 transition-colors"
+                    >
+                      <Plus className="w-4 h-4" /> Add {bulkPasteReview.filter(r => r.include).length} Product{bulkPasteReview.filter(r => r.include).length !== 1 ? 's' : ''}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Catalog picker modal */}
       {showCatalog && (
