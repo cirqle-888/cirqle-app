@@ -35,6 +35,7 @@ import {
   Inbox,
   PhoneCall,
   Award,
+  Activity,
   Tag,
   Package,
   Blocks,
@@ -149,6 +150,10 @@ const navSections: NavSection[] = [
       { label: 'Contribution Analysis', href: '/dashboard/reports/contribution-analysis', icon: Sheet, requiredPerm: 'reports.view' },
       // Client Ranking: payment reliability + business value scoring per client.
       { label: 'Client Ranking', href: '/dashboard/clients/ranking', icon: Award, requiredPerm: 'reports.view' },
+      // Business Health Center: cash/collections, overdue aging, client risk
+      // (reuses Client Ranking's scoring), and whether the scheduled crons
+      // are actually running. Same reports.view gate.
+      { label: 'Business Health', href: '/dashboard/health', icon: Activity, requiredPerm: 'reports.view' },
     ],
   },
   {

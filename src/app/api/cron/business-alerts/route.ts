@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { classifyInvoice, latestByInvoice, type ClassifiableInvoice, type FollowupRow } from '@/lib/followups/grouping'
 import { notifyAdmins } from '@/lib/notifications/create'
+import { logCronRun } from '@/lib/cron/log'
 
 /**
  * Daily business-health alert cron — surfaces invoices that have newly
@@ -39,15 +40,24 @@ export async function GET(req: NextRequest) {
     .from('invoices')
     .select('id, invoice_number, status, issue_date, due_date, total_amount, total_amount_inr, client:clients(name)')
     .in('status', ['sent', 'partial', 'overdue'])
-  if (invErr) return NextResponse.json({ ok: false, error: invErr.message }, { status: 500 })
-  if (!invoices?.length) return NextResponse.json({ ok: true, urgentFound: 0, notified: 0 })
+  if (invErr) {
+    await logCronRun(admin, 'business-alerts', false, undefined, invErr.message)
+    return NextResponse.json({ ok: false, error: invErr.message }, { status: 500 })
+  }
+  if (!invoices?.length) {
+    await logCronRun(admin, 'business-alerts', true, { urgentFound: 0, notified: 0 })
+    return NextResponse.json({ ok: true, urgentFound: 0, notified: 0 })
+  }
 
   const invoiceIds = invoices.map((i: any) => i.id)
   const { data: followups, error: fuErr } = await admin
     .from('invoice_followups')
     .select('id, invoice_id, note, outcome, promised_date, next_followup_date, created_by, created_at')
     .in('invoice_id', invoiceIds)
-  if (fuErr) return NextResponse.json({ ok: false, error: fuErr.message }, { status: 500 })
+  if (fuErr) {
+    await logCronRun(admin, 'business-alerts', false, undefined, fuErr.message)
+    return NextResponse.json({ ok: false, error: fuErr.message }, { status: 500 })
+  }
 
   const latestMap = latestByInvoice((followups || []) as FollowupRow[])
 
@@ -72,5 +82,6 @@ export async function GET(req: NextRequest) {
     notified++
   }
 
+  await logCronRun(admin, 'business-alerts', true, { urgentFound, notified })
   return NextResponse.json({ ok: true, urgentFound, notified })
 }

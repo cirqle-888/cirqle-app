@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { getNextOccurrence, shouldGenerateNext } from '@/lib/utils/recurring'
 import { nextTaskNumber } from '@/lib/utils/task-code'
 import { notifyAdmins } from '@/lib/notifications/create'
+import { logCronRun } from '@/lib/cron/log'
 
 /**
  * Recurring-task JUST-IN-TIME generation cron.
@@ -60,8 +61,14 @@ export async function GET(req: NextRequest) {
     .is('deleted_at', null)
     .neq('status', 'cancelled')
 
-  if (parentsErr) return NextResponse.json({ ok: false, error: parentsErr.message }, { status: 500 })
-  if (!parents?.length) return NextResponse.json({ ok: true, seriesChecked: 0, instancesGenerated: 0 })
+  if (parentsErr) {
+    await logCronRun(admin, 'recurring-tasks', false, undefined, parentsErr.message)
+    return NextResponse.json({ ok: false, error: parentsErr.message }, { status: 500 })
+  }
+  if (!parents?.length) {
+    await logCronRun(admin, 'recurring-tasks', true, { seriesChecked: 0, instancesGenerated: 0 })
+    return NextResponse.json({ ok: true, seriesChecked: 0, instancesGenerated: 0 })
+  }
 
   // One shared task_number counter across the whole run.
   const maxRow = await admin.from('tasks').select('task_number').order('task_number', { ascending: false, nullsFirst: false }).limit(1).maybeSingle()
@@ -138,6 +145,11 @@ export async function GET(req: NextRequest) {
     })
   }
 
+  await logCronRun(
+    admin, 'recurring-tasks', errors.length === 0,
+    { seriesChecked: parents.length, instancesGenerated: totalGenerated },
+    errors.length ? errors.join('; ') : undefined,
+  )
   return NextResponse.json({
     ok: errors.length === 0,
     seriesChecked: parents.length,

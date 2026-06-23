@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
+import { logCronRun } from '@/lib/cron/log'
 
 /**
  * Scheduled product-image retention cleanup — permanently deletes old product
@@ -50,8 +51,14 @@ export async function GET(req: NextRequest) {
     .eq('is_primary', false)
     .lt('created_at', cutoffIso)
 
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 })
-  if (!candidates?.length) return NextResponse.json({ ok: true, deleted: 0, retentionMonths })
+  if (error) {
+    await logCronRun(admin, 'cleanup-product-images', false, undefined, error.message)
+    return NextResponse.json({ ok: false, error: error.message }, { status: 500 })
+  }
+  if (!candidates?.length) {
+    await logCronRun(admin, 'cleanup-product-images', true, { deleted: 0, retentionMonths })
+    return NextResponse.json({ ok: true, deleted: 0, retentionMonths })
+  }
 
   // Never delete a product's only remaining image — count per product first.
   const productIds = [...new Set(candidates.map(c => c.product_id))]
@@ -76,5 +83,6 @@ export async function GET(req: NextRequest) {
     deleted++
   }
 
+  await logCronRun(admin, 'cleanup-product-images', errors.length === 0, { deleted, retentionMonths }, errors.length ? errors.join('; ') : undefined)
   return NextResponse.json({ ok: errors.length === 0, deleted, retentionMonths, errors: errors.length ? errors : undefined })
 }

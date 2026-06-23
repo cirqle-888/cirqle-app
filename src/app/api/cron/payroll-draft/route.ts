@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { computeMonthlyCommissions } from '@/lib/payroll/compute'
 import { notifyAdmins } from '@/lib/notifications/create'
+import { logCronRun } from '@/lib/cron/log'
 
 /**
  * Monthly payroll auto-draft cron.
@@ -45,15 +46,24 @@ export async function GET(req: NextRequest) {
   const year = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear()
 
   const commissionRes = await computeMonthlyCommissions(admin, month, year)
-  if (!commissionRes.ok) return NextResponse.json({ ok: false, error: commissionRes.error }, { status: 500 })
+  if (!commissionRes.ok) {
+    await logCronRun(admin, 'payroll-draft', false, { month, year }, commissionRes.error)
+    return NextResponse.json({ ok: false, error: commissionRes.error }, { status: 500 })
+  }
   const { commissionByEmployee } = commissionRes
 
   const [employeesRes, existingRes] = await Promise.all([
     admin.from('employees').select('id, base_salary').eq('is_active', true),
     admin.from('payroll').select('employee_id').eq('month', month).eq('year', year),
   ])
-  if (employeesRes.error) return NextResponse.json({ ok: false, error: employeesRes.error.message }, { status: 500 })
-  if (existingRes.error) return NextResponse.json({ ok: false, error: existingRes.error.message }, { status: 500 })
+  if (employeesRes.error) {
+    await logCronRun(admin, 'payroll-draft', false, { month, year }, employeesRes.error.message)
+    return NextResponse.json({ ok: false, error: employeesRes.error.message }, { status: 500 })
+  }
+  if (existingRes.error) {
+    await logCronRun(admin, 'payroll-draft', false, { month, year }, existingRes.error.message)
+    return NextResponse.json({ ok: false, error: existingRes.error.message }, { status: 500 })
+  }
 
   const existingIds = new Set((existingRes.data || []).map((r: any) => r.employee_id))
 
@@ -77,11 +87,15 @@ export async function GET(req: NextRequest) {
     }))
 
   if (rows.length === 0) {
+    await logCronRun(admin, 'payroll-draft', true, { month, year, drafted: 0 })
     return NextResponse.json({ ok: true, month, year, drafted: 0 })
   }
 
   const { data: inserted, error: insertErr } = await admin.from('payroll').insert(rows).select('id')
-  if (insertErr) return NextResponse.json({ ok: false, error: insertErr.message }, { status: 500 })
+  if (insertErr) {
+    await logCronRun(admin, 'payroll-draft', false, { month, year }, insertErr.message)
+    return NextResponse.json({ ok: false, error: insertErr.message }, { status: 500 })
+  }
 
   const count = inserted?.length || 0
   void notifyAdmins({
@@ -92,5 +106,6 @@ export async function GET(req: NextRequest) {
     sourceKey: `payroll_draft:${year}-${String(month).padStart(2, '0')}`,
   })
 
+  await logCronRun(admin, 'payroll-draft', true, { month, year, drafted: count })
   return NextResponse.json({ ok: true, month, year, drafted: count })
 }

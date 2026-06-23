@@ -23,6 +23,7 @@ const ROUTE_LABELS: Record<string, string> = {
   reports:       'Reports',
   import:        'Bulk Import',
   settings:      'Settings',
+  health:        'Business Health',
 }
 
 function Breadcrumbs({ isEmployee }: { isEmployee: boolean }) { // eslint-disable-line @typescript-eslint/no-unused-vars
