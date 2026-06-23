@@ -22,13 +22,15 @@ export async function callGroqJSON(
     model,
     temperature: 0,
     max_tokens: opts?.maxTokens ?? 300,
-    response_format: { type: 'json_object' },
-    // Qwen3 (and other Groq "reasoning" models) prepend <think>...</think>
-    // chain-of-thought before the actual answer by default — that breaks
-    // Groq's strict json_object validator since the raw content isn't pure
-    // JSON. reasoning_format: 'hidden' strips the thinking tokens server-side
-    // so only the final JSON answer comes back. Harmless no-op on
-    // non-reasoning models (e.g. Llama).
+    // Deliberately NOT using response_format: { type: 'json_object' } —
+    // Groq enforces that strictly server-side, and Qwen3 (a "reasoning"
+    // model) prepends <think>...</think> chain-of-thought before its answer,
+    // which fails that validation with a hard 400 even with
+    // reasoning_format: 'hidden' (still observed leaking through). Instead:
+    // prompt-instruct JSON-only output, hint reasoning_format to suppress
+    // thinking tokens when the model honors it, and parse leniently below
+    // (strip any <think> block, then regex out the JSON object). Soft
+    // failure (empty object) beats a hard request-level error.
     reasoning_format: 'hidden',
     messages: [
       { role: 'system', content: systemPrompt },
@@ -52,11 +54,22 @@ export async function callGroqJSON(
     // Surface Groq's real reason (quota exceeded, model not found, key invalid…)
     const detail = await res.text().catch(() => '')
     let msg = ''
-    try { msg = JSON.parse(detail)?.error?.message || '' } catch { /* not json */ }
+    try {
+      const parsed = JSON.parse(detail)
+      msg = parsed?.error?.message || ''
+      // Groq includes the raw model output that failed validation here when
+      // response_format enforcement rejects a generation — useful for
+      // diagnosing prompt/model issues, so surface a trimmed preview of it.
+      const failedGen = parsed?.error?.failed_generation
+      if (failedGen) msg += ` | model said: ${String(failedGen).slice(0, 200)}`
+    } catch { /* not json */ }
     throw new Error(`AI request failed (${res.status})${msg ? `: ${msg}` : ''}.`)
   }
   const data = await res.json()
-  const raw = data?.choices?.[0]?.message?.content || '{}'
+  let raw = data?.choices?.[0]?.message?.content || '{}'
+  // Defense-in-depth: strip any chain-of-thought block that leaked through
+  // despite reasoning_format: 'hidden', before extracting the JSON object.
+  raw = raw.replace(/<think>[\s\S]*?<\/think>/gi, '')
   const match = raw.match(/\{[\s\S]*\}/)
   try { return JSON.parse(match ? match[0] : raw) } catch { return {} }
 }

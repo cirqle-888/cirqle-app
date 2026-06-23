@@ -60,7 +60,8 @@ export async function aiParse(text: string): Promise<{ client?: string; title?: 
     `You convert a short note (dictated, WhatsApp message, or email) into a design-agency work request. Today is ${todayStr}. ` +
     `Extract: client (the customer/business name), title (a short task title), service (the kind of work, ` +
     `e.g. "Menu Design", "Offer Flyer"), dueDate (resolve "tomorrow"/"next friday" etc. against today as ` +
-    `yyyy-mm-dd, else null). Respond with ONLY a JSON object with keys client, title, service, dueDate — no other text.`,
+    `yyyy-mm-dd, else null). Do not think out loud, do not explain, do not use <think> tags. ` +
+    `Respond with ONLY a JSON object with keys client, title, service, dueDate — no other text whatsoever.`,
     text,
   )
 }

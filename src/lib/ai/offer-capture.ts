@@ -22,8 +22,9 @@ const SYSTEM_PROMPT =
   `- weight: pack size / quantity if present (e.g. "500g", "1kg", "250ml"), else null\n` +
   `- price: the selling/offer price as a plain number, else null\n` +
   `- mrp: a second, higher "MRP"/"was" price if BOTH an offer price and an original price appear on the same line, else null\n` +
-  `Skip blank lines, headers, or lines that aren't actually a product. Respond with ONLY a JSON object: ` +
-  `{ "products": [ { "name": string, "weight": string|null, "price": number|null, "mrp": number|null }, ... ] } — no other text.`
+  `Skip blank lines, headers, or lines that aren't actually a product. Do not think out loud, do not explain, ` +
+  `do not use <think> tags. Respond with ONLY a JSON object: ` +
+  `{ "products": [ { "name": string, "weight": string|null, "price": number|null, "mrp": number|null }, ... ] } — no other text whatsoever.`
 
 export async function aiParseOfferProducts(text: string): Promise<{ products: ParsedOfferProduct[] }> {
   const result = await callGroqJSON(SYSTEM_PROMPT, text, { maxTokens: 4000 })
