@@ -28,6 +28,39 @@ export async function findClient(admin: SupabaseClient, name?: string | null) {
   return exact || rows.sort((a: any, b: any) => a.name.length - b.name.length)[0]
 }
 
+/** Reduce a free-form phone string to its comparable local digits (last 10 for India). */
+export function normalizePhone(raw?: string | null): string {
+  const d = (raw || '').replace(/\D/g, '')
+  return d.length > 10 ? d.slice(-10) : d
+}
+
+/**
+ * Find a client by phone number. `clients.phone` is free-form text, so we
+ * normalize both sides to the last-10 digits and compare in JS (the client
+ * list is small for an agency). Returns null on no/short match.
+ */
+export async function findClientByPhone(admin: SupabaseClient, phone?: string | null) {
+  const target = normalizePhone(phone)
+  if (target.length < 10) return null
+  const { data } = await admin
+    .from('clients').select('id, name, phone').not('phone', 'is', null).limit(5000)
+  for (const c of data || []) {
+    if (normalizePhone((c as any).phone) === target) {
+      return { id: (c as any).id as string, name: (c as any).name as string }
+    }
+  }
+  return null
+}
+
+/** Find a client by exact (case-insensitive) email. */
+export async function findClientByEmail(admin: SupabaseClient, email?: string | null) {
+  const e = (email || '').trim().toLowerCase()
+  if (!e || !e.includes('@')) return null
+  const { data } = await admin
+    .from('clients').select('id, name').ilike('email', e).limit(1).maybeSingle()
+  return data ? { id: (data as any).id as string, name: (data as any).name as string } : null
+}
+
 /** Find a service by (fuzzy) name. */
 export async function findService(admin: SupabaseClient, name?: string | null) {
   const q = (name || '').trim()

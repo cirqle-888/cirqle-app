@@ -2909,7 +2909,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
               { key: 'pending',     label: 'New',         color: 'bg-amber-500/15 border-amber-500/20 text-amber-400',  badge: '⋯' },
               { key: 'in_progress', label: 'In Progress', color: 'bg-blue-500/15 border-blue-500/20 text-blue-400',     badge: '▶' },
               { key: 'delivered',   label: 'Delivered',   color: 'bg-violet-500/15 border-violet-500/20 text-violet-300', badge: '↗' },
-              { key: 'done',        label: 'Completed',   color: 'bg-green-500/15 border-green-500/20 text-green-400',  badge: '✓' },
+              { key: 'done',        label: 'Done',        color: 'bg-green-500/15 border-green-500/20 text-green-400',  badge: '✓' },
               { key: 'invoiced',    label: 'Invoiced',    color: 'bg-purple-500/15 border-purple-500/20 text-purple-400', badge: '$' },
               { key: 'cancelled',   label: 'Cancelled',   color: 'bg-red-500/15 border-red-500/20 text-red-400',         badge: '✗' },
             ]

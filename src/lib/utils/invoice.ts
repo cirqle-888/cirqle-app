@@ -83,7 +83,7 @@ export function getStatusLabel(status: string): string {
     pending:     'New',
     in_progress: 'In Progress',
     delivered:   'Delivered',
-    done:        'Completed',
+    done:        'Done',
     invoiced:    'Invoiced',
   }
   return labels[status] || status

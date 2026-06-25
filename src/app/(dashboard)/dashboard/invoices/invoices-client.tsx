@@ -248,6 +248,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   const [searchFacets, setSearchFacets] = useState<SearchFacet[]>(() => {
     try { const raw = searchParams.get('sf'); return raw ? JSON.parse(raw) : [] } catch { return [] }
   })
+  
+  useEffect(() => {
+    setInvoices(initialInvoices)
+  }, [initialInvoices])
+  
   const [searchDraft, setSearchDraft] = useState('')
   const activeFacets = useMemo<SearchFacet[]>(
     () => searchDraft.trim() ? [...searchFacets, { field: 'any', op: 'contains' as const, text: searchDraft.trim() }] : searchFacets,
@@ -2956,37 +2961,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             )}
           </div>
 
-          {/* Linked Cash Book payments — the allocation relationship. Lets the
-              user see which cashbook entries pay this invoice, how much, and
-              jump straight to the entry. */}
-          {(() => {
-            const links = (inv.cashbook_invoice_allocations || []).filter(a => !a.deleted_at && a.cashbook_entry)
-            if (links.length === 0) return null
-            return (
-              <div className="bg-violet-500/[0.04] rounded-xl border border-violet-500/20 p-3 space-y-2">
-                <h4 className="text-[11px] font-semibold text-violet-300/90 uppercase tracking-wider flex items-center gap-1.5">
-                  <Link2 className="w-3 h-3" />Cash Book Payments ({links.length})
-                </h4>
-                {links.map(a => (
-                  <div key={a.id} className="flex items-center justify-between gap-3 text-xs">
-                    <a
-                      href={`/dashboard/cashbook?client=${inv.client_id}&focus=${a.cashbook_entry!.id}`}
-                      className="group inline-flex items-center gap-1.5 text-foreground/90 hover:text-violet-300 transition-colors min-w-0">
-                      <span className="font-mono truncate">
-                        {a.cashbook_entry!.reference || a.cashbook_entry!.entry_date || 'Entry'}
-                      </span>
-                      <ExternalLink className="w-3 h-3 shrink-0 opacity-50 group-hover:opacity-100" />
-                    </a>
-                    {showAmounts && (
-                      <span className="font-mono font-semibold text-green-400 shrink-0">
-                        ₹{Number(a.allocated_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )
-          })()}
+
 
           {/* Client Expenses section — hidden here, expenses now shown inline in LINE ITEMS above */}
           {false && (inv.expense_items || []).length > 0 && (() => {
@@ -3382,36 +3357,76 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           </div>
 
           {/* Payment history */}
-          {(inv.payments || []).length > 0 && (
-            <div>
-              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                Payments ({inv.payments!.length})
-              </h4>
-              <div className="space-y-1">
-                {inv.payments!.map(p => (
-                  <div key={p.id} className="flex items-center justify-between p-2 bg-green-500/5 rounded-lg border border-green-500/20 text-xs">
-                    <div>
-                      <div className="font-medium text-green-400">{fmt(p.amount, (p.currency as Currency) || inv.currency)}</div>
-                      <div className="text-[10px] text-muted-foreground">
-                        {fmtDate(p.payment_date)} · {METHOD_LABEL[p.payment_method] || p.payment_method}
-                        {p.reference && ` · ${p.reference}`}
-                        {p.currency && p.currency !== 'INR' && p.amount_inr != null && (
-                          <span> · @ {p.exchange_rate} = {fmt(p.amount_inr, 'INR')}</span>
-                        )}
+          {(() => {
+            const payments = inv.payments || []
+            const links = (inv.cashbook_invoice_allocations || []).filter(a => !a.deleted_at && a.cashbook_entry)
+            
+            // Standalone links are cashbook allocations that are NOT represented by a direct payment
+            const standaloneLinks = links.filter(link => {
+              return !payments.some(p => 
+                p.payment_date === link.cashbook_entry!.entry_date &&
+                (p.amount_inr || p.amount) === link.allocated_amount
+              )
+            })
+
+            const hasAnyPayments = payments.length > 0 || standaloneLinks.length > 0
+
+            if (!hasAnyPayments) return null
+
+            return (
+              <div>
+                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                  Payments Received ({payments.length + standaloneLinks.length})
+                </h4>
+                <div className="space-y-1">
+                  {/* Direct Payments */}
+                  {payments.map(p => (
+                    <div key={p.id} className="flex items-center justify-between p-2 bg-green-500/5 rounded-lg border border-green-500/20 text-xs">
+                      <div>
+                        <div className="font-medium text-green-400">{fmt(p.amount, (p.currency as Currency) || inv.currency)}</div>
+                        <div className="text-[10px] text-muted-foreground">
+                          {fmtDate(p.payment_date)} · {METHOD_LABEL[p.payment_method] || p.payment_method}
+                          {p.reference && ` · ${p.reference}`}
+                          {p.currency && p.currency !== 'INR' && p.amount_inr != null && (
+                            <span> · @ {p.exchange_rate} = {fmt(p.amount_inr, 'INR')}</span>
+                          )}
+                        </div>
                       </div>
+                      <button
+                        onClick={() => deletePayment(inv.id, p.id)}
+                        title="Remove this payment"
+                        className="p-1 rounded hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors ml-2 shrink-0"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
                     </div>
-                    <button
-                      onClick={() => deletePayment(inv.id, p.id)}
-                      title="Remove this payment"
-                      className="p-1 rounded hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors ml-2 shrink-0"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
+                  ))}
+
+                  {/* Cash Book Allocations */}
+                  {standaloneLinks.map(a => (
+                    <div key={a.id} className="flex items-center justify-between p-2 bg-violet-500/5 rounded-lg border border-violet-500/20 text-xs">
+                      <div>
+                        <div className="font-medium text-green-400">
+                          ₹{Number(a.allocated_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                          {fmtDate(a.cashbook_entry!.entry_date)} · Cash Book Allocation
+                          {a.cashbook_entry!.reference && ` · ${a.cashbook_entry!.reference}`}
+                        </div>
+                      </div>
+                      <a
+                        href={`/dashboard/cashbook?client=${inv.client_id}&focus=${a.cashbook_entry!.id}`}
+                        className="p-1 rounded hover:bg-violet-500/20 text-muted-foreground hover:text-violet-400 transition-colors ml-2 shrink-0"
+                        title="View in Cash Book"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )
+          })()}
 
           {/* Notes */}
           {inv.notes && (

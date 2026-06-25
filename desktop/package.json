@@ -1,0 +1,17 @@
+{
+  "name": "cirqle-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cirqle + WhatsApp Web, side by side, with one-tap clipboard → Quick Capture.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "CIRQLE_URL=http://localhost:3000 electron .",
+    "pack": "electron-builder --mac --dir",
+    "dmg": "electron-builder --mac dmg"
+  },
+  "devDependencies": {
+    "electron": "^33.3.0",
+    "electron-builder": "^25.1.8"
+  }
+}

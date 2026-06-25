@@ -760,22 +760,27 @@ function EmployeeDashboard({
   const today     = new Date(todayStr + 'T12:00:00')
   const todayLabel = today.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 
-  // ── STEP 1: Deduplicate by task.id ─────────────────────────────────────────
+  // ── STEP 1: Deduplicate by task.id AND employee_id ───────────────────────
   //
   // Server uses `!inner` join on tasks, so every row has task.id set.
-  // Rows with NULL task_id (orphaned imports) are excluded automatically
-  // by the inner join — they never reach the client.
+  // Rows with NULL task_id (orphaned imports) are excluded automatically.
   //
   // Server returns ordered by calculated_at DESC, so the first occurrence
-  // of each task.id is the MOST RECENT calculation — the correct score.
+  // of each task.id + employee_id is the MOST RECENT calculation.
   //
-  // This is O(n) using a Set — safe for 50K+ rows.
+  // We MUST include employee_id in the deduplication key, because a single
+  // task calculation inserts multiple rows (one for each contributing employee)
+  // at the exact same calculated_at timestamp. Deduplicating by task.id alone
+  // would throw away all but one employee's contribution for shared tasks!
   const dedupedScores = useMemo(() => {
     const seen = new Set<string>()
     return scores.filter(s => {
-      const tid = s.task?.id  // guaranteed non-null with !inner join
-      if (!tid || seen.has(tid)) return false
-      seen.add(tid)
+      const tid = s.task?.id
+      const eid = s.employee_id
+      if (!tid || !eid) return false
+      const key = `${tid}-${eid}`
+      if (seen.has(key)) return false
+      seen.add(key)
       return true
     })
   }, [scores])

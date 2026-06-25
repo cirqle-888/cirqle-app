@@ -1,0 +1,13 @@
+appId: work.cirqle.desktop
+productName: Cirqle Desktop
+directories:
+  output: dist
+files:
+  - src/**/*
+  - package.json
+mac:
+  category: public.app-category.business
+  target: dmg
+  # Unsigned, free build (no Apple Developer account). Gatekeeper blocks the
+  # first launch — see README for the one-time right-click → Open / xattr step.
+  identity: null

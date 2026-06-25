@@ -295,15 +295,16 @@ export async function syncDraftInvoices(taskId: string) {
   for (const invId of invoiceIdsToRecalculate) {
     const { data: allItems } = await supabase.from('invoice_items').select('total').eq('invoice_id', invId)
     const { data: allExps } = await supabase.from('invoice_expense_items').select('amount').eq('invoice_id', invId)
-    const { data: inv } = await supabase.from('invoices').select('discount_amount, tax_amount').eq('id', invId).single()
+    const { data: inv } = await supabase.from('invoices').select('discount_amount, tax_amount, previous_balance').eq('id', invId).single()
     
     const taskTotal = (allItems || []).reduce((sum, it) => sum + (it.total || 0), 0)
     const expTotal = (allExps || []).reduce((sum, e) => sum + (e.amount || 0), 0)
     const discount = inv?.discount_amount || 0
     const tax = inv?.tax_amount || 0
+    const prevBal = inv?.previous_balance || 0
     
     const subtotal = r2(taskTotal + expTotal)
-    const total_amount = r2(subtotal - discount + tax)
+    const total_amount = r2(subtotal - discount + tax + prevBal)
     
     await supabase.from('invoices').update({
       subtotal,
