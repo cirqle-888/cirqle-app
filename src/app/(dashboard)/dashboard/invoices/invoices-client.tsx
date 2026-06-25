@@ -247,7 +247,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     () => searchDraft.trim() ? [...searchFacets, { field: 'any', op: 'contains' as const, text: searchDraft.trim() }] : searchFacets,
     [searchFacets, searchDraft],
   )
-  const [tab, setTab] = useState<'active' | 'closed'>((searchParams.get('tab') as any) || 'active')
+  const [tab, setTab] = useState<'active' | 'closed' | 'all'>((searchParams.get('tab') as any) || 'active')
 
   const idFromUrl = searchParams.get('id')
   useEffect(() => {
@@ -501,9 +501,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
   const filtered = useMemo(() => {
     let list = invoices.filter(inv => {
-      const inTab = tab === 'active'
-        ? STATUS_GROUPS.active.includes(inv.status) || (isOverdue(inv.due_date || '', inv.status, inv.issue_date) && inv.status !== 'paid')
-        : STATUS_GROUPS.closed.includes(inv.status)
+      const inTab = tab === 'all'
+        ? true
+        : tab === 'active'
+          ? STATUS_GROUPS.active.includes(inv.status) || (isOverdue(inv.due_date || '', inv.status, inv.issue_date) && inv.status !== 'paid')
+          : STATUS_GROUPS.closed.includes(inv.status)
       if (!inTab) return false
       if (filterStatus && inv.status !== filterStatus) return false
       if (filterClient && inv.client_id !== filterClient) return false
@@ -2514,7 +2516,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         <div className="flex-1 overflow-y-auto divide-y divide-border/30">
           {filtered.length === 0 && (
             <div className="p-6 text-center text-muted-foreground text-sm">
-              {tab === 'active' ? 'No active invoices' : 'No closed invoices'}
+              {tab === 'active' ? 'No active invoices' : tab === 'closed' ? 'No closed invoices' : 'No invoices'}
             </div>
           )}
           {filtered.map(inv => {
@@ -5426,11 +5428,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
       {/* ── Tab bar ── */}
       <div className="flex items-center gap-0 border-b border-border/40 px-4 pt-1">
-        {(['active', 'closed'] as const).map(t => (
+        {(['active', 'closed', 'all'] as const).map(t => (
           <button key={t}
             onClick={() => { setTab(t); setFilterStatus('') }}
             className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${tab === t ? 'border-violet-500 text-violet-300' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
-            {t === 'active' ? `Active (${invoices.filter(i => STATUS_GROUPS.active.includes(i.status) || (isOverdue(i.due_date || '', i.status, i.issue_date) && i.status !== 'paid')).length})` : `Closed`}
+            {t === 'active' ? `Active (${invoices.filter(i => STATUS_GROUPS.active.includes(i.status) || (isOverdue(i.due_date || '', i.status, i.issue_date) && i.status !== 'paid')).length})` : t === 'closed' ? `Closed` : `All`}
           </button>
         ))}
         <div className="flex-1" />
