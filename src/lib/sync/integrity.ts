@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { calculateCommission } from '@/lib/calculations/commission'
 import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
 import { syncTaskAgreementEarnings } from '@/lib/sync/agreement-earnings'
+import { getInvoiceDateForTaskMonth, toSequenceMonth } from '@/lib/invoices/numbering'
 
 const r2 = (n: number) => Math.round(n * 100) / 100
 
@@ -217,37 +218,81 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
 export async function syncDraftInvoices(taskId: string) {
   const supabase = createAdminClient()
 
-  const { data: task } = await supabase.from('tasks').select('id, billing_amount_inr, currency, billing_amount').eq('id', taskId).single()
+  const { data: task } = await supabase.from('tasks')
+    .select('id, title, status, client_id, task_date, billing_amount_inr, currency, billing_amount')
+    .eq('id', taskId).single()
+  
   if (!task) return { error: 'Task not found' }
 
-  // Find all invoice items linked to this task
+  // 1. Find all existing invoice items linked to this task
   const { data: items } = await supabase.from('invoice_items').select('id, invoice_id, quantity').eq('task_id', taskId)
-  if (!items || items.length === 0) return { updated: 0, message: 'No linked invoice items' }
+  const taskAmt = task.billing_amount || 0
+  const invoiceIdsToRecalculate = new Set<string>()
 
-  // Extract unique invoice IDs
-  const invoiceIds = Array.from(new Set(items.map(i => i.invoice_id)))
+  if (items && items.length > 0) {
+    // Extract unique invoice IDs
+    const invoiceIds = Array.from(new Set(items.map(i => i.invoice_id)))
 
-  // Find which of these invoices are in 'draft' status
-  const { data: invoices } = await supabase.from('invoices').select('id, status').in('id', invoiceIds).eq('status', 'draft')
-  if (!invoices || invoices.length === 0) return { updated: 0, message: 'No linked draft invoices' }
+    // Find which of these invoices are in 'draft' status
+    const { data: invoices } = await supabase.from('invoices').select('id, status').in('id', invoiceIds).eq('status', 'draft')
+    if (invoices && invoices.length > 0) {
+      const draftInvoiceIds = new Set(invoices.map(inv => inv.id))
+      const draftItemsToUpdate = items.filter(i => draftInvoiceIds.has(i.invoice_id))
+      
+      for (const item of draftItemsToUpdate) {
+        const newTotal = taskAmt * (item.quantity || 1)
+        
+        // Update the invoice item with latest task details
+        await supabase.from('invoice_items').update({
+          unit_price: taskAmt,
+          description: task.title,
+          total: newTotal
+        }).eq('id', item.id)
+        
+        invoiceIdsToRecalculate.add(item.invoice_id)
+      }
+    }
+  } else if (task.status === 'done' && task.client_id && task.task_date) {
+    // 2. Task is done but not on any invoice. Try to add it to an existing draft invoice for this month.
+    const fromDateObj = new Date(task.task_date)
+    const taskMonth = `${fromDateObj.getFullYear()}-${String(fromDateObj.getMonth() + 1).padStart(2, '0')}`
+    const invoiceDate = getInvoiceDateForTaskMonth(taskMonth)
+    const sequenceMonth = toSequenceMonth(invoiceDate)
 
-  const draftInvoiceIds = new Set(invoices.map(inv => inv.id))
-  
-  // Filter items that belong to draft invoices
-  const draftItemsToUpdate = items.filter(i => draftInvoiceIds.has(i.invoice_id))
-  
-  for (const item of draftItemsToUpdate) {
-    const newTotal = (task.billing_amount || 0) * (item.quantity || 1)
-    
-    // Update the invoice item
-    await supabase.from('invoice_items').update({
-      unit_price: task.billing_amount,
-      total: newTotal
-    }).eq('id', item.id)
+    const { data: draftInvoice } = await supabase
+      .from('invoices')
+      .select('id')
+      .eq('client_id', task.client_id)
+      .eq('status', 'draft')
+      .eq('invoice_sequence_month', sequenceMonth)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (draftInvoice) {
+      // Determine the next display order
+      const { data: existingItemsInInv } = await supabase.from('invoice_items').select('display_order').eq('invoice_id', draftInvoice.id)
+      const nextOrder = existingItemsInInv?.length ? Math.max(...existingItemsInInv.map(i => i.display_order || 0)) + 1 : 0
+      
+      const { error } = await supabase.from('invoice_items').insert({
+        invoice_id: draftInvoice.id,
+        task_id: task.id,
+        description: task.title,
+        quantity: 1,
+        unit_price: taskAmt,
+        total: taskAmt,
+        currency: task.currency || 'INR',
+        display_order: nextOrder
+      })
+      
+      if (!error) {
+        invoiceIdsToRecalculate.add(draftInvoice.id)
+      }
+    }
   }
 
-  // Recalculate totals for all affected draft invoices
-  for (const invId of draftInvoiceIds) {
+  // 3. Recalculate totals for all affected draft invoices
+  for (const invId of invoiceIdsToRecalculate) {
     const { data: allItems } = await supabase.from('invoice_items').select('total').eq('invoice_id', invId)
     const newInvoiceTotal = (allItems || []).reduce((sum, it) => sum + (it.total || 0), 0)
     
@@ -256,5 +301,5 @@ export async function syncDraftInvoices(taskId: string) {
     }).eq('id', invId)
   }
 
-  return { success: true, updatedInvoices: draftInvoiceIds.size }
+  return { success: true, updatedInvoices: invoiceIdsToRecalculate.size }
 }

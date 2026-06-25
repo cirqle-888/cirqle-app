@@ -111,7 +111,7 @@ export async function updateClient(
   if (!auth.ok) return { ok: false, error: auth.error }
 
   const admin = createAdminClient()
-  const { data, error } = await admin.from('clients').update(sanitizeClientForm(form)).eq('id', id).select().single()
+  const { data, error } = await admin.from('clients').update({ ...sanitizeClientForm(form), pricing_pending: false }).eq('id', id).select().single()
   if (error) return { ok: false, error: error.message }
   return { ok: true, data }
 }
@@ -209,7 +209,7 @@ export async function updateService(
   const admin = createAdminClient()
   const { data: service, error } = await admin
     .from('services')
-    .update(payload)
+    .update({ ...payload, pricing_pending: false })
     .eq('id', id)
     .select()
     .single()
@@ -596,5 +596,10 @@ export async function upsertMatrixCell(
     { onConflict: 'client_id,service_id' },
   )
   if (error) return { ok: false, error: error.message }
+
+  // Resolve the "pending to price" flag since we just set the price
+  await admin.from('clients').update({ pricing_pending: false }).eq('id', clientId).then(undefined, () => {})
+  await admin.from('services').update({ pricing_pending: false }).eq('id', serviceId).then(undefined, () => {})
+
   return { ok: true }
 }

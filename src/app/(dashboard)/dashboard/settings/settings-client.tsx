@@ -411,6 +411,8 @@ export default function SettingsClient(props: Props) {
       cell.currency || 'INR',
     )
     setMatrixSaving(null)
+    setClients(prev => prev.map(c => c.id === clientId ? { ...c, pricing_pending: false } : c))
+    setServices(prev => prev.map(s => s.id === serviceId ? { ...s, pricing_pending: false } : s))
   }
 
   function updateMatrix(clientId: string, serviceId: string, field: keyof MatrixCell, value: string) {
@@ -518,6 +520,8 @@ export default function SettingsClient(props: Props) {
         }))
       if (pricingRows.length > 0) {
         await upsertClientServicePricings(pricingRows)
+        const sIds = pricingRows.map(r => r.service_id)
+        setServices(prev => prev.map(s => sIds.includes(s.id) ? { ...s, pricing_pending: false } : s))
       }
     }
     setSaving(false)
