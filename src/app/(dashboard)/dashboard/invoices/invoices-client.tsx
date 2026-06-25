@@ -67,6 +67,12 @@ const AddExpenseModal = dynamic(
   { ssr: false },
 )
 
+const ReceiptModal = dynamic(
+  () => import('@/components/cashbook/receipt-modal'),
+  { ssr: false },
+)
+import type { ReceiptInput } from '@/components/cashbook/receipt-modal'
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface StatementLedgerRow {
   invoiceNumber?: string
@@ -401,6 +407,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   const [jobLossesLoaded, setJobLossesLoaded]           = useState(false)
   const [analyticsFilterClient, setAnalyticsFilterClient] = useState('')
   const [expandedLossId, setExpandedLossId]               = useState<string | null>(null)
+  const [receiptPayment, setReceiptPayment]               = useState<any>(null)
 
   // Batch generate state
   const [batchGroups, setBatchGroups] = useState<{
@@ -4487,8 +4494,18 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                                           {pmt.reference && <span className="ml-1 opacity-70">· {pmt.reference}</span>}
                                         </div>
                                       </div>
-                                      <div className="text-[11px] font-bold text-emerald-400 tabular-nums">
-                                        {fmt(pmt.amount)}
+                                      <div className="flex items-center gap-2">
+                                        <div className="text-[11px] font-bold text-emerald-400 tabular-nums">
+                                          {fmt(pmt.amount)}
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => { e.stopPropagation(); setReceiptPayment({ pmt, invoice: inv }) }}
+                                          className="p-1 rounded bg-transparent text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+                                          title="Generate Receipt"
+                                        >
+                                          <Receipt className="w-3.5 h-3.5" />
+                                        </button>
                                       </div>
                                     </div>
                                   ))}
@@ -5210,7 +5227,17 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                       {p.reference && (
                         <div className="text-[10px] text-muted-foreground">Ref: {p.reference}</div>
                       )}
-                      <div className="text-[10px] text-blue-400/60 mt-1">{fmtDate(p.payment_date)}</div>
+                      <div className="flex items-center justify-between mt-1">
+                        <div className="text-[10px] text-blue-400/60">{fmtDate(p.payment_date)}</div>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setReceiptPayment({ pmt: p, invoice: p.invoice }) }}
+                          className="p-1 rounded bg-transparent text-blue-400 hover:text-blue-300 hover:bg-blue-500/20 transition-colors"
+                          title="Generate Receipt"
+                        >
+                          <Receipt className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -5634,6 +5661,36 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           canMarkup={role === 'super_admin' || role === 'accounts'}
           onClose={() => setAddExpenseInvoice(null)}
           onUpdate={() => { setAddExpenseInvoice(null); router.refresh() }}
+        />
+      )}
+
+      {receiptPayment && (
+        <ReceiptModal
+          input={((): ReceiptInput => {
+            const inv = receiptPayment.invoice
+            const pmt = receiptPayment.pmt
+            const compact = (pmt.payment_date || '').replace(/-/g, '')
+            const legacyNo = `RCPT-${compact}-${pmt.id.slice(-4).toUpperCase()}`
+            
+            return {
+              receiptNo: pmt.receipt_number || legacyNo,
+              defaultClientName: inv?.client?.name || '',
+              amount: pmt.amount ?? pmt.amount_inr ?? 0,
+              currency: pmt.currency,
+              dateISO: pmt.payment_date,
+              method: pmt.payment_method?.replace(/_/g, ' '),
+              reference: pmt.reference,
+              invoices: [{
+                number: inv?.invoice_number || '—',
+                outstanding: inv ? Number(inv.total_amount) - Number(inv.paid_amount || 0) : 0,
+              }],
+              companyLogoUrl: companySettings.logo_url_dark || companySettings.logo_url,
+              companyName:    companySettings.company_name,
+              companyPhone:   companySettings.company_phone,
+              companyWebsite: companySettings.company_website,
+            }
+          })()}
+          onClose={() => setReceiptPayment(null)}
         />
       )}
     </div>
