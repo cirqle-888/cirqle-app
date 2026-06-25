@@ -264,7 +264,7 @@ export async function syncDraftInvoices(taskId: string) {
       .select('id')
       .eq('client_id', task.client_id)
       .eq('status', 'draft')
-      .eq('invoice_sequence_month', sequenceMonth)
+      .like('invoice_number', `INV-${sequenceMonth}-%`)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
