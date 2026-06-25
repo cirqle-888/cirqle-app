@@ -294,11 +294,135 @@ export async function syncDraftInvoices(taskId: string) {
   // 3. Recalculate totals for all affected draft invoices
   for (const invId of invoiceIdsToRecalculate) {
     const { data: allItems } = await supabase.from('invoice_items').select('total').eq('invoice_id', invId)
-    const newInvoiceTotal = (allItems || []).reduce((sum, it) => sum + (it.total || 0), 0)
+    const { data: allExps } = await supabase.from('invoice_expense_items').select('amount').eq('invoice_id', invId)
+    const { data: inv } = await supabase.from('invoices').select('discount_amount, tax_amount').eq('id', invId).single()
+    
+    const taskTotal = (allItems || []).reduce((sum, it) => sum + (it.total || 0), 0)
+    const expTotal = (allExps || []).reduce((sum, e) => sum + (e.amount || 0), 0)
+    const discount = inv?.discount_amount || 0
+    const tax = inv?.tax_amount || 0
+    
+    const subtotal = r2(taskTotal + expTotal)
+    const total_amount = r2(subtotal - discount + tax)
     
     await supabase.from('invoices').update({
-      total_amount: newInvoiceTotal
+      subtotal,
+      total_amount
     }).eq('id', invId)
+  }
+
+  return { success: true, updatedInvoices: invoiceIdsToRecalculate.size }
+}
+
+export async function syncDraftInvoiceExpenses(entryId: string) {
+  const supabase = createAdminClient()
+
+  // 1. Get the entry
+  const { data: entry } = await supabase.from('cashbook_entries')
+    .select('id, type, amount, amount_inr, currency, description, client_id, entry_date, deleted_at')
+    .eq('id', entryId).single()
+    
+  if (!entry || entry.deleted_at || entry.type !== 'outflow' || !entry.client_id || !entry.entry_date) {
+    return { success: false, reason: 'Not applicable for auto-invoicing' }
+  }
+
+  const invoiceIdsToRecalculate = new Set<string>()
+
+  // 2. Check if this entry is already an expense item
+  const { data: existingExp } = await supabase.from('invoice_expense_items')
+    .select('id, invoice_id, amount, amount_inr, currency, original_amount, original_amount_inr, markup_type')
+    .eq('cashbook_entry_id', entry.id)
+    .maybeSingle()
+
+  if (existingExp) {
+    const { data: inv } = await supabase.from('invoices').select('status, currency, exchange_rate').eq('id', existingExp.invoice_id).single()
+    if (inv && inv.status === 'draft') {
+      let newBilling = entry.amount
+      let newBillingInr = entry.amount_inr
+      
+      // If markup was none, we update the billing amount to match the new original amount.
+      // But we need to ensure it's in the invoice currency.
+      if (entry.currency !== inv.currency) {
+          const invRate = inv.exchange_rate || 1
+          newBilling = r2(entry.amount_inr / invRate)
+      }
+
+      if (existingExp.markup_type !== 'none') {
+          // If it had a markup, we don't recalculate the billing amount automatically here
+          // to avoid overwriting a custom manual markup value. Just update the original costs.
+          newBilling = existingExp.amount
+          newBillingInr = existingExp.amount_inr
+      }
+      
+      await supabase.from('invoice_expense_items').update({
+        original_amount: entry.amount,
+        original_amount_inr: entry.amount_inr,
+        amount: newBilling,
+        amount_inr: newBillingInr,
+        description: entry.description || ''
+      }).eq('id', existingExp.id)
+
+      invoiceIdsToRecalculate.add(existingExp.invoice_id)
+    }
+  } else {
+    // 3. Try to add to a draft invoice for this month
+    const fromDateObj = new Date(entry.entry_date)
+    const entryMonth = `${fromDateObj.getFullYear()}-${String(fromDateObj.getMonth() + 1).padStart(2, '0')}`
+    const invoiceDate = getInvoiceDateForTaskMonth(entryMonth)
+    const sequenceMonth = toSequenceMonth(invoiceDate)
+
+    const { data: draftInvoice } = await supabase
+      .from('invoices')
+      .select('id, currency, exchange_rate')
+      .eq('client_id', entry.client_id)
+      .eq('status', 'draft')
+      .like('invoice_number', `INV-${sequenceMonth}-%`)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (draftInvoice) {
+      let billing = entry.amount
+      if (entry.currency !== draftInvoice.currency) {
+          const invRate = draftInvoice.exchange_rate || 1
+          billing = r2(entry.amount_inr / invRate)
+      }
+
+      const { error } = await supabase.from('invoice_expense_items').insert({
+        invoice_id: draftInvoice.id,
+        cashbook_entry_id: entry.id,
+        description: entry.description || 'Expense',
+        amount: billing,
+        amount_inr: entry.amount_inr,
+        currency: draftInvoice.currency || 'INR',
+        original_amount: entry.amount,
+        original_amount_inr: entry.amount_inr,
+        markup_type: 'none',
+        markup_value: 0,
+        markup_amount: 0
+      })
+
+      if (!error) {
+        invoiceIdsToRecalculate.add(draftInvoice.id)
+      }
+    }
+  }
+
+  // 4. Recalculate total for affected invoices
+  for (const invId of invoiceIdsToRecalculate) {
+    const { data: allItems } = await supabase.from('invoice_items').select('total').eq('invoice_id', invId)
+    const { data: allExps } = await supabase.from('invoice_expense_items').select('amount').eq('invoice_id', invId)
+    const { data: inv } = await supabase.from('invoices').select('discount_amount, tax_amount').eq('id', invId).single()
+    
+    const taskTotal = (allItems || []).reduce((sum, it) => sum + (it.total || 0), 0)
+    const expTotal = (allExps || []).reduce((sum, e) => sum + (e.amount || 0), 0)
+    const discount = inv?.discount_amount || 0
+    const tax = inv?.tax_amount || 0
+    
+    const subtotal = r2(taskTotal + expTotal)
+    const total_amount = r2(subtotal - discount + tax)
+    
+    await supabase.from('invoices').update({ subtotal, total_amount }).eq('id', invId)
   }
 
   return { success: true, updatedInvoices: invoiceIdsToRecalculate.size }

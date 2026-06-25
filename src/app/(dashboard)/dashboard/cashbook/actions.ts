@@ -12,6 +12,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission } from '@/lib/auth/enforce'
 import { PERMS } from '@/lib/permissions/keys'
 import { fetchRates } from '@/lib/fx/sync'
+import { syncDraftInvoiceExpenses } from '@/lib/sync/integrity'
 
 const REVALIDATE = '/dashboard/cashbook'
 
@@ -179,6 +180,16 @@ export async function insertCashbookEntries(
     }
   }
 
+  // Auto-sync outflows to draft invoices if they have a client_id
+  if (basePayload.type === 'outflow' && basePayload.client_id) {
+    for (const entry of allInserted) {
+      const entryId = (entry as any)?.id
+      if (typeof entryId === 'string') {
+        await syncDraftInvoiceExpenses(entryId)
+      }
+    }
+  }
+
   revalidatePath(REVALIDATE)
   return { ok: true, data: { entries: allInserted } }
 }
@@ -213,6 +224,9 @@ export async function updateCashbookEntry(
     .update(changes)
     .eq('id', id)
   if (error) return { ok: false, error: error.message }
+
+  // Sync potential expense changes to draft invoice
+  await syncDraftInvoiceExpenses(id)
 
   revalidatePath(REVALIDATE)
   return { ok: true }
