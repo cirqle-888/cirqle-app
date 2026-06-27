@@ -779,7 +779,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   const activeFilterCount = useMemo(() => {
     const f = filters
     let n = 0
-    if (f.from || f.to || f.month || f.year) n++
+    if (f.date) n++
     if (f.clientIds.length) n++
     if (f.serviceIds.length) n++
     if (f.employeeIds?.length > 0) n++
