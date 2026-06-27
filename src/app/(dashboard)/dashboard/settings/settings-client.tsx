@@ -226,7 +226,7 @@ export default function SettingsClient(props: Props) {
   const [salaryCalViewDate, setSalaryCalViewDate] = useState(() => new Date())
 
   const filteredClients = useMemo(() => {
-    let list = [...clients]
+    let list = clients.filter((c: any) => c.is_active !== false)
     if (clientSearch) {
       const q = clientSearch.toLowerCase()
       list = list.filter((c: any) => c.name?.toLowerCase().includes(q) || c.code?.toLowerCase().includes(q) || c.email?.toLowerCase().includes(q))
@@ -238,7 +238,10 @@ export default function SettingsClient(props: Props) {
   }, [clients, clientSearch, clientSort])
 
   const filteredServices = useMemo(() => {
-    let list = serviceSort === 'usage' ? [...servicesSortedByUsage] : [...services].sort((a: any, b: any) => a.name.localeCompare(b.name))
+    let activeServices = services.filter((s: any) => s.is_active !== false)
+    let list = serviceSort === 'usage' 
+      ? servicesSortedByUsage.filter((s: any) => s.is_active !== false) 
+      : activeServices.sort((a: any, b: any) => a.name.localeCompare(b.name))
     if (serviceSearch) {
       const q = serviceSearch.toLowerCase()
       list = list.filter((s: any) => s.name?.toLowerCase().includes(q) || s.description?.toLowerCase().includes(q))
@@ -247,21 +250,24 @@ export default function SettingsClient(props: Props) {
   }, [services, servicesSortedByUsage, serviceSearch, serviceSort])
 
   const filteredGroups = useMemo(() => {
-    if (!groupSearch) return groups
+    let pool = groups.filter((g: any) => g.is_active !== false)
+    if (!groupSearch) return pool
     const q = groupSearch.toLowerCase()
-    return groups.filter((g: any) => g.name?.toLowerCase().includes(q))
+    return pool.filter((g: any) => g.name?.toLowerCase().includes(q))
   }, [groups, groupSearch])
 
   const filteredParams = useMemo(() => {
-    if (!paramSearch) return params
+    let pool = params.filter((p: any) => p.is_active !== false)
+    if (!paramSearch) return pool
     const q = paramSearch.toLowerCase()
-    return params.filter((p: any) => p.name?.toLowerCase().includes(q))
+    return pool.filter((p: any) => p.name?.toLowerCase().includes(q))
   }, [params, paramSearch])
 
   const filteredTools = useMemo(() => {
-    if (!toolSearch) return tools
+    let pool = tools.filter((t: any) => t.is_active !== false)
+    if (!toolSearch) return pool
     const q = toolSearch.toLowerCase()
-    return tools.filter((t: any) => t.name?.toLowerCase().includes(q))
+    return pool.filter((t: any) => t.name?.toLowerCase().includes(q))
   }, [tools, toolSearch])
 
   // Employee filter tabs: active | archived | all
@@ -2065,14 +2071,14 @@ export default function SettingsClient(props: Props) {
                 </button>
               </div>
               <div className="space-y-2">
-                {bankAccounts.map(b => (
+                {bankAccounts.filter(b => b.is_active !== false).map(b => (
                   <div key={b.id} className="bg-card border border-border rounded-xl px-4 py-3 flex items-center justify-between">
                     <div>
                       <p className="font-medium text-sm">{b.name}</p>
                       <p className="text-xs text-muted-foreground capitalize">{b.type} · {b.currency} · {b.account_number}</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className={`text-xs px-2 py-0.5 rounded-md ${b.is_active ? 'bg-green-500/15 text-green-400' : 'bg-gray-500/15 text-gray-400'}`}>{b.is_active ? 'Active' : 'Inactive'}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-md bg-green-500/15 text-green-400`}>Active</span>
                       <button onClick={() => { setEditingId(b.id); setShowForm('bank'); setForm(b) }} className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground">
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
@@ -2101,7 +2107,7 @@ export default function SettingsClient(props: Props) {
                     both:    { header: 'bg-blue-500/10 text-blue-400',    addBtn: 'hover:bg-blue-500/15 hover:text-blue-400',  dot: 'bg-blue-400' },
                   }
                   const s = styleMap[type]
-                  const filtered = categories.filter((c: any) => c.type === type)
+                  const filtered = categories.filter((c: any) => c.type === type && c.is_active !== false)
                   return (
                     <div key={type} className="bg-card border border-border rounded-xl overflow-hidden flex flex-col">
                       <div className={`px-4 py-3 border-b border-border flex items-center justify-between ${s.header}`}>

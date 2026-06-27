@@ -236,7 +236,7 @@ export interface Filters {
   year: string    // '2026' or ''
   clientIds: string[]
   serviceIds: string[]
-  employeeId: string   // "tasks containing this employee"
+  employeeIds: string[]
   statuses: string[]
   billingMin: string
   billingMax: string
@@ -250,7 +250,7 @@ export interface Filters {
 
 export const EMPTY_FILTERS: Filters = {
   from: '', to: '', month: '', year: '',
-  clientIds: [], serviceIds: [], employeeId: '', statuses: [],
+  clientIds: [], serviceIds: [], employeeIds: [], statuses: [],
   billingMin: '', billingMax: '', profitMin: '', profitMax: '',
   profitPctMin: '', profitPctMax: '', earnMin: '', earnMax: '',
 }
@@ -285,7 +285,9 @@ export function applyFilters(rows: AnalysisRow[], f: Filters): AnalysisRow[] {
     if (clientSet && !clientSet.has(row.client_id)) return false
     if (serviceSet && !serviceSet.has(row.service_id)) return false
     if (statusSet && !statusSet.has(row.status)) return false
-    if (f.employeeId && !((row.emp[f.employeeId]?.pct ?? 0) > 0)) return false
+    if (f.employeeIds && f.employeeIds.length > 0) {
+      if (!f.employeeIds.some(empId => row.emp[empId]?.pct > 0)) return false
+    }
     if (row.billing_inr < bMin || row.billing_inr > bMax) return false
     if (row.profit < pMin || row.profit > pMax) return false
     if (row.profit_pct < ppMin || row.profit_pct > ppMax) return false

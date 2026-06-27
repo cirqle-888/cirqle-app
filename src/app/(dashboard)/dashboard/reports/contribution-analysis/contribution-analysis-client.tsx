@@ -93,7 +93,7 @@ const pct = (n: number) => `${n.toFixed(1)}%`
 // ── Column definitions ────────────────────────────────────────────────────────
 type Align = 'left' | 'right' | 'center'
 // 'core' columns are always shown. The other 3 are toggleable column groups.
-type ColGroup = 'core' | 'billing' | 'profit' | 'employees'
+type ColGroup = 'core' | 'billing' | 'profit' | 'employees' | 'actual_received' | 'fx_gain_loss' | 'actual_profit' | 'actual_profit_pct' | 'contributors'
 interface Col {
   key: SortKey
   label: string
@@ -137,25 +137,25 @@ function buildColumns(employees: EmployeeColumn[], dp: number): Col[] {
       cls: r => (r.profit_pct < 0 ? 'text-red-400' : 'text-emerald-400'),
     },
     {
-      key: 'actual_received', label: 'Actual Recv ₹', width: 116, align: 'right', group: 'profit',
+      key: 'actual_received', label: 'Actual Recv ₹', width: 116, align: 'right', group: 'actual_received',
       render: r => r.actual_received === null ? <span className="text-muted-foreground/40">—</span> : inr(r.actual_received, dp),
     },
     {
-      key: 'fx_gain_loss', label: 'FX +/− ₹', width: 100, align: 'right', group: 'profit',
+      key: 'fx_gain_loss', label: 'FX +/− ₹', width: 100, align: 'right', group: 'fx_gain_loss',
       render: r => r.fx_gain_loss === null ? <span className="text-muted-foreground/40">—</span> : inr(r.fx_gain_loss, dp),
       cls: r => (r.fx_gain_loss === null ? '' : r.fx_gain_loss < 0 ? 'text-red-400' : r.fx_gain_loss > 0 ? 'text-emerald-400' : ''),
     },
     {
-      key: 'actual_profit', label: 'Actual Profit ₹', width: 120, align: 'right', group: 'profit',
+      key: 'actual_profit', label: 'Actual Profit ₹', width: 120, align: 'right', group: 'actual_profit',
       render: r => r.actual_profit === null ? <span className="text-muted-foreground/40">—</span> : inr(r.actual_profit, dp),
       cls: r => (r.actual_profit === null ? '' : r.actual_profit < 0 ? 'text-red-400' : 'text-emerald-400'),
     },
     {
-      key: 'actual_profit_pct', label: 'Actual Profit %', width: 100, align: 'right', group: 'profit',
+      key: 'actual_profit_pct', label: 'Actual Profit %', width: 100, align: 'right', group: 'actual_profit_pct',
       render: r => r.actual_profit_pct === null ? <span className="text-muted-foreground/40">—</span> : pct(r.actual_profit_pct),
       cls: r => (r.actual_profit_pct === null ? '' : r.actual_profit_pct < 0 ? 'text-red-400' : 'text-emerald-400'),
     },
-    { key: 'contributors', label: 'Contrib.', width: 72, align: 'center', group: 'core', render: r => r.contributors },
+    { key: 'contributors', label: 'Contrib.', width: 72, align: 'center', group: 'contributors', render: r => r.contributors },
   ]
   const emp: Col[] = []
   for (const e of employees) {
@@ -360,8 +360,17 @@ function MultiSelect({ label, options, selected, onChange, sortKey }: {
 }
 
 // ── URL (de)serialization ─────────────────────────────────────────────────────
-const ALL_GROUPS: ColGroup[] = ['billing', 'profit', 'employees']
-const GROUP_LABELS: Record<string, string> = { billing: 'Billing', profit: 'Profit & FX', employees: 'Employees' }
+const ALL_GROUPS: ColGroup[] = ['billing', 'profit', 'actual_received', 'fx_gain_loss', 'actual_profit', 'actual_profit_pct', 'contributors', 'employees']
+const GROUP_LABELS: Record<string, string> = { 
+  billing: 'Billing', 
+  profit: 'Exp Profit', 
+  actual_received: 'Actual Recv',
+  fx_gain_loss: 'FX',
+  actual_profit: 'Actual Profit ₹',
+  actual_profit_pct: 'Actual Profit %',
+  contributors: 'Contrib.',
+  employees: 'Employees' 
+}
 
 function parseFromParams(sp: URLSearchParams): { filters: Filters; sortKey: SortKey; sortDir: SortDir; pageSize: number; decimals: boolean; groups: ColGroup[]; groupKey: GroupKey } {
   const g = (k: string) => sp.get(k) || ''
@@ -371,7 +380,7 @@ function parseFromParams(sp: URLSearchParams): { filters: Filters; sortKey: Sort
     filters: {
       from: g('from'), to: g('to'), month: g('month'), year: g('year'),
       clientIds: arr('clients'), serviceIds: arr('services'),
-      employeeId: g('emp'), statuses: arr('status'),
+      employeeIds: arr('emp'), statuses: arr('status'),
       billingMin: g('bmin'), billingMax: g('bmax'),
       profitMin: g('pmin'), profitMax: g('pmax'),
       profitPctMin: g('ppmin'), profitPctMax: g('ppmax'),
@@ -561,8 +570,8 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     [employees, isUnlocked], // eslint-disable-line react-hooks/exhaustive-deps
   )
   const displayEmployees = useMemo(
-    () => (filters.employeeId ? allDisplayEmployees.filter(e => e.id === filters.employeeId) : allDisplayEmployees),
-    [allDisplayEmployees, filters.employeeId],
+    () => (filters.employeeIds?.length > 0 ? allDisplayEmployees.filter(e => filters.employeeIds.includes(e.id)) : allDisplayEmployees),
+    [allDisplayEmployees, filters.employeeIds],
   )
 
   // ── Smart Mode: with any date filter active (from/to/month/year), the
@@ -596,8 +605,8 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     if (!dateScopedRows) return allDisplayEmployees
     const ids = new Set<string>()
     dateScopedRows.forEach(r => { for (const id in r.emp) if ((r.emp[id]?.pct ?? 0) > 0) ids.add(id) })
-    return allDisplayEmployees.filter(e => ids.has(e.id) || e.id === filters.employeeId)
-  }, [dateScopedRows, allDisplayEmployees, filters.employeeId])
+    return allDisplayEmployees.filter(e => ids.has(e.id) || filters.employeeIds.includes(e.id))
+  }, [dateScopedRows, allDisplayEmployees, filters.employeeIds])
 
   // Full column set (for export) and the visible subset (group toggles applied).
   // Non-employee columns are sorted according to the user's colOrder preference.
@@ -649,7 +658,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     if (f.year) p.set('year', f.year)
     if (f.clientIds.length) p.set('clients', f.clientIds.join(','))
     if (f.serviceIds.length) p.set('services', f.serviceIds.join(','))
-    if (f.employeeId) p.set('emp', f.employeeId)
+    if (f.employeeIds.length) p.set('emp', f.employeeIds.join(','))
     if (f.statuses.length) p.set('status', f.statuses.join(','))
     if (f.billingMin) p.set('bmin', f.billingMin)
     if (f.billingMax) p.set('bmax', f.billingMax)
@@ -775,7 +784,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     if (f.from || f.to || f.month || f.year) n++
     if (f.clientIds.length) n++
     if (f.serviceIds.length) n++
-    if (f.employeeId) n++
+    if (f.employeeIds?.length > 0) n++
     if (f.statuses.length) n++
     if (f.billingMin || f.billingMax) n++
     if (f.profitMin || f.profitMax) n++
@@ -979,7 +988,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
           </div>
 
           {/* Column group toggles — show/hide whole blocks of columns */}
-          <div className="flex items-center gap-1 ml-1 pl-2 border-l border-border">
+          <div className="flex flex-wrap items-center gap-1 ml-1 pl-2 border-l border-border">
             <span className="text-[11px] text-muted-foreground mr-0.5">Columns:</span>
             {ALL_GROUPS.map(gp => {
               const on = groupSet.has(gp)
@@ -1256,13 +1265,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
               </div>
               <MultiSelect label="Clients" options={scopedClients} selected={filters.clientIds} onChange={ids => setFilters(f => ({ ...f, clientIds: ids }))} sortKey="clients" />
               <MultiSelect label="Services" options={scopedServices} selected={filters.serviceIds} onChange={ids => setFilters(f => ({ ...f, serviceIds: ids }))} sortKey="services" />
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Has contributor</label>
-                <select value={filters.employeeId} onChange={e => setFilters(f => ({ ...f, employeeId: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs">
-                  <option value="">Any employee</option>
-                  {scopedContribEmployees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                </select>
-              </div>
+              <MultiSelect label="Has contributor" options={scopedContribEmployees} selected={filters.employeeIds || []} onChange={ids => setFilters(f => ({ ...f, employeeIds: ids }))} />
               <MultiSelect label="Status" options={STATUSES.map(s => ({ id: s, name: s }))} selected={filters.statuses} onChange={ids => setFilters(f => ({ ...f, statuses: ids }))} />
             </div>
 
