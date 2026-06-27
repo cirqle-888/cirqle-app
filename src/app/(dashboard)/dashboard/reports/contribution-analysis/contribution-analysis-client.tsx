@@ -585,19 +585,9 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   // Clients/Services/Has-contributor options narrow to values present in rows
   // within that period (current selections kept so they stay clearable).
   const dateScopedRows = useMemo(() => {
-    const { from, to, month, year } = filters
-    if (!from && !to && !month && !year) return null
-    const y = year ? parseInt(year, 10) : null
-    const m = month ? parseInt(month, 10) : null
-    return rows.filter(r => {
-      const d = r.task_date || ''
-      if (from && d < from) return false
-      if (to && d > to) return false
-      if (y !== null && parseInt(d.slice(0, 4), 10) !== y) return false
-      if (m !== null && parseInt(d.slice(5, 7), 10) !== m) return false
-      return true
-    })
-  }, [rows, filters.from, filters.to, filters.month, filters.year]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (!filters.date) return null
+    return rows.filter(r => matchesDateFilter(r.task_date, filters.date!))
+  }, [rows, filters.date])
   const scopedClients = useMemo(() => {
     if (!dateScopedRows) return clients
     const ids = new Set(dateScopedRows.map(r => r.client_id))
