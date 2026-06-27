@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect, useRef, useCallback, useLayoutEffect, Fra
 import { createPortal } from 'react-dom'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
+import InfoTip from '@/components/ui/info-tip'
 import { usePrivacy } from '@/contexts/privacy-context'
 import {
   applyFilters, sortRows, computeSummary, toMatrix, toMatrixGrouped, matrixToCSV, empShare,
@@ -14,7 +15,7 @@ import {
 import {
   Download, Printer, FileSpreadsheet, SlidersHorizontal, X, ArrowUp, ArrowDown,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Layers, Pin, GripVertical,
-  Save, RotateCcw, Building2, Check, Search,
+  Save, RotateCcw, Building2, Check, Search, Eye, EyeOff,
 } from 'lucide-react'
 import { savePersonalReportLayout, saveSystemReportLayout } from './actions'
 import { readSortData, trackUsage, type SortEntry } from '@/lib/hooks/use-smart-sort'
@@ -427,6 +428,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   const [groups, setGroups] = useState<ColGroup[]>(hasUrlCols ? initial.groups : ((dbLayout?.groups as ColGroup[] | undefined) ?? initial.groups))
   const groupSet = useMemo(() => new Set(groups), [groups])
   const [groupKey, setGroupKey] = useState<GroupKey>(initial.groupKey)
+  const [showSummary, setShowSummary] = useState(true)
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
 
   // ── Freeze columns ──────────────────────────────────────────────────────────
@@ -910,26 +912,31 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
 
       <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4">
         {/* Summary cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-3">
-          {[
-            { label: 'Total Tasks', value: fmt(summary.totalTasks, 0) },
-            { label: 'Total Billing', value: inr(summary.totalBilling, decimals ? 2 : 0) },
-            { label: 'Commission Pool', value: inr(summary.totalPool, decimals ? 2 : 0) },
-            { label: 'Employee Earnings', value: inr(summary.totalEarnings, decimals ? 2 : 0) },
-            { label: 'Avg Contribution %', value: pct(summary.avgContributionPct) },
-            { label: 'Expected Profit', value: inr(summary.totalProfit, decimals ? 2 : 0), accent: summary.totalProfit < 0 ? 'text-red-400' : 'text-emerald-400' },
-            { label: 'Avg Expected Profit %', value: pct(summary.avgProfitPct), accent: summary.avgProfitPct < 0 ? 'text-red-400' : 'text-emerald-400' },
-            { label: 'Actual Received', value: inr(summary.totalActualReceived, decimals ? 2 : 0), sub: `${fmt(summary.actualTasks, 0)} paid tasks` },
-            { label: 'FX Gain / Loss', value: inr(summary.totalFxGainLoss, decimals ? 2 : 0), accent: summary.totalFxGainLoss < 0 ? 'text-red-400' : summary.totalFxGainLoss > 0 ? 'text-emerald-400' : '' },
-            { label: 'Actual Profit', value: inr(summary.totalActualProfit, decimals ? 2 : 0), accent: summary.totalActualProfit < 0 ? 'text-red-400' : 'text-emerald-400' },
-          ].map(c => (
-            <div key={c.label} className="bg-card border border-border rounded-xl p-3">
-              <div className="text-[11px] text-muted-foreground mb-1 truncate">{c.label}</div>
-              <div className={`text-lg font-semibold tabular-nums ${(c as any).accent || ''}`}>{c.value}</div>
-              {(c as any).sub && <div className="text-[10px] text-muted-foreground/60 mt-0.5">{(c as any).sub}</div>}
-            </div>
-          ))}
-        </div>
+        {showSummary && (
+          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-3">
+            {[
+              { label: 'Total Tasks', value: fmt(summary.totalTasks, 0), tip: 'Total number of tasks matching the current filters.' },
+              { label: 'Total Billing', value: inr(summary.totalBilling, decimals ? 2 : 0), tip: 'Sum of the total billing amount across all tasks.' },
+              { label: 'Commission Pool', value: inr(summary.totalPool, decimals ? 2 : 0), tip: 'Sum of the commission pool (the portion of billing set aside for employee payouts).' },
+              { label: 'Employee Earnings', value: inr(summary.totalEarnings, decimals ? 2 : 0), tip: 'Sum of the earnings allocated to all employees across the filtered tasks. This is calculated as (Billing Amount × Commission % × Employee % Share).' },
+              { label: 'Avg Contribution %', value: pct(summary.avgContributionPct), tip: 'The average employee contribution percentage across these tasks.' },
+              { label: 'Expected Profit', value: inr(summary.totalProfit, decimals ? 2 : 0), accent: summary.totalProfit < 0 ? 'text-red-400' : 'text-emerald-400', tip: 'The profit CirQle expects to make after paying out all employee commissions (Total Billing - Commission Pool).' },
+              { label: 'Avg Expected Profit %', value: pct(summary.avgProfitPct), accent: summary.avgProfitPct < 0 ? 'text-red-400' : 'text-emerald-400', tip: 'The average profit margin percentage.' },
+              { label: 'Actual Received', value: inr(summary.totalActualReceived, decimals ? 2 : 0), sub: `${fmt(summary.actualTasks, 0)} paid tasks`, tip: 'The actual amount of money received from clients for these tasks (only counts fully paid tasks).' },
+              { label: 'FX Gain / Loss', value: inr(summary.totalFxGainLoss, decimals ? 2 : 0), accent: summary.totalFxGainLoss < 0 ? 'text-red-400' : summary.totalFxGainLoss > 0 ? 'text-emerald-400' : '', tip: 'The difference between the expected Total Billing and the Actual Received amount (caused by currency fluctuations or short-pays).' },
+              { label: 'Actual Profit', value: inr(summary.totalActualProfit, decimals ? 2 : 0), accent: summary.totalActualProfit < 0 ? 'text-red-400' : 'text-emerald-400', tip: 'The real profit made (Actual Received - Commission Pool), which accounts for FX differences.' },
+            ].map(c => (
+              <div key={c.label} className="bg-card border border-border rounded-xl p-3">
+                <div className="flex items-center text-[11px] text-muted-foreground mb-1 truncate">
+                  {c.label}
+                  {c.tip && <InfoTip text={c.tip} />}
+                </div>
+                <div className={`text-lg font-semibold tabular-nums ${(c as any).accent || ''}`}>{c.value}</div>
+                {(c as any).sub && <div className="text-[10px] text-muted-foreground/60 mt-0.5">{(c as any).sub}</div>}
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Toolbar */}
         <div className="flex flex-wrap items-center gap-2">
@@ -947,6 +954,14 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
               <X className="w-3.5 h-3.5" /> Clear
             </button>
           )}
+          <div className="flex-1" />
+          <button
+            onClick={() => setShowSummary(s => !s)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-border bg-card text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {showSummary ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            {showSummary ? 'Hide Summary' : 'Show Summary'}
+          </button>
 
           {/* Search */}
           <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-lg px-2.5 h-[34px] min-w-[160px] max-w-[220px] flex-1 sm:flex-none">
