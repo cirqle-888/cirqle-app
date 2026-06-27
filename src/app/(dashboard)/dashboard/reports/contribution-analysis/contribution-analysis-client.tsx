@@ -127,7 +127,10 @@ function buildColumns(employees: EmployeeColumn[], dp: number): Col[] {
     { key: 'billing_inr', label: 'Billing ₹', width: 110, align: 'right', group: 'billing', render: r => inr(r.billing_inr, dp) },
     { key: 'commission_pct', label: 'Comm %', width: 80, align: 'right', group: 'billing', render: r => pct(r.commission_pct) },
     { key: 'commission_pool', label: 'Pool ₹', width: 110, align: 'right', group: 'billing', render: r => inr(r.commission_pool, dp) },
-    { key: 'total_earnings', label: 'Emp Earnings ₹', width: 120, align: 'right', group: 'profit', render: r => inr(r.total_earnings, dp) },
+    {
+      key: 'total_earnings', label: 'Total Emp Earn ₹', width: 104, align: 'right', group: 'employees',
+      render: r => inr(r.total_earnings, dp),
+    },
     { key: 'company_received', label: 'Received ₹', width: 110, align: 'right', group: 'billing', render: r => inr(r.company_received, dp) },
     {
       key: 'profit', label: 'Exp Profit ₹', width: 110, align: 'right', group: 'profit', render: r => inr(r.profit, dp),
@@ -701,7 +704,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     if (quickSort === 'client')      return [...s].sort((a, b) => (a.client_name || '').localeCompare(b.client_name || ''))
     return s
   }, [baseSort, searchQ, quickSort])
-  const summary = useMemo(() => computeSummary(filtered), [filtered])
+  const summary = useMemo(() => computeSummary(filtered, filters.employeeIds), [filtered, filters.employeeIds])
   // Per-employee earnings totals over the whole filtered set (for the totals row).
   const empEarnTotals = useMemo(() => {
     const out: Record<string, number> = {}
@@ -918,9 +921,9 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
               { label: 'Total Tasks', value: fmt(summary.totalTasks, 0), tip: 'Total number of tasks matching the current filters.' },
               { label: 'Total Billing', value: inr(summary.totalBilling, decimals ? 2 : 0), tip: 'Sum of the total billing amount across all tasks.' },
               { label: 'Commission Pool', value: inr(summary.totalPool, decimals ? 2 : 0), tip: 'Sum of the commission pool (the portion of billing set aside for employee payouts).' },
-              { label: 'Employee Earnings', value: inr(summary.totalEarnings, decimals ? 2 : 0), tip: 'Sum of the earnings allocated to all employees across the filtered tasks. This is calculated as (Billing Amount × Commission % × Employee % Share).' },
-              { label: 'Avg Contribution %', value: pct(summary.avgContributionPct), tip: 'The average employee contribution percentage across these tasks.' },
-              { label: 'Expected Profit', value: inr(summary.totalProfit, decimals ? 2 : 0), accent: summary.totalProfit < 0 ? 'text-red-400' : 'text-emerald-400', tip: 'The profit CirQle expects to make after paying out all employee commissions (Total Billing - Commission Pool).' },
+              { label: summary.filteredEarnings !== undefined ? 'Filtered Emp Earnings' : 'Employee Earnings', value: inr(summary.filteredEarnings ?? summary.totalEarnings, decimals ? 2 : 0), tip: summary.filteredEarnings !== undefined ? 'Sum of earnings allocated strictly to the filtered employees.' : 'Sum of the earnings allocated to all employees across the filtered tasks. This is calculated as (Billing Amount × Commission % × Employee % Share).' },
+              { label: summary.filteredAvgContrib !== undefined ? 'Filtered Avg Contrib %' : 'Avg Contribution %', value: pct(summary.filteredAvgContrib ?? summary.avgContributionPct), tip: summary.filteredAvgContrib !== undefined ? 'The average contribution percentage among the filtered employees.' : 'The average employee contribution percentage across these tasks.' },
+              { label: 'Expected Profit', value: inr(summary.totalProfit, decimals ? 2 : 0), accent: summary.totalProfit < 0 ? 'text-red-400' : 'text-emerald-400', tip: 'The profit CirQle expects to make after paying out ALL employee commissions on these tasks (Total Billing - Commission Pool).' },
               { label: 'Avg Expected Profit %', value: pct(summary.avgProfitPct), accent: summary.avgProfitPct < 0 ? 'text-red-400' : 'text-emerald-400', tip: 'The average profit margin percentage.' },
               { label: 'Actual Received', value: inr(summary.totalActualReceived, decimals ? 2 : 0), sub: `${fmt(summary.actualTasks, 0)} paid tasks`, tip: 'The actual amount of money received from clients for these tasks (only counts fully paid tasks).' },
               { label: 'FX Gain / Loss', value: inr(summary.totalFxGainLoss, decimals ? 2 : 0), accent: summary.totalFxGainLoss < 0 ? 'text-red-400' : summary.totalFxGainLoss > 0 ? 'text-emerald-400' : '', tip: 'The difference between the expected Total Billing and the Actual Received amount (caused by currency fluctuations or short-pays).' },

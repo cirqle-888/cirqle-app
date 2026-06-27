@@ -351,13 +351,22 @@ export interface Summary {
   totalActualReceived: number
   totalFxGainLoss: number
   totalActualProfit: number
+  // ── Filtered Employee Specific ──
+  filteredEarnings?: number
+  filteredAvgContrib?: number
 }
 
-export function computeSummary(rows: AnalysisRow[]): Summary {
+export function computeSummary(rows: AnalysisRow[], employeeFilterIds?: string[]): Summary {
   let totalBilling = 0, totalPool = 0, totalEarnings = 0, totalProfit = 0
   let profitPctSum = 0, profitPctCount = 0
   let contribPctSum = 0, contribPctCount = 0
   let actualTasks = 0, totalActualReceived = 0, totalFxGainLoss = 0, totalActualProfit = 0
+  
+  let filteredEarnings = 0
+  let filteredContribSum = 0, filteredContribCount = 0
+
+  const hasEmpFilter = employeeFilterIds && employeeFilterIds.length > 0
+
   for (const r of rows) {
     totalBilling += r.billing_inr
     totalPool += r.commission_pool
@@ -370,11 +379,24 @@ export function computeSummary(rows: AnalysisRow[]): Summary {
       totalFxGainLoss += r.fx_gain_loss ?? 0
       totalActualProfit += r.actual_profit ?? 0
     }
-    for (const id in r.emp) {
-      const pct = r.emp[id].pct
-      if (pct > 0) { contribPctSum += pct; contribPctCount++ }
+    
+    // Calculate averages based on filters
+    if (hasEmpFilter) {
+      for (const id of employeeFilterIds) {
+        if (r.emp[id]) {
+          filteredEarnings += r.emp[id].earn
+          const pct = r.emp[id].pct
+          if (pct > 0) { filteredContribSum += pct; filteredContribCount++ }
+        }
+      }
+    } else {
+      for (const id in r.emp) {
+        const pct = r.emp[id].pct
+        if (pct > 0) { contribPctSum += pct; contribPctCount++ }
+      }
     }
   }
+  
   return {
     totalTasks: rows.length,
     totalBilling: r2(totalBilling),
@@ -387,6 +409,10 @@ export function computeSummary(rows: AnalysisRow[]): Summary {
     totalActualReceived: r2(totalActualReceived),
     totalFxGainLoss: r2(totalFxGainLoss),
     totalActualProfit: r2(totalActualProfit),
+    ...(hasEmpFilter ? {
+      filteredEarnings: r2(filteredEarnings),
+      filteredAvgContrib: filteredContribCount ? r2(filteredContribSum / filteredContribCount) : 0
+    } : {})
   }
 }
 
