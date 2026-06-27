@@ -114,7 +114,7 @@ export default async function ContributionsPage() {
     timed('vis_billing',            supabase.from('company_settings').select('value').eq('key', 'visibility_billing').maybeSingle()),
     timed('vis_contrib',            supabase.from('company_settings').select('value').eq('key', 'visibility_contributions').maybeSingle()),
     timed('vis_names',              supabase.from('company_settings').select('value').eq('key', 'visibility_employee_names').maybeSingle()),
-    timed('task_group_assigns',     fetchAll(supabase.from('task_group_assignments').select('task_id, employee_id'))),
+    timed('task_group_assigns',     fetchAll(supabase.from('task_group_assignments').select('task_id, group_id, employee_id'))),
     timed('task_param_assigns',     fetchAll(supabase.from('task_parameter_assignments').select('task_id, employee_id'))),
     timed('performance_history',    fetchAll(supabase.from('employee_performance_history').select('*').order('effective_from', { ascending: false }))),
   ])

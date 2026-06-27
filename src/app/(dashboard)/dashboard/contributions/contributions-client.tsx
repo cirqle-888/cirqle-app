@@ -826,7 +826,7 @@ export default function ContributionsClient({
   const filteredGroups = useMemo(() => {
     if (!selectedTask) return groups
     const linked = groupServices.filter(gs => gs.service_id === selectedTask.service_id).map(gs => gs.group_id)
-    if (!linked.length) return groups
+    if (!linked.length) return []
     return groups.filter(g => linked.includes(g.id))
   }, [selectedTask, groups, groupServices])
 
@@ -838,7 +838,7 @@ export default function ContributionsClient({
   const filteredTools = useMemo(() => {
     if (!selectedTask) return tools
     const linked = toolServices.filter(ts => ts.service_id === selectedTask.service_id).map(ts => ts.tool_id)
-    if (!linked.length) return tools
+    if (!linked.length) return []
     return tools.filter(t => linked.includes(t.id))
   }, [selectedTask, tools, toolServices])
 
