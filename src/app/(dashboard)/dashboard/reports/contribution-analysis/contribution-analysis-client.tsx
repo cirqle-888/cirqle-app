@@ -384,7 +384,7 @@ function parseFromParams(sp: URLSearchParams): { filters: Filters; sortKey: Sort
   const rawGroups = arr('cols').filter((x): x is ColGroup => (ALL_GROUPS as string[]).includes(x))
   return {
     filters: {
-      from: g('from'), to: g('to'), month: g('month'), year: g('year'),
+      date: (function() { const d = g('date'); try { return d ? JSON.parse(d) : null } catch { return null } })(),
       clientIds: arr('clients'), serviceIds: arr('services'),
       employeeIds: arr('emp'), statuses: arr('status'),
       billingMin: g('bmin'), billingMax: g('bmax'),
@@ -659,10 +659,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   useEffect(() => {
     const p = new URLSearchParams()
     const f = filters
-    if (f.from) p.set('from', f.from)
-    if (f.to) p.set('to', f.to)
-    if (f.month) p.set('month', f.month)
-    if (f.year) p.set('year', f.year)
+    if (f.date) p.set('date', JSON.stringify(f.date))
     if (f.clientIds.length) p.set('clients', f.clientIds.join(','))
     if (f.serviceIds.length) p.set('services', f.serviceIds.join(','))
     if (f.employeeIds.length) p.set('emp', f.employeeIds.join(','))
