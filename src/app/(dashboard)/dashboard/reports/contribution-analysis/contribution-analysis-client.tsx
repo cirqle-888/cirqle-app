@@ -929,7 +929,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
               <div key={c.label} className="bg-card border border-border rounded-xl p-3">
                 <div className="flex items-center text-[11px] text-muted-foreground mb-1 truncate">
                   {c.label}
-                  {c.tip && <InfoTip text={c.tip} />}
+                  {c.tip && <InfoTip text={c.tip} direction="down" />}
                 </div>
                 <div className={`text-lg font-semibold tabular-nums ${(c as any).accent || ''}`}>{c.value}</div>
                 {(c as any).sub && <div className="text-[10px] text-muted-foreground/60 mt-0.5">{(c as any).sub}</div>}
