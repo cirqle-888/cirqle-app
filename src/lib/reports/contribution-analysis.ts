@@ -230,10 +230,7 @@ export function buildAnalysisRows(
 // ─── Filtering ────────────────────────────────────────────────────────────────
 
 export interface Filters {
-  from: string
-  to: string
-  month: string   // '1'..'12' or ''
-  year: string    // '2026' or ''
+  date: any // DateFilterValue from UI
   clientIds: string[]
   serviceIds: string[]
   employeeIds: string[]
@@ -249,7 +246,7 @@ export interface Filters {
 }
 
 export const EMPTY_FILTERS: Filters = {
-  from: '', to: '', month: '', year: '',
+  date: null,
   clientIds: [], serviceIds: [], employeeIds: [], statuses: [],
   billingMin: '', billingMax: '', profitMin: '', profitMax: '',
   profitPctMin: '', profitPctMax: '', earnMin: '', earnMax: '',
@@ -268,20 +265,8 @@ export function applyFilters(rows: AnalysisRow[], f: Filters): AnalysisRow[] {
   const pMin = numOr(f.profitMin, -Infinity), pMax = numOr(f.profitMax, Infinity)
   const ppMin = numOr(f.profitPctMin, -Infinity), ppMax = numOr(f.profitPctMax, Infinity)
   const eMin = numOr(f.earnMin, -Infinity), eMax = numOr(f.earnMax, Infinity)
-  const year = f.year ? parseInt(f.year, 10) : null
-  const month = f.month ? parseInt(f.month, 10) : null
 
   return rows.filter(row => {
-    const d = row.task_date || ''
-    if (f.from && d < f.from) return false
-    if (f.to && d > f.to) return false
-    if (year !== null || month !== null) {
-      // task_date is YYYY-MM-DD
-      const yy = parseInt(d.slice(0, 4), 10)
-      const mm = parseInt(d.slice(5, 7), 10)
-      if (year !== null && yy !== year) return false
-      if (month !== null && mm !== month) return false
-    }
     if (clientSet && !clientSet.has(row.client_id)) return false
     if (serviceSet && !serviceSet.has(row.service_id)) return false
     if (statusSet && !statusSet.has(row.status)) return false

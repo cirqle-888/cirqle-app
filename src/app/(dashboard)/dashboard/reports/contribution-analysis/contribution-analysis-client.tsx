@@ -5,6 +5,8 @@ import { createPortal } from 'react-dom'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
 import InfoTip from '@/components/ui/info-tip'
+import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
+import type { DateFilterValue } from '@/components/ui/date-filter'
 import { usePrivacy } from '@/contexts/privacy-context'
 import {
   applyFilters, sortRows, computeSummary, toMatrix, toMatrixGrouped, matrixToCSV, empShare,
@@ -685,7 +687,11 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   }, [filters, sortKey, sortDir, pageSize, decimals, groups, groupKey, pathname, router, searchParams])
 
   // ── Pipeline: filter → sort ───────────────────────────────────────────────────
-  const filtered = useMemo(() => applyFilters(rows, filters), [rows, filters])
+  const filtered = useMemo(() => {
+    const f = applyFilters(rows, filters)
+    if (filters.date) return f.filter(r => matchesDateFilter(r.task_date, filters.date))
+    return f
+  }, [rows, filters])
   const baseSort = useMemo(() => sortRows(filtered, sortKey, sortDir), [filtered, sortKey, sortDir])
   const sorted = useMemo(() => {
     let s = baseSort
@@ -1263,23 +1269,10 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
           <div className="bg-card border border-border rounded-xl p-4 space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
               <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">From date</label>
-                <input type="date" value={filters.from} onChange={e => setFilters(f => ({ ...f, from: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs" />
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">To date</label>
-                <input type="date" value={filters.to} onChange={e => setFilters(f => ({ ...f, to: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs" />
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Month</label>
-                <select value={filters.month} onChange={e => setFilters(f => ({ ...f, month: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs">
-                  <option value="">Any</option>
-                  {MONTHS.map((m, i) => <option key={m} value={String(i + 1)}>{m}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Year</label>
-                <input type="number" placeholder="Any" value={filters.year} onChange={e => setFilters(f => ({ ...f, year: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs" />
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Date</label>
+                <div className="flex bg-secondary border border-border rounded-lg p-0.5">
+                  <DateFilter value={filters.date} onChange={d => setFilters(f => ({ ...f, date: d }))} className="flex-1 [&>button]:w-full [&>button]:bg-transparent [&>button]:border-none [&>button]:shadow-none" />
+                </div>
               </div>
               <MultiSelect label="Clients" options={scopedClients} selected={filters.clientIds} onChange={ids => setFilters(f => ({ ...f, clientIds: ids }))} sortKey="clients" />
               <MultiSelect label="Services" options={scopedServices} selected={filters.serviceIds} onChange={ids => setFilters(f => ({ ...f, serviceIds: ids }))} sortKey="services" />
