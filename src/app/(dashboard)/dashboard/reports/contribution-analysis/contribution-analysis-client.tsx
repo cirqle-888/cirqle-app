@@ -927,8 +927,8 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
               { label: 'Actual Profit', value: inr(summary.totalActualProfit, decimals ? 2 : 0), accent: summary.totalActualProfit < 0 ? 'text-red-400' : 'text-emerald-400', tip: 'The real profit made (Actual Received - Commission Pool), which accounts for FX differences.' },
             ].map(c => (
               <div key={c.label} className="bg-card border border-border rounded-xl p-3">
-                <div className="flex items-center text-[11px] text-muted-foreground mb-1 truncate">
-                  {c.label}
+                <div className="flex items-center text-[11px] text-muted-foreground mb-1">
+                  <span className="truncate">{c.label}</span>
                   {c.tip && <InfoTip text={c.tip} direction="down" />}
                 </div>
                 <div className={`text-lg font-semibold tabular-nums ${(c as any).accent || ''}`}>{c.value}</div>
