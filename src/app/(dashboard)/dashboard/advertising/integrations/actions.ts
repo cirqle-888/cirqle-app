@@ -40,6 +40,21 @@ export async function fetchProviderConnections(clientId?: string) {
   return data
 }
 
+export async function fetchActiveClients() {
+  const guard = await requirePermission(PERMS.ADVERTISING_MANAGE_PROVIDERS)
+  if (!guard.ok) throw new Error(guard.error)
+  const admin = createAdminClient()
+  
+  const { data, error } = await admin
+    .from('clients')
+    .select('id, name')
+    .eq('status', 'active')
+    .order('name')
+    
+  if (error) throw error
+  return data || []
+}
+
 export async function disconnectProvider(connectionId: string) {
   const me = await requirePermission(PERMS.ADVERTISING_MANAGE_PROVIDERS)
   if (!me.ok) throw new Error(me.error)

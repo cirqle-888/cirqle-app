@@ -3,7 +3,8 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { disconnectProvider, refreshAdAccounts } from './actions'
+import { disconnectProvider, refreshAdAccounts, fetchActiveClients } from './actions'
+import { ModalOverlay } from '@/components/ui/modal-overlay'
 
 import { Loader2, Plus, RefreshCw, Trash2, FolderPlus } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
@@ -29,6 +30,12 @@ export function IntegrationsClient({ initialConnections }: { initialConnections:
   const [wizardOpen, setWizardOpen] = useState(false)
   const [selectedAccount, setSelectedAccount] = useState<any | null>(null)
   const [selectedClientId, setSelectedClientId] = useState<string>('')
+
+  // Client Selection State
+  const [isClientModalOpen, setIsClientModalOpen] = useState(false)
+  const [clients, setClients] = useState<{id: string, name: string}[]>([])
+  const [selectedClientForAuth, setSelectedClientForAuth] = useState<string>('')
+  const [providerToConnect, setProviderToConnect] = useState<'meta' | 'google' | null>(null)
 
   const handleDisconnect = async (id: string) => {
     if (!confirm('Are you sure you want to disconnect this provider?')) return
@@ -56,33 +63,32 @@ export function IntegrationsClient({ initialConnections }: { initialConnections:
     }
   }
 
-  const handleConnectMeta = () => {
-    // Hardcoded workspace for demo if multiple workspaces exist, but usually we'd have a workspace selector
-    // In cirqle, we often have a context provider for the current client, or they pick one.
-    // For now, let's use a dummy client ID if not provided, or prompt.
-    // Assuming there's a client selection or it connects to a specific client.
-    // In Phase A, we added provider_connections per client.
-    const clientId = prompt('Enter Client ID to connect (UUID):')
-    if (clientId) {
-      window.location.href = `/api/auth/meta/login?client_id=${clientId}`
+  const openClientSelector = async (provider: 'meta' | 'google') => {
+    setProviderToConnect(provider)
+    try {
+      const data = await fetchActiveClients()
+      setClients(data)
+      if (data.length > 0) setSelectedClientForAuth(data[0].id)
+      setIsClientModalOpen(true)
+    } catch (err: any) {
+      alert('Failed to load clients: ' + err.message)
     }
   }
 
-  const handleConnectGoogle = () => {
-    const clientId = prompt('Enter Client ID to connect (UUID):')
-    if (clientId) {
-      window.location.href = `/api/auth/google/login?client_id=${clientId}`
-    }
+  const handleProceedWithAuth = () => {
+    if (!selectedClientForAuth || !providerToConnect) return
+    setIsClientModalOpen(false)
+    window.location.href = `/api/auth/${providerToConnect}/login?client_id=${selectedClientForAuth}`
   }
 
   return (
     <div className="space-y-6">
       
       <div className="flex justify-end gap-2">
-        <Button variant="outline" onClick={handleConnectMeta}>
+        <Button variant="outline" onClick={() => openClientSelector('meta')}>
           <Plus className="mr-2 h-4 w-4" /> Connect Meta Ads
         </Button>
-        <Button variant="outline" onClick={handleConnectGoogle}>
+        <Button variant="outline" onClick={() => openClientSelector('google')}>
           <Plus className="mr-2 h-4 w-4" /> Connect Google Ads
         </Button>
       </div>
@@ -202,11 +208,41 @@ export function IntegrationsClient({ initialConnections }: { initialConnections:
 
       <CreateProjectWizard 
         open={wizardOpen}
-
         onOpenChange={setWizardOpen}
         adAccount={selectedAccount}
         clientId={selectedClientId}
       />
+
+      {isClientModalOpen && (
+        <ModalOverlay onClose={() => setIsClientModalOpen(false)}>
+          <div className="bg-card text-card-foreground shadow-lg border rounded-2xl w-[400px] overflow-hidden flex flex-col">
+            <div className="p-6 border-b">
+              <h2 className="text-xl font-semibold">Select Workspace</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Choose the client workspace to connect {providerToConnect === 'meta' ? 'Meta' : 'Google'} Ads.
+              </p>
+            </div>
+            <div className="p-6">
+              <label className="text-sm font-medium mb-2 block">Client</label>
+              <select 
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                value={selectedClientForAuth}
+                onChange={(e) => setSelectedClientForAuth(e.target.value)}
+              >
+                {clients.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="p-6 border-t bg-muted/50 flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setIsClientModalOpen(false)}>Cancel</Button>
+              <Button onClick={handleProceedWithAuth} disabled={!selectedClientForAuth}>
+                Continue to {providerToConnect === 'meta' ? 'Meta' : 'Google'}
+              </Button>
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
     </div>
   )
 }
