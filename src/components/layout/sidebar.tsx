@@ -39,6 +39,7 @@ import {
   Tag,
   Package,
   Blocks,
+  Megaphone,
 } from 'lucide-react'
 import { CommandPaletteTrigger } from '@/components/ui/command-palette'
 import { NotificationBell } from '@/components/layout/notification-bell'
@@ -159,7 +160,8 @@ const navSections: NavSection[] = [
   {
     label: 'Apps',
     items: [
-      { label: 'Apps Directory', href: '/dashboard/apps', icon: Blocks },
+      { label: 'Advertising',    href: '/dashboard/advertising', icon: Megaphone, requiredPerm: 'advertising.view' },
+      { label: 'Apps Directory', href: '/dashboard/apps',        icon: Blocks },
     ],
   },
   {

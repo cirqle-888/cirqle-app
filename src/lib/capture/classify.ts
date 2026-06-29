@@ -17,7 +17,7 @@ import type { CaptureClassification, CaptureType } from './types'
 /** Below this the classifier's pick is treated as 'unknown' → user chooses. */
 export const CONFIDENCE_THRESHOLD = 0.45
 
-const ALLOWED: CaptureType[] = ['request', 'offer', 'invoice', 'client', 'task', 'quotation', 'unknown']
+const ALLOWED: CaptureType[] = ['request', 'offer', 'invoice', 'client', 'task', 'quotation', 'advertising', 'unknown']
 
 const SYSTEM_PROMPT =
   `You are a router for a creative agency's operations app. Classify ONE pasted snippet ` +
@@ -28,6 +28,7 @@ const SYSTEM_PROMPT =
   `- "client": contact details for a customer (name + phone/email/address, a vCard)\n` +
   `- "task": an internal to-do for the team (not a client-facing request)\n` +
   `- "quotation": a request for a price quote / RFQ / estimate\n` +
+  `- "advertising": a client wants PAID ADS run or managed — Meta/Facebook/Instagram/Google/YouTube/TikTok/LinkedIn/X/Snapchat ads, a lead-generation or conversion campaign, boosting a post, PPC, or ad-budget management (e.g. "run meta ads ₹20k", "google ads for our store", "boost this post", "lead gen campaign", "awareness campaign"). Prefer this over "request" whenever paid ad spend, an ad platform, or an ad budget is involved.\n` +
   `- "unknown": none of the above, or too ambiguous to tell\n` +
   `Respond with ONLY JSON: {"type": <one of the above>, "confidence": <0..1>, "client_hint": <name or null>}. ` +
   `Do not explain. Do not use <think> tags.`

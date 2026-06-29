@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('desk', {
   preset: (p) => ipcRenderer.send('layout:preset', p),
   reload: (which) => ipcRenderer.send('reload', which),
   capture: () => ipcRenderer.send('capture:clipboard'),
+  retry: (pane) => ipcRenderer.send('retry', pane),
   splitterStart: () => ipcRenderer.send('splitter:start'),
   splitterDrag: (screenX) => ipcRenderer.send('splitter:drag', screenX),
   splitterEnd: () => ipcRenderer.send('splitter:end'),

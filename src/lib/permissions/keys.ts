@@ -83,6 +83,30 @@ export const PERMS = {
   INTAKE_LINKS_MANAGE:    'intake_links.manage',
   AGENCY_LINKS_MANAGE:    'agency_links.manage',
 
+  // Advertising — paid-ads campaign management module
+  ADVERTISING_VIEW:            'advertising.view',
+  ADVERTISING_CREATE:          'advertising.create',
+  ADVERTISING_EDIT:            'advertising.edit',
+  ADVERTISING_DELETE:          'advertising.delete',
+  /** Set the ad spend budget + agency service charge, and sync invoices. */
+  ADVERTISING_MANAGE_BUDGET:   'advertising.manage_budget',
+  /** Add / edit daily performance entries for assigned campaigns. */
+  ADVERTISING_ENTER_METRICS:   'advertising.enter_metrics',
+  /** Approve daily metrics submitted by media buyers. */
+  ADVERTISING_APPROVE_METRICS: 'advertising.approve_metrics',
+  ADVERTISING_VIEW_REPORTS:    'advertising.view_reports',
+  
+  // Advertising - Enterprise ERP Permissions
+  ADVERTISING_MANAGE_PROVIDERS:'advertising.manage_providers',
+  ADVERTISING_MANAGE_OAUTH:    'advertising.manage_oauth',
+  ADVERTISING_MAP_CAMPAIGNS:   'advertising.map_campaigns',
+  ADVERTISING_MANUAL_SYNC:     'advertising.manual_sync',
+  ADVERTISING_MANAGE_SETTINGS: 'advertising.manage_settings',
+  ADVERTISING_VIEW_AI:         'advertising.view_ai',
+  ADVERTISING_MANAGE_AI:       'advertising.manage_ai',
+  ADVERTISING_RUN_AI:          'advertising.run_ai',
+  ADVERTISING_VIEW_FORECASTS:  'advertising.view_forecasts',
+
   // Clients / Services — granular "add" perms (separate from settings.access)
   /** Create new clients (e.g. + Add client in the task form). */
   CLIENTS_CREATE:  'clients.create',

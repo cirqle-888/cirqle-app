@@ -12,7 +12,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Sparkles, Loader2, User, ArrowRight, CheckCircle2, AlertCircle } from 'lucide-react'
-import { analyzeCapture, analyzeCaptureAs, commitRequestCapture } from './actions'
+import { analyzeCapture, analyzeCaptureAs, commitRequestCapture, commitAdvertisingCapture } from './actions'
 import type { CaptureInput, CaptureResult, CaptureType } from '@/lib/capture/types'
 
 const TYPE_META: Record<CaptureType, { label: string; color: string }> = {
@@ -22,6 +22,7 @@ const TYPE_META: Record<CaptureType, { label: string; color: string }> = {
   client:    { label: 'Client',    color: 'text-sky-600 bg-sky-500/10' },
   task:      { label: 'Task',      color: 'text-blue-600 bg-blue-500/10' },
   quotation: { label: 'Quotation', color: 'text-fuchsia-600 bg-fuchsia-500/10' },
+  advertising: { label: 'Advertising', color: 'text-pink-600 bg-pink-500/10' },
   unknown:   { label: 'Unknown',   color: 'text-muted-foreground bg-muted' },
 }
 
@@ -71,6 +72,22 @@ export default function CaptureClient() {
       if (res.ok) {
         const ref = res.data?.ref_no ? `REQ-${String(res.data.ref_no).padStart(4, '0')}` : 'Request'
         setDone(`${ref} created in Requests.`)
+      } else {
+        setResult({ ...result!, ok: false, error: res.error })
+      }
+    } else if (draft.type === 'advertising') {
+      setCommitting(true)
+      const res = await commitAdvertisingCapture({
+        clientId: (draft.fields.clientId as string) || null,
+        campaignName: draft.fields.campaignName as string,
+        description: text,
+        platform: (draft.fields.platform as string) || null,
+        campaignType: (draft.fields.campaignType as string) || null,
+        adBudget: (draft.fields.adBudget as number) ?? null,
+      })
+      setCommitting(false)
+      if (res.ok) {
+        setDone(`${res.data?.ref ?? 'Request'} created in Requests — start it from Advertising.`)
       } else {
         setResult({ ...result!, ok: false, error: res.error })
       }
@@ -194,7 +211,7 @@ export default function CaptureClient() {
                 className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 hover:bg-violet-700"
               >
                 {committing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                {draft.type === 'request' ? 'Create request' : `Open in ${TYPE_META[draft.type].label}`}
+                {draft.type === 'request' || draft.type === 'advertising' ? 'Create request' : `Open in ${TYPE_META[draft.type].label}`}
               </button>
             </div>
           )}
@@ -212,6 +229,11 @@ function DraftFields({ type, fields }: { type: CaptureType; fields: Record<strin
     add('Title', fields.title)
     add('Service', fields.serviceName)
     add('Due', fields.dueDate || fields.date)
+  } else if (type === 'advertising') {
+    add('Campaign', fields.campaignName)
+    add('Platform', fields.platform)
+    add('Objective', fields.campaignType)
+    add('Budget', fields.adBudget != null ? `₹${Number(fields.adBudget).toLocaleString('en-IN')}` : null)
   } else if (type === 'client') {
     add('Name', fields.name); add('Phone', fields.phone); add('Email', fields.email)
   } else if (type === 'offer') {

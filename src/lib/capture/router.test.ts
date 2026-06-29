@@ -11,9 +11,9 @@ describe('Smart Router', () => {
     }
   })
 
-  it('registers exactly the six modules', () => {
+  it('registers exactly the seven modules', () => {
     expect([...ROUTABLE_TYPES].sort()).toEqual(
-      ['client', 'invoice', 'offer', 'quotation', 'request', 'task'],
+      ['advertising', 'client', 'invoice', 'offer', 'quotation', 'request', 'task'],
     )
   })
 

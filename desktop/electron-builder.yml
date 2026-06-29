@@ -7,7 +7,24 @@ files:
   - package.json
 mac:
   category: public.app-category.business
+  icon: assets/icon.icns
   target: dmg
   # Unsigned, free build (no Apple Developer account). Gatekeeper blocks the
   # first launch — see README for the one-time right-click → Open / xattr step.
   identity: null
+dmg:
+  title: "Cirqle Workspace Setup"
+  icon: assets/icon.icns
+  iconSize: 120
+  background: assets/background.png
+  window:
+    width: 800
+    height: 500
+  contents:
+    - x: 200
+      y: 340
+      type: file
+    - x: 600
+      y: 340
+      type: link
+      path: /Applications

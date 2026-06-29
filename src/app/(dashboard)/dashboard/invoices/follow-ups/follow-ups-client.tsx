@@ -498,6 +498,7 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
                                     onMarkSent={() => doMarkSent(inv.id)}
                                     onMarkSentAndShare={() => markSentAndShare(inv)}
                                     onShareInvoice={() => shareInvoice(inv)}
+                                    onCopyInvoice={() => copyText(invoiceShareText(inv))}
                                     onRecordPayment={(args) => doRecordPayment(inv.id, args)}
                                     onSubmit={() => submitFollowup(inv.id)}
                                     onDeleteFollowup={doDeleteFollowup}
@@ -562,6 +563,7 @@ interface CardProps {
   onMarkSent:     () => void
   onMarkSentAndShare: () => void
   onShareInvoice: () => void
+  onCopyInvoice: () => void
   onRecordPayment:(args: { amount: number; date: string; method: string; reference: string }) => Promise<boolean>
   onSubmit:       () => void
   onDeleteFollowup: (id: string) => void
@@ -708,6 +710,13 @@ function InvoiceCard(p: CardProps) {
                 className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-700 border border-emerald-500/30 hover:bg-emerald-500/25 dark:text-emerald-400 transition-colors"
               >
                 <MessageCircle className="w-3.5 h-3.5" /> Share invoice
+              </button>
+              <button
+                onClick={p.onCopyInvoice}
+                title="Copy the message to paste into the WhatsApp pane"
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-secondary border border-border hover:bg-secondary/70 text-foreground transition-colors"
+              >
+                <Copy className="w-3.5 h-3.5" /> Copy message
               </button>
               <button
                 onClick={p.onToggleWa}

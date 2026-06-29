@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
-import { Inbox, Tag, Settings as SettingsIcon, ArrowRight, Sparkles, Link2, Copy, Check, MessageCircle, Users, ExternalLink } from 'lucide-react'
+import { Inbox, Tag, Settings as SettingsIcon, ArrowRight, Sparkles, Link2, Copy, Check, MessageCircle, Users, ExternalLink, Megaphone } from 'lucide-react'
 import { INTAKE_KIND_META } from '@/lib/services/intake'
 import { whatsappShareUrl } from '@/lib/invoices/share'
 
@@ -16,8 +16,6 @@ const APPS: { kind: string; configHref: string; icon: typeof Inbox }[] = [
 // Planned modules (no portal yet) — surfaced so the roadmap is visible and the
 // "add-on" model is obvious.
 const COMING: { label: string; description: string }[] = [
-  { label: 'Meta Ads Reports',   description: 'Ad-report intake for clients on a Meta Ads retainer.' },
-  { label: 'Google Ads Reports', description: 'Google Ads performance submissions.' },
   { label: 'Website Requests',   description: 'Website change / build request intake.' },
   { label: 'SEO',                description: 'SEO task and report intake.' },
 ]
@@ -107,6 +105,31 @@ export default function AppsClient({ clientCounts, multiServiceClients = [] }: {
 
         {/* Active apps */}
         <div className="grid sm:grid-cols-2 gap-4">
+          {/* Advertising — a full management module (not a tokenised intake form),
+              but it's an "app" that handles client ad requests through the same
+              Requests inbox, so it lives here too. */}
+          <Link
+            href="/dashboard/advertising"
+            className="rounded-xl border border-border bg-card p-5 flex flex-col hover:border-pink-500/40 transition-colors"
+          >
+            <div className="flex items-center gap-2.5 mb-2">
+              <div className="w-9 h-9 rounded-lg bg-pink-500/10 border border-pink-500/20 flex items-center justify-center shrink-0">
+                <Megaphone className="w-4 h-4 text-pink-600 dark:text-pink-400" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">Advertising</h3>
+                <p className="text-[11px] text-muted-foreground">Paid-ads campaigns</p>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground flex-1">
+              Run Meta / Google / etc. campaigns. Client ad requests land in the Requests inbox; start one to
+              create a campaign + a single task, with daily performance, budgets and billing.
+            </p>
+            <span className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-pink-600 dark:text-pink-400">
+              <ArrowRight className="w-3.5 h-3.5" /> Open module
+            </span>
+          </Link>
+
           {APPS.map(({ kind, configHref, icon: Icon }) => {
             const meta = INTAKE_KIND_META[kind]
             const count = clientCounts[kind] || 0

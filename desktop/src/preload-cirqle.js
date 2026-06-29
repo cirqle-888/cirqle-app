@@ -8,7 +8,10 @@
  */
 const { contextBridge, ipcRenderer } = require('electron')
 
-contextBridge.exposeInMainWorld('__CIRQLE_DESKTOP__', { version: 1 })
+contextBridge.exposeInMainWorld('__CIRQLE_DESKTOP__', {
+  version: 1,
+  retry: (pane) => ipcRenderer.send('retry', pane),
+})
 
 ipcRenderer.on('cirqle:capture', (_e, payload) => {
   try {

@@ -1257,9 +1257,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
               <div>
                 <label className="block text-[11px] font-medium text-muted-foreground mb-1">Date</label>
-                <div className="flex bg-secondary border border-border rounded-lg p-0.5">
-                  <DateFilter value={filters.date} onChange={d => setFilters(f => ({ ...f, date: d }))} className="flex-1 [&>button]:w-full [&>button]:bg-transparent [&>button]:border-none [&>button]:shadow-none" />
-                </div>
+                <DateFilter value={filters.date} onChange={d => setFilters(f => ({ ...f, date: d }))} className="w-full [&>button]:w-full [&>button]:border-border" compact />
               </div>
               <MultiSelect label="Clients" options={scopedClients} selected={filters.clientIds} onChange={ids => setFilters(f => ({ ...f, clientIds: ids }))} sortKey="clients" />
               <MultiSelect label="Services" options={scopedServices} selected={filters.serviceIds} onChange={ids => setFilters(f => ({ ...f, serviceIds: ids }))} sortKey="services" />

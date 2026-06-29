@@ -11,6 +11,7 @@
 import { resolveCurrentEmployeeId } from '@/lib/auth/enforce'
 import { runCapture, prepareAs } from '@/lib/capture/engine'
 import { createManualRequest } from '@/app/(dashboard)/dashboard/requests/actions'
+import { createAdvertisingRequest } from '@/app/(dashboard)/dashboard/advertising/actions'
 import type { CaptureInput, CaptureResult, CaptureType } from '@/lib/capture/types'
 
 async function ensureSignedIn(): Promise<string | null> {
@@ -46,5 +47,32 @@ export async function commitRequestCapture(fields: {
     description: fields.description || '',
     serviceId: fields.serviceId ?? null,
     dueDate: fields.dueDate ?? null,
+  })
+}
+
+/**
+ * Commit a reviewed advertising draft. Advertising requests ride the Requests
+ * inbox (so a client ad request reads like any other request); "Start" on the
+ * Advertising dashboard then turns it into a campaign + its single task.
+ */
+export async function commitAdvertisingCapture(fields: {
+  clientId?: string | null
+  campaignName?: string
+  description?: string
+  platform?: string | null
+  campaignType?: string | null
+  adBudget?: number | null
+}): Promise<{ ok: boolean; error?: string; data?: any }> {
+  if (!(await ensureSignedIn())) return { ok: false, error: 'Not signed in.' }
+  if (!fields.clientId) {
+    return { ok: false, error: 'A client is required — none was detected. Open it in Requests to pick one.' }
+  }
+  return createAdvertisingRequest({
+    clientId: fields.clientId,
+    title: fields.campaignName || 'Advertising campaign',
+    description: fields.description || '',
+    platform: fields.platform ?? null,
+    campaignType: fields.campaignType ?? null,
+    adBudget: fields.adBudget ?? null,
   })
 }

@@ -17,7 +17,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 /** Destinations the Smart Router can dispatch to (plus the catch-all). */
 export type CaptureType =
-  | 'request' | 'offer' | 'invoice' | 'client' | 'task' | 'quotation' | 'unknown'
+  | 'request' | 'offer' | 'invoice' | 'client' | 'task' | 'quotation' | 'advertising' | 'unknown'
 
 /**
  * Where the content came from. The desktop sources ship in v1; the string

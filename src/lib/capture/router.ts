@@ -12,9 +12,11 @@ import { invoiceAdapter } from './adapters/invoice'
 import { clientAdapter } from './adapters/client'
 import { taskAdapter } from './adapters/task'
 import { quotationAdapter } from './adapters/quotation'
+import { advertisingAdapter } from './adapters/advertising'
 
 const ADAPTERS: ModuleAdapter[] = [
   requestAdapter, offerAdapter, invoiceAdapter, clientAdapter, taskAdapter, quotationAdapter,
+  advertisingAdapter,
 ]
 
 const REGISTRY = new Map<CaptureType, ModuleAdapter>(ADAPTERS.map(a => [a.type, a]))
