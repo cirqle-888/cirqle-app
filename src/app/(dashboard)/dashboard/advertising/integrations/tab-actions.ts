@@ -3,6 +3,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission } from '@/lib/auth/enforce'
 import { PERMS } from '@/lib/permissions/keys'
+import { enqueueJob } from '@/lib/jobs/engine'
 
 export async function fetchSyncLogs(projectId: string) {
   const guard = await requirePermission(PERMS.ADVERTISING_VIEW)
@@ -26,14 +27,12 @@ export async function triggerManualSync(projectId: string) {
 
   await admin.from('ad_projects').update({ sync_status: 'queued' }).eq('id', projectId)
 
-  const { error } = await admin.from('system_jobs').insert({
+  await enqueueJob({
     job_type: 'advertising_sync_project',
     payload: { project_id: projectId },
-    status: 'waiting',
     priority: 'high',
   })
 
-  if (error) throw error
   return { success: true }
 }
 
