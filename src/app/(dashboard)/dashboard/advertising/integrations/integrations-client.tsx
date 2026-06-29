@@ -1,12 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { disconnectProvider, refreshAdAccounts, fetchActiveClients } from './actions'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 
-import { Loader2, Plus, RefreshCw, Trash2, FolderPlus } from 'lucide-react'
+import { Loader2, Plus, RefreshCw, Trash2, FolderPlus, CheckCircle, XCircle } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { CreateProjectWizard } from './CreateProjectWizard'
 import { SyncStatusPanel } from './SyncStatusPanel'
@@ -22,10 +23,33 @@ interface ProviderConnection {
   ad_accounts?: any[]
 }
 
+const ERROR_MESSAGES: Record<string, string> = {
+  auth_failed:    'Meta authentication failed. Please try again.',
+  auth_denied:    'You cancelled the Meta connection.',
+  not_configured: 'Meta OAuth is not configured on this server.',
+  server_error:   'A server error occurred. Check logs and try again.',
+}
+
 export function IntegrationsClient({ initialConnections }: { initialConnections: any[] }) {
+  const searchParams = useSearchParams()
+  const router = useRouter()
   const [connections, setConnections] = useState<ProviderConnection[]>(initialConnections)
   const [isRefreshing, setIsRefreshing] = useState<string | null>(null)
   const [isDisconnecting, setIsDisconnecting] = useState<string | null>(null)
+  const [flash, setFlash] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+
+  useEffect(() => {
+    const success = searchParams.get('success')
+    const error = searchParams.get('error')
+    if (success === 'meta_connected') {
+      setFlash({ type: 'success', message: 'Meta Ads connected successfully. Ad accounts have been discovered.' })
+      router.replace('/dashboard/advertising/integrations')
+    } else if (error) {
+      setFlash({ type: 'error', message: ERROR_MESSAGES[error] || 'An unknown error occurred.' })
+      router.replace('/dashboard/advertising/integrations')
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const [wizardOpen, setWizardOpen] = useState(false)
   const [selectedAccount, setSelectedAccount] = useState<any | null>(null)
@@ -83,7 +107,23 @@ export function IntegrationsClient({ initialConnections }: { initialConnections:
 
   return (
     <div className="space-y-6">
-      
+      {flash && (
+        <div className={`flex items-start gap-3 rounded-lg border px-4 py-3 text-sm ${
+          flash.type === 'success'
+            ? 'border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-400'
+            : 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400'
+        }`}>
+          {flash.type === 'success'
+            ? <CheckCircle className="h-4 w-4 mt-0.5 shrink-0" />
+            : <XCircle className="h-4 w-4 mt-0.5 shrink-0" />}
+          <span>{flash.message}</span>
+          <button
+            onClick={() => setFlash(null)}
+            className="ml-auto text-current opacity-60 hover:opacity-100"
+          >×</button>
+        </div>
+      )}
+
       <div className="flex justify-end gap-2">
         <Button variant="outline" onClick={() => openClientSelector('meta')}>
           <Plus className="mr-2 h-4 w-4" /> Connect Meta Ads
