@@ -42,14 +42,12 @@ export function IntegrationsTab({ project, canEdit, onChange }: { project: any, 
     try {
       const data = await fetchProviderConnections(project.client_id)
       setConnections(data)
-      
-      // If we already have an ad_account_id, find the connection for it
-      if (project.ad_account_id) {
-        // Find which connection this account belongs to, we would normally do this securely via backend
-        // For now, let's just trigger loading accounts if connection is selected
+      // Auto-select first connection so accounts load immediately
+      if (data.length > 0 && !selectedConnectionId) {
+        setSelectedConnectionId(data[0].id)
       }
     } catch (err: any) {
-      alert('Failed to load connections')
+      console.error('Failed to load connections', err)
     } finally {
       setLoading(false)
     }

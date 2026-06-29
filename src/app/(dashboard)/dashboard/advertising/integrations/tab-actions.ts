@@ -57,10 +57,10 @@ export async function fetchAdAccounts(connectionId: string) {
   const admin = createAdminClient()
   const { data, error } = await admin
     .from('ad_accounts')
-    .select('id, name, account_id, currency, status')
+    .select('id, name, account_id, currency, is_active')
     .eq('connection_id', connectionId)
     .order('name')
-  
+
   if (error) throw error
   return data
 }
