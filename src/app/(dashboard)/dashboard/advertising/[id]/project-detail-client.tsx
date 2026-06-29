@@ -25,7 +25,7 @@ import { healthScore } from '@/lib/advertising/health'
 import BudgetFields, { emptyBudget, resolveBudget, type BudgetValue } from '../budget-fields'
 import {
   updateAdStatus, saveAdBudget, upsertDailyMetric, approveDailyMetric, deleteDailyMetric,
-  addAdTask, addAdNote, createInvoiceForProject, setMetricSyncState
+  addAdTask, addAdNote, createInvoiceForProject, setMetricSyncState, softDeleteAdProject,
 } from '../actions'
 import { IntegrationsTab } from './integrations-tab'
 
@@ -62,10 +62,20 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, ev
     roas: agg.roas, ctr: agg.ctr, status: project.status,
   }), [project, agg])
 
+  const [deleting, setDeleting] = useState(false)
+
   async function onStatus(v: string) {
     setStatus(v)
     await updateAdStatus(project.id, v)
     router.refresh()
+  }
+
+  async function onDelete() {
+    if (!confirm(`Delete "${project.campaign_name}"? This cannot be undone.`)) return
+    setDeleting(true)
+    const res = await softDeleteAdProject(project.id)
+    if (res.ok) router.push('/dashboard/advertising')
+    else { alert(res.error || 'Failed to delete.'); setDeleting(false) }
   }
 
   const tabs: { key: Tab; label: string }[] = [
@@ -94,19 +104,32 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, ev
               {project.campaign_type ? ` · ${CAMPAIGN_TYPE_LABEL[project.campaign_type] || project.campaign_type}` : ''}
             </p>
           </div>
-          {perms.edit ? (
-            <select
-              value={status}
-              onChange={e => onStatus(e.target.value)}
-              className={`rounded-full border px-3 py-1 text-xs font-semibold outline-none ${AD_STATUS_CHIP[status] || ''}`}
-            >
-              {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-            </select>
-          ) : (
-            <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${AD_STATUS_CHIP[status] || ''}`}>
-              {STATUS_LABEL[status] || status}
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {perms.edit ? (
+              <select
+                value={status}
+                onChange={e => onStatus(e.target.value)}
+                className={`rounded-full border px-3 py-1 text-xs font-semibold outline-none ${AD_STATUS_CHIP[status] || ''}`}
+              >
+                {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+            ) : (
+              <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${AD_STATUS_CHIP[status] || ''}`}>
+                {STATUS_LABEL[status] || status}
+              </span>
+            )}
+            {perms.edit && (
+              <button
+                onClick={onDelete}
+                disabled={deleting}
+                title="Delete campaign"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-500/20 dark:text-red-400 disabled:opacity-50 transition-colors"
+              >
+                {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                Delete
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
