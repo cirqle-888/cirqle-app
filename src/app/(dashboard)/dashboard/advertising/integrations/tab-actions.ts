@@ -23,11 +23,14 @@ export async function triggerManualSync(projectId: string) {
   const guard = await requirePermission(PERMS.ADVERTISING_ENTER_METRICS)
   if (!guard.ok) throw new Error(guard.error)
   const admin = createAdminClient()
+
+  await admin.from('ad_projects').update({ sync_status: 'queued' }).eq('id', projectId)
+
   const { error } = await admin.from('system_jobs').insert({
-    type: 'advertising_sync_project',
+    job_type: 'advertising_sync_project',
     payload: { project_id: projectId },
-    status: 'pending',
-    priority: 1
+    status: 'waiting',
+    priority: 'high',
   })
 
   if (error) throw error
