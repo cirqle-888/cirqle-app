@@ -48,7 +48,7 @@ export async function fetchActiveClients() {
   const { data, error } = await admin
     .from('clients')
     .select('id, name')
-    .eq('status', 'active')
+    .eq('is_active', true)
     .order('name')
     
   if (error) throw error
