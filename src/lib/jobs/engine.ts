@@ -138,3 +138,4 @@ export async function heartbeatJob(jobId: string): Promise<void> {
 
   if (error) console.error(`[Jobs] Failed to heartbeat job ${jobId}:`, error)
 }
+
