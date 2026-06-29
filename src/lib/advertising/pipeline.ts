@@ -142,6 +142,7 @@ export async function ingestMetrics(
         employeeId: employeeId || undefined,
         metadata: { error: upsertErr.message }
       })
+      throw new Error(`ad_daily_metrics upsert failed: ${upsertErr.message} (code: ${upsertErr.code})`)
     } else {
       // 5. Fire events and check thresholds
       for (const pid of projectIds) {
