@@ -9,11 +9,12 @@
  * guarded server actions; after each, router.refresh() re-pulls server data.
  */
 
-import { useMemo, useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
-  Megaphone, ArrowLeft, Loader2, Plus, Check, Trash2, FileText, ExternalLink,
+  Megaphone, ArrowLeft, Loader2, Plus, Check, Trash2, FileText, ExternalLink, BarChart2,
+  Download, Calendar, ChevronDown, CheckCircle, XCircle, Clock,
 } from 'lucide-react'
 import {
   AD_STATUS_CHIP, STATUS_LABEL, STATUSES, PLATFORM_LABEL, CAMPAIGN_TYPE_LABEL, adRefLabel,
@@ -47,7 +48,7 @@ const inr = (v: number | null | undefined, dp = 0) =>
 const num = (v: number | null | undefined) =>
   v == null ? '—' : Number(v).toLocaleString('en-IN')
 
-type Tab = 'overview' | 'daily' | 'tasks' | 'budget' | 'notes' | 'integrations'
+type Tab = 'overview' | 'daily' | 'tasks' | 'budget' | 'notes' | 'integrations' | 'reports'
 
 export default function ProjectDetailClient({ project, metrics, tasks, notes, events, invoice, services, servicePricing, perms }: Props) {
   const router = useRouter()
@@ -85,6 +86,7 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, ev
     { key: 'budget', label: 'Budget' },
     { key: 'notes', label: 'Notes' },
     { key: 'integrations', label: 'Integrations' },
+    { key: 'reports', label: 'Reports' },
   ]
 
   return (
@@ -165,6 +167,9 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, ev
       )}
       {tab === 'integrations' && (
         <IntegrationsTab project={project} canEdit={perms.edit} onChange={() => router.refresh()} />
+      )}
+      {tab === 'reports' && (
+        <ProjectReportsTab projectId={project.id} clientId={project.client_id ?? ''} canEdit={perms.edit} />
       )}
     </div>
   )
@@ -598,6 +603,209 @@ function NotesTab({ projectId, notes, events, canEdit, onChange }: {
               </li>
             ))}
           </ol>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Project Reports Tab ──────────────────────────────────────────────────────
+
+interface ReportRow {
+  id: string
+  report_type: string
+  template: string
+  date_from: string
+  date_to: string
+  status: 'pending' | 'generating' | 'ready' | 'failed'
+  error_message?: string | null
+  generation_time_ms?: number | null
+  pdf_url?: string | null
+  xlsx_url?: string | null
+  csv_url?: string | null
+  image_url_portrait?: string | null
+  created_at: string
+}
+
+function ProjectReportsTab({
+  projectId,
+  clientId,
+  canEdit,
+}: {
+  projectId: string
+  clientId: string
+  canEdit: boolean
+}) {
+  const [reports, setReports] = useState<ReportRow[]>([])
+  const [loadingList, setLoadingList] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+
+  // Form state
+  const today = new Date().toISOString().slice(0, 10)
+  const thirtyAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
+  const [dateFrom, setDateFrom] = useState(thirtyAgo)
+  const [dateTo, setDateTo] = useState(today)
+  const [template, setTemplate] = useState('performance')
+  const [formats, setFormats] = useState<string[]>(['pdf'])
+  const [withComparison, setWithComparison] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+
+  async function loadReports() {
+    setLoadingList(true)
+    try {
+      const r = await fetch(`/api/advertising/reports?projectId=${projectId}&limit=10`)
+      const j = await r.json()
+      setReports(j.data ?? [])
+    } finally {
+      setLoadingList(false)
+      setLoaded(true)
+    }
+  }
+
+  // Load on first render
+  if (!loaded && !loadingList) loadReports()
+
+  const toggleFormat = (f: string) =>
+    setFormats(prev => prev.includes(f) ? prev.filter(x => x !== f) : [...prev, f])
+
+  async function onGenerate() {
+    if (!clientId) { setError('Campaign has no associated client'); return }
+    if (formats.length === 0) { setError('Select at least one format'); return }
+    setGenerating(true); setError(null); setSuccess(null)
+    try {
+      const body: any = { projectId, clientId, reportType: 'custom', template, dateFrom, dateTo, formats }
+      if (withComparison) {
+        const from = new Date(dateFrom)
+        const to   = new Date(dateTo)
+        const days = Math.round((to.getTime() - from.getTime()) / 86400000) + 1
+        const compTo = new Date(from); compTo.setDate(compTo.getDate() - 1)
+        const compFrom = new Date(compTo); compFrom.setDate(compFrom.getDate() - days + 1)
+        body.comparisonFrom = compFrom.toISOString().slice(0, 10)
+        body.comparisonTo   = compTo.toISOString().slice(0, 10)
+      }
+      const res = await fetch('/api/advertising/reports/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Failed')
+      setSuccess('Report queued — it will appear below in a few moments.')
+      setTimeout(() => loadReports(), 3000)
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  const statusIcon = (status: string) => ({
+    pending:    <Clock className="h-3.5 w-3.5 text-muted-foreground" />,
+    generating: <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />,
+    ready:      <CheckCircle className="h-3.5 w-3.5 text-green-500" />,
+    failed:     <XCircle className="h-3.5 w-3.5 text-red-500" />,
+  } as Record<string, React.ReactNode>)[status] ?? null
+
+  return (
+    <div className="space-y-6">
+      {/* Generate form */}
+      {canEdit && (
+        <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+          <h3 className="font-medium text-sm text-foreground flex items-center gap-2">
+            <BarChart2 className="h-4 w-4 text-primary" />
+            Generate Report
+          </h3>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-muted-foreground mb-1">From</label>
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs text-muted-foreground mb-1">To</label>
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm" />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-muted-foreground mb-1">Template</label>
+            <select value={template} onChange={e => setTemplate(e.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm">
+              <option value="performance">Performance Report</option>
+              <option value="executive">Executive Summary</option>
+              <option value="marketing">Marketing Performance</option>
+              <option value="lead_gen">Lead Generation</option>
+              <option value="ecommerce">E-commerce</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs text-muted-foreground mb-1">Formats</label>
+            <div className="flex gap-2 flex-wrap">
+              {['pdf', 'xlsx', 'csv', 'image_portrait'].map(f => (
+                <button key={f} type="button" onClick={() => toggleFormat(f)}
+                  className={['rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors',
+                    formats.includes(f) ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-background text-muted-foreground'
+                  ].join(' ')}>
+                  {f}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={withComparison} onChange={e => setWithComparison(e.target.checked)}
+              className="rounded border-border" />
+            <span className="text-xs text-foreground">Compare with previous period</span>
+          </label>
+
+          {error && <p className="text-xs text-red-500">{error}</p>}
+          {success && <p className="text-xs text-green-600">{success}</p>}
+
+          <button onClick={onGenerate} disabled={generating}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+            {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+            {generating ? 'Generating…' : 'Generate'}
+          </button>
+        </div>
+      )}
+
+      {/* Report history */}
+      <div>
+        <h3 className="font-medium text-sm text-foreground mb-3">Report History</h3>
+        {loadingList ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+          </div>
+        ) : reports.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No reports generated yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {reports.map(r => (
+              <div key={r.id} className="rounded-xl border border-border bg-card/50 p-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  {statusIcon(r.status)}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-sm font-medium capitalize">{r.template}</span>
+                      <span className="text-xs text-muted-foreground">{r.date_from} → {r.date_to}</span>
+                    </div>
+                    {r.status === 'failed' && r.error_message && (
+                      <p className="text-xs text-red-500 truncate">{r.error_message}</p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  {r.pdf_url  && <a href={r.pdf_url}  target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"><Download className="h-3 w-3" />PDF</a>}
+                  {r.xlsx_url && <a href={r.xlsx_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"><Download className="h-3 w-3" />Excel</a>}
+                  {r.csv_url  && <a href={r.csv_url}  target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"><Download className="h-3 w-3" />CSV</a>}
+                  {r.image_url_portrait && <a href={r.image_url_portrait} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"><Download className="h-3 w-3" />Image</a>}
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>
