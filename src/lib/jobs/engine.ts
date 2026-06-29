@@ -36,26 +36,22 @@ export interface DequeuedJob extends SystemJob {
  */
 export async function enqueueJob(job: SystemJob): Promise<string> {
   const supabase = createAdminClient()
-  
+
   const { data, error } = await supabase
     .from('system_jobs')
     .insert({
       job_type: job.job_type,
       priority: job.priority || 'normal',
-      status: job.status || 'pending',
+      status: 'pending',
       payload: job.payload,
       max_attempts: job.max_attempts || 3,
-      parent_job_id: job.parent_job_id || null,
-      depends_on_job_id: job.depends_on_job_id || null,
-      retry_delay_seconds: job.retry_delay_seconds || 60,
-      metadata: job.metadata || {}
     })
     .select('id')
     .single()
 
   if (error) {
     console.error('[Jobs] Failed to enqueue:', error)
-    throw new Error('Job enqueue failed')
+    throw new Error(`Job enqueue failed: ${error.message}`)
   }
 
   await publishAdEvent('job_created', { metadata: { job_id: data.id, job_type: job.job_type } })
@@ -92,21 +88,13 @@ export async function dequeueJobs(workerId: string, maxJobs: number = 5): Promis
  */
 export async function completeJob(job: DequeuedJob, metadataUpdates?: any): Promise<void> {
   const supabase = createAdminClient()
-  
-  let updateData: any = {
-    status: 'completed',
-    finished_at: new Date().toISOString(),
-    locked_by: null,
-    locked_at: null
-  }
-  
-  if (metadataUpdates) {
-    updateData.metadata = { ...job.metadata, ...metadataUpdates }
-  }
 
   const { error } = await supabase
     .from('system_jobs')
-    .update(updateData)
+    .update({
+      status: 'completed',
+      finished_at: new Date().toISOString(),
+    })
     .eq('id', job.id)
 
   if (error) console.error(`[Jobs] Failed to complete job ${job.id}:`, error)
@@ -118,27 +106,18 @@ export async function completeJob(job: DequeuedJob, metadataUpdates?: any): Prom
  */
 export async function failJob(job: DequeuedJob, errorMsg: string): Promise<void> {
   const supabase = createAdminClient()
-  
-  const attempts = job.attempts || 0
-  const maxAttempts = job.max_attempts || 3
-  const baseDelay = job.retry_delay_seconds || 60
 
-  const newAttempts = attempts + 1
-  const isDeadLetter = newAttempts >= maxAttempts
-  
-  const nextRun = new Date()
-  nextRun.setSeconds(nextRun.getSeconds() + (baseDelay * Math.pow(2, attempts)))
-  
+  const newAttempts = (job.attempts || 0) + 1
+  const isDeadLetter = newAttempts >= (job.max_attempts || 3)
+
   const { error } = await supabase
     .from('system_jobs')
     .update({
-      status: isDeadLetter ? 'dead_letter' : 'retrying',
-      locked_by: null,
-      locked_at: null,
+      status: isDeadLetter ? 'failed' : 'pending',
       attempts: newAttempts,
-      queued_at: nextRun.toISOString(),
+      queued_at: new Date().toISOString(),
       finished_at: isDeadLetter ? new Date().toISOString() : null,
-      error_log: errorMsg
+      error_log: errorMsg,
     })
     .eq('id', job.id)
 
