@@ -136,16 +136,29 @@ export async function createAdProject(payload: {
 
   if (accErr || !account) throw new Error('Invalid Ad Account')
   
-  // Ensure we don't duplicate active sync projects for the same account
+  // Check for an existing sync project for this ad account
   const { data: existing } = await admin
     .from('ad_projects')
     .select('id')
     .eq('ad_account_id', payload.ad_account_id)
-    .eq('sync_enabled', true)
-    .single()
+    .maybeSingle()
 
   if (existing) {
-    throw new Error('An active sync project already exists for this Ad Account.')
+    // Project already created (e.g. prior attempt failed mid-way) —
+    // just enqueue a fresh sync job and return the existing project.
+    if (payload.sync_enabled) {
+      const { enqueueJob } = await import('@/lib/jobs/engine')
+      await enqueueJob({
+        job_type: 'advertising_sync_project',
+        payload: { project_id: existing.id },
+        priority: 'high'
+      })
+      await admin
+        .from('ad_projects')
+        .update({ sync_status: 'queued' })
+        .eq('id', existing.id)
+    }
+    return { success: true, project_id: existing.id }
   }
 
   // 2. Create the ad_project
