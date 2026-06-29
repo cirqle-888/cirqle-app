@@ -27,7 +27,7 @@
     },
     {
       "path": "/api/cron/report-scheduler",
-      "schedule": "0 * * * *"
+      "schedule": "0 6 * * *"
     }
   ]
 }
