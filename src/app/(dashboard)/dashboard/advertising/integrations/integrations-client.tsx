@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useSearchParams, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { disconnectProvider, refreshAdAccounts, fetchActiveClients } from './actions'
@@ -30,23 +29,35 @@ const ERROR_MESSAGES: Record<string, string> = {
   server_error:   'A server error occurred. Check logs and try again.',
 }
 
-export function IntegrationsClient({ initialConnections }: { initialConnections: any[] }) {
-  const searchParams = useSearchParams()
-  const router = useRouter()
+export function IntegrationsClient({
+  initialConnections,
+  oauthSuccess,
+  oauthError,
+}: {
+  initialConnections: any[]
+  oauthSuccess?: string
+  oauthError?: string
+}) {
   const [connections, setConnections] = useState<ProviderConnection[]>(initialConnections)
   const [isRefreshing, setIsRefreshing] = useState<string | null>(null)
   const [isDisconnecting, setIsDisconnecting] = useState<string | null>(null)
-  const [flash, setFlash] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [flash, setFlash] = useState<{ type: 'success' | 'error'; message: string } | null>(() => {
+    if (oauthSuccess === 'meta_connected') {
+      return { type: 'success', message: 'Meta Ads connected successfully. Ad accounts have been discovered.' }
+    }
+    if (oauthError) {
+      return { type: 'error', message: ERROR_MESSAGES[oauthError] || 'An unknown error occurred.' }
+    }
+    return null
+  })
 
   useEffect(() => {
-    const success = searchParams.get('success')
-    const error = searchParams.get('error')
-    if (success === 'meta_connected') {
-      setFlash({ type: 'success', message: 'Meta Ads connected successfully. Ad accounts have been discovered.' })
-      router.replace('/dashboard/advertising/integrations')
-    } else if (error) {
-      setFlash({ type: 'error', message: ERROR_MESSAGES[error] || 'An unknown error occurred.' })
-      router.replace('/dashboard/advertising/integrations')
+    if (oauthSuccess || oauthError) {
+      // Clean the query string so a page refresh doesn't re-show the banner
+      const url = new URL(window.location.href)
+      url.searchParams.delete('success')
+      url.searchParams.delete('error')
+      window.history.replaceState({}, '', url.toString())
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
