@@ -108,7 +108,7 @@ export async function ingestMetrics(
     const rateToBilling = rateToBase 
 
     upsertPayloads.push({
-      id: existing?.id,
+      ...(existing?.id ? { id: existing.id } : {}),
       project_id: r.projectId,
       metric_date: r.metricDate,
       spend: r.spend,
