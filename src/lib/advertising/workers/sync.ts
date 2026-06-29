@@ -85,15 +85,17 @@ export async function syncProjectWorker(job: DequeuedJob): Promise<any> {
   const durationMs = new Date(pFinishedAt).getTime() - new Date(pStartedAt).getTime()
 
   // Log sync success
-  await admin.from('ad_sync_logs').insert({
+  const { error: logErr } = await admin.from('ad_sync_logs').insert({
     project_id: project.id,
     provider: providerName,
     status: 'success',
     started_at: pStartedAt,
     finished_at: pFinishedAt,
     duration_ms: durationMs,
-    records_imported: imported + updated
+    records_imported: imported + updated,
+    trigger_source: 'manual',
   })
+  if (logErr) console.error('[syncProjectWorker] Failed to write sync log:', logErr)
   
   // Enqueue dependent notifications and reports
   await enqueueJob({

@@ -99,7 +99,8 @@ export class MetaProvider implements AdProvider {
       'purchase_roas'
     ].join(',')
 
-    const url = `https://graph.facebook.com/v19.0/${campaignId}/insights?time_range={'since':'${startDate}','until':'${endDate}'}&time_increment=1&fields=${fields}&access_token=${accessToken}`
+    const timeRange = encodeURIComponent(JSON.stringify({ since: startDate, until: endDate }))
+    const url = `https://graph.facebook.com/v19.0/${campaignId}/insights?time_range=${timeRange}&time_increment=1&fields=${fields}&access_token=${accessToken}`
 
     try {
       const res = await fetch(url)
