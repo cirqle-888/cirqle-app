@@ -79,32 +79,35 @@ export async function refreshAdAccounts(connectionId: string) {
   if (!guard.ok) throw new Error(guard.error)
   const admin = createAdminClient()
   
-  const { data: conn, error: connErr } = await admin.from('provider_connections').select('*').eq('id', connectionId).single()
+  const { data: conn, error: connErr } = await admin.from('provider_connections').select('id,client_id,provider,access_token').eq('id', connectionId).single()
   if (connErr || !conn) throw new Error('Connection not found')
   if (!conn.access_token) throw new Error('Missing access token')
 
   try {
     const provider = getProvider(conn.provider)
     const accounts = await provider.getAccounts(connectionId, conn.access_token)
-    
+
     for (const acc of accounts) {
       if (acc.business_id) {
         await admin.from('ad_businesses').upsert({
           connection_id: connectionId,
+          client_id: conn.client_id,
           business_id: acc.business_id,
           name: `Business ${acc.business_id}`,
-          status: 'active'
         }, { onConflict: 'connection_id,business_id' })
       }
 
+      // unique constraint is on (provider, account_id) — not connection_id
       await admin.from('ad_accounts').upsert({
         connection_id: connectionId,
+        client_id: conn.client_id,
+        provider: conn.provider,
         account_id: acc.account_id,
         name: acc.name,
         currency: acc.currency,
         timezone: acc.timezone,
-        status: 'active'
-      }, { onConflict: 'connection_id,account_id' })
+        is_active: true,
+      }, { onConflict: 'provider,account_id' })
     }
     return { success: true, count: accounts.length }
   } catch (err: any) {
