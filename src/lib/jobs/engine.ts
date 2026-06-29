@@ -59,28 +59,42 @@ export async function enqueueJob(job: SystemJob): Promise<string> {
 }
 
 /**
- * Atomically dequeues jobs using PostgreSQL FOR UPDATE SKIP LOCKED
+ * Dequeues jobs using optimistic locking (no RPC dependency)
  */
 export async function dequeueJobs(workerId: string, maxJobs: number = 5): Promise<DequeuedJob[]> {
   const supabase = createAdminClient()
-  const { data, error } = await supabase.rpc('dequeue_jobs', {
-    p_worker_id: workerId,
-    p_max_jobs: maxJobs
-  })
 
-  if (error) {
-    console.error('[Jobs] Failed to dequeue:', error)
+  // Fetch pending jobs
+  const { data: pending, error: fetchErr } = await supabase
+    .from('system_jobs')
+    .select('*')
+    .in('status', ['pending', 'queued'])
+    .order('queued_at', { ascending: true, nullsFirst: false })
+    .limit(maxJobs)
+
+  if (fetchErr) {
+    console.error('[Jobs] Failed to fetch pending jobs:', fetchErr)
     return []
   }
+  if (!pending || pending.length === 0) return []
 
-  const jobs = data as DequeuedJob[]
-  for (const job of jobs) {
-    await publishAdEvent(job.attempts > 0 ? 'retry_started' : 'job_started', { 
-      metadata: { job_id: job.id, job_type: job.job_type, attempts: job.attempts } 
-    })
+  // Claim each job by updating status to 'running'
+  const claimed: DequeuedJob[] = []
+  for (const job of pending) {
+    const { data: updated, error: updateErr } = await supabase
+      .from('system_jobs')
+      .update({ status: 'running', started_at: new Date().toISOString() })
+      .eq('id', job.id)
+      .eq('status', job.status) // optimistic lock: only update if still same status
+      .select('*')
+      .single()
+
+    if (!updateErr && updated) {
+      claimed.push(updated as DequeuedJob)
+    }
   }
 
-  return jobs
+  return claimed
 }
 
 /**
