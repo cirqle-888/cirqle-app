@@ -214,25 +214,68 @@ function ReportCard({ report: r }: { report: Report }) {
 
 // ─── Generate Tab ─────────────────────────────────────────────────────────────
 
+// ─── Section toggles config ───────────────────────────────────────────────────
+
+const SECTION_OPTIONS = [
+  { key: 'executiveSummary',    label: 'Executive Summary',    desc: 'AI-written overview paragraph' },
+  { key: 'dailyBreakdown',      label: 'Daily Breakdown',      desc: 'Date-by-date spend, reach, impressions table' },
+  { key: 'campaignHealth',      label: 'Campaign Health Score', desc: 'Health grade & risk level' },
+  { key: 'forecast',            label: 'Forecast',             desc: '7/30-day spend & leads forecast' },
+  { key: 'aiInsights',          label: 'AI Insights',          desc: 'Key insights, risks & opportunities' },
+  { key: 'budgetAnalysis',      label: 'Budget Analysis',      desc: 'Remaining budget & utilisation' },
+  { key: 'recommendations',     label: 'Recommendations',      desc: 'AI-recommended actions' },
+  { key: 'benchmarkComparison', label: 'Benchmark Comparison', desc: 'Performance vs industry benchmarks' },
+] as const
+
+type SectionKey = typeof SECTION_OPTIONS[number]['key']
+
+// Default sections per template (must match template-engine.ts).
+// Uses Record<string, boolean> to include kpiScorecard (always-on, not user-toggleable).
+const TEMPLATE_DEFAULTS: Record<string, Record<string, boolean>> = {
+  daily:       { kpiScorecard: true, dailyBreakdown: true, budgetAnalysis: true },
+  performance: { executiveSummary: true, kpiScorecard: true, dailyBreakdown: true, campaignHealth: true, benchmarkComparison: true, forecast: true, aiInsights: true, budgetAnalysis: true, recommendations: true },
+  executive:   { executiveSummary: true, kpiScorecard: true, campaignHealth: true, benchmarkComparison: true, forecast: true, aiInsights: true, budgetAnalysis: true, recommendations: true },
+  marketing:   { executiveSummary: true, kpiScorecard: true, dailyBreakdown: true, campaignHealth: true, benchmarkComparison: true, forecast: true, aiInsights: true, recommendations: true },
+  lead_gen:    { executiveSummary: true, kpiScorecard: true, dailyBreakdown: true, campaignHealth: true, benchmarkComparison: true, forecast: true, aiInsights: true, budgetAnalysis: true, recommendations: true },
+  ecommerce:   { executiveSummary: true, kpiScorecard: true, dailyBreakdown: true, campaignHealth: true, benchmarkComparison: true, forecast: true, aiInsights: true, budgetAnalysis: true, recommendations: true },
+  agency:      { executiveSummary: true, kpiScorecard: true, dailyBreakdown: true, campaignHealth: true, benchmarkComparison: true, forecast: true, aiInsights: true, budgetAnalysis: true, recommendations: true },
+}
+
+// ─── Generate Tab ─────────────────────────────────────────────────────────────
+
 function GenerateTab({ projects, canEdit }: { projects: Project[]; canEdit: boolean }) {
   const router = useRouter()
   const [projectId, setProjectId] = useState('')
   const [reportType, setReportType] = useState('custom')
-  const [template, setTemplate] = useState('performance')
+  const [template, setTemplate] = useState('daily')
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10)
   })
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10))
   const [formats, setFormats] = useState<string[]>(['pdf'])
-  const [withComparison, setWithComparison] = useState(true)
+  const [withComparison, setWithComparison] = useState(false)
+  const [sections, setSections] = useState<Partial<Record<SectionKey, boolean>>>({})
+  const [showSections, setShowSections] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
   const selectedProject = projects.find(p => p.id === projectId)
 
+  // Effective section state = template defaults merged with user overrides
+  const effectiveSections = { ...(TEMPLATE_DEFAULTS[template] ?? {}), ...sections }
+
   const toggleFormat = (f: string) =>
     setFormats(prev => prev.includes(f) ? prev.filter(x => x !== f) : [...prev, f])
+
+  const toggleSection = (key: SectionKey) =>
+    setSections(prev => ({ ...prev, [key]: !effectiveSections[key] }))
+
+  // When template changes, reset overrides so defaults take effect
+  function onTemplateChange(t: string) {
+    setTemplate(t)
+    setSections({})
+  }
 
   async function onGenerate() {
     if (!projectId) { setError('Select a campaign'); return }
@@ -250,10 +293,10 @@ function GenerateTab({ projects, canEdit }: { projects: Project[]; canEdit: bool
         dateFrom,
         dateTo,
         formats,
+        sections: Object.keys(sections).length > 0 ? sections : undefined,
       }
 
       if (withComparison) {
-        // Compute comparison: same number of days immediately preceding
         const from = new Date(dateFrom)
         const to   = new Date(dateTo)
         const days = Math.round((to.getTime() - from.getTime()) / 86400000) + 1
@@ -319,8 +362,9 @@ function GenerateTab({ projects, canEdit }: { projects: Project[]; canEdit: bool
       {/* Template */}
       <div>
         <label className="block text-sm font-medium text-foreground mb-1.5">Template</label>
-        <select value={template} onChange={e => setTemplate(e.target.value)}
+        <select value={template} onChange={e => onTemplateChange(e.target.value)}
           className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm">
+          <option value="daily">Daily Report — Cirqle style (Reach · Impressions · Clicks · Spend · CPR)</option>
           <option value="performance">Performance Report</option>
           <option value="executive">Executive Summary</option>
           <option value="marketing">Marketing Performance</option>
@@ -328,6 +372,37 @@ function GenerateTab({ projects, canEdit }: { projects: Project[]; canEdit: bool
           <option value="ecommerce">E-commerce</option>
           <option value="agency">Agency Report</option>
         </select>
+      </div>
+
+      {/* Section toggles */}
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowSections(v => !v)}
+          className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ChevronDown className={`h-4 w-4 transition-transform ${showSections ? 'rotate-180' : ''}`} />
+          Customise sections
+        </button>
+
+        {showSections && (
+          <div className="mt-3 rounded-xl border border-border bg-card/50 p-4 space-y-2.5">
+            {SECTION_OPTIONS.map(opt => (
+              <label key={opt.key} className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={!!effectiveSections[opt.key]}
+                  onChange={() => toggleSection(opt.key)}
+                  className="mt-0.5 rounded border-border"
+                />
+                <div>
+                  <div className="text-sm font-medium text-foreground">{opt.label}</div>
+                  <div className="text-xs text-muted-foreground">{opt.desc}</div>
+                </div>
+              </label>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Formats */}

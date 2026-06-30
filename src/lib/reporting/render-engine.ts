@@ -17,7 +17,7 @@ import { generateForecast } from '@/lib/advertising/ai/forecasting'
 import { calculateWeightedHealthScore } from '@/lib/advertising/ai/scoring'
 import { buildAINarrative } from './ai-engine'
 import type {
-  ReportConfig, RenderData, BenchmarkSummary, ForecastBundle, HealthSummary,
+  ReportConfig, RenderData, BenchmarkSummary, ForecastBundle, HealthSummary, TemplateConfig,
 } from './types'
 
 /**
@@ -39,7 +39,11 @@ export async function buildRenderData(config: ReportConfig): Promise<RenderData>
   })
 
   // ── 2. Template config ───────────────────────────────────────────────────
-  const template = resolveTemplate(config.template)
+  // Merge any per-section overrides the user supplied in ReportConfig.sections
+  const baseTemplate = resolveTemplate(config.template)
+  const template: TemplateConfig = config.sections
+    ? { ...baseTemplate, sections: { ...baseTemplate.sections, ...config.sections } }
+    : baseTemplate
 
   // ── 3. KPI data ──────────────────────────────────────────────────────────
   const kpi = buildKPIData(raw.metrics, raw.comparisonMetrics, raw.project)

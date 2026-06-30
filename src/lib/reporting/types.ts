@@ -18,7 +18,7 @@ import type { BenchmarkMetrics } from '@/lib/advertising/ai/benchmarks'
 // ─── Report Config ────────────────────────────────────────────────────────────
 
 export type ReportType = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'custom'
-export type ReportTemplate = 'executive' | 'marketing' | 'lead_gen' | 'ecommerce' | 'performance' | 'agency'
+export type ReportTemplate = 'executive' | 'marketing' | 'lead_gen' | 'ecommerce' | 'performance' | 'agency' | 'daily'
 export type ReportFormat = 'pdf' | 'xlsx' | 'csv' | 'image_portrait' | 'image_square'
 export type WhiteLabelMode = 'cirqle' | 'client' | 'agency'
 export type ReportStatus = 'pending' | 'generating' | 'ready' | 'failed'
@@ -33,6 +33,12 @@ export interface ReportConfig {
   comparisonFrom?: string // YYYY-MM-DD
   comparisonTo?: string   // YYYY-MM-DD
   formats: ReportFormat[]
+  /**
+   * Optional per-section overrides. Keys present here take precedence over
+   * the template's default sections. Lets users toggle individual sections
+   * from the UI without changing the base template.
+   */
+  sections?: Partial<TemplateSections>
   /** UUID of employee triggering the report. */
   generatedBy?: string
   /** UUID of linked schedule (if automated). */

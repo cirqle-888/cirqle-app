@@ -112,6 +112,29 @@ const TEMPLATE_CONFIGS: Record<ReportTemplate, TemplateConfig> = {
       recommendations:      true,
     },
   },
+
+  /**
+   * Daily — Matches the Cirqle Meta Ads Daily Report style:
+   * campaign info header, KPI scorecard, last-3-days breakdown, budget status.
+   * Omits AI-heavy sections (forecast, benchmarks, recommendations) to keep
+   * the report fast and focused on today's numbers.
+   */
+  daily: {
+    name: 'daily',
+    displayName: 'Daily Report',
+    primaryKPI: 'reach',
+    sections: {
+      executiveSummary:    false,
+      kpiScorecard:        true,
+      dailyBreakdown:      true,
+      campaignHealth:      false,
+      benchmarkComparison: false,
+      forecast:            false,
+      aiInsights:          false,
+      budgetAnalysis:      true,
+      recommendations:     false,
+    },
+  },
 }
 
 /**
