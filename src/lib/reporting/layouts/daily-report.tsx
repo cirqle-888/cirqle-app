@@ -85,25 +85,26 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
         background: '#FFFFFF',
         fontFamily: 'sans-serif',
         color: INK,
-        padding: `${64 * s}px ${56 * s}px`,
         boxSizing: 'border-box',
         overflow: 'hidden',
       }}
     >
-      {/* Decorative swooshes or custom images */}
+      {/* Decorative swooshes or custom images — full-bleed behind the content */}
       {(brand.backgroundDesign === 'custom_images' || brand.backgroundDesign === 'Custom Images') ? (
-        <>
-          {brand.bgImageTopUrl && (
-            <div style={{ position: 'absolute', top: 0, left: 0, width: `${width}px`, display: 'flex' }}>
-              <img src={brand.bgImageTopUrl} width={width} style={{ width: '100%', objectFit: 'contain', objectPosition: 'top' }} alt="" />
-            </div>
-          )}
-          {brand.bgImageBottomUrl && (
-            <div style={{ position: 'absolute', bottom: 0, left: 0, width: `${width}px`, display: 'flex' }}>
-              <img src={brand.bgImageBottomUrl} width={width} style={{ width: '100%', objectFit: 'contain', objectPosition: 'bottom' }} alt="" />
-            </div>
-          )}
-        </>
+        // Full-page overlay: top image pinned to the top edge, bottom image to
+        // the bottom edge (space-between is reliable in Satori, unlike bottom:0).
+        <div style={{
+          position: 'absolute', top: 0, left: 0,
+          width: `${width}px`, height: `${height}px`,
+          display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+        }}>
+          <div style={{ display: 'flex', width: `${width}px` }}>
+            {brand.bgImageTopUrl ? <img src={brand.bgImageTopUrl} width={width} style={{ width: `${width}px` }} alt="" /> : null}
+          </div>
+          <div style={{ display: 'flex', width: `${width}px` }}>
+            {brand.bgImageBottomUrl ? <img src={brand.bgImageBottomUrl} width={width} style={{ width: `${width}px` }} alt="" /> : null}
+          </div>
+        </div>
       ) : (
         <>
           <Swoosh position="top" s={s} width={width} />
@@ -111,6 +112,17 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
         </>
       )}
 
+      {/* Content wrapper carries the page padding so the backgrounds stay edge-to-edge */}
+      <div
+        style={{
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'column',
+          flexGrow: 1,
+          padding: `${64 * s}px ${56 * s}px`,
+          boxSizing: 'border-box',
+        }}
+      >
       {/* ── Header: Cirqle logo · date · platform logo ── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: `${10 * s}px` }}>
         <CirqleLogo s={s} brand={brand} />
@@ -214,6 +226,7 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
             {brand.contactEmail ? `  |  ${brand.contactEmail}` : ''}
           </div>
         </div>
+      </div>
       </div>
     </div>
   )
