@@ -57,6 +57,60 @@ const state = Object.assign({
 // Recent clipboard items (newest first), surfaced in the Capture menu.
 const clipHistory = []
 let lastClip = ''
+
+// Downloads (reports / invoices) saved from the Cirqle pane. Session-only,
+// newest first. Surfaced via the toolbar ⬇ button and a native popup menu so
+// the user can open them or reveal them in Finder to drag into WhatsApp.
+const downloads = []
+const downloadsDir = () => path.join(app.getPath('downloads'), 'Cirqle')
+function uniquePath(dir, name) {
+  let p = path.join(dir, name)
+  const ext = path.extname(name)
+  const base = path.basename(name, ext)
+  let i = 1
+  while (fs.existsSync(p)) { p = path.join(dir, `${base} (${i++})${ext}`) }
+  return p
+}
+function wireDownloads(sess) {
+  if (!sess || sess.__cirqleDownloadsWired) return
+  sess.__cirqleDownloadsWired = true
+  sess.on('will-download', (_event, item) => {
+    try {
+      const dir = downloadsDir()
+      fs.mkdirSync(dir, { recursive: true })
+      const savePath = uniquePath(dir, item.getFilename() || 'download')
+      item.setSavePath(savePath)
+      item.once('done', (_e, st) => {
+        if (st !== 'completed') return
+        downloads.unshift({ name: path.basename(savePath), path: savePath, at: Date.now() })
+        if (downloads.length > 30) downloads.pop()
+        if (chrome) chrome.webContents.send('downloads', { count: downloads.length, latest: path.basename(savePath) })
+        buildMenu()
+      })
+    } catch { /* fall back to Electron's default download handling */ }
+  })
+}
+function downloadsMenuTemplate() {
+  const items = downloads.length
+    ? downloads.map((d) => ({
+        label: truncate(d.name, 48),
+        submenu: [
+          { label: 'Open', click: () => shell.openPath(d.path) },
+          { label: 'Show in Folder (drag into WhatsApp)', click: () => shell.showItemInFolder(d.path) },
+        ],
+      }))
+    : [{ label: '(no downloads yet)', enabled: false }]
+  return [
+    ...items,
+    { type: 'separator' },
+    { label: 'Open Downloads Folder', click: () => shell.openPath(downloadsDir()) },
+    { label: 'Clear List', enabled: downloads.length > 0, click: () => { downloads.length = 0; if (chrome) chrome.webContents.send('downloads', { count: 0 }); buildMenu() } },
+  ]
+}
+function popupDownloadsMenu() {
+  const menu = Menu.buildFromTemplate(downloadsMenuTemplate())
+  if (win) menu.popup({ window: win })
+}
 const truncate = (s, n = 60) => { const one = String(s).replace(/\s+/g, ' ').trim(); return one.length > n ? one.slice(0, n) + '…' : one }
 
 // ── Layout: position each view from the window size + ratio + visibility ──────
@@ -150,6 +204,7 @@ function createViews() {
 
   cirqle = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-cirqle.js') } })
   cirqle.webContents.loadURL(CIRQLE_URL)
+  wireDownloads(cirqle.webContents.session) // capture report / invoice downloads
   cirqle.webContents.on('did-fail-load', (_e, code, _desc, _url, isMainFrame) => {
     if (isMainFrame && code !== -3) loadError(cirqle, CIRQLE_URL, 'cirqle')
   })
@@ -210,6 +265,7 @@ function buildMenu() {
     // REQUIRED on macOS: without the Edit menu's roles, Cmd+C / Cmd+V don't work
     // in the web views — which would break the entire copy-paste workflow.
     { role: 'editMenu' },
+    { label: 'Downloads', submenu: downloadsMenuTemplate() },
     {
       label: 'View',
       submenu: [
@@ -254,6 +310,7 @@ ipcMain.on('reload', (_e, which) => {
 ipcMain.on('goBack', () => { if (cirqle && cirqle.webContents.canGoBack()) cirqle.webContents.goBack() })
 ipcMain.on('goForward', () => { if (cirqle && cirqle.webContents.canGoForward()) cirqle.webContents.goForward() })
 ipcMain.on('toggleFullscreen', () => { if (win) win.setFullScreen(!win.isFullScreen()) })
+ipcMain.on('downloads:menu', popupDownloadsMenu)
 ipcMain.on('capture:clipboard', sendClipboardToCirqle)
 ipcMain.on('retry', (_e, pane) => {
   if (pane === 'whatsapp' && whatsapps[state.activeWa]) whatsapps[state.activeWa].webContents.loadURL(WHATSAPP_URL, { userAgent: CHROME_UA })

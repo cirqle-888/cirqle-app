@@ -167,7 +167,11 @@
     </div>
     
     <div class="sep" style="margin-right: 4px;"></div>
-    
+
+    <button id="btn-downloads" class="icon-btn" title="Downloaded reports & invoices" style="position:relative;">
+      <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+      <span id="dl-badge" style="display:none;position:absolute;top:-2px;right:-2px;min-width:14px;height:14px;padding:0 3px;border-radius:7px;background:#8b5cf6;color:#fff;font-size:9px;line-height:14px;font-weight:700;text-align:center;"></span>
+    </button>
     <button id="btn-fullscreen" class="icon-btn" title="Toggle Full Screen">
       <svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
     </button>
@@ -186,7 +190,17 @@
     $('#btn-back').onclick = () => window.desk.goBack()
     $('#btn-forward').onclick = () => window.desk.goForward()
     $('#btn-fullscreen').onclick = () => window.desk.toggleFullscreen()
+    $('#btn-downloads').onclick = () => window.desk.openDownloadsMenu()
     $('#wa-add').onclick = () => window.desk.waAdd()
+
+    // Downloads badge: count of files saved this session.
+    window.desk.onDownloads((d) => {
+      const badge = $('#dl-badge')
+      if (!badge) return
+      const n = (d && d.count) || 0
+      badge.textContent = n
+      badge.style.display = n > 0 ? 'block' : 'none'
+    })
 
     // Receive state from main process
     window.desk.onState((s) => {

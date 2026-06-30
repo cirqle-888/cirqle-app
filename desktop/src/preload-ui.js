@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('desk', {
   splitterStart: () => ipcRenderer.send('splitter:start'),
   splitterDrag: (screenX) => ipcRenderer.send('splitter:drag', screenX),
   splitterEnd: () => ipcRenderer.send('splitter:end'),
+  openDownloadsMenu: () => ipcRenderer.send('downloads:menu'),
   version: () => ipcRenderer.invoke('app:version'),
   onState: (cb) => ipcRenderer.on('state', (_e, s) => cb(s)),
+  onDownloads: (cb) => ipcRenderer.on('downloads', (_e, d) => cb(d)),
 })
