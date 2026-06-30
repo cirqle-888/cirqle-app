@@ -6,6 +6,10 @@
       "schedule": "0 3 * * *"
     },
     {
+      "path": "/api/cron/cleanup-reports",
+      "schedule": "0 2 * * *"
+    },
+    {
       "path": "/api/cron/recurring-tasks",
       "schedule": "0 4 * * *"
     },
