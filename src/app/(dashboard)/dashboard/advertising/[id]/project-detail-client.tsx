@@ -647,7 +647,7 @@ function ProjectReportsTab({
   const thirtyAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
   const [dateFrom, setDateFrom] = useState(thirtyAgo)
   const [dateTo, setDateTo] = useState(today)
-  const [template, setTemplate] = useState('performance')
+  const [template, setTemplate] = useState('daily')
   const [formats, setFormats] = useState<string[]>(['pdf'])
   const [withComparison, setWithComparison] = useState(false)
   const [loaded, setLoaded] = useState(false)
@@ -733,6 +733,7 @@ function ProjectReportsTab({
             <label className="block text-xs text-muted-foreground mb-1">Template</label>
             <select value={template} onChange={e => setTemplate(e.target.value)}
               className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm">
+              <option value="daily">Daily Report (Meta / WhatsApp style)</option>
               <option value="performance">Performance Report</option>
               <option value="executive">Executive Summary</option>
               <option value="marketing">Marketing Performance</option>

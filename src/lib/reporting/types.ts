@@ -172,9 +172,12 @@ export interface DailySeriesPoint {
   revenue: number
   impressions: number
   clicks: number
+  reach: number
   leads: number
   roas: number
   ctr: number
+  /** Cost per result = spend / (leads || conversions || clicks). 0 when no results. */
+  cpr: number
 }
 
 export interface WeeklySeriesPoint extends DailySeriesPoint {

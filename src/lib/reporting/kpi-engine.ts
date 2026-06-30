@@ -72,32 +72,42 @@ export function buildKPIData(
   const dailyGroups = aggregateByPeriod(primaryAdRows, 'daily')
   const dailySeries: DailySeriesPoint[] = Object.entries(dailyGroups)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, agg]) => ({
-      date,
-      spend: agg.spend,
-      revenue: agg.revenue,
-      impressions: agg.impressions,
-      clicks: agg.clicks,
-      leads: agg.leads,
-      roas: agg.roas,
-      ctr: agg.ctr,
-    }))
+    .map(([date, agg]) => {
+      const dayResults = agg.leads || agg.conversions || agg.clicks
+      return {
+        date,
+        spend: agg.spend,
+        revenue: agg.revenue,
+        impressions: agg.impressions,
+        clicks: agg.clicks,
+        reach: agg.reach,
+        leads: agg.leads,
+        roas: agg.roas,
+        ctr: agg.ctr,
+        cpr: dayResults > 0 ? agg.spend / dayResults : 0,
+      }
+    })
 
   // ── Weekly series ───────────────────────────────────────────────────────
   const weeklyGroups = aggregateByPeriod(primaryAdRows, 'weekly')
   const weeklySeries: WeeklySeriesPoint[] = Object.entries(weeklyGroups)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, agg]) => ({
-      date,
-      weekLabel: `w/c ${date}`,
-      spend: agg.spend,
-      revenue: agg.revenue,
-      impressions: agg.impressions,
-      clicks: agg.clicks,
-      leads: agg.leads,
-      roas: agg.roas,
-      ctr: agg.ctr,
-    }))
+    .map(([date, agg]) => {
+      const weekResults = agg.leads || agg.conversions || agg.clicks
+      return {
+        date,
+        weekLabel: `w/c ${date}`,
+        spend: agg.spend,
+        revenue: agg.revenue,
+        impressions: agg.impressions,
+        clicks: agg.clicks,
+        reach: agg.reach,
+        leads: agg.leads,
+        roas: agg.roas,
+        ctr: agg.ctr,
+        cpr: weekResults > 0 ? agg.spend / weekResults : 0,
+      }
+    })
 
   // ── Derived KPIs ────────────────────────────────────────────────────────
   const profit = primary.revenue - primary.spend

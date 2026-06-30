@@ -20,8 +20,16 @@ type Doc = InstanceType<typeof jsPDF>
 
 /**
  * Generates a PDF buffer from RenderData.
+ *
+ * The "daily" template is rendered pixel-perfect: the shared branded layout is
+ * rasterised to a high-res A4 PNG and embedded full-page, so the PDF matches the
+ * WhatsApp image exactly. All other templates use the multi-page analytics build.
  */
 export async function generatePDF(data: RenderData): Promise<Buffer> {
+  if (data.template.name === 'daily') {
+    return generateDailyPDF(data)
+  }
+
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
 
   // Embed page 1: cover + KPI scorecard
@@ -46,6 +54,31 @@ export async function generatePDF(data: RenderData): Promise<Buffer> {
   // Footer on all pages
   addFooters(doc, data)
 
+  return Buffer.from(doc.output('arraybuffer'))
+}
+
+// ─── Daily template — image-based pixel-perfect PDF ─────────────────────────────
+
+/**
+ * Renders the shared daily-report layout to a high-resolution A4-portrait PNG
+ * (~150 DPI) and embeds it full-bleed into a single-page PDF. This guarantees
+ * the PDF is visually identical to the WhatsApp image export.
+ */
+async function generateDailyPDF(data: RenderData): Promise<Buffer> {
+  const { ImageResponse } = await import('next/og')
+  const { buildDailyReportElement } = await import('../layouts/daily-report')
+
+  // A4 portrait at ~150 DPI: 1240 × 1754 (ratio 0.707 matches 210/297).
+  const W = 1240
+  const H = 1754
+
+  const element = buildDailyReportElement(data, { width: W, height: H })
+  const response = new ImageResponse(element, { width: W, height: H })
+  const png = Buffer.from(await (response as Response).arrayBuffer())
+  const dataUrl = `data:image/png;base64,${png.toString('base64')}`
+
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+  doc.addImage(dataUrl, 'PNG', 0, 0, PAGE_W, 297, undefined, 'FAST')
   return Buffer.from(doc.output('arraybuffer'))
 }
 
