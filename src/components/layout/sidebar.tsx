@@ -316,6 +316,12 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
     return () => { alive = false }
   }, [canSeeRequests, pathname])
 
+  useEffect(() => {
+    if (typeof window !== 'undefined' && (window as any).__CIRQLE_DESKTOP__) {
+      (window as any).__CIRQLE_DESKTOP__.updateLogo(logoUrl || '')
+    }
+  }, [logoUrl])
+
   // Pre-compute visible sections once per permission change — avoids re-filtering on
   // every route transition (pathname is the only thing changing in the common case).
   const visibleNavSections = useMemo(

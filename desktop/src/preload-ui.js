@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('desk', {
   toggleFullscreen: () => ipcRenderer.send('toggleFullscreen'),
   waAdd: () => ipcRenderer.send('wa:add'),
   waSwitch: (id) => ipcRenderer.send('wa:switch', id),
+  waRemove: (id) => ipcRenderer.send('wa:remove', id),
+  waRename: (id, label) => ipcRenderer.send('wa:rename', { id, label }),
   capture: () => ipcRenderer.send('capture:clipboard'),
   retry: (pane) => ipcRenderer.send('retry', pane),
   splitterStart: () => ipcRenderer.send('splitter:start'),

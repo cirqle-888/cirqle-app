@@ -90,9 +90,26 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
         overflow: 'hidden',
       }}
     >
-      {/* Decorative swooshes */}
-      <Swoosh position="top" s={s} width={width} />
-      <Swoosh position="bottom" s={s} width={width} />
+      {/* Decorative swooshes or custom images */}
+      {brand.backgroundDesign === 'Custom Images' ? (
+        <>
+          {brand.bgImageTopUrl && (
+            <div style={{ position: 'absolute', top: 0, left: 0, width: `${width}px`, display: 'flex' }}>
+              <img src={brand.bgImageTopUrl} width={width} style={{ width: '100%', objectFit: 'contain', objectPosition: 'top' }} alt="" />
+            </div>
+          )}
+          {brand.bgImageBottomUrl && (
+            <div style={{ position: 'absolute', bottom: 0, left: 0, width: `${width}px`, display: 'flex' }}>
+              <img src={brand.bgImageBottomUrl} width={width} style={{ width: '100%', objectFit: 'contain', objectPosition: 'bottom' }} alt="" />
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <Swoosh position="top" s={s} width={width} />
+          <Swoosh position="bottom" s={s} width={width} />
+        </>
+      )}
 
       {/* ── Header: Cirqle logo · date · platform logo ── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: `${10 * s}px` }}>

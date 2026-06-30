@@ -18,7 +18,9 @@
   </style>
 </head>
 <body>
-  <div class="brand"><img src="../assets/icon.png" style="height: 24px; width: 24px; object-fit: contain; vertical-align: middle;" alt="Cirqle Desktop" /></div>
+  <div class="brand">
+    <img id="app-logo" src="../assets/icon.png" style="height: 24px; width: auto; max-width: 120px; object-fit: contain; vertical-align: middle;" alt="Cirqle Desktop" />
+  </div>
   <button class="primary" id="cap">➕ New request from clipboard</button>
   <div class="sep"></div>
   <button data-preset="50">50 / 50</button>
@@ -68,8 +70,41 @@
             btn.classList.add('on')
           }
           btn.onclick = () => window.desk.waSwitch(wa.id)
-          tabsContainer.appendChild(btn)
+          btn.oncontextmenu = (e) => {
+            e.preventDefault()
+            const newName = prompt('Rename WhatsApp tab to:', wa.label)
+            if (newName !== null && newName.trim() !== '') {
+              window.desk.waRename(wa.id, newName.trim())
+            }
+          }
+          
+          const wrap = document.createElement('div')
+          wrap.style.display = 'flex'
+          wrap.style.alignItems = 'center'
+          wrap.appendChild(btn)
+          
+          if (s.waAccounts.length > 1) {
+            const closeBtn = document.createElement('button')
+            closeBtn.textContent = '×'
+            closeBtn.style.marginLeft = '2px'
+            closeBtn.style.padding = '6px'
+            closeBtn.style.fontSize = '12px'
+            closeBtn.title = 'Remove Account'
+            closeBtn.onclick = () => {
+              if (confirm(`Remove WhatsApp account "${wa.label}"?`)) {
+                window.desk.waRemove(wa.id)
+              }
+            }
+            wrap.appendChild(closeBtn)
+          }
+          
+          tabsContainer.appendChild(wrap)
         })
+      }
+
+      const logoImg = $('#app-logo')
+      if (s.logoUrl && logoImg.src !== s.logoUrl) {
+        logoImg.src = s.logoUrl
       }
     })
   </script>

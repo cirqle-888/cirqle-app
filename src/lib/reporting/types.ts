@@ -110,6 +110,9 @@ export interface BrandConfig {
   whiteLabelMode: WhiteLabelMode
   confidentialWatermark: boolean
   showPoweredBy: boolean
+  backgroundDesign?: string
+  bgImageTopUrl?: string | null
+  bgImageBottomUrl?: string | null
 }
 
 // ─── Template Config (output of Template Engine) ─────────────────────────────

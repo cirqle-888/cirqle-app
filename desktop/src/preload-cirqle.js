@@ -11,6 +11,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('__CIRQLE_DESKTOP__', {
   version: 1,
   retry: (pane) => ipcRenderer.send('retry', pane),
+  updateLogo: (url) => ipcRenderer.send('cirqle:logo', url),
 })
 
 ipcRenderer.on('cirqle:capture', (_e, payload) => {

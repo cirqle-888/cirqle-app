@@ -35,7 +35,7 @@ export async function resolveBrandConfig(
   clientName: string,
 ): Promise<BrandConfig> {
   const admin = createAdminClient()
-  const companyLogo = await getCompanyLogoUrl(admin)
+  const companySettings = await getCompanySettings(admin)
 
   try {
     const { data } = await admin
@@ -46,30 +46,47 @@ export async function resolveBrandConfig(
 
     if (data) {
       const cfg = mapRowToBrandConfig(data, clientName)
-      return { ...cfg, agencyLogoUrl: cfg.agencyLogoUrl ?? companyLogo }
+      return { 
+        ...cfg, 
+        agencyLogoUrl: cfg.agencyLogoUrl ?? companySettings.logoUrl,
+        backgroundDesign: companySettings.bgDesign,
+        bgImageTopUrl: companySettings.bgTopUrl,
+        bgImageBottomUrl: companySettings.bgBottomUrl,
+      }
     }
   } catch {
     // Silently fall through to defaults
   }
 
   const cfg = buildDefaultBrandConfig(clientName)
-  return { ...cfg, agencyLogoUrl: cfg.agencyLogoUrl ?? companyLogo }
+  return { 
+    ...cfg, 
+    agencyLogoUrl: cfg.agencyLogoUrl ?? companySettings.logoUrl,
+    backgroundDesign: companySettings.bgDesign,
+    bgImageTopUrl: companySettings.bgTopUrl,
+    bgImageBottomUrl: companySettings.bgBottomUrl,
+  }
 }
 
 /**
  * The agency (Cirqle) logo for reports comes from Settings → Company → Branding,
  * stored in company_settings. Prefer the light-mode logo (reports are on white).
  */
-async function getCompanyLogoUrl(admin: ReturnType<typeof createAdminClient>): Promise<string | null> {
+async function getCompanySettings(admin: ReturnType<typeof createAdminClient>) {
   try {
     const { data } = await admin
       .from('company_settings')
       .select('key, value')
-      .in('key', ['logo_url_light', 'logo_url'])
+      .in('key', ['logo_url_light', 'logo_url', 'invoice_bg_design', 'invoice_bg_image_top_url', 'invoice_bg_image_bottom_url'])
     const map = new Map((data ?? []).map((r: any) => [r.key, r.value]))
-    return (map.get('logo_url_light') || map.get('logo_url') || null) as string | null
+    return {
+      logoUrl: (map.get('logo_url_light') || map.get('logo_url') || null) as string | null,
+      bgDesign: map.get('invoice_bg_design') as string | undefined,
+      bgTopUrl: map.get('invoice_bg_image_top_url') as string | undefined,
+      bgBottomUrl: map.get('invoice_bg_image_bottom_url') as string | undefined,
+    }
   } catch {
-    return null
+    return { logoUrl: null }
   }
 }
 

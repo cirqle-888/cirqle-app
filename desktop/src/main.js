@@ -280,6 +280,39 @@ ipcMain.on('wa:switch', (_e, id) => {
   if (chrome) chrome.webContents.send('state', state)
 })
 
+ipcMain.on('wa:remove', (_e, id) => {
+  if (state.waAccounts.length <= 1) return // Keep at least one
+  state.waAccounts = state.waAccounts.filter(a => a.id !== id)
+  if (state.activeWa === id) {
+    state.activeWa = state.waAccounts[0].id
+  }
+  if (whatsapps[id]) {
+    if (win) win.contentView.removeChildView(whatsapps[id])
+    // The view isn't easily destroyed in modern Electron without just letting it get GC'd, 
+    // but we can at least remove it from the map.
+    delete whatsapps[id]
+  }
+  layout()
+  saveSettings()
+  if (chrome) chrome.webContents.send('state', state)
+})
+
+ipcMain.on('wa:rename', (_e, { id, label }) => {
+  const account = state.waAccounts.find(a => a.id === id)
+  if (account) {
+    account.label = label || account.label
+    saveSettings()
+    if (chrome) chrome.webContents.send('state', state)
+  }
+})
+
+ipcMain.on('cirqle:logo', (_e, url) => {
+  if (state.logoUrl !== url) {
+    state.logoUrl = url
+    if (chrome) chrome.webContents.send('state', state)
+  }
+})
+
 // Draggable splitter: on drag start we float a full-body overlay view that keeps
 // receiving mouse events even as the pointer passes over the two web views.
 ipcMain.on('splitter:start', () => {
