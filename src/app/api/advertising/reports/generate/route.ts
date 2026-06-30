@@ -15,6 +15,7 @@ import { generateReport, enqueueReportGeneration } from '@/lib/reporting/orchest
 import type { ReportConfig } from '@/lib/reporting/types'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60 // Vercel max for Hobby plan
 
 export async function POST(req: NextRequest) {
   try {

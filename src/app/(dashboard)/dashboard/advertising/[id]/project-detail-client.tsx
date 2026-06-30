@@ -685,13 +685,13 @@ function ProjectReportsTab({
         body.comparisonFrom = compFrom.toISOString().slice(0, 10)
         body.comparisonTo   = compTo.toISOString().slice(0, 10)
       }
-      const res = await fetch('/api/advertising/reports/generate', {
+      const res = await fetch('/api/advertising/reports/generate?sync=true', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? 'Failed')
-      setSuccess('Report queued — it will appear below in a few moments.')
-      setTimeout(() => loadReports(), 3000)
+      setSuccess('Report generated successfully.')
+      loadReports()
     } catch (err: any) {
       setError(err.message)
     } finally {

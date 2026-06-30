@@ -263,7 +263,7 @@ function GenerateTab({ projects, canEdit }: { projects: Project[]; canEdit: bool
         body.comparisonTo   = compTo.toISOString().slice(0, 10)
       }
 
-      const res = await fetch('/api/advertising/reports/generate', {
+      const res = await fetch('/api/advertising/reports/generate?sync=true', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -272,7 +272,7 @@ function GenerateTab({ projects, canEdit }: { projects: Project[]; canEdit: bool
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? 'Failed')
 
-      setSuccess('Report queued! Check History tab in a few moments.')
+      setSuccess('Report generated successfully.')
       router.refresh()
     } catch (err: any) {
       setError(err.message)
