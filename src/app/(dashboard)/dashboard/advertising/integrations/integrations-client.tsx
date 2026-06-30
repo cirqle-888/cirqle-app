@@ -1,13 +1,14 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Button } from '@/components/ui/button'
+import Link from 'next/link'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { disconnectProvider, refreshAdAccounts, fetchActiveClients } from './actions'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import {
   Loader2, Plus, RefreshCw, Trash2, FolderPlus,
-  CheckCircle, XCircle, AlertTriangle, Link2, Zap,
+  CheckCircle, XCircle, AlertTriangle, Link2, Zap, ListChecks,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { CreateProjectWizard } from './CreateProjectWizard'
@@ -299,17 +300,27 @@ export function IntegrationsClient({
                       </div>
                     </div>
                   </div>
-                  <Button
-                    className="mt-4 w-full"
-                    onClick={() => {
-                      setSelectedAccount(acc)
-                      setSelectedClientId(c.client_id)
-                      setWizardOpen(true)
-                    }}
-                  >
-                    <FolderPlus className="mr-2 h-4 w-4" />
-                    Create Campaign Project
-                  </Button>
+                  <div className="mt-4 space-y-2">
+                    <Link
+                      href={`/dashboard/advertising/integrations/${acc.id}/campaigns`}
+                      className={buttonVariants({ className: 'w-full' })}
+                    >
+                      <ListChecks className="mr-2 h-4 w-4" />
+                      Map Campaigns
+                    </Link>
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => {
+                        setSelectedAccount(acc)
+                        setSelectedClientId(c.client_id)
+                        setWizardOpen(true)
+                      }}
+                    >
+                      <FolderPlus className="mr-2 h-4 w-4" />
+                      Create Single Project
+                    </Button>
+                  </div>
                 </div>
               ))
             )}

@@ -10,6 +10,8 @@ import { createAdminClient } from '@/lib/supabase/server'
 export type AdEventType = 
   | 'campaign_created'
   | 'campaign_updated'
+  | 'campaign_mapped'
+  | 'campaign_unmapped'
   | 'budget_changed'
   | 'provider_connected'
   | 'provider_disconnected'

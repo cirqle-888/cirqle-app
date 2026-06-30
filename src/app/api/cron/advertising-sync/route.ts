@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { enqueueJob } from '@/lib/jobs/engine'
+import { discoverAccountCampaigns } from '@/lib/advertising/discovery'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,7 +23,20 @@ export async function GET(req: Request) {
   try {
     // Note: We might read company_settings here to see if sync is enabled globally.
     // For now we assume it is.
-    
+
+    // 0. Discovery pass — refresh the campaign registry for every active account
+    //    so newly-created Meta campaigns surface as "unmapped". Best-effort: a
+    //    failing account is logged inside discoverAccountCampaigns and skipped.
+    let discovered = 0
+    const { data: accounts } = await admin
+      .from('ad_accounts')
+      .select('id')
+      .eq('is_active', true)
+    for (const acc of accounts ?? []) {
+      const r = await discoverAccountCampaigns(admin, acc.id, 'scheduled')
+      discovered += r.discovered
+    }
+
     // Fetch active ad_projects with sync_enabled = true and an assigned ad_account_id
     const { data: projects, error: projErr } = await admin
       .from('ad_projects')
@@ -32,12 +46,9 @@ export async function GET(req: Request) {
       .in('status', ['active', 'paused', 'completed']) // Include recently completed to catch late attribution
 
     if (projErr) throw projErr
-    if (!projects || projects.length === 0) {
-      return NextResponse.json({ message: 'No projects require syncing.' })
-    }
 
     let enqueued = 0
-    for (const project of projects) {
+    for (const project of projects ?? []) {
       await enqueueJob({
         job_type: 'advertising_sync_project',
         payload: { project_id: project.id },
@@ -46,9 +57,10 @@ export async function GET(req: Request) {
       enqueued++
     }
 
-    return NextResponse.json({ 
-      ok: true, 
-      message: `Enqueued ${enqueued} sync jobs` 
+    return NextResponse.json({
+      ok: true,
+      discovered,
+      message: `Discovered ${discovered} campaigns; enqueued ${enqueued} sync jobs`,
     })
   } catch (error: any) {
     console.error('Advertising sync cron failed:', error)

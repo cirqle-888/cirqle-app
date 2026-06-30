@@ -11,6 +11,8 @@ export interface AdCampaignResponse {
   name: string
   status: string
   objective?: string
+  /** Provider's computed delivery status (e.g. Meta effective_status), when available. */
+  effective_status?: string
 }
 
 export interface AdMetricsResponse {

@@ -50,64 +50,95 @@ export async function syncProjectWorker(job: DequeuedJob): Promise<any> {
   const startDate = d.toISOString().split('T')[0]
 
   const pStartedAt = new Date().toISOString()
-  
-  // Fetch metrics
-  const metrics = await provider.getCampaignInsights(
-    account.account_id,
-    accessToken,
-    project.provider_metadata,
-    startDate,
-    endDate
-  )
+  await admin.from('ad_projects').update({ sync_status: 'running' }).eq('id', project.id)
 
-  // Convert to IngestRow
-  const rows = metrics.map((m: any) => ({
-    projectId: project.id,
-    metricDate: m.metric_date,
-    spend: m.spend,
-    revenue: m.revenue || 0,
-    impressions: m.impressions,
-    clicks: m.clicks,
-    reach: m.reach || 0,
-    leads: m.leads || 0,
-    adCurrency: account.currency
-  }))
+  try {
+    // Fetch metrics
+    const metrics = await provider.getCampaignInsights(
+      account.account_id,
+      accessToken,
+      project.provider_metadata,
+      startDate,
+      endDate
+    )
 
-  let imported = 0
-  let updated = 0
-  if (rows.length > 0) {
-    const result = await ingestMetrics(`${providerName} API`, null, rows)
-    imported = result.imported
-    updated = result.updated
+    // Convert to IngestRow
+    const rows = metrics.map((m: any) => ({
+      projectId: project.id,
+      metricDate: m.metric_date,
+      spend: m.spend,
+      revenue: m.revenue || 0,
+      impressions: m.impressions,
+      clicks: m.clicks,
+      reach: m.reach || 0,
+      leads: m.leads || 0,
+      adCurrency: account.currency
+    }))
+
+    let imported = 0
+    let updated = 0
+    if (rows.length > 0) {
+      const result = await ingestMetrics(`${providerName} API`, null, rows)
+      imported = result.imported
+      updated = result.updated
+    }
+
+    const pFinishedAt = new Date().toISOString()
+    const durationMs = new Date(pFinishedAt).getTime() - new Date(pStartedAt).getTime()
+
+    // Mark the project synced + stamp the campaign registry (drives the
+    // mapping UI's sync column). ad_campaigns may not exist pre-migration.
+    await admin.from('ad_projects').update({
+      sync_status: 'idle',
+      last_sync_at: pFinishedAt,
+      last_sync_error: null,
+    }).eq('id', project.id)
+    await admin.from('ad_campaigns')
+      .update({ last_synced_at: pFinishedAt })
+      .eq('project_id', project.id)
+      .then(null, () => {})
+
+    // Log sync success
+    const { error: logErr } = await admin.from('ad_sync_logs').insert({
+      project_id: project.id,
+      provider: providerName,
+      status: 'success',
+      started_at: pStartedAt,
+      finished_at: pFinishedAt,
+      duration_ms: durationMs,
+      records_imported: imported + updated,
+      trigger_source: 'manual',
+    })
+    if (logErr) console.error('[syncProjectWorker] Failed to write sync log:', logErr)
+
+    // Enqueue dependent notifications and reports
+    await enqueueJob({
+      job_type: 'advertising_send_notification',
+      parent_job_id: job.id,
+      payload: { project_id: project.id }
+    })
+
+    // E4: Automatically trigger AI Analysis DAG if AI is enabled
+    if (project.provider_metadata?.ai_enabled !== false) {
+      await triggerAIAnalysisDAG(project.id)
+    }
+
+    return { rows_fetched: metrics.length, imported, updated, durationMs }
+  } catch (err: any) {
+    // Surface the failure on the project so the mapping/sync UI shows it.
+    await admin.from('ad_projects').update({
+      sync_status: 'error',
+      last_sync_error: err?.message ?? 'Sync failed',
+    }).eq('id', project.id).then(null, () => {})
+    await admin.from('ad_sync_logs').insert({
+      project_id: project.id,
+      provider: providerName,
+      status: 'error',
+      started_at: pStartedAt,
+      finished_at: new Date().toISOString(),
+      error_message: err?.message ?? 'Sync failed',
+      trigger_source: 'manual',
+    }).then(null, () => {})
+    throw err
   }
-  
-  const pFinishedAt = new Date().toISOString()
-  const durationMs = new Date(pFinishedAt).getTime() - new Date(pStartedAt).getTime()
-
-  // Log sync success
-  const { error: logErr } = await admin.from('ad_sync_logs').insert({
-    project_id: project.id,
-    provider: providerName,
-    status: 'success',
-    started_at: pStartedAt,
-    finished_at: pFinishedAt,
-    duration_ms: durationMs,
-    records_imported: imported + updated,
-    trigger_source: 'manual',
-  })
-  if (logErr) console.error('[syncProjectWorker] Failed to write sync log:', logErr)
-  
-  // Enqueue dependent notifications and reports
-  await enqueueJob({
-    job_type: 'advertising_send_notification',
-    parent_job_id: job.id,
-    payload: { project_id: project.id }
-  })
-  
-  // E4: Automatically trigger AI Analysis DAG if AI is enabled
-  if (project.provider_metadata?.ai_enabled !== false) {
-    await triggerAIAnalysisDAG(project.id)
-  }
-  
-  return { rows_fetched: metrics.length, imported, updated, durationMs }
 }

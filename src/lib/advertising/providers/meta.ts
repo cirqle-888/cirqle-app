@@ -56,18 +56,32 @@ export class MetaProvider implements AdProvider {
   async searchCampaigns(accountId: string, accessToken: string, query: string): Promise<AdCampaignResponse[]> {
     // In Graph API, ad account id requires 'act_' prefix
     const prefixedAccountId = accountId.startsWith('act_') ? accountId : `act_${accountId}`
-    const url = `https://graph.facebook.com/v19.0/${prefixedAccountId}/campaigns?fields=id,name,status,objective&access_token=${accessToken}`
-    
-    const res = await fetch(url)
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.error?.message || 'Failed to fetch campaigns')
+    const fields = 'id,name,status,effective_status,objective'
+    let url: string | null =
+      `https://graph.facebook.com/v19.0/${prefixedAccountId}/campaigns` +
+      `?fields=${fields}&limit=200&access_token=${accessToken}`
 
-    const campaigns: AdCampaignResponse[] = data.data.map((c: any) => ({
-      campaign_id: c.id,
-      name: c.name,
-      status: c.status,
-      objective: c.objective
-    }))
+    // Follow Graph API cursor pagination so agencies with >25 campaigns are not
+    // silently truncated. Cap pages defensively to avoid a runaway loop.
+    const campaigns: AdCampaignResponse[] = []
+    let page = 0
+    while (url && page < 50) {
+      const res: Response = await fetch(url)
+      const data: any = await res.json()
+      if (!res.ok) throw new Error(data.error?.message || 'Failed to fetch campaigns')
+
+      for (const c of data.data ?? []) {
+        campaigns.push({
+          campaign_id: c.id,
+          name: c.name,
+          status: c.status,
+          effective_status: c.effective_status,
+          objective: c.objective,
+        })
+      }
+      url = data.paging?.next ?? null
+      page++
+    }
 
     if (query) {
       const q = query.toLowerCase()
