@@ -77,11 +77,14 @@ async function getCompanySettings(admin: ReturnType<typeof createAdminClient>) {
     const { data } = await admin
       .from('company_settings')
       .select('key, value')
-      .in('key', ['logo_url_light', 'logo_url', 'invoice_bg_design', 'invoice_bg_image_top_url', 'invoice_bg_image_bottom_url'])
+      .in('key', ['logo_url_light', 'logo_url', 'invoice_bg_style', 'invoice_bg_design', 'invoice_bg_image_top_url', 'invoice_bg_image_bottom_url'])
     const map = new Map((data ?? []).map((r: any) => [r.key, r.value]))
     return {
       logoUrl: (map.get('logo_url_light') || map.get('logo_url') || null) as string | null,
-      bgDesign: map.get('invoice_bg_design') as string | undefined,
+      // The invoice background style is saved under `invoice_bg_style`
+      // (`invoice_bg_design` was a legacy/never-saved key). Report uses the
+      // same setting as the invoice so they match.
+      bgDesign: (map.get('invoice_bg_style') || map.get('invoice_bg_design')) as string | undefined,
       bgTopUrl: map.get('invoice_bg_image_top_url') as string | undefined,
       bgBottomUrl: map.get('invoice_bg_image_bottom_url') as string | undefined,
     }

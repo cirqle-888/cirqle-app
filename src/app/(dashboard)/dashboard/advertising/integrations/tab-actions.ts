@@ -13,7 +13,7 @@ export async function fetchSyncLogs(projectId: string) {
     .from('ad_sync_logs')
     .select('*')
     .eq('project_id', projectId)
-    .order('sync_date', { ascending: false })
+    .order('created_at', { ascending: false })
     .limit(20)
 
   if (error) throw error
@@ -32,6 +32,16 @@ export async function triggerManualSync(projectId: string) {
     payload: { project_id: projectId },
     priority: 'high',
   })
+
+  // Run the queue inline so a manual "Sync Now" completes immediately instead of
+  // waiting for the daily process-jobs cron. The high-priority job is dequeued
+  // first; the 25s budget keeps us within the serverless timeout.
+  try {
+    const { processJobs } = await import('@/lib/jobs/worker')
+    await processJobs(crypto.randomUUID(), 25000)
+  } catch (err) {
+    console.error('[triggerManualSync] inline processing failed; job stays queued for cron', err)
+  }
 
   return { success: true }
 }

@@ -233,13 +233,21 @@ export async function triggerManualSync(projectId: string) {
   const admin = createAdminClient()
   
   await admin.from('ad_projects').update({ sync_status: 'queued' }).eq('id', projectId)
-  
+
   const { enqueueJob } = await import('@/lib/jobs/engine')
   await enqueueJob({
     job_type: 'advertising_sync_project',
     payload: { project_id: projectId },
     priority: 'high'
   })
+
+  // Run inline so the sync completes now rather than waiting for the daily cron.
+  try {
+    const { processJobs } = await import('@/lib/jobs/worker')
+    await processJobs(crypto.randomUUID(), 25000)
+  } catch (err) {
+    console.error('[triggerManualSync] inline processing failed; job stays queued for cron', err)
+  }
   return { success: true }
 }
 

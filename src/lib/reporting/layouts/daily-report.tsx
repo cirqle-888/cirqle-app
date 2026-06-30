@@ -91,7 +91,7 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
       }}
     >
       {/* Decorative swooshes or custom images */}
-      {brand.backgroundDesign === 'Custom Images' ? (
+      {(brand.backgroundDesign === 'custom_images' || brand.backgroundDesign === 'Custom Images') ? (
         <>
           {brand.bgImageTopUrl && (
             <div style={{ position: 'absolute', top: 0, left: 0, width: `${width}px`, display: 'flex' }}>
