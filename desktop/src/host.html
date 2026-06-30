@@ -70,17 +70,47 @@
             btn.classList.add('on')
           }
           btn.onclick = () => window.desk.waSwitch(wa.id)
-          btn.oncontextmenu = (e) => {
-            e.preventDefault()
-            const newName = prompt('Rename WhatsApp tab to:', wa.label)
-            if (newName !== null && newName.trim() !== '') {
-              window.desk.waRename(wa.id, newName.trim())
-            }
-          }
-          
           const wrap = document.createElement('div')
           wrap.style.display = 'flex'
           wrap.style.alignItems = 'center'
+          
+          btn.oncontextmenu = (e) => {
+            e.preventDefault()
+            const input = document.createElement('input')
+            input.type = 'text'
+            input.value = wa.label
+            input.style.width = '80px'
+            input.style.padding = '4px 8px'
+            input.style.fontSize = '12px'
+            input.style.border = '1px solid #4B5563' // border-gray-600
+            input.style.borderRadius = '4px'
+            input.style.backgroundColor = '#1F2937' // bg-gray-800
+            input.style.color = 'white'
+            input.style.outline = 'none'
+            
+            const submit = () => {
+              if (input.value && input.value.trim() !== '' && input.value !== wa.label) {
+                window.desk.waRename(wa.id, input.value.trim())
+              } else {
+                // If they cancel or leave empty, just redraw from current state
+                wrap.replaceChild(btn, input)
+              }
+            }
+            
+            input.onblur = submit
+            input.onkeydown = (e) => {
+              if (e.key === 'Enter') submit()
+              if (e.key === 'Escape') {
+                input.value = wa.label
+                submit()
+              }
+            }
+            
+            wrap.replaceChild(input, btn)
+            input.focus()
+            input.select()
+          }
+          
           wrap.appendChild(btn)
           
           if (s.waAccounts.length > 1) {
