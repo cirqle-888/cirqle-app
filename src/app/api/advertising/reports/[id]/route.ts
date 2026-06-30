@@ -37,11 +37,11 @@ export async function GET(
     if (!data)  return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
     // Track viewed event (fire-and-forget)
-    void (admin.from('ad_report_analytics').insert({
+    void admin.from('ad_report_analytics').insert({
       report_id: id,
       event:     'viewed',
       user_id:   (me as any)?.id ?? null,
-    }) as any as Promise<any>).catch(() => {})
+    }).then(null, () => {})
 
     return NextResponse.json(data)
   } catch (err: any) {

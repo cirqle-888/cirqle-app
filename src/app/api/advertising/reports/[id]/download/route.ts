@@ -43,12 +43,12 @@ export async function GET(
     if (!url) return NextResponse.json({ error: `Format '${format}' not generated for this report` }, { status: 404 })
 
     // Track downloaded event
-    void (admin.from('ad_report_analytics').insert({
+    void admin.from('ad_report_analytics').insert({
       report_id: id,
       event:     'downloaded',
       format,
       user_id:   (me as any)?.id ?? null,
-    }) as any as Promise<any>).catch(() => {})
+    }).then(null, () => {})
 
     return NextResponse.json({ url, format })
   } catch (err: any) {

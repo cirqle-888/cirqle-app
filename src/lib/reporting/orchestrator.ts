@@ -161,12 +161,14 @@ export async function generateReport(config: ReportConfig): Promise<Orchestratio
     if (updateErr) console.error('[Orchestrator] Failed to update report record:', updateErr.message)
 
     // ── 7. Track generated event ───────────────────────────────────────
-    void (admin.from('ad_report_analytics').insert({
+    // Use .then(null, () => {}) instead of .catch() — Supabase returns a
+    // PromiseLike (has .then) but not a full Promise (no .catch).
+    void admin.from('ad_report_analytics').insert({
       report_id: reportId,
       event:     'generated',
       user_id:   config.generatedBy ?? null,
       metadata:  { formats, generation_time_ms: generationTimeMs },
-    }) as any as Promise<any>).catch(() => {}) // Non-critical
+    }).then(null, () => {}) // Non-critical
 
     return {
       reportId,
