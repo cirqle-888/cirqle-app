@@ -35,6 +35,8 @@
   <button id="wa-add" style="margin-left: 4px;" title="Add WhatsApp Account">+</button>
   <button data-reload="whatsapp" style="margin-left: 4px;" title="Reload Active WhatsApp">⟳ WA</button>
   <div class="grow"></div>
+  <button id="btn-fullscreen" title="Toggle Full Screen">⤢</button>
+  <button data-preset="toggleToolbar" title="Hide Toolbar (Cmd/Ctrl+T to show)">⬆</button>
   <span class="ver" id="ver"></span>
   <script>
     const $ = (s) => document.querySelector(s)
@@ -44,6 +46,7 @@
     window.desk.version().then((v) => ($('#ver').textContent = 'v' + v))
     $('#btn-back').onclick = () => window.desk.goBack()
     $('#btn-forward').onclick = () => window.desk.goForward()
+    $('#btn-fullscreen').onclick = () => window.desk.toggleFullscreen()
     $('#wa-add').onclick = () => window.desk.waAdd()
 
     window.desk.onState((s) => {

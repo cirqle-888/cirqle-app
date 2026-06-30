@@ -49,6 +49,7 @@ const state = Object.assign({
   ratio: 0.5, 
   showCirqle: true, 
   showWhatsapp: true,
+  showToolbar: true,
   waAccounts: [{ id: 'default', label: 'WA 1' }],
   activeWa: 'default'
 }, loadSettings())
@@ -62,9 +63,16 @@ const truncate = (s, n = 60) => { const one = String(s).replace(/\s+/g, ' ').tri
 function layout() {
   if (!win) return
   const b = win.getContentBounds()
-  const bodyY = TOOLBAR_H
-  const bodyH = b.height - TOOLBAR_H
-  chrome.setBounds({ x: 0, y: 0, width: b.width, height: TOOLBAR_H })
+  const currentToolbarH = state.showToolbar ? TOOLBAR_H : 0
+  const bodyY = currentToolbarH
+  const bodyH = b.height - currentToolbarH
+  
+  if (state.showToolbar) {
+    chrome.setBounds({ x: 0, y: 0, width: b.width, height: currentToolbarH })
+    chrome.setVisible(true)
+  } else {
+    chrome.setVisible(false)
+  }
 
   const both = state.showCirqle && state.showWhatsapp
   
@@ -99,6 +107,7 @@ function applyPreset(p) {
   else if (p === '25') Object.assign(state, { ratio: 0.25, showCirqle: true, showWhatsapp: true })
   else if (p === 'hideWA') Object.assign(state, { showWhatsapp: false, showCirqle: true })
   else if (p === 'hideCirqle') Object.assign(state, { showCirqle: false, showWhatsapp: true })
+  else if (p === 'toggleToolbar') Object.assign(state, { showToolbar: !state.showToolbar })
   layout(); saveSettings()
   if (chrome) chrome.webContents.send('state', state)
 }
@@ -213,6 +222,9 @@ function buildMenu() {
         { label: 'Hide WhatsApp', click: () => applyPreset('hideWA') },
         { label: 'Hide Cirqle', click: () => applyPreset('hideCirqle') },
         { type: 'separator' },
+        { label: 'Toggle Toolbar', accelerator: 'CmdOrCtrl+T', click: () => applyPreset('toggleToolbar') },
+        { role: 'togglefullscreen' },
+        { type: 'separator' },
         { role: 'toggleDevTools' },
       ],
     },
@@ -241,6 +253,7 @@ ipcMain.on('reload', (_e, which) => {
 })
 ipcMain.on('goBack', () => { if (cirqle && cirqle.webContents.canGoBack()) cirqle.webContents.goBack() })
 ipcMain.on('goForward', () => { if (cirqle && cirqle.webContents.canGoForward()) cirqle.webContents.goForward() })
+ipcMain.on('toggleFullscreen', () => { if (win) win.setFullScreen(!win.isFullScreen()) })
 ipcMain.on('capture:clipboard', sendClipboardToCirqle)
 ipcMain.on('retry', (_e, pane) => {
   if (pane === 'whatsapp' && whatsapps[state.activeWa]) whatsapps[state.activeWa].webContents.loadURL(WHATSAPP_URL, { userAgent: CHROME_UA })

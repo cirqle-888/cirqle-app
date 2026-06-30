@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('desk', {
   reload: (which) => ipcRenderer.send('reload', which),
   goBack: () => ipcRenderer.send('goBack'),
   goForward: () => ipcRenderer.send('goForward'),
+  toggleFullscreen: () => ipcRenderer.send('toggleFullscreen'),
   waAdd: () => ipcRenderer.send('wa:add'),
   waSwitch: (id) => ipcRenderer.send('wa:switch', id),
   capture: () => ipcRenderer.send('capture:clipboard'),
