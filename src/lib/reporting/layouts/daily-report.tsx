@@ -15,13 +15,13 @@
 /* eslint-disable @next/next/no-img-element */
 import React from 'react'
 import type { RenderData } from '../types'
+import { META_LOGO_DATA_URI } from './meta-logo'
 
 // ─── Brand tokens ───────────────────────────────────────────────────────────
 const PURPLE   = '#6D28D9'
 const PURPLE_D = '#5B21B6'
 const NAVY      = '#1E1B4B'
 const INK       = '#111827'
-const META_BLUE = '#0866FF'
 const GREY_PILL = '#4B5563'
 const RED_PILL  = '#EF4444'
 
@@ -220,21 +220,21 @@ function MetaLine({ s, pairs }: { s: number; pairs: [string, string][] }) {
 function KpiCircle({
   s, label, value, grad, icon,
 }: { s: number; label: string; value: string; grad: [string, string]; icon: IconName }) {
-  const dia = 116 * s
+  const dia = 84 * s
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: `${184 * s}px` }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: `${172 * s}px` }}>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         width: `${dia}px`, height: `${dia}px`, borderRadius: `${dia}px`,
         background: `linear-gradient(135deg, ${grad[0]}, ${grad[1]})`,
-        marginBottom: `${14 * s}px`,
+        marginBottom: `${12 * s}px`,
       }}>
-        <Icon name={icon} size={56 * s} />
+        <Icon name={icon} size={40 * s} />
       </div>
-      <div style={{ display: 'flex', fontSize: `${22 * s}px`, fontWeight: 700, color: '#374151', marginBottom: `${4 * s}px` }}>
+      <div style={{ display: 'flex', fontSize: `${21 * s}px`, fontWeight: 600, color: '#6B7280', marginBottom: `${3 * s}px` }}>
         {label}
       </div>
-      <div style={{ display: 'flex', fontSize: `${34 * s}px`, fontWeight: 900, color: INK }}>
+      <div style={{ display: 'flex', fontSize: `${32 * s}px`, fontWeight: 800, color: INK }}>
         {value}
       </div>
     </div>
@@ -242,7 +242,7 @@ function KpiCircle({
 }
 
 function KpiDivider({ s }: { s: number }) {
-  return <div style={{ display: 'flex', width: `${1 * s}px`, height: `${96 * s}px`, background: '#E5E7EB', marginTop: `${10 * s}px` }} />
+  return <div style={{ display: 'flex', width: `${1 * s}px`, height: `${72 * s}px`, background: '#E5E7EB', marginTop: `${6 * s}px` }} />
 }
 
 function Pill({ s, bg, label, value }: { s: number; bg: string; label: string; value: string }) {
@@ -296,10 +296,19 @@ function TableRow({
 // ─── Logos ──────────────────────────────────────────────────────────────────
 
 function CirqleLogo({ s, brand }: { s: number; brand: RenderData['brand'] }) {
-  // White-label: if a client logo image is set, use it; else the Cirqle mark.
+  // Real agency logo from Settings → Company → Branding. Fixed box keeps the
+  // header height stable regardless of the logo's aspect ratio.
   if (brand.agencyLogoUrl) {
     return (
-      <img src={brand.agencyLogoUrl} alt="" style={{ height: `${56 * s}px`, objectFit: 'contain' }} />
+      <div style={{ display: 'flex', alignItems: 'center', width: `${230 * s}px`, height: `${64 * s}px` }}>
+        <img
+          src={brand.agencyLogoUrl}
+          alt=""
+          width={230 * s}
+          height={64 * s}
+          style={{ width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'left center' }}
+        />
+      </div>
     )
   }
   const box = 56 * s
@@ -327,19 +336,12 @@ function CirqleLogo({ s, brand }: { s: number; brand: RenderData['brand'] }) {
 }
 
 function MetaLogo({ s }: { s: number }) {
+  // Official Meta logo (infinity mark + wordmark), viewBox 0 0 50 11.
+  const h = 30 * s
+  const w = h * (50 / 11)
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: `${12 * s}px` }}>
-      <svg width={64 * s} height={32 * s} viewBox="0 0 64 32" fill="none">
-        <path
-          d="M6 24 C6 10 16 8 23 18 C28 25 36 25 41 18 C46 11 54 11 58 18"
-          stroke={META_BLUE} strokeWidth={5 * s} strokeLinecap="round"
-        />
-        <path
-          d="M6 24 C6 10 16 8 23 18"
-          stroke="#1C7FFF" strokeWidth={5 * s} strokeLinecap="round"
-        />
-      </svg>
-      <span style={{ display: 'flex', fontSize: `${34 * s}px`, fontWeight: 800, color: '#1C2B33' }}>Meta</span>
+    <div style={{ display: 'flex', alignItems: 'center', width: `${w}px`, height: `${h}px` }}>
+      <img src={META_LOGO_DATA_URI} alt="Meta" width={w} height={h} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
     </div>
   )
 }

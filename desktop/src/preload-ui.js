@@ -9,6 +9,10 @@ const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('desk', {
   preset: (p) => ipcRenderer.send('layout:preset', p),
   reload: (which) => ipcRenderer.send('reload', which),
+  goBack: () => ipcRenderer.send('goBack'),
+  goForward: () => ipcRenderer.send('goForward'),
+  waAdd: () => ipcRenderer.send('wa:add'),
+  waSwitch: (id) => ipcRenderer.send('wa:switch', id),
   capture: () => ipcRenderer.send('capture:clipboard'),
   retry: (pane) => ipcRenderer.send('retry', pane),
   splitterStart: () => ipcRenderer.send('splitter:start'),

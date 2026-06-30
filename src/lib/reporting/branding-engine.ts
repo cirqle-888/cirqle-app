@@ -34,20 +34,43 @@ export async function resolveBrandConfig(
   clientId: string,
   clientName: string,
 ): Promise<BrandConfig> {
+  const admin = createAdminClient()
+  const companyLogo = await getCompanyLogoUrl(admin)
+
   try {
-    const admin = createAdminClient()
     const { data } = await admin
       .from('client_branding')
       .select('*')
       .eq('client_id', clientId)
       .maybeSingle()
 
-    if (data) return mapRowToBrandConfig(data, clientName)
+    if (data) {
+      const cfg = mapRowToBrandConfig(data, clientName)
+      return { ...cfg, agencyLogoUrl: cfg.agencyLogoUrl ?? companyLogo }
+    }
   } catch {
     // Silently fall through to defaults
   }
 
-  return buildDefaultBrandConfig(clientName)
+  const cfg = buildDefaultBrandConfig(clientName)
+  return { ...cfg, agencyLogoUrl: cfg.agencyLogoUrl ?? companyLogo }
+}
+
+/**
+ * The agency (Cirqle) logo for reports comes from Settings → Company → Branding,
+ * stored in company_settings. Prefer the light-mode logo (reports are on white).
+ */
+async function getCompanyLogoUrl(admin: ReturnType<typeof createAdminClient>): Promise<string | null> {
+  try {
+    const { data } = await admin
+      .from('company_settings')
+      .select('key, value')
+      .in('key', ['logo_url_light', 'logo_url'])
+    const map = new Map((data ?? []).map((r: any) => [r.key, r.value]))
+    return (map.get('logo_url_light') || map.get('logo_url') || null) as string | null
+  } catch {
+    return null
+  }
 }
 
 /**

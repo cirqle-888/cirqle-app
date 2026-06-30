@@ -298,8 +298,8 @@ export default function AdvertisingClient({
 
                 {/* KPI grid */}
                 <div className="grid grid-cols-4 gap-2">
-                  <MiniStat label="ROAS" value={agg.roas != null ? `${agg.roas}×` : '—'} />
-                  <MiniStat label="CTR" value={agg.ctr != null ? `${agg.ctr}%` : '—'} />
+                  <MiniStat label="ROAS" value={agg.roas != null ? `${agg.roas.toFixed(2)}×` : '—'} />
+                  <MiniStat label="CTR" value={agg.ctr != null ? `${agg.ctr.toFixed(2)}%` : '—'} />
                   <MiniStat label="CPC" value={agg.spend && agg.clicks ? inr((agg.spend) / agg.clicks) : '—'} />
                   <MiniStat label="Leads" value={agg.leads ? agg.leads.toLocaleString('en-IN') : '—'} />
                 </div>
@@ -339,9 +339,9 @@ export default function AdvertisingClient({
 
 function MiniStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg bg-secondary/50 px-2 py-1.5 text-center">
+    <div className="rounded-lg bg-secondary/50 px-2 py-1.5 text-center min-w-0">
       <div className="text-[9px] uppercase tracking-wide text-muted-foreground font-medium">{label}</div>
-      <div className="text-xs font-semibold tabular-nums mt-0.5">{value}</div>
+      <div className="text-xs font-semibold tabular-nums mt-0.5 truncate">{value}</div>
     </div>
   )
 }

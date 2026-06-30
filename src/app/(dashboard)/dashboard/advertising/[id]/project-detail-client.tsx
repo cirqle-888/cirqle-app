@@ -699,6 +699,24 @@ function ProjectReportsTab({
     }
   }
 
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  async function onDelete(reportId: string) {
+    if (!confirm('Delete this report permanently? The PDF/image files will also be removed.')) return
+    setDeletingId(reportId)
+    setError(null)
+    try {
+      const res = await fetch(`/api/advertising/reports/${reportId}`, { method: 'DELETE' })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error ?? 'Failed to delete')
+      setReports(prev => prev.filter(r => r.id !== reportId))
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   const statusIcon = (status: string) => ({
     pending:    <Clock className="h-3.5 w-3.5 text-muted-foreground" />,
     generating: <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />,
@@ -803,6 +821,16 @@ function ProjectReportsTab({
                   {r.xlsx_url && <a href={r.xlsx_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"><Download className="h-3 w-3" />Excel</a>}
                   {r.csv_url  && <a href={r.csv_url}  target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"><Download className="h-3 w-3" />CSV</a>}
                   {r.image_url_portrait && <a href={r.image_url_portrait} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"><Download className="h-3 w-3" />Image</a>}
+                  {canEdit && (
+                    <button
+                      onClick={() => onDelete(r.id)}
+                      disabled={deletingId === r.id}
+                      title="Delete report"
+                      className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:text-red-600 hover:border-red-300 disabled:opacity-50"
+                    >
+                      {deletingId === r.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

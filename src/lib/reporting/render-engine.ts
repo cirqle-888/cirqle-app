@@ -9,6 +9,7 @@
  * re-exporting any format never re-fetches the database or re-calls AI.
  */
 
+import sharp from 'sharp'
 import { fetchReportData } from './data-engine'
 import { buildKPIData } from './kpi-engine'
 import { resolveTemplate } from './template-engine'
@@ -37,6 +38,16 @@ export async function buildRenderData(config: ReportConfig): Promise<RenderData>
     comparisonFrom: config.comparisonFrom,
     comparisonTo: config.comparisonTo,
   })
+
+  // ── 1b. Resolve agency logo to an embeddable data URI ────────────────────
+  // Satori (image/PDF rasteriser) is most reliable with a data URI rather than
+  // a remote URL. Convert the company logo once; store it on the brand so all
+  // exporters reuse it.
+  const brand = { ...raw.branding }
+  if (brand.agencyLogoUrl && /^https?:\/\//.test(brand.agencyLogoUrl)) {
+    const dataUrl = await logoToDataUrl(brand.agencyLogoUrl)
+    if (dataUrl) brand.agencyLogoUrl = dataUrl
+  }
 
   // ── 2. Template config ───────────────────────────────────────────────────
   // Merge any per-section overrides the user supplied in ReportConfig.sections
@@ -125,7 +136,7 @@ export async function buildRenderData(config: ReportConfig): Promise<RenderData>
   return {
     config,
     template,
-    brand: raw.branding,
+    brand,
     project: raw.project,
     kpi,
     benchmarks,
@@ -137,6 +148,26 @@ export async function buildRenderData(config: ReportConfig): Promise<RenderData>
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Fetches a remote logo and returns a resized PNG data URI (or null on failure).
+ * Mirrors the payslip renderer so report branding is consistent and never
+ * depends on a live network fetch at raster time.
+ */
+async function logoToDataUrl(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url)
+    if (!res.ok) return null
+    const raw = Buffer.from(await res.arrayBuffer())
+    const png = await sharp(raw)
+      .resize({ width: 480, height: 160, fit: 'inside', withoutEnlargement: true })
+      .png({ compressionLevel: 9 })
+      .toBuffer()
+    return 'data:image/png;base64,' + png.toString('base64')
+  } catch {
+    return null
+  }
+}
 
 function gradeVerdict(grade: string, score: number): string {
   if (grade === 'A') return `Excellent campaign — score ${score}/100`

@@ -43,8 +43,15 @@ const settingsFile = () => path.join(app.getPath('userData'), 'layout.json')
 const loadSettings = () => { try { return JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) } catch { return {} } }
 const saveSettings = () => { try { fs.writeFileSync(settingsFile(), JSON.stringify(state)) } catch { /* best effort */ } }
 
-let win, chrome, cirqle, whatsapp, splitter, overlay
-const state = Object.assign({ ratio: 0.5, showCirqle: true, showWhatsapp: true }, loadSettings())
+let win, chrome, cirqle, splitter, overlay
+const whatsapps = {} // keyed by id
+const state = Object.assign({ 
+  ratio: 0.5, 
+  showCirqle: true, 
+  showWhatsapp: true,
+  waAccounts: [{ id: 'default', label: 'WA 1' }],
+  activeWa: 'default'
+}, loadSettings())
 
 // Recent clipboard items (newest first), surfaced in the Capture menu.
 const clipHistory = []
@@ -60,19 +67,29 @@ function layout() {
   chrome.setBounds({ x: 0, y: 0, width: b.width, height: TOOLBAR_H })
 
   const both = state.showCirqle && state.showWhatsapp
+  
+  // Hide all whatsapp views first
+  for (const id in whatsapps) whatsapps[id].setVisible(false)
+  
+  const activeWaView = whatsapps[state.activeWa]
+
   if (both) {
     const splitX = Math.round(b.width * state.ratio)
     cirqle.setBounds({ x: 0, y: bodyY, width: splitX - SPLITTER_W / 2, height: bodyH })
     splitter.setBounds({ x: splitX - SPLITTER_W / 2, y: bodyY, width: SPLITTER_W, height: bodyH })
-    whatsapp.setBounds({ x: splitX + SPLITTER_W / 2, y: bodyY, width: b.width - splitX - SPLITTER_W / 2, height: bodyH })
+    if (activeWaView) activeWaView.setBounds({ x: splitX + SPLITTER_W / 2, y: bodyY, width: b.width - splitX - SPLITTER_W / 2, height: bodyH })
     splitter.setVisible(true)
   } else {
     splitter.setVisible(false)
-    const only = state.showCirqle ? cirqle : whatsapp
-    only.setBounds({ x: 0, y: bodyY, width: b.width, height: bodyH })
+    if (state.showCirqle) {
+      cirqle.setBounds({ x: 0, y: bodyY, width: b.width, height: bodyH })
+    } else if (state.showWhatsapp && activeWaView) {
+      activeWaView.setBounds({ x: 0, y: bodyY, width: b.width, height: bodyH })
+    }
   }
+  
   cirqle.setVisible(state.showCirqle)
-  whatsapp.setVisible(state.showWhatsapp)
+  if (state.showWhatsapp && activeWaView) activeWaView.setVisible(true)
   if (overlay) overlay.setBounds({ x: 0, y: bodyY, width: b.width, height: bodyH })
 }
 
@@ -128,25 +145,39 @@ function createViews() {
     if (isMainFrame && code !== -3) loadError(cirqle, CIRQLE_URL, 'cirqle')
   })
 
-  whatsapp = new WebContentsView({ webPreferences: { partition: 'persist:whatsapp:default', preload: path.join(__dirname, 'preload-ui.js') } })
-  whatsapp.webContents.setUserAgent(CHROME_UA)
-  whatsapp.webContents.loadURL(WHATSAPP_URL, { userAgent: CHROME_UA })
-  whatsapp.webContents.on('did-fail-load', (_e, code, _desc, _url, isMainFrame) => {
-    if (isMainFrame && code !== -3) loadError(whatsapp, WHATSAPP_URL, 'whatsapp')
+  // Ensure activeWa is valid
+  if (!state.waAccounts.find(a => a.id === state.activeWa)) {
+    if (state.waAccounts.length > 0) state.activeWa = state.waAccounts[0].id
+  }
+
+  state.waAccounts.forEach(account => {
+    createWhatsappView(account.id)
   })
 
   splitter = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-ui.js') } })
   splitter.webContents.loadFile(path.join(__dirname, 'splitter.html'))
 
-  // External links (target=_blank) open in the system browser, not in-app.
-  for (const v of [cirqle, whatsapp]) {
+  for (const v of [cirqle, ...Object.values(whatsapps)]) {
     v.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' } })
   }
 
   win.contentView.addChildView(cirqle)
-  win.contentView.addChildView(whatsapp)
+  Object.values(whatsapps).forEach(waView => win.contentView.addChildView(waView))
   win.contentView.addChildView(splitter)
   win.contentView.addChildView(chrome) // toolbar on top
+}
+
+function createWhatsappView(id) {
+  if (whatsapps[id]) return
+  const wa = new WebContentsView({ webPreferences: { partition: `persist:whatsapp:${id}`, preload: path.join(__dirname, 'preload-ui.js') } })
+  wa.webContents.setUserAgent(CHROME_UA)
+  wa.webContents.loadURL(WHATSAPP_URL, { userAgent: CHROME_UA })
+  wa.webContents.on('did-fail-load', (_e, code, _desc, _url, isMainFrame) => {
+    if (isMainFrame && code !== -3) loadError(wa, WHATSAPP_URL, 'whatsapp')
+  })
+  wa.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' } })
+  whatsapps[id] = wa
+  if (win) win.contentView.addChildView(wa)
 }
 
 // Native menu — unclipped, so clipboard history + New-record shortcuts live here
@@ -174,7 +205,7 @@ function buildMenu() {
       label: 'View',
       submenu: [
         { label: 'Reload Cirqle', accelerator: 'CmdOrCtrl+R', click: () => cirqle && cirqle.webContents.loadURL(CIRQLE_URL) },
-        { label: 'Reload WhatsApp', click: () => whatsapp && whatsapp.webContents.reload() },
+        { label: 'Reload WhatsApp', click: () => whatsapps[state.activeWa] && whatsapps[state.activeWa].webContents.reload() },
         { type: 'separator' },
         { label: 'Split 50 / 50', click: () => applyPreset('50') },
         { label: 'Cirqle 75 / WhatsApp 25', click: () => applyPreset('75') },
@@ -206,14 +237,35 @@ function pollClipboard() {
 ipcMain.on('layout:preset', (_e, p) => applyPreset(p))
 ipcMain.on('reload', (_e, which) => {
   if (which === 'cirqle' && cirqle) cirqle.webContents.loadURL(CIRQLE_URL)
-  if (which === 'whatsapp' && whatsapp) whatsapp.webContents.reload()
+  if (which === 'whatsapp' && whatsapps[state.activeWa]) whatsapps[state.activeWa].webContents.reload()
 })
+ipcMain.on('goBack', () => { if (cirqle && cirqle.webContents.canGoBack()) cirqle.webContents.goBack() })
+ipcMain.on('goForward', () => { if (cirqle && cirqle.webContents.canGoForward()) cirqle.webContents.goForward() })
 ipcMain.on('capture:clipboard', sendClipboardToCirqle)
 ipcMain.on('retry', (_e, pane) => {
-  if (pane === 'whatsapp' && whatsapp) whatsapp.webContents.loadURL(WHATSAPP_URL, { userAgent: CHROME_UA })
+  if (pane === 'whatsapp' && whatsapps[state.activeWa]) whatsapps[state.activeWa].webContents.loadURL(WHATSAPP_URL, { userAgent: CHROME_UA })
   else if (cirqle) cirqle.webContents.loadURL(CIRQLE_URL)
 })
 ipcMain.handle('app:version', () => app.getVersion())
+
+ipcMain.on('wa:add', () => {
+  const newId = Date.now().toString()
+  state.waAccounts.push({ id: newId, label: `WA ${state.waAccounts.length + 1}` })
+  state.activeWa = newId
+  createWhatsappView(newId)
+  layout()
+  saveSettings()
+  if (chrome) chrome.webContents.send('state', state)
+})
+
+ipcMain.on('wa:switch', (_e, id) => {
+  if (state.activeWa === id) return
+  state.activeWa = id
+  state.showWhatsapp = true
+  layout()
+  saveSettings()
+  if (chrome) chrome.webContents.send('state', state)
+})
 
 // Draggable splitter: on drag start we float a full-body overlay view that keeps
 // receiving mouse events even as the pointer passes over the two web views.

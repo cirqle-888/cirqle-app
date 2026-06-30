@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { logCronRun } from '@/lib/cron/log'
+import { deleteReportStorageAndRow } from '@/lib/reporting/delete-report'
 
 /**
  * Scheduled report-retention cleanup — permanently deletes generated reports
@@ -20,9 +21,6 @@ import { logCronRun } from '@/lib/cron/log'
  * Schedule in vercel.json → `crons`.
  */
 
-const BUCKET = 'ad-reports'
-// Folder slugs uploadExport() writes under reports/{id}/ — one per format.
-const FORMAT_SLUGS = ['pdf', 'xlsx', 'csv', 'image-portrait', 'image-square']
 // Cap per run so a backlog can't blow the serverless time budget.
 const MAX_PER_RUN = 500
 
@@ -66,27 +64,9 @@ export async function GET(req: NextRequest) {
   const errors: string[] = []
 
   for (const report of stale) {
-    // 1. Remove all storage objects under reports/{id}/{slug}/
-    const paths: string[] = []
-    for (const slug of FORMAT_SLUGS) {
-      const { data: files } = await admin.storage.from(BUCKET).list(`reports/${report.id}/${slug}`)
-      for (const f of files ?? []) {
-        if (f.name) paths.push(`reports/${report.id}/${slug}/${f.name}`)
-      }
-    }
-    if (paths.length > 0) {
-      const { error: rmErr } = await admin.storage.from(BUCKET).remove(paths)
-      if (rmErr) {
-        // Surface but keep going — we still delete the DB row so it stops showing.
-        errors.push(`storage ${report.id}: ${rmErr.message}`)
-      } else {
-        filesRemoved += paths.length
-      }
-    }
-
-    // 2. Delete the report row (ad_report_analytics cascades).
-    const { error: delErr } = await admin.from('ad_reports').delete().eq('id', report.id)
-    if (delErr) { errors.push(`row ${report.id}: ${delErr.message}`); continue }
+    const result = await deleteReportStorageAndRow(admin, report.id)
+    filesRemoved += result.filesRemoved
+    if (result.error) { errors.push(`${report.id}: ${result.error}`); continue }
     deleted++
   }
 
