@@ -111,6 +111,20 @@ function popupDownloadsMenu() {
   const menu = Menu.buildFromTemplate(downloadsMenuTemplate())
   if (win) menu.popup({ window: win })
 }
+
+// New-window (target=_blank / window.open) links from the Cirqle pane: if they
+// point at a file (report / invoice PDF, Excel, CSV, image) download it into the
+// Cirqle folder so it lands in the tray; otherwise open in the system browser.
+const FILE_URL_RE = /\.(pdf|xlsx?|csv|docx?|pptx?|png|jpe?g|zip)(\?|#|$)/i
+function makeWindowOpenHandler(getView) {
+  return ({ url }) => {
+    if (FILE_URL_RE.test(url) || url.includes('/storage/v1/object/')) {
+      try { getView().webContents.downloadURL(url); return { action: 'deny' } } catch { /* fall through to browser */ }
+    }
+    shell.openExternal(url)
+    return { action: 'deny' }
+  }
+}
 const truncate = (s, n = 60) => { const one = String(s).replace(/\s+/g, ' ').trim(); return one.length > n ? one.slice(0, n) + '…' : one }
 
 // ── Layout: position each view from the window size + ratio + visibility ──────
@@ -221,7 +235,10 @@ function createViews() {
   splitter = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-ui.js') } })
   splitter.webContents.loadFile(path.join(__dirname, 'splitter.html'))
 
-  for (const v of [cirqle, ...Object.values(whatsapps)]) {
+  // Cirqle pane downloads report/invoice file links into the tray; WhatsApp
+  // links keep opening in the system browser.
+  cirqle.webContents.setWindowOpenHandler(makeWindowOpenHandler(() => cirqle))
+  for (const v of Object.values(whatsapps)) {
     v.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' } })
   }
 
