@@ -47,6 +47,7 @@ const inr = (v: number | null | undefined, dp = 0) =>
   v == null ? '—' : `₹${Number(v).toLocaleString('en-IN', { maximumFractionDigits: dp })}`
 const num = (v: number | null | undefined) =>
   v == null ? '—' : Number(v).toLocaleString('en-IN')
+const round2 = (v: number) => Math.round(v * 100) / 100
 
 type Tab = 'overview' | 'daily' | 'tasks' | 'budget' | 'notes' | 'integrations' | 'reports'
 
@@ -188,8 +189,8 @@ function OverviewTab({ project, agg, remaining, health }: {
     ['Spent', inr(agg.spend)],
     ['Remaining', inr(remaining)],
     ['Revenue', inr(agg.revenue)],
-    ['ROAS', agg.roas != null ? `${agg.roas}×` : '—'],
-    ['CTR', agg.ctr != null ? `${agg.ctr}%` : '—'],
+    ['ROAS', agg.roas != null ? `${round2(agg.roas)}×` : '—'],
+    ['CTR', agg.ctr != null ? `${round2(agg.ctr)}%` : '—'],
     ['CPC', inr(agg.cpc, 2)],
     ['Clicks', num(agg.clicks)],
     ['Impressions', num(agg.impressions)],
@@ -210,9 +211,9 @@ function OverviewTab({ project, agg, remaining, health }: {
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         {kpis.map(([k, v]) => (
-          <div key={k} className="rounded-lg border border-border bg-card p-3">
+          <div key={k} className="rounded-lg border border-border bg-card p-3 min-w-0">
             <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{k}</div>
-            <div className="text-lg font-semibold tabular-nums">{v}</div>
+            <div className="text-lg font-semibold tabular-nums truncate" title={v}>{v}</div>
           </div>
         ))}
       </div>

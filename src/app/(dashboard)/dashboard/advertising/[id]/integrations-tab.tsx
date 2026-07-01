@@ -195,9 +195,17 @@ export function IntegrationsTab({ project, canEdit, onChange }: { project: any, 
                       <td className="py-2">{log.records_imported}</td>
                       <td className="py-2">{log.records_updated}</td>
                       <td className="py-2">
-                        <span className={`px-2 py-0.5 rounded-full text-xs ${log.status === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-xs ${log.status === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800 cursor-help'}`}
+                          title={log.status !== 'success' ? (log.error_message || 'Sync failed') : undefined}
+                        >
                           {log.status}
                         </span>
+                        {log.status !== 'success' && log.error_message && (
+                          <div className="text-[11px] text-red-600 mt-0.5 max-w-md truncate" title={log.error_message}>
+                            {log.error_message}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}
