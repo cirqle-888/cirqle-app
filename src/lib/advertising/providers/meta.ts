@@ -9,8 +9,19 @@ export class MetaProvider implements AdProvider {
   getOAuthUrl(targetClientId: string, redirectUri: string, state: string): string {
     const clientId = process.env.META_APP_ID || process.env.META_CLIENT_ID
     if (!clientId) throw new Error('Meta OAuth not configured')
+    const base = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`
+
+    // Apps registered under "Facebook Login for Business" (Business-Portfolio-owned
+    // apps) must reference a saved Login Configuration via config_id — the
+    // permission list is defined on the configuration itself, and a plain
+    // `scope=` param is silently ignored, returning a token with zero granted
+    // scopes. Fall back to `scope` only for classic (non-Business) apps that
+    // have no configuration.
+    const configId = process.env.META_LOGIN_CONFIG_ID
+    if (configId) return `${base}&config_id=${configId}`
+
     const scope = 'ads_management,ads_read,business_management'
-    return `https://www.facebook.com/v19.0/dialog/oauth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}&scope=${scope}`
+    return `${base}&scope=${scope}`
   }
 
   async refreshTokenIfNeeded(connectionId: string): Promise<boolean> {
