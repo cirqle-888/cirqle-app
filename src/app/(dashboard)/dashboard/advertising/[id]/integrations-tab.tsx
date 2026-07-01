@@ -186,7 +186,11 @@ export function IntegrationsTab({ project, canEdit, onChange }: { project: any, 
                 <tbody className="divide-y">
                   {logs.map(log => (
                     <tr key={log.id}>
-                      <td className="py-2 whitespace-nowrap">{formatDistanceToNow(new Date(log.sync_date))} ago</td>
+                      <td className="py-2 whitespace-nowrap">
+                        {log.created_at && !isNaN(new Date(log.created_at).getTime())
+                          ? `${formatDistanceToNow(new Date(log.created_at))} ago`
+                          : '—'}
+                      </td>
                       <td className="py-2 capitalize">{log.provider}</td>
                       <td className="py-2">{log.records_imported}</td>
                       <td className="py-2">{log.records_updated}</td>
