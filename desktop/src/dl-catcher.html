@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    /* Fully transparent, full-window. A WebContentsView still receives mouse
+       events even when transparent, so this is a reliable click-away scrim. */
+    html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; cursor: default; }
+  </style>
+</head>
+<body>
+  <script>
+    const close = () => { try { window.desk.closeDownloads() } catch (_) {} }
+    // pointerdown → dismiss immediately (before any click/focus churn), capture
+    // phase so nothing can swallow it first. Covers left/right/middle press.
+    window.addEventListener('pointerdown', close, true)
+    // A right-click on the scrim should also just dismiss (no stray menu).
+    window.addEventListener('contextmenu', (e) => { e.preventDefault(); close() }, true)
+    window.addEventListener('keydown', (e) => { if (e.key === 'Escape') close() })
+  </script>
+</body>
+</html>

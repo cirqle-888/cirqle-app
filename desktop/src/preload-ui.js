@@ -21,8 +21,19 @@ contextBridge.exposeInMainWorld('desk', {
   splitterStart: () => ipcRenderer.send('splitter:start'),
   splitterDrag: (screenX) => ipcRenderer.send('splitter:drag', screenX),
   splitterEnd: () => ipcRenderer.send('splitter:end'),
-  openDownloadsMenu: () => ipcRenderer.send('downloads:menu'),
   version: () => ipcRenderer.invoke('app:version'),
   onState: (cb) => ipcRenderer.on('state', (_e, s) => cb(s)),
   onDownloads: (cb) => ipcRenderer.on('downloads', (_e, d) => cb(d)),
+
+  // Downloads panel (Chrome/Safari-style shelf)
+  toggleDownloads: () => ipcRenderer.send('downloads:toggle'),
+  closeDownloads: () => ipcRenderer.send('downloads:close'),
+  dlOpen: (id) => ipcRenderer.send('downloads:open', id),
+  dlReveal: (id) => ipcRenderer.send('downloads:reveal', id),
+  dlRemove: (id) => ipcRenderer.send('downloads:remove', id),
+  dlClear: () => ipcRenderer.send('downloads:clear'),
+  dlOpenFolder: () => ipcRenderer.send('downloads:openFolder'),
+  dlCopy: (id) => ipcRenderer.send('downloads:copy', id),
+  dlShareWA: (id) => ipcRenderer.send('downloads:shareWA', id),
+  onDownloadsList: (cb) => ipcRenderer.on('downloads:list', (_e, list) => cb(list)),
 })

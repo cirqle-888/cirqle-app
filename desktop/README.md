@@ -31,6 +31,20 @@ so you stay logged in across restarts.
 - **Capture:** copy text in the WhatsApp pane → click **➕ New request from clipboard**
   (or press **⌘⇧N**). Cirqle's Quick Capture opens prefilled; review and confirm.
 - **Copy/paste** uses the normal Edit menu shortcuts (⌘C / ⌘V).
+- **Right-click menu (both panes):** a Chrome/Safari-style, context-aware menu —
+  **Copy Image / Copy Image Address / Save Image to Downloads**, **Copy / Open Link
+  in Browser**, and Cut/Copy/Paste/Select-All on editable fields. Right-clicking an
+  image in the Cirqle pane also offers **Share Image to Linked WhatsApp**.
+- **Common Downloads (⬇ toolbar button):** one shelf for every file saved from
+  **either** pane — Cirqle reports/invoices/receipts *and* images/files saved from
+  WhatsApp Web. Thumbnails for images, download progress, and per-item **Open /
+  Show in Folder / Copy / Share to WhatsApp / Remove**. Files save to
+  `~/Downloads/Cirqle/` and the list persists across restarts (like a browser).
+- **Share a payment receipt to WhatsApp:** in Cirqle's receipt dialog the **Send to
+  WhatsApp** split-button offers three actions (pick from the ▾ menu): *Copy image +
+  open WhatsApp* (default — press ⌘V in the chat), *Send to WhatsApp (auto-paste)*,
+  or *Download + reveal in Finder*. Set the default (and optionally force it) in
+  **Cirqle → Settings → WhatsApp**.
 
 ## Build an unsigned macOS app (free)
 
@@ -57,8 +71,16 @@ browser meanwhile. A Windows target can be added later from this same codebase
 ## Files
 
 - `src/main.js` — window, the two `WebContentsView`s, UA override, persistent WhatsApp
-  session, layout + draggable splitter, clipboard → capture bridge, macOS Edit menu.
+  session, layout + draggable splitter, clipboard → capture bridge, macOS Edit menu,
+  the context-aware right-click menu (`wireContextMenu`), the common downloads model
+  (`wireDownloads` on both sessions + persisted `downloads.json`) and its floating
+  panel, and the receipt → WhatsApp share engine (`share:receipt`).
 - `src/preload-cirqle.js` — relays captured text into the Cirqle page as the
-  `cirqle:capture` event.
-- `src/preload-ui.js` — IPC surface for the toolbar / splitter / overlay.
-- `src/host.html` — toolbar. `src/splitter.html` / `src/overlay.html` — drag-to-resize.
+  `cirqle:capture` event, and exposes `shareReceipt(dataUrl, filename, action)`.
+- `src/preload-ui.js` — IPC surface for the toolbar / splitter / overlay / downloads panel.
+- `src/host.html` — toolbar. `src/downloads.html` — the downloads shelf.
+  `src/splitter.html` / `src/overlay.html` — drag-to-resize.
+
+On the Cirqle side the bridge lives in `src/lib/desktop.ts` (`isDesktop()`, share
+preference helpers); the receipt dialog is `src/components/cashbook/receipt-modal.tsx`
+and the preference UI is in Settings → WhatsApp (`DesktopReceiptShareCard`).

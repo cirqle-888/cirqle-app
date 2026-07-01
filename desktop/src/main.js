@@ -13,7 +13,7 @@
  * Cirqle's Quick Capture via the `cirqle:capture` window event (preload-cirqle).
  */
 
-const { app, BaseWindow, WebContentsView, ipcMain, globalShortcut, clipboard, shell, Menu } = require('electron')
+const { app, BaseWindow, WebContentsView, ipcMain, globalShortcut, clipboard, shell, Menu, nativeImage } = require('electron')
 const path = require('path')
 const fs = require('fs')
 
@@ -43,8 +43,11 @@ const settingsFile = () => path.join(app.getPath('userData'), 'layout.json')
 const loadSettings = () => { try { return JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) } catch { return {} } }
 const saveSettings = () => { try { fs.writeFileSync(settingsFile(), JSON.stringify(state)) } catch { /* best effort */ } }
 
-let win, chrome, cirqle, splitter, overlay
+let win, chrome, cirqle, splitter, overlay, downloadsPanel, dlCatcher
 const whatsapps = {} // keyed by id
+
+const DL_PANEL_W = 380
+const DL_PANEL_H = 460
 const state = Object.assign({ 
   ratio: 0.5, 
   showCirqle: true, 
@@ -58,11 +61,59 @@ const state = Object.assign({
 const clipHistory = []
 let lastClip = ''
 
-// Downloads (reports / invoices) saved from the Cirqle pane. Session-only,
-// newest first. Surfaced via the toolbar ⬇ button and a native popup menu so
-// the user can open them or reveal them in Finder to drag into WhatsApp.
-const downloads = []
+// ── Common Downloads ──────────────────────────────────────────────────────────
+// Every file saved from EITHER pane (Cirqle reports/invoices/receipts, or images
+// & files saved from WhatsApp Web) lands in one shared list — a Chrome/Safari-style
+// downloads shelf surfaced as a floating panel (⬇ toolbar button). The list is
+// persisted across restarts (metadata only) so history survives like a browser's.
+const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|svg|heic)(\?|#|$)/i
+const downloads = [] // { id, name, path, at, size, source, done, received, total }
 const downloadsDir = () => path.join(app.getPath('downloads'), 'Cirqle')
+const downloadsStore = () => path.join(app.getPath('userData'), 'downloads.json')
+let dlSeq = 0
+
+function loadDownloads() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(downloadsStore(), 'utf8'))
+    if (Array.isArray(raw)) {
+      // Drop entries whose file no longer exists on disk (like a browser prunes).
+      for (const d of raw) {
+        if (d && d.path && fs.existsSync(d.path)) {
+          downloads.push({ ...d, id: ++dlSeq, done: true })
+        }
+      }
+    }
+  } catch { /* first run / corrupt — start empty */ }
+}
+function saveDownloads() {
+  try {
+    const slim = downloads
+      .filter((d) => d.done)
+      .slice(0, 60)
+      .map(({ name, path: p, at, size, source }) => ({ name, path: p, at, size, source }))
+    fs.writeFileSync(downloadsStore(), JSON.stringify(slim))
+  } catch { /* best effort */ }
+}
+function isImageFile(nameOrPath) { return IMAGE_EXT_RE.test(nameOrPath || '') }
+function pushDownloadsUpdate() {
+  if (chrome) chrome.webContents.send('downloads', { count: downloads.filter((d) => d.done).length })
+  if (downloadsPanel) downloadsPanel.webContents.send('downloads:list', downloadsForPanel())
+}
+function downloadsForPanel() {
+  return downloads.map((d) => ({
+    id: d.id,
+    name: d.name,
+    at: d.at,
+    size: d.size || 0,
+    source: d.source || 'cirqle',
+    done: !!d.done,
+    received: d.received || 0,
+    total: d.total || 0,
+    isImage: isImageFile(d.path || d.name),
+    // Local file preview for images — file:// path the panel can render as a thumbnail.
+    thumb: d.done && isImageFile(d.path || d.name) ? 'file://' + encodeURI(d.path) : null,
+  }))
+}
 function uniquePath(dir, name) {
   let p = path.join(dir, name)
   const ext = path.extname(name)
@@ -71,7 +122,7 @@ function uniquePath(dir, name) {
   while (fs.existsSync(p)) { p = path.join(dir, `${base} (${i++})${ext}`) }
   return p
 }
-function wireDownloads(sess) {
+function wireDownloads(sess, source) {
   if (!sess || sess.__cirqleDownloadsWired) return
   sess.__cirqleDownloadsWired = true
   sess.on('will-download', (_event, item) => {
@@ -80,23 +131,64 @@ function wireDownloads(sess) {
       fs.mkdirSync(dir, { recursive: true })
       const savePath = uniquePath(dir, item.getFilename() || 'download')
       item.setSavePath(savePath)
+      const rec = {
+        id: ++dlSeq,
+        name: path.basename(savePath),
+        path: savePath,
+        at: Date.now(),
+        size: 0,
+        source: source || 'cirqle',
+        done: false,
+        received: 0,
+        total: item.getTotalBytes() || 0,
+      }
+      downloads.unshift(rec)
+      while (downloads.length > 60) downloads.pop()
+      pushDownloadsUpdate()
+      item.on('updated', (_e, st) => {
+        if (st === 'progressing') {
+          rec.received = item.getReceivedBytes()
+          rec.total = item.getTotalBytes() || rec.total
+          pushDownloadsUpdate()
+        }
+      })
       item.once('done', (_e, st) => {
-        if (st !== 'completed') return
-        downloads.unshift({ name: path.basename(savePath), path: savePath, at: Date.now() })
-        if (downloads.length > 30) downloads.pop()
-        if (chrome) chrome.webContents.send('downloads', { count: downloads.length, latest: path.basename(savePath) })
-        buildMenu()
+        if (st === 'completed') {
+          rec.done = true
+          try { rec.size = fs.statSync(savePath).size } catch { /* ignore */ }
+          pushDownloadsUpdate()
+          saveDownloads()
+          buildMenu()
+        } else {
+          // interrupted / cancelled — drop it from the list
+          const i = downloads.indexOf(rec)
+          if (i >= 0) downloads.splice(i, 1)
+          pushDownloadsUpdate()
+        }
       })
     } catch { /* fall back to Electron's default download handling */ }
   })
 }
+function removeDownload(id) {
+  const i = downloads.findIndex((d) => d.id === id)
+  if (i >= 0) { downloads.splice(i, 1); pushDownloadsUpdate(); saveDownloads(); buildMenu() }
+}
+function clearDownloads() {
+  downloads.length = 0
+  pushDownloadsUpdate(); saveDownloads(); buildMenu()
+}
+
+// The compact native "Downloads" submenu still lives in the menu bar (unclipped);
+// the rich actions live in the floating panel.
 function downloadsMenuTemplate() {
-  const items = downloads.length
-    ? downloads.map((d) => ({
+  const done = downloads.filter((d) => d.done)
+  const items = done.length
+    ? done.slice(0, 15).map((d) => ({
         label: truncate(d.name, 48),
         submenu: [
           { label: 'Open', click: () => shell.openPath(d.path) },
-          { label: 'Show in Folder (drag into WhatsApp)', click: () => shell.showItemInFolder(d.path) },
+          { label: 'Show in Folder', click: () => shell.showItemInFolder(d.path) },
+          { label: 'Share to Linked WhatsApp', click: () => shareFileToWhatsApp(d.path) },
         ],
       }))
     : [{ label: '(no downloads yet)', enabled: false }]
@@ -104,12 +196,8 @@ function downloadsMenuTemplate() {
     ...items,
     { type: 'separator' },
     { label: 'Open Downloads Folder', click: () => shell.openPath(downloadsDir()) },
-    { label: 'Clear List', enabled: downloads.length > 0, click: () => { downloads.length = 0; if (chrome) chrome.webContents.send('downloads', { count: 0 }); buildMenu() } },
+    { label: 'Clear List', enabled: done.length > 0, click: clearDownloads },
   ]
-}
-function popupDownloadsMenu() {
-  const menu = Menu.buildFromTemplate(downloadsMenuTemplate())
-  if (win) menu.popup({ window: win })
 }
 
 // New-window (target=_blank / window.open) links from the Cirqle pane: if they
@@ -126,6 +214,190 @@ function makeWindowOpenHandler(getView) {
   }
 }
 const truncate = (s, n = 60) => { const one = String(s).replace(/\s+/g, ' ').trim(); return one.length > n ? one.slice(0, n) + '…' : one }
+
+// ── Share to the linked WhatsApp pane ─────────────────────────────────────────
+// The reliable path everywhere: put the image on the OS clipboard, bring the
+// active WhatsApp pane forward + focus it, so ⌘V drops it into the open chat.
+// autoPaste additionally tries to focus WhatsApp's composer and paste for the
+// user (best-effort — WhatsApp Web's DOM can change, so it degrades to manual ⌘V).
+function focusWhatsapp() {
+  if (!state.showWhatsapp) applyPreset(state.showCirqle ? '50' : 'hideCirqle')
+  const wa = whatsapps[state.activeWa]
+  if (wa) { wa.webContents.focus() }
+  return wa
+}
+async function pasteIntoWhatsappComposer(wa) {
+  if (!wa) return false
+  try {
+    // Focus the message composer (the contenteditable with a data-tab), then paste.
+    await wa.webContents.executeJavaScript(`(() => {
+      const box = document.querySelector('div[contenteditable="true"][data-tab]') ||
+                  document.querySelector('footer div[contenteditable="true"]')
+      if (box) { box.focus(); return true }
+      return false
+    })()`, true)
+    wa.webContents.paste()
+    return true
+  } catch { return false }
+}
+function shareImageToWhatsApp(image, { autoPaste = false } = {}) {
+  if (!image || image.isEmpty?.()) return { ok: false, reason: 'empty' }
+  clipboard.writeImage(image)
+  const wa = focusWhatsapp()
+  if (autoPaste) setTimeout(() => pasteIntoWhatsappComposer(wa), 250)
+  return { ok: true, pasted: autoPaste }
+}
+function shareFileToWhatsApp(filePath, opts) {
+  try {
+    if (isImageFile(filePath)) {
+      const img = nativeImage.createFromPath(filePath)
+      if (!img.isEmpty()) return shareImageToWhatsApp(img, opts)
+    }
+    // Non-image (PDF etc.) can't be pasted into WhatsApp Web — reveal it to drag in.
+    focusWhatsapp()
+    shell.showItemInFolder(filePath)
+    return { ok: true, revealed: true }
+  } catch (e) { return { ok: false, reason: String(e) } }
+}
+function dataUrlToImage(dataUrl) {
+  try { return nativeImage.createFromDataURL(dataUrl) } catch { return null }
+}
+// Save a data URL (e.g. a canvas-rendered receipt PNG) into the common downloads.
+function saveDataUrlToDownloads(dataUrl, filename) {
+  try {
+    const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl)
+    if (!m) return null
+    const dir = downloadsDir()
+    fs.mkdirSync(dir, { recursive: true })
+    const savePath = uniquePath(dir, filename || 'download.png')
+    fs.writeFileSync(savePath, Buffer.from(m[2], 'base64'))
+    const rec = {
+      id: ++dlSeq, name: path.basename(savePath), path: savePath, at: Date.now(),
+      size: fs.statSync(savePath).size, source: 'cirqle', done: true, received: 0, total: 0,
+    }
+    downloads.unshift(rec)
+    while (downloads.length > 60) downloads.pop()
+    pushDownloadsUpdate(); saveDownloads(); buildMenu()
+    return savePath
+  } catch { return null }
+}
+
+// ── Downloads panel (floating Chrome/Safari-style shelf) ──────────────────────
+// The 48px toolbar view clips its own content, so the panel is its own
+// WebContentsView floated on top, anchored under the ⬇ button.
+function positionDownloadsPanel() {
+  if (!win) return
+  const b = win.getContentBounds()
+  // The catch layer spans the whole window so a click ANYWHERE outside the panel
+  // (either pane or the toolbar) dismisses it — exactly like a browser scrim.
+  if (dlCatcher) dlCatcher.setBounds({ x: 0, y: 0, width: b.width, height: b.height })
+  if (!downloadsPanel) return
+  const w = Math.min(DL_PANEL_W, b.width - 16)
+  const h = Math.min(DL_PANEL_H, b.height - TOOLBAR_H - 16)
+  downloadsPanel.setBounds({ x: Math.max(8, b.width - w - 10), y: (state.showToolbar ? TOOLBAR_H : 0) + 4, width: w, height: h })
+}
+function openDownloadsPanel() {
+  if (downloadsPanel) return
+  closeOtherPopups() // only one floating panel at a time
+  // 1) Transparent full-window catch layer, UNDER the panel. A transparent
+  //    WebContentsView still receives mouse events (same trick the splitter drag
+  //    overlay uses), so a click anywhere on it = a click outside the panel →
+  //    dismiss. This is far more reliable than blur/focus events across the
+  //    separate WebContentsViews of the Cirqle / WhatsApp panes.
+  dlCatcher = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-ui.js') } })
+  dlCatcher.setBackgroundColor('#00000000')
+  win.contentView.addChildView(dlCatcher)
+  dlCatcher.webContents.loadFile(path.join(__dirname, 'dl-catcher.html'))
+  // 2) The panel itself, stacked ON TOP of the catcher — clicks inside it hit the
+  //    panel (its own WebContentsView), so they never reach the catcher.
+  downloadsPanel = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-ui.js') } })
+  downloadsPanel.setBackgroundColor('#00000000')
+  win.contentView.addChildView(downloadsPanel)
+  downloadsPanel.webContents.loadFile(path.join(__dirname, 'downloads.html'))
+  downloadsPanel.webContents.once('did-finish-load', () => {
+    downloadsPanel.webContents.send('downloads:list', downloadsForPanel())
+    downloadsPanel.webContents.focus() // keyboard (Esc) goes to the panel
+  })
+  positionDownloadsPanel()
+}
+function closeDownloadsPanel() {
+  if (downloadsPanel) { win.contentView.removeChildView(downloadsPanel); downloadsPanel = null }
+  if (dlCatcher) { win.contentView.removeChildView(dlCatcher); dlCatcher = null }
+}
+function toggleDownloadsPanel() {
+  if (downloadsPanel) closeDownloadsPanel()
+  else openDownloadsPanel()
+}
+// Keep the catcher + panel on top after another view is (re)added to the window.
+function raiseDownloadsPanel() {
+  if (!downloadsPanel || !win) return
+  if (dlCatcher) { win.contentView.removeChildView(dlCatcher); win.contentView.addChildView(dlCatcher) }
+  win.contentView.removeChildView(downloadsPanel); win.contentView.addChildView(downloadsPanel)
+}
+// Dismiss any other transient floating layer so only one is ever open.
+function closeOtherPopups() {
+  if (overlay) { win.contentView.removeChildView(overlay); overlay = null }
+}
+// Esc closes the panel no matter which pane holds keyboard focus. Harmless when
+// the panel is closed (does nothing, doesn't preventDefault → panes keep their Esc).
+function wireEscToCloseDownloads(view) {
+  view.webContents.on('before-input-event', (_e, input) => {
+    if (downloadsPanel && input.type === 'keyDown' && input.key === 'Escape') closeDownloadsPanel()
+  })
+}
+
+// ── Context menu (both panes, context-aware — Chrome/Safari style) ─────────────
+function wireContextMenu(view, isCirqle) {
+  view.webContents.on('context-menu', (_e, params) => {
+    closeDownloadsPanel() // opening a menu dismisses the downloads panel
+    const wc = view.webContents
+    const items = []
+    const isImage = params.mediaType === 'image' && !!params.srcURL
+    const link = params.linkURL
+    const flags = params.editFlags || {}
+
+    if (isImage) {
+      items.push({ label: 'Copy Image', click: () => wc.copyImageAt(params.x, params.y) })
+      items.push({ label: 'Copy Image Address', click: () => clipboard.writeText(params.srcURL) })
+      items.push({ label: 'Save Image to Downloads', click: () => { try { wc.downloadURL(params.srcURL) } catch { /* ignore */ } } })
+      if (isCirqle) {
+        // From Cirqle → push straight into the WhatsApp pane.
+        items.push({ type: 'separator' })
+        items.push({
+          label: 'Share Image to Linked WhatsApp',
+          click: () => { wc.copyImageAt(params.x, params.y); setTimeout(() => { const wa = focusWhatsapp(); pasteIntoWhatsappComposer(wa) }, 120) },
+        })
+      }
+      items.push({ type: 'separator' })
+    }
+
+    if (link) {
+      items.push({ label: 'Open Link', click: () => view.webContents.loadURL(link) })
+      items.push({ label: 'Open Link in Browser', click: () => shell.openExternal(link) })
+      items.push({ label: 'Copy Link', click: () => clipboard.writeText(link) })
+      if (FILE_URL_RE.test(link) || link.includes('/storage/v1/object/')) {
+        items.push({ label: 'Download to Common Downloads', click: () => { try { wc.downloadURL(link) } catch { /* ignore */ } } })
+      }
+      items.push({ type: 'separator' })
+    }
+
+    // Editing / selection actions, gated on Chromium's own edit flags.
+    if (params.isEditable) {
+      items.push({ role: 'cut', enabled: flags.canCut })
+      items.push({ role: 'copy', enabled: flags.canCopy })
+      items.push({ role: 'paste', enabled: flags.canPaste })
+      items.push({ role: 'selectAll' })
+    } else if (params.selectionText && params.selectionText.trim()) {
+      items.push({ role: 'copy' })
+      items.push({ role: 'selectAll' })
+    }
+
+    if (!items.length) return
+    // Trim a trailing separator if one ended the list.
+    while (items.length && items[items.length - 1].type === 'separator') items.pop()
+    Menu.buildFromTemplate(items).popup({ window: win })
+  })
+}
 
 // ── Layout: position each view from the window size + ratio + visibility ──────
 function layout() {
@@ -167,6 +439,7 @@ function layout() {
   cirqle.setVisible(state.showCirqle)
   if (state.showWhatsapp && activeWaView) activeWaView.setVisible(true)
   if (overlay) overlay.setBounds({ x: 0, y: bodyY, width: b.width, height: bodyH })
+  if (downloadsPanel) positionDownloadsPanel()
 }
 
 function applyPreset(p) {
@@ -216,9 +489,13 @@ function createViews() {
   chrome.webContents.loadFile(path.join(__dirname, 'host.html'))
   chrome.webContents.once('did-finish-load', () => chrome.webContents.send('state', state))
 
+  wireEscToCloseDownloads(chrome) // Esc from the toolbar view closes the panel too
+
   cirqle = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-cirqle.js') } })
   cirqle.webContents.loadURL(CIRQLE_URL)
-  wireDownloads(cirqle.webContents.session) // capture report / invoice downloads
+  wireDownloads(cirqle.webContents.session, 'cirqle') // capture report / invoice / receipt downloads
+  wireContextMenu(cirqle, true)                       // Chrome-style right-click menu
+  wireEscToCloseDownloads(cirqle)                     // Esc closes the downloads panel
   cirqle.webContents.on('did-fail-load', (_e, code, _desc, _url, isMainFrame) => {
     if (isMainFrame && code !== -3) loadError(cirqle, CIRQLE_URL, 'cirqle')
   })
@@ -253,12 +530,17 @@ function createWhatsappView(id) {
   const wa = new WebContentsView({ webPreferences: { partition: `persist:whatsapp:${id}`, preload: path.join(__dirname, 'preload-ui.js') } })
   wa.webContents.setUserAgent(CHROME_UA)
   wa.webContents.loadURL(WHATSAPP_URL, { userAgent: CHROME_UA })
+  wireDownloads(wa.webContents.session, 'whatsapp') // images/files saved from WhatsApp land in the common list too
+  wireContextMenu(wa, false)                        // Chrome-style right-click menu (Copy Image, etc.)
+  wireEscToCloseDownloads(wa)                        // Esc closes the downloads panel
   wa.webContents.on('did-fail-load', (_e, code, _desc, _url, isMainFrame) => {
     if (isMainFrame && code !== -3) loadError(wa, WHATSAPP_URL, 'whatsapp')
   })
   wa.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' } })
   whatsapps[id] = wa
   if (win) win.contentView.addChildView(wa)
+  // Keep the downloads catcher + panel on top if they're open when a WA view is added.
+  raiseDownloadsPanel()
 }
 
 // Native menu — unclipped, so clipboard history + New-record shortcuts live here
@@ -327,7 +609,36 @@ ipcMain.on('reload', (_e, which) => {
 ipcMain.on('goBack', () => { if (cirqle && cirqle.webContents.canGoBack()) cirqle.webContents.goBack() })
 ipcMain.on('goForward', () => { if (cirqle && cirqle.webContents.canGoForward()) cirqle.webContents.goForward() })
 ipcMain.on('toggleFullscreen', () => { if (win) win.setFullScreen(!win.isFullScreen()) })
-ipcMain.on('downloads:menu', popupDownloadsMenu)
+// ── Downloads panel ───────────────────────────────────────────────────────────
+ipcMain.on('downloads:toggle', toggleDownloadsPanel)
+ipcMain.on('downloads:close', closeDownloadsPanel)
+ipcMain.on('downloads:open', (_e, id) => { const d = downloads.find((x) => x.id === id); if (d) shell.openPath(d.path) })
+ipcMain.on('downloads:reveal', (_e, id) => { const d = downloads.find((x) => x.id === id); if (d) shell.showItemInFolder(d.path) })
+ipcMain.on('downloads:remove', (_e, id) => removeDownload(id))
+ipcMain.on('downloads:clear', clearDownloads)
+ipcMain.on('downloads:openFolder', () => shell.openPath(downloadsDir()))
+ipcMain.on('downloads:copy', (_e, id) => {
+  const d = downloads.find((x) => x.id === id)
+  if (!d) return
+  if (isImageFile(d.path)) { const img = nativeImage.createFromPath(d.path); if (!img.isEmpty()) clipboard.writeImage(img); else clipboard.writeText(d.path) }
+  else clipboard.writeText(d.path)
+})
+ipcMain.on('downloads:shareWA', (_e, id) => { const d = downloads.find((x) => x.id === id); if (d) shareFileToWhatsApp(d.path) })
+
+// ── Share (from the Cirqle pane → the linked WhatsApp pane) ────────────────────
+// action: 'copy' (copy image + focus WA), 'paste' (auto-paste into open chat),
+// 'download' (save into common downloads + reveal in Finder to drag in).
+ipcMain.handle('share:receipt', (_e, { dataUrl, filename, action } = {}) => {
+  if (action === 'download') {
+    const p = saveDataUrlToDownloads(dataUrl, filename)
+    if (p) { focusWhatsapp(); shell.showItemInFolder(p) }
+    return { ok: !!p, action: 'download', path: p }
+  }
+  const img = dataUrlToImage(dataUrl)
+  if (!img || img.isEmpty()) return { ok: false, reason: 'bad-image' }
+  const r = shareImageToWhatsApp(img, { autoPaste: action === 'paste' })
+  return { ...r, action }
+})
 ipcMain.on('capture:clipboard', sendClipboardToCirqle)
 ipcMain.on('retry', (_e, pane) => {
   if (pane === 'whatsapp' && whatsapps[state.activeWa]) whatsapps[state.activeWa].webContents.loadURL(WHATSAPP_URL, { userAgent: CHROME_UA })
@@ -390,6 +701,7 @@ ipcMain.on('cirqle:logo', (_e, url) => {
 // Draggable splitter: on drag start we float a full-body overlay view that keeps
 // receiving mouse events even as the pointer passes over the two web views.
 ipcMain.on('splitter:start', () => {
+  closeDownloadsPanel() // only one floating layer at a time
   if (overlay) return
   overlay = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-ui.js') } })
   overlay.setBackgroundColor('#00000000')
@@ -409,6 +721,7 @@ ipcMain.on('splitter:end', () => {
 })
 
 app.whenReady().then(() => {
+  loadDownloads() // restore the downloads history (files that still exist on disk)
   win = new BaseWindow({ width: 1440, height: 900, minWidth: 900, minHeight: 600, title: 'Cirqle Desktop' })
   createViews()
   buildMenu()
