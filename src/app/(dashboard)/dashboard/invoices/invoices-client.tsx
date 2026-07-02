@@ -2491,6 +2491,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             ]}
             onClearAll={() => { setFilterStatus(''); setFilterClient('') }}
           />
+
+          <div className="flex justify-between items-center px-1 pt-1 mt-1">
+            <span className="text-[11px] font-medium text-muted-foreground">{filtered.length} invoice{filtered.length !== 1 ? 's' : ''}</span>
+            <span className="text-xs font-bold text-foreground tracking-tight">Total: {fmt(filtered.reduce((s, i) => s + invTotalInr(i), 0))}</span>
+          </div>
           
           {/* Bulk Action Bar — wraps onto multiple lines: this list panel is a
               narrow (~300px) master-detail column, not a full-width table, so
@@ -2499,7 +2504,12 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           {selectedForBulk.size > 0 && (
             <div className="bg-violet-500/10 border border-violet-500/30 rounded-lg px-3 py-2 mt-2 animate-in slide-in-from-top-2">
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs font-medium text-violet-300">{selectedForBulk.size} selected</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-medium text-violet-300">{selectedForBulk.size} selected</span>
+                  <span className="text-xs font-bold text-violet-300 border-l border-violet-500/30 pl-3">
+                    Due: {fmt(invoices.filter(i => selectedForBulk.has(i.id)).reduce((s, i) => s + balanceDueInr(i), 0))}
+                  </span>
+                </div>
                 <button
                   onClick={() => setSelectedForBulk(new Set())}
                   className="p-1 text-muted-foreground hover:text-foreground rounded"
