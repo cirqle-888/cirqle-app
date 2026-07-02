@@ -234,9 +234,9 @@ export function renderInvoiceHtml(
   // Payment information — italic block, reference style
   const payRow = (label: string, value: string) => `
     <tr>
-      <td style="font-family:'Open Sans',sans-serif;font-size:11.5px;font-style:italic;color:#222;padding:2.5px 0;white-space:nowrap">${label.replace(/ /g, '\u00A0')}</td>
+      <td style="font-family:'Open Sans',sans-serif;font-size:11.5px;font-style:italic;color:#222;padding:2.5px 0;white-space:nowrap">${label.replace(/ /g, '<span style="font-style:normal">&nbsp;</span>')}</td>
       <td style="font-family:'Open Sans',sans-serif;padding:2.5px 10px;font-size:11.5px;font-style:italic;color:#222">:</td>
-      <td style="font-family:'Open Sans',sans-serif;font-size:11.5px;font-style:italic;font-weight:700;color:#111;white-space:nowrap">${value.replace(/ /g, '\u00A0')}</td>
+      <td style="font-family:'Open Sans',sans-serif;font-size:11.5px;font-style:italic;font-weight:700;color:#111;white-space:nowrap">${value.replace(/ /g, '<span style="font-style:normal">&nbsp;</span>')}</td>
     </tr>`
   const paymentBlock = showPayInfo && (co.holder || co.account || co.upi) ? `
     <div style="font-family:'Open Sans',sans-serif">
