@@ -214,7 +214,9 @@ const COL_LABELS: Record<ColKey, string> = {
   client: 'Client', service: 'Service', date: 'Date',
   billing: 'Billing', qty: 'Qty', total: 'Total', status: 'Status',
 }
-const BILLING_COLS: ColKey[] = ['billing', 'qty', 'total']
+// Qty (task count) is NOT price data — it stays visible to everyone (e.g. employees
+// need to see how much they've delivered) even when Billing/Total are hidden.
+const BILLING_COLS: ColKey[] = ['billing', 'total']
 
 /** Draggable <th> wrapper — shows a grip handle on hover; handles the DnD transform. */
 function SortableColHeader({ id, children, className }: {
@@ -2715,12 +2717,17 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                     {formatTaskDate(task.task_date)}
                   </span>
                   <div className="flex items-center gap-0.5" onClick={e => e.stopPropagation()}>
-                    {showBilling && (
+                    {showBilling ? (
                       <span className="text-[11px] font-semibold text-foreground tabular-nums mr-2">
                         {(task.quantity ?? 1) > 1
                           ? <>{formatCurrency((task.billing_amount ?? 0) / (task.quantity ?? 1), task.currency as Currency)}<span className="text-muted-foreground/60 font-normal ml-1">×{task.quantity}</span></>
                           : formatCurrency(task.billing_amount ?? 0, task.currency as Currency)
                         }
+                      </span>
+                    ) : (
+                      // Qty is not price data — stays visible even when Billing/Total are hidden.
+                      <span className="text-[11px] font-medium text-muted-foreground tabular-nums mr-2">
+                        Qty {task.quantity ?? 1}
                       </span>
                     )}
                     {can('tasks.assign') && (
