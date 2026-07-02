@@ -267,7 +267,7 @@ export function renderInvoiceHtml(
   const line2 = ftWords.length > 2 ? ftWords.slice(2, 4).join(' ') : ''  // e.g. "for your"
   const line3 = ftWords.length > 4 ? ftWords.slice(4).join(' ') : ''     // e.g. "Business!"
   const thankBlock = `
-    <div style="font-family:'Airbnb Cereal App',${FONT};min-height:104px;display:flex;flex-direction:column;justify-content:center;line-height:1.2;padding-left:30px">
+    <div style="font-family:'Airbnb Cereal App',${FONT};min-height:104px;display:flex;flex-direction:column;justify-content:center;line-height:1.2;padding-left:30px;padding-bottom:20px">
       <div style="font-size:31px;font-weight:800;${THANK_FILL}">${line1}</div>
       ${line2 ? `<div style="font-size:27px;font-weight:700;${THANK_FILL}">${line2}</div>` : ''}
       ${line3 ? `<div style="font-size:27px;font-weight:700;${THANK_FILL}">${line3}</div>` : ''}
