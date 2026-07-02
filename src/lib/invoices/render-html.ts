@@ -142,14 +142,15 @@ export function renderInvoiceHtml(
   const expenseItems = inv.expense_items || []
   // Per-invoice override → company default → 'mode_a'
   const expensesMode = inv.expenses_mode || companySettings.expense_display_mode || 'mode_a'
-  const td = (extra: string) => `padding:9px 10px;vertical-align:middle;border-bottom:1px solid ${CELL_BORD};border-left:1px solid ${CELL_BORD};font-size:13px;${extra}`
+  const ROW_H = 38
+  const td = (extra: string) => `height:${ROW_H}px;padding:0 10px 4px 10px;line-height:${ROW_H - 4}px;border-bottom:1px solid ${CELL_BORD};border-left:1px solid ${CELL_BORD};font-size:13px;${extra}`
 
   // Build task item rows
   const itemRows = sortedItems.map((it, idx) => {
     const taskDate = it.task?.task_date ? ddMon(it.task.task_date) : ''
     const bg = idx % 2 === 1 ? ALT_ROW : '#ffffff'
     return `
-      <tr style="background:${bg}">
+      <tr style="background:${bg};height:${ROW_H}px">
         <td style="${td('border-left:none;text-align:center;color:#222')}">${idx + 1}</td>
         <td style="${td('text-align:center;color:#222;white-space:nowrap')}">${taskDate}</td>
         <td style="${td('text-align:left;color:#222')}">${it.description}</td>
@@ -163,13 +164,13 @@ export function renderInvoiceHtml(
   // Expenses section block (separate from main item table in all modes)
   const expensesTotal = expenseItems.reduce((s: number, e: any) => s + (e.amount || 0), 0)
   const separateExpensesBlock = expenseItems.length > 0 ? (() => {
+    const EXP_H = 36
     const expRows = expenseItems.map((exp: any, i: number) => {
       const bg = i % 2 === 1 ? ALT_ROW : '#ffffff'
-      const tdE = `padding:8px 10px;vertical-align:middle;border-bottom:1px solid ${CELL_BORD};font-size:12.5px;`
+      const tdE = `height:${EXP_H}px;padding:0 10px 3px 10px;line-height:${EXP_H - 3}px;border-bottom:1px solid ${CELL_BORD};font-size:12.5px;`
       const hasMarkup = exp.markup_type !== 'none' && (exp.markup_amount || 0) > 0
 
       if (expensesMode === 'mode_b' && hasMarkup) {
-        // Mode B: show cost + markup + total in a sub-table within the cell
         return `<tr style="background:${bg}">
           <td style="${tdE}color:#222">
             <div style="font-weight:600">${exp.description}</div>
@@ -191,7 +192,7 @@ export function renderInvoiceHtml(
         </tr>`
       }
       // Mode A (default): description + billing amount only
-      return `<tr style="background:${bg}">
+      return `<tr style="background:${bg};height:${EXP_H}px">
         <td style="${tdE}color:#222">${exp.description}</td>
         <td style="${tdE}border-left:1px solid ${CELL_BORD};font-weight:700;text-align:right;white-space:nowrap">${inr(exp.amount)}</td>
       </tr>`
@@ -201,16 +202,16 @@ export function renderInvoiceHtml(
     <div style="font-weight:700;font-size:13px;color:${NAVY};margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em">Expenses</div>
     <table style="width:100%;border-collapse:collapse;border:1px solid ${CELL_BORD}">
       <thead>
-        <tr style="background:linear-gradient(to bottom,${HEAD_TOP},${HEAD_BOT})">
-          <th style="padding:8px 10px;text-align:left;color:#fff;font-size:12.5px;font-weight:700">Description</th>
-          <th style="padding:8px 10px;text-align:right;color:#fff;font-size:12.5px;font-weight:700;white-space:nowrap;border-left:2px solid #fff">Amount</th>
+        <tr style="background:linear-gradient(to bottom,${HEAD_TOP},${HEAD_BOT});height:${EXP_H}px">
+          <th style="height:${EXP_H}px;padding:0 10px 3px 10px;line-height:${EXP_H - 3}px;text-align:left;color:#fff;font-size:12.5px;font-weight:700">Description</th>
+          <th style="height:${EXP_H}px;padding:0 10px 3px 10px;line-height:${EXP_H - 3}px;text-align:right;color:#fff;font-size:12.5px;font-weight:700;white-space:nowrap;border-left:2px solid #fff">Amount</th>
         </tr>
       </thead>
       <tbody>
         ${expRows}
-        <tr style="background:#f8f8f8">
-          <td style="padding:8px 10px;font-size:12.5px;font-weight:700;color:#111;text-align:right">Expenses Total</td>
-          <td style="padding:8px 10px;border-left:1px solid ${CELL_BORD};font-size:13px;font-weight:700;text-align:right;white-space:nowrap">${inr(expensesTotal)}</td>
+        <tr style="background:#f8f8f8;height:${EXP_H}px">
+          <td style="height:${EXP_H}px;padding:0 10px 3px 10px;line-height:${EXP_H - 3}px;font-size:12.5px;font-weight:700;color:#111;text-align:right">Expenses Total</td>
+          <td style="height:${EXP_H}px;padding:0 10px 3px 10px;line-height:${EXP_H - 3}px;border-left:1px solid ${CELL_BORD};font-size:13px;font-weight:700;text-align:right;white-space:nowrap">${inr(expensesTotal)}</td>
         </tr>
       </tbody>
     </table>
@@ -449,13 +450,13 @@ export function renderInvoiceHtml(
   <!-- ── ITEMS TABLE ── -->
   <table style="width:100%;border-collapse:collapse;margin:14px 0 12px">
     <thead>
-      <tr style="background:linear-gradient(180deg,${HEAD_TOP} 0%,${HEAD_BOT} 100%)">
-        <th class="disp" style="padding:11px 8px;text-align:center;vertical-align:middle;color:#fff;font-size:13.5px;font-weight:700;width:46px">No.</th>
-        <th class="disp" style="padding:11px 8px;text-align:center;vertical-align:middle;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:118px">Date</th>
-        <th class="disp" style="padding:11px 8px;text-align:center;vertical-align:middle;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff">Jobs Done</th>
-        <th class="disp" style="padding:11px 8px;text-align:center;vertical-align:middle;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;width:54px">Qty</th>
-        <th class="disp" style="padding:11px 8px;text-align:center;vertical-align:middle;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:118px">Rate</th>
-        <th class="disp" style="padding:11px 8px;text-align:center;vertical-align:middle;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:130px">Total Amount</th>
+      <tr style="background:linear-gradient(180deg,${HEAD_TOP} 0%,${HEAD_BOT} 100%);height:${ROW_H}px">
+        <th class="disp" style="height:${ROW_H}px;padding:0 8px 4px 8px;line-height:${ROW_H - 4}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;width:46px">No.</th>
+        <th class="disp" style="height:${ROW_H}px;padding:0 8px 4px 8px;line-height:${ROW_H - 4}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:118px">Date</th>
+        <th class="disp" style="height:${ROW_H}px;padding:0 8px 4px 8px;line-height:${ROW_H - 4}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff">Jobs Done</th>
+        <th class="disp" style="height:${ROW_H}px;padding:0 8px 4px 8px;line-height:${ROW_H - 4}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;width:54px">Qty</th>
+        <th class="disp" style="height:${ROW_H}px;padding:0 8px 4px 8px;line-height:${ROW_H - 4}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:118px">Rate</th>
+        <th class="disp" style="height:${ROW_H}px;padding:0 8px 4px 8px;line-height:${ROW_H - 4}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:130px">Total Amount</th>
       </tr>
     </thead>
     <tbody>
