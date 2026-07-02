@@ -2485,11 +2485,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
       const { default: html2canvas } = await import('html2canvas')
       const canvas = await html2canvas(doc.body, { scale: 2, useCORS: true, backgroundColor: '#ffffff' })
-      const imgData = canvas.toDataURL('image/png')
+      const imgData = canvas.toDataURL('image/jpeg', 0.8)
 
       const { default: jsPDF } = await import('jspdf')
-      const pdf = new jsPDF({ orientation: 'portrait', unit: 'px', format: [canvas.width, canvas.height] })
-      pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height)
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'px', format: [canvas.width, canvas.height], compress: true })
+      pdf.addImage(imgData, 'JPEG', 0, 0, canvas.width, canvas.height, undefined, 'FAST')
       pdf.save(`${inv.invoice_number}.pdf`)
     } catch (e) {
       console.error('Invoice PDF download failed', e)

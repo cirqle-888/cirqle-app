@@ -1,11 +1,17 @@
 import { createClient } from '@supabase/supabase-js'
-import * as dotenv from 'dotenv'
+import dotenv from 'dotenv'
 dotenv.config({ path: '.env.local' })
 
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY! || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
 
-async function main() {
-  const { count } = await supabase.from('contribution_scores').select('*', { count: 'exact', head: true })
-  console.log('Total scores:', count)
+async function run() {
+  const { data, error } = await supabase
+      .from('cashbook_entries')
+      .select('id, client_id, entry_date, description, amount_inr')
+      .eq('type', 'outflow')
+      .is('deleted_at', null)
+      .limit(1)
+  console.log("Error:", error)
+  console.log("Data:", data)
 }
-main()
+run()
