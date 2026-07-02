@@ -142,7 +142,7 @@ export function renderInvoiceHtml(
   const expenseItems = inv.expense_items || []
   // Per-invoice override → company default → 'mode_a'
   const expensesMode = inv.expenses_mode || companySettings.expense_display_mode || 'mode_a'
-  const td = (extra: string) => `padding:9px 10px;border-bottom:1px solid ${CELL_BORD};border-left:1px solid ${CELL_BORD};font-size:13px;${extra}`
+  const td = (extra: string) => `padding:9px 10px;vertical-align:middle;border-bottom:1px solid ${CELL_BORD};border-left:1px solid ${CELL_BORD};font-size:13px;${extra}`
 
   // Build task item rows
   const itemRows = sortedItems.map((it, idx) => {
@@ -165,7 +165,7 @@ export function renderInvoiceHtml(
   const separateExpensesBlock = expenseItems.length > 0 ? (() => {
     const expRows = expenseItems.map((exp: any, i: number) => {
       const bg = i % 2 === 1 ? ALT_ROW : '#ffffff'
-      const tdE = `padding:8px 10px;border-bottom:1px solid ${CELL_BORD};font-size:12.5px;`
+      const tdE = `padding:8px 10px;vertical-align:middle;border-bottom:1px solid ${CELL_BORD};font-size:12.5px;`
       const hasMarkup = exp.markup_type !== 'none' && (exp.markup_amount || 0) > 0
 
       if (expensesMode === 'mode_b' && hasMarkup) {
@@ -239,7 +239,7 @@ export function renderInvoiceHtml(
     </tr>`
   const paymentBlock = showPayInfo && (co.holder || co.account || co.upi) ? `
     <div style="font-family:'Open Sans',sans-serif">
-      <div style="font-family:'Open Sans',sans-serif;font-weight:700;font-style:italic;font-size:13.5px;color:#111;margin-bottom:6px;text-decoration:underline;text-underline-offset:3px">Payment Information</div>
+      <div style="font-family:'Open Sans',sans-serif;font-weight:700;font-style:italic;font-size:13.5px;color:#111;margin-bottom:6px;text-decoration:underline;text-underline-offset:3px;letter-spacing:0.3px">Payment&nbsp;Information</div>
       <table style="border-collapse:collapse;font-family:'Open Sans',sans-serif">
         ${co.holder  ? payRow('A/C Holder Name', co.holder.toUpperCase()) : ''}
         ${co.account ? payRow('A/C Number', co.account) : ''}
@@ -350,9 +350,11 @@ export function renderInvoiceHtml(
   // Tagline splits into "Get Budget" / "Designs" (last word bold on its own line)
   const tagWords = (co.tagline || '').trim().split(/\s+/)
 
-  // Inline icons (black, match reference)
-  const waIcon = `<svg width="17" height="17" viewBox="0 0 448 512" xmlns="http://www.w3.org/2000/svg" style="display:inline-block;vertical-align:-3px"><path fill="#111" d="M380.9 97.1C339 55.1 283.2 32 223.9 32c-122.4 0-222 99.6-222 222 0 39.1 10.2 77.3 29.6 111L0 480l117.7-30.9c32.4 17.7 68.9 27 106.1 27h.1c122.3 0 224.1-99.6 224.1-222 0-59.3-25.2-115-67.1-157zm-157 341.6c-33.2 0-65.7-8.9-94-25.7l-6.7-4-69.8 18.3L72 359.2l-4.4-7c-18.5-29.4-28.2-63.3-28.2-98.2 0-101.7 82.8-184.5 184.6-184.5 49.3 0 95.6 19.2 130.4 54.1 34.8 34.9 56.2 81.2 56.1 130.5 0 101.8-84.9 184.6-186.6 184.6zm101.2-138.2c-5.5-2.8-32.8-16.2-37.9-18-5.1-1.9-8.8-2.8-12.5 2.8-3.7 5.6-14.3 18-17.6 21.8-3.2 3.7-6.5 4.2-12 1.4-32.6-16.3-54-29.1-75.5-66-5.7-9.8 5.7-9.1 16.3-30.3 1.8-3.7.9-6.9-.5-9.7-1.4-2.8-12.5-30.1-17.1-41.2-4.5-10.8-9.1-9.3-12.5-9.5-3.2-.2-6.9-.2-10.6-.2-3.7 0-9.7 1.4-14.8 6.9-5.1 5.6-19.4 19-19.4 46.3 0 27.3 19.9 53.7 22.6 57.4 2.8 3.7 39.1 59.7 94.8 83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z"/></svg>`
-  const globeIcon = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="1.8" xmlns="http://www.w3.org/2000/svg" style="display:inline-block;vertical-align:-3px"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2c2.5 2.6 4 6.1 4 10s-1.5 7.4-4 10c-2.5-2.6-4-6.1-4-10s1.5-7.4 4-10z"/></svg>`
+  // Inline icons (black, match reference) - encoded as base64 images to fix html2canvas rendering
+  const waSvg = encodeURIComponent(`<svg width="17" height="17" viewBox="0 0 448 512" xmlns="http://www.w3.org/2000/svg"><path fill="#111" d="M380.9 97.1C339 55.1 283.2 32 223.9 32c-122.4 0-222 99.6-222 222 0 39.1 10.2 77.3 29.6 111L0 480l117.7-30.9c32.4 17.7 68.9 27 106.1 27h.1c122.3 0 224.1-99.6 224.1-222 0-59.3-25.2-115-67.1-157zm-157 341.6c-33.2 0-65.7-8.9-94-25.7l-6.7-4-69.8 18.3L72 359.2l-4.4-7c-18.5-29.4-28.2-63.3-28.2-98.2 0-101.7 82.8-184.5 184.6-184.5 49.3 0 95.6 19.2 130.4 54.1 34.8 34.9 56.2 81.2 56.1 130.5 0 101.8-84.9 184.6-186.6 184.6zm101.2-138.2c-5.5-2.8-32.8-16.2-37.9-18-5.1-1.9-8.8-2.8-12.5 2.8-3.7 5.6-14.3 18-17.6 21.8-3.2 3.7-6.5 4.2-12 1.4-32.6-16.3-54-29.1-75.5-66-5.7-9.8 5.7-9.1 16.3-30.3 1.8-3.7.9-6.9-.5-9.7-1.4-2.8-12.5-30.1-17.1-41.2-4.5-10.8-9.1-9.3-12.5-9.5-3.2-.2-6.9-.2-10.6-.2-3.7 0-9.7 1.4-14.8 6.9-5.1 5.6-19.4 19-19.4 46.3 0 27.3 19.9 53.7 22.6 57.4 2.8 3.7 39.1 59.7 94.8 83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z"/></svg>`)
+  const globeSvg = encodeURIComponent(`<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="1.8" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2c2.5 2.6 4 6.1 4 10s-1.5 7.4-4 10c-2.5-2.6-4-6.1-4-10s1.5-7.4 4-10z"/></svg>`)
+  const waIcon = `<img src="data:image/svg+xml;charset=utf-8,${waSvg}" style="width:17px;height:17px;display:inline-block;vertical-align:-3px" />`
+  const globeIcon = `<img src="data:image/svg+xml;charset=utf-8,${globeSvg}" style="width:17px;height:17px;display:inline-block;vertical-align:-3px" />`
 
   const html = `<!DOCTYPE html>
 <html>
@@ -426,8 +428,8 @@ export function renderInvoiceHtml(
         <!-- INVOICE title — the accent rule is a separate bar (not border-bottom)
              so html2canvas renders it as a solid 4px block, not a thin underline. -->
         <div style="display:inline-block">
-          <div class="disp" style="font-size:33px;font-weight:800;color:#0f0f0f;letter-spacing:0.5px;line-height:1">INVOICE</div>
-          <div style="height:4px;background:#0f0f0f;border-radius:1px;margin-top:5px"></div>
+          <div class="disp" style="font-size:33px;font-weight:800;color:#0f0f0f;letter-spacing:0.5px;line-height:1.1;padding-bottom:3px">INVOICE</div>
+          <div style="height:4px;background:#0f0f0f;border-radius:1px;margin-top:8px"></div>
         </div>
         <!-- Bill To (below INVOICE in same td, aligned right then left for content) -->
         <div style="margin-top:16px;text-align:left">
@@ -469,25 +471,25 @@ export function renderInvoiceHtml(
           <tr>
             <td style="padding:5px 8px;font-size:13.5px;color:#222;text-align:right">Total Amount Due</td>
             <td style="padding:5px 6px;font-size:13.5px;color:#222;width:14px">:</td>
-            <td style="padding:5px 0;font-size:13.5px;font-weight:700;color:#111;text-align:right;width:110px;white-space:nowrap">${inr(subtotal)}</td>
+            <td style="padding:5px 10px;font-size:13.5px;font-weight:700;color:#111;text-align:right;width:130px;white-space:nowrap">${inr(subtotal)}</td>
           </tr>
           ${discount > 0 ? `
           <tr>
             <td style="padding:5px 8px;font-size:13.5px;color:#222;text-align:right">Discount</td>
             <td style="padding:5px 6px;font-size:13.5px;color:#222">:</td>
-            <td style="padding:5px 0;font-size:13.5px;font-weight:700;color:#1d9a52;text-align:right;white-space:nowrap">- ${inr(discount)}</td>
+            <td style="padding:5px 10px;font-size:13.5px;font-weight:700;color:#1d9a52;text-align:right;white-space:nowrap">- ${inr(discount)}</td>
           </tr>` : ''}
           ${taxAmt > 0 ? `
           <tr>
             <td style="padding:5px 8px;font-size:13.5px;color:#222;text-align:right">Tax (${inv.tax_rate || 0}%)</td>
             <td style="padding:5px 6px;font-size:13.5px;color:#222">:</td>
-            <td style="padding:5px 0;font-size:13.5px;font-weight:700;color:#111;text-align:right;white-space:nowrap">+ ${inr(taxAmt)}</td>
+            <td style="padding:5px 10px;font-size:13.5px;font-weight:700;color:#111;text-align:right;white-space:nowrap">+ ${inr(taxAmt)}</td>
           </tr>` : ''}
           ${prevBal > 0 ? `
           <tr>
             <td style="padding:5px 8px;font-size:13.5px;color:#222;text-align:right">Previous Balance</td>
             <td style="padding:5px 6px;font-size:13.5px;color:#222">:</td>
-            <td style="padding:5px 0;font-size:13.5px;font-weight:700;color:#111;text-align:right;white-space:nowrap">${inr(prevBal)}</td>
+            <td style="padding:5px 10px;font-size:13.5px;font-weight:700;color:#111;text-align:right;white-space:nowrap">${inr(prevBal)}</td>
           </tr>` : ''}
           <tr>
             <td colspan="3" style="border-top:1.5px solid #9a9a9a;padding:0;height:4px"></td>
@@ -495,7 +497,7 @@ export function renderInvoiceHtml(
           <tr>
             <td class="disp" style="padding:6px 8px;font-size:15.5px;font-weight:700;color:#0f0f0f;text-align:right">Total Payable</td>
             <td class="disp" style="padding:6px 6px;font-size:15.5px;font-weight:700;color:#0f0f0f">:</td>
-            <td class="disp" style="padding:6px 0;font-size:15.5px;font-weight:800;color:#0f0f0f;text-align:right;white-space:nowrap">${inr(totalPayable)}</td>
+            <td class="disp" style="padding:6px 10px;font-size:15.5px;font-weight:800;color:#0f0f0f;text-align:right;white-space:nowrap">${inr(totalPayable)}</td>
           </tr>
           ${otherOutstanding > 0 ? `
           <tr>
@@ -504,7 +506,7 @@ export function renderInvoiceHtml(
           <tr>
             <td style="padding:5px 8px;font-size:12.5px;font-style:italic;color:#c43c3c;text-align:right">Other Outstanding Invoices</td>
             <td style="padding:5px 6px;font-size:12.5px;color:#c43c3c">:</td>
-            <td style="padding:5px 0;font-size:12.5px;font-weight:700;color:#c43c3c;text-align:right;white-space:nowrap">+ ${inr(otherOutstanding)}</td>
+            <td style="padding:5px 10px;font-size:12.5px;font-weight:700;color:#c43c3c;text-align:right;white-space:nowrap">+ ${inr(otherOutstanding)}</td>
           </tr>
           <tr>
             <td colspan="3" style="border-top:1.5px solid #9a9a9a;padding:0;height:4px"></td>
@@ -512,7 +514,7 @@ export function renderInvoiceHtml(
           <tr>
             <td class="disp" style="padding:6px 8px;font-size:15.5px;font-weight:700;color:#0f0f0f;text-align:right">Total Payable (All Invoices)</td>
             <td class="disp" style="padding:6px 6px;font-size:15.5px;font-weight:700;color:#0f0f0f">:</td>
-            <td class="disp" style="padding:6px 0;font-size:15.5px;font-weight:800;color:#0f0f0f;text-align:right;white-space:nowrap">${inr(totalPayable + otherOutstanding)}</td>
+            <td class="disp" style="padding:6px 10px;font-size:15.5px;font-weight:800;color:#0f0f0f;text-align:right;white-space:nowrap">${inr(totalPayable + otherOutstanding)}</td>
           </tr>` : ''}
         </table>
         ${(inv.paid_amount || 0) > 0 ? `
@@ -520,13 +522,13 @@ export function renderInvoiceHtml(
           <tr>
             <td style="padding:2px 8px;font-size:12px;font-style:italic;color:#1d9a52;text-align:right">Amount Received</td>
             <td style="padding:2px 6px;font-size:12px;color:#1d9a52;width:14px">:</td>
-            <td style="padding:2px 0;font-size:12px;font-weight:700;color:#1d9a52;text-align:right;width:110px;white-space:nowrap">${inr(inv.paid_amount || 0)}</td>
+            <td style="padding:2px 10px;font-size:12px;font-weight:700;color:#1d9a52;text-align:right;width:130px;white-space:nowrap">${inr(inv.paid_amount || 0)}</td>
           </tr>
           ${balanceDue(inv) > 0 ? `
           <tr>
             <td style="padding:2px 8px;font-size:12.5px;font-style:italic;font-weight:700;color:#c43c3c;text-align:right">Balance Due</td>
             <td style="padding:2px 6px;font-size:12.5px;color:#c43c3c">:</td>
-            <td style="padding:2px 0;font-size:12.5px;font-weight:700;color:#c43c3c;text-align:right;white-space:nowrap">${inr(balanceDue(inv))}</td>
+            <td style="padding:2px 10px;font-size:12.5px;font-weight:700;color:#c43c3c;text-align:right;white-space:nowrap">${inr(balanceDue(inv))}</td>
           </tr>` : ''}
         </table>` : ''}
       </td>
@@ -539,9 +541,9 @@ export function renderInvoiceHtml(
   <div style="margin-top:auto;padding-top:44px">
     <table style="width:100%;border-collapse:collapse">
       <tr>
-        <td style="vertical-align:bottom;padding-left:0">${paymentBlock}</td>
-        <td style="vertical-align:bottom;text-align:center;width:110px;padding:0 10px">${qrBlock}</td>
-        <td style="vertical-align:bottom">
+        <td style="vertical-align:middle;padding-left:0">${paymentBlock}</td>
+        <td style="vertical-align:middle;text-align:center;width:110px;padding:0 10px">${qrBlock}</td>
+        <td style="vertical-align:middle">
           <div style="display:flex;justify-content:flex-end">${thankBlock}</div>
         </td>
       </tr>
