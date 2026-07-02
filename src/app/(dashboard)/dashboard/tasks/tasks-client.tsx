@@ -652,7 +652,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
   const [viewMode, setViewMode] = useState<'table' | 'board' | 'calendar'>('table')
   const [filterAssignee, setFilterAssignee] = useState('')
   const [filterDate, setFilterDate] = useState<DateFilterValue>(null)
-  // "My Tasks" / "Not My Tasks" quick toggle — independent of the Assignee
+  // "My Tasks" / "Not Assigned to Me" quick toggle — independent of the Assignee
   // dropdown (which picks any single teammate). Available to anyone with an
   // employee record, not just role==='employee' — admins can be assignees too.
   const [myScope, setMyScope] = useState<'mine' | 'not_mine' | null>(null)
@@ -1980,9 +1980,12 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
 
             {/* Search — full-width on mobile (order-first so it sits at top of wrapped row),
                 flex-1 on desktop so it fills the gap between action group and view toggle.
+                sm:min-w guards against the row's other shrink-0 groups (Select/Edit, My/Not-My
+                Tasks, view toggle) crushing this down to near-zero at moderate widths — with
+                min-w-0 it would rather shrink than wrap, leaving an unusably narrow search box.
                 h-[34px] matches the other toolbar buttons for visual rhythm. */}
             <TokenizedSearch
-              className="order-1 sm:order-none w-full sm:w-auto flex-1 min-w-0"
+              className="order-1 sm:order-none w-full sm:w-auto flex-1 sm:min-w-[220px]"
               facets={searchFacets}
               onFacetsChange={setSearchFacets}
               draft={searchDraft}
@@ -2001,7 +2004,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
 
             {/* Top Row My Tasks & Filters (Mobile focused) */}
             <div className="order-2 flex items-center gap-1.5 shrink-0">
-              {/* My Tasks / Not My Tasks — available to anyone with an employee
+              {/* My Tasks / Not Assigned to Me — available to anyone with an employee
                   record (admins can be assignees/contributors too, not just employees). */}
               {currentEmployee && (
                 <div className="flex items-center gap-1 shrink-0">
@@ -2025,7 +2028,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                         : 'bg-secondary text-muted-foreground border-foreground/15 hover:text-foreground hover:bg-foreground/5'
                     }`}
                   >
-                    Not My Tasks
+                    Not Assigned to Me
                   </button>
                 </div>
               )}
