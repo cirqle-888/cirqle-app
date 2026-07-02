@@ -43,16 +43,21 @@ const settingsFile = () => path.join(app.getPath('userData'), 'layout.json')
 const loadSettings = () => { try { return JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) } catch { return {} } }
 const saveSettings = () => { try { fs.writeFileSync(settingsFile(), JSON.stringify(state)) } catch { /* best effort */ } }
 
-let win, chrome, cirqle, splitter, overlay, downloadsPanel, dlCatcher
+let win, chrome, cirqle, cirqle2, splitter, overlay, downloadsPanel, dlCatcher, fxOverlay
 const whatsapps = {} // keyed by id
+
+// Download "flying to the shelf" animation state.
+let fxInFlight = 0        // number of icons currently animating; overlay removed at 0
+let dlBtnRect = null      // ⬇ button rect (window coords), reported by host.html
 
 const DL_PANEL_W = 380
 const DL_PANEL_H = 460
-const state = Object.assign({ 
-  ratio: 0.5, 
-  showCirqle: true, 
-  showWhatsapp: true,
+const state = Object.assign({
+  ratio: 0.5,
+  showCirqle: true,
+  showWhatsapp: true,   // structurally: "show the RIGHT pane" (WhatsApp or 2nd Cirqle)
   showToolbar: true,
+  rightPane: 'whatsapp', // 'whatsapp' | 'cirqle2' — what occupies the right slot
   waAccounts: [{ id: 'default', label: 'WA 1' }],
   activeWa: 'default'
 }, loadSettings())
@@ -145,6 +150,7 @@ function wireDownloads(sess, source) {
       downloads.unshift(rec)
       while (downloads.length > 60) downloads.pop()
       pushDownloadsUpdate()
+      flyDownloadFx(source) // animate an icon flying to the ⬇ shelf button
       item.on('updated', (_e, st) => {
         if (st === 'progressing') {
           rec.received = item.getReceivedBytes()
@@ -221,7 +227,12 @@ const truncate = (s, n = 60) => { const one = String(s).replace(/\s+/g, ' ').tri
 // autoPaste additionally tries to focus WhatsApp's composer and paste for the
 // user (best-effort — WhatsApp Web's DOM can change, so it degrades to manual ⌘V).
 function focusWhatsapp() {
+  // If the right pane is currently showing a 2nd Cirqle, switch it back to WhatsApp
+  // so the share target is actually visible.
+  const wasComparing = state.rightPane === 'cirqle2'
+  state.rightPane = 'whatsapp'
   if (!state.showWhatsapp) applyPreset(state.showCirqle ? '50' : 'hideCirqle')
+  else if (wasComparing) { layout(); saveSettings(); if (chrome) chrome.webContents.send('state', state) }
   const wa = whatsapps[state.activeWa]
   if (wa) { wa.webContents.focus() }
   return wa
@@ -278,6 +289,7 @@ function saveDataUrlToDownloads(dataUrl, filename) {
     downloads.unshift(rec)
     while (downloads.length > 60) downloads.pop()
     pushDownloadsUpdate(); saveDownloads(); buildMenu()
+    flyDownloadFx('cirqle') // receipt/canvas saves get the flying animation too
     return savePath
   } catch { return null }
 }
@@ -344,6 +356,91 @@ function wireEscToCloseDownloads(view) {
   view.webContents.on('before-input-event', (_e, input) => {
     if (downloadsPanel && input.type === 'keyDown' && input.key === 'Escape') closeDownloadsPanel()
   })
+}
+
+// ── Download "flying to the shelf" animation (Chrome/Safari style) ─────────────
+// A transient, full-window transparent overlay flies a little download icon from
+// the pane that triggered the download to the ⬇ toolbar button, then the button
+// pulses. Like the downloads panel/catcher, a transparent WebContentsView still
+// captures mouse events, so the overlay exists ONLY while an icon is in flight
+// (~0.6s) and is removed the instant the last one lands — a click the user is
+// very unlikely to make right after clicking "download".
+function paneCenter(source) {
+  const b = win.getContentBounds()
+  const toolbarH = state.showToolbar ? TOOLBAR_H : 0
+  const bodyH = b.height - toolbarH
+  const both = state.showCirqle && state.showWhatsapp
+  if (source === 'whatsapp') {
+    const splitX = both ? Math.round(b.width * state.ratio) : 0
+    const w = both ? (b.width - splitX) : b.width
+    return { x: splitX + w / 2, y: toolbarH + bodyH / 2 }
+  }
+  const w = both ? Math.round(b.width * state.ratio) : b.width
+  return { x: w / 2, y: toolbarH + bodyH / 2 }
+}
+function dlBtnCenter() {
+  const b = win.getContentBounds()
+  if (dlBtnRect && state.showToolbar) return { x: dlBtnRect.x + dlBtnRect.w / 2, y: dlBtnRect.y + dlBtnRect.h / 2 }
+  return { x: b.width - 40, y: state.showToolbar ? TOOLBAR_H / 2 : 12 }
+}
+function ensureFxOverlay() {
+  if (fxOverlay) return
+  fxOverlay = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-ui.js') } })
+  fxOverlay.setBackgroundColor('#00000000')
+  win.contentView.addChildView(fxOverlay) // topmost while it lives
+  fxOverlay.webContents.loadFile(path.join(__dirname, 'download-fx.html'))
+  const b = win.getContentBounds()
+  fxOverlay.setBounds({ x: 0, y: 0, width: b.width, height: b.height })
+}
+function flyDownloadFx(source) {
+  if (!win) return
+  const payload = { from: paneCenter(source), to: dlBtnCenter() }
+  ensureFxOverlay()
+  fxInFlight++
+  const send = () => { if (fxOverlay) fxOverlay.webContents.send('fx:fly', payload) }
+  if (fxOverlay.webContents.isLoadingMainFrame()) fxOverlay.webContents.once('did-finish-load', send)
+  else send()
+}
+
+// ── Native drag-out of a downloaded file (to WhatsApp, Finder, anywhere) ───────
+// A 1×1 transparent PNG — startDrag REQUIRES a non-empty icon or it throws, so
+// this is the guaranteed fallback when a file has no usable thumbnail.
+const FALLBACK_DRAG_ICON = nativeImage.createFromDataURL(
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+)
+function dragIconFor(filePath) {
+  try {
+    if (isImageFile(filePath)) {
+      const img = nativeImage.createFromPath(filePath)
+      if (!img.isEmpty()) return img.resize({ width: 64, quality: 'good' })
+    }
+  } catch { /* fall through */ }
+  try {
+    const appIcon = nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'icon.png'))
+    if (!appIcon.isEmpty()) return appIcon.resize({ width: 48 })
+  } catch { /* fall through */ }
+  return FALLBACK_DRAG_ICON
+}
+
+// ── Second Cirqle pane — "duplicate / compare two Cirqle pages side-by-side" ────
+// Shares the DEFAULT session with the main Cirqle view (same login/cookies), so
+// wireDownloads is a no-op here (already wired once on that session).
+function createCirqle2() {
+  if (cirqle2) return
+  cirqle2 = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-cirqle.js') } })
+  cirqle2.webContents.loadURL(cirqle.webContents.getURL() || CIRQLE_URL)
+  wireDownloads(cirqle2.webContents.session, 'cirqle')
+  wireContextMenu(cirqle2, true)
+  wireEscToCloseDownloads(cirqle2)
+  cirqle2.webContents.setWindowOpenHandler(makeWindowOpenHandler(() => cirqle2))
+  cirqle2.webContents.on('did-fail-load', (_e, code, _desc, _url, isMainFrame) => {
+    if (isMainFrame && code !== -3) loadError(cirqle2, CIRQLE_URL, 'cirqle')
+  })
+  win.contentView.addChildView(cirqle2)
+  // Keep splitter + toolbar (and any floating panel) above the new pane.
+  win.contentView.removeChildView(splitter); win.contentView.addChildView(splitter)
+  win.contentView.removeChildView(chrome); win.contentView.addChildView(chrome)
+  raiseDownloadsPanel()
 }
 
 // ── Context menu (both panes, context-aware — Chrome/Safari style) ─────────────
@@ -415,30 +512,33 @@ function layout() {
   }
 
   const both = state.showCirqle && state.showWhatsapp
-  
-  // Hide all whatsapp views first
+
+  // Hide every right-slot candidate first (all WhatsApp views + the 2nd Cirqle),
+  // then show only the one the user has selected for the right pane.
   for (const id in whatsapps) whatsapps[id].setVisible(false)
-  
-  const activeWaView = whatsapps[state.activeWa]
+  if (cirqle2) cirqle2.setVisible(false)
+
+  const activeRight = (state.rightPane === 'cirqle2' && cirqle2) ? cirqle2 : whatsapps[state.activeWa]
 
   if (both) {
     const splitX = Math.round(b.width * state.ratio)
     cirqle.setBounds({ x: 0, y: bodyY, width: splitX - SPLITTER_W / 2, height: bodyH })
     splitter.setBounds({ x: splitX - SPLITTER_W / 2, y: bodyY, width: SPLITTER_W, height: bodyH })
-    if (activeWaView) activeWaView.setBounds({ x: splitX + SPLITTER_W / 2, y: bodyY, width: b.width - splitX - SPLITTER_W / 2, height: bodyH })
+    if (activeRight) activeRight.setBounds({ x: splitX + SPLITTER_W / 2, y: bodyY, width: b.width - splitX - SPLITTER_W / 2, height: bodyH })
     splitter.setVisible(true)
   } else {
     splitter.setVisible(false)
     if (state.showCirqle) {
       cirqle.setBounds({ x: 0, y: bodyY, width: b.width, height: bodyH })
-    } else if (state.showWhatsapp && activeWaView) {
-      activeWaView.setBounds({ x: 0, y: bodyY, width: b.width, height: bodyH })
+    } else if (state.showWhatsapp && activeRight) {
+      activeRight.setBounds({ x: 0, y: bodyY, width: b.width, height: bodyH })
     }
   }
-  
+
   cirqle.setVisible(state.showCirqle)
-  if (state.showWhatsapp && activeWaView) activeWaView.setVisible(true)
+  if (state.showWhatsapp && activeRight) activeRight.setVisible(true)
   if (overlay) overlay.setBounds({ x: 0, y: bodyY, width: b.width, height: bodyH })
+  if (fxOverlay) fxOverlay.setBounds({ x: 0, y: 0, width: b.width, height: b.height })
   if (downloadsPanel) positionDownloadsPanel()
 }
 
@@ -485,6 +585,10 @@ function loadError(view, url, pane) {
 }
 
 function createViews() {
+  // Always start on WhatsApp in the right pane — the 2nd Cirqle is created
+  // on demand and not restored across restarts.
+  state.rightPane = 'whatsapp'
+
   chrome = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-ui.js') } })
   chrome.webContents.loadFile(path.join(__dirname, 'host.html'))
   chrome.webContents.once('did-finish-load', () => chrome.webContents.send('state', state))
@@ -604,7 +708,11 @@ function pollClipboard() {
 ipcMain.on('layout:preset', (_e, p) => applyPreset(p))
 ipcMain.on('reload', (_e, which) => {
   if (which === 'cirqle' && cirqle) cirqle.webContents.loadURL(CIRQLE_URL)
-  if (which === 'whatsapp' && whatsapps[state.activeWa]) whatsapps[state.activeWa].webContents.reload()
+  if (which === 'whatsapp') {
+    // The right-pane reload button reloads whatever occupies the right slot.
+    if (state.rightPane === 'cirqle2' && cirqle2) cirqle2.webContents.reload()
+    else if (whatsapps[state.activeWa]) whatsapps[state.activeWa].webContents.reload()
+  }
 })
 ipcMain.on('goBack', () => { if (cirqle && cirqle.webContents.canGoBack()) cirqle.webContents.goBack() })
 ipcMain.on('goForward', () => { if (cirqle && cirqle.webContents.canGoForward()) cirqle.webContents.goForward() })
@@ -624,6 +732,37 @@ ipcMain.on('downloads:copy', (_e, id) => {
   else clipboard.writeText(d.path)
 })
 ipcMain.on('downloads:shareWA', (_e, id) => { const d = downloads.find((x) => x.id === id); if (d) shareFileToWhatsApp(d.path) })
+// Native OS file drag from a shelf item → drop onto WhatsApp, Finder, anywhere.
+ipcMain.on('downloads:startDrag', (e, id) => {
+  const d = downloads.find((x) => x.id === id)
+  if (!d || !fs.existsSync(d.path)) return
+  try { e.sender.startDrag({ file: d.path, icon: dragIconFor(d.path) }) }
+  catch { try { e.sender.startDrag({ file: d.path, icon: FALLBACK_DRAG_ICON }) } catch { /* give up */ } }
+})
+
+// ── Download flying-animation callbacks ───────────────────────────────────────
+ipcMain.on('fx:report-btn', (_e, rect) => { dlBtnRect = rect })
+ipcMain.on('fx:done', () => {
+  fxInFlight = Math.max(0, fxInFlight - 1)
+  if (fxInFlight === 0 && fxOverlay) { win.contentView.removeChildView(fxOverlay); fxOverlay = null }
+  if (chrome) chrome.webContents.send('downloads:pulse') // land → pulse the ⬇ button
+})
+
+// ── Duplicate / compare: toggle a 2nd Cirqle page in the right pane ───────────
+ipcMain.on('cirqle:compareToggle', () => {
+  if (state.rightPane === 'cirqle2') {
+    state.rightPane = 'whatsapp' // back to WhatsApp
+  } else {
+    createCirqle2()
+    cirqle2.webContents.loadURL(cirqle.webContents.getURL() || CIRQLE_URL) // duplicate current page
+    state.rightPane = 'cirqle2'
+    state.showCirqle = true
+    state.showWhatsapp = true
+    if (state.ratio < 0.3 || state.ratio > 0.7) state.ratio = 0.5
+  }
+  layout(); saveSettings()
+  if (chrome) chrome.webContents.send('state', state)
+})
 
 // ── Share (from the Cirqle pane → the linked WhatsApp pane) ────────────────────
 // action: 'copy' (copy image + focus WA), 'paste' (auto-paste into open chat),
@@ -657,7 +796,9 @@ ipcMain.on('wa:add', () => {
 })
 
 ipcMain.on('wa:switch', (_e, id) => {
-  if (state.activeWa === id) return
+  // Clicking a WhatsApp tab always brings WhatsApp back into the right pane,
+  // even if it was showing a 2nd Cirqle page.
+  state.rightPane = 'whatsapp'
   state.activeWa = id
   state.showWhatsapp = true
   layout()

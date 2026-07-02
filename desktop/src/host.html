@@ -62,6 +62,9 @@
     }
 
     button.icon-btn { padding: 6px 8px; }
+    /* Active/engaged icon button (e.g. compare mode on) */
+    button.icon-btn.active { background: #7c3aed; border-color: #7c3aed; color: #fff; }
+    button.icon-btn.active:hover { background: #8b5cf6; }
     button svg { 
       width: 15px; height: 15px; 
       stroke-width: 2.2; stroke: currentColor; fill: none; 
@@ -124,6 +127,10 @@
         <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
       </button>
     </div>
+
+    <button id="btn-compare" class="icon-btn" title="Compare — open a 2nd Cirqle page side-by-side">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="16" rx="1.5"/></svg>
+    </button>
   </div>
 
   <!-- CENTER: WhatsApp Tabs -->
@@ -192,6 +199,24 @@
     $('#btn-fullscreen').onclick = () => window.desk.toggleFullscreen()
     $('#btn-downloads').onclick = () => window.desk.toggleDownloads()
     $('#wa-add').onclick = () => window.desk.waAdd()
+    $('#btn-compare').onclick = () => window.desk.cirqleCompareToggle()
+
+    // Tell main where the ⬇ button is (window coords) so the download "fly"
+    // animation knows its landing point. Re-report on resize + layout changes.
+    function reportDlBtn() {
+      const el = $('#btn-downloads'); if (!el) return
+      const r = el.getBoundingClientRect()
+      window.desk.reportDownloadBtn({ x: r.left, y: r.top, w: r.width, h: r.height })
+    }
+    reportDlBtn(); setTimeout(reportDlBtn, 150)
+    window.addEventListener('resize', reportDlBtn)
+
+    // A download just landed → pulse the shelf button.
+    window.desk.onDownloadsPulse(() => {
+      const b = $('#btn-downloads'); if (!b) return
+      b.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.35)' }, { transform: 'scale(1)' }],
+        { duration: 420, easing: 'ease-out' })
+    })
 
     // Downloads badge: count of files saved this session.
     window.desk.onDownloads((d) => {
@@ -212,6 +237,15 @@
       else key = s.ratio < 0.4 ? '25' : s.ratio > 0.6 ? '75' : '50'
       const el = $('[data-preset="' + key + '"]')
       if (el) el.classList.add('on')
+
+      // 1b. Reflect compare mode on the compare button
+      const cmp = $('#btn-compare')
+      if (cmp) {
+        cmp.classList.toggle('active', s.rightPane === 'cirqle2')
+        cmp.title = s.rightPane === 'cirqle2'
+          ? 'Close comparison — back to WhatsApp'
+          : 'Compare — open a 2nd Cirqle page side-by-side'
+      }
 
       // 2. Update WhatsApp Tabs
       const tabsContainer = $('#wa-tabs')
@@ -291,6 +325,9 @@
       if (s.logoUrl && logoImg.src !== s.logoUrl) {
         logoImg.src = s.logoUrl
       }
+
+      // Layout may have shifted the toolbar → refresh the fly-animation target.
+      reportDlBtn()
     })
   </script>
 </body>

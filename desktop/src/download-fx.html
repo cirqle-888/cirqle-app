@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+    .fly {
+      position: fixed; width: 26px; height: 26px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 7px;
+      background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+      box-shadow: 0 6px 18px rgba(124, 58, 237, 0.5);
+      color: #fff; will-change: transform, opacity; pointer-events: none;
+    }
+    .fly svg { width: 15px; height: 15px; stroke: #fff; stroke-width: 2.2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+</head>
+<body>
+  <script>
+    const DOC = '<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>'
+
+    // main sends one of these per download; several can be in flight at once.
+    window.desk.onFxFly(({ from, to }) => {
+      const el = document.createElement('div')
+      el.className = 'fly'
+      el.innerHTML = DOC
+      el.style.left = (from.x - 13) + 'px'
+      el.style.top = (from.y - 13) + 'px'
+      document.body.appendChild(el)
+
+      const dx = to.x - from.x
+      const dy = to.y - from.y
+      // Arc up over the midpoint, then shrink into the shelf button.
+      const anim = el.animate([
+        { transform: 'translate(0,0) scale(1)', opacity: 1, offset: 0 },
+        { transform: `translate(${dx * 0.5}px, ${dy * 0.5 - 60}px) scale(0.85)`, opacity: 0.95, offset: 0.5 },
+        { transform: `translate(${dx}px, ${dy}px) scale(0.25)`, opacity: 0.12, offset: 1 },
+      ], { duration: 560, easing: 'cubic-bezier(.4,0,.5,1)' })
+
+      anim.onfinish = () => { el.remove(); try { window.desk.fxDone() } catch (_) {} }
+    })
+  </script>
+</body>
+</html>

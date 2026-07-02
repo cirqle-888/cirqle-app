@@ -40,6 +40,15 @@ so you stay logged in across restarts.
   WhatsApp Web. Thumbnails for images, download progress, and per-item **Open /
   Show in Folder / Copy / Share to WhatsApp / Remove**. Files save to
   `~/Downloads/Cirqle/` and the list persists across restarts (like a browser).
+  When a download starts, a little icon **flies to the ⬇ shelf button** (which
+  then pulses) so you can see where it went.
+- **Drag downloaded files out:** grab any item in the Downloads shelf and drag it
+  straight into the WhatsApp pane's chat, into Finder, or onto any other app — a
+  real OS file drag.
+- **Compare two Cirqle pages (⧉ toolbar button):** open a **second Cirqle page
+  side-by-side** in the right pane (duplicates the current page; shares your
+  login). Great for comparing/analysing two records at once. Click it again — or
+  click a WhatsApp tab — to bring WhatsApp back.
 - **Share a payment receipt to WhatsApp:** in Cirqle's receipt dialog the **Send to
   WhatsApp** split-button offers three actions (pick from the ▾ menu): *Copy image +
   open WhatsApp* (default — press ⌘V in the chat), *Send to WhatsApp (auto-paste)*,
@@ -74,11 +83,14 @@ browser meanwhile. A Windows target can be added later from this same codebase
   session, layout + draggable splitter, clipboard → capture bridge, macOS Edit menu,
   the context-aware right-click menu (`wireContextMenu`), the common downloads model
   (`wireDownloads` on both sessions + persisted `downloads.json`) and its floating
-  panel, and the receipt → WhatsApp share engine (`share:receipt`).
+  panel, the native file drag-out (`downloads:startDrag`), the download fly-to-shelf
+  animation (`flyDownloadFx`), the 2nd-Cirqle compare pane (`createCirqle2`), and the
+  receipt → WhatsApp share engine (`share:receipt`).
 - `src/preload-cirqle.js` — relays captured text into the Cirqle page as the
   `cirqle:capture` event, and exposes `shareReceipt(dataUrl, filename, action)`.
 - `src/preload-ui.js` — IPC surface for the toolbar / splitter / overlay / downloads panel.
 - `src/host.html` — toolbar. `src/downloads.html` — the downloads shelf.
+  `src/download-fx.html` — the fly-to-shelf animation overlay.
   `src/splitter.html` / `src/overlay.html` — drag-to-resize.
 
 On the Cirqle side the bridge lives in `src/lib/desktop.ts` (`isDesktop()`, share

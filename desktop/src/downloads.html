@@ -112,7 +112,8 @@
 
         const thumb = document.createElement('div')
         thumb.className = 'thumb'
-        if (it.thumb) { const img = document.createElement('img'); img.src = it.thumb; thumb.appendChild(img) }
+        // Let the whole row own the drag (below) — not the inner <img>.
+        if (it.thumb) { const img = document.createElement('img'); img.src = it.thumb; img.draggable = false; thumb.appendChild(img) }
         else { const s = document.createElement('span'); s.className = 'ext'; s.textContent = extOf(it.name); thumb.appendChild(s) }
         el.appendChild(thumb)
 
@@ -136,6 +137,12 @@
         el.appendChild(meta)
 
         if (it.done) {
+          // Native OS drag-out: drag this file straight into WhatsApp, Finder, or any app.
+          el.draggable = true
+          el.style.cursor = 'grab'
+          el.title = 'Drag to WhatsApp, Finder, or anywhere'
+          el.addEventListener('dragstart', (e) => { e.preventDefault(); window.desk.dlStartDrag(it.id) })
+
           const acts = document.createElement('div'); acts.className = 'row-actions'
           const mk = (icon, title, cls, fn) => { const b = document.createElement('button'); if (cls) b.className = cls; b.title = title; b.innerHTML = icon; b.onclick = fn; return b }
           acts.appendChild(mk(ICONS.open, 'Open', '', () => window.desk.dlOpen(it.id)))

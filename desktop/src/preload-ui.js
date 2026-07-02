@@ -35,5 +35,15 @@ contextBridge.exposeInMainWorld('desk', {
   dlOpenFolder: () => ipcRenderer.send('downloads:openFolder'),
   dlCopy: (id) => ipcRenderer.send('downloads:copy', id),
   dlShareWA: (id) => ipcRenderer.send('downloads:shareWA', id),
+  dlStartDrag: (id) => ipcRenderer.send('downloads:startDrag', id),
   onDownloadsList: (cb) => ipcRenderer.on('downloads:list', (_e, list) => cb(list)),
+
+  // Duplicate / compare a 2nd Cirqle page side-by-side
+  cirqleCompareToggle: () => ipcRenderer.send('cirqle:compareToggle'),
+
+  // Download flying-to-shelf animation
+  reportDownloadBtn: (rect) => ipcRenderer.send('fx:report-btn', rect),
+  onFxFly: (cb) => ipcRenderer.on('fx:fly', (_e, d) => cb(d)),
+  fxDone: () => ipcRenderer.send('fx:done'),
+  onDownloadsPulse: (cb) => ipcRenderer.on('downloads:pulse', () => cb()),
 })
