@@ -64,7 +64,13 @@ const balanceDue = (inv: any): number => Math.max(0, (inv.total_amount ?? 0) - (
 export function renderInvoiceHtml(
   inv: any,
   companySettings: Record<string, string>,
-  opts?: { autoprint?: boolean },
+  // otherOutstanding: live-computed sum of the client's OTHER sent/partial/overdue
+  // invoices, for a "share one PDF that shows everything they owe" use case.
+  // Deliberately NOT persisted anywhere — purely a render-time addition, kept as
+  // its own clearly-labeled line rather than folded into this invoice's own
+  // "Total Payable", so the printed amount for THIS invoice never gets confused
+  // with the client's total outstanding across all invoices.
+  opts?: { autoprint?: boolean; otherOutstanding?: number },
 ): string {
   // Company info + design from settings
   const co = {
@@ -97,6 +103,7 @@ export function renderInvoiceHtml(
   const discount = inv.discount_amount || 0
   const taxAmt   = inv.tax_amount || 0
   const totalPayable = inv.total_amount || 0
+  const otherOutstanding = opts?.otherOutstanding || 0
 
   // Format date as DD/MM/YYYY (header meta)
   function dd(d?: string) {
@@ -476,6 +483,23 @@ export function renderInvoiceHtml(
             <td class="disp" style="padding:6px 6px;font-size:15.5px;font-weight:700;color:#0f0f0f">:</td>
             <td class="disp" style="padding:6px 0;font-size:15.5px;font-weight:800;color:#0f0f0f;text-align:right;white-space:nowrap">${inr(totalPayable)}</td>
           </tr>
+          ${otherOutstanding > 0 ? `
+          <tr>
+            <td colspan="3" style="padding-top:8px"></td>
+          </tr>
+          <tr>
+            <td style="padding:5px 8px;font-size:12.5px;font-style:italic;color:#c43c3c;text-align:right">Other Outstanding Invoices</td>
+            <td style="padding:5px 6px;font-size:12.5px;color:#c43c3c">:</td>
+            <td style="padding:5px 0;font-size:12.5px;font-weight:700;color:#c43c3c;text-align:right;white-space:nowrap">+ ${inr(otherOutstanding)}</td>
+          </tr>
+          <tr>
+            <td colspan="3" style="border-top:1.5px solid #9a9a9a;padding:0;height:4px"></td>
+          </tr>
+          <tr>
+            <td class="disp" style="padding:6px 8px;font-size:15.5px;font-weight:700;color:#0f0f0f;text-align:right">Total Payable (All Invoices)</td>
+            <td class="disp" style="padding:6px 6px;font-size:15.5px;font-weight:700;color:#0f0f0f">:</td>
+            <td class="disp" style="padding:6px 0;font-size:15.5px;font-weight:800;color:#0f0f0f;text-align:right;white-space:nowrap">${inr(totalPayable + otherOutstanding)}</td>
+          </tr>` : ''}
         </table>
         ${(inv.paid_amount || 0) > 0 ? `
         <table style="width:100%;border-collapse:collapse;margin-top:6px">

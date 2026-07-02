@@ -244,6 +244,13 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   const [selectedId, setSelectedId] = useState<string | null>(searchParams.get('id') || null)
   // Invoice id currently being rendered to a PDF file for download (see downloadInvoicePdf).
   const [downloadingInvId, setDownloadingInvId] = useState<string | null>(null)
+  // "Include other outstanding invoices" toggle for Preview/Download — per-invoice,
+  // NEVER persisted to the DB (see buildInvoiceHtml / toggleIncludeOutstanding).
+  // Deliberately distinct from the existing Prev. Balance auto-fill, which writes
+  // a permanent value onto the invoice's own total_amount.
+  const [includeOutstanding, setIncludeOutstanding] = useState<Set<string>>(new Set())
+  const [otherOutstandingByInvoice, setOtherOutstandingByInvoice] = useState<Record<string, number>>({})
+  const [loadingOutstandingId, setLoadingOutstandingId] = useState<string | null>(null)
 
   const [filterStatus, setFilterStatus] = useState<string>(searchParams.get('status') || '')
   const [filterClient, setFilterClient] = useState<string>(searchParams.get('client') || '')
@@ -2413,7 +2420,34 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
   // ── Invoice print-design helpers ──────────────────────────────────────────
   function buildInvoiceHtml(inv: Invoice, opts?: { autoprint?: boolean }): string {
-    return renderInvoiceHtml(inv as any, companySettings, opts)
+    const otherOutstanding = includeOutstanding.has(inv.id) ? (otherOutstandingByInvoice[inv.id] || 0) : undefined
+    return renderInvoiceHtml(inv as any, companySettings, { ...opts, otherOutstanding })
+  }
+
+  // "Include other outstanding invoices" toggle — computes the client's live
+  // outstanding balance from their OTHER sent/partial/overdue invoices (same
+  // query as the existing Prev. Balance auto-fill) and shows it as an extra
+  // line on the Preview/PDF only. Never written to the database — toggling
+  // off (or closing the modal) discards it.
+  async function toggleIncludeOutstanding(inv: Invoice) {
+    if (includeOutstanding.has(inv.id)) {
+      setIncludeOutstanding(prev => { const n = new Set(prev); n.delete(inv.id); return n })
+      return
+    }
+    setLoadingOutstandingId(inv.id)
+    try {
+      const { data } = await supabase.from('invoices')
+        .select('total_amount,paid_amount,status')
+        .eq('client_id', inv.client_id)
+        .in('status', ['sent', 'partial', 'overdue'])
+        .neq('id', inv.id)
+      const pending = (data || []).reduce((s, i) => s + Math.max(0, (i.total_amount || 0) - (i.paid_amount || 0)), 0)
+      setOtherOutstandingByInvoice(prev => ({ ...prev, [inv.id]: pending }))
+      setIncludeOutstanding(prev => new Set(prev).add(inv.id))
+      if (pending <= 0) toastError('No other outstanding balance found for this client')
+    } finally {
+      setLoadingOutstandingId(null)
+    }
   }
 
   function printInvoice(inv: Invoice) {
@@ -5675,6 +5709,16 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                <label
+                  title="Add the client's other overdue/pending invoices as an extra line on this PDF — not saved to the invoice, for sharing only"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-foreground/[0.06] text-xs font-medium text-foreground cursor-pointer border border-foreground/15">
+                  {loadingOutstandingId === previewInv.id
+                    ? <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
+                    : <input type="checkbox" checked={includeOutstanding.has(previewInv.id)}
+                        onChange={() => toggleIncludeOutstanding(previewInv)}
+                        className="rounded accent-violet-500 cursor-pointer" />}
+                  Include Outstanding
+                </label>
                 <button onClick={() => printInvoice(previewInv)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-foreground/[0.06] hover:bg-foreground/10 text-xs font-medium text-foreground transition-colors border border-foreground/15">
                   <Printer className="w-3.5 h-3.5" />Print
@@ -5695,6 +5739,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             <div className="flex-1 overflow-auto bg-[#f5f7fa] rounded-b-2xl" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
               <div style={{ minWidth: 680, height: '100%' }}>
                 <iframe
+                  // key forces a full remount on toggle — changing srcDoc on an
+                  // already-mounted iframe doesn't reliably reload its content.
+                  key={`${previewInv.id}-${includeOutstanding.has(previewInv.id)}`}
                   srcDoc={buildInvoiceHtml(previewInv)}
                   className="w-full h-full border-0"
                   style={{ minHeight: 600 }}
