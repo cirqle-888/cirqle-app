@@ -242,7 +242,7 @@ export function renderInvoiceHtml(
     <div style="font-family:'Open Sans',sans-serif">
       <div style="font-family:'Open Sans',sans-serif;font-weight:700;font-style:italic;font-size:13.5px;color:#111;margin-bottom:6px;text-decoration:underline;text-underline-offset:3px;letter-spacing:0.3px">Payment&nbsp;Information</div>
       <table style="border-collapse:collapse;font-family:'Open Sans',sans-serif">
-        ${co.holder  ? payRow('A/C Holder Name', co.holder) : ''}
+        ${co.holder  ? payRow('A/C Holder Name', co.holder.replace(/ /g, '&nbsp;')) : ''}
         ${co.account ? payRow('A/C Number', co.account) : ''}
         ${co.ifsc    ? payRow('IFSC Code', co.ifsc) : ''}
         ${co.upi     ? payRow('UPI ID', co.upi) : ''}
