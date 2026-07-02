@@ -545,9 +545,9 @@ export function renderInvoiceHtml(
   <div style="margin-top:auto;padding-top:44px">
     <table style="width:100%;border-collapse:collapse">
       <tr>
-        <td style="vertical-align:middle;padding:0">${paymentBlock}</td>
-        <td style="vertical-align:middle;text-align:center;padding:0 10px 0 30px;width:120px">${qrBlock}</td>
-        <td style="vertical-align:middle;padding:0">${thankBlock}</td>
+        <td style="vertical-align:middle;padding:0;width:33.33%">${paymentBlock}</td>
+        <td style="vertical-align:middle;text-align:center;padding:0 10px 0 30px;width:33.33%">${qrBlock}</td>
+        <td style="vertical-align:middle;padding:0;width:33.33%">${thankBlock}</td>
       </tr>
     </table>
   </div>
