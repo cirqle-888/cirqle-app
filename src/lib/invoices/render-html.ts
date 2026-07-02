@@ -234,15 +234,15 @@ export function renderInvoiceHtml(
   // Payment information — italic block, reference style
   const payRow = (label: string, value: string) => `
     <tr>
-      <td style="font-family:'Open Sans',sans-serif;font-size:11.5px;font-style:italic;color:#222;padding:2.5px 0;white-space:nowrap">${label}</td>
+      <td style="font-family:'Open Sans',sans-serif;font-size:11.5px;font-style:italic;color:#222;padding:2.5px 0;white-space:nowrap">${label.replace(/ /g, '\u00A0')}</td>
       <td style="font-family:'Open Sans',sans-serif;padding:2.5px 10px;font-size:11.5px;font-style:italic;color:#222">:</td>
-      <td style="font-family:'Open Sans',sans-serif;font-size:11.5px;font-style:italic;font-weight:700;color:#111;white-space:nowrap">${value}</td>
+      <td style="font-family:'Open Sans',sans-serif;font-size:11.5px;font-style:italic;font-weight:700;color:#111;white-space:nowrap">${value.replace(/ /g, '\u00A0')}</td>
     </tr>`
   const paymentBlock = showPayInfo && (co.holder || co.account || co.upi) ? `
     <div style="font-family:'Open Sans',sans-serif">
-      <div style="font-family:'Open Sans',sans-serif;font-weight:700;font-style:italic;font-size:13.5px;color:#111;margin-bottom:6px;text-decoration:underline;text-underline-offset:3px;letter-spacing:0.3px">Payment&nbsp;Information</div>
+      <div style="font-family:'Open Sans',sans-serif;font-weight:700;font-style:italic;font-size:13.5px;color:#111;margin-bottom:12px;text-decoration:underline;text-underline-offset:3px;letter-spacing:0.3px">Payment&nbsp;Information</div>
       <table style="border-collapse:collapse;font-family:'Open Sans',sans-serif">
-        ${co.holder  ? payRow('A/C Holder Name', co.holder.replace(/ /g, '&nbsp;')) : ''}
+        ${co.holder  ? payRow('A/C Holder Name', co.holder) : ''}
         ${co.account ? payRow('A/C Number', co.account) : ''}
         ${co.ifsc    ? payRow('IFSC Code', co.ifsc) : ''}
         ${co.upi     ? payRow('UPI ID', co.upi) : ''}
