@@ -32,7 +32,7 @@ import {
   Calendar, Building2, IndianRupee, MoreHorizontal, Search, Filter,
   Printer, TrendingUp, BadgeCheck, CircleDollarSign, Receipt, Edit2, Save,
   History, Tag, Percent, ChevronDown, ChevronUp, ArrowDownToLine, Gift, ExternalLink, Copy,
-  Wallet, Link2, ShoppingBag, Share2,
+  Wallet, Link2, ShoppingBag, Share2, Layers,
 } from 'lucide-react'
 import { logFollowup } from "./follow-ups/actions"
 import { recordInvoicePayment } from "./actions"
@@ -245,6 +245,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
   const [filterStatus, setFilterStatus] = useState<string>(searchParams.get('status') || '')
   const [filterClient, setFilterClient] = useState<string>(searchParams.get('client') || '')
+  const [groupByClient, setGroupByClient] = useState(false)
   const [searchFacets, setSearchFacets] = useState<SearchFacet[]>(() => {
     try { const raw = searchParams.get('sf'); return raw ? JSON.parse(raw) : [] } catch { return [] }
   })
@@ -532,6 +533,27 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     })
   }, [invoices, tab, filterStatus, filterClient, activeFacets])
+
+  // Client groups for the list panel — only computed when groupByClient is on.
+  // Sorted by group balance-due desc (clients who owe the most surface first);
+  // within a group, `filtered`'s existing sort order (drafts first, then newest) is kept.
+  type ClientGroup = { clientId: string; clientName: string; invoices: Invoice[]; totalInr: number; balanceInr: number }
+  const clientGroups = useMemo<ClientGroup[]>(() => {
+    if (!groupByClient) return []
+    const map = new Map<string, ClientGroup>()
+    for (const inv of filtered) {
+      const key = inv.client_id || '—'
+      let g = map.get(key)
+      if (!g) {
+        g = { clientId: key, clientName: inv.client?.name || 'No client', invoices: [], totalInr: 0, balanceInr: 0 }
+        map.set(key, g)
+      }
+      g.invoices.push(inv)
+      g.totalInr += invTotalInr(inv)
+      g.balanceInr += balanceDueInr(inv)
+    }
+    return [...map.values()].sort((a, b) => b.balanceInr - a.balanceInr || a.clientName.localeCompare(b.clientName))
+  }, [filtered, groupByClient])
 
   // Summary stats
   const stats = useMemo(() => {
@@ -2438,17 +2460,27 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 >{s ? getStatusLabel(s) : 'All'}</button>
               ))}
             </div>
-            {filtered.length > 0 && (
-              <label className="flex items-center gap-1.5 cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-                <input
-                  type="checkbox"
-                  className="rounded border-border/40 bg-transparent text-violet-500 focus:ring-0 cursor-pointer h-3 w-3"
-                  checked={filtered.length > 0 && filtered.every(i => selectedForBulk.has(i.id))}
-                  onChange={toggleSelectAllBulk}
-                />
-                Select All
-              </label>
-            )}
+            <div className="flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => setGroupByClient(g => !g)}
+                title="Group the list by client"
+                className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border transition-colors ${groupByClient ? 'bg-violet-500/20 border-violet-500/50 text-violet-300' : 'border-border/40 text-muted-foreground hover:border-border'}`}
+              >
+                <Layers className="w-2.5 h-2.5" /> Group by Client
+              </button>
+              {filtered.length > 0 && (
+                <label className="flex items-center gap-1.5 cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                  <input
+                    type="checkbox"
+                    className="rounded border-border/40 bg-transparent text-violet-500 focus:ring-0 cursor-pointer h-3 w-3"
+                    checked={filtered.length > 0 && filtered.every(i => selectedForBulk.has(i.id))}
+                    onChange={toggleSelectAllBulk}
+                  />
+                  Select All
+                </label>
+              )}
+            </div>
           </div>
 
           {/* Tokenized active filters */}
@@ -2531,77 +2563,93 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               {tab === 'active' ? 'No active invoices' : tab === 'closed' ? 'No closed invoices' : 'No invoices'}
             </div>
           )}
-          {filtered.map(inv => {
-            const balance = balanceDue(inv)
-            const overdue = isOverdue(inv.due_date || '', inv.status, inv.issue_date)
-            const isSelected = selectedId === inv.id
-            return (
-              <div
-                key={inv.id}
-                onClick={() => selectInvoice(inv.id)}
-                className="hover-gradient-row px-3 py-3"
-              >
-                <div className="flex items-start gap-3">
-                  <div className="pt-1.5" onClick={e => e.stopPropagation()}>
-                    <input 
-                      type="checkbox" 
-                      className="rounded border-border/40 bg-transparent text-violet-500 focus:ring-0 cursor-pointer h-3.5 w-3.5"
-                      checked={selectedForBulk.has(inv.id)}
-                      onChange={(e) => toggleBulkSelection(e as unknown as React.MouseEvent, inv.id)}
-                    />
+          {groupByClient
+            ? clientGroups.map(g => (
+                <div key={g.clientId}>
+                  <div className="sticky top-0 z-[1] px-3 py-1.5 bg-secondary/70 backdrop-blur-sm border-y border-border/30 flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-foreground truncate">{g.clientName}</span>
+                    <span className="flex items-center gap-2 shrink-0 text-[10px] text-muted-foreground">
+                      <span>{g.invoices.length} inv</span>
+                      {g.balanceInr > 0 && <span className="text-red-400 font-medium">₹{g.balanceInr.toLocaleString('en-IN')} due</span>}
+                    </span>
                   </div>
-                  <div className="flex items-start justify-between gap-2 flex-1 min-w-0">
-                    <div className="min-w-0 flex-1 flex flex-col items-start gap-0.5">
-                      <div className="flex items-center gap-1.5 mb-0.5">
-                      <button
-                        type="button"
-                        onClick={e => { e.stopPropagation(); copyInvNum(inv.invoice_number) }}
-                        title="Copy invoice number"
-                        className="flex items-center gap-0.5 text-[11px] font-mono text-muted-foreground hover:text-foreground transition-colors group/copy"
-                      >
-                        {inv.invoice_number}
-                        <Copy className="w-2.5 h-2.5 ml-0.5 lg:opacity-0 opacity-50 group-hover/copy:opacity-50 transition-opacity" />
-                      </button>
-                      <StatusBadge status={overdue && inv.status !== 'paid' ? 'overdue' : inv.status} />
-                    </div>
-                    <div className="text-sm font-medium text-foreground truncate">{inv.client?.name || '—'}</div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[10px] text-muted-foreground">
-                        {inv.billing_period_start ? formatBillingPeriod(inv.billing_period_start) : fmtDate(inv.issue_date)}
-                      </span>
-                      {(inv.items?.length || 0) > 0 && (
-                        <span className="text-[10px] text-muted-foreground">{inv.items!.length} task{inv.items!.length !== 1 ? 's' : ''}</span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex flex-col items-end gap-1 shrink-0">
-                    <div className={`text-sm font-semibold ${balance > 0 && overdue ? 'text-red-400' : 'text-foreground'}`}>
-                      {fmt(inv.total_amount, inv.currency)}
-                    </div>
-                    {(inv.paid_amount ?? 0) > 0 && inv.status !== 'paid' && (
-                      <div className="text-[10px] text-green-400">
-                        Paid {fmt(inv.paid_amount, inv.currency)}
-                      </div>
-                    )}
-                    {role === 'super_admin' && (
-                      <button
-                        type="button"
-                        onClick={e => { e.stopPropagation(); setEditClientId(inv.client_id) }}
-                        title={`Edit ${inv.client?.name}`}
-                        className="text-muted-foreground/30 hover:text-violet-400 transition-colors"
-                      >
-                        <ExternalLink size={10} />
-                      </button>
-                    )}
+                  <div className="divide-y divide-border/30">
+                    {g.invoices.map(inv => renderInvoiceRow(inv))}
                   </div>
                 </div>
-              </div>
-              </div>
-            )
-          })}
+              ))
+            : filtered.map(inv => renderInvoiceRow(inv))}
         </div>
       </div>
     )
+
+    function renderInvoiceRow(inv: Invoice) {
+      const balance = balanceDue(inv)
+      const overdue = isOverdue(inv.due_date || '', inv.status, inv.issue_date)
+      return (
+        <div
+          key={inv.id}
+          onClick={() => selectInvoice(inv.id)}
+          className="hover-gradient-row px-3 py-3"
+        >
+          <div className="flex items-start gap-3">
+            <div className="pt-1.5" onClick={e => e.stopPropagation()}>
+              <input
+                type="checkbox"
+                className="rounded border-border/40 bg-transparent text-violet-500 focus:ring-0 cursor-pointer h-3.5 w-3.5"
+                checked={selectedForBulk.has(inv.id)}
+                onChange={(e) => toggleBulkSelection(e as unknown as React.MouseEvent, inv.id)}
+              />
+            </div>
+            <div className="flex items-start justify-between gap-2 flex-1 min-w-0">
+              <div className="min-w-0 flex-1 flex flex-col items-start gap-0.5">
+                <div className="flex items-center gap-1.5 mb-0.5">
+                <button
+                  type="button"
+                  onClick={e => { e.stopPropagation(); copyInvNum(inv.invoice_number) }}
+                  title="Copy invoice number"
+                  className="flex items-center gap-0.5 text-[11px] font-mono text-muted-foreground hover:text-foreground transition-colors group/copy"
+                >
+                  {inv.invoice_number}
+                  <Copy className="w-2.5 h-2.5 ml-0.5 lg:opacity-0 opacity-50 group-hover/copy:opacity-50 transition-opacity" />
+                </button>
+                <StatusBadge status={overdue && inv.status !== 'paid' ? 'overdue' : inv.status} />
+              </div>
+              {!groupByClient && <div className="text-sm font-medium text-foreground truncate">{inv.client?.name || '—'}</div>}
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="text-[10px] text-muted-foreground">
+                  {inv.billing_period_start ? formatBillingPeriod(inv.billing_period_start) : fmtDate(inv.issue_date)}
+                </span>
+                {(inv.items?.length || 0) > 0 && (
+                  <span className="text-[10px] text-muted-foreground">{inv.items!.length} task{inv.items!.length !== 1 ? 's' : ''}</span>
+                )}
+              </div>
+            </div>
+            <div className="flex flex-col items-end gap-1 shrink-0">
+              <div className={`text-sm font-semibold ${balance > 0 && overdue ? 'text-red-400' : 'text-foreground'}`}>
+                {fmt(inv.total_amount, inv.currency)}
+              </div>
+              {(inv.paid_amount ?? 0) > 0 && inv.status !== 'paid' && (
+                <div className="text-[10px] text-green-400">
+                  Paid {fmt(inv.paid_amount, inv.currency)}
+                </div>
+              )}
+              {role === 'super_admin' && (
+                <button
+                  type="button"
+                  onClick={e => { e.stopPropagation(); setEditClientId(inv.client_id) }}
+                  title={`Edit ${inv.client?.name}`}
+                  className="text-muted-foreground/30 hover:text-violet-400 transition-colors"
+                >
+                  <ExternalLink size={10} />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+        </div>
+      )
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -5415,9 +5463,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             </div>
             <div className={`bg-foreground/[0.03] rounded-xl p-3 border ${stats.overdueCount > 0 ? 'border-red-500/30' : 'border-border/30'}`}>
               <div className="text-[10px] text-muted-foreground mb-0.5">Overdue</div>
-              <div className={`text-sm font-bold ${stats.overdueCount > 0 ? 'text-red-400' : 'text-foreground'}`}>
-                {fmt(stats.overdueAmt)}
-                {stats.overdueCount > 0 && <span className="ml-1 text-[10px]">({stats.overdueCount})</span>}
+              <div className={`text-sm font-bold flex flex-wrap items-baseline gap-1 ${stats.overdueCount > 0 ? 'text-red-400' : 'text-foreground'}`}>
+                <span>{fmt(stats.overdueAmt)}</span>
+                {stats.overdueCount > 0 && <span className="text-[10px]">({stats.overdueCount})</span>}
               </div>
             </div>
             <div className={`bg-foreground/[0.03] rounded-xl p-3 border ${stats.draftCount > 0 ? 'border-amber-500/30' : 'border-border/30'}`}>

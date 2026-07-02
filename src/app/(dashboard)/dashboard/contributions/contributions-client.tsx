@@ -1637,6 +1637,10 @@ export default function ContributionsClient({
                                 {task.client?.name && <span className="font-medium text-foreground/70">{task.client.name}{task.client?.code && <span className="ml-1 text-[10px] font-mono text-muted-foreground/50">{task.client.code}</span>}</span>}
                                 {task.client?.name && task.service?.name && <span>·</span>}
                                 {task.service?.name && <span>{task.service.name}</span>}
+                                {/* Qty is not price data — visible to everyone, admin and employee alike. */}
+                                {(task.quantity ?? 1) > 1 && (
+                                  <><span>·</span><span className="font-medium text-violet-400/80">×{task.quantity} qty</span></>
+                                )}
                                 {canSeeFinancials && showFinancials && task.billing_amount_inr > 0 && (
                                   <><span>·</span><span className="font-semibold text-foreground">₹{task.billing_amount_inr.toLocaleString('en-IN')}</span></>
                                 )}
@@ -1894,6 +1898,7 @@ export default function ContributionsClient({
                               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                                 <span className="text-[10px] text-muted-foreground truncate max-w-[140px]">{task.client?.name || '—'}{task.client?.code ? ` · ${task.client.code}` : ''}</span>
                                 {task.service?.name && <span className="text-[10px] text-cyan-400/60">{task.service.name}</span>}
+                                {(task.quantity ?? 1) > 1 && <span className="text-[10px] text-violet-400/80 font-medium">×{task.quantity} qty</span>}
                                 <span className={`text-[10px] px-1.5 py-0.5 rounded ${statusColor(task.status)}`}>{statusLabel(task.status)}</span>
                                 <span className="text-[10px] text-muted-foreground/50">{task.task_date}</span>
                               </div>
@@ -2290,6 +2295,7 @@ export default function ContributionsClient({
             </div>
             <p className="text-[11px] text-muted-foreground truncate leading-tight">
               {[selectedTask?.client?.name, selectedTask?.service?.name].filter(Boolean).join(' · ')}
+              {(selectedTask?.quantity ?? 1) > 1 && <> · ×{selectedTask.quantity} qty</>}
               {canSeeFinancials && showFinancials && selectedTask?.billing_amount_inr > 0 && (
                 <> · ₹{(selectedTask.billing_amount_inr || 0).toLocaleString('en-IN')}</>
               )}
