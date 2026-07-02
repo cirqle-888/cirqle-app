@@ -229,6 +229,10 @@ export default function ContributionsClient({
   const toggleClient  = (id: string) => setFilterClients(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   const toggleService = (id: string) => setFilterServices(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   const [filterEmployeeMode, setFilterEmployeeMode] = useState<'worked' | 'solo' | 'any'>((searchParams.get('empmode') as any) || 'worked')
+  // "My Tasks" / "Not Assigned to Me" quick toggle — independent of the Employee
+  // dropdown (which picks any single teammate). Available to anyone with an
+  // employee record, not just role==='employee' — admins can contribute too.
+  const [myScope, setMyScope] = useState<'mine' | 'not_mine' | null>(null)
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'done' | 'missing'>((searchParams.get('status') as any) || 'all')
   const [sortBy, setSortBy] = useState<'today_first' | 'date_desc' | 'date_asc' | 'amount_desc' | 'client'>((searchParams.get('sort') as any) || 'today_first')
   const [showMobileFilters, setShowMobileFilters] = useState(false)
@@ -752,6 +756,11 @@ export default function ContributionsClient({
           if (!hasContributed && !isAssigned) return false
         }
       }
+      if (myScope && currentEmployee) {
+        const isMine = !!contributed?.has(currentEmployee.id) || !!taskAssignmentMap[t.id]?.has(currentEmployee.id)
+        if (myScope === 'mine' && !isMine) return false
+        if (myScope === 'not_mine' && isMine) return false
+      }
       if (statusFilter === 'pending' && doneCount > 0) return false   // Pending = zero contributions
       if (statusFilter === 'done' && doneCount === 0) return false     // Done = at least 1 contributed
       if (statusFilter === 'missing') {
@@ -762,7 +771,7 @@ export default function ContributionsClient({
       }
       return true
     })
-  }, [localTasks, activeFacets, filterClients, filterServices, filterDate, filterEmployee, filterEmployeeMode, statusFilter, taskScoreMap, taskAssignmentMap, employees])
+  }, [localTasks, activeFacets, filterClients, filterServices, filterDate, filterEmployee, filterEmployeeMode, statusFilter, taskScoreMap, taskAssignmentMap, employees, myScope, currentEmployee])
 
   // canSeeFinancials: requires (a) the legacy visibility-settings gate AND
   // (b) the new granular `contributions.view_earnings` permission. Both
@@ -809,18 +818,18 @@ export default function ContributionsClient({
   const tasksByDate = useMemo(() => {
     const map: Record<string, any[]> = {}
     
-    // To prevent massive DOM lag on mobile, we limit the initial render to mobileLimit tasks 
+    // To prevent massive DOM lag on mobile, we limit the initial render to mobileLimit tasks
     // unless they are explicitly searching or filtering by employee.
-    const hasTightFilter = hasSearch || !!filterEmployee
+    const hasTightFilter = hasSearch || !!filterEmployee || !!myScope
     const tasksToRender = hasTightFilter ? myVisibleTasks : myVisibleTasks.slice(0, mobileLimit)
-    
+
     tasksToRender.forEach(t => {
       const d = t.task_date || 'Unknown'
       if (!map[d]) map[d] = []
       map[d].push(t)
     })
     return Object.entries(map).sort(([a], [b]) => b.localeCompare(a))
-  }, [myVisibleTasks, hasSearch, filterEmployee])
+  }, [myVisibleTasks, hasSearch, filterEmployee, myScope])
 
   // ── Entry-view derived data ───────────────────────────
   const filteredGroups = useMemo(() => {
@@ -1198,7 +1207,8 @@ export default function ContributionsClient({
       filterClients.length +
       filterServices.length +
       (filterDate ? 1 : 0) +
-      (filterEmployee ? 1 : 0)
+      (filterEmployee ? 1 : 0) +
+      (myScope ? 1 : 0)
     const hasAnyFilter = activeFilterCount > 0 || hasSearch || statusFilter !== 'all'
 
     const headerActions = (
@@ -1295,22 +1305,33 @@ export default function ContributionsClient({
 
             {/* Top Row My Tasks & Filters (Mobile focused) */}
             <div className="order-2 flex items-center gap-1.5 shrink-0">
-              {/* My Tasks toggle for employees */}
-              {role === 'employee' && currentEmployee && (
-                <button
-                  onClick={() => {
-                    const isActive = filterEmployee === currentEmployee.id;
-                    setFilterEmployee(isActive ? '' : currentEmployee.id);
-                    if (!isActive) setFilterEmployeeMode('any');
-                  }}
-                  className={`h-[34px] px-3 rounded-xl text-xs font-medium border transition-colors cursor-pointer shrink-0 ${
-                    filterEmployee === currentEmployee.id
-                      ? 'bg-primary text-primary-foreground border-primary'
-                      : 'bg-secondary text-muted-foreground border-foreground/15 hover:text-foreground hover:bg-foreground/5'
-                  }`}
-                >
-                  My Tasks
-                </button>
+              {/* My Tasks / Not Assigned to Me — available to anyone with an employee
+                  record (admins can be assignees/contributors too, not just employees). */}
+              {currentEmployee && (
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={() => setMyScope(s => s === 'mine' ? null : 'mine')}
+                    title="Tasks assigned to or contributed by me"
+                    className={`h-[34px] px-3 rounded-xl text-xs font-medium border transition-colors cursor-pointer ${
+                      myScope === 'mine'
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'bg-secondary text-muted-foreground border-foreground/15 hover:text-foreground hover:bg-foreground/5'
+                    }`}
+                  >
+                    My Tasks
+                  </button>
+                  <button
+                    onClick={() => setMyScope(s => s === 'not_mine' ? null : 'not_mine')}
+                    title="Tasks I'm not assigned to or haven't contributed to — see what's not mine"
+                    className={`h-[34px] px-3 rounded-xl text-xs font-medium border transition-colors cursor-pointer ${
+                      myScope === 'not_mine'
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'bg-secondary text-muted-foreground border-foreground/15 hover:text-foreground hover:bg-foreground/5'
+                    }`}
+                  >
+                    Not Assigned to Me
+                  </button>
+                </div>
               )}
 
               {/* Mobile Filters Toggle */}
@@ -1497,7 +1518,7 @@ export default function ContributionsClient({
               ))}
               {hasAnyFilter && (
                 <button
-                  onClick={() => { setSearchFacets([]); setSearchDraft(''); setFilterClients([]); setFilterServices([]); setFilterEmployee(''); setFilterEmployeeMode('worked'); setFilterDate(null); setStatusFilter('all') }}
+                  onClick={() => { setSearchFacets([]); setSearchDraft(''); setFilterClients([]); setFilterServices([]); setFilterEmployee(''); setFilterEmployeeMode('worked'); setFilterDate(null); setStatusFilter('all'); setMyScope(null) }}
                   className="ml-1 text-xs text-muted-foreground hover:text-foreground px-2 py-1.5 rounded-md hover:bg-foreground/[0.04] transition-colors flex items-center gap-1 shrink-0"
                 >
                   <X size={12} /> Clear all
@@ -1522,7 +1543,7 @@ export default function ContributionsClient({
               ...(filterEmployee ? [{ key: 'employee', label: 'Employee', value: dn(employees.find((e: any) => e.id === filterEmployee)) || 'Selected', onRemove: () => { setFilterEmployee(''); setFilterEmployeeMode('worked') } }] : []),
               ...(filterDate ? [{ key: 'date', label: 'Date', value: getDateFilterLabel(filterDate), onRemove: () => setFilterDate(null) }] : []),
             ]}
-            onClearAll={() => { setSearchFacets([]); setSearchDraft(''); setFilterClients([]); setFilterServices([]); setFilterEmployee(''); setFilterEmployeeMode('worked'); setFilterDate(null); setStatusFilter('all') }}
+            onClearAll={() => { setSearchFacets([]); setSearchDraft(''); setFilterClients([]); setFilterServices([]); setFilterEmployee(''); setFilterEmployeeMode('worked'); setFilterDate(null); setStatusFilter('all'); setMyScope(null) }}
           />
 
           {/* ── Missing-scores toast (bottom-right) — list view only ── */}
