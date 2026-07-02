@@ -236,7 +236,7 @@ export function renderInvoiceHtml(
     <tr>
       <td style="font-family:'Open Sans',sans-serif;font-size:11.5px;font-style:italic;color:#222;padding:2.5px 0;white-space:nowrap">${label}</td>
       <td style="font-family:'Open Sans',sans-serif;padding:2.5px 10px;font-size:11.5px;font-style:italic;color:#222">:</td>
-      <td style="font-family:'Open Sans',sans-serif;font-size:11.5px;font-style:italic;font-weight:700;color:#111">${value}</td>
+      <td style="font-family:'Open Sans',sans-serif;font-size:11.5px;font-style:italic;font-weight:700;color:#111;white-space:nowrap">${value}</td>
     </tr>`
   const paymentBlock = showPayInfo && (co.holder || co.account || co.upi) ? `
     <div style="font-family:'Open Sans',sans-serif">
@@ -545,9 +545,9 @@ export function renderInvoiceHtml(
   <div style="margin-top:auto;padding-top:44px">
     <table style="width:100%;border-collapse:collapse">
       <tr>
-        <td style="vertical-align:middle;padding:0;width:33.33%">${paymentBlock}</td>
-        <td style="vertical-align:middle;text-align:center;padding:0 10px 0 30px;width:33.33%">${qrBlock}</td>
-        <td style="vertical-align:middle;padding:0;width:33.33%">${thankBlock}</td>
+        <td style="vertical-align:middle;padding:0;width:38%">${paymentBlock}</td>
+        <td style="vertical-align:middle;text-align:center;padding:0 10px 0 30px;width:24%">${qrBlock}</td>
+        <td style="vertical-align:middle;padding:0;width:38%">${thankBlock}</td>
       </tr>
     </table>
   </div>
