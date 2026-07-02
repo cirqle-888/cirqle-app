@@ -1546,15 +1546,20 @@ export default function ContributionsClient({
             onClearAll={() => { setSearchFacets([]); setSearchDraft(''); setFilterClients([]); setFilterServices([]); setFilterEmployee(''); setFilterEmployeeMode('worked'); setFilterDate(null); setStatusFilter('all'); setMyScope(null) }}
           />
 
-          {/* ── Missing-scores toast (bottom-right) — list view only ── */}
+          {/* ── Missing-scores toast (bottom-right) — list view only ──
+              text-orange-300/400 read fine on the dark theme's near-black backdrop
+              but are far too pale against the light theme's white backdrop (same
+              20%-opacity tinted background reads as pale-on-pale either way) —
+              darker/more saturated base shades for light mode, original pale
+              shades kept under dark: for the dark theme. */}
           {missingCount > 0 && listViewMode === 'list' && showMissingBanner && (
             <div className="fixed bottom-6 right-6 z-40 bg-orange-500/20 border border-orange-500/40 rounded-lg px-4 py-3 flex items-center gap-3 max-w-sm shadow-2xl">
-              <AlertCircle className="w-4 h-4 text-orange-400 shrink-0" />
-              <p className="text-xs text-orange-300 leading-relaxed flex-1">
+              <AlertCircle className="w-4 h-4 text-orange-700 dark:text-orange-400 shrink-0" />
+              <p className="text-xs text-orange-900 dark:text-orange-300 leading-relaxed flex-1">
                 <span className="font-semibold">{missingCount} task{missingCount === 1 ? '' : 's'}</span> need scoring.{' '}
-                <button onClick={() => setStatusFilter('missing')} className="underline hover:text-orange-200 font-semibold">View</button>
+                <button onClick={() => setStatusFilter('missing')} className="underline hover:text-orange-700 dark:hover:text-orange-200 font-semibold">View</button>
               </p>
-              <button onClick={() => setShowMissingBanner(false)} className="shrink-0 text-orange-400 hover:text-orange-300">
+              <button onClick={() => setShowMissingBanner(false)} className="shrink-0 text-orange-700 hover:text-orange-900 dark:text-orange-400 dark:hover:text-orange-300">
                 <X className="w-4 h-4" />
               </button>
             </div>
