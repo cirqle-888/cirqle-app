@@ -156,7 +156,7 @@ export function renderInvoiceHtml(
         <td style="${td('text-align:left;color:#222')}">${it.description}</td>
         <td style="${td('text-align:center;color:#222')}">${it.quantity}</td>
         <td style="${td('text-align:center;color:#222;white-space:nowrap')}">${inr(it.unit_price)}</td>
-        <td style="${td('text-align:center;color:#111;font-weight:700;white-space:nowrap')}">${inr(it.total)}</td>
+        <td style="${td('text-align:right;color:#111;font-weight:700;white-space:nowrap')}">${inr(it.total)}</td>
       </tr>`
   })
   const allItemRows = itemRows.join('')
@@ -456,7 +456,7 @@ export function renderInvoiceHtml(
         <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff">Jobs Done</th>
         <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;width:54px">Qty</th>
         <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:118px">Rate</th>
-        <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:130px">Total Amount</th>
+        <th class="disp" style="height:${ROW_H}px;padding:0 10px 8px 8px;line-height:${ROW_H - 8}px;text-align:right;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:130px">Total Amount</th>
       </tr>
     </thead>
     <tbody>
@@ -508,9 +508,9 @@ export function renderInvoiceHtml(
             <td colspan="3" style="padding-top:8px"></td>
           </tr>
           <tr>
-            <td style="padding:5px 8px;font-size:12.5px;font-style:italic;color:#c43c3c;text-align:right">Other Outstanding Invoices</td>
-            <td style="padding:5px 6px;font-size:12.5px;color:#c43c3c">:</td>
-            <td style="padding:5px 10px;font-size:12.5px;font-weight:700;color:#c43c3c;text-align:right;white-space:nowrap">+ ${inr(otherOutstanding)}</td>
+            <td style="padding:5px 8px 12px 8px;font-size:12.5px;font-style:italic;color:#c43c3c;text-align:right">Other Outstanding Invoices</td>
+            <td style="padding:5px 6px 12px 6px;font-size:12.5px;color:#c43c3c">:</td>
+            <td style="padding:5px 10px 12px 10px;font-size:12.5px;font-weight:700;color:#c43c3c;text-align:right;white-space:nowrap">+ ${inr(otherOutstanding)}</td>
           </tr>
           <tr>
             <td colspan="3" style="border-top:1.5px solid #9a9a9a;padding:0;height:4px"></td>
