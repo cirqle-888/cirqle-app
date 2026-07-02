@@ -242,6 +242,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const [selectedId, setSelectedId] = useState<string | null>(searchParams.get('id') || null)
+  // Invoice id currently being rendered to a PDF file for download (see downloadInvoicePdf).
+  const [downloadingInvId, setDownloadingInvId] = useState<string | null>(null)
 
   const [filterStatus, setFilterStatus] = useState<string>(searchParams.get('status') || '')
   const [filterClient, setFilterClient] = useState<string>(searchParams.get('client') || '')
@@ -2420,6 +2422,48 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     if (w) { w.document.write(html); w.document.close() }
   }
 
+  // Genuine file download (distinct from Print, which only offers the OS print
+  // dialog's "Save as PDF" — not a real download event). Renders the same
+  // print-safe HTML (plain hex colors, no oklch/CSS vars — see render-html.ts)
+  // into an off-screen iframe, captures it with html2canvas, and saves via
+  // jsPDF. jsPDF's .save() triggers a real browser download, so on Cirqle
+  // Desktop it lands in the common Downloads shelf like any other file.
+  async function downloadInvoicePdf(inv: Invoice) {
+    setDownloadingInvId(inv.id)
+    const iframe = document.createElement('iframe')
+    try {
+      const html = buildInvoiceHtml(inv)
+      iframe.style.cssText = 'position:fixed; top:-99999px; left:-99999px; width:800px; height:1131px; border:0;'
+      document.body.appendChild(iframe)
+      const doc = iframe.contentDocument
+      if (!doc) throw new Error('Could not create render frame')
+      doc.open(); doc.write(html); doc.close()
+
+      // Wait for the frame (incl. any logo/QR/background <img>s) to finish loading,
+      // with a safety timeout in case an image is slow/unreachable.
+      await new Promise<void>(resolve => {
+        if (doc.readyState === 'complete') { resolve(); return }
+        iframe.addEventListener('load', () => resolve(), { once: true })
+        setTimeout(resolve, 1500)
+      })
+
+      const { default: html2canvas } = await import('html2canvas')
+      const canvas = await html2canvas(doc.body, { scale: 2, useCORS: true, backgroundColor: '#ffffff' })
+      const imgData = canvas.toDataURL('image/png')
+
+      const { default: jsPDF } = await import('jspdf')
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'px', format: [canvas.width, canvas.height] })
+      pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height)
+      pdf.save(`${inv.invoice_number}.pdf`)
+    } catch (e) {
+      console.error('Invoice PDF download failed', e)
+      toastError('Could not generate the PDF. Try Print instead.')
+    } finally {
+      document.body.removeChild(iframe)
+      setDownloadingInvId(null)
+    }
+  }
+
   // ── Render helpers ─────────────────────────────────────────────────────────
   function StatusBadge({ status }: { status: string }) {
     return (
@@ -2728,6 +2772,12 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             <button onClick={() => printInvoice(inv)} title="Print"
               className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-foreground/5 rounded-lg transition-colors">
               <Printer className="w-3.5 h-3.5" />
+            </button>
+            <button onClick={() => downloadInvoicePdf(inv)} disabled={downloadingInvId === inv.id} title="Download PDF"
+              className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-foreground/5 rounded-lg transition-colors disabled:opacity-50">
+              {downloadingInvId === inv.id
+                ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                : <Download className="w-3.5 h-3.5" />}
             </button>
             <button
               onClick={() => {
@@ -5627,7 +5677,13 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               <div className="flex items-center gap-2">
                 <button onClick={() => printInvoice(previewInv)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-foreground/[0.06] hover:bg-foreground/10 text-xs font-medium text-foreground transition-colors border border-foreground/15">
-                  <Printer className="w-3.5 h-3.5" />Print / Download
+                  <Printer className="w-3.5 h-3.5" />Print
+                </button>
+                <button onClick={() => downloadInvoicePdf(previewInv)} disabled={downloadingInvId === previewInv.id}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-foreground/[0.06] hover:bg-foreground/10 text-xs font-medium text-foreground transition-colors border border-foreground/15 disabled:opacity-50">
+                  {downloadingInvId === previewInv.id
+                    ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    : <Download className="w-3.5 h-3.5" />}Download
                 </button>
                 <button onClick={() => setPreviewInv(null)}
                   className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-foreground/5 rounded-lg transition-colors">
