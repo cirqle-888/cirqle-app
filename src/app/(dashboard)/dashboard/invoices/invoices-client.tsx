@@ -2419,7 +2419,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   }
 
   // ── Invoice print-design helpers ──────────────────────────────────────────
-  function buildInvoiceHtml(inv: Invoice, opts?: { autoprint?: boolean }): string {
+  function buildInvoiceHtml(inv: Invoice, opts?: { autoprint?: boolean; forRaster?: boolean }): string {
     const otherOutstanding = includeOutstanding.has(inv.id) ? (otherOutstandingByInvoice[inv.id] || 0) : undefined
     return renderInvoiceHtml(inv as any, companySettings, { ...opts, otherOutstanding })
   }
@@ -2466,7 +2466,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     setDownloadingInvId(inv.id)
     const iframe = document.createElement('iframe')
     try {
-      const html = buildInvoiceHtml(inv)
+      // forRaster flattens the gradient-clipped thank-you text to a solid colour —
+      // html2canvas can't clip a gradient to text and would paint solid boxes.
+      const html = buildInvoiceHtml(inv, { forRaster: true })
       iframe.style.cssText = 'position:fixed; top:-99999px; left:-99999px; width:800px; height:1131px; border:0;'
       document.body.appendChild(iframe)
       const doc = iframe.contentDocument

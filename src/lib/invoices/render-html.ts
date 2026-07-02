@@ -70,7 +70,12 @@ export function renderInvoiceHtml(
   // its own clearly-labeled line rather than folded into this invoice's own
   // "Total Payable", so the printed amount for THIS invoice never gets confused
   // with the client's total outstanding across all invoices.
-  opts?: { autoprint?: boolean; otherOutstanding?: number },
+  // forRaster: the caller will rasterize this HTML with html2canvas (the Download
+  // PDF button), which does NOT support -webkit-background-clip:text. When set,
+  // the gradient-filled thank-you text is flattened to a solid brand colour so it
+  // renders as text, not solid boxes. Preview / Print (real browser rendering)
+  // leave it off and keep the gradient.
+  opts?: { autoprint?: boolean; otherOutstanding?: number; forRaster?: boolean },
 ): string {
   // Company info + design from settings
   const co = {
@@ -104,6 +109,7 @@ export function renderInvoiceHtml(
   const taxAmt   = inv.tax_amount || 0
   const totalPayable = inv.total_amount || 0
   const otherOutstanding = opts?.otherOutstanding || 0
+  const forRaster = !!opts?.forRaster
 
   // Format date as DD/MM/YYYY (header meta)
   function dd(d?: string) {
@@ -250,16 +256,20 @@ export function renderInvoiceHtml(
 
   // Thank-you block: gradient from Figma design (#8D66DB→#52117E→#4548A5), fills QR height
   // Split into 3 lines: "Thank you" | "for your" | "Business!" to prevent cropping
-  const GRAD_THANK_CSS = 'background:linear-gradient(135deg,#8D66DB 0%,#52117E 52%,#4548A5 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text'
+  // Gradient-clipped text for real browser rendering; a solid brand purple when
+  // rasterizing (html2canvas can't clip a gradient to text → it'd paint boxes).
+  const THANK_FILL = forRaster
+    ? 'color:#52117E'
+    : 'background:linear-gradient(135deg,#8D66DB 0%,#52117E 52%,#4548A5 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text'
   const ftWords = (co.footerText || '').trim().split(/\s+/)
   const line1 = ftWords.length >= 2 ? `${ftWords[0]} ${ftWords[1]}` : (co.footerText || 'Thank you')
   const line2 = ftWords.length > 2 ? ftWords.slice(2, 4).join(' ') : ''  // e.g. "for your"
   const line3 = ftWords.length > 4 ? ftWords.slice(4).join(' ') : ''     // e.g. "Business!"
   const thankBlock = `
     <div style="font-family:'Airbnb Cereal App',${FONT};min-height:104px;display:flex;flex-direction:column;justify-content:center;line-height:1.2">
-      <div style="font-size:31px;font-weight:800;${GRAD_THANK_CSS}">${line1}</div>
-      ${line2 ? `<div style="font-size:27px;font-weight:700;${GRAD_THANK_CSS}">${line2}</div>` : ''}
-      ${line3 ? `<div style="font-size:27px;font-weight:700;${GRAD_THANK_CSS}">${line3}</div>` : ''}
+      <div style="font-size:31px;font-weight:800;${THANK_FILL}">${line1}</div>
+      ${line2 ? `<div style="font-size:27px;font-weight:700;${THANK_FILL}">${line2}</div>` : ''}
+      ${line3 ? `<div style="font-size:27px;font-weight:700;${THANK_FILL}">${line3}</div>` : ''}
     </div>`
 
   const bgCss = bgStyle === 'dots'
@@ -413,8 +423,12 @@ export function renderInvoiceHtml(
         </table>
       </td>
       <td style="vertical-align:top;text-align:right;width:38%">
-        <!-- INVOICE title -->
-        <div class="disp" style="display:inline-block;font-size:33px;font-weight:800;color:#0f0f0f;letter-spacing:0.5px;line-height:1;border-bottom:4px solid #0f0f0f;padding-bottom:5px">INVOICE</div>
+        <!-- INVOICE title — the accent rule is a separate bar (not border-bottom)
+             so html2canvas renders it as a solid 4px block, not a thin underline. -->
+        <div style="display:inline-block">
+          <div class="disp" style="font-size:33px;font-weight:800;color:#0f0f0f;letter-spacing:0.5px;line-height:1">INVOICE</div>
+          <div style="height:4px;background:#0f0f0f;border-radius:1px;margin-top:5px"></div>
+        </div>
         <!-- Bill To (below INVOICE in same td, aligned right then left for content) -->
         <div style="margin-top:16px;text-align:left">
           <div style="font-size:14.5px;color:#222">Bill to :</div>
