@@ -143,7 +143,7 @@ export function renderInvoiceHtml(
   // Per-invoice override → company default → 'mode_a'
   const expensesMode = inv.expenses_mode || companySettings.expense_display_mode || 'mode_a'
   const ROW_H = 38
-  const td = (extra: string) => `height:${ROW_H}px;padding:0 10px 6px 10px;line-height:${ROW_H - 6}px;border-bottom:1px solid ${CELL_BORD};border-left:1px solid ${CELL_BORD};font-size:13px;${extra}`
+  const td = (extra: string) => `height:${ROW_H}px;padding:0 10px 8px 10px;line-height:${ROW_H - 8}px;border-bottom:1px solid ${CELL_BORD};border-left:1px solid ${CELL_BORD};font-size:13px;${extra}`
 
   // Build task item rows
   const itemRows = sortedItems.map((it, idx) => {
@@ -167,7 +167,7 @@ export function renderInvoiceHtml(
     const EXP_H = 36
     const expRows = expenseItems.map((exp: any, i: number) => {
       const bg = i % 2 === 1 ? ALT_ROW : '#ffffff'
-      const tdE = `height:${EXP_H}px;padding:0 10px 6px 10px;line-height:${EXP_H - 6}px;border-bottom:1px solid ${CELL_BORD};font-size:12.5px;`
+      const tdE = `height:${EXP_H}px;padding:0 10px 8px 10px;line-height:${EXP_H - 8}px;border-bottom:1px solid ${CELL_BORD};font-size:12.5px;`
       const hasMarkup = exp.markup_type !== 'none' && (exp.markup_amount || 0) > 0
 
       if (expensesMode === 'mode_b' && hasMarkup) {
@@ -199,19 +199,19 @@ export function renderInvoiceHtml(
     }).join('')
     return `
   <div style="margin-top:18px">
-    <div style="font-weight:700;font-size:13px;color:${NAVY};margin-bottom:6px;padding-bottom:3px;text-transform:uppercase;letter-spacing:0.05em">Expenses</div>
+    <div style="font-weight:700;font-size:13px;color:${NAVY};margin-bottom:6px;padding-bottom:5px;text-transform:uppercase;letter-spacing:0.05em">Expenses</div>
     <table style="width:100%;border-collapse:collapse;border:1px solid ${CELL_BORD}">
       <thead>
         <tr style="background:linear-gradient(to bottom,${HEAD_TOP},${HEAD_BOT});height:${EXP_H}px">
-          <th style="height:${EXP_H}px;padding:0 10px 6px 10px;line-height:${EXP_H - 6}px;text-align:left;color:#fff;font-size:12.5px;font-weight:700">Description</th>
-          <th style="height:${EXP_H}px;padding:0 10px 6px 10px;line-height:${EXP_H - 6}px;text-align:right;color:#fff;font-size:12.5px;font-weight:700;white-space:nowrap;border-left:2px solid #fff">Amount</th>
+          <th style="height:${EXP_H}px;padding:0 10px 8px 10px;line-height:${EXP_H - 8}px;text-align:left;color:#fff;font-size:12.5px;font-weight:700">Description</th>
+          <th style="height:${EXP_H}px;padding:0 10px 8px 10px;line-height:${EXP_H - 8}px;text-align:right;color:#fff;font-size:12.5px;font-weight:700;white-space:nowrap;border-left:2px solid #fff">Amount</th>
         </tr>
       </thead>
       <tbody>
         ${expRows}
         <tr style="background:#f8f8f8;height:${EXP_H}px">
-          <td style="height:${EXP_H}px;padding:0 10px 6px 10px;line-height:${EXP_H - 6}px;font-size:12.5px;font-weight:700;color:#111;text-align:right">Expenses Total</td>
-          <td style="height:${EXP_H}px;padding:0 10px 6px 10px;line-height:${EXP_H - 6}px;border-left:1px solid ${CELL_BORD};font-size:13px;font-weight:700;text-align:right;white-space:nowrap">${inr(expensesTotal)}</td>
+          <td style="height:${EXP_H}px;padding:0 10px 8px 10px;line-height:${EXP_H - 8}px;font-size:12.5px;font-weight:700;color:#111;text-align:right">Expenses Total</td>
+          <td style="height:${EXP_H}px;padding:0 10px 8px 10px;line-height:${EXP_H - 8}px;border-left:1px solid ${CELL_BORD};font-size:13px;font-weight:700;text-align:right;white-space:nowrap">${inr(expensesTotal)}</td>
         </tr>
       </tbody>
     </table>
@@ -451,12 +451,12 @@ export function renderInvoiceHtml(
   <table style="width:100%;border-collapse:collapse;margin:14px 0 12px">
     <thead>
       <tr style="background:linear-gradient(180deg,${HEAD_TOP} 0%,${HEAD_BOT} 100%);height:${ROW_H}px">
-        <th class="disp" style="height:${ROW_H}px;padding:0 8px 6px 8px;line-height:${ROW_H - 6}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;width:46px">No.</th>
-        <th class="disp" style="height:${ROW_H}px;padding:0 8px 6px 8px;line-height:${ROW_H - 6}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:118px">Date</th>
-        <th class="disp" style="height:${ROW_H}px;padding:0 8px 6px 8px;line-height:${ROW_H - 6}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff">Jobs Done</th>
-        <th class="disp" style="height:${ROW_H}px;padding:0 8px 6px 8px;line-height:${ROW_H - 6}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;width:54px">Qty</th>
-        <th class="disp" style="height:${ROW_H}px;padding:0 8px 6px 8px;line-height:${ROW_H - 6}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:118px">Rate</th>
-        <th class="disp" style="height:${ROW_H}px;padding:0 8px 6px 8px;line-height:${ROW_H - 6}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:130px">Total Amount</th>
+        <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;width:46px">No.</th>
+        <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:118px">Date</th>
+        <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff">Jobs Done</th>
+        <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;width:54px">Qty</th>
+        <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:118px">Rate</th>
+        <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:130px">Total Amount</th>
       </tr>
     </thead>
     <tbody>
@@ -473,35 +473,35 @@ export function renderInvoiceHtml(
       <td style="width:58%">
         <table style="width:100%;border-collapse:collapse">
           <tr>
-            <td style="padding:3px 8px 7px 8px;font-size:13.5px;color:#222;text-align:right">Total Amount Due</td>
-            <td style="padding:3px 6px 7px 6px;font-size:13.5px;color:#222;width:14px">:</td>
-            <td style="padding:3px 10px 7px 10px;font-size:13.5px;font-weight:700;color:#111;text-align:right;width:130px;white-space:nowrap">${inr(subtotal)}</td>
+            <td style="padding:1px 8px 9px 8px;font-size:13.5px;color:#222;text-align:right">Total Amount Due</td>
+            <td style="padding:1px 6px 9px 6px;font-size:13.5px;color:#222;width:14px">:</td>
+            <td style="padding:1px 10px 9px 10px;font-size:13.5px;font-weight:700;color:#111;text-align:right;width:130px;white-space:nowrap">${inr(subtotal)}</td>
           </tr>
           ${discount > 0 ? `
           <tr>
-            <td style="padding:5px 8px;font-size:13.5px;color:#222;text-align:right">Discount</td>
-            <td style="padding:5px 6px;font-size:13.5px;color:#222">:</td>
-            <td style="padding:5px 10px;font-size:13.5px;font-weight:700;color:#1d9a52;text-align:right;white-space:nowrap">- ${inr(discount)}</td>
+            <td style="padding:1px 8px 9px 8px;font-size:13.5px;color:#222;text-align:right">Discount</td>
+            <td style="padding:1px 6px 9px 6px;font-size:13.5px;color:#222">:</td>
+            <td style="padding:1px 10px 9px 10px;font-size:13.5px;font-weight:700;color:#1d9a52;text-align:right;white-space:nowrap">- ${inr(discount)}</td>
           </tr>` : ''}
           ${taxAmt > 0 ? `
           <tr>
-            <td style="padding:5px 8px;font-size:13.5px;color:#222;text-align:right">Tax (${inv.tax_rate || 0}%)</td>
-            <td style="padding:5px 6px;font-size:13.5px;color:#222">:</td>
-            <td style="padding:5px 10px;font-size:13.5px;font-weight:700;color:#111;text-align:right;white-space:nowrap">+ ${inr(taxAmt)}</td>
+            <td style="padding:1px 8px 9px 8px;font-size:13.5px;color:#222;text-align:right">Tax (${inv.tax_rate || 0}%)</td>
+            <td style="padding:1px 6px 9px 6px;font-size:13.5px;color:#222">:</td>
+            <td style="padding:1px 10px 9px 10px;font-size:13.5px;font-weight:700;color:#111;text-align:right;white-space:nowrap">+ ${inr(taxAmt)}</td>
           </tr>` : ''}
           ${prevBal > 0 ? `
           <tr>
-            <td style="padding:5px 8px;font-size:13.5px;color:#222;text-align:right">Previous Balance</td>
-            <td style="padding:5px 6px;font-size:13.5px;color:#222">:</td>
-            <td style="padding:5px 10px;font-size:13.5px;font-weight:700;color:#111;text-align:right;white-space:nowrap">${inr(prevBal)}</td>
+            <td style="padding:1px 8px 9px 8px;font-size:13.5px;color:#222;text-align:right">Previous Balance</td>
+            <td style="padding:1px 6px 9px 6px;font-size:13.5px;color:#222">:</td>
+            <td style="padding:1px 10px 9px 10px;font-size:13.5px;font-weight:700;color:#111;text-align:right;white-space:nowrap">${inr(prevBal)}</td>
           </tr>` : ''}
           <tr>
-            <td colspan="3" style="border-top:1.5px solid #9a9a9a;padding:0;height:4px"></td>
+            <td colspan="3" style="border-top:1.5px solid #9a9a9a;padding:0;height:1px"></td>
           </tr>
           <tr>
-            <td class="disp" style="padding:6px 8px;font-size:15.5px;font-weight:700;color:#0f0f0f;text-align:right">Total Payable</td>
-            <td class="disp" style="padding:6px 6px;font-size:15.5px;font-weight:700;color:#0f0f0f">:</td>
-            <td class="disp" style="padding:6px 10px;font-size:15.5px;font-weight:800;color:#0f0f0f;text-align:right;white-space:nowrap">${inr(totalPayable)}</td>
+            <td class="disp" style="padding:2px 8px 6px 8px;font-size:15.5px;font-weight:700;color:#0f0f0f;text-align:right">Total Payable</td>
+            <td class="disp" style="padding:2px 6px 6px 6px;font-size:15.5px;font-weight:700;color:#0f0f0f">:</td>
+            <td class="disp" style="padding:2px 10px 6px 10px;font-size:15.5px;font-weight:800;color:#0f0f0f;text-align:right;white-space:nowrap">${inr(totalPayable)}</td>
           </tr>
           ${otherOutstanding > 0 ? `
           <tr>
