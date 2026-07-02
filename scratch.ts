@@ -1,17 +1,25 @@
 import { createClient } from '@supabase/supabase-js'
-import * as dotenv from 'dotenv'
+import dotenv from 'dotenv'
+import { syncDraftInvoices } from './src/lib/sync/integrity'
+
 dotenv.config({ path: '.env.local' })
 
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY! || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
 
-async function main() {
-  const { data } = await supabase.from('invoices').select('*').eq('invoice_number', 'INV-2605-033')
-  console.log('Invoice:', data)
+async function run() {
+  const { data: tasks } = await supabase.from('tasks').select('id, status').eq('status', 'done')
+  if (!tasks) return
   
-  const { data: allocations } = await supabase.from('cashbook_invoice_allocations').select('*').eq('invoice_id', data?.[0]?.id)
-  console.log('Allocations:', allocations)
-  
-  const { data: payments } = await supabase.from('payments').select('*').eq('invoice_id', data?.[0]?.id)
-  console.log('Payments:', payments)
+  console.log(`Syncing draft invoices for ${tasks.length} done tasks...`)
+  let count = 0
+  for (const t of tasks) {
+    try {
+      await syncDraftInvoices(t.id)
+      count++
+    } catch(e) {
+      console.error(e)
+    }
+  }
+  console.log(`Successfully synced ${count} tasks.`)
 }
-main()
+run()

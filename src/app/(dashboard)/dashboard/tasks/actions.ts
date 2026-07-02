@@ -137,6 +137,9 @@ export async function serverUpdateTaskStatus(
     detail:     { title: taskTitle, from: fromStatus, to: toStatus },
   })
 
+  // SYNC INTEGRITY!
+  await syncDraftInvoices(taskId)
+
   // Mirror onto any promoted requests (no-op when none are linked).
   void syncRequestStatusFromTask(taskId, toStatus).catch(() => {})
 
@@ -172,6 +175,11 @@ export async function serverBulkUpdateStatus(
     action:     'status_changed',
     detail:     { bulk: true, count: ids.length, to: toStatus },
   })
+
+  // SYNC INTEGRITY!
+  for (const id of ids) {
+    await syncDraftInvoices(id)
+  }
 
   // Mirror onto any promoted requests (no-op when none are linked).
   void syncRequestStatusFromTasks(ids, toStatus).catch(() => {})

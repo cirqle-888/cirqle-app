@@ -43,10 +43,11 @@ interface TaskEditModalProps {
   onClose: () => void
 }
 
-const MANUAL_STATUSES = ['pending', 'in_progress', 'done', 'cancelled']
+const MANUAL_STATUSES = ['pending', 'in_progress', 'delivered', 'done', 'cancelled']
 const STATUS_LABELS: Record<string, string> = {
-  pending: '⏳ Pending',
+  pending: '⏳ New',
   in_progress: '🔄 In Progress',
+  delivered: '↗️ Delivered',
   done: '✅ Done',
   invoiced: '🔒 Invoiced',
   cancelled: '❌ Cancelled',

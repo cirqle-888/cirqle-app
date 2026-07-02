@@ -33,6 +33,7 @@ import { EmployeeAvatar, AvatarPicker } from '@/components/ui/employee-avatar'
 import { PerformanceHistoryModal } from './performance-history-modal'
 import { DEFAULT_TEMPLATES, TEMPLATE_KEYS, TEMPLATE_DOCS, templatesFromSettings, type MessageTemplates } from '@/lib/messaging/templates'
 import { INTAKE_KINDS, INTAKE_KIND_META } from '@/lib/services/intake'
+import { isDesktop, getReceiptSharePref, setReceiptSharePref, RECEIPT_SHARE_LABELS, RECEIPT_SHARE_HINTS, type ReceiptShareAction } from '@/lib/desktop'
 import { buildInvoiceShareText } from '@/lib/invoices/share'
 import { buildReminderText } from '@/lib/followups/grouping'
 
@@ -3352,6 +3353,75 @@ export default function SettingsClient(props: Props) {
 
 const inputCls = 'w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50'
 
+// ─── Desktop app: receipt → WhatsApp share preference ────────────────────────
+// Only meaningful inside the Cirqle Desktop shell (localStorage-backed, per
+// install). Lets the user set the default action the receipt Share button runs,
+// and optionally force it so the picker is skipped.
+function DesktopReceiptShareCard() {
+  const [onDesktop, setOnDesktop] = useState(false)
+  const [pref, setPref] = useState<{ default: ReceiptShareAction; always: boolean }>({ default: 'copy', always: false })
+
+  useEffect(() => {
+    if (!isDesktop()) return
+    setOnDesktop(true)
+    setPref(getReceiptSharePref())
+  }, [])
+
+  if (!onDesktop) return null
+
+  const update = (next: { default: ReceiptShareAction; always: boolean }) => {
+    setPref(next)
+    setReceiptSharePref(next)
+  }
+
+  return (
+    <div className="border border-border rounded-xl p-4 space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+          <Send className="w-4 h-4 text-emerald-400" /> Receipt sharing (Desktop app)
+        </h3>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Choose what the receipt <strong>Send to WhatsApp</strong> button does by default. You can still pick a
+          different action any time from the button&apos;s dropdown.
+        </p>
+      </div>
+
+      <div className="space-y-1.5">
+        {(['copy', 'paste', 'download'] as ReceiptShareAction[]).map(a => (
+          <label
+            key={a}
+            className={`flex items-start gap-2.5 rounded-lg border p-2.5 cursor-pointer transition-colors ${
+              pref.default === a ? 'border-primary/50 bg-primary/5' : 'border-border hover:bg-secondary/50'
+            }`}
+          >
+            <input
+              type="radio"
+              name="receipt-share-default"
+              checked={pref.default === a}
+              onChange={() => update({ ...pref, default: a })}
+              className="mt-0.5 accent-violet-500"
+            />
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-foreground">{RECEIPT_SHARE_LABELS[a]}</span>
+              <span className="block text-[11px] text-muted-foreground leading-snug">{RECEIPT_SHARE_HINTS[a]}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+
+      <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer pt-1">
+        <input
+          type="checkbox"
+          checked={pref.always}
+          onChange={e => update({ ...pref, always: e.target.checked })}
+          className="accent-violet-500"
+        />
+        Always use this action (skip the picker)
+      </label>
+    </div>
+  )
+}
+
 // ─── Message Templates tab ───────────────────────────────────────────────────
 // Lets Settings own the wording of every client-facing WhatsApp text (invoice
 // share + payment reminders) without a code change. Each template is stored
@@ -3403,6 +3473,8 @@ function MessageTemplatesTab({ companySettings, setCompanySettings, saveCompanyS
           to show that line only when the placeholder has a value. Leave a template blank to use the default wording.
         </p>
       </div>
+
+      <DesktopReceiptShareCard />
 
       {TEMPLATE_DOCS.map(({ key, label, description, placeholders }) => {
         const settingKey = TEMPLATE_KEYS[key]

@@ -3502,7 +3502,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
           count={selectedTasks.size}
           onClear={() => { setSelectedTasks(new Set()); setBulkMode(false) }}
           actions={[
-            { key: 'done', label: 'Completed', icon: <CheckCircle className="w-3.5 h-3.5" />, tint: 'emerald', onClick: () => bulkUpdateStatus('done') },
+            { key: 'done', label: 'Done', icon: <CheckCircle className="w-3.5 h-3.5" />, tint: 'emerald', onClick: () => bulkUpdateStatus('done') },
             { key: 'delivered', label: 'Delivered', icon: <CheckCircle className="w-3.5 h-3.5" />, tint: 'violet', onClick: () => bulkUpdateStatus('delivered') },
             { key: 'in_progress', label: 'In Progress', icon: <Clock className="w-3.5 h-3.5" />, tint: 'blue', onClick: () => bulkUpdateStatus('in_progress') },
             { key: 'pending', label: 'New', icon: <Hash className="w-3.5 h-3.5" />, tint: 'yellow', onClick: () => bulkUpdateStatus('pending') },

@@ -2,7 +2,11 @@
 
 import { useRef, useState, useEffect } from 'react'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
-import { X, Download, Share2, FileText, Loader2, Check } from 'lucide-react'
+import { X, Download, Share2, FileText, Loader2, Check, ChevronDown } from 'lucide-react'
+import {
+  isDesktop, desktop, effectiveShareAction, rememberLastShareAction,
+  RECEIPT_SHARE_LABELS, RECEIPT_SHARE_HINTS, type ReceiptShareAction,
+} from '@/lib/desktop'
 
 /**
  * Shareable "Payment Received" receipt.
@@ -295,6 +299,11 @@ export default function ReceiptModal({ input, onClose }: Props) {
   const [busy, setBusy] = useState<'png' | 'share' | 'pdf' | null>(null)
   const [done, setDone] = useState(false)
   const [error, setError] = useState('')
+  // Desktop-only: which "share to linked WhatsApp" action the split button runs,
+  // and whether the little action picker is open.
+  const onDesktop = isDesktop()
+  const [shareAction, setShareAction] = useState<ReceiptShareAction>(() => (onDesktop ? effectiveShareAction() : 'copy'))
+  const [shareMenuOpen, setShareMenuOpen] = useState(false)
 
   useEffect(() => {
     const el = previewContainerRef.current
@@ -361,6 +370,32 @@ export default function ReceiptModal({ input, onClose }: Props) {
     } catch (e) {
       console.error('Receipt image export failed', e)
       setError('Could not generate the receipt image. Please try again.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // Desktop: render the receipt PNG and hand it to the Electron shell, which
+  // copies it to the clipboard + focuses WhatsApp (copy), auto-pastes into the
+  // open chat (paste), or saves + reveals it in Finder (download).
+  async function shareToWhatsApp(action: ReceiptShareAction) {
+    const bridge = desktop()
+    if (!bridge?.shareReceipt) return
+    setBusy('share')
+    setError('')
+    setShareMenuOpen(false)
+    setShareAction(action)
+    rememberLastShareAction(action)
+    try {
+      const canvas = await renderCanvas()
+      if (!canvas) return
+      const dataUrl = canvas.toDataURL('image/png', 0.97)
+      const res = await bridge.shareReceipt(dataUrl, `Cirqle-Receipt-${input.receiptNo}.png`, action)
+      if (res?.ok) flashDone()
+      else setError('Could not share to WhatsApp. Try the Image button and drag it in.')
+    } catch (e) {
+      console.error('Receipt share to WhatsApp failed', e)
+      setError('Could not share to WhatsApp. Try the Image button and drag it in.')
     } finally {
       setBusy(null)
     }
@@ -585,14 +620,57 @@ export default function ReceiptModal({ input, onClose }: Props) {
           </div>
         )}
         <div className="border-t border-border p-3 flex items-center gap-2 shrink-0 bg-secondary/20">
-          <button
-            onClick={() => exportImage(true)}
-            disabled={busy !== null}
-            className="flex-1 flex items-center justify-center gap-1.5 gradient-bg text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
-          >
-            {busy === 'share' ? <Loader2 className="w-4 h-4 animate-spin" /> : done ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
-            Share
-          </button>
+          {onDesktop ? (
+            /* Desktop: split button → share to the linked WhatsApp pane, chevron picks how. */
+            <div className="relative flex-1 flex">
+              <button
+                onClick={() => shareToWhatsApp(shareAction)}
+                disabled={busy !== null}
+                title={RECEIPT_SHARE_HINTS[shareAction]}
+                className="flex-1 flex items-center justify-center gap-1.5 gradient-bg text-white pl-4 pr-3 py-2.5 rounded-l-lg text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                {busy === 'share' ? <Loader2 className="w-4 h-4 animate-spin" /> : done ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
+                {shareAction === 'download' ? 'Save & Reveal' : 'Send to WhatsApp'}
+              </button>
+              <button
+                onClick={() => setShareMenuOpen(o => !o)}
+                disabled={busy !== null}
+                aria-label="Choose how to share"
+                className="gradient-bg text-white px-2 py-2.5 rounded-r-lg border-l border-white/20 hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                <ChevronDown className="w-4 h-4" />
+              </button>
+              {shareMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShareMenuOpen(false)} />
+                  <div className="absolute bottom-full left-0 mb-1.5 z-50 w-72 bg-card border border-border rounded-xl shadow-2xl shadow-black/40 overflow-hidden p-1">
+                    {(['copy', 'paste', 'download'] as ReceiptShareAction[]).map(a => (
+                      <button
+                        key={a}
+                        onClick={() => shareToWhatsApp(a)}
+                        className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-secondary transition-colors flex items-start gap-2"
+                      >
+                        <span className="mt-0.5 w-4 shrink-0">{shareAction === a && <Check className="w-3.5 h-3.5 text-primary" />}</span>
+                        <span className="min-w-0">
+                          <span className="block text-sm font-medium text-foreground">{RECEIPT_SHARE_LABELS[a]}</span>
+                          <span className="block text-[11px] text-muted-foreground leading-snug">{RECEIPT_SHARE_HINTS[a]}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <button
+              onClick={() => exportImage(true)}
+              disabled={busy !== null}
+              className="flex-1 flex items-center justify-center gap-1.5 gradient-bg text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              {busy === 'share' ? <Loader2 className="w-4 h-4 animate-spin" /> : done ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
+              Share
+            </button>
+          )}
           <button
             onClick={() => exportImage(false)}
             disabled={busy !== null}
