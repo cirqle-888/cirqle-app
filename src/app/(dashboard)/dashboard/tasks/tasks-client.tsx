@@ -652,6 +652,10 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
   const [viewMode, setViewMode] = useState<'table' | 'board' | 'calendar'>('table')
   const [filterAssignee, setFilterAssignee] = useState('')
   const [filterDate, setFilterDate] = useState<DateFilterValue>(null)
+  // "My Tasks" / "Not My Tasks" quick toggle — independent of the Assignee
+  // dropdown (which picks any single teammate). Available to anyone with an
+  // employee record, not just role==='employee' — admins can be assignees too.
+  const [myScope, setMyScope] = useState<'mine' | 'not_mine' | null>(null)
   // Calendar view state
   const [calViewYear, setCalViewYear] = useState(() => new Date().getFullYear())
   const [calViewMonth, setCalViewMonth] = useState(() => new Date().getMonth())
@@ -1526,6 +1530,8 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       const ids = assigneeTaskIdSet
       t = t.filter(task => ids.has(task.id))
     }
+    if (myScope === 'mine')     t = t.filter(task => myTaskIdSet.has(task.id))
+    if (myScope === 'not_mine') t = t.filter(task => !myTaskIdSet.has(task.id))
     if (sortBy === 'today_first') {
       // Today at top → upcoming ascending (soonest next) → past descending (most recent first)
       const today = new Date().toISOString().split('T')[0]
@@ -1548,7 +1554,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
     if (sortBy === 'amount_desc') t = [...t].sort((a, b) => ((b.billing_amount_inr ?? 0)) - ((a.billing_amount_inr ?? 0)))
     if (sortBy === 'client')      t = [...t].sort((a, b) => (a.client?.name || '').localeCompare(b.client?.name || ''))
     return t
-  }, [tasks, filterStatus, filterClient, filterService, searchQ, namedFacets, sortBy, filterDate, assigneeTaskIdSet])
+  }, [tasks, filterStatus, filterClient, filterService, searchQ, namedFacets, sortBy, filterDate, assigneeTaskIdSet, myScope, myTaskIdSet])
 
   // visibleTasks is a passthrough — filtering is fully handled by filteredTasks above.
   // (The comment "only show their assigned tasks" was stale — server already scopes the array.)
@@ -1557,7 +1563,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
   }, [filteredTasks])
 
   // Reset to page 0 and clear DB search results when filters/search/sort change
-  useEffect(() => { setTablePage(0); setDbSearchResults(null); exitDbMode() }, [filterStatus, filterClient, filterService, searchQ, sortBy, filterAssignee, filterDate])
+  useEffect(() => { setTablePage(0); setDbSearchResults(null); exitDbMode() }, [filterStatus, filterClient, filterService, searchQ, sortBy, filterAssignee, filterDate, myScope])
 
   // ── Auto-fallback to database search ──────────────────────────────────────
   // When the user types a query (especially #number) and finds nothing in the
@@ -1595,8 +1601,8 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
     ? dbModeResults.slice(0, mobileLimit)
     : visibleTasks.slice(0, mobileLimit)
 
-  const hasActiveFilters = !!(filterStatus || filterClient || filterService || searchQ || sortBy !== 'today_first' || !!filterAssignee || !!filterDate)
-  const activeFilterCount = [filterClient, filterService, filterAssignee, sortBy !== 'today_first' ? 'sort' : ''].filter(Boolean).length
+  const hasActiveFilters = !!(filterStatus || filterClient || filterService || searchQ || sortBy !== 'today_first' || !!filterAssignee || !!filterDate || !!myScope)
+  const activeFilterCount = [filterClient, filterService, filterAssignee, sortBy !== 'today_first' ? 'sort' : '', myScope || ''].filter(Boolean).length
 
   // Status counts — computed from tasks before status filter is applied so all
   // tabs show real numbers. Reuses the same assigneeTaskIdSet so the inner
@@ -1995,18 +2001,33 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
 
             {/* Top Row My Tasks & Filters (Mobile focused) */}
             <div className="order-2 flex items-center gap-1.5 shrink-0">
-              {/* My Tasks toggle for employees */}
-              {role === 'employee' && currentEmployee && (
-                <button
-                  onClick={() => setFilterAssignee(filterAssignee === currentEmployee.id ? '' : currentEmployee.id)}
-                  className={`h-[34px] px-3 rounded-xl text-xs font-medium border transition-colors cursor-pointer shrink-0 ${
-                    filterAssignee === currentEmployee.id
-                      ? 'bg-primary text-primary-foreground border-primary'
-                      : 'bg-secondary text-muted-foreground border-foreground/15 hover:text-foreground hover:bg-foreground/5'
-                  }`}
-                >
-                  My Tasks
-                </button>
+              {/* My Tasks / Not My Tasks — available to anyone with an employee
+                  record (admins can be assignees/contributors too, not just employees). */}
+              {currentEmployee && (
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={() => setMyScope(s => s === 'mine' ? null : 'mine')}
+                    title="Tasks assigned to or contributed by me"
+                    className={`h-[34px] px-3 rounded-xl text-xs font-medium border transition-colors cursor-pointer ${
+                      myScope === 'mine'
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'bg-secondary text-muted-foreground border-foreground/15 hover:text-foreground hover:bg-foreground/5'
+                    }`}
+                  >
+                    My Tasks
+                  </button>
+                  <button
+                    onClick={() => setMyScope(s => s === 'not_mine' ? null : 'not_mine')}
+                    title="Tasks I'm not assigned to or haven't contributed to — see what's not mine"
+                    className={`h-[34px] px-3 rounded-xl text-xs font-medium border transition-colors cursor-pointer ${
+                      myScope === 'not_mine'
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'bg-secondary text-muted-foreground border-foreground/15 hover:text-foreground hover:bg-foreground/5'
+                    }`}
+                  >
+                    Not My Tasks
+                  </button>
+                </div>
               )}
 
               {/* Mobile Filters Toggle */}
@@ -2179,7 +2200,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                 )
               })}
               {hasActiveFilters && (
-                <button onClick={() => { setFilterStatus(''); setFilterClient(''); setFilterService(''); clearSearch(); setSortBy('today_first'); setFilterAssignee(''); setFilterDate(null) }}
+                <button onClick={() => { setFilterStatus(''); setFilterClient(''); setFilterService(''); clearSearch(); setSortBy('today_first'); setFilterAssignee(''); setFilterDate(null); setMyScope(null) }}
                   className="text-xs text-muted-foreground hover:text-foreground px-1.5 py-1 rounded-md hover:bg-foreground/[0.04] transition-colors flex items-center gap-0.5 shrink-0">
                   <X size={11} /> Clear
                 </button>

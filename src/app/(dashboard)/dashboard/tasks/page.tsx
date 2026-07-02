@@ -138,7 +138,6 @@ export default async function TasksPage({
   // Best-effort load user role to apply optimizations
   const me = await loadCurrentUser().catch(() => null)
   const isAdmin   = me?.isAdmin ?? true
-  const isEmployee = !isAdmin
   const vis = financialVisibility(me)
 
   const canAccessContribs = isAdmin
@@ -221,9 +220,11 @@ export default async function TasksPage({
     // so the "My Tasks" toggle plus assignee filter can resolve full history.
     safeQuery('task_group_assignments', supabase.from('task_group_assignments').select('task_id, group_id, employee_id')),
     safeQuery('task_parameter_assignments', supabase.from('task_parameter_assignments').select('task_id, parameter_id, employee_id')),
-    // myTaskIds — the ids the current employee personally has any history on.
-    // Lightweight join; only used by the "My Tasks" filter on the client.
-    isEmployee && me?.employeeId
+    // myTaskIds — the ids the current viewer (employee OR admin) personally has
+    // any history on. Lightweight join; used by the "My Tasks" / "Not My Tasks"
+    // filters on the client — admins have employee records too and can be
+    // assignees/contributors, so this isn't employee-only.
+    me?.employeeId
       ? fetchEmployeeOwnTaskIds(supabase, me.employeeId)
       : Promise.resolve([] as string[]),
     supabase.from('company_settings').select('value').eq('key', 'visibility_billing').maybeSingle(),
