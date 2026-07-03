@@ -2497,15 +2497,41 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       
       let heightLeft = pdfHeight
       let position = 0
+      const headerHeight = 60 // px
 
       pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight, undefined, 'FAST')
       heightLeft -= pageHeight
+      let pageNum = 1
 
       while (heightLeft > 0) {
-        position = heightLeft - pdfHeight
+        position = position - pageHeight + headerHeight
         pdf.addPage()
+        
         pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight, undefined, 'FAST')
-        heightLeft -= pageHeight
+        
+        // Draw solid white header background to mask the overlapping image
+        pdf.setFillColor(255, 255, 255)
+        pdf.rect(0, 0, pdfWidth, headerHeight, 'F')
+        
+        // Add subtle bottom border to header
+        pdf.setDrawColor(230, 230, 230)
+        pdf.setLineWidth(1)
+        pdf.line(20, headerHeight - 1, pdfWidth - 20, headerHeight - 1)
+        
+        // Add branding
+        pdf.setFontSize(16)
+        pdf.setFont('helvetica', 'bold')
+        pdf.setTextColor(0, 0, 0)
+        pdf.text('CIRQLE', pdfWidth - 20, 35, { align: 'right' })
+        
+        // Add invoice detail
+        pdf.setFontSize(10)
+        pdf.setFont('helvetica', 'normal')
+        pdf.setTextColor(100, 100, 100)
+        pdf.text(`Invoice ${inv.invoice_number}  •  Page ${pageNum + 1}`, 20, 35)
+
+        heightLeft -= (pageHeight - headerHeight)
+        pageNum++
       }
 
       pdf.save(`${inv.invoice_number}.pdf`)
