@@ -1744,9 +1744,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                       />
                       <Combobox
                         options={sortedDueInvoices
-                          // Hide invoices already paid via the invoice "Record Payment"
-                          // panel — linking one here would create a conflicting allocation.
-                          .filter(inv => !((inv.payments || []).length > 0))
+
                           .map(inv => {
                           const cur = inv.currency || 'INR'
                           const outstanding = inv.total_amount - (inv.paid_amount || 0)

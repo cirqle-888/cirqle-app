@@ -2909,8 +2909,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                   allowed (multiple payments against one invoice). */}
               {showAmounts
                 && !STATUS_GROUPS.closed.includes(inv.status)
-                && balanceDueInr(inv) > 0.01
-                && (inv.payments || []).length === 0 && (
+                && balanceDueInr(inv) > 0.01 && (
                 <button
                   onClick={() => setAllocatingInvoice(inv)}
                   className="flex-1 min-w-[120px] py-1.5 px-3 bg-violet-600/10 hover:bg-violet-600/20 text-violet-300 border border-violet-500/30 text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 transition-colors">
