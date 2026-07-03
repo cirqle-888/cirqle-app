@@ -107,7 +107,7 @@ export interface CreateAdProjectInput {
  * the agency service charge, so team earnings flow from the agency fee (the ad
  * spend is a pass-through, billed separately on the campaign invoice).
  */
-async function createCampaignTask(
+export async function createCampaignTask(
   admin: SupabaseClient,
   opts: {
     projectId: string; campaignName: string; clientId: string | null;

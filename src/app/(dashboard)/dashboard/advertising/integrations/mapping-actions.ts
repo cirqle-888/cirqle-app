@@ -165,6 +165,18 @@ async function mapCampaignCore(
     }).select('id').single()
     if (insErr || !created) return { success: false, error: insErr?.message || 'Failed to create project' }
     projectId = created.id
+
+    // Automatically create a linked task for this new campaign
+    const { createCampaignTask } = await import('../actions')
+    await createCampaignTask(admin, {
+      projectId: projectId,
+      campaignName: camp.name,
+      clientId: input.clientId,
+      serviceId: null,
+      serviceCharge: 0,
+      currency: 'INR',
+      employeeId,
+    })
   }
 
   const { error: regErr } = await admin.from('ad_campaigns').update({

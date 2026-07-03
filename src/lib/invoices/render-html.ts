@@ -101,7 +101,14 @@ export function renderInvoiceHtml(
   const NAVY       = companySettings.invoice_primary_color || '#1a2744'
   const NAVY_LIGHT = companySettings.invoice_accent_color  || '#243459'
   const FONT       = companySettings.invoice_font          || "'Airbnb Cereal App', Arial, Helvetica, sans-serif"
-  const sortedItems = [...(inv.items || [])].sort((a: any, b: any) => a.display_order - b.display_order)
+  const sortedItems = [...(inv.items || [])].sort((a: any, b: any) => {
+    const dateA = a.task?.task_date || ''
+    const dateB = b.task?.task_date || ''
+    if (dateA && dateB && dateA !== dateB) {
+      return dateA.localeCompare(dateB)
+    }
+    return a.display_order - b.display_order
+  })
   const subtotal = inv.subtotal || ((inv.total_amount || 0) + (inv.discount_amount || 0) - (inv.tax_amount || 0) - (inv.previous_balance || 0))
   const prevBal  = inv.previous_balance || 0
   const totalDue = subtotal + prevBal

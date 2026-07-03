@@ -80,6 +80,7 @@ interface Entry {
   deleted_at?: string | null
   category?: { id: string; name: string; type: string }
   bank_account?: { id: string; name: string }
+  direct_invoice?: any
   allocations?: {
     id: string;
     invoice_id: string;
@@ -1750,13 +1751,16 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                           const outstanding = inv.total_amount - (inv.paid_amount || 0)
                           const overdue = inv.due_date && inv.due_date < today
                           // Show amount in the invoice's own currency; add INR equivalent for foreign invoices
+                          const totalLabel = cur === 'INR'
+                            ? `₹${inv.total_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                            : `${cur} ${inv.total_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
                           const outstandingLabel = cur === 'INR'
                             ? `₹${outstanding.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
                             : `${cur} ${outstanding.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
                           return {
                             id: inv.id,
                             label: `${overdue ? '⚠ ' : ''}${inv.invoice_number} — ${inv.client?.name}`,
-                            sub: `${outstandingLabel} outstanding${overdue ? ' · overdue' : inv.due_date ? ` · due ${inv.due_date}` : ''}`,
+                            sub: `${totalLabel} total · ${outstandingLabel} outstanding${overdue ? ' · overdue' : inv.due_date ? ` · due ${inv.due_date}` : ''}`,
                           }
                         })}
                         value={form.linked_invoice_id}
@@ -2095,7 +2099,22 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         <ReceiptModal
           input={((): ReceiptInput => {
             const allocs = (receiptEntry.allocations || []).filter(a => !a.deleted_at)
-            const firstClient = allocs.find(a => a.invoice?.client?.name)?.invoice?.client?.name || ''
+            
+            // Build the list of invoices for the receipt. Fallback to the direct_invoice if there are no allocations.
+            let receiptInvoices = allocs.map(a => ({
+              number: a.invoice?.invoice_number || '—',
+              outstanding: a.invoice ? Number(a.invoice.total_amount) - Number(a.invoice.paid_amount || 0) : 0,
+            }))
+            let firstClient = allocs.find(a => a.invoice?.client?.name)?.invoice?.client?.name || ''
+            
+            if (receiptInvoices.length === 0 && receiptEntry.direct_invoice) {
+              receiptInvoices = [{
+                number: receiptEntry.direct_invoice.invoice_number || '—',
+                outstanding: Number(receiptEntry.direct_invoice.total_amount) - Number(receiptEntry.direct_invoice.paid_amount || 0),
+              }]
+              firstClient = receiptEntry.direct_invoice.client?.name || ''
+            }
+
             // Prefer the stored receipt_number (RCPT-YYMM-CQxxx-NNN, generated
             // atomically by the DB function in migration 011 — all historical
             // entries are backfilled so this should always be non-null for
@@ -2112,10 +2131,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               dateISO: receiptEntry.entry_date,
               method: receiptEntry.bank_account?.name,
               reference: receiptEntry.reference,
-              invoices: allocs.map(a => ({
-                number: a.invoice?.invoice_number || '—',
-                outstanding: a.invoice ? Number(a.invoice.total_amount) - Number(a.invoice.paid_amount || 0) : 0,
-              })),
+              invoices: receiptInvoices,
               // Branding from Settings → Company. Missing keys leave the
               // receipt rendering its built-in Cirqle defaults.
               // Receipt has a dark background — use dark logo when available,

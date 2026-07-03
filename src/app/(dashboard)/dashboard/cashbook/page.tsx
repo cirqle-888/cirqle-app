@@ -28,6 +28,9 @@ export default async function CashBookPage() {
           deleted_at,
           invoice:invoices(invoice_number, status, due_date, total_amount, paid_amount, total_amount_inr, exchange_rate, currency, client:clients(id, name))
         ),
+        direct_invoice:invoices!invoice_id(
+          invoice_number, status, due_date, total_amount, paid_amount, total_amount_inr, exchange_rate, currency, client:clients(id, name)
+        ),
         payroll_allocations:cashbook_payroll_allocations(
           id,
           payroll_id,

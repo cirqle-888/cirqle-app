@@ -357,7 +357,7 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col flex-1 overflow-hidden min-h-0">
       {/* Logo */}
       <div className={`py-5 border-b border-sidebar-border transition-all duration-300 ${isCollapsed ? 'flex flex-col items-center px-0' : 'px-5'}`}>
         <div className={`flex items-center transition-all duration-300 ${isCollapsed ? 'justify-center gap-0' : 'gap-2.5'}`}>
@@ -650,14 +650,20 @@ export default function Sidebar() {
           onMouseLeave={() => !effectivePinned && setIsHovered(false)}
           className={`absolute left-0 top-0 h-dvh flex-col bg-sidebar border-r border-sidebar-border transition-all duration-300 ease-in-out z-40 flex overflow-hidden ${effectiveCollapsed ? 'w-[72px]' : 'w-60'}`}
         >
-          <button
-            onClick={togglePin}
-            title={effectivePinned ? 'Unpin sidebar' : 'Pin sidebar'}
-            className={`absolute right-3 top-6 z-50 flex items-center justify-center w-6 h-6 bg-sidebar border border-sidebar-border rounded-full text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-all duration-300 shadow-sm ${effectiveCollapsed ? 'opacity-0 pointer-events-none scale-90' : 'opacity-100 scale-100'}`}
-          >
-            {effectivePinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
-          </button>
           <SidebarContent isCollapsed={effectiveCollapsed} />
+          
+          <div className="p-3 border-t border-sidebar-border mt-auto">
+            <button
+              onClick={togglePin}
+              title={effectivePinned ? 'Collapse sidebar' : 'Pin sidebar'}
+              className="flex w-full items-center gap-3 px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded-lg transition-colors"
+            >
+              {effectivePinned ? <ChevronLeft className="w-4 h-4 shrink-0" /> : <ChevronRight className="w-4 h-4 shrink-0" />}
+              <span className={`truncate whitespace-nowrap transition-all duration-300 ${effectiveCollapsed ? 'opacity-0 w-0' : 'opacity-100'}`}>
+                {effectivePinned ? 'Collapse' : 'Pin sidebar'}
+              </span>
+            </button>
+          </div>
         </aside>
       </div>
 

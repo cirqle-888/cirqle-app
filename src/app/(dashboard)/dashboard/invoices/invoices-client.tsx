@@ -2465,7 +2465,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       // forRaster flattens the gradient-clipped thank-you text to a solid colour —
       // html2canvas can't clip a gradient to text and would paint solid boxes.
       const html = buildInvoiceHtml(inv, { forRaster: true })
-      iframe.style.cssText = 'position:fixed; top:-99999px; left:-99999px; width:800px; height:1131px; border:0;'
+      // Don't hardcode height initially so it can expand
+      iframe.style.cssText = 'position:fixed; top:-99999px; left:-99999px; width:800px; border:0;'
       document.body.appendChild(iframe)
       const doc = iframe.contentDocument
       if (!doc) throw new Error('Could not create render frame')
@@ -2479,13 +2480,34 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         setTimeout(resolve, 1500)
       })
 
+      // Fix height so html2canvas captures everything
+      iframe.style.height = doc.body.scrollHeight + 'px'
+
       const { default: html2canvas } = await import('html2canvas')
       const canvas = await html2canvas(doc.body, { scale: 2, useCORS: true, backgroundColor: '#ffffff' })
       const imgData = canvas.toDataURL('image/jpeg', 0.8)
 
       const { default: jsPDF } = await import('jspdf')
-      const pdf = new jsPDF({ orientation: 'portrait', unit: 'px', format: [canvas.width, canvas.height], compress: true })
-      pdf.addImage(imgData, 'JPEG', 0, 0, canvas.width, canvas.height, undefined, 'FAST')
+      // Force A4 size for standard pagination
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'px', format: 'a4', compress: true })
+      
+      const pdfWidth = pdf.internal.pageSize.getWidth()
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width
+      const pageHeight = pdf.internal.pageSize.getHeight()
+      
+      let heightLeft = pdfHeight
+      let position = 0
+
+      pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight, undefined, 'FAST')
+      heightLeft -= pageHeight
+
+      while (heightLeft > 0) {
+        position = heightLeft - pdfHeight
+        pdf.addPage()
+        pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight, undefined, 'FAST')
+        heightLeft -= pageHeight
+      }
+
       pdf.save(`${inv.invoice_number}.pdf`)
     } catch (e) {
       console.error('Invoice PDF download failed', e)
