@@ -47,6 +47,56 @@ export default async function AdvertisingPage() {
 
   const clients = (await admin.from('clients').select('id, name, code').order('name')).data || []
 
+  // ── Client wallet ledger (best-effort — migration 20260703140000) ──────────
+  // One fetch powers balances, per-campaign allocations, and the history panel.
+  let walletSupported = true
+  let ledger: any[] = []
+  try {
+    const { data, error } = await admin
+      .from('ad_wallet_ledger')
+      .select(`
+        id, client_id, direction, kind, ad_project_id, cashbook_entry_id,
+        amount, amount_inr, notes, created_at,
+        creator:employees(id, name),
+        entry:cashbook_entries(id, entry_date, description, reference),
+        project:ad_projects(id, campaign_name)
+      `)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+      .limit(1000)
+    if (error) walletSupported = false
+    ledger = data || []
+  } catch { walletSupported = false }
+
+  // Candidate funding entries for "Add funds": recent outflows + how much of
+  // each is still uncredited to any wallet.
+  let fundCandidates: any[] = []
+  if (walletSupported) {
+    try {
+      const { data: outflows } = await admin
+        .from('cashbook_entries')
+        .select('id, entry_date, description, reference, amount, amount_inr, currency')
+        .eq('type', 'outflow').is('deleted_at', null)
+        .order('entry_date', { ascending: false }).limit(100)
+      const entries = outflows || []
+      let creditedByEntry: Record<string, number> = {}
+      if (entries.length > 0) {
+        const { data: credits } = await admin
+          .from('ad_wallet_ledger').select('cashbook_entry_id, amount')
+          .eq('direction', 'credit').is('deleted_at', null)
+          .in('cashbook_entry_id', entries.map((e: any) => e.id))
+        creditedByEntry = (credits || []).reduce((acc: Record<string, number>, r: any) => {
+          acc[r.cashbook_entry_id] = (acc[r.cashbook_entry_id] || 0) + Number(r.amount || 0)
+          return acc
+        }, {})
+      }
+      fundCandidates = entries.map((e: any) => ({
+        ...e,
+        uncredited: Math.round((Number(e.amount || 0) - (creditedByEntry[e.id] || 0)) * 100) / 100,
+      }))
+    } catch { /* cashbook not readable — Add Funds simply shows no candidates */ }
+  }
+
   // Advertising requests waiting to be started (they also show in the Requests
   // inbox). Defensive: the ad_meta column ships in a later migration.
   let pendingRequests: any[] = []
@@ -75,6 +125,9 @@ export default async function AdvertisingPage() {
       metricsByProject={metricsByProject}
       pendingRequests={pendingRequests}
       clients={clients}
+      walletSupported={walletSupported}
+      ledger={ledger}
+      fundCandidates={fundCandidates}
       perms={perms}
     />
   )

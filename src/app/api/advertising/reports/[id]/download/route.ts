@@ -7,7 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
-import { loadCurrentUser } from '@/lib/permissions/check'
+import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,6 +20,9 @@ export async function GET(
     const format  = req.nextUrl.searchParams.get('format') ?? 'pdf'
     const admin   = createAdminClient()
     const me      = await loadCurrentUser().catch(() => null)
+    if (!me || !hasPermission(me, 'advertising.view_reports')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+    }
 
     const { data, error } = await admin
       .from('ad_reports')
@@ -47,7 +50,7 @@ export async function GET(
       report_id: id,
       event:     'downloaded',
       format,
-      user_id:   (me as any)?.id ?? null,
+      user_id:   me.employeeId || null,
     }).then(null, () => {})
 
     return NextResponse.json({ url, format })

@@ -32,14 +32,23 @@ async function fetchLogoUrls(): Promise<{ logoUrl: string | null; logoUrlDark: s
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   // Best-effort loads — both graceful so the dashboard always renders.
-  const [me, logos] = await Promise.all([
-    loadCurrentUser().catch(() => null),
+  // Distinguish "lookup errored" (transient DB failure → fail CLOSED, never
+  // grant admin on an error) from "returned null" (no employee row →
+  // legacy single-admin setup → permissive fallback is intentional).
+  const [meResult, logos] = await Promise.all([
+    loadCurrentUser().then(
+      (u) => ({ user: u, failed: false }),
+      () => ({ user: null, failed: true }),
+    ),
     fetchLogoUrls(),
   ])
+  const me = meResult.user
+  const loadFailed = meResult.failed
   const { logoUrl, logoUrlDark, faviconUrl } = logos
 
-  // Default to a permissive admin shape if no employee record / migration not yet applied,
-  // so the existing single-admin app keeps working until the migration runs.
+  // Permissive admin shape ONLY for the pre-migration single-admin case
+  // (signed in, no employee record). If the lookup errored, fall back to a
+  // zero-permission user instead — a transient DB error must not grant admin.
   const fallbackUser: PermissionUser = {
     employeeId: '',
     authId: '',
@@ -48,7 +57,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     email: '',
     designationId: null,
     designationName: null,
-    isAdmin: true,
+    isAdmin: !loadFailed,
     permissions: [],
     dateOfBirth: null,
   }

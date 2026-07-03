@@ -26,6 +26,8 @@ import {
   Menu,
   X,
   ChevronLeft,
+  Pin,
+  PinOff,
   Sun,
   Moon,
   Monitor,
@@ -610,24 +612,54 @@ export default function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [showPwdModal, setShowPwdModal] = useState(false)
   const [profileSheetOpen, setProfileSheetOpen] = useState(false)
-  const [isCollapsed, setIsCollapsed] = useState(false)
+  const [isPinned, setIsPinned] = useState(true)
+  const [isHovered, setIsHovered] = useState(false)
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+    const stored = localStorage.getItem('sidebar-pinned')
+    if (stored !== null) {
+      setIsPinned(stored === 'true')
+    }
+  }, [])
+
+  const togglePin = () => {
+    const next = !isPinned
+    setIsPinned(next)
+    localStorage.setItem('sidebar-pinned', String(next))
+  }
   const { user } = usePermissions()
   const pathname = usePathname()
 
   const isEmployee = !user.isAdmin
+  const isCollapsed = !isPinned && !isHovered
+
+  // Default to pinned state when rendering on server to avoid layout shift,
+  // client will adjust immediately on mount.
+  const effectivePinned = mounted ? isPinned : true
+  const effectiveCollapsed = !effectivePinned && !isHovered
 
   return (
     <>
-      {/* ── Desktop sidebar ── */}
-      <aside className={`hidden md:flex shrink-0 h-dvh flex-col bg-sidebar border-r border-sidebar-border transition-all duration-300 ease-in-out relative ${isCollapsed ? 'w-[72px]' : 'w-60'}`}>
-        <button
-          onClick={() => setIsCollapsed(!isCollapsed)}
-          className="absolute -right-3 top-6 z-50 flex items-center justify-center w-6 h-6 bg-sidebar border border-sidebar-border rounded-full text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-colors shadow-sm"
+      {/* Spacer for desktop layout so main content doesn't shift on hover when unpinned */}
+      <div className={`hidden md:block shrink-0 relative transition-[width] duration-300 ease-in-out ${effectivePinned ? 'w-60' : 'w-[72px]'}`}>
+        {/* ── Desktop sidebar ── */}
+        <aside 
+          onMouseEnter={() => !effectivePinned && setIsHovered(true)}
+          onMouseLeave={() => !effectivePinned && setIsHovered(false)}
+          className={`absolute left-0 top-0 h-dvh flex-col bg-sidebar border-r border-sidebar-border transition-all duration-300 ease-in-out z-40 flex overflow-hidden ${effectiveCollapsed ? 'w-[72px]' : 'w-60'}`}
         >
-          {isCollapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronLeft className="w-3 h-3" />}
-        </button>
-        <SidebarContent isCollapsed={isCollapsed} />
-      </aside>
+          <button
+            onClick={togglePin}
+            title={effectivePinned ? 'Unpin sidebar' : 'Pin sidebar'}
+            className={`absolute right-3 top-6 z-50 flex items-center justify-center w-6 h-6 bg-sidebar border border-sidebar-border rounded-full text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-all duration-300 shadow-sm ${effectiveCollapsed ? 'opacity-0 pointer-events-none scale-90' : 'opacity-100 scale-100'}`}
+          >
+            {effectivePinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
+          </button>
+          <SidebarContent isCollapsed={effectiveCollapsed} />
+        </aside>
+      </div>
 
       {/* ── Mobile: hamburger (admin only) ── */}
       {!mobileOpen && !isEmployee && (

@@ -13,6 +13,7 @@ import { requirePermission } from '@/lib/auth/enforce'
 import { PERMS } from '@/lib/permissions/keys'
 import { fetchRates } from '@/lib/fx/sync'
 import { syncDraftInvoiceExpenses } from '@/lib/sync/integrity'
+import { recomputeCampaignBilling } from '@/lib/advertising/billing'
 
 const REVALIDATE = '/dashboard/cashbook'
 
@@ -244,6 +245,30 @@ export async function softDeleteCashbookEntry(id: string): Promise<ActionResult>
     .update({ deleted_at: new Date().toISOString() })
     .eq('id', id)
   if (error) return { ok: false, error: error.message }
+
+  // Release any campaign fund allocations backed by this entry and re-derive
+  // the affected campaigns' billing (best-effort — table may not be migrated).
+  try {
+    const { data: allocs } = await admin
+      .from('ad_fund_allocations').select('id, ad_project_id')
+      .eq('cashbook_entry_id', id).is('deleted_at', null)
+    if (allocs && allocs.length > 0) {
+      await admin.from('ad_fund_allocations')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('cashbook_entry_id', id).is('deleted_at', null)
+      const projectIds = [...new Set(allocs.map((a: any) => a.ad_project_id as string))]
+      for (const pid of projectIds) await recomputeCampaignBilling(admin, pid)
+    }
+  } catch { /* ad_fund_allocations not migrated */ }
+
+  // Release wallet credits funded by this entry (ledger rows stay for audit).
+  // Campaign debits are left untouched — committed money is a finance decision;
+  // any resulting negative wallet balance surfaces on the Advertising dashboard.
+  try {
+    await admin.from('ad_wallet_ledger')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('cashbook_entry_id', id).eq('direction', 'credit').is('deleted_at', null)
+  } catch { /* ad_wallet_ledger not migrated */ }
 
   revalidatePath(REVALIDATE)
   return { ok: true }

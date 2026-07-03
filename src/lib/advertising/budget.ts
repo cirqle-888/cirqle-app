@@ -34,6 +34,22 @@ export interface BudgetTotals {
 const round2 = (v: number): number =>
   Math.round((Number(v || 0) + Number.EPSILON) * 100) / 100
 
+// ─── GST on platform spend ──────────────────────────────────────────────────
+// Ad platforms (Meta) report spend EXCLUDING GST, but the money actually paid
+// includes 18% GST: paid = reported × 1.18 (e.g. ₹847.46 reported = ₹1,000
+// paid). Financial comparisons (wallet allocations, unspent amounts) must use
+// the GST-inclusive figure; performance KPIs keep the reported number.
+
+export const AD_SPEND_GST_RATE = 0.18
+
+/** GST amount on a platform-reported (GST-exclusive) spend figure. */
+export const gstOnSpend = (reportedSpend: number): number =>
+  round2(Number(reportedSpend || 0) * AD_SPEND_GST_RATE)
+
+/** Platform-reported spend converted to the actual GST-inclusive money paid. */
+export const spendWithGst = (reportedSpend: number): number =>
+  round2(Number(reportedSpend || 0) * (1 + AD_SPEND_GST_RATE))
+
 /** Resolve the agency service charge from its type + value. */
 export function computeServiceCharge(
   adBudget: number,

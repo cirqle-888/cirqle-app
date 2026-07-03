@@ -6,11 +6,17 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
+import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   try {
+    const me = await loadCurrentUser().catch(() => null)
+    if (!me || !hasPermission(me, 'advertising.view_reports')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+    }
+
     const { searchParams } = req.nextUrl
     const projectId = searchParams.get('projectId')
     const limit     = Math.min(Number(searchParams.get('limit') ?? 20), 100)

@@ -14,7 +14,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 import React from 'react'
-import type { RenderData } from '../types'
+import type { RenderData, DailySeriesPoint } from '../types'
 import { META_LOGO_DATA_URI } from './meta-logo'
 
 // ─── Brand tokens ───────────────────────────────────────────────────────────
@@ -25,18 +25,60 @@ const INK       = '#111827'
 const GREY_PILL = '#4B5563'
 const RED_PILL  = '#EF4444'
 
+export type DailyRowWithBalance = DailySeriesPoint & { balance: number }
+
+/**
+ * Computes the full chronological (oldest → newest) daily performance series
+ * with a running "balance to spend" against the campaign's ad budget.
+ */
+export function computeDailyRows(data: RenderData): DailyRowWithBalance[] {
+  const { project, kpi } = data
+  let cumulative = 0
+  return kpi.dailySeries.map(row => {
+    cumulative += row.spend
+    return { ...row, balance: project.adBudget - cumulative }
+  })
+}
+
 interface LayoutOpts {
   width: number
   height: number
-  /** Max rows in the performance table (default 5). */
+  /** Max rows in the performance table when `rows` isn't provided (default 5). Used for single-image exports, which show only the most recent days. */
   maxRows?: number
+  /** Explicit rows to render, already sliced/ordered — used to paginate the full campaign history across multiple PDF pages instead of capping to `maxRows`. */
+  rows?: DailyRowWithBalance[]
+  /** Continuation page: omits the KPI circles and budget pills (shown on page 1), keeping header, compact campaign meta, table and footer so every page stays on-brand. */
+  continuation?: boolean
+  /** Overrides the default "Last N Days Performance" table heading. */
+  tableHeading?: string
+}
+
+/**
+ * How many table rows fit on a page without clipping, derived from the same
+ * vertical measurements the layout uses (all in 1080-width design units, so
+ * the result is resolution-independent). Keep in sync with the JSX below.
+ */
+export function dailyReportRowCapacity(opts: { width: number; height: number; continuation?: boolean }): number {
+  const unitsHigh = opts.height / (opts.width / 1080) // page height in design units
+  const PAD    = 128 // content wrapper 64 top + 64 bottom
+  const HEADER = 84  // logo box 64 + 10 margin, + divider spacing overlap
+  const DIVIDE = 30  // 2px rule + 28 margin
+  const FOOTER = 100 // marginTop 20 + paddingTop 20 + two ~29/24 text lines
+  const HEADING = 63 // table heading 30×1.2 + 8 pad + 3 border + 16 margin
+  const THEAD  = 51  // header row: 13×2 padding + 21×1.2 text
+  const ROW_H  = 51
+  const hero = opts.continuation
+    ? 75 + 45           // smaller title (44×1.2 + 22 margin) + compact meta line
+    : 99 + 129 + 192 + 93 // title + 3 meta lines + KPI circles + pills (incl. margins)
+  const fixed = PAD + HEADER + DIVIDE + hero + HEADING + THEAD + FOOTER
+  return Math.max(1, Math.floor((unitsHigh - fixed - 10) / ROW_H)) // −10 safety
 }
 
 /**
  * Builds the daily-report JSX element for ImageResponse.
  */
 export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
-  const { width, height, maxRows = 5 } = opts
+  const { width, height, maxRows = 5, rows, continuation = false, tableHeading } = opts
   const s = width / 1080 // uniform scale factor
 
   const { brand, project, kpi } = data
@@ -65,14 +107,8 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
     Math.round((new Date(endDate).getTime() - Date.now()) / 86400000),
   )
 
-  // ── Performance table rows (chronological → running balance → newest first)
-  const series = kpi.dailySeries
-  let cumulative = 0
-  const withBalance = series.map(row => {
-    cumulative += row.spend
-    return { ...row, balance: project.adBudget - cumulative }
-  })
-  const tableRows = withBalance.slice(-maxRows).reverse()
+  // ── Performance table rows: explicit slice (pagination) or default last-N newest-first
+  const tableRows = rows ?? computeDailyRows(data).slice(-maxRows).reverse()
 
   return (
     <div
@@ -139,37 +175,47 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
       {/* ── Title ── */}
       <div style={{
         display: 'flex', justifyContent: 'center',
-        fontSize: `${64 * s}px`, fontWeight: 900, color: INK,
+        fontSize: `${(continuation ? 44 : 64) * s}px`, fontWeight: 900, color: INK,
         letterSpacing: `${-1 * s}px`, marginBottom: `${22 * s}px`,
       }}>
-        {platformLabel} Ads Daily Report
+        {platformLabel} Ads Daily Report{continuation ? ' — continued' : ''}
       </div>
 
-      {/* ── Campaign meta (centered key:value pairs) ── */}
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: `${6 * s}px`, marginBottom: `${30 * s}px` }}>
-        <MetaLine s={s} pairs={[['Client', project.clientName], ['Campaign', project.campaignName]]} />
-        <MetaLine s={s} pairs={[['Campaign Period', periodLabel], ['Campaign Plan', `${planDays} Days`]]} />
-        <MetaLine s={s} pairs={[['Daily Budget', `₹${money(dailyBudget)}`], ['Expected Budget', `₹${num(project.adBudget)}`]]} />
-      </div>
+      {/* ── Campaign meta ── (Satori: no fragments — hero blocks live in ONE
+           explicit flex column, otherwise their children lay out in a row) */}
+      {continuation ? (
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: `${16 * s}px` }}>
+          <MetaLine s={s} pairs={[['Client', project.clientName], ['Campaign', project.campaignName], ['Period', periodLabel]]} />
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          {/* Centered key:value pairs */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: `${6 * s}px`, marginBottom: `${30 * s}px` }}>
+            <MetaLine s={s} pairs={[['Client', project.clientName], ['Campaign', project.campaignName]]} />
+            <MetaLine s={s} pairs={[['Campaign Period', periodLabel], ['Campaign Plan', `${planDays} Days`]]} />
+            <MetaLine s={s} pairs={[['Daily Budget', `₹${money(dailyBudget)}`], ['Expected Budget', `₹${num(project.adBudget)}`]]} />
+          </div>
 
-      {/* ── KPI circle row ── */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'center', marginBottom: `${30 * s}px` }}>
-        <KpiCircle s={s} label="Reach"       value={num(p.reach)}        grad={['#8B5CF6', '#6D28D9']} icon="users" />
-        <KpiDivider s={s} />
-        <KpiCircle s={s} label="Impressions" value={num(p.impressions)}  grad={['#6366F1', '#4F46E5']} icon="eye" />
-        <KpiDivider s={s} />
-        <KpiCircle s={s} label="Clicks"      value={num(p.clicks)}       grad={['#22B8F2', '#2563EB']} icon="cursor" />
-        <KpiDivider s={s} />
-        <KpiCircle s={s} label="Spend"       value={`₹${money(p.spend)}`} grad={['#A855F7', '#7C3AED']} icon="rupee" />
-        <KpiDivider s={s} />
-        <KpiCircle s={s} label="CPR"         value={`₹${money(d.costPerResult)}`} grad={['#FB923C', '#EF4444']} icon="percent" />
-      </div>
+          {/* KPI circle row */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'center', marginBottom: `${30 * s}px` }}>
+            <KpiCircle s={s} label="Reach"       value={num(p.reach)}        grad={['#8B5CF6', '#6D28D9']} icon="users" />
+            <KpiDivider s={s} />
+            <KpiCircle s={s} label="Impressions" value={num(p.impressions)}  grad={['#6366F1', '#4F46E5']} icon="eye" />
+            <KpiDivider s={s} />
+            <KpiCircle s={s} label="Clicks"      value={num(p.clicks)}       grad={['#22B8F2', '#2563EB']} icon="cursor" />
+            <KpiDivider s={s} />
+            <KpiCircle s={s} label="Spend"       value={`₹${money(p.spend)}`} grad={['#A855F7', '#7C3AED']} icon="rupee" />
+            <KpiDivider s={s} />
+            <KpiCircle s={s} label="CPR"         value={`₹${money(d.costPerResult)}`} grad={['#FB923C', '#EF4444']} icon="percent" />
+          </div>
 
-      {/* ── Budget status pills ── */}
-      <div style={{ display: 'flex', justifyContent: 'center', gap: `${20 * s}px`, marginBottom: `${36 * s}px` }}>
-        <Pill s={s} bg={GREY_PILL} label="Total Remaining Amount" value={`₹${money(d.remainingBudget)}`} />
-        <Pill s={s} bg={RED_PILL}  label="Remaining Days" value={`${remainingDays} Days`} />
-      </div>
+          {/* Budget status pills */}
+          <div style={{ display: 'flex', justifyContent: 'center', gap: `${20 * s}px`, marginBottom: `${36 * s}px` }}>
+            <Pill s={s} bg={GREY_PILL} label="Total Remaining Amount" value={`₹${money(d.remainingBudget)}`} />
+            <Pill s={s} bg={RED_PILL}  label="Remaining Days" value={`${remainingDays} Days`} />
+          </div>
+        </div>
+      )}
 
       {/* ── Performance table ── */}
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
@@ -177,7 +223,7 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
           display: 'flex', fontSize: `${30 * s}px`, fontWeight: 800, color: INK,
           borderBottom: `${3 * s}px solid ${PURPLE}`, paddingBottom: `${8 * s}px`, marginBottom: `${16 * s}px`,
         }}>
-          Last {tableRows.length} Days Performance
+          {tableHeading ?? `Last ${tableRows.length} Days Performance`}
           <span style={{ display: 'flex', marginLeft: `${12 * s}px`, fontSize: `${22 * s}px`, fontWeight: 500, color: '#6B7280' }}>
             ({project.campaignName})
           </span>

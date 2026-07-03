@@ -9,8 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminClient } from '@/lib/supabase/server'
-import { loadCurrentUser } from '@/lib/permissions/check'
+import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { generateReport, enqueueReportGeneration } from '@/lib/reporting/orchestrator'
 import type { ReportConfig } from '@/lib/reporting/types'
 
@@ -20,6 +19,9 @@ export const maxDuration = 60 // Vercel max for Hobby plan
 export async function POST(req: NextRequest) {
   try {
     const me = await loadCurrentUser().catch(() => null)
+    if (!me || !hasPermission(me, 'advertising.view_reports')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+    }
 
     const body = await req.json() as Partial<ReportConfig>
 
@@ -39,7 +41,7 @@ export async function POST(req: NextRequest) {
       comparisonFrom: body.comparisonFrom,
       comparisonTo:   body.comparisonTo,
       formats:        body.formats?.length ? body.formats : ['pdf'],
-      generatedBy:    (me as any)?.id ?? undefined,
+      generatedBy:    me.employeeId || undefined,
       recipients:     body.recipients     ?? [],
     }
 

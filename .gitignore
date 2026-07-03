@@ -39,3 +39,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Local dev scratch/debug scripts (archived, not part of the app)
+/_archive/
+
+# Claude session artifacts
+/.claude/
+
+# env
+.env.local

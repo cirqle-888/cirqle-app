@@ -1,26 +1,30 @@
 'use client'
 
 /**
- * Advertising dashboard — proper KPI dashboard with campaign cards, budget
- * progress, and ad account connection CTA.
+ * Advertising dashboard — client-first financial view.
+ *
+ * Hierarchy: Client cards (wallet: credited / allocated / remaining / Meta
+ * spend / GST diff) → campaign cards (allocated, billing, KPIs). A view toggle
+ * keeps the old flat "All Campaigns" grid available. Wallet money moves only
+ * via ledger transactions (ad_wallet_ledger) — balances are always derived.
  */
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  Megaphone, Plus, TrendingUp, Target, Wallet, Activity,
-  ArrowRight, Inbox, Play, Loader2, Link2, BarChart3,
-  MousePointerClick, Users, Zap, AlertTriangle, CheckCircle2,
-  Clock, ChevronRight,
+  Megaphone, Plus, TrendingUp, Target, Wallet, ArrowRight, Inbox, Play,
+  Loader2, Link2, BarChart3, MousePointerClick, Users, Zap, AlertTriangle,
+  Clock, ChevronRight, ChevronDown, History, Trash2, ArrowDownLeft, ArrowUpRight,
 } from 'lucide-react'
 import {
-  AD_STATUS_CHIP, STATUS_LABEL, PLATFORM_LABEL, CAMPAIGN_TYPE_LABEL, type AdProjectRow,
+  AD_STATUS_CHIP, STATUS_LABEL, PLATFORM_LABEL, CAMPAIGN_TYPE_LABEL, STATUSES, type AdProjectRow,
 } from '@/lib/advertising/types'
 import { remainingBudget } from '@/lib/advertising/metrics'
 import { aggregateMetrics } from '@/lib/advertising/reporting'
 import { healthScore } from '@/lib/advertising/health'
-import { startAdvertisingRequest } from './actions'
+import { computeServiceCharge, gstOnSpend, spendWithGst } from '@/lib/advertising/budget'
+import { startAdvertisingRequest, addClientFund, removeWalletTransaction } from './actions'
 
 interface PendingRequest {
   id: string
@@ -31,17 +35,50 @@ interface PendingRequest {
   client?: { id: string; name: string } | null
 }
 
+export interface LedgerRowView {
+  id: string
+  client_id: string
+  direction: 'credit' | 'debit'
+  kind: string
+  ad_project_id: string | null
+  cashbook_entry_id: string | null
+  amount: number
+  amount_inr: number
+  notes: string | null
+  created_at: string
+  creator?: { id: string; name: string } | null
+  entry?: { id: string; entry_date: string; description: string; reference: string | null } | null
+  project?: { id: string; campaign_name: string } | null
+}
+
+export interface FundCandidate {
+  id: string
+  entry_date: string
+  description: string
+  reference: string | null
+  amount: number
+  amount_inr: number
+  currency: string
+  uncredited: number
+}
+
+type ProjectRow = AdProjectRow & { client?: { id: string; name: string; code: string } | null }
+
 interface Props {
   migrated: boolean
-  initialProjects: (AdProjectRow & { client?: { id: string; name: string; code: string } | null })[]
+  initialProjects: ProjectRow[]
   metricsByProject: Record<string, any[]>
   pendingRequests: PendingRequest[]
   clients: { id: string; name: string; code: string }[]
+  walletSupported: boolean
+  ledger: LedgerRowView[]
+  fundCandidates: FundCandidate[]
   perms: { create: boolean; edit: boolean; manageBudget: boolean }
 }
 
-const inr = (v: number | null | undefined) =>
-  v == null ? '—' : `₹${Number(v).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+const inr = (v: number | null | undefined, dp = 0) =>
+  v == null ? '—' : `₹${Number(v).toLocaleString('en-IN', { maximumFractionDigits: dp })}`
+const round2 = (v: number) => Math.round(v * 100) / 100
 
 function daysRemaining(endDate: string | null): number | null {
   if (!endDate) return null
@@ -67,11 +104,7 @@ function HealthBadge({ score, label }: { score: number; label: string }) {
 }
 
 function KpiCard({
-  icon: Icon,
-  label,
-  value,
-  sub,
-  accent = false,
+  icon: Icon, label, value, sub, accent = false,
 }: {
   icon: typeof Wallet
   label: string
@@ -108,26 +141,163 @@ function BudgetBar({ spent, total }: { spent: number; total: number }) {
   )
 }
 
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg bg-secondary/50 px-2 py-1.5 text-center min-w-0">
+      <div className="text-[9px] uppercase tracking-wide text-muted-foreground font-medium">{label}</div>
+      <div className="text-xs font-semibold tabular-nums mt-0.5 truncate">{value}</div>
+    </div>
+  )
+}
+
+// ─── Card data assembly ───────────────────────────────────────────────────────
+
+interface CardData {
+  p: ProjectRow
+  agg: ReturnType<typeof aggregateMetrics>
+  health: ReturnType<typeof healthScore>
+  remaining: number | null
+  days: number | null
+  allocated: number
+  billing: number
+}
+
+interface ClientWallet { credited: number; allocated: number; balance: number }
+
+interface ClientGroup {
+  clientId: string
+  name: string
+  code: string
+  cards: CardData[]
+  wallet: ClientWallet
+  metaSpend: number
+}
+
+type ViewMode = 'clients' | 'all'
+type BalanceFilter = 'all' | 'positive' | 'low' | 'negative'
+
 export default function AdvertisingClient({
-  migrated, initialProjects, metricsByProject, pendingRequests, clients, perms,
+  migrated, initialProjects, metricsByProject, pendingRequests, clients,
+  walletSupported, ledger, fundCandidates, perms,
 }: Props) {
-  const cards = useMemo(() => initialProjects.map(p => {
+  const [view, setView] = useState<ViewMode>('clients')
+  const [fClient, setFClient] = useState('')
+  const [fStatus, setFStatus] = useState('')
+  const [fPlatform, setFPlatform] = useState('')
+  const [fMonth, setFMonth] = useState('')
+  const [fBalance, setFBalance] = useState<BalanceFilter>('all')
+
+  // Σ campaign-allocation debits per project.
+  const allocatedByProject = useMemo(() => {
+    const out: Record<string, number> = {}
+    for (const r of ledger) {
+      if (r.direction === 'debit' && r.ad_project_id) {
+        out[r.ad_project_id] = round2((out[r.ad_project_id] || 0) + Number(r.amount_inr || 0))
+      }
+    }
+    return out
+  }, [ledger])
+
+  // Wallet summary per client (credits − debits).
+  const walletByClient = useMemo(() => {
+    const out: Record<string, ClientWallet> = {}
+    for (const r of ledger) {
+      const w = (out[r.client_id] ||= { credited: 0, allocated: 0, balance: 0 })
+      if (r.direction === 'credit') w.credited = round2(w.credited + Number(r.amount_inr || 0))
+      else w.allocated = round2(w.allocated + Number(r.amount_inr || 0))
+    }
+    for (const w of Object.values(out)) w.balance = round2(w.credited - w.allocated)
+    return out
+  }, [ledger])
+
+  const ledgerByClient = useMemo(() => {
+    const out: Record<string, LedgerRowView[]> = {}
+    for (const r of ledger) (out[r.client_id] ||= []).push(r)
+    return out
+  }, [ledger])
+
+  const cards: CardData[] = useMemo(() => initialProjects.map(p => {
     const agg = aggregateMetrics(metricsByProject[p.id] || [])
     const health = healthScore({
       adBudget: p.ad_budget_amount, totalSpend: agg.spend,
       startDate: p.start_date, endDate: p.end_date,
       roas: agg.roas, ctr: agg.ctr, status: p.status,
     })
-    return { p, agg, health, remaining: remainingBudget(p.ad_budget_amount, agg.spend), days: daysRemaining(p.end_date) }
-  }), [initialProjects, metricsByProject])
+    const allocated = allocatedByProject[p.id] || 0
+    const billing = computeServiceCharge(
+      allocated,
+      p.service_charge_type, Number(p.service_charge_value || 0),
+    )
+    return {
+      p, agg, health,
+      remaining: remainingBudget(p.ad_budget_amount, agg.spend),
+      days: daysRemaining(p.end_date),
+      allocated, billing,
+    }
+  }), [initialProjects, metricsByProject, allocatedByProject])
 
-  // Aggregate totals
+  // Card-level filters (shared by both views).
+  const cardMatches = (c: CardData) => {
+    if (fStatus && c.p.status !== fStatus) return false
+    if (fPlatform && c.p.platform !== fPlatform) return false
+    if (fClient && c.p.client?.id !== fClient) return false
+    if (fMonth) {
+      const d = c.p.start_date || c.p.created_at
+      if (!d || String(d).slice(0, 7) !== fMonth) return false
+    }
+    return true
+  }
+  const filteredCards = cards.filter(cardMatches)
+  const cardFiltersActive = Boolean(fStatus || fPlatform || fMonth)
+
+  // Group by client (clients with wallet activity but no campaigns still show).
+  const groups: ClientGroup[] = useMemo(() => {
+    const byId: Record<string, ClientGroup> = {}
+    const ensure = (id: string, name: string, code: string) =>
+      (byId[id] ||= { clientId: id, name, code, cards: [], wallet: walletByClient[id] || { credited: 0, allocated: 0, balance: 0 }, metaSpend: 0 })
+
+    for (const c of filteredCards) {
+      if (!c.p.client?.id) continue
+      const g = ensure(c.p.client.id, c.p.client.name, c.p.client.code)
+      g.cards.push(c)
+      g.metaSpend = round2(g.metaSpend + (c.agg.spend || 0))
+    }
+    if (!cardFiltersActive) {
+      for (const clientId of Object.keys(walletByClient)) {
+        if (byId[clientId]) continue
+        if (fClient && clientId !== fClient) continue
+        const meta = clients.find(cl => cl.id === clientId)
+        ensure(clientId, meta?.name || 'Unknown client', meta?.code || '')
+      }
+    }
+    let list = Object.values(byId).sort((a, b) => a.name.localeCompare(b.name))
+    if (fBalance !== 'all') {
+      list = list.filter(g => {
+        const w = g.wallet
+        if (fBalance === 'positive') return w.balance > 0
+        if (fBalance === 'negative') return w.balance < 0
+        if (fBalance === 'low') return w.credited > 0 && w.balance >= 0 && w.balance <= w.credited * 0.1
+        return true
+      })
+    }
+    return list
+  }, [filteredCards, walletByClient, clients, fClient, fBalance, cardFiltersActive])
+
+  const unassigned = filteredCards.filter(c => !c.p.client?.id)
+
+  const platforms = useMemo(
+    () => [...new Set(initialProjects.map(p => p.platform).filter(Boolean))],
+    [initialProjects],
+  )
+
+  // Aggregate totals for the KPI strip.
   const totals = useMemo(() => {
     const totalSpend = cards.reduce((s, c) => s + (c.agg.spend || 0), 0)
     const totalRev = cards.reduce((s, c) => s + (c.agg.revenue || 0), 0)
     const totalImpr = cards.reduce((s, c) => s + (c.agg.impressions || 0), 0)
     const totalClicks = cards.reduce((s, c) => s + (c.agg.clicks || 0), 0)
     const totalLeads = cards.reduce((s, c) => s + (c.agg.leads || 0), 0)
+    const walletBalance = Object.values(walletByClient).reduce((s, w) => s + w.balance, 0)
     return {
       totalSpend, totalRev,
       roas: totalSpend > 0 ? (totalRev / totalSpend).toFixed(2) + '×' : '—',
@@ -135,8 +305,9 @@ export default function AdvertisingClient({
       cpc: totalClicks > 0 ? inr(totalSpend / totalClicks) : '—',
       leads: totalLeads.toLocaleString('en-IN'),
       active: cards.filter(c => c.p.status === 'active').length,
+      walletBalance: round2(walletBalance),
     }
-  }, [cards])
+  }, [cards, walletByClient])
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 space-y-6">
@@ -149,7 +320,7 @@ export default function AdvertisingClient({
             Advertising
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Campaigns, live KPIs, budgets — synced from Meta &amp; Google Ads.
+            Client wallets, campaigns, live KPIs — Cashbook is the financial source of truth.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -172,7 +343,7 @@ export default function AdvertisingClient({
         </div>
       </div>
 
-      {/* ── Migration notice ── */}
+      {/* ── Migration notices ── */}
       {!migrated && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 flex items-start gap-3">
           <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
@@ -184,12 +355,25 @@ export default function AdvertisingClient({
           </div>
         </div>
       )}
+      {migrated && !walletSupported && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 flex items-start gap-3">
+          <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <div>
+            <div className="text-sm font-semibold text-amber-700 dark:text-amber-400">Client wallets not set up</div>
+            <div className="text-sm text-amber-600/80 dark:text-amber-400/80 mt-0.5">
+              Run <code className="rounded bg-amber-500/15 px-1.5 py-0.5 text-xs">20260703140000_ad_wallet_ledger.sql</code> to enable wallet balances, fund allocation, and allocation history.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── KPI Summary ── */}
       {migrated && cards.length > 0 && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
           <KpiCard icon={Zap} label="Active" value={totals.active} sub={`of ${cards.length} campaigns`} accent />
-          <KpiCard icon={Wallet} label="Total Spend" value={inr(totals.totalSpend)} />
+          {walletSupported
+            ? <KpiCard icon={Wallet} label="Wallet Balance" value={inr(totals.walletBalance)} sub="across all clients" />
+            : <KpiCard icon={Wallet} label="Total Spend" value={inr(totals.totalSpend)} />}
           <KpiCard icon={TrendingUp} label="Revenue" value={inr(totals.totalRev)} />
           <KpiCard icon={BarChart3} label="Avg ROAS" value={totals.roas} />
           <KpiCard icon={MousePointerClick} label="Avg CTR" value={totals.ctr} />
@@ -203,120 +387,101 @@ export default function AdvertisingClient({
         <PendingRequestsSection requests={pendingRequests} />
       )}
 
-      {/* ── Connect account CTA (empty + migrated) ── */}
+      {/* ── Empty state ── */}
       {migrated && cards.length === 0 && pendingRequests.length === 0 && (
-        <div className="rounded-xl border border-dashed border-border bg-card overflow-hidden">
-          <div className="p-12 text-center">
-            <div className="mx-auto w-14 h-14 rounded-2xl bg-pink-500/10 flex items-center justify-center mb-4">
-              <Megaphone className="h-7 w-7 text-pink-500" />
-            </div>
-            <h2 className="text-lg font-semibold">No campaigns yet</h2>
-            <p className="text-sm text-muted-foreground mt-1 max-w-sm mx-auto">
-              Connect your Meta or Google Ads account to start syncing campaigns, or create one manually.
-            </p>
-            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-              <Link
-                href="/dashboard/advertising/integrations"
-                className="inline-flex items-center gap-2 rounded-lg gradient-bg px-4 py-2.5 text-sm font-medium text-white hover:opacity-90"
-              >
-                <Link2 className="h-4 w-4" />
-                Connect Meta / Google Ads
-              </Link>
-              {perms.create && (
-                <Link
-                  href="/dashboard/advertising/new"
-                  className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium hover:border-pink-500/40 transition-colors"
-                >
-                  <Plus className="h-4 w-4" />
-                  Create manually
-                </Link>
-              )}
-            </div>
-          </div>
+        <EmptyState canCreate={perms.create} />
+      )}
 
-          {/* How it works */}
-          <div className="border-t border-border bg-muted/30 px-8 py-6 grid gap-6 sm:grid-cols-3 text-center">
-            {[
-              { icon: Link2, step: '1', title: 'Connect Ad Account', desc: 'OAuth with Meta or Google — takes 30 seconds.' },
-              { icon: Zap, step: '2', title: 'Auto-sync Campaigns', desc: 'Daily metrics pull into your dashboard automatically.' },
-              { icon: BarChart3, step: '3', title: 'Track & Optimise', desc: 'ROAS, CTR, spend, leads — all in one place.' },
-            ].map(({ icon: Icon, step, title, desc }) => (
-              <div key={step} className="flex flex-col items-center gap-2">
-                <div className="h-9 w-9 rounded-full bg-pink-500/10 flex items-center justify-center text-pink-500 font-bold text-sm">
-                  {step}
-                </div>
-                <div className="font-medium text-sm">{title}</div>
-                <div className="text-xs text-muted-foreground">{desc}</div>
-              </div>
+      {/* ── View toggle + filters ── */}
+      {cards.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded-lg border border-border bg-card p-0.5">
+            {([['clients', 'By Client'], ['all', 'All Campaigns']] as [ViewMode, string][]).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setView(key)}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  view === key ? 'bg-pink-500/10 text-pink-600 dark:text-pink-400' : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {label}
+              </button>
             ))}
           </div>
+
+          <select value={fClient} onChange={e => setFClient(e.target.value)}
+            className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs">
+            <option value="">All clients</option>
+            {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <select value={fStatus} onChange={e => setFStatus(e.target.value)}
+            className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs">
+            <option value="">All statuses</option>
+            {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+          <select value={fPlatform} onChange={e => setFPlatform(e.target.value)}
+            className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs">
+            <option value="">All platforms</option>
+            {platforms.map(p => <option key={p} value={p}>{PLATFORM_LABEL[p] || p}</option>)}
+          </select>
+          <input
+            type="month" value={fMonth} onChange={e => setFMonth(e.target.value)}
+            className="rounded-lg border border-border bg-card px-2.5 py-1 text-xs"
+            title="Campaign month (start date)"
+          />
+          {walletSupported && (
+            <select value={fBalance} onChange={e => setFBalance(e.target.value as BalanceFilter)}
+              className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs">
+              <option value="all">Any balance</option>
+              <option value="positive">Balance available</option>
+              <option value="low">Low balance (≤10%)</option>
+              <option value="negative">Negative balance</option>
+            </select>
+          )}
+          {(fClient || fStatus || fPlatform || fMonth || fBalance !== 'all') && (
+            <button
+              onClick={() => { setFClient(''); setFStatus(''); setFPlatform(''); setFMonth(''); setFBalance('all') }}
+              className="text-xs text-muted-foreground hover:text-foreground underline"
+            >
+              Clear filters
+            </button>
+          )}
         </div>
       )}
 
-      {/* ── Campaign Cards ── */}
-      {cards.length > 0 && (
+      {/* ── By Client view ── */}
+      {view === 'clients' && groups.map(g => (
+        <ClientSection
+          key={g.clientId}
+          group={g}
+          history={ledgerByClient[g.clientId] || []}
+          candidates={fundCandidates}
+          walletSupported={walletSupported}
+          canManage={perms.manageBudget}
+        />
+      ))}
+      {view === 'clients' && unassigned.length > 0 && (
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-              Campaigns ({cards.length})
-            </h2>
-          </div>
-
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+            Unassigned ({unassigned.length})
+          </h2>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {cards.map(({ p, agg, health, remaining, days }) => (
-              <Link
-                key={p.id}
-                href={`/dashboard/advertising/${p.id}`}
-                className="group relative rounded-xl border border-border bg-card p-5 hover:border-pink-500/40 hover:shadow-md transition-all"
-              >
-                {/* Card header */}
-                <div className="flex items-start justify-between gap-2 mb-3">
-                  <div className="min-w-0">
-                    <div className="font-semibold truncate leading-tight">{p.campaign_name}</div>
-                    <div className="text-xs text-muted-foreground mt-0.5 truncate">
-                      {p.client?.name || 'No client'}
-                      {' · '}
-                      {PLATFORM_LABEL[p.platform] || p.platform}
-                      {p.campaign_type ? ` · ${CAMPAIGN_TYPE_LABEL[p.campaign_type] || p.campaign_type}` : ''}
-                    </div>
-                  </div>
-                  <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${AD_STATUS_CHIP[p.status] || ''}`}>
-                    {STATUS_LABEL[p.status] || p.status}
-                  </span>
-                </div>
+            {unassigned.map(c => <CampaignCard key={c.p.id} card={c} walletOn={walletSupported} />)}
+          </div>
+        </div>
+      )}
+      {view === 'clients' && groups.length === 0 && unassigned.length === 0 && cards.length > 0 && (
+        <p className="text-sm text-muted-foreground py-8 text-center">No clients match the current filters.</p>
+      )}
 
-                {/* Budget progress */}
-                {p.ad_budget_amount != null && (
-                  <div className="mb-3 rounded-lg bg-secondary/50 px-3 py-2">
-                    <div className="flex items-center justify-between text-xs font-medium">
-                      <span className="text-muted-foreground">Budget</span>
-                      <span>{inr(p.ad_budget_amount)}</span>
-                    </div>
-                    <BudgetBar spent={agg.spend || 0} total={p.ad_budget_amount} />
-                  </div>
-                )}
-
-                {/* KPI grid */}
-                <div className="grid grid-cols-4 gap-2">
-                  <MiniStat label="ROAS" value={agg.roas != null ? `${agg.roas.toFixed(2)}×` : '—'} />
-                  <MiniStat label="CTR" value={agg.ctr != null ? `${agg.ctr.toFixed(2)}%` : '—'} />
-                  <MiniStat label="CPC" value={agg.spend && agg.clicks ? inr((agg.spend) / agg.clicks) : '—'} />
-                  <MiniStat label="Leads" value={agg.leads ? agg.leads.toLocaleString('en-IN') : '—'} />
-                </div>
-
-                {/* Footer */}
-                <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
-                  <HealthBadge score={health.score} label={health.label} />
-                  <span className="text-xs text-muted-foreground flex items-center gap-1">
-                    <Clock className="h-3 w-3" />
-                    {days == null ? 'No end date' : days < 0 ? 'Ended' : `${days}d left`}
-                  </span>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                </div>
-              </Link>
-            ))}
-
-            {/* Quick "connect account" card */}
+      {/* ── All Campaigns view (flat grid) ── */}
+      {view === 'all' && filteredCards.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+            Campaigns ({filteredCards.length})
+          </h2>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {filteredCards.map(c => <CampaignCard key={c.p.id} card={c} walletOn={walletSupported} />)}
             <Link
               href="/dashboard/advertising/integrations"
               className="group rounded-xl border border-dashed border-border bg-card/50 p-5 flex flex-col items-center justify-center gap-2 hover:border-pink-500/40 hover:bg-card transition-all text-center"
@@ -333,15 +498,337 @@ export default function AdvertisingClient({
           </div>
         </div>
       )}
+      {view === 'all' && filteredCards.length === 0 && cards.length > 0 && (
+        <p className="text-sm text-muted-foreground py-8 text-center">No campaigns match the current filters.</p>
+      )}
     </div>
   )
 }
 
-function MiniStat({ label, value }: { label: string; value: string }) {
+// ─── Client section (wallet + campaigns) ─────────────────────────────────────
+
+function ClientSection({ group, history, candidates, walletSupported, canManage }: {
+  group: ClientGroup
+  history: LedgerRowView[]
+  candidates: FundCandidate[]
+  walletSupported: boolean
+  canManage: boolean
+}) {
+  const router = useRouter()
+  const [showAdd, setShowAdd] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
+  const w = group.wallet
+  const spendGross = spendWithGst(group.metaSpend) // actual money consumed (incl. 18% GST)
+  const unspent = round2(w.allocated - spendGross)
+
   return (
-    <div className="rounded-lg bg-secondary/50 px-2 py-1.5 text-center min-w-0">
-      <div className="text-[9px] uppercase tracking-wide text-muted-foreground font-medium">{label}</div>
-      <div className="text-xs font-semibold tabular-nums mt-0.5 truncate">{value}</div>
+    <div className="rounded-xl border border-border bg-card overflow-hidden">
+      {/* Client header + wallet */}
+      <div className="border-b border-border bg-muted/30 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="font-semibold truncate">{group.name}</span>
+            {group.code && <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">{group.code}</span>}
+            <span className="text-xs text-muted-foreground">· {group.cards.length} campaign{group.cards.length === 1 ? '' : 's'}</span>
+          </div>
+          {walletSupported && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowHistory(v => !v)}
+                className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium hover:bg-secondary"
+              >
+                <History className="h-3.5 w-3.5" /> History
+                <ChevronDown className={`h-3 w-3 transition-transform ${showHistory ? 'rotate-180' : ''}`} />
+              </button>
+              {canManage && (
+                <button
+                  onClick={() => setShowAdd(v => !v)}
+                  className="inline-flex items-center gap-1 rounded-lg gradient-bg px-2.5 py-1.5 text-xs font-medium text-white hover:opacity-90"
+                >
+                  <Plus className="h-3.5 w-3.5" /> Add Funds
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {walletSupported && (
+          <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+            <WalletStat label="Wallet Credited" value={inr(w.credited, 2)} />
+            <WalletStat label="Campaign Allocated" value={inr(w.allocated, 2)} />
+            <WalletStat label="Remaining Balance" value={inr(w.balance, 2)} tone={w.balance < 0 ? 'bad' : w.balance > 0 ? 'good' : undefined} />
+            <WalletStat label="Meta Spend (excl. GST)" value={inr(group.metaSpend, 2)} />
+            <WalletStat label="GST 18%" value={inr(gstOnSpend(group.metaSpend), 2)} />
+            <WalletStat label="Unspent (incl. GST)" value={inr(unspent, 2)} tone={unspent < 0 ? 'bad' : undefined} />
+          </div>
+        )}
+
+        {showAdd && canManage && walletSupported && (
+          <AddFundsForm clientId={group.clientId} candidates={candidates} onDone={() => { setShowAdd(false); router.refresh() }} />
+        )}
+
+        {showHistory && walletSupported && (
+          <LedgerHistory rows={history} canManage={canManage} onChange={() => router.refresh()} />
+        )}
+      </div>
+
+      {/* Campaign cards */}
+      {group.cards.length > 0 ? (
+        <div className="grid gap-4 p-4 sm:grid-cols-2 xl:grid-cols-3">
+          {group.cards.map(c => <CampaignCard key={c.p.id} card={c} walletOn={walletSupported} />)}
+        </div>
+      ) : (
+        <p className="px-4 py-6 text-xs text-muted-foreground">No campaigns yet for this client.</p>
+      )}
+    </div>
+  )
+}
+
+function WalletStat({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'bad' }) {
+  return (
+    <div className="rounded-lg bg-card border border-border px-3 py-2">
+      <div className="text-[10px] text-muted-foreground">{label}</div>
+      <div className={`text-sm font-semibold tabular-nums ${tone === 'bad' ? 'text-red-500' : tone === 'good' ? 'text-emerald-600 dark:text-emerald-400' : ''}`}>
+        {value}
+      </div>
+    </div>
+  )
+}
+
+function AddFundsForm({ clientId, candidates, onDone }: {
+  clientId: string
+  candidates: FundCandidate[]
+  onDone: () => void
+}) {
+  const [entryId, setEntryId] = useState('')
+  const [amount, setAmount] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  const usable = candidates.filter(c => c.uncredited > 0)
+
+  function pick(id: string) {
+    setEntryId(id)
+    const c = candidates.find(x => x.id === id)
+    if (c) setAmount(String(c.uncredited))
+  }
+
+  async function submit() {
+    if (!entryId) { setErr('Pick a cashbook entry.'); return }
+    setBusy(true); setErr(null)
+    const res = await addClientFund(clientId, { cashbookEntryId: entryId, amount: Number(amount) || 0 })
+    setBusy(false)
+    if (res.ok) onDone()
+    else setErr(res.error || 'Could not add funds.')
+  }
+
+  return (
+    <div className="mt-3 rounded-lg border border-border bg-card p-3 space-y-2">
+      <div className="text-xs font-medium">Credit this client&apos;s wallet from a Cashbook payment (e.g. a Meta top-up)</div>
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="flex-1 min-w-[220px]">
+          <label className="block text-[10px] font-medium text-muted-foreground mb-1">Cashbook entry (outflow)</label>
+          <select value={entryId} onChange={e => pick(e.target.value)}
+            className="w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs">
+            <option value="">Select an entry…</option>
+            {usable.map(c => (
+              <option key={c.id} value={c.id}>
+                {c.entry_date} — {c.description || c.reference || 'Entry'} · {inr(c.uncredited, 2)} unassigned of {inr(c.amount, 2)}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="w-36">
+          <label className="block text-[10px] font-medium text-muted-foreground mb-1">Amount</label>
+          <input type="number" min="0" step="0.01" value={amount} onChange={e => setAmount(e.target.value)}
+            className="w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs tabular-nums" />
+        </div>
+        <button onClick={submit} disabled={busy || !entryId}
+          className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-secondary disabled:opacity-50">
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />} Credit wallet
+        </button>
+      </div>
+      {usable.length === 0 && (
+        <p className="text-[11px] text-muted-foreground">No outflow entries with unassigned funds — record the top-up payment in the Cashbook first.</p>
+      )}
+      {err && <p className="text-[11px] text-red-500">{err}</p>}
+    </div>
+  )
+}
+
+function LedgerHistory({ rows, canManage, onChange }: {
+  rows: LedgerRowView[]
+  canManage: boolean
+  onChange: () => void
+}) {
+  const [busy, setBusy] = useState<string | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  async function remove(id: string) {
+    setBusy(id); setErr(null)
+    const res = await removeWalletTransaction(id)
+    setBusy(null)
+    if (res.ok) onChange()
+    else setErr(res.error || 'Could not reverse the transaction.')
+  }
+
+  if (rows.length === 0) {
+    return <p className="mt-3 text-xs text-muted-foreground">No wallet transactions yet.</p>
+  }
+
+  return (
+    <div className="mt-3 rounded-lg border border-border bg-card divide-y divide-border max-h-72 overflow-y-auto">
+      {err && <p className="px-3 py-2 text-[11px] text-red-500">{err}</p>}
+      {rows.map(r => {
+        const credit = r.direction === 'credit'
+        const what = credit
+          ? `Top-up${r.entry?.description ? ` — ${r.entry.description}` : ''}${r.entry?.reference ? ` (${r.entry.reference})` : ''}`
+          : `→ ${r.project?.campaign_name || 'Campaign allocation'}`
+        return (
+          <div key={r.id} className="flex items-center justify-between gap-3 px-3 py-2">
+            <div className="flex items-center gap-2 min-w-0">
+              {credit
+                ? <ArrowDownLeft className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+                : <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-pink-500" />}
+              <div className="min-w-0">
+                <div className="text-xs truncate">{what}{r.notes ? <span className="text-muted-foreground"> · {r.notes}</span> : null}</div>
+                <div className="text-[10px] text-muted-foreground">
+                  {new Date(r.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  {r.creator?.name ? ` · ${r.creator.name}` : ''}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className={`text-xs font-semibold tabular-nums ${credit ? 'text-emerald-600 dark:text-emerald-400' : 'text-pink-600 dark:text-pink-400'}`}>
+                {credit ? '+' : '−'}{inr(r.amount_inr, 2)}
+              </span>
+              {canManage && (
+                <button onClick={() => remove(r.id)} disabled={busy === r.id} title="Reverse this transaction"
+                  className="text-muted-foreground hover:text-red-500 disabled:opacity-50">
+                  {busy === r.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                </button>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── Campaign card ────────────────────────────────────────────────────────────
+
+function CampaignCard({ card, walletOn }: { card: CardData; walletOn: boolean }) {
+  const { p, agg, health, days, allocated, billing } = card
+  return (
+    <Link
+      href={`/dashboard/advertising/${p.id}`}
+      className="group relative rounded-xl border border-border bg-card p-5 hover:border-pink-500/40 hover:shadow-md transition-all"
+    >
+      {/* Card header */}
+      <div className="flex items-start justify-between gap-2 mb-3">
+        <div className="min-w-0">
+          <div className="font-semibold truncate leading-tight">{p.campaign_name}</div>
+          <div className="text-xs text-muted-foreground mt-0.5 truncate">
+            {p.client?.name || 'No client'}
+            {' · '}
+            {PLATFORM_LABEL[p.platform] || p.platform}
+            {p.campaign_type ? ` · ${CAMPAIGN_TYPE_LABEL[p.campaign_type] || p.campaign_type}` : ''}
+          </div>
+        </div>
+        <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${AD_STATUS_CHIP[p.status] || ''}`}>
+          {STATUS_LABEL[p.status] || p.status}
+        </span>
+      </div>
+
+      {/* Funding: allocated vs GST-inclusive spend (falls back to estimated budget) */}
+      <div className="mb-3 rounded-lg bg-secondary/50 px-3 py-2">
+        <div className="flex items-center justify-between text-xs font-medium">
+          <span className="text-muted-foreground">{walletOn && allocated > 0 ? 'Allocated' : 'Budget'}</span>
+          <span>{walletOn && allocated > 0 ? inr(allocated) : inr(p.ad_budget_amount)}</span>
+        </div>
+        {/* Financial progress uses actual money consumed = reported spend + 18% GST */}
+        <BudgetBar spent={spendWithGst(agg.spend || 0)} total={walletOn && allocated > 0 ? allocated : (p.ad_budget_amount || 0)} />
+        {walletOn && (
+          <div className="mt-1.5 flex items-center justify-between text-[10px] text-muted-foreground">
+            <span>Billing: <span className="font-semibold text-foreground">{inr(billing, 2)}</span>
+              {p.service_charge_type === 'percent' ? ` (${p.service_charge_value}%)` : ''}
+            </span>
+            {allocated > 0 && <span>Remaining alloc: {inr(Math.max(0, round2(allocated - spendWithGst(agg.spend || 0))))}</span>}
+          </div>
+        )}
+      </div>
+
+      {/* KPI grid */}
+      <div className="grid grid-cols-4 gap-2">
+        <MiniStat label="ROAS" value={agg.roas != null ? `${agg.roas.toFixed(2)}×` : '—'} />
+        <MiniStat label="CTR" value={agg.ctr != null ? `${agg.ctr.toFixed(2)}%` : '—'} />
+        <MiniStat label="CPC" value={agg.spend && agg.clicks ? inr(agg.spend / agg.clicks) : '—'} />
+        <MiniStat label="Leads" value={agg.leads ? agg.leads.toLocaleString('en-IN') : '—'} />
+      </div>
+
+      {/* Footer */}
+      <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
+        <HealthBadge score={health.score} label={health.label} />
+        <span className="text-xs text-muted-foreground flex items-center gap-1">
+          <Clock className="h-3 w-3" />
+          {days == null ? 'No end date' : days < 0 ? 'Ended' : `${days}d left`}
+        </span>
+        <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+      </div>
+    </Link>
+  )
+}
+
+// ─── Empty state + pending requests ──────────────────────────────────────────
+
+function EmptyState({ canCreate }: { canCreate: boolean }) {
+  return (
+    <div className="rounded-xl border border-dashed border-border bg-card overflow-hidden">
+      <div className="p-12 text-center">
+        <div className="mx-auto w-14 h-14 rounded-2xl bg-pink-500/10 flex items-center justify-center mb-4">
+          <Megaphone className="h-7 w-7 text-pink-500" />
+        </div>
+        <h2 className="text-lg font-semibold">No campaigns yet</h2>
+        <p className="text-sm text-muted-foreground mt-1 max-w-sm mx-auto">
+          Connect your Meta or Google Ads account to start syncing campaigns, or create one manually.
+        </p>
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+          <Link
+            href="/dashboard/advertising/integrations"
+            className="inline-flex items-center gap-2 rounded-lg gradient-bg px-4 py-2.5 text-sm font-medium text-white hover:opacity-90"
+          >
+            <Link2 className="h-4 w-4" />
+            Connect Meta / Google Ads
+          </Link>
+          {canCreate && (
+            <Link
+              href="/dashboard/advertising/new"
+              className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium hover:border-pink-500/40 transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+              Create manually
+            </Link>
+          )}
+        </div>
+      </div>
+
+      {/* How it works */}
+      <div className="border-t border-border bg-muted/30 px-8 py-6 grid gap-6 sm:grid-cols-3 text-center">
+        {[
+          { icon: Link2, step: '1', title: 'Connect Ad Account', desc: 'OAuth with Meta or Google — takes 30 seconds.' },
+          { icon: Zap, step: '2', title: 'Auto-sync Campaigns', desc: 'Daily metrics pull into your dashboard automatically.' },
+          { icon: BarChart3, step: '3', title: 'Track & Optimise', desc: 'ROAS, CTR, spend, leads — all in one place.' },
+        ].map(({ step, title, desc }) => (
+          <div key={step} className="flex flex-col items-center gap-2">
+            <div className="h-9 w-9 rounded-full bg-pink-500/10 flex items-center justify-center text-pink-500 font-bold text-sm">
+              {step}
+            </div>
+            <div className="font-medium text-sm">{title}</div>
+            <div className="text-xs text-muted-foreground">{desc}</div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

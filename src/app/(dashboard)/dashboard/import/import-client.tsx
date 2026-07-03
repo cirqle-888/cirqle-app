@@ -1,18 +1,9 @@
 'use client'
 
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
 import { Download } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { recalculatePayrollForMonths } from '@/app/(dashboard)/dashboard/payroll/actions'
 import { useToast, ToastContainer } from '@/components/ui/toast'
-import { buildHeader, buildExampleRow, buildColumnDefs, parseRowFromSchema, buildInsertRecord, norm as sNorm } from '@/lib/import/engine'
-import {
-  FIELD_SCHEMA, EMPLOYEE_FIELDS, CLIENT_FIELDS, GROUP_FIELDS, PARAMETER_FIELDS, TOOL_FIELDS,
-  EMPLOYEE_EXTRA_EXAMPLES, CLIENT_EXTRA_EXAMPLES, SERVICE_EXTRA_EXAMPLES, JOB_EXTRA_EXAMPLES,
-  getContribFields,
-} from '@/lib/import/schemas'
-import type { ParseContext } from '@/lib/import/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface RefClient    { id: string; name: string; code: string }
@@ -110,14 +101,116 @@ const IMPORT_TIERS: { tier: number; label: string; color: string; hint: string; 
 ]
 
 // ─── Templates ───────────────────────────────────────────────────────────────
-// Schema-driven: template header, example row, and column docs all derive from
-// FIELD_SCHEMA. To add a field, edit the relevant schema file — no changes here.
-const TEMPLATES: Record<ImportMode, { header: string; example: string }> = Object.fromEntries(
-  (Object.keys(FIELD_SCHEMA) as ImportMode[]).map(m => [m, {
-    header:  buildHeader(FIELD_SCHEMA[m]),
-    example: buildExampleRow(FIELD_SCHEMA[m]),
-  }])
-) as Record<ImportMode, { header: string; example: string }>
+// `id` is the first column in every template — leave blank for new inserts,
+// required for Update mode. Use the "Export current data" button to get a CSV
+// with real `id` values already filled in, then modify and re-import.
+const TEMPLATES: Record<ImportMode, { header: string; example: string }> = {
+  employees: {
+    header: 'id,cqid,name,email,phone,role,salary_type,base_salary,performance_rating,joined_date,is_active',
+    example: [
+      '"","CQ001","John Smith","john@cirqle.in","9876543210","employee","fixed","25000","80","2024-01-15","true"',
+      '"","CQ002","Jane Doe","jane@cirqle.in","9876543211","team_lead","fixed_plus_commission","30000","85","2024-03-01","true"',
+    ].join('\n'),
+  },
+  clients: {
+    header: 'id,code,name,contact_name,phone,email,address,gstin,default_currency,billing_cycle,billing_day,is_active',
+    example: [
+      '"","SSM001","Sea Star Supermarket","Ravi Kumar","9876540001","ravi@seastar.in","MG Road, Kochi","","INR","monthly","1","true"',
+      '"","BNM001","B.N. Mart Supermarket","Anita Nair","9876540002","","Anna Nagar, Chennai","","INR","monthly","1","true"',
+    ].join('\n'),
+  },
+  services: {
+    header: 'id,name,pricing_type,description,display_order,default_price,default_currency,group_names,is_active',
+    example: [
+      '"","Offer Flyer","fixed_per_creative","Promotional offer flyer design","1","","INR","Design Group | Variable Group","true"',
+      '"","Social Media Management","retainer","Monthly social media package","2","","INR","Design Group","true"',
+      '"","Paid Ads","percentage_of_spend","Google/Meta ad management","3","","INR","","true"',
+    ].join('\n'),
+  },
+  groups: {
+    header: 'id,name,weight,description,display_order,is_active',
+    example: [
+      '"","Design Group","50","Core design work parameters","1","true"',
+      '"","Variable Group","50","Variable/product update parameters","2","true"',
+    ].join('\n'),
+  },
+  parameters: {
+    header: 'id,group_name,name,is_master,weight,description,display_order,input_type,is_active',
+    example: [
+      '"","Design Group","Design","TRUE","1","Main design score (0-100%)","1","percentage","true"',
+      '"","Design Group","Date Change","FALSE","0.04","Date update on existing design","2","count","true"',
+      '"","Design Group","Title Change","FALSE","0.16","Title/heading change","3","count","true"',
+      '"","Design Group","Color Change","FALSE","0.12","Color scheme change","4","count","true"',
+      '"","Design Group","Background Change","FALSE","0.2","Background image/color change","5","count","true"',
+      '"","Design Group","Redesign","FALSE","0.48","Full redesign of existing creative","6","count","true"',
+      '"","Design Group","Design Cleanup","FALSE","0.003","Minor cleanup and polish","7","count","true"',
+      '"","Variable Group","Products","TRUE","1","Product variable score (count)","1","count","true"',
+      '"","Variable Group","Photo Updating","FALSE","0.02","Product photo update","2","count","true"',
+      '"","Variable Group","Price Updating","FALSE","0.01","Price update on creative","3","count","true"',
+    ].join('\n'),
+  },
+  tools: {
+    header: 'id,name,fixed_percentage,group_name,description,is_active',
+    example: [
+      '"","Ideogram","10","Design Group","AI image generation tool","true"',
+      '"","ChatGPT","5","","AI text/copy tool","true"',
+    ].join('\n'),
+  },
+  pricing_matrix: {
+    header: 'id,client_name_or_code,service_name,price,percentage_rate,commission_percentage,currency,is_active',
+    example: [
+      '"","Sea Star Supermarket","Offer Flyer","250","","75","INR","true"',
+      '"","Sea Star Supermarket","Paid Ads","","15","60","INR","true"',
+      '"","B.N. Mart Supermarket","Offer Flyer","200","","75","INR","true"',
+      '"","B.N. Mart Supermarket","Paid Ads","","12","60","INR","true"',
+    ].join('\n'),
+  },
+  jobs: {
+    header: 'id,task_number,title,client_name_or_code,service_name,task_date,billing_amount_inr,billing_amount,currency,quantity,status,description,is_recurring,recurring_interval,recurring_end_date',
+    example: [
+      '"","","Social Media Pack Jun","Sea Star Supermarket","Offer Flyer","2025-06-01","5000","5000","INR","1","done","","false","",""',
+      '"","","Logo Design","SSM001","Branding","2025-06-03","8000","8000","INR","1","done","Final version delivered","false","",""',
+    ].join('\n'),
+  },
+  contributions: {
+    header: 'id,task_id,task_title,task_date,employee_cqid,score_percentage,earnings_inr',
+    example: [
+      '"","","Social Media Pack Jun","2025-06-01","CQ001","60","3000"',
+      '"","","Social Media Pack Jun","2025-06-01","CQ002","40","2000"',
+    ].join('\n'),
+  },
+  cashbook_entries: {
+    header: 'id,entry_date,type,category_name,bank_account_name,amount,currency,amount_inr,description,reference',
+    example: [
+      '"","2024-01-15","inflow","Invoice Payment","HDFC Current","25000","INR","25000","Payment from Sea Star - Invoice #INV-001","INV-001"',
+      '"","2024-01-20","outflow","Salary","HDFC Current","15000","INR","15000","Salary for CQ001 - January 2024",""',
+      '"","2024-01-25","outflow","Software Subscription","HDFC Current","1200","INR","1200","Adobe CC monthly",""',
+    ].join('\n'),
+  },
+  invoices: {
+    header: 'id,invoice_number,client_name_or_code,issue_date,due_date,billing_period_start,billing_period_end,currency,subtotal,tax_rate,discount_amount,notes,status',
+    example: [
+      '"","INV-2024-001","Sea Star Supermarket","2024-01-31","2024-02-14","2024-01-01","2024-01-31","INR","50000","0","0","January 2024 services","draft"',
+      '"","INV-2024-002","SSM001","2024-02-29","2024-03-14","2024-02-01","2024-02-29","INR","45000","0","0","February 2024 services","sent"',
+    ].join('\n'),
+  },
+  invoice_status: {
+    header: 'invoice_number_or_id,status,paid_amount,payment_date,payment_method,notes',
+    example: [
+      '"INV-2024-001","paid","50000","2024-02-10","bank_transfer","Full payment received"',
+      '"INV-2024-002","partial","20000","2024-03-05","cheque","Partial payment - balance pending"',
+      '"INV-2024-003","cancelled","","","","Client cancelled project"',
+    ].join('\n'),
+  },
+  discounts: {
+    header: 'id,invoice_number_or_id,client_name_or_code,discount_amount,discount_percentage,invoice_total,reason,discount_date',
+    example: [
+      '"","INV-2024-001","Sea Star Supermarket","2000","","50000","Year-end loyalty discount","2024-12-15"',
+      '"","INV-2024-002","SSM001","","10","45000","10% promo discount","2024-12-20"',
+      '"","","Sea Star Supermarket","5000","","","Goodwill discount (no specific invoice)","2024-12-25"',
+    ].join('\n'),
+  },
+}
 
 // ─── Export configuration ─────────────────────────────────────────────────────
 // `orderBy` is tried first; if the column does not exist in the DB schema the
@@ -160,12 +253,158 @@ function downloadCsv(filename: string, content: string) {
 }
 
 // ─── Column definitions ───────────────────────────────────────────────────────
-// Schema-driven: derived from FIELD_SCHEMA. No manual list needed.
-// Kept as a typed alias for any legacy code that still uses COLUMNS[mode].
+// First column `id` is always optional for Insert mode (blank = new row),
+// REQUIRED for Update mode (matches the existing DB row to modify).
 type ColDef = { col: string; req: boolean; notes: string }
-const COLUMNS: Record<ImportMode, ColDef[]> = Object.fromEntries(
-  (Object.keys(FIELD_SCHEMA) as ImportMode[]).map(m => [m, buildColumnDefs(FIELD_SCHEMA[m])])
-) as Record<ImportMode, ColDef[]>
+const ID_COL: ColDef = { col: 'id', req: false, notes: 'Leave blank for new rows · REQUIRED in Update mode (use Export to get current ids)' }
+const COLUMNS: Record<ImportMode, ColDef[]> = {
+  employees: [
+    ID_COL,
+    { col: 'cqid',               req: true,  notes: 'Unique ID e.g. CQ001' },
+    { col: 'name',               req: true,  notes: 'Full name' },
+    { col: 'email',              req: true,  notes: 'Unique email' },
+    { col: 'phone',              req: false, notes: 'Mobile number' },
+    { col: 'role',               req: false, notes: 'employee / team_lead / accounts / view_only (default: employee)' },
+    { col: 'salary_type',        req: false, notes: 'fixed / fixed_plus_commission / commission_only (default: fixed)' },
+    { col: 'base_salary',        req: false, notes: 'Monthly base in INR' },
+    { col: 'performance_rating', req: false, notes: '0–100 (default: 70)' },
+    { col: 'joined_date',        req: false, notes: 'DD-MM-YYYY (also accepts YYYY-MM-DD or M/D/YYYY)' },
+    { col: 'is_active',          req: false, notes: 'true / false (default: true)' },
+  ],
+  clients: [
+    ID_COL,
+    { col: 'code',             req: true,  notes: 'Unique short code e.g. SSM001' },
+    { col: 'name',             req: true,  notes: 'Full client/company name' },
+    { col: 'contact_name',     req: false, notes: 'Primary contact person' },
+    { col: 'phone',            req: false, notes: '' },
+    { col: 'email',            req: false, notes: '' },
+    { col: 'address',          req: false, notes: '' },
+    { col: 'gstin',            req: false, notes: 'GST number if applicable' },
+    { col: 'default_currency', req: false, notes: 'INR / USD / AED etc. (default: INR)' },
+    { col: 'billing_cycle',    req: false, notes: 'monthly (default) / weekly / daily / none' },
+    { col: 'billing_day',      req: false, notes: 'Day of month (1-28) for monthly billing' },
+    { col: 'is_active',        req: false, notes: 'true / false (default: true)' },
+  ],
+  services: [
+    ID_COL,
+    { col: 'name',             req: true,  notes: 'Service name' },
+    { col: 'pricing_type',     req: true,  notes: 'fixed_per_creative / percentage_of_spend / retainer / hourly' },
+    { col: 'description',      req: false, notes: '' },
+    { col: 'display_order',    req: false, notes: 'Sort order number' },
+    { col: 'default_price',    req: false, notes: 'Fallback price when no client-specific pricing exists' },
+    { col: 'default_currency', req: false, notes: 'INR / USD / AED etc. (default: INR)' },
+    { col: 'group_names',      req: false, notes: 'Contribution groups linked to this service. Separate multiple with | or , e.g. "Design Group | Variable Group". Names must match existing groups.' },
+    { col: 'is_active',        req: false, notes: 'true / false (default: true)' },
+  ],
+  groups: [
+    ID_COL,
+    { col: 'name',          req: true,  notes: 'Group name e.g. Design Group' },
+    { col: 'weight',        req: true,  notes: '0–100, groups must add up to 100' },
+    { col: 'description',   req: false, notes: '' },
+    { col: 'display_order', req: false, notes: '' },
+    { col: 'is_active',     req: false, notes: 'true / false (default: true)' },
+  ],
+  parameters: [
+    ID_COL,
+    { col: 'group_name',    req: true,  notes: 'Must match an existing group name exactly' },
+    { col: 'name',          req: true,  notes: 'Parameter name' },
+    { col: 'is_master',     req: false, notes: 'TRUE for master parameter (Design, Products) — gets % score. FALSE for sub-parameters — get count values' },
+    { col: 'weight',        req: false, notes: 'Relative weight within group. Master = 1, sub-params = decimal (0.04, 0.16 etc.)' },
+    { col: 'description',   req: false, notes: '' },
+    { col: 'display_order', req: false, notes: '' },
+    { col: 'input_type',    req: false, notes: 'percentage / count (default: count)' },
+    { col: 'is_active',     req: false, notes: 'true / false (default: true)' },
+  ],
+  tools: [
+    ID_COL,
+    { col: 'name',             req: true,  notes: 'Tool name e.g. Ideogram' },
+    { col: 'fixed_percentage', req: true,  notes: '% of task billing assigned to this tool' },
+    { col: 'group_name',       req: false, notes: 'Optional group association' },
+    { col: 'description',      req: false, notes: '' },
+    { col: 'is_active',        req: false, notes: 'true / false (default: true)' },
+  ],
+  pricing_matrix: [
+    ID_COL,
+    { col: 'client_name_or_code',  req: true,  notes: 'Client name or client code (e.g. SSM001) — or raw client_id UUID' },
+    { col: 'service_name',         req: true,  notes: 'Must match service name exactly — or raw service_id UUID' },
+    { col: 'price',                req: false, notes: 'Fixed price per creative (for fixed_per_creative services)' },
+    { col: 'percentage_rate',      req: false, notes: '% of spend (for percentage_of_spend services)' },
+    { col: 'commission_percentage',req: true,  notes: '% of billing that goes to employee pool (e.g. 75)' },
+    { col: 'currency',             req: false, notes: 'INR / AED / USD etc. (default: INR)' },
+    { col: 'is_active',            req: false, notes: 'true / false (default: true)' },
+  ],
+  jobs: [
+    ID_COL,
+    { col: 'task_number',         req: false, notes: 'Optional · leave blank to auto-assign next number (1, 2, 3…)' },
+    { col: 'title',               req: true,  notes: 'Task name' },
+    { col: 'client_name_or_code', req: false, notes: 'Client name or client code' },
+    { col: 'service_name',        req: false, notes: 'Must match service name exactly' },
+    { col: 'task_date',           req: true,  notes: 'DD-MM-YYYY (also accepts YYYY-MM-DD or M/D/YYYY)' },
+    { col: 'billing_amount_inr',  req: false, notes: 'INR amount; no ₹ symbol' },
+    { col: 'billing_amount',      req: false, notes: 'Amount in task currency (defaults to billing_amount_inr if blank)' },
+    { col: 'currency',            req: false, notes: 'INR / USD / AED etc. (default: INR)' },
+    { col: 'quantity',            req: false, notes: 'Hours / items / spend (default: 1)' },
+    { col: 'status',              req: false, notes: 'pending / in_progress / done / invoiced / cancelled (default: done)' },
+    { col: 'description',         req: false, notes: '' },
+    { col: 'is_recurring',        req: false, notes: 'true / false' },
+    { col: 'recurring_interval',  req: false, notes: 'daily / weekly / biweekly / monthly' },
+    { col: 'recurring_end_date',  req: false, notes: 'DD-MM-YYYY when the recurrence stops (also accepts YYYY-MM-DD)' },
+  ],
+  contributions: [
+    ID_COL,
+    { col: 'task_id',          req: false, notes: 'Optional · use raw task UUID if available (faster lookup)' },
+    { col: 'task_title',       req: true,  notes: 'Exact task title in DB — import jobs first (ignored if task_id is provided)' },
+    { col: 'task_date',        req: true,  notes: 'DD-MM-YYYY (also accepts YYYY-MM-DD) — used to find the task (with task_title)' },
+    { col: 'employee_cqid',    req: true,  notes: 'e.g. CQ001' },
+    { col: 'score_percentage', req: true,  notes: '0–100' },
+    { col: 'earnings',         req: true,  notes: 'INR amount' },
+  ],
+  cashbook_entries: [
+    ID_COL,
+    { col: 'entry_date',        req: true,  notes: 'DD-MM-YYYY (also accepts YYYY-MM-DD)' },
+    { col: 'type',              req: true,  notes: 'inflow / outflow' },
+    { col: 'category_name',     req: false, notes: 'Must match a category name in Cash Categories settings' },
+    { col: 'bank_account_name', req: false, notes: 'Must match a bank account name in Bank Accounts settings' },
+    { col: 'amount',            req: true,  notes: 'Amount in the transaction currency' },
+    { col: 'currency',          req: false, notes: 'INR / AED / USD etc. (default: INR)' },
+    { col: 'amount_inr',        req: false, notes: 'INR equivalent (defaults to amount if currency is INR)' },
+    { col: 'description',       req: false, notes: 'Description / notes' },
+    { col: 'reference',         req: false, notes: 'Reference number, invoice number, etc.' },
+  ],
+  invoices: [
+    ID_COL,
+    { col: 'invoice_number',        req: true,  notes: 'Unique invoice number e.g. INV-2024-001' },
+    { col: 'client_name_or_code',   req: true,  notes: 'Client name or client code' },
+    { col: 'issue_date',            req: true,  notes: 'DD-MM-YYYY' },
+    { col: 'due_date',              req: false, notes: 'DD-MM-YYYY (default: issue_date + 14 days)' },
+    { col: 'billing_period_start',  req: false, notes: 'DD-MM-YYYY — month/period start' },
+    { col: 'billing_period_end',    req: false, notes: 'DD-MM-YYYY — month/period end' },
+    { col: 'currency',              req: false, notes: 'INR / AED / USD etc. (default: INR)' },
+    { col: 'subtotal',              req: false, notes: 'Invoice subtotal amount' },
+    { col: 'tax_rate',              req: false, notes: 'Tax % (default: 0)' },
+    { col: 'discount_amount',       req: false, notes: 'Discount amount (default: 0)' },
+    { col: 'notes',                 req: false, notes: 'Invoice notes' },
+    { col: 'status',                req: false, notes: 'draft / reviewed / sent / partial / paid / cancelled (default: draft)' },
+  ],
+  invoice_status: [
+    { col: 'invoice_number_or_id', req: true,  notes: 'Invoice number (e.g. INV-2024-001) or raw UUID' },
+    { col: 'status',               req: true,  notes: 'draft / reviewed / sent / partial / paid / cancelled / bad_debt / overdue' },
+    { col: 'paid_amount',          req: false, notes: 'Amount paid — required when status is partial or paid' },
+    { col: 'payment_date',         req: false, notes: 'DD-MM-YYYY' },
+    { col: 'payment_method',       req: false, notes: 'bank_transfer / cheque / cash / upi / other' },
+    { col: 'notes',                req: false, notes: 'Payment or status change notes' },
+  ],
+  discounts: [
+    ID_COL,
+    { col: 'invoice_number_or_id', req: false, notes: 'Invoice number (e.g. INV-2024-001) or UUID — optional. Leave blank for client-level/standalone discount' },
+    { col: 'client_name_or_code',  req: true,  notes: 'Client name or code (e.g. SSM001) — required when no invoice ref' },
+    { col: 'discount_amount',      req: false, notes: 'Flat discount in INR — either this or discount_percentage is required' },
+    { col: 'discount_percentage',  req: false, notes: '% discount applied — either this or discount_amount is required' },
+    { col: 'invoice_total',        req: false, notes: 'Invoice total at the time of discount (for record-keeping; defaults to 0 if no invoice ref)' },
+    { col: 'reason',               req: false, notes: 'Reason / note for the discount' },
+    { col: 'discount_date',        req: false, notes: 'DD-MM-YYYY when the discount was given (defaults to today)' },
+  ],
+}
 
 // ─── CSV helpers ──────────────────────────────────────────────────────────────
 function parseCSV(text: string): string[][] {
@@ -230,16 +469,6 @@ function normalizeDate(raw: string): string {
     const [, d, m, y] = dmy
     return `${y}-${m}-${d}`
   }
-  
-  // Attempt standard JS Date parse (handles "04-December-2023, Monday")
-  const parsed = new Date(s)
-  if (!isNaN(parsed.getTime())) {
-    const y = parsed.getFullYear()
-    const m = String(parsed.getMonth() + 1).padStart(2, '0')
-    const d = String(parsed.getDate()).padStart(2, '0')
-    return `${y}-${m}-${d}`
-  }
-
   return s  // return as-is; validation will catch it
 }
 
@@ -273,7 +502,6 @@ function IssueCell({ row }: { row: ParsedRow }) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function ImportClient({ clients, services, employees, groups, parameters, bankAccounts, cashCategories }: Props) {
-  const router = useRouter()
   const supabase = createClient()
   const { toasts, dismiss, success, error: toastError } = useToast()
 
@@ -294,38 +522,6 @@ export default function ImportClient({ clients, services, employees, groups, par
   // ── Contribution sub-mode ──────────────────────────────────────────────────
   const [contribSubMode, setContribSubMode] = useState<ContribSubMode>('score_pct')
 
-  // ── Discount template generator ────────────────────────────────────────────
-  const [discountFilter, setDiscountFilter] = useState({
-    clientId:  '',
-    dateFrom:  '',
-    dateTo:    '',
-    status:    '',
-  })
-  const [discountTemplateLoading, setDiscountTemplateLoading] = useState(false)
-  const [contribTemplateLoading, setContribTemplateLoading] = useState(false)
-
-  // ── Export filters (per-mode, shared state — reset on mode change) ──────────
-  const [exportFilterOpen, setExportFilterOpen] = useState(false)
-  const [exportFilters, setExportFilters] = useState({
-    clientId:   '',
-    serviceId:  '',    // jobs, contributions
-    employeeId: '',    // contributions
-    taskNumberFrom: '',  // jobs, contributions — task number range start
-    taskNumberTo:   '',  // jobs, contributions — task number range end
-    status:     '',
-    dateFrom:   '',
-    dateTo:     '',
-    isActive:   '',    // '' | 'true' | 'false'
-    entryType:  '',    // cashbook: 'income' | 'expense'
-    parameterIds: [] as string[],  // contributions param_detail: filter by specific parameters
-  })
-  const EXPORT_FILTER_EMPTY = { clientId: '', serviceId: '', employeeId: '', taskNumberFrom: '', taskNumberTo: '', status: '', dateFrom: '', dateTo: '', isActive: '', entryType: '', parameterIds: [] }
-  // Reset export filters when mode changes
-  useEffect(() => {
-    setExportFilters(EXPORT_FILTER_EMPTY)
-    setExportFilterOpen(false)
-  }, [mode])
-
   // ── Clean-up state ─────────────────────────────────────────────────────────
   const [cleanupMode, setCleanupMode] = useState<ImportMode>('employees')
   const [cleanupRecords, setCleanupRecords] = useState<any[]>([])
@@ -341,166 +537,31 @@ export default function ImportClient({ clients, services, employees, groups, par
   const bankAccountMap = useMemo(() => { const m: Record<string, string> = {}; bankAccounts.forEach(b => { m[norm(b.name)] = b.id }); return m }, [bankAccounts])
   const cashCategoryMap = useMemo(() => { const m: Record<string, string> = {}; cashCategories.forEach(c => { m[norm(c.name)] = c.id }); return m }, [cashCategories])
 
-  // ── ParseContext builder ────────────────────────────────────────────────────
-  // Passes all reference data and lookup maps to the schema engine.
-  function buildParseCtx(): ParseContext {
-    return {
-      clients, services, employees,
-      groups: groups as ParseContext['groups'],
-      parameters: parameters as ParseContext['parameters'],
-      bankAccounts, cashCategories,
-      clientMap, serviceMap, empMap, groupMap, bankAccountMap, cashCategoryMap,
-    }
-  }
-
   // ── Export current data ────────────────────────────────────────────────────
   async function exportCurrentData(m: ImportMode) {
     const cfg = EXPORT_CONFIG[m]
-    const PAGE = 1000
-    const allData: any[] = []
+    // Try ordered first; if the orderBy column is missing on this DB schema,
+    // retry without ordering so the export still works.
+    let data: any[] | null = null
     let lastError: any = null
-    let orderingWorks = !!cfg.orderBy
-
-    // Date column per mode — used for dateFrom/dateTo filters
-    const dateColMap: Partial<Record<ImportMode, string>> = {
-      jobs:             'task_date',
-      invoices:         'issue_date',
-      invoice_status:   'issue_date',
-      cashbook_entries: 'entry_date',
-      discounts:        'created_at',
-      contributions:    'created_at',
+    if (cfg.orderBy) {
+      const ordered = await supabase.from(cfg.table).select('*').order(cfg.orderBy, { ascending: true, nullsFirst: false })
+      if (ordered.error) lastError = ordered.error
+      else data = ordered.data as any[]
     }
-    const dateCol = dateColMap[m]
-
-    // Modes that have client_id column directly (NOT contributions — that joins via tasks)
-    const hasClientId: ImportMode[] = ['jobs', 'invoices', 'invoice_status', 'discounts', 'pricing_matrix']
-    // Modes that have service_id column directly
-    const hasServiceId: ImportMode[] = ['jobs']
-    // Modes that have status column
-    const hasStatus: ImportMode[] = ['jobs', 'invoices', 'invoice_status']
-    // Modes that have is_active column
-    const hasIsActive: ImportMode[] = ['employees', 'clients', 'services']
-
-    // ── Contributions: pre-filter via tasks table then chunked fetch ─────────
-    // contribution_scores has no client_id/service_id — those live on tasks.
-    // Approach:
-    //   1. Query tasks with the applicable filters → get matching task_id list
-    //   2. Fetch contribution_scores in chunks of CONTRIB_CHUNK IDs per request
-    //      to stay well under the URL length limit (~8 KB). Putting hundreds of
-    //      UUIDs in a single .in() parameter exceeds that limit and the browser
-    //      silently drops the request ("TypeError: Failed to fetch").
-    const CONTRIB_CHUNK = 150  // 150 × ~36 chars ≈ 5.5 KB per request; safe margin
-    if (m === 'contributions') {
-      const needsTaskJoin = exportFilters.clientId || exportFilters.serviceId || exportFilters.taskNumberFrom || exportFilters.taskNumberTo || exportFilters.dateFrom || exportFilters.dateTo
-      let taskIds: string[] | null = null
-      if (needsTaskJoin) {
-        let tq = supabase.from('tasks').select('id')
-        if (exportFilters.clientId)  tq = tq.eq('client_id',  exportFilters.clientId)
-        if (exportFilters.serviceId) tq = tq.eq('service_id', exportFilters.serviceId)
-        if (exportFilters.taskNumberFrom) { const n = parseInt(exportFilters.taskNumberFrom, 10); if (!isNaN(n)) tq = tq.gte('task_number', n) }
-        if (exportFilters.taskNumberTo)   { const n = parseInt(exportFilters.taskNumberTo,   10); if (!isNaN(n)) tq = tq.lte('task_number', n) }
-        if (exportFilters.dateFrom) tq = tq.gte('task_date', exportFilters.dateFrom)
-        if (exportFilters.dateTo)   tq = tq.lte('task_date', exportFilters.dateTo)
-        const { data: taskRows, error: tErr } = await tq
-        if (tErr) { toastError(`Export failed — could not filter tasks: ${tErr.message}`); return }
-        taskIds = (taskRows || []).map((t: any) => t.id)
-        if (taskIds.length === 0) { toastError('No tasks match your filters — nothing to export'); return }
-      }
-
-      // Build the base contribution_scores query (employee filter applies in every chunk)
-      const buildContribQ = (ids?: string[]) => {
-        let q = supabase.from('contribution_scores').select('*')
-        if (exportFilters.employeeId) q = q.eq('employee_id', exportFilters.employeeId)
-        if (ids) q = q.in('task_id', ids)
-        return q
-      }
-
-      if (taskIds) {
-        // Chunked fetch — avoids URL-length-exceeded errors for large ID sets
-        for (let i = 0; i < taskIds.length; i += CONTRIB_CHUNK) {
-          const chunk = taskIds.slice(i, i + CONTRIB_CHUNK)
-          const { data, error } = await buildContribQ(chunk)
-          if (error) { toastError(`Export failed: ${error.message}`); return }
-          if (data) allData.push(...data)
-        }
-      } else {
-        // No task-join filter — just paginate all scores (optionally by employee)
-        for (let page = 0; page < 100; page++) {
-          const { data, error } = await buildContribQ()
-            .range(page * PAGE, (page + 1) * PAGE - 1)
-            .order('task_id', { ascending: true })
-          if (error) { toastError(`Export failed: ${error.message}`); return }
-          if (data) allData.push(...data)
-          if (!data || data.length < PAGE) break
-        }
-      }
-
-      // Skip the generic loop below — data is already collected
-      if (allData.length === 0) { toastError('No data to export'); return }
-      let data = allData
-      const allKeys = new Set<string>()
-      data.forEach((r: Record<string, unknown>) => Object.keys(r).forEach(k => allKeys.add(k)))
-      let headers = ['id', ...[...allKeys].filter(k => k !== 'id').sort()]
-
-      // When param_detail mode + parameters selected, filter to only those parameter columns
-      if (contribSubMode === 'param_detail' && exportFilters.parameterIds.length > 0) {
-        const paramMap = new Map(parameters.map(p => [p.id, p.name]))
-        const selectedParamNames = new Set(
-          exportFilters.parameterIds.map(id => paramMap.get(id)).filter(Boolean)
-        )
-        // Keep base columns + only selected parameter columns
-        const baseColumns = ['id', 'task_id', 'task_number', 'task_title', 'task_date', 'employee_id', 'employee_cqid', 'score_percentage', 'earnings']
-        headers = headers.filter(h => baseColumns.includes(h) || selectedParamNames.has(h))
-        data = data.map(r => {
-          const filtered: Record<string, unknown> = {}
-          headers.forEach(h => { if (h in r) filtered[h] = r[h] })
-          return filtered
-        })
-      }
-
-      const csv = toCsv(headers, data)
-      const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
-      downloadCsv(`${m}_export_${ts}.csv`, csv)
-      success(`Exported ${data.length} row${data.length !== 1 ? 's' : ''}`)
-      return  // ← early return; skip generic loop
-    }
-
-    for (let page = 0; page < 100; page++) {   // hard ceiling: 100k rows
-      let q = supabase.from(cfg.table).select('*').range(page * PAGE, (page + 1) * PAGE - 1)
-      if (orderingWorks && cfg.orderBy) q = q.order(cfg.orderBy, { ascending: true, nullsFirst: false })
-
-      // Apply export filters
-      if (exportFilters.clientId  && hasClientId.includes(m))  q = q.eq('client_id',  exportFilters.clientId)
-      if (exportFilters.serviceId && hasServiceId.includes(m)) q = q.eq('service_id', exportFilters.serviceId)
-      if (m === 'jobs') {
-        if (exportFilters.taskNumberFrom) { const n = parseInt(exportFilters.taskNumberFrom, 10); if (!isNaN(n)) q = q.gte('task_number', n) }
-        if (exportFilters.taskNumberTo)   { const n = parseInt(exportFilters.taskNumberTo,   10); if (!isNaN(n)) q = q.lte('task_number', n) }
-      }
-      if (exportFilters.status    && hasStatus.includes(m))    q = q.eq('status', exportFilters.status)
-      if (exportFilters.dateFrom  && dateCol)                  q = q.gte(dateCol, exportFilters.dateFrom)
-      if (exportFilters.dateTo    && dateCol)                  q = q.lte(dateCol, exportFilters.dateTo)
-      if (exportFilters.isActive !== '' && hasIsActive.includes(m)) q = q.eq('is_active', exportFilters.isActive === 'true')
-      if (exportFilters.entryType && m === 'cashbook_entries') q = q.eq('type', exportFilters.entryType)
-
-      const { data, error } = await q
-      if (error) {
-        if (page === 0 && orderingWorks) {
-          // orderBy column may not exist — retry this page without ordering
-          orderingWorks = false
-          lastError = error
-          page--   // retry same page
-          continue
-        }
-        toastError(`Export failed: ${error.message}`)
+    if (!data) {
+      const plain = await supabase.from(cfg.table).select('*')
+      if (plain.error) {
+        toastError(`Export failed: ${plain.error.message}`)
         return
       }
-      if (data) allData.push(...data)
-      if (!data || data.length < PAGE) break   // last page reached
+      data = plain.data as any[]
+      if (lastError) {
+        // Silent fallback worked — let the user know ordering was skipped
+        console.warn(`Export ordering by "${cfg.orderBy}" skipped: ${lastError.message}`)
+      }
     }
-
-    if (lastError) console.warn(`Export ordering by "${cfg.orderBy}" skipped: ${lastError.message}`)
-    if (allData.length === 0) { toastError('No data to export'); return }
-    let data = allData
+    if (!data || data.length === 0) { toastError('No data to export'); return }
 
     // ── Enrichment per mode ──
     // Services: append a `group_names` column (pipe-separated) so the export
@@ -549,115 +610,6 @@ export default function ImportClient({ clients, services, employees, groups, par
     success(`Exported ${data.length} row${data.length !== 1 ? 's' : ''}`)
   }
 
-  // ── Contributions template generator ───────────────────────────────────────
-  async function generateContribTemplate() {
-    setContribTemplateLoading(true)
-    try {
-      const allData: any[] = []
-      const PAGE = 1000
-      for (let page = 0; page < 100; page++) {
-        const q = supabase
-          .from('tasks')
-          .select('id, task_number, title, task_date')
-          .neq('status', 'cancelled')
-          .order('task_date', { ascending: true })
-          .range(page * PAGE, (page + 1) * PAGE - 1)
-        
-        const { data, error } = await q
-        if (error) { toastError(`Failed to load tasks: ${error.message}`); return }
-        if (data) allData.push(...data)
-        if (!data || data.length < PAGE) break
-      }
-      if (allData.length === 0) { toastError('No tasks available'); return }
-      const data = allData
-
-      let header = ''
-      let paramHeaders: string[] = []
-      if (contribSubMode === 'earnings_only') {
-        header = 'id,task_id,task_number,task_title,task_date,employee_cqid,earnings_inr'
-      } else if (contribSubMode === 'score_pct') {
-        header = 'id,task_id,task_number,task_title,task_date,employee_cqid,score_percentage,earnings_inr'
-      } else {
-        paramHeaders = parameters.map(p => p.name)
-        header = `id,task_id,task_number,task_title,task_date,employee_cqid,${paramHeaders.join(',')}`
-      }
-
-      const rows = data.map((t: any) => {
-        let baseRow = [
-          '', // id
-          t.id, // task_id
-          t.task_number || '', // task_number
-          t.title || '',
-          t.task_date || '',
-          '', // employee_cqid
-        ]
-        if (contribSubMode === 'earnings_only') {
-          baseRow.push('') 
-        } else if (contribSubMode === 'score_pct') {
-          baseRow.push('', '') 
-        } else {
-          paramHeaders.forEach(() => baseRow.push(''))
-        }
-        return baseRow.map(v => (String(v).includes(',') ? `"${v}"` : v)).join(',')
-      })
-
-      const ts = new Date().toISOString().slice(0, 10)
-      downloadCsv(`contributions_${contribSubMode}_prefilled_${ts}.csv`, header + '\n' + rows.join('\n'))
-      success(`Generated pre-filled template with ${data.length} task${data.length !== 1 ? 's' : ''}`)
-    } finally {
-      setContribTemplateLoading(false)
-    }
-  }
-
-  // ── Discount template generator ────────────────────────────────────────────
-  async function generateDiscountTemplate() {
-    setDiscountTemplateLoading(true)
-    try {
-      const allData: any[] = []
-      const PAGE = 1000
-      for (let page = 0; page < 100; page++) {
-        let q = supabase
-          .from('invoices')
-          .select('invoice_number, issue_date, total_amount, status, client:clients(name, code)')
-          .order('issue_date', { ascending: true })
-
-        if (discountFilter.clientId) q = q.eq('client_id', discountFilter.clientId)
-        if (discountFilter.dateFrom)  q = q.gte('issue_date', discountFilter.dateFrom)
-        if (discountFilter.dateTo)    q = q.lte('issue_date', discountFilter.dateTo)
-        if (discountFilter.status)    q = q.eq('status', discountFilter.status)
-
-        const { data, error } = await q.range(page * PAGE, (page + 1) * PAGE - 1)
-        if (error) { toastError(`Failed to load invoices: ${error.message}`); return }
-        if (data) allData.push(...data)
-        if (!data || data.length < PAGE) break
-      }
-      if (allData.length === 0) { toastError('No invoices match the selected filters'); return }
-      const data = allData
-
-      const today = new Date().toISOString().slice(0, 10)
-      const header = 'invoice_number,client_name_or_code,invoice_total,discount_amount,discount_percentage,reason,discount_date'
-      const rows = data.map((inv: any) => {
-        const clientCode = inv.client?.code || inv.client?.name || ''
-        const total = inv.total_amount || ''
-        return [
-          inv.invoice_number,
-          clientCode,
-          total,
-          '',   // discount_amount — to be filled
-          '',   // discount_percentage — to be filled
-          '',   // reason — to be filled
-          today,
-        ].map(v => (String(v).includes(',') ? `"${v}"` : v)).join(',')
-      })
-
-      const ts = new Date().toISOString().slice(0, 10)
-      downloadCsv(`discount_template_${ts}.csv`, header + '\n' + rows.join('\n'))
-      success(`Generated template with ${data.length} invoice${data.length !== 1 ? 's' : ''}`)
-    } finally {
-      setDiscountTemplateLoading(false)
-    }
-  }
-
   // ── Parsers ────────────────────────────────────────────────────────────────
   function baseRow(i: number): ParsedRow { return { _line: i + 2, errors: [], warnings: [], status: 'ok' } }
   function finalize(r: ParsedRow): ParsedRow {
@@ -666,22 +618,55 @@ export default function ImportClient({ clients, services, employees, groups, par
   }
 
   function parseEmployees(lines: string[][]): ParsedRow[] {
-    const headers = lines[0]
-    const ctx = buildParseCtx()
-    return lines.slice(1).map((cells, i) => {
-      const r = parseRowFromSchema(EMPLOYEE_FIELDS, cells, headers, i + 2, ctx)
-      r.row_id = r.id  // preserve row_id alias for update/delete operations
-      return r
+    const h = lines[0].map(norm)
+    const idx = (k: string) => h.findIndex(c => c.includes(k))
+    const iId = h.findIndex(c => c === 'id')
+    const iCqid = idx('cqid'), iName = idx('name'), iEmail = idx('email')
+    const iPhone = idx('phone'), iRole = idx('role'), iSalType = idx('salary')
+    const iBase = idx('base'), iRating = idx('rating'), iJoined = idx('joined')
+
+    return lines.slice(1).map((c, i) => {
+      const g = (j: number) => j >= 0 ? c[j]?.trim() || '' : ''
+      const r: ParsedRow = { ...baseRow(i), row_id: g(iId), cqid: g(iCqid), name: g(iName), email: g(iEmail),
+        phone: g(iPhone), role: g(iRole) || 'employee', salary_type: g(iSalType) || 'fixed',
+        base_salary: g(iBase), performance_rating: g(iRating) || '70', joined_date: normalizeDate(g(iJoined)) }
+      if (!r.cqid)  r.errors.push('cqid is required')
+      if (!r.name)  r.errors.push('name is required')
+      if (!r.email) r.errors.push('email is required')
+      else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email)) r.errors.push('email format invalid')
+      const validRoles = ['super_admin','accounts','team_lead','employee','view_only']
+      if (r.role && !validRoles.includes(r.role)) r.errors.push(`role "${r.role}" invalid`)
+      const validSalTypes = ['fixed','commission_only','fixed_plus_commission','pure_commission','base_plus_commission','fixed_plus_bonus','hourly']
+      if (r.salary_type && !validSalTypes.includes(r.salary_type)) r.errors.push(`salary_type "${r.salary_type}" invalid`)
+      if (r.joined_date && !/^\d{4}-\d{2}-\d{2}$/.test(r.joined_date)) r.errors.push('joined_date must be DD-MM-YYYY (e.g. 18-05-2026)')
+      return finalize(r)
     })
   }
 
   function parseClients(lines: string[][]): ParsedRow[] {
-    const headers = lines[0]
-    const ctx = buildParseCtx()
-    return lines.slice(1).map((cells, i) => {
-      const r = parseRowFromSchema(CLIENT_FIELDS, cells, headers, i + 2, ctx)
-      r.row_id = r.id
-      return r
+    const h = lines[0].map(norm)
+    const idx = (k: string) => h.findIndex(c => c.includes(k))
+    const iId = h.findIndex(c => c === 'id')
+    const iCode = idx('code'), iName = idx('name'), iContact = idx('contact')
+    const iPhone = idx('phone'), iEmail = idx('email'), iAddr = idx('address')
+    const iGst = idx('gst'), iCurr = idx('currency')
+    const iBillingCycle = h.findIndex(c => c === 'billing_cycle' || c === 'billingcycle')
+    const iBillingDay   = h.findIndex(c => c === 'billing_day'   || c === 'billingday')
+
+    return lines.slice(1).map((c, i) => {
+      const g = (j: number) => j >= 0 ? c[j]?.trim() || '' : ''
+      const billingCycle = g(iBillingCycle) || 'monthly'
+      const r: ParsedRow = { ...baseRow(i), row_id: g(iId), code: g(iCode), name: g(iName), contact_name: g(iContact),
+        phone: g(iPhone), email: g(iEmail), address: g(iAddr), gstin: g(iGst),
+        default_currency: g(iCurr) || 'INR',
+        billing_cycle: billingCycle,
+        billing_day: g(iBillingDay) || '1',
+      }
+      if (!r.code) r.errors.push('code is required')
+      if (!r.name) r.errors.push('name is required')
+      const validCycles = ['monthly','weekly','daily','none']
+      if (r.billing_cycle && !validCycles.includes(r.billing_cycle)) r.errors.push(`billing_cycle "${r.billing_cycle}" invalid — use monthly/weekly/daily/none`)
+      return finalize(r)
     })
   }
 
@@ -729,36 +714,68 @@ export default function ImportClient({ clients, services, employees, groups, par
   }
 
   function parseGroups(lines: string[][]): ParsedRow[] {
-    const headers = lines[0]
-    const ctx = buildParseCtx()
-    return lines.slice(1).map((cells, i) => {
-      const r = parseRowFromSchema(GROUP_FIELDS, cells, headers, i + 2, ctx)
-      r.row_id = r.id
-      return r
+    const h = lines[0].map(norm)
+    const idx = (k: string) => h.findIndex(c => c.includes(k))
+    const iId = h.findIndex(c => c === 'id')
+    const iName = idx('name'), iWeight = idx('weight'), iDesc = idx('desc'), iOrd = idx('order')
+
+    return lines.slice(1).map((c, i) => {
+      const g = (j: number) => j >= 0 ? c[j]?.trim() || '' : ''
+      const r: ParsedRow = { ...baseRow(i), row_id: g(iId), name: g(iName), weight: g(iWeight),
+        description: g(iDesc), display_order: g(iOrd) || '0' }
+      if (!r.name) r.errors.push('name is required')
+      if (!r.weight) r.errors.push('weight is required')
+      else if (isNaN(parseFloat(r.weight))) r.errors.push('weight must be a number')
+      return finalize(r)
     })
   }
 
   function parseParameters(lines: string[][]): ParsedRow[] {
-    const headers = lines[0]
-    const ctx = buildParseCtx()
-    return lines.slice(1).map((cells, i) => {
-      const r = parseRowFromSchema(PARAMETER_FIELDS, cells, headers, i + 2, ctx)
-      r.row_id = r.id
-      // Resolve group_id from group_name for downstream insert logic
-      if (r.group_name) r.group_id = groupMap[norm(r.group_name)]
-      return r
+    const h = lines[0].map(norm)
+    // Use EXACT match for 'name' to avoid matching 'group_name'
+    const iId      = h.findIndex(c => c === 'id')
+    const iGroup   = h.findIndex(c => c === 'group_name' || c === 'group')
+    const iName    = h.findIndex(c => c === 'name')          // exact — not group_name
+    const iWeight  = h.findIndex(c => c.includes('weight'))
+    const iDesc    = h.findIndex(c => c.includes('desc'))
+    const iOrd     = h.findIndex(c => c.includes('order'))
+    const iMaster  = h.findIndex(c => c.includes('master') || c.includes('is_master'))
+
+    return lines.slice(1).map((c, i) => {
+      const g = (j: number) => j >= 0 ? c[j]?.trim() || '' : ''
+      const masterVal = g(iMaster)
+      const is_master = masterVal === 'TRUE' || masterVal === 'true' || masterVal === '1' || masterVal === 'yes'
+      const r: ParsedRow = { ...baseRow(i), row_id: g(iId), group_name: g(iGroup), name: g(iName),
+        weight: g(iWeight) || '1', description: g(iDesc), display_order: g(iOrd) || '0', is_master }
+      if (!r.name)       r.errors.push('name is required')
+      if (!r.group_name) r.errors.push('group_name is required')
+      else {
+        r.group_id = groupMap[norm(r.group_name)]
+        if (!r.group_id) r.errors.push(`Group "${r.group_name}" not found — create the group first`)
+      }
+      return finalize(r)
     })
   }
 
   function parseTools(lines: string[][]): ParsedRow[] {
-    const headers = lines[0]
-    const ctx = buildParseCtx()
-    return lines.slice(1).map((cells, i) => {
-      const r = parseRowFromSchema(TOOL_FIELDS, cells, headers, i + 2, ctx)
-      r.row_id = r.id
-      // Resolve group_id from group_name for downstream insert logic
-      if (r.group_name) r.group_id = groupMap[norm(r.group_name)]
-      return r
+    const h = lines[0].map(norm)
+    const idx = (k: string) => h.findIndex(c => c.includes(k))
+    const iId = h.findIndex(c => c === 'id')
+    const iName = idx('name'), iPct = h.findIndex(c => c.includes('percent') || c.includes('pct') || c === 'fixed_percentage')
+    const iGroup = idx('group'), iDesc = idx('desc')
+
+    return lines.slice(1).map((c, i) => {
+      const g = (j: number) => j >= 0 ? c[j]?.trim() || '' : ''
+      const r: ParsedRow = { ...baseRow(i), row_id: g(iId), name: g(iName), fixed_percentage: g(iPct),
+        group_name: g(iGroup), description: g(iDesc) }
+      if (!r.name) r.errors.push('name is required')
+      if (!r.fixed_percentage) r.errors.push('fixed_percentage is required')
+      else if (isNaN(parseFloat(r.fixed_percentage))) r.errors.push('fixed_percentage must be a number')
+      if (r.group_name) {
+        r.group_id = groupMap[norm(r.group_name)]
+        if (!r.group_id) r.warnings.push(`Group "${r.group_name}" not found — tool will be saved without group`)
+      }
+      return finalize(r)
     })
   }
 
@@ -861,35 +878,20 @@ export default function ImportClient({ clients, services, employees, groups, par
     const h = lines[0].map(norm)
     const iRowId = h.findIndex(c => c === 'id')
     const iId    = h.findIndex(c => c === 'task_id')
-    const iTaskNum = h.findIndex(c => c === 'task_number')
-    const iTaskTitle = h.findIndex(c => c === 'task_title')
-    const iTask  = h.findIndex(c => c.includes('task') && !['task_id', 'id', 'task_number', 'task_title', 'task_date'].includes(c))
+    const iTask  = h.findIndex(c => c.includes('task') && c !== 'task_id' && c !== 'id')
     const iDate  = h.findIndex(c => c.includes('date'))
     const iCqid  = h.findIndex(c => c.includes('cqid') || c === 'employee_cqid')
     const iScore = h.findIndex(c => c.includes('score') || c.includes('pct') || c.includes('percent'))
     const iEarn  = h.findIndex(c => c.includes('earn'))
 
-    // Build task lookup from number or title+date for rows without direct task_id
-    const numsToFetch = [...new Set(
-      lines.slice(1).filter(c => !c[iId]?.trim()).map(c => iTaskNum >= 0 ? c[iTaskNum]?.trim() : '').filter(Boolean)
-    )]
+    // Build task lookup from title+date for rows without direct task_id
     const titlesToFetch = [...new Set(
-      lines.slice(1)
-        .filter(c => !c[iId]?.trim() && (iTaskNum < 0 || !c[iTaskNum]?.trim()))
-        .map(c => (iTaskTitle >= 0 ? c[iTaskTitle] : (iTask >= 0 ? c[iTask] : ''))?.trim())
-        .filter(Boolean)
+      lines.slice(1).filter(c => !c[iId]?.trim()).map(c => c[iTask]?.trim()).filter(Boolean)
     )]
-
-    const taskMapNum: Record<string, string> = {}
-    if (numsToFetch.length) {
-      const { data: tasksData } = await supabase.from('tasks').select('id, task_number').in('task_number', numsToFetch)
-      ;(tasksData || []).forEach(t => { taskMapNum[String(t.task_number)] = t.id })
-    }
-
-    const taskMapTitle: Record<string, string> = {}
+    const taskMap: Record<string, string> = {}
     if (titlesToFetch.length) {
       const { data: tasksData } = await supabase.from('tasks').select('id, title, task_date').in('title', titlesToFetch)
-      ;(tasksData || []).forEach(t => { taskMapTitle[`${t.title}|||${t.task_date}`] = t.id })
+      ;(tasksData || []).forEach(t => { taskMap[`${t.title}|||${t.task_date}`] = t.id })
     }
 
     // For param_detail: map CSV column → parameter
@@ -908,8 +910,7 @@ export default function ImportClient({ clients, services, employees, groups, par
         ...baseRow(i),
         row_id: g(iRowId),
         task_id_direct: g(iId),
-        task_number: iTaskNum >= 0 ? g(iTaskNum) : '',
-        task_ref: iTaskTitle >= 0 ? g(iTaskTitle) : (iTask >= 0 ? g(iTask) : ''),
+        task_ref: g(iTask),
         task_date: taskDate,
         employee_cqid: g(iCqid),
         score_percentage: g(iScore),
@@ -920,15 +921,12 @@ export default function ImportClient({ clients, services, employees, groups, par
       // ── Resolve task ──────────────────────────────────────────────────────
       if (r.task_id_direct) {
         r.task_id = r.task_id_direct
-      } else if (r.task_number) {
-        r.task_id = taskMapNum[r.task_number]
-        if (!r.task_id) r.warnings.push(`Task not matched — check task_number`)
       } else {
-        if (!r.task_ref)  r.errors.push('task_number or task_title is required (or provide task_id column)')
+        if (!r.task_ref)  r.errors.push('task_title is required (or provide task_id column)')
         if (!r.task_date) r.errors.push('task_date is required')
         else if (!/^\d{4}-\d{2}-\d{2}$/.test(r.task_date)) r.errors.push('task_date must be DD-MM-YYYY (e.g. 18-05-2026)')
         if (r.task_ref && r.task_date) {
-          r.task_id = taskMapTitle[`${r.task_ref}|||${r.task_date}`]
+          r.task_id = taskMap[`${r.task_ref}|||${r.task_date}`]
           if (!r.task_id) r.warnings.push(`Task not matched — check title & date match exactly`)
         }
       }
@@ -962,7 +960,7 @@ export default function ImportClient({ clients, services, employees, groups, par
     })
   }
 
-  async function parseCashbookEntries(lines: string[][]): Promise<ParsedRow[]> {
+  function parseCashbookEntries(lines: string[][]): ParsedRow[] {
     const h = lines[0].map(norm)
     const iId       = h.findIndex(c => c === 'id')
     const iDate     = h.findIndex(c => c.includes('entry_date') || c.includes('date'))
@@ -974,11 +972,6 @@ export default function ImportClient({ clients, services, employees, groups, par
     const iAmtInr   = h.findIndex(c => c.includes('amount_inr') || c.includes('inr'))
     const iDesc     = h.findIndex(c => c.includes('description') || c.includes('desc'))
     const iRef      = h.findIndex(c => c.includes('reference') || c.includes('ref'))
-    const iInvNum   = h.findIndex(c => c.includes('invoicenumber') || c.includes('invoice_number'))
-
-    const { data: invRows } = await supabase.from('invoices').select('id, invoice_number')
-    const invMap: Record<string, string> = {}
-    ;(invRows || []).forEach(inv => { invMap[inv.invoice_number.toUpperCase()] = inv.id })
 
     return lines.slice(1).map((c, i) => {
       const g = (j: number) => j >= 0 ? c[j]?.trim() || '' : ''
@@ -987,7 +980,6 @@ export default function ImportClient({ clients, services, employees, groups, par
       const currency = g(iCurr) || 'INR'
       const amount   = g(iAmt)
       const amtInr   = g(iAmtInr) || (currency === 'INR' ? amount : '')
-      const refStr = g(iRef).trim()
       const r: ParsedRow = {
         ...baseRow(i), row_id: g(iId),
         entry_date: normalizeDate(g(iDate)),
@@ -997,51 +989,7 @@ export default function ImportClient({ clients, services, employees, groups, par
         bank_account_name: bankName,
         bank_account_id: bankName ? bankAccountMap[norm(bankName)] : undefined,
         amount, currency, amount_inr: amtInr,
-        description: g(iDesc), reference: refStr || null,
-      }
-
-      // ── Resolve reference → client_id / employee_id ───────────────────────
-      // "Company" = internal expense, leave both null (no entity allocation).
-      // CQID pattern   → employee_id (salary / commission payments).
-      // Anything else  → try client name or code → client_id.
-      if (refStr && norm(refStr) !== 'company') {
-        const empId = empMap[norm(refStr)]
-        if (empId) {
-          r.employee_id = empId
-        } else {
-          const clientId = clientMap[norm(refStr)]
-          if (clientId) {
-            r.client_id = clientId
-          } else {
-            r.warnings.push(`Reference "${refStr}" not matched to any client or employee — entry imported without entity link`)
-          }
-        }
-      }
-
-      const providedInvNum = g(iInvNum)
-      
-      if (providedInvNum) {
-        // Strict lookup
-        const strictMatch = invMap[providedInvNum.toUpperCase()]
-        if (strictMatch) {
-          r.invoice_id = strictMatch
-        } else {
-          r.warnings.push(`Invoice number "${providedInvNum}" not found in database. Entry will be imported unlinked.`)
-        }
-      } else {
-        // Legacy fallback to reference parsing
-        if (r.reference) {
-          const refUpper = r.reference.toUpperCase()
-          const matchedInv = Object.keys(invMap).find(num => refUpper.includes(num))
-          if (matchedInv) {
-            r.invoice_id = invMap[matchedInv]
-          }
-        }
-        
-        // Warn if invoice category but no invoice number provided
-        if (norm(catName) === 'invoice' && !r.invoice_id) {
-          r.warnings.push('Invoice payment detected without invoice_number. Auto-linking may be unreliable.')
-        }
+        description: g(iDesc), reference: g(iRef),
       }
       if (!r.entry_date) r.errors.push('entry_date is required')
       else if (!/^\d{4}-\d{2}-\d{2}$/.test(r.entry_date)) r.errors.push('entry_date must be DD-MM-YYYY')
@@ -1220,12 +1168,12 @@ export default function ImportClient({ clients, services, employees, groups, par
       case 'pricing_matrix': parsed = parsePricingMatrix(lines);     break
       case 'jobs':           parsed = parseJobs(lines);              break
       case 'contributions': parsed = await parseContributions(lines); break
-      case 'cashbook_entries': parsed = await parseCashbookEntries(lines);  break
+      case 'cashbook_entries': parsed = parseCashbookEntries(lines);        break
       case 'invoices':         parsed = parseInvoices(lines);               break
       case 'invoice_status':   parsed = await parseInvoiceStatus(lines);    break
       case 'discounts':        parsed = await parseDiscounts(lines);        break
     }
-    if (mode !== 'discounts' && (operation === 'update' || operation === 'delete')) {
+    if (operation === 'update' || operation === 'delete') {
       parsed.forEach(p => {
         if (!p.row_id) {
           p.errors.push('id is required in ' + operation + ' mode')
@@ -1236,7 +1184,7 @@ export default function ImportClient({ clients, services, employees, groups, par
     setRows(parsed)
     setStep('preview')
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, operation, contribSubMode, parameters, clientMap, serviceMap, empMap, groupMap, bankAccountMap, cashCategoryMap])
+  }, [mode, operation, clientMap, serviceMap, empMap, groupMap, bankAccountMap, cashCategoryMap])
 
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; if (f) handleFile(f) }
   const onDrop = (e: React.DragEvent) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f) }
@@ -1310,13 +1258,19 @@ export default function ImportClient({ clients, services, employees, groups, par
         }
         const recs = valid.map(r => ({
           row_id: r.row_id,
-          fields: buildInsertRecord(EMPLOYEE_FIELDS, r),
+          fields: {
+            cqid: r.cqid, name: r.name, email: r.email, phone: r.phone || null,
+            role: r.role || 'employee', salary_type: r.salary_type || 'fixed',
+            base_salary: parseFloat(r.base_salary) || 0,
+            performance_rating: parseFloat(r.performance_rating) || 70,
+            joined_date: r.joined_date || null,
+          },
         }))
         if (operation === 'update') {
           await backupBeforeUpdate(table, recs.map(r => r.row_id))
           await batchUpdate(table, recs)
         } else {
-          await batchInsert(table, recs.map(r => ({ ...r.fields, is_active: r.fields.is_active ?? true })))
+          await batchInsert(table, recs.map(r => ({ ...r.fields, is_active: true })))
         }
         break
       }
@@ -1330,13 +1284,19 @@ export default function ImportClient({ clients, services, employees, groups, par
         }
         const recs = valid.map(r => ({
           row_id: r.row_id,
-          fields: buildInsertRecord(CLIENT_FIELDS, r),
+          fields: {
+            code: r.code, name: r.name, contact_name: r.contact_name || null,
+            phone: r.phone || null, email: r.email || null, address: r.address || null,
+            gstin: r.gstin || null, default_currency: r.default_currency || 'INR',
+            billing_cycle: r.billing_cycle || 'monthly',
+            billing_day: parseInt(r.billing_day) || 1,
+          },
         }))
         if (operation === 'update') {
           await backupBeforeUpdate(table, recs.map(r => r.row_id))
           await batchUpdate(table, recs)
         } else {
-          await batchInsert(table, recs.map(r => ({ ...r.fields, is_active: r.fields.is_active ?? true })))
+          await batchInsert(table, recs.map(r => ({ ...r.fields, is_active: true })))
         }
         break
       }
@@ -1402,13 +1362,16 @@ export default function ImportClient({ clients, services, employees, groups, par
         }
         const recs = valid.map(r => ({
           row_id: r.row_id,
-          fields: buildInsertRecord(GROUP_FIELDS, r),
+          fields: {
+            name: r.name, weight: parseFloat(r.weight), description: r.description || null,
+            display_order: parseInt(r.display_order) || 0,
+          },
         }))
         if (operation === 'update') {
           await backupBeforeUpdate(table, recs.map(r => r.row_id))
           await batchUpdate(table, recs)
         } else {
-          await batchInsert(table, recs.map(r => ({ ...r.fields, is_active: r.fields.is_active ?? true })))
+          await batchInsert(table, recs.map(r => ({ ...r.fields, is_active: true })))
         }
         break
       }
@@ -1422,19 +1385,22 @@ export default function ImportClient({ clients, services, employees, groups, par
         }
         const recs = valid.map(r => ({
           row_id: r.row_id,
-          // buildInsertRecord skips group_name (db:false); add resolved group_id manually
-          fields: { ...buildInsertRecord(PARAMETER_FIELDS, r), group_id: r.group_id } as Record<string, any>,
+          fields: {
+            group_id: r.group_id, name: r.name, is_master: r.is_master === true,
+            weight: parseFloat(r.weight) || 1,
+            description: r.description || null, display_order: parseInt(r.display_order) || 0,
+          },
         }))
         if (operation === 'update') {
           await backupBeforeUpdate(table, recs.map(r => r.row_id))
           await batchUpdate(table, recs)
         } else {
-          const paramRows = recs.map(r => ({ ...r.fields, is_active: r.fields.is_active ?? true }))
+          const paramRows = recs.map(r => ({ ...r.fields, is_active: true }))
           // Try with is_master first; fall back without it if column doesn't exist yet
           const firstBatch = await supabase.from('parameters').insert(paramRows.slice(0, 1)).select('id')
           if (firstBatch.error?.message?.includes('is_master')) {
             // Column not in schema yet — strip is_master and import without it
-            const rowsWithout = (paramRows as any[]).map(({ is_master: _m, ...rest }: any) => rest)
+            const rowsWithout = paramRows.map(({ is_master: _m, ...rest }) => rest)
             await batchInsert('parameters', rowsWithout)
             res.errors.push('⚠️ is_master column not found — run the SQL migration in Supabase to enable master parameter tracking. All other fields imported successfully.')
           } else {
@@ -1455,14 +1421,16 @@ export default function ImportClient({ clients, services, employees, groups, par
         }
         const recs = valid.map(r => ({
           row_id: r.row_id,
-          // buildInsertRecord skips group_name (db:false); add resolved group_id manually
-          fields: { ...buildInsertRecord(TOOL_FIELDS, r), group_id: r.group_id || null } as Record<string, any>,
+          fields: {
+            name: r.name, fixed_percentage: parseFloat(r.fixed_percentage),
+            group_id: r.group_id || null, description: r.description || null,
+          },
         }))
         if (operation === 'update') {
           await backupBeforeUpdate(table, recs.map(r => r.row_id))
           await batchUpdate(table, recs)
         } else {
-          await batchInsert(table, recs.map(r => ({ ...r.fields, is_active: r.fields.is_active ?? true })))
+          await batchInsert(table, recs.map(r => ({ ...r.fields, is_active: true })))
         }
         break
       }
@@ -1495,24 +1463,12 @@ export default function ImportClient({ clients, services, employees, groups, par
       }
       case 'jobs': {
         const table = 'tasks'
-        const affectedMonths: Set<string> = new Set()
-
         if (operation === 'delete') {
           const ids = valid.map(r => r.row_id).filter(Boolean) as string[]
           await backupBeforeUpdate(table, ids)
           await batchDelete(table, ids)
           break
         }
-
-        // Collect affected months from all task records
-        valid.forEach((r: any) => {
-          if (r.task_date) {
-            const d = new Date(r.task_date)
-            const key = `${d.getFullYear()}-${d.getMonth() + 1}`
-            affectedMonths.add(key)
-          }
-        })
-
         if (operation === 'update') {
           // In update mode, respect the CSV's task_number as-is (no auto-assign)
           const recs = valid.map(r => {
@@ -1536,18 +1492,6 @@ export default function ImportClient({ clients, services, employees, groups, par
           })
           await backupBeforeUpdate('tasks', recs.map(r => r.row_id))
           await batchUpdate('tasks', recs)
-
-          // Auto-recalculate payroll for all affected months
-          if (affectedMonths.size > 0) {
-            const months = Array.from(affectedMonths).map(key => {
-              const [year, month] = key.split('-').map(Number)
-              return { month, year }
-            })
-            // Fire-and-forget
-            recalculatePayrollForMonths({ months, source: 'csv_task_import' }).catch(() => {
-              // Silently ignore payroll errors
-            })
-          }
         } else {
           // Base columns guaranteed to exist in schema
           const baseRows = valid.map(r => ({
@@ -1590,24 +1534,12 @@ export default function ImportClient({ clients, services, employees, groups, par
       }
       case 'contributions': {
         const table = 'contribution_scores'
-        const affectedMonths: Set<string> = new Set()
-
         if (operation === 'delete') {
           const ids = valid.map(r => r.row_id).filter(Boolean) as string[]
           await backupBeforeUpdate(table, ids)
           await batchDelete(table, ids)
           break
         }
-
-        // Collect affected months from all contribution records
-        valid.forEach((r: any) => {
-          if (r.task_date) {
-            const d = new Date(r.task_date)
-            const key = `${d.getFullYear()}-${d.getMonth() + 1}`
-            affectedMonths.add(key)
-          }
-        })
-
         if (operation === 'update') {
           // Simple update path: update contribution_scores directly by id
           const recs = valid.map(r => ({
@@ -1617,7 +1549,6 @@ export default function ImportClient({ clients, services, employees, groups, par
               employee_id: r.employee_id,
               score_percentage: parseFloat(r.score_percentage) || 0,
               earnings_inr: parseFloat(r.earnings) || 0,
-              is_manual_override: true,
               calculated_at: new Date().toISOString(),
             },
           }))
@@ -1630,7 +1561,6 @@ export default function ImportClient({ clients, services, employees, groups, par
             employee_id: r.employee_id,
             score_percentage: 0,
             earnings_inr: parseFloat(r.earnings) || 0,
-            is_manual_override: true,
             calculated_at: new Date().toISOString(),
           })), 'task_id,employee_id')
         } else if (contribSubMode === 'score_pct') {
@@ -1640,7 +1570,6 @@ export default function ImportClient({ clients, services, employees, groups, par
             employee_id: r.employee_id,
             score_percentage: parseFloat(r.score_percentage) || 0,
             earnings_inr: parseFloat(r.earnings) || 0,
-            is_manual_override: true,
             calculated_at: new Date().toISOString(),
           })), 'task_id,employee_id')
         } else {
@@ -1661,20 +1590,8 @@ export default function ImportClient({ clients, services, employees, groups, par
             }
           }
           if (contribRows.length) {
-            await batchInsert('contributions', contribRows, 'task_id,employee_id,parameter_id')
+            await batchInsert('contributions', contribRows)
           }
-        }
-
-        // Auto-recalculate payroll for all affected months
-        if (affectedMonths.size > 0) {
-          const months = Array.from(affectedMonths).map(key => {
-            const [year, month] = key.split('-').map(Number)
-            return { month, year }
-          })
-          // Fire-and-forget; don't block CSV import if payroll recalc fails
-          recalculatePayrollForMonths({ months, source: 'csv_contribution_import' }).catch(() => {
-            // Silently ignore payroll errors; CSV import succeeded
-          })
         }
         break
       }
@@ -1699,71 +1616,13 @@ export default function ImportClient({ clients, services, employees, groups, par
             amount_inr:      parseFloat(r.amount_inr || r.amount) || 0,
             description:     r.description || null,
             reference:       r.reference || null,
-            invoice_id:      r.invoice_id || null,
-            client_id:       r.client_id   || null,  // resolved from reference column
-            employee_id:     r.employee_id || null,  // resolved from reference column
           },
         }))
         if (operation === 'update') {
           await backupBeforeUpdate(table, recs.map(r => r.row_id).filter(Boolean) as string[])
           await batchUpdate(table, recs.filter(r => r.row_id) as any)
         } else {
-          // Custom batch insert to handle auto-allocation of Salary entries
-          const salaryCatId = Object.entries(cashCategoryMap).find(([k]) => k.includes('salary') || k.includes('salaries'))?.[1]
-          
-          for (let i = 0; i < recs.length; i += BATCH) {
-            const b = recs.slice(i, i + BATCH).map(r => r.fields)
-            const { data, error } = await supabase.from(table).insert(b).select('id, category_id, reference, amount_inr')
-            if (error) { 
-              res.errors.push(`Batch ${Math.floor(i/BATCH)+1}: ${error.message}`)
-              res.skipped += b.length 
-            } else {
-              res.inserted += data?.length || 0
-              
-              if (data && salaryCatId) {
-                const salaryEntries = data.filter(d => d.category_id === salaryCatId && d.reference)
-                for (const entry of salaryEntries) {
-                  const match = entry.reference.match(/(CQID\d{3})/i)
-                  if (match) {
-                    const cqid = match[1].toUpperCase()
-                    const empId = empMap[norm(cqid)]
-                    if (empId) {
-                      // Fetch pending payrolls for employee (oldest first)
-                      const { data: payrolls } = await supabase.from('payroll')
-                        .select('id, net_salary')
-                        .eq('employee_id', empId)
-                        .eq('status', 'pending')
-                        .order('created_at', { ascending: true })
-                      
-                      let remaining = Number(entry.amount_inr)
-                      for (const p of (payrolls || [])) {
-                        if (remaining <= 0.01) break
-                        
-                        const pNet = Number(p.net_salary)
-                        const { data: allocs } = await supabase.from('cashbook_payroll_allocations')
-                          .select('allocated_amount')
-                          .eq('payroll_id', p.id)
-                          .is('deleted_at', null)
-                        
-                        const alreadyAllocated = allocs?.reduce((sum, a) => sum + Number(a.allocated_amount), 0) || 0
-                        const needed = Math.max(0, pNet - alreadyAllocated)
-                        
-                        if (needed > 0.01) {
-                          const allocAmt = Math.min(remaining, needed)
-                          await supabase.from('cashbook_payroll_allocations').insert({
-                            cashbook_entry_id: entry.id,
-                            payroll_id: p.id,
-                            allocated_amount: allocAmt
-                          })
-                          remaining -= allocAmt
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
+          await batchInsert(table, recs.map(r => r.fields))
         }
         break
       }
@@ -1805,89 +1664,40 @@ export default function ImportClient({ clients, services, employees, groups, par
       }
 
       case 'discounts': {
-        // Upsert by invoice_id — no id column needed in CSV.
-        // Also syncs invoices.discount_amount + recalculates invoices.total_amount
-        // so the discount is reflected in the invoice detail view.
-        const invoiceIds = valid.map(r => r.invoice_id).filter(Boolean) as string[]
-
-        // Fetch existing discount_logs and invoice financials in parallel
-        const [existingLogsRes, invoiceDataRes] = await Promise.all([
-          invoiceIds.length
-            ? supabase.from('discount_logs').select('id, invoice_id').in('invoice_id', invoiceIds)
-            : Promise.resolve({ data: [] as any[] }),
-          invoiceIds.length
-            ? supabase.from('invoices').select('id, subtotal, tax_amount, previous_balance, total_amount, discount_amount').in('id', invoiceIds)
-            : Promise.resolve({ data: [] as any[] }),
-        ])
-
-        const existingByInvoice = new Map<string, string>()
-        ;((existingLogsRes as any).data || []).forEach((row: any) => existingByInvoice.set(row.invoice_id, row.id))
-
-        const invoiceFinancials = new Map<string, { subtotal: number; tax_amount: number; previous_balance: number; total_amount: number; discount_amount: number }>()
-        ;((invoiceDataRes as any).data || []).forEach((inv: any) => invoiceFinancials.set(inv.id, {
-          subtotal:         inv.subtotal         || 0,
-          tax_amount:       inv.tax_amount       || 0,
-          previous_balance: inv.previous_balance || 0,
-          total_amount:     inv.total_amount     || 0,
-          discount_amount:  inv.discount_amount  || 0,
-        }))
-
-        for (const r of valid) {
-          if (!r.invoice_id) { res.skipped += 1; continue }
+        const table = 'discount_logs'
+        if (operation === 'delete') {
+          const ids = valid.map(r => r.row_id).filter(Boolean) as string[]
+          await backupBeforeUpdate(table, ids)
+          await batchDelete(table, ids)
+          break
+        }
+        const recs = valid.map(r => {
           const amount = parseFloat(r.discount_amount) || 0
           const pct    = parseFloat(r.discount_percentage) || 0
           const total  = parseFloat(r.invoice_total) || 0
+          // Derive whichever wasn't provided
           let finalAmount     = amount
           let finalPercentage = pct
           if (!finalAmount && finalPercentage && total > 0)     finalAmount     = (finalPercentage / 100) * total
           if (!finalPercentage && finalAmount && total > 0)     finalPercentage = (finalAmount   / total) * 100
-
-          const logFields = {
-            invoice_id:          r.invoice_id,
-            client_id:           r.client_id || null,
-            discount_amount:     finalAmount,
-            discount_percentage: finalPercentage,
-            invoice_total:       total,
-            reason:              r.reason || 'Bulk import',
-            created_at:          r.discount_date ? new Date(r.discount_date).toISOString() : new Date().toISOString(),
+          return {
+            row_id: r.row_id,
+            fields: {
+              invoice_id:          r.invoice_id || null,
+              client_id:           r.client_id,
+              discount_amount:     finalAmount,
+              discount_percentage: finalPercentage,
+              invoice_total:       total,
+              reason:              r.reason || 'Bulk import',
+              created_at:          r.discount_date ? new Date(r.discount_date).toISOString() : new Date().toISOString(),
+            },
           }
-
-          // Upsert discount_logs
-          const existingId = existingByInvoice.get(r.invoice_id)
-          const { error: logErr } = existingId
-            ? await supabase.from('discount_logs').update(logFields).eq('id', existingId)
-            : await supabase.from('discount_logs').insert(logFields)
-
-          if (logErr) { res.errors.push(`${r.invoice_ref}: ${logErr.message}`); res.skipped += 1; continue }
-
-          // Sync invoices.discount_amount + recalculate total_amount.
-          // For historical invoices (subtotal=0), derive the pre-discount base
-          // from current total_amount + current discount_amount (delta approach).
-          const fin = invoiceFinancials.get(r.invoice_id)
-          const sub      = fin?.subtotal || 0
-          const tax      = fin?.tax_amount || 0
-          const prevBal  = fin?.previous_balance || 0
-          const oldTotal = fin?.total_amount || 0
-          const oldDisc  = fin?.discount_amount || 0
-
-          let newTotal: number
-          if (sub > 0) {
-            // Full financials available — recalculate properly
-            newTotal = Math.max(0, sub + tax - finalAmount + prevBal)
-          } else {
-            // Historical import: only total_amount is set, no subtotal breakdown.
-            // Derive pre-discount base and apply new discount delta.
-            const preDiscountBase = oldTotal + oldDisc
-            newTotal = Math.max(0, preDiscountBase - finalAmount)
-          }
-
-          const { error: invErr } = await supabase
-            .from('invoices')
-            .update({ discount_amount: finalAmount, total_amount: newTotal })
-            .eq('id', r.invoice_id)
-
-          if (invErr) { res.errors.push(`${r.invoice_ref} (invoice sync): ${invErr.message}`); res.skipped += 1 }
-          else res.inserted += 1
+        })
+        if (operation === 'update') {
+          await backupBeforeUpdate(table, recs.map(r => r.row_id).filter(Boolean) as string[])
+          await batchUpdate(table, recs.filter(r => r.row_id) as any)
+        } else {
+          await batchInsert(table, recs.map(r => r.fields))
         }
         break
       }
@@ -2008,7 +1818,6 @@ export default function ImportClient({ clients, services, employees, groups, par
       jobs:          'Invoice items, contributions, and contribution scores for these tasks will also be deleted.',
       employees:     'Contribution scores for these employees will also be deleted.',
       groups:        'All parameters (and their contributions) inside these groups will also be deleted.',
-      invoices:      'Invoice line items and allocations will be deleted. Linked Cash Book payments are KEPT but unlinked from the invoice.',
     }
     const extraWarning = cascadeWarnings[cleanupMode] ? `\n\n⚠️ ${cascadeWarnings[cleanupMode]}` : ''
     if (!window.confirm(`Delete ${ids.length} record${ids.length !== 1 ? 's' : ''}? This cannot be undone.${extraWarning}`)) return
@@ -2020,15 +1829,6 @@ export default function ImportClient({ clients, services, employees, groups, par
       for (let i = 0; i < values.length; i += BATCH) {
         const { error } = await supabase.from(table).delete().in(field, values.slice(i, i + BATCH))
         if (error) throw new Error(`${table}: ${error.message}`)
-      }
-    }
-
-    // Unlink (set a FK column to null) instead of deleting — used to preserve
-    // independent records (e.g. cashbook payments) while removing the parent.
-    const batchUnlink = async (table: string, field: string, values: string[]) => {
-      for (let i = 0; i < values.length; i += BATCH) {
-        const { error } = await supabase.from(table).update({ [field]: null }).in(field, values.slice(i, i + BATCH))
-        if (error) throw new Error(`${table} (unlink): ${error.message}`)
       }
     }
 
@@ -2058,19 +1858,6 @@ export default function ImportClient({ clients, services, employees, groups, par
         // Delete contribution_scores for these employees
         await batchDelete('contribution_scores', 'employee_id', ids)
         await batchDelete('contributions', 'employee_id', ids)
-      }
-      if (cleanupMode === 'cashbook_entries') {
-        // Delete any related allocations before deleting the entries to satisfy foreign key constraint
-        await batchDelete('cashbook_invoice_allocations', 'cashbook_entry_id', ids)
-      }
-      if (cleanupMode === 'invoices') {
-        // Remove invoice-only children first…
-        await batchDelete('invoice_items', 'invoice_id', ids)
-        await batchDelete('cashbook_invoice_allocations', 'invoice_id', ids)
-        await batchDelete('discount_logs', 'invoice_id', ids)
-        // …then UNLINK cashbook payments (keep the money records — they are real
-        // entries in your books, just no longer tied to a deleted invoice).
-        await batchUnlink('cashbook_entries', 'invoice_id', ids)
       }
 
       // ── Main delete ─────────────────────────────────────────────────────────
@@ -2465,27 +2252,6 @@ export default function ImportClient({ clients, services, employees, groups, par
         </tr>))}</tbody></table>
     )
 
-    if (mode === 'discounts') return (
-      <table className="w-full text-xs"><thead><tr className="border-b border-border bg-background/40">
-        <th className={thCls}>#</th><th className={thCls}>St</th><th className={thCls}>Invoice #</th>
-        <th className={thCls}>Client</th><th className={thCls+' text-right'}>Invoice Total</th>
-        <th className={thCls+' text-right'}>Discount ₹</th><th className={thCls+' text-right'}>Discount %</th>
-        <th className={thCls}>Reason</th><th className={thCls}>Date</th><th className={thCls}>Issues</th>
-      </tr></thead><tbody>{rows.map(r => (
-        <tr key={r._line} className={`border-b border-border/40 ${r.status==='error'?'bg-red-500/5':r.status==='warn'?'bg-yellow-500/5':''}`}>
-          <td className={tdCls+' text-muted-foreground'}>{r._line}</td>
-          <td className={tdCls}><StatusBadge status={r.status}/></td>
-          <td className={tdCls+' font-mono text-violet-300'}>{r.invoice_id?<span className="text-green-400">{r.invoice_ref}</span>:<span className="text-red-400">{r.invoice_ref||'—'}</span>}</td>
-          <td className={tdCls}>{r.client_id?<span className="text-green-400">{r.client_ref||'✓'}</span>:<span className="text-red-400">{r.client_ref||'—'}</span>}</td>
-          <td className={tdCls+' text-right font-mono'}>{r.invoice_total?`₹${parseFloat(r.invoice_total).toLocaleString('en-IN')}`:'—'}</td>
-          <td className={tdCls+' text-right font-mono'}>{r.discount_amount?`₹${parseFloat(r.discount_amount).toLocaleString('en-IN')}`:'—'}</td>
-          <td className={tdCls+' text-right font-mono'}>{r.discount_percentage?`${r.discount_percentage}%`:'—'}</td>
-          <td className={tdCls+' text-muted-foreground max-w-[120px] truncate'}>{r.reason||'—'}</td>
-          <td className={tdCls+' font-mono'}>{r.discount_date||'—'}</td>
-          <IssueCell row={r}/>
-        </tr>))}</tbody></table>
-    )
-
     // contributions
     const visibleParams = contribSubMode === 'param_detail' ? parameters.slice(0, 6) : []
     return (
@@ -2694,35 +2460,27 @@ export default function ImportClient({ clients, services, employees, groups, par
           {/* Drop zone + operation toggle */}
           <div className="space-y-3">
             <div className="flex items-center gap-2">
-              {mode === 'discounts' ? (
-                <span className="text-xs text-muted-foreground px-2 py-1 rounded-lg border border-foreground/15 bg-foreground/[0.04]">
-                  ↕ Auto upsert by invoice number
+              <span className="text-xs text-muted-foreground">Operation:</span>
+              <div className="flex items-center border border-foreground/15 rounded-lg overflow-hidden h-[30px]">
+                <button onClick={() => setOperation('insert')} className={`px-3 text-xs flex items-center gap-1.5 transition-colors h-full ${operation === 'insert' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                  + Insert new
+                </button>
+                <button onClick={() => setOperation('update')} className={`px-3 text-xs flex items-center gap-1.5 transition-colors border-l border-foreground/15 h-full ${operation === 'update' ? 'bg-amber-500/15 text-amber-300' : 'text-muted-foreground hover:text-foreground'}`}>
+                  ✎ Update existing
+                </button>
+                <button onClick={() => setOperation('delete')} className={`px-3 text-xs flex items-center gap-1.5 transition-colors border-l border-foreground/15 ${operation === 'delete' ? 'bg-red-500/15 text-red-300' : 'text-muted-foreground hover:text-foreground'}`}>
+                  🗑 Delete
+                </button>
+              </div>
+              {operation === 'update' && (
+                <span className="text-[10px] text-amber-400/80 ml-2">
+                  Requires <code className="font-mono">id</code> column. Auto-backs up before applying.
                 </span>
-              ) : (
-                <>
-                  <span className="text-xs text-muted-foreground">Operation:</span>
-                  <div className="flex items-center border border-foreground/15 rounded-lg overflow-hidden h-[30px]">
-                    <button onClick={() => setOperation('insert')} className={`px-3 text-xs flex items-center gap-1.5 transition-colors h-full ${operation === 'insert' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-                      + Insert new
-                    </button>
-                    <button onClick={() => setOperation('update')} className={`px-3 text-xs flex items-center gap-1.5 transition-colors border-l border-foreground/15 h-full ${operation === 'update' ? 'bg-amber-500/15 text-amber-300' : 'text-muted-foreground hover:text-foreground'}`}>
-                      ✎ Update existing
-                    </button>
-                    <button onClick={() => setOperation('delete')} className={`px-3 text-xs flex items-center gap-1.5 transition-colors border-l border-foreground/15 ${operation === 'delete' ? 'bg-red-500/15 text-red-300' : 'text-muted-foreground hover:text-foreground'}`}>
-                      🗑 Delete
-                    </button>
-                  </div>
-                  {operation === 'update' && (
-                    <span className="text-[10px] text-amber-400/80 ml-2">
-                      Requires <code className="font-mono">id</code> column. Auto-backs up before applying.
-                    </span>
-                  )}
-                  {operation === 'delete' && (
-                    <span className="text-[10px] text-red-400/80 ml-2">
-                      ⚠ Destructive. Requires <code className="font-mono">id</code> column. Backup auto-downloaded before delete. Only the <code className="font-mono">id</code> column is read.
-                    </span>
-                  )}
-                </>
+              )}
+              {operation === 'delete' && (
+                <span className="text-[10px] text-red-400/80 ml-2">
+                  ⚠ Destructive. Requires <code className="font-mono">id</code> column. Backup auto-downloaded before delete. Only the <code className="font-mono">id</code> column is read.
+                </span>
               )}
             </div>
             <div
@@ -2752,177 +2510,7 @@ export default function ImportClient({ clients, services, employees, groups, par
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                 Download {MODES.find(m => m.key === mode)?.label} Template
               </button>
-              {/* Export with optional filters */}
-              <div className="mt-3 space-y-2">
-                {/* Filter toggle */}
-                <button
-                  type="button"
-                  onClick={() => setExportFilterOpen(o => !o)}
-                  className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z"/></svg>
-                  {exportFilterOpen ? 'Hide filters' : 'Filter export'}
-                  {(() => {
-                    const n = Object.values(exportFilters).filter(Boolean).length
-                    return n > 0 ? <span className="ml-1 px-1.5 py-0.5 rounded-full bg-violet-500/20 text-violet-400 text-[10px] font-semibold">{n}</span> : null
-                  })()}
-                </button>
-
-                {exportFilterOpen && (
-                  <div className="bg-foreground/[0.03] border border-border/40 rounded-lg p-3 space-y-2">
-                    {/* is_active — employees, clients, services */}
-                    {['employees','clients','services'].includes(mode) && (
-                      <div>
-                        <label className="text-[10px] text-muted-foreground mb-1 block">Status</label>
-                        <select value={exportFilters.isActive} onChange={e => setExportFilters(f => ({ ...f, isActive: e.target.value }))}
-                          className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60">
-                          <option value="">All</option>
-                          <option value="true">Active only</option>
-                          <option value="false">Inactive only</option>
-                        </select>
-                      </div>
-                    )}
-                    {/* Client — jobs, invoices, invoice_status, discounts, pricing_matrix, contributions */}
-                    {['jobs','invoices','invoice_status','discounts','pricing_matrix','contributions'].includes(mode) && (
-                      <div>
-                        <label className="text-[10px] text-muted-foreground mb-1 block">Client</label>
-                        <select value={exportFilters.clientId} onChange={e => setExportFilters(f => ({ ...f, clientId: e.target.value }))}
-                          className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60">
-                          <option value="">All clients</option>
-                          {clients.map(c => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
-                        </select>
-                      </div>
-                    )}
-                    {/* Service — jobs, contributions */}
-                    {['jobs','contributions'].includes(mode) && (
-                      <div>
-                        <label className="text-[10px] text-muted-foreground mb-1 block">Service</label>
-                        <select value={exportFilters.serviceId} onChange={e => setExportFilters(f => ({ ...f, serviceId: e.target.value }))}
-                          className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60">
-                          <option value="">All services</option>
-                          {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                        </select>
-                      </div>
-                    )}
-                    {/* Employee — contributions */}
-                    {mode === 'contributions' && (
-                      <div>
-                        <label className="text-[10px] text-muted-foreground mb-1 block">Employee</label>
-                        <select value={exportFilters.employeeId} onChange={e => setExportFilters(f => ({ ...f, employeeId: e.target.value }))}
-                          className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60">
-                          <option value="">All employees</option>
-                          {employees.map(e => <option key={e.id} value={e.id}>{e.cqid} — {e.name}</option>)}
-                        </select>
-                      </div>
-                    )}
-                    {/* Parameters — contributions param_detail mode */}
-                    {mode === 'contributions' && contribSubMode === 'param_detail' && (
-                      <div>
-                        <label className="text-[10px] text-muted-foreground mb-1 block">Parameters (optional)</label>
-                        <div className="space-y-1 max-h-40 overflow-y-auto bg-background border border-border rounded-lg p-2">
-                          {parameters.length === 0 ? (
-                            <p className="text-[10px] text-muted-foreground px-1 py-1">No parameters available</p>
-                          ) : (
-                            parameters.map(p => (
-                              <label key={p.id} className="flex items-center gap-2 px-1 py-1 text-[10px] cursor-pointer hover:bg-foreground/5 rounded">
-                                <input
-                                  type="checkbox"
-                                  checked={exportFilters.parameterIds.includes(p.id)}
-                                  onChange={e => {
-                                    if (e.target.checked) {
-                                      setExportFilters(f => ({ ...f, parameterIds: [...f.parameterIds, p.id] }))
-                                    } else {
-                                      setExportFilters(f => ({ ...f, parameterIds: f.parameterIds.filter(id => id !== p.id) }))
-                                    }
-                                  }}
-                                  className="accent-violet-500"
-                                />
-                                <span className="text-foreground">{p.name}</span>
-                              </label>
-                            ))
-                          )}
-                        </div>
-                        {exportFilters.parameterIds.length > 0 && (
-                          <p className="text-[10px] text-violet-400 mt-1">
-                            {exportFilters.parameterIds.length} parameter{exportFilters.parameterIds.length !== 1 ? 's' : ''} selected
-                          </p>
-                        )}
-                      </div>
-                    )}
-                    {/* Task number — jobs, contributions */}
-                    {['jobs','contributions'].includes(mode) && (
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="text-[10px] text-muted-foreground mb-1 block">Task # from</label>
-                          <input type="number" min="1" placeholder="e.g. 1000"
-                            value={exportFilters.taskNumberFrom}
-                            onChange={e => setExportFilters(f => ({ ...f, taskNumberFrom: e.target.value }))}
-                            className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60" />
-                        </div>
-                        <div>
-                          <label className="text-[10px] text-muted-foreground mb-1 block">Task # to</label>
-                          <input type="number" min="1" placeholder="e.g. 1200"
-                            value={exportFilters.taskNumberTo}
-                            onChange={e => setExportFilters(f => ({ ...f, taskNumberTo: e.target.value }))}
-                            className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60" />
-                        </div>
-                      </div>
-                    )}
-                    {/* Status — jobs, invoices, invoice_status */}
-                    {['jobs','invoices','invoice_status'].includes(mode) && (
-                      <div>
-                        <label className="text-[10px] text-muted-foreground mb-1 block">Status</label>
-                        <select value={exportFilters.status} onChange={e => setExportFilters(f => ({ ...f, status: e.target.value }))}
-                          className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60">
-                          <option value="">All statuses</option>
-                          {mode === 'jobs'
-                            ? ['pending','in_progress','done','invoiced','cancelled'].map(s => <option key={s} value={s}>{s.replace('_',' ')}</option>)
-                            : ['draft','reviewed','sent','partial','paid','overdue','cancelled','bad_debt'].map(s => <option key={s} value={s}>{s}</option>)
-                          }
-                        </select>
-                      </div>
-                    )}
-                    {/* Entry type — cashbook */}
-                    {mode === 'cashbook_entries' && (
-                      <div>
-                        <label className="text-[10px] text-muted-foreground mb-1 block">Type</label>
-                        <select value={exportFilters.entryType} onChange={e => setExportFilters(f => ({ ...f, entryType: e.target.value }))}
-                          className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60">
-                          <option value="">All</option>
-                          <option value="income">Income</option>
-                          <option value="expense">Expense</option>
-                        </select>
-                      </div>
-                    )}
-                    {/* Date range — transactional modes */}
-                    {['jobs','invoices','invoice_status','cashbook_entries','discounts','contributions'].includes(mode) && (
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="text-[10px] text-muted-foreground mb-1 block">
-                            {mode === 'contributions' ? 'Task date from' : 'Date from'}
-                          </label>
-                          <input type="date" value={exportFilters.dateFrom} onChange={e => setExportFilters(f => ({ ...f, dateFrom: e.target.value }))}
-                            className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60" />
-                        </div>
-                        <div>
-                          <label className="text-[10px] text-muted-foreground mb-1 block">
-                            {mode === 'contributions' ? 'Task date to' : 'Date to'}
-                          </label>
-                          <input type="date" value={exportFilters.dateTo} onChange={e => setExportFilters(f => ({ ...f, dateTo: e.target.value }))}
-                            className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1 focus:outline-none focus:border-violet-500/60" />
-                        </div>
-                      </div>
-                    )}
-                    {/* Clear filters */}
-                    {Object.values(exportFilters).some(Boolean) && (
-                      <button type="button" onClick={() => setExportFilters(EXPORT_FILTER_EMPTY)}
-                        className="text-[10px] text-red-400 hover:text-red-300 transition-colors">
-                        × Clear all filters
-                      </button>
-                    )}
-                  </div>
-                )}
-
+              <div className="mt-2 flex">
                 <button
                   type="button"
                   onClick={() => exportCurrentData(mode)}
@@ -2972,42 +2560,32 @@ export default function ImportClient({ clients, services, employees, groups, par
                 ))}
 
                 {/* Dynamic template download for this sub-mode */}
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => {
-                      let header = '', example = ''
-                      if (contribSubMode === 'earnings_only') {
-                        header = 'id,task_id,task_number,task_title,task_date,employee_cqid,earnings_inr'
-                        example = ['"","","1042","Social Media Pack Jun","2026-05-01","CQ001","3000"', '"","","1042","Social Media Pack Jun","2026-05-01","CQ002","2000"'].join('\n')
-                      } else if (contribSubMode === 'score_pct') {
-                        header = 'id,task_id,task_number,task_title,task_date,employee_cqid,score_percentage,earnings_inr'
-                        example = ['"","","1042","Social Media Pack Jun","2026-05-01","CQ001","60","3000"', '"","","1042","Social Media Pack Jun","2026-05-01","CQ002","40","2000"'].join('\n')
-                      } else {
-                        const paramZeros = parameters.map(() => '0').join(',')
-                        header = `id,task_id,task_number,task_title,task_date,employee_cqid,${parameters.map(p => p.name).join(',')}`
-                        example = `"","","1042","Social Media Pack Jun","2026-05-01","CQ001",${paramZeros}\n"","","1042","Social Media Pack Jun","2026-05-01","CQ002",${paramZeros}`
-                      }
-                      const blob = new Blob([header + '\n' + example], { type: 'text/csv;charset=utf-8;' })
-                      const a = document.createElement('a')
-                      a.href = URL.createObjectURL(blob)
-                      a.download = `contributions_${contribSubMode}_template.csv`
-                      a.click()
-                      URL.revokeObjectURL(a.href)
-                    }}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-foreground/[0.04] border border-border/40 text-foreground text-xs font-medium hover:bg-foreground/[0.08] transition-colors"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                    Blank Template
-                  </button>
-                  <button
-                    onClick={generateContribTemplate}
-                    disabled={contribTemplateLoading}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-violet-600/20 border border-violet-500/30 text-violet-300 text-xs font-medium hover:bg-violet-600/30 transition-colors disabled:opacity-50"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    {contribTemplateLoading ? 'Generating…' : 'Pre-fill with Jobs'}
-                  </button>
-                </div>
+                <button
+                  onClick={() => {
+                    let header = '', example = ''
+                    if (contribSubMode === 'earnings_only') {
+                      header = 'id,task_id,task_title,task_date,employee_cqid,earnings_inr'
+                      example = ['"","","Social Media Pack Jun","2026-05-01","CQ001","3000"', '"","","Social Media Pack Jun","2026-05-01","CQ002","2000"'].join('\n')
+                    } else if (contribSubMode === 'score_pct') {
+                      header = 'id,task_id,task_title,task_date,employee_cqid,score_percentage,earnings_inr'
+                      example = ['"","","Social Media Pack Jun","2026-05-01","CQ001","60","3000"', '"","","Social Media Pack Jun","2026-05-01","CQ002","40","2000"'].join('\n')
+                    } else {
+                      const paramZeros = parameters.map(() => '0').join(',')
+                      header = `id,task_id,task_title,task_date,employee_cqid,${parameters.map(p => p.name).join(',')}`
+                      example = `"","","Social Media Pack Jun","2026-05-01","CQ001",${paramZeros}\n"","","Social Media Pack Jun","2026-05-01","CQ002",${paramZeros}`
+                    }
+                    const blob = new Blob([header + '\n' + example], { type: 'text/csv;charset=utf-8;' })
+                    const a = document.createElement('a')
+                    a.href = URL.createObjectURL(blob)
+                    a.download = `contributions_${contribSubMode}_template.csv`
+                    a.click()
+                    URL.revokeObjectURL(a.href)
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-600/20 border border-violet-500/30 text-violet-300 text-xs font-medium hover:bg-violet-600/30 transition-colors"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                  Download {contribSubMode === 'earnings_only' ? 'Earnings-Only' : contribSubMode === 'score_pct' ? 'Score %' : 'Parameter Detail'} Template
+                </button>
 
                 {contribSubMode === 'param_detail' && (
                   <div className="text-[11px] text-muted-foreground bg-background/40 rounded-lg p-2 space-y-0.5">
@@ -3026,82 +2604,6 @@ export default function ImportClient({ clients, services, employees, groups, par
                 {(contribSubMode === 'score_pct' || contribSubMode === 'earnings_only') && (
                   <p className="text-[11px] text-blue-400">💡 <strong>task_id</strong> column: paste the Supabase task ID directly to skip title+date matching. Leave blank to match by title+date.</p>
                 )}
-              </div>
-            )}
-
-            {/* Discount template generator from invoices */}
-            {mode === 'discounts' && (
-              <div className="bg-card border border-border rounded-xl p-4 space-y-3">
-                <div>
-                  <p className="text-sm font-semibold">Generate from invoices</p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">Filter your invoices and download a pre-filled discount template — just add the discount amount and reason.</p>
-                </div>
-
-                {/* Client filter */}
-                <div>
-                  <label className="text-[11px] text-muted-foreground mb-1 block">Client</label>
-                  <select
-                    value={discountFilter.clientId}
-                    onChange={e => setDiscountFilter(f => ({ ...f, clientId: e.target.value }))}
-                    className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus:border-violet-500/60"
-                  >
-                    <option value="">All clients</option>
-                    {clients.map(c => (
-                      <option key={c.id} value={c.id}>{c.name} ({c.code})</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Date range */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[11px] text-muted-foreground mb-1 block">Issue date from</label>
-                    <input
-                      type="date"
-                      value={discountFilter.dateFrom}
-                      onChange={e => setDiscountFilter(f => ({ ...f, dateFrom: e.target.value }))}
-                      className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus:border-violet-500/60"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11px] text-muted-foreground mb-1 block">Issue date to</label>
-                    <input
-                      type="date"
-                      value={discountFilter.dateTo}
-                      onChange={e => setDiscountFilter(f => ({ ...f, dateTo: e.target.value }))}
-                      className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus:border-violet-500/60"
-                    />
-                  </div>
-                </div>
-
-                {/* Status filter */}
-                <div>
-                  <label className="text-[11px] text-muted-foreground mb-1 block">Status</label>
-                  <select
-                    value={discountFilter.status}
-                    onChange={e => setDiscountFilter(f => ({ ...f, status: e.target.value }))}
-                    className="w-full text-xs bg-background border border-border rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus:border-violet-500/60"
-                  >
-                    <option value="">All statuses</option>
-                    {['draft','reviewed','sent','partial','paid','overdue','cancelled','bad_debt'].map(s => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={generateDiscountTemplate}
-                  disabled={discountTemplateLoading}
-                  className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 text-sm font-medium hover:bg-emerald-600/30 transition-colors disabled:opacity-50"
-                >
-                  <Download className="w-4 h-4" />
-                  {discountTemplateLoading ? 'Loading invoices…' : 'Download Pre-filled Template'}
-                </button>
-
-                <p className="text-[10px] text-muted-foreground/60">
-                  The CSV will have one row per invoice with <code className="font-mono">invoice_number</code>, <code className="font-mono">invoice_total</code>, and <code className="font-mono">client_name_or_code</code> pre-filled. Add <code className="font-mono">discount_amount</code> or <code className="font-mono">discount_percentage</code> and import it back.
-                </p>
               </div>
             )}
 

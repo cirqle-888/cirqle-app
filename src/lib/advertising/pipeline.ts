@@ -143,7 +143,13 @@ export async function ingestMetrics(
       })
       throw new Error(`ad_daily_metrics upsert failed: ${upsertErr.message} (code: ${upsertErr.code})`)
     } else {
-      // 5. Fire events and check thresholds
+      // 5. Fire events and check thresholds.
+      // Campaign names make the alerts readable; deleted/archived campaigns
+      // never alert (select * keeps this working before the archive migration).
+      const { data: projMeta } = await supabase
+        .from('ad_projects').select('*').in('id', projectIds)
+      const projById = new Map<string, any>((projMeta || []).map((p: any) => [p.id, p]))
+
       for (const pid of projectIds) {
         const projectRows = upsertPayloads.filter(p => p.project_id === pid)
         if (projectRows.length === 0) continue
@@ -154,15 +160,22 @@ export async function ingestMetrics(
           metadata: { source, rows_processed: projectRows.length }
         })
 
+        const meta = projById.get(pid)
+        if (!meta || meta.deleted_at || meta.archived_at) continue
+        const label = meta.campaign_name ? `Campaign "${meta.campaign_name}"` : `Campaign (Project ${pid})`
+
         // Check alerts
         const agg = aggregateMetrics(projectRows)
-        
-        if (agg.spend > 0 && agg.roas < lowRoasThreshold) {
+
+        // Low ROAS only makes sense when revenue is actually tracked — awareness/
+        // engagement/hiring campaigns have no revenue, so ROAS 0 there is normal,
+        // not an alert condition.
+        if (agg.spend > 0 && agg.revenue > 0 && agg.roas < lowRoasThreshold) {
           await notifyAdmins({
             type: 'low_roas',
             title: 'Low ROAS Alert',
-            message: `Campaign (Project ${pid}) ROAS is ${agg.roas.toFixed(2)}, below threshold ${lowRoasThreshold}.`,
-            link: `/dashboard/advertising/campaigns/${pid}`,
+            message: `${label} ROAS is ${agg.roas.toFixed(2)}, below threshold ${lowRoasThreshold}.`,
+            link: `/dashboard/advertising/${pid}`,
             sourceKey: `low_roas_${pid}_${new Date().toISOString().slice(0,10)}`
           })
         }
@@ -171,8 +184,8 @@ export async function ingestMetrics(
           await notifyAdmins({
             type: 'high_cpc',
             title: 'High CPC Alert',
-            message: `Campaign (Project ${pid}) CPC is ${agg.cpc.toFixed(2)}, above threshold ${highCpcThreshold}.`,
-            link: `/dashboard/advertising/campaigns/${pid}`,
+            message: `${label} CPC is ${agg.cpc.toFixed(2)}, above threshold ${highCpcThreshold}.`,
+            link: `/dashboard/advertising/${pid}`,
             sourceKey: `high_cpc_${pid}_${new Date().toISOString().slice(0,10)}`
           })
         }

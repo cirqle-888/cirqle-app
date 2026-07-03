@@ -60,25 +60,53 @@ export async function generatePDF(data: RenderData): Promise<Buffer> {
 // ─── Daily template — image-based pixel-perfect PDF ─────────────────────────────
 
 /**
- * Renders the shared daily-report layout to a high-resolution A4-portrait PNG
- * (~150 DPI) and embeds it full-bleed into a single-page PDF. This guarantees
- * the PDF is visually identical to the WhatsApp image export.
+ * Renders the shared daily-report layout to one or more high-resolution
+ * A4-portrait PNGs (~150 DPI) and embeds them full-bleed as PDF pages — one
+ * page per chunk of days, so the full campaign history is shown instead of
+ * being truncated to the last few days. Row counts per page are derived from
+ * the layout's own vertical metrics, so each page fills its available space:
+ * page 1 keeps the full branded hero, continuation pages keep the header,
+ * campaign line, repeated table header and footer.
  */
 async function generateDailyPDF(data: RenderData): Promise<Buffer> {
   const { ImageResponse } = await import('next/og')
-  const { buildDailyReportElement } = await import('../layouts/daily-report')
+  const { buildDailyReportElement, computeDailyRows, dailyReportRowCapacity } = await import('../layouts/daily-report')
 
   // A4 portrait at ~150 DPI: 1240 × 1754 (ratio 0.707 matches 210/297).
   const W = 1240
   const H = 1754
 
-  const element = buildDailyReportElement(data, { width: W, height: H })
-  const response = new ImageResponse(element, { width: W, height: H })
-  const png = Buffer.from(await (response as Response).arrayBuffer())
-  const dataUrl = `data:image/png;base64,${png.toString('base64')}`
+  const allRows = computeDailyRows(data)
+  const firstCap = dailyReportRowCapacity({ width: W, height: H, continuation: false })
+  const contCap  = dailyReportRowCapacity({ width: W, height: H, continuation: true })
+
+  const pages: { rows: typeof allRows; startIndex: number; continuation: boolean }[] = []
+  if (allRows.length <= firstCap) {
+    pages.push({ rows: allRows, startIndex: 0, continuation: false })
+  } else {
+    pages.push({ rows: allRows.slice(0, firstCap), startIndex: 0, continuation: false })
+    for (let i = firstCap; i < allRows.length; i += contCap) {
+      pages.push({ rows: allRows.slice(i, i + contCap), startIndex: i, continuation: true })
+    }
+  }
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
-  doc.addImage(dataUrl, 'PNG', 0, 0, PAGE_W, 297, undefined, 'FAST')
+
+  for (let i = 0; i < pages.length; i++) {
+    const { rows, startIndex, continuation } = pages[i]
+    const tableHeading = pages.length > 1
+      ? `Daily Performance — Day ${startIndex + 1}–${startIndex + rows.length} of ${allRows.length}`
+      : undefined
+
+    const element = buildDailyReportElement(data, { width: W, height: H, rows, continuation, tableHeading })
+    const response = new ImageResponse(element, { width: W, height: H })
+    const png = Buffer.from(await (response as Response).arrayBuffer())
+    const dataUrl = `data:image/png;base64,${png.toString('base64')}`
+
+    if (i > 0) doc.addPage()
+    doc.addImage(dataUrl, 'PNG', 0, 0, PAGE_W, 297, undefined, 'FAST')
+  }
+
   return Buffer.from(doc.output('arraybuffer'))
 }
 

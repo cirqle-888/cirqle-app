@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
+import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { computeNextRun } from '@/lib/reporting/scheduler-utils'
 
 export const dynamic = 'force-dynamic'
@@ -14,6 +15,11 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const me = await loadCurrentUser().catch(() => null)
+    if (!me || !hasPermission(me, 'advertising.edit')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+    }
+
     const { id } = await params
     const body   = await req.json()
     const admin  = createAdminClient()
@@ -54,6 +60,11 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const me = await loadCurrentUser().catch(() => null)
+    if (!me || !hasPermission(me, 'advertising.edit')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+    }
+
     const { id } = await params
     const admin  = createAdminClient()
 

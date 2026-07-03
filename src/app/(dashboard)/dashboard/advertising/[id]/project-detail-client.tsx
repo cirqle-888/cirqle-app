@@ -26,11 +26,34 @@ import { healthScore } from '@/lib/advertising/health'
 import BudgetFields, { emptyBudget, resolveBudget, type BudgetValue } from '../budget-fields'
 import {
   updateAdStatus, saveAdBudget, upsertDailyMetric, approveDailyMetric, deleteDailyMetric,
-  addAdTask, addAdNote, createInvoiceForProject, setMetricSyncState, softDeleteAdProject,
+  addAdNote, createInvoiceForProject, setMetricSyncState, softDeleteAdProject,
+  allocateToCampaign, removeWalletTransaction, setAdProjectArchived, generateTaskForProject,
 } from '../actions'
+import { computeServiceCharge, gstOnSpend, spendWithGst } from '@/lib/advertising/budget'
 import { IntegrationsTab } from './integrations-tab'
+import { Archive, ArchiveRestore } from 'lucide-react'
 
-type Project = AdProjectRow & { client?: { id: string; name: string; code: string } | null }
+type Project = AdProjectRow & { 
+  client?: { id: string; name: string; code: string } | null,
+  archived_at?: string | null
+}
+
+export interface CampaignAllocation {
+  id: string
+  amount: number
+  amount_inr: number
+  notes: string | null
+  created_at: string
+  creator?: { id: string; name: string; cqid?: string } | null
+}
+
+export interface WalletSummaryView {
+  clientId: string
+  creditedInr: number
+  allocatedInr: number
+  balanceInr: number
+}
+
 interface Props {
   project: Project
   metrics: AdDailyMetricRow[]
@@ -40,6 +63,9 @@ interface Props {
   invoice: { id: string; invoice_number: string; status: string; total_amount: number } | null
   services?: { id: string; name: string; pricing_type: string | null; default_price: number | null }[]
   servicePricing?: { client_id: string; service_id: string; price: number }[]
+  allocations?: CampaignAllocation[]
+  wallet?: WalletSummaryView | null
+  allocSupported?: boolean
   perms: { edit: boolean; manageBudget: boolean; enterMetrics: boolean; approveMetrics: boolean }
 }
 
@@ -49,9 +75,9 @@ const num = (v: number | null | undefined) =>
   v == null ? '—' : Number(v).toLocaleString('en-IN')
 const round2 = (v: number) => Math.round(v * 100) / 100
 
-type Tab = 'overview' | 'daily' | 'tasks' | 'budget' | 'notes' | 'integrations' | 'reports'
+type Tab = 'overview' | 'daily' | 'budget' | 'notes' | 'integrations' | 'reports'
 
-export default function ProjectDetailClient({ project, metrics, tasks, notes, events, invoice, services, servicePricing, perms }: Props) {
+export default function ProjectDetailClient({ project, metrics, tasks, notes, events, invoice, services, servicePricing, allocations = [], wallet = null, allocSupported = false, perms }: Props) {
   const router = useRouter()
   const [tab, setTab] = useState<Tab>('overview')
   const [status, setStatus] = useState(project.status)
@@ -65,6 +91,7 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, ev
   }), [project, agg])
 
   const [deleting, setDeleting] = useState(false)
+  const [archiving, setArchiving] = useState(false)
 
   async function onStatus(v: string) {
     setStatus(v)
@@ -80,10 +107,19 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, ev
     else { alert(res.error || 'Failed to delete.'); setDeleting(false) }
   }
 
+  async function onToggleArchive() {
+    const isArchived = !!project.archived_at
+    if (!isArchived && !confirm(`Archive "${project.campaign_name}"? It will be hidden from active lists.`)) return
+    setArchiving(true)
+    const res = await setAdProjectArchived(project.id, !isArchived)
+    setArchiving(false)
+    if (res.ok) router.refresh()
+    else alert(res.error || 'Failed to update archive status.')
+  }
+
   const tabs: { key: Tab; label: string }[] = [
     { key: 'overview', label: 'Overview' },
     { key: 'daily', label: `Daily Performance${metrics.length ? ` (${metrics.length})` : ''}` },
-    { key: 'tasks', label: `Tasks${tasks.length ? ` (${tasks.length})` : ''}` },
     { key: 'budget', label: 'Budget' },
     { key: 'notes', label: 'Notes' },
     { key: 'integrations', label: 'Integrations' },
@@ -101,6 +137,11 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, ev
           <div>
             <h1 className="text-xl font-semibold flex items-center gap-2">
               <Megaphone className="h-5 w-5 text-pink-500" /> {project.campaign_name}
+              {project.archived_at && (
+                <span className="ml-2 rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 px-2 py-0.5 text-xs font-semibold">
+                  Archived
+                </span>
+              )}
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
               {adRefLabel(project.id)} · {project.client?.name || 'No client'} · {PLATFORM_LABEL[project.platform] || project.platform}
@@ -122,15 +163,26 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, ev
               </span>
             )}
             {perms.edit && (
-              <button
-                onClick={onDelete}
-                disabled={deleting}
-                title="Delete campaign"
-                className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-500/20 dark:text-red-400 disabled:opacity-50 transition-colors"
-              >
-                {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                Delete
-              </button>
+              <>
+                <button
+                  onClick={onToggleArchive}
+                  disabled={archiving}
+                  title={project.archived_at ? 'Unarchive campaign' : 'Archive campaign'}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium hover:bg-secondary disabled:opacity-50 transition-colors"
+                >
+                  {archiving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : project.archived_at ? <ArchiveRestore className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />}
+                  {project.archived_at ? 'Unarchive' : 'Archive'}
+                </button>
+                <button
+                  onClick={onDelete}
+                  disabled={deleting}
+                  title="Delete campaign"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-500/20 dark:text-red-400 disabled:opacity-50 transition-colors"
+                >
+                  {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                  Delete
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -152,16 +204,22 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, ev
       </div>
 
       {tab === 'overview' && (
-        <OverviewTab project={project} agg={agg} remaining={remaining} health={health} />
+        <OverviewTab
+          project={project} agg={agg} remaining={remaining} health={health}
+          allocations={allocations} wallet={wallet} allocSupported={allocSupported}
+          campaignTask={tasks[0] ?? null} invoice={invoice} perms={perms}
+        />
       )}
       {tab === 'daily' && (
         <DailyTab projectId={project.id} campaignType={project.campaign_type} metrics={metrics} perms={perms} onChange={() => router.refresh()} />
       )}
-      {tab === 'tasks' && (
-        <TasksTab projectId={project.id} clientId={project.client_id} tasks={tasks} canEdit={perms.edit} onChange={() => router.refresh()} />
-      )}
       {tab === 'budget' && (
-        <BudgetTab project={project} invoice={invoice} canManage={perms.manageBudget} onChange={() => router.refresh()} services={services} servicePricing={servicePricing} />
+        <BudgetTab
+          project={project} invoice={invoice} canManage={perms.manageBudget} onChange={() => router.refresh()}
+          services={services} servicePricing={servicePricing}
+          allocations={allocations} wallet={wallet} allocSupported={allocSupported}
+          reportedSpend={agg.spend} campaignTask={tasks[0] ?? null}
+        />
       )}
       {tab === 'notes' && (
         <NotesTab projectId={project.id} notes={notes} events={events} canEdit={perms.edit} onChange={() => router.refresh()} />
@@ -178,16 +236,39 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, ev
 
 // ─── Overview ────────────────────────────────────────────────────────────────
 
-function OverviewTab({ project, agg, remaining, health }: {
+function OverviewTab({ project, agg, remaining, health, allocations = [], wallet = null, allocSupported = false, campaignTask = null, invoice = null, perms }: {
   project: Project
   agg: ReturnType<typeof aggregateMetrics>
   remaining: number | null
   health: ReturnType<typeof healthScore>
+  allocations?: CampaignAllocation[]
+  wallet?: WalletSummaryView | null
+  allocSupported?: boolean
+  campaignTask?: Props['tasks'][number] | null
+  invoice?: Props['invoice']
+  perms: Props['perms']
 }) {
+  const router = useRouter()
+  void remaining // superseded by the GST-aware remaining below
+  const allocated = round2(allocations.reduce((s, a) => s + Number(a.amount_inr || 0), 0))
+  const hasAllocations = allocations.length > 0
+  const basis = allocated
+  const spend = agg.spend || 0
+  const spendGross = spendWithGst(spend)              // actual money consumed (incl. 18% GST)
+  const serviceCharge = computeServiceCharge(basis, project.service_charge_type, Number(project.service_charge_value || 0))
+
+  const financials: [string, string][] = [
+    ['Allocated (wallet)', hasAllocations ? inr(allocated, 2) : '—'],
+    ['Budget (estimated)', inr(project.ad_budget_amount)],
+    ['Spend (Meta, excl. GST)', inr(spend, 2)],
+    ['GST 18%', inr(gstOnSpend(spend), 2)],
+    ['Spend incl. GST', inr(spendGross, 2)],
+    ['Remaining (incl. GST)', inr(round2(basis - spendGross), 2)],
+    ['Service charge (billing)', `${inr(serviceCharge, 2)}${project.service_charge_type === 'percent' ? ` (${project.service_charge_value}%)` : ''}`],
+    ['Wallet balance', allocSupported && wallet ? inr(wallet.balanceInr, 2) : '—'],
+  ]
+
   const kpis: [string, string][] = [
-    ['Budget', inr(project.ad_budget_amount)],
-    ['Spent', inr(agg.spend)],
-    ['Remaining', inr(remaining)],
     ['Revenue', inr(agg.revenue)],
     ['ROAS', agg.roas != null ? `${round2(agg.roas)}×` : '—'],
     ['CTR', agg.ctr != null ? `${round2(agg.ctr)}%` : '—'],
@@ -198,6 +279,7 @@ function OverviewTab({ project, agg, remaining, health }: {
     ['Conversions', num(agg.conversions)],
     ['Days reported', String(agg.days)],
   ]
+
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-border bg-card p-4 flex items-center justify-between">
@@ -209,14 +291,95 @@ function OverviewTab({ project, agg, remaining, health }: {
           {project.start_date || '—'} → {project.end_date || '—'}
         </div>
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-        {kpis.map(([k, v]) => (
-          <div key={k} className="rounded-lg border border-border bg-card p-3 min-w-0">
-            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{k}</div>
-            <div className="text-lg font-semibold tabular-nums truncate" title={v}>{v}</div>
-          </div>
-        ))}
+
+      {/* Financials: wallet allocation, GST-aware spend, billing */}
+      <div>
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Financials</h3>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+          {financials.map(([k, v]) => (
+            <div key={k} className="rounded-lg border border-border bg-card p-3 min-w-0">
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{k}</div>
+              <div className="text-lg font-semibold tabular-nums truncate" title={v}>{v}</div>
+            </div>
+          ))}
+        </div>
+        {!hasAllocations && (
+          <p className="mt-1.5 text-[11px] text-muted-foreground">
+            No wallet funds allocated yet — Service charge billing requires funds to be allocated in the Budget tab.
+          </p>
+        )}
       </div>
+
+      {/* Work + billing status */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        {campaignTask ? (
+          <Link href={`/dashboard/tasks?focus=${campaignTask.id}`}
+            className="flex items-center justify-between rounded-lg border border-border bg-card p-3 hover:bg-secondary/50">
+            <div className="min-w-0">
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Campaign task</div>
+              <div className="text-sm font-medium truncate">#{campaignTask.task_number ?? '—'} {campaignTask.title}</div>
+              <div className="text-xs text-muted-foreground mt-0.5">
+                Billing {inr(campaignTask.billing_amount, 2)} · work split via Contributions
+              </div>
+            </div>
+            <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-[10px] font-semibold capitalize">{campaignTask.status}</span>
+          </Link>
+        ) : (
+          <div className="rounded-lg border border-dashed border-border bg-card p-3 flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">No campaign task linked.</span>
+            {perms.edit && (
+              <button
+                onClick={async (e) => {
+                  const btn = e.currentTarget
+                  btn.disabled = true
+                  const originalText = btn.textContent
+                  btn.textContent = 'Creating...'
+                  const res = await generateTaskForProject(project.id)
+                  if (!res.ok) {
+                    alert(res.error)
+                    btn.disabled = false
+                    btn.textContent = originalText
+                  } else {
+                    router.refresh()
+                  }
+                }}
+                className="text-xs font-medium text-primary hover:underline disabled:opacity-50"
+              >
+                Create Task
+              </button>
+            )}
+          </div>
+        )}
+        {invoice ? (
+          <Link href={`/dashboard/invoices?focus=${invoice.id}`}
+            className="flex items-center justify-between rounded-lg border border-border bg-card p-3 hover:bg-secondary/50">
+            <div className="min-w-0">
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Invoice</div>
+              <div className="text-sm font-medium truncate">{invoice.invoice_number}</div>
+              <div className="text-xs text-muted-foreground mt-0.5">{inr(invoice.total_amount, 2)} · auto-synced with billing</div>
+            </div>
+            <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-[10px] font-semibold capitalize">{invoice.status}</span>
+          </Link>
+        ) : (
+          <div className="rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground">
+            No invoice yet — create one from the Budget tab.
+          </div>
+        )}
+      </div>
+
+      {/* Performance (platform-reported) */}
+      <div>
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Performance</h3>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+          {kpis.map(([k, v]) => (
+            <div key={k} className="rounded-lg border border-border bg-card p-3 min-w-0">
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{k}</div>
+              <div className="text-lg font-semibold tabular-nums truncate" title={v}>{v}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {project.objective && (
         <div className="rounded-lg border border-border bg-card p-3 text-sm">
           <span className="text-muted-foreground">Objective: </span>{project.objective}
@@ -380,52 +543,6 @@ function LabeledInput({ label, value, onChange, cls, type = 'text' }: {
   )
 }
 
-// ─── Tasks ───────────────────────────────────────────────────────────────────
-
-function TasksTab({ projectId, clientId, tasks, canEdit, onChange }: {
-  projectId: string; clientId: string | null
-  tasks: Props['tasks']; canEdit: boolean; onChange: () => void
-}) {
-  const [title, setTitle] = useState('')
-  const [busy, setBusy] = useState(false)
-  async function add() {
-    if (!title.trim()) return
-    setBusy(true)
-    await addAdTask(projectId, { title, clientId })
-    setBusy(false); setTitle(''); onChange()
-  }
-  return (
-    <div className="space-y-4">
-      {canEdit && (
-        <div className="flex gap-2">
-          <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Add a campaign task…"
-            className="flex-1 rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-pink-500/40"
-            onKeyDown={e => { if (e.key === 'Enter') add() }} />
-          <button onClick={add} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg gradient-bg px-3 py-2 text-sm font-medium text-white disabled:opacity-50 hover:opacity-90">
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Add
-          </button>
-        </div>
-      )}
-      {tasks.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground">
-          No tasks linked yet. These are normal Cirqle tasks — contributions &amp; payroll work on them as usual.
-        </div>
-      ) : (
-        <div className="rounded-xl border border-border divide-y divide-border">
-          {tasks.map(t => (
-            <Link key={t.id} href={`/dashboard/tasks?focus=${t.id}`} className="flex items-center justify-between px-4 py-2.5 hover:bg-secondary/50">
-              <span className="text-sm">
-                <span className="text-muted-foreground mr-2">#{t.task_number ?? '—'}</span>{t.title}
-              </span>
-              <span className="text-xs text-muted-foreground">{t.status}</span>
-            </Link>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ─── Budget ──────────────────────────────────────────────────────────────────
 
 /** Map a stored day count back to a duration preset for re-editing. */
@@ -434,13 +551,18 @@ function presetFromDays(days?: number | null): string {
   return days != null && days > 0 ? 'custom' : '7'
 }
 
-function BudgetTab({ project, invoice, canManage, onChange, services = [], servicePricing = [] }: {
+function BudgetTab({ project, invoice, canManage, onChange, services = [], servicePricing = [], allocations = [], wallet = null, allocSupported = false, reportedSpend = 0, campaignTask = null }: {
   project: Project
   invoice: Props['invoice']
   canManage: boolean
   onChange: () => void
   services?: Props['services']
   servicePricing?: Props['servicePricing']
+  allocations?: CampaignAllocation[]
+  wallet?: WalletSummaryView | null
+  allocSupported?: boolean
+  reportedSpend?: number
+  campaignTask?: Props['tasks'][number] | null
 }) {
   const derivedPricing = useMemo(() => {
     if (!project.service_id) return null
@@ -537,6 +659,17 @@ function BudgetTab({ project, invoice, canManage, onChange, services = [], servi
         )}
       </div>
 
+      <FundAllocationCard
+        project={project}
+        allocations={allocations}
+        wallet={wallet}
+        supported={allocSupported}
+        reportedSpend={reportedSpend}
+        campaignTask={campaignTask}
+        canManage={canManage}
+        onChange={onChange}
+      />
+
       {invoice && (
         <Link href={`/dashboard/invoices?focus=${invoice.id}`} className="flex items-center justify-between rounded-xl border border-border bg-card p-4 hover:bg-secondary/50">
           <div className="text-sm">
@@ -546,6 +679,167 @@ function BudgetTab({ project, invoice, canManage, onChange, services = [], servi
           <span className="inline-flex items-center gap-1 text-sm">{inr(invoice.total_amount, 2)} <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" /></span>
         </Link>
       )}
+    </div>
+  )
+}
+
+// ─── Fund allocation (client wallet → campaign billing) ─────────────────────
+
+function FundAllocationCard({ project, allocations, wallet, supported, reportedSpend, campaignTask, canManage, onChange }: {
+  project: Project
+  allocations: CampaignAllocation[]
+  wallet: WalletSummaryView | null
+  supported: boolean
+  reportedSpend: number
+  campaignTask: Props['tasks'][number] | null
+  canManage: boolean
+  onChange: () => void
+}) {
+  const [amount, setAmount] = useState('')
+  const [busy, setBusy] = useState<string | null>(null) // 'add' | ledger row id
+  const [err, setErr] = useState<string | null>(null)
+
+  const allocatedTotal = round2(allocations.reduce((s, a) => s + Number(a.amount_inr || 0), 0))
+  const hasAllocations = allocations.length > 0
+  const basis = allocatedTotal
+  const serviceCharge = computeServiceCharge(basis, project.service_charge_type, Number(project.service_charge_value || 0))
+  const spendGross = spendWithGst(reportedSpend) // actual money consumed (incl. 18% GST)
+  const balance = wallet?.balanceInr ?? 0
+
+  async function add() {
+    setBusy('add'); setErr(null)
+    const res = await allocateToCampaign(project.id, { amount: Number(amount) || 0 })
+    setBusy(null)
+    if (res.ok) { setAmount(''); onChange() }
+    else setErr(res.error || 'Could not allocate.')
+  }
+
+  async function remove(id: string) {
+    setBusy(id); setErr(null)
+    const res = await removeWalletTransaction(id)
+    setBusy(null)
+    if (res.ok) onChange()
+    else setErr(res.error || 'Could not remove.')
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold">Campaign Funds (Client Wallet)</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Billing follows the funds allocated to this campaign from the client&apos;s wallet (GST-inclusive money actually
+            paid). Platform-reported spend stays reporting-only. Top up the wallet from the Advertising dashboard.
+          </p>
+        </div>
+        {supported && wallet && (
+          <div className="rounded-lg bg-secondary/60 px-3 py-1.5 text-xs">
+            <span className="text-muted-foreground">{project.client?.name || 'Client'} wallet: </span>
+            <span className={`font-semibold tabular-nums ${balance < 0 ? 'text-red-500' : ''}`}>{inr(balance, 2)}</span>
+            <span className="text-muted-foreground"> available</span>
+          </div>
+        )}
+      </div>
+
+      {!supported && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+          The wallet ledger needs a database migration. Apply <code>supabase/migrations/20260703140000_ad_wallet_ledger.sql</code> to enable this section.
+        </div>
+      )}
+
+      {supported && !project.client_id && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+          Assign a client to this campaign to allocate wallet funds.
+        </div>
+      )}
+
+      {supported && project.client_id && (
+        <>
+          {/* Allocation ledger for this campaign */}
+          {allocations.length > 0 ? (
+            <div className="divide-y divide-border rounded-lg border border-border">
+              {allocations.map(a => (
+                <div key={a.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                  <div className="min-w-0">
+                    <div className="truncate">
+                      Allocated from wallet
+                      {a.notes ? <span className="text-muted-foreground"> — {a.notes}</span> : null}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {new Date(a.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      {a.creator?.name ? ` · ${a.creator.name}` : ''}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className="tabular-nums font-medium">{inr(a.amount_inr, 2)}</span>
+                    {canManage && (
+                      <button
+                        onClick={() => remove(a.id)}
+                        disabled={busy === a.id}
+                        title="Reverse this allocation"
+                        className="text-muted-foreground hover:text-red-500 disabled:opacity-50"
+                      >
+                        {busy === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              No funds allocated yet — billing currently falls back to the estimated budget ({inr(project.ad_budget_amount, 2)}).
+            </p>
+          )}
+
+          {/* Allocate from wallet */}
+          {canManage && (
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="w-44">
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
+                  Amount (max {inr(Math.max(0, balance), 2)})
+                </label>
+                <input
+                  type="number" min="0" step="0.01" value={amount}
+                  onChange={e => setAmount(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm tabular-nums"
+                />
+              </div>
+              <button
+                onClick={add}
+                disabled={busy === 'add' || !(Number(amount) > 0)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50"
+              >
+                {busy === 'add' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Allocate from wallet
+              </button>
+            </div>
+          )}
+
+          {err && <p className="text-xs text-red-500">{err}</p>}
+
+          {/* GST-aware billing summary */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
+            <SummaryCell label="Allocated (paid, GST incl.)" value={inr(allocatedTotal, 2)} />
+            <SummaryCell label="Spend incl. GST 18%" value={inr(spendGross, 2)} />
+            <SummaryCell label="Unspent allocation" value={inr(round2(basis - spendGross), 2)} />
+            <SummaryCell label="Billing basis" value={`${inr(basis, 2)}${hasAllocations ? '' : ' (estimated)'}`} />
+            <SummaryCell
+              label="Service charge"
+              value={`${inr(serviceCharge, 2)}${project.service_charge_type === 'percent' ? ` (${project.service_charge_value}%)` : ''}`}
+            />
+            <SummaryCell label="Task billing (auto-updated)" value={campaignTask ? inr(campaignTask.billing_amount, 2) : '—'} />
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function SummaryCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg bg-secondary/50 px-3 py-2">
+      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className="text-sm font-semibold tabular-nums">{value}</div>
     </div>
   )
 }

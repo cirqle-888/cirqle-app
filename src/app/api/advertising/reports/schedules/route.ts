@@ -7,7 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
-import { loadCurrentUser } from '@/lib/permissions/check'
+import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { computeNextRun } from '@/lib/reporting/scheduler-utils'
 
 export const dynamic = 'force-dynamic'
@@ -16,6 +16,11 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   try {
+    const me = await loadCurrentUser().catch(() => null)
+    if (!me || !hasPermission(me, 'advertising.view_reports')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+    }
+
     const projectId = req.nextUrl.searchParams.get('projectId')
     if (!projectId) return NextResponse.json({ error: 'Missing projectId' }, { status: 400 })
 
@@ -38,6 +43,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const me   = await loadCurrentUser().catch(() => null)
+    if (!me || !hasPermission(me, 'advertising.edit')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+    }
     const body = await req.json()
 
     if (!body.project_id) return NextResponse.json({ error: 'Missing project_id' }, { status: 400 })
@@ -62,7 +70,7 @@ export async function POST(req: NextRequest) {
         recipients:        body.recipients         ?? [],
         is_active:         body.is_active          ?? true,
         next_run_at:       nextRun,
-        created_by:        (me as any)?.id ?? null,
+        created_by:        me.employeeId || null,
       })
       .select()
       .single()

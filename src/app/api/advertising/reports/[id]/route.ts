@@ -23,6 +23,9 @@ export async function GET(
     const { id } = await params
     const admin   = createAdminClient()
     const me      = await loadCurrentUser().catch(() => null)
+    if (!me || !hasPermission(me, 'advertising.view_reports')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+    }
 
     const { data, error } = await admin
       .from('ad_reports')
@@ -42,7 +45,7 @@ export async function GET(
     void admin.from('ad_report_analytics').insert({
       report_id: id,
       event:     'viewed',
-      user_id:   (me as any)?.id ?? null,
+      user_id:   me.employeeId || null,
     }).then(null, () => {})
 
     return NextResponse.json(data)

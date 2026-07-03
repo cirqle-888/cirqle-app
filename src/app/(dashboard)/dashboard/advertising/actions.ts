@@ -17,7 +17,8 @@ import { PERMS } from '@/lib/permissions/keys'
 import { generateInvoiceNumber } from '@/lib/invoices/numbering'
 import { nextTaskNumber } from '@/lib/utils/task-code'
 import { computeBudgetTotals, computeServiceCharge } from '@/lib/advertising/budget'
-import { PLATFORM_LABEL } from '@/lib/advertising/types'
+import { recomputeCampaignBilling, writeInvoiceLines } from '@/lib/advertising/billing'
+import { getWalletSummary, getEntryUncredited } from '@/lib/advertising/wallet'
 import { createManualRequest } from '@/app/(dashboard)/dashboard/requests/actions'
 import { logRequestActivity } from '@/lib/requests/core'
 
@@ -198,6 +199,38 @@ export async function createAdProject(
   return { ok: true, data: { id, taskId } }
 }
 
+export async function generateTaskForProject(projectId: string): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.ADVERTISING_EDIT)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+  
+  const { data: existing } = await admin.from('ad_project_tasks').select('task_id').eq('project_id', projectId).maybeSingle()
+  if (existing) return { ok: false, error: 'Task already linked' }
+
+  const { data: project, error: projErr } = await admin.from('ad_projects').select('*').eq('id', projectId).single()
+  if (projErr || !project) return { ok: false, error: 'Project not found' }
+
+  const serviceCharge = computeServiceCharge(
+    project.ad_budget_amount ?? 0, project.service_charge_type || 'fixed', project.service_charge_value ?? 0
+  )
+
+  const taskId = await createCampaignTask(admin, {
+    projectId,
+    campaignName: project.campaign_name,
+    clientId: project.client_id,
+    serviceId: project.service_id,
+    serviceCharge,
+    currency: project.ad_budget_currency || 'INR',
+    employeeId: guard.employeeId,
+  })
+
+  if (!taskId) return { ok: false, error: 'Failed to create task' }
+
+  revalidatePath(REVALIDATE); revalidatePath(`${REVALIDATE}/${projectId}`)
+  return { ok: true }
+}
+
 export interface UpdateAdProjectInput {
   campaignName?: string
   platform?: string
@@ -241,6 +274,32 @@ export async function updateAdStatus(id: string, status: string): Promise<Action
     .update({ status, updated_at: new Date().toISOString() }).eq('id', id)
   if (error) return { ok: false, error: error.message }
   await logAdEvent(admin, id, 'status_changed', guard.employeeId, { to: status })
+  revalidatePath(REVALIDATE); revalidatePath(`${REVALIDATE}/${id}`)
+  return { ok: true }
+}
+
+/**
+ * Archive / unarchive a campaign. Archived campaigns leave the dashboard, stop
+ * syncing and stop alerting, but keep all data (metrics, wallet ledger, task,
+ * invoices) — unarchiving restores them exactly as they were.
+ */
+export async function setAdProjectArchived(id: string, archived: boolean): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.ADVERTISING_EDIT)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('ad_projects')
+    .update({ archived_at: archived ? new Date().toISOString() : null, updated_at: new Date().toISOString() })
+    .eq('id', id)
+  if (error) {
+    return {
+      ok: false,
+      error: error.message.includes('archived_at')
+        ? 'Archiving needs a database migration — apply 20260703150000_ad_projects_archive.sql first.'
+        : error.message,
+    }
+  }
+  await logAdEvent(admin, id, archived ? 'archived' : 'unarchived', guard.employeeId, {})
   revalidatePath(REVALIDATE); revalidatePath(`${REVALIDATE}/${id}`)
   return { ok: true }
 }
@@ -291,75 +350,161 @@ export async function saveAdBudget(id: string, budget: SaveAdBudgetInput): Promi
     mode: budget.budgetInputMode, dailyBudget: budget.dailyBudget, budgetDays: budget.budgetDays,
   })
   await logAdEvent(admin, id, 'budget_changed', guard.employeeId, { ad_budget: budget.adBudget })
-  // Keep any linked draft invoice in step with the new budget.
-  await resyncInvoiceForProject(admin, id)
+  // Re-derive the task billing from the latest basis (allocated funds when any
+  // exist, else this estimated budget) and resync any linked draft invoice.
+  await recomputeCampaignBilling(admin, id)
 
-  revalidatePath(REVALIDATE); revalidatePath(`${REVALIDATE}/${id}`); revalidatePath('/dashboard/invoices')
+  revalidatePath(REVALIDATE); revalidatePath(`${REVALIDATE}/${id}`); revalidatePath('/dashboard/invoices'); revalidatePath('/dashboard/tasks')
   return { ok: true }
 }
 
-/** Recompute the linked draft invoice's service-charge + ad-spend lines. No-op if none. */
-async function resyncInvoiceForProject(admin: SupabaseClient, projectId: string): Promise<void> {
-  try {
-    const { data: project } = await admin.from('ad_projects')
-      .select('*, client:clients(default_currency)').eq('id', projectId).maybeSingle()
-    if (!project) return
-    const { data: inv } = await admin.from('invoices')
-      .select('id, status').eq('ad_project_id', projectId)
-      .order('created_at', { ascending: false }).limit(1).maybeSingle()
-    // Only touch a draft we created — never edit a sent/paid invoice.
-    if (!inv || (inv as any).status !== 'draft') return
-    await writeInvoiceLines(admin, projectId, (inv as any).id, project)
-  } catch { /* invoice tables not migrated / transient */ }
+// ─── Client wallet ledger (Cashbook → client wallet → campaign) ─────────────
+//
+// The agency funds the platform in advance (one Cashbook outflow, e.g. a
+// ₹20,000 Meta top-up). That money is CREDITED to client wallets, then
+// DEBITED to campaigns. Every movement is a ledger transaction (full audit
+// trail); balances are always derived from the rows. The campaign's debited
+// total — GST-inclusive, actually-paid money — is the billing basis; the
+// platform-reported spend stays reporting-only.
+
+const LEDGER_MISSING = 'Wallet ledger not available yet — apply migration 20260703140000_ad_wallet_ledger.sql first.'
+
+export interface AddClientFundInput {
+  cashbookEntryId: string
+  amount: number
+  notes?: string | null
 }
 
-/** Write (insert-or-update) the agency service-charge item + ad-spend section for a project's invoice. */
-async function writeInvoiceLines(
-  admin: SupabaseClient, projectId: string, invoiceId: string, project: any,
-): Promise<void> {
-  const currency = project.ad_budget_currency || project.client?.default_currency || 'INR'
-  const totals = computeBudgetTotals({
-    adBudget: Number(project.ad_budget_amount || 0),
-    serviceChargeType: project.service_charge_type,
-    serviceChargeValue: Number(project.service_charge_value || 0),
-    taxPercent: Number(project.tax_percent || 0),
+/** CREDIT: assign a share of a Cashbook outflow (top-up) to a client's wallet. */
+export async function addClientFund(
+  clientId: string, input: AddClientFundInput,
+): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.ADVERTISING_MANAGE_BUDGET)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const amount = Math.round((Number(input.amount) || 0) * 100) / 100
+  if (amount <= 0) return { ok: false, error: 'Amount must be greater than zero.' }
+  if (!clientId) return { ok: false, error: 'Client is required.' }
+
+  const admin = createAdminClient()
+  const { data: entry, error: entryErr } = await admin
+    .from('cashbook_entries')
+    .select('id, type, amount, amount_inr, currency, deleted_at')
+    .eq('id', input.cashbookEntryId).maybeSingle()
+  if (entryErr || !entry) return { ok: false, error: 'Cashbook entry not found.' }
+  if ((entry as any).deleted_at) return { ok: false, error: 'That cashbook entry was deleted.' }
+  if ((entry as any).type !== 'outflow') return { ok: false, error: 'Wallet credits must come from an outflow (payment) entry.' }
+
+  // Over-crediting guard: total credited across ALL clients stays within the entry.
+  const entryAmount = Number((entry as any).amount || 0)
+  const uncredited = await getEntryUncredited(admin, input.cashbookEntryId, entryAmount)
+  if (uncredited === Infinity) return { ok: false, error: LEDGER_MISSING }
+  if (amount > uncredited + 0.005) {
+    return { ok: false, error: `Only ₹${uncredited.toLocaleString('en-IN')} of this entry is still unassigned.` }
+  }
+
+  // INR normalisation: proportional share of the entry's stored amount_inr.
+  const entryInr = Number((entry as any).amount_inr || 0) || entryAmount
+  const amountInr = entryAmount > 0
+    ? Math.round((entryInr * (amount / entryAmount)) * 100) / 100
+    : amount
+
+  const { error } = await admin.from('ad_wallet_ledger').insert({
+    client_id: clientId,
+    direction: 'credit',
+    kind: 'topup',
+    cashbook_entry_id: input.cashbookEntryId,
+    amount,
+    amount_inr: amountInr,
+    notes: input.notes?.trim() || null,
+    created_by: guard.employeeId,
   })
+  if (error) return { ok: false, error: error.message.includes('does not exist') ? LEDGER_MISSING : error.message }
 
-  // Agency service charge → normal invoice item (matched by description prefix).
-  const { data: scItem } = await admin.from('invoice_items')
-    .select('id').eq('invoice_id', invoiceId).ilike('description', 'Agency Service Charge%').limit(1).maybeSingle()
-  const scDesc = `Agency Service Charge — ${project.campaign_name}`
-  if (scItem) {
-    await admin.from('invoice_items').update({
-      description: scDesc, unit_price: totals.serviceCharge, total: totals.serviceCharge, currency,
-    }).eq('id', (scItem as any).id)
-  } else if (totals.serviceCharge > 0) {
-    await admin.from('invoice_items').insert({
-      invoice_id: invoiceId, description: scDesc, quantity: 1,
-      unit_price: totals.serviceCharge, total: totals.serviceCharge, currency, display_order: 0,
-    })
+  revalidatePath(REVALIDATE)
+  return { ok: true }
+}
+
+/** DEBIT: allocate from the campaign's client wallet to the campaign. */
+export async function allocateToCampaign(
+  projectId: string, input: { amount: number; notes?: string | null },
+): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.ADVERTISING_MANAGE_BUDGET)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const amount = Math.round((Number(input.amount) || 0) * 100) / 100
+  if (amount <= 0) return { ok: false, error: 'Amount must be greater than zero.' }
+
+  const admin = createAdminClient()
+  const { data: project } = await admin
+    .from('ad_projects').select('id, client_id, campaign_name')
+    .eq('id', projectId).is('deleted_at', null).maybeSingle()
+  if (!project) return { ok: false, error: 'Campaign not found.' }
+  const clientId = (project as any).client_id as string | null
+  if (!clientId) return { ok: false, error: 'Assign a client to this campaign before allocating funds.' }
+
+  const wallet = await getWalletSummary(admin, clientId)
+  if (amount > wallet.balanceInr + 0.005) {
+    return { ok: false, error: `Client wallet has only ₹${wallet.balanceInr.toLocaleString('en-IN')} available. Add funds to the wallet first.` }
   }
 
-  // Advertising spend → separate section.
-  const adInr = await toInr(admin, totals.adSpend, currency)
-  const adDesc = `${PLATFORM_LABEL[project.platform] || 'Advertising'} Ad Spend — ${project.campaign_name}`
-  const { data: adItem } = await admin.from('invoice_ad_spend_items')
-    .select('id').eq('invoice_id', invoiceId).eq('ad_project_id', projectId).limit(1).maybeSingle()
-  if (adItem) {
-    await admin.from('invoice_ad_spend_items').update({
-      description: adDesc, amount: totals.adSpend, amount_inr: adInr, currency,
-    }).eq('id', (adItem as any).id)
-  } else {
-    await admin.from('invoice_ad_spend_items').insert({
-      invoice_id: invoiceId, ad_project_id: projectId, description: adDesc,
-      amount: totals.adSpend, amount_inr: adInr, currency, display_order: 0,
-    })
+  const { error } = await admin.from('ad_wallet_ledger').insert({
+    client_id: clientId,
+    direction: 'debit',
+    kind: 'campaign_allocation',
+    ad_project_id: projectId,
+    amount,          // debits are entered in INR (the base currency)
+    amount_inr: amount,
+    notes: input.notes?.trim() || null,
+    created_by: guard.employeeId,
+  })
+  if (error) return { ok: false, error: error.message.includes('does not exist') ? LEDGER_MISSING : error.message }
+
+  await logAdEvent(admin, projectId, 'funds_allocated', guard.employeeId, { amount })
+  await recomputeCampaignBilling(admin, projectId)
+
+  revalidatePath(REVALIDATE); revalidatePath(`${REVALIDATE}/${projectId}`)
+  revalidatePath('/dashboard/invoices'); revalidatePath('/dashboard/tasks')
+  return { ok: true }
+}
+
+/**
+ * Reverse a ledger transaction (soft delete — the row stays for audit).
+ * Credits are blocked when removing them would push the wallet negative.
+ */
+export async function removeWalletTransaction(ledgerId: string): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.ADVERTISING_MANAGE_BUDGET)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+  const { data: row } = await admin
+    .from('ad_wallet_ledger')
+    .select('id, client_id, direction, kind, ad_project_id, amount, amount_inr')
+    .eq('id', ledgerId).is('deleted_at', null).maybeSingle()
+  if (!row) return { ok: false, error: 'Transaction not found.' }
+
+  if ((row as any).direction === 'credit') {
+    const wallet = await getWalletSummary(admin, (row as any).client_id)
+    if (wallet.balanceInr - Number((row as any).amount_inr || 0) < -0.005) {
+      return { ok: false, error: 'Removing this credit would make the wallet negative — remove campaign allocations first.' }
+    }
   }
 
-  // Invoice grand total = agency service + ad spend (the true amount owed).
-  await admin.from('invoices')
-    .update({ total_amount: totals.subtotal, updated_at: new Date().toISOString() })
-    .eq('id', invoiceId)
+  const { error } = await admin.from('ad_wallet_ledger')
+    .update({ deleted_at: new Date().toISOString() }).eq('id', ledgerId)
+  if (error) return { ok: false, error: error.message }
+
+  const projectId = (row as any).ad_project_id as string | null
+  if (projectId) {
+    await logAdEvent(admin, projectId, 'allocation_removed', guard.employeeId, {
+      ledger_id: ledgerId, amount: (row as any).amount,
+    })
+    await recomputeCampaignBilling(admin, projectId)
+  }
+
+  revalidatePath(REVALIDATE)
+  if (projectId) { revalidatePath(`${REVALIDATE}/${projectId}`); revalidatePath('/dashboard/invoices'); revalidatePath('/dashboard/tasks') }
+  return { ok: true }
 }
 
 export async function createInvoiceForProject(projectId: string): Promise<ActionResult<{ invoiceId: string }>> {

@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: Request) {
   // Validate cron secret if provided
   const authHeader = req.headers.get('authorization')
-  if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!process.env.CRON_SECRET || authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return new NextResponse('Unauthorized', { status: 401 })
   }
 
@@ -37,18 +37,23 @@ export async function GET(req: Request) {
       discovered += r.discovered
     }
 
-    // Fetch active ad_projects with sync_enabled = true and an assigned ad_account_id
+    // Fetch active ad_projects with sync_enabled = true and an assigned ad_account_id.
+    // select('*') so the archived_at filter below stays safe before its migration.
     const { data: projects, error: projErr } = await admin
       .from('ad_projects')
-      .select('id')
+      .select('*')
       .eq('sync_enabled', true)
       .not('ad_account_id', 'is', null)
       .in('status', ['active', 'paused', 'completed']) // Include recently completed to catch late attribution
 
     if (projErr) throw projErr
 
+    // Archived / soft-deleted campaigns don't sync (JS-side so a missing
+    // archived_at column pre-migration can't break the whole cron).
+    const live = (projects ?? []).filter((p: any) => !p.deleted_at && !p.archived_at)
+
     let enqueued = 0
-    for (const project of projects ?? []) {
+    for (const project of live) {
       await enqueueJob({
         job_type: 'advertising_sync_project',
         payload: { project_id: project.id },

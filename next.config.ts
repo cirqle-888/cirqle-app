@@ -19,6 +19,35 @@ const nextConfig: NextConfig = {
       static: 300,
     },
   },
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          // Clickjacking protection — the app is never legitimately iframed.
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'Content-Security-Policy', value: "frame-ancestors 'none'" },
+          // Prevent MIME-type sniffing of responses.
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          // Force HTTPS for a year (Vercel already serves HTTPS; this pins it).
+          { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
+          // Don't leak full URLs (which contain portal/intake tokens) to third parties.
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          // Lock down powerful browser features the app doesn't use.
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+        ],
+      },
+    ]
+  },
+  async redirects() {
+    return [
+      {
+        source: '/dashboard/advertising/campaigns/:id',
+        destination: '/dashboard/advertising/:id',
+        permanent: true,
+      },
+    ]
+  },
 };
 
 export default nextConfig;
