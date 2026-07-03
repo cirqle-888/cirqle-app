@@ -16,7 +16,7 @@ export default async function InvoicesPage() {
   const vis = financialVisibility(me)
   const supabase = createAdminClient()
 
-  const [invoicesRes, clientsRes, bankRes, servicesRes, settingsRes, ratesRes] = await Promise.all([
+  const [invoicesRes, clientsRes, bankRes, servicesRes, settingsRes, ratesRes, categoriesRes] = await Promise.all([
     // Note: this is the biggest single query on the page (HAR shows 7.5s cold).
     // The nested task+service joins inside `items` are needed by the editor,
     // PDF generator, and invoice rows — can't safely drop them without a
@@ -57,6 +57,11 @@ export default async function InvoicesPage() {
     supabase
       .from('exchange_rates')
       .select('*'),
+    supabase
+      .from('cashbook_categories')
+      .select('*')
+      .order('type')
+      .order('name'),
   ])
 
   // Convert settings array to a key→value map
@@ -82,6 +87,7 @@ export default async function InvoicesPage() {
       initialInvoices={initialInvoices}
       clients={clientsRes.data || []}
       bankAccounts={bankRes.data || []}
+      cashbookCategories={categoriesRes.data || []}
       services={servicesRes.data || []}
       companySettings={settings}
       exchangeRates={ratesRes.data || []}

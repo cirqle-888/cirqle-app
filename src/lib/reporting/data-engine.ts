@@ -48,6 +48,17 @@ export async function fetchReportData(opts: FetchReportDataOptions): Promise<Rep
   }
 
   const client = (projectRow.client as any) ?? {}
+  // ── 1.5. Fetch Campaign Wallet Allocation ──────────────────────────────────
+  const { data: ledgerRows, error: ledgerErr } = await admin
+    .from('ad_wallet_ledger')
+    .select('amount_inr')
+    .eq('ad_project_id', opts.projectId)
+    .eq('direction', 'debit')
+    .eq('kind', 'campaign_allocation')
+    .is('deleted_at', null)
+
+  const walletAllocation = ledgerRows?.reduce((sum, row) => sum + Number(row.amount_inr || 0), 0) ?? 0
+
   const project: ReportProject = {
     id: projectRow.id,
     clientId: projectRow.client_id ?? opts.clientId,
@@ -65,6 +76,7 @@ export async function fetchReportData(opts: FetchReportDataOptions): Promise<Rep
     objective: projectRow.objective,
     startDate: projectRow.start_date,
     endDate: projectRow.end_date,
+    walletAllocation,
   }
 
   // ── 2. Primary period metrics ───────────────────────────────────────────

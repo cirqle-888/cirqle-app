@@ -4,8 +4,11 @@
  * Single source of truth for the professional invoice layout. Used by:
  *   - the Invoices page (print + live preview), via a thin delegate
  *   - the public hosted invoice page (/i/[token]) clients open to view/download
+ *   - the Download PDF pipeline (lib/invoices/download-pdf.ts), which measures
+ *     and re-composes these blocks into discrete A4 pages so table rows never
+ *     split across page boundaries
  *
- * Pure: takes the invoice row + company_settings map and returns an HTML string.
+ * Pure: takes the invoice row + company_settings map and returns HTML strings.
  * No React, no browser-only globals (qrcode is isomorphic), so it runs in a
  * Server Component too.
  */
@@ -61,22 +64,71 @@ function qrSvgBlock(text: string, accent: string, size = 104): string {
 
 const balanceDue = (inv: any): number => Math.max(0, (inv.total_amount ?? 0) - (inv.paid_amount ?? 0))
 
-export function renderInvoiceHtml(
-  inv: any,
-  companySettings: Record<string, string>,
+export interface InvoiceRenderOpts {
+  autoprint?: boolean
   // otherOutstanding: live-computed sum of the client's OTHER sent/partial/overdue
   // invoices, for a "share one PDF that shows everything they owe" use case.
   // Deliberately NOT persisted anywhere — purely a render-time addition, kept as
   // its own clearly-labeled line rather than folded into this invoice's own
   // "Total Payable", so the printed amount for THIS invoice never gets confused
   // with the client's total outstanding across all invoices.
+  otherOutstanding?: number
   // forRaster: the caller will rasterize this HTML with html2canvas (the Download
-  // PDF button), which does NOT support -webkit-background-clip:text. When set,
+  // PDF pipeline), which does NOT support -webkit-background-clip:text. When set,
   // the gradient-filled thank-you text is flattened to a solid brand colour so it
   // renders as text, not solid boxes. Preview / Print (real browser rendering)
   // leave it off and keep the gradient.
-  opts?: { autoprint?: boolean; otherOutstanding?: number; forRaster?: boolean },
-): string {
+  forRaster?: boolean
+}
+
+/** Decorative layers can be viewport-fixed (print) or page-div-absolute (PDF pages). */
+type LayerPos = 'fixed' | 'absolute'
+
+export interface InvoiceRenderParts {
+  inv: any
+  co: { name: string; phone: string; website: string; tagline: string; holder: string; account: string; ifsc: string; upi: string; logoUrl: string; footerText: string }
+  NAVY: string
+  NAVY_LIGHT: string
+  CELL_BORD: string
+  FONT: string
+  bgStyle: string
+  /** dots/diagonal pattern css for the page background ('' otherwise) */
+  bgCss: string
+  fullBleed: boolean
+  pageMargin: string
+  bodyPad: string
+  fontLinks: string
+  /** page-1 header: logo/name/tagline + contact + invoice meta + INVOICE title + bill-to */
+  headerBlock: string
+  /** compact continuation header for pages 2+ (logo, name, invoice/client/date, Page X of Y, accent rule) */
+  contHeader: (page: number, totalPages: number) => string
+  /** continuation footer for every page except the last (brand line + Page X of Y + Continued →) */
+  contFooter: (page: number, totalPages: number) => string
+  /** wraps row html in the items table (with the repeated gradient thead) */
+  itemsTable: (rowsHtml: string) => string
+  /** one html string per item row, in display order (sorted by task date) */
+  itemRows: string[]
+  emptyRow: string
+  expensesBlock: string
+  totalsBlock: string
+  notesBlock: string
+  /** payment info | QR | thank-you footer (margin-top:auto, pinned to page bottom) */
+  footerBlock: string
+  /** bottom brand strip; optional right-side extra (e.g. "Page N of N") */
+  brandStrip: (rightExtra?: string) => string
+  cornerSvg: (pos: LayerPos) => string
+  /** top decorative layer (silk shade svg / custom top image), '' when none */
+  bgTop: (pos: LayerPos) => string
+  /** bottom decorative layer, '' when none */
+  bgBottom: (pos: LayerPos) => string
+  autoprintScript: string
+}
+
+export function buildInvoiceParts(
+  inv: any,
+  companySettings: Record<string, string>,
+  opts?: InvoiceRenderOpts,
+): InvoiceRenderParts {
   // Company info + design from settings
   const co = {
     name:    companySettings.company_name    || 'cirqle',
@@ -104,14 +156,17 @@ export function renderInvoiceHtml(
   const sortedItems = [...(inv.items || [])].sort((a: any, b: any) => {
     const dateA = a.task?.task_date || ''
     const dateB = b.task?.task_date || ''
-    if (dateA && dateB && dateA !== dateB) {
-      return dateA.localeCompare(dateB)
+    if (dateA && dateB) {
+      if (dateA !== dateB) return dateA.localeCompare(dateB)
+    } else if (dateA && !dateB) {
+      return -1 // Items with dates come before items without dates
+    } else if (!dateA && dateB) {
+      return 1
     }
     return a.display_order - b.display_order
   })
   const subtotal = inv.subtotal || ((inv.total_amount || 0) + (inv.discount_amount || 0) - (inv.tax_amount || 0) - (inv.previous_balance || 0))
   const prevBal  = inv.previous_balance || 0
-  const totalDue = subtotal + prevBal
   const discount = inv.discount_amount || 0
   const taxAmt   = inv.tax_amount || 0
   const totalPayable = inv.total_amount || 0
@@ -140,9 +195,6 @@ export function renderInvoiceHtml(
   const HEAD_TOP  = NAVY                              // table header gradient top
   const HEAD_BOT  = shadeHex(NAVY, 0.55)              // table header gradient bottom
   const CELL_BORD = tintHex(NAVY_LIGHT, 0.82)         // faint column/row borders
-  const THANK_LT  = NAVY_LIGHT                        // "Thank" light purple
-  const THANK_DK  = shadeHex(NAVY_LIGHT, 0.5)         // "you" deep purple
-  const THANK_MID = shadeHex(NAVY_LIGHT, 0.78)        // "for your / Business!"
 
   // Expense items — rendered as a separate "Expenses" section after the item table.
   // Display mode (A/B/C) controls what the client sees; internal costs are never shown in A or C.
@@ -166,11 +218,11 @@ export function renderInvoiceHtml(
         <td style="${td('text-align:right;color:#111;font-weight:700;white-space:nowrap')}">${inr(it.total)}</td>
       </tr>`
   })
-  const allItemRows = itemRows.join('')
+  const emptyRow = `<tr><td colspan="6" style="padding:20px;text-align:center;color:#999;font-size:12px">No items</td></tr>`
 
   // Expenses section block (separate from main item table in all modes)
   const expensesTotal = expenseItems.reduce((s: number, e: any) => s + (e.amount || 0), 0)
-  const separateExpensesBlock = expenseItems.length > 0 ? (() => {
+  const expensesBlock = expenseItems.length > 0 ? (() => {
     const EXP_H = 36
     const expRows = expenseItems.map((exp: any, i: number) => {
       const bg = i % 2 === 1 ? ALT_ROW : '#ffffff'
@@ -228,15 +280,16 @@ export function renderInvoiceHtml(
   const upiString = co.upi ? `upi://pay?pa=${co.upi}&pn=${encodeURIComponent(co.holder)}&cu=INR` : ''
 
   // Logo: use uploaded image if available, else SVG icon
-  const logoBlock = showLogo
+  const logoBlockSized = (h: number) => showLogo
     ? co.logoUrl
-      ? `<img src="${co.logoUrl}" alt="logo" style="height:42px;object-fit:contain;display:block"/>`
-      : `<svg width="42" height="42" viewBox="0 0 42 42" xmlns="http://www.w3.org/2000/svg">
+      ? `<img src="${co.logoUrl}" alt="logo" style="height:${h}px;object-fit:contain;display:block"/>`
+      : `<svg width="${h}" height="${h}" viewBox="0 0 42 42" xmlns="http://www.w3.org/2000/svg">
            <circle cx="21" cy="21" r="20" fill="none" stroke="${NAVY}" stroke-width="2.5"/>
            <circle cx="21" cy="21" r="14" fill="${NAVY}"/>
            <text x="21" y="26" text-anchor="middle" fill="white" font-size="14" font-weight="bold" font-family="Arial">c</text>
          </svg>`
     : ''
+  const logoBlock = logoBlockSized(42)
 
   // Payment information — italic block, reference style
   const payRow = (label: string, value: string) => `
@@ -258,7 +311,7 @@ export function renderInvoiceHtml(
 
   // QR (encodes the UPI pay link or uses a custom uploaded QR image)
   const customQr = companySettings.invoice_qr_image_url
-  const qrBlock = showQr 
+  const qrBlock = showQr
     ? (customQr ? `<img src="${customQr}" alt="QR Code" style="width:104px;height:104px;object-fit:contain;display:block;margin:0 auto"/>` : (upiString ? qrSvgBlock(upiString, NAVY_LIGHT) : ''))
     : ''
 
@@ -286,8 +339,8 @@ export function renderInvoiceHtml(
     ? `background-image:repeating-linear-gradient(45deg,${NAVY}12 0px,${NAVY}12 1px,transparent 1px,transparent 16px);`
     : ''
 
-  const cornerSvg = bgStyle === 'corner'
-    ? `<svg style="position:fixed;top:0;right:0;width:180px;height:180px;pointer-events:none;z-index:0" viewBox="0 0 180 180" xmlns="http://www.w3.org/2000/svg">
+  const cornerSvg = (pos: LayerPos) => bgStyle === 'corner'
+    ? `<svg style="position:${pos};top:0;right:0;width:180px;height:180px;pointer-events:none;z-index:0" viewBox="0 0 180 180" xmlns="http://www.w3.org/2000/svg">
          <path d="M180 0 L180 180 L0 0 Z" fill="${NAVY}" opacity="0.07"/>
          <path d="M180 0 L180 120 L60 0 Z" fill="${NAVY}" opacity="0.07"/>
        </svg>`
@@ -296,8 +349,8 @@ export function renderInvoiceHtml(
   // Silk Shade — layered flowing silk-wave ribbons hugging the top & bottom
   // page edges (multiple translucent layers + white highlight streaks, blurred)
   const ACC = NAVY_LIGHT
-  const shadeSvg = bgStyle === 'shade'
-    ? `<svg style="position:fixed;top:0;left:0;width:100%;height:190px;pointer-events:none;z-index:0" viewBox="0 0 800 190" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+  const shadeTopSvg = (pos: LayerPos) =>
+    `<svg style="position:${pos};top:0;left:0;width:100%;height:190px;pointer-events:none;z-index:0" viewBox="0 0 800 190" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
          <defs>
            <linearGradient id="wgT" x1="0" y1="0" x2="1" y2="0.25">
              <stop offset="0" stop-color="${ACC}" stop-opacity="0.20"/>
@@ -320,8 +373,9 @@ export function renderInvoiceHtml(
            <path d="M0 66 C196 112 416 36 624 70 C700 82 764 68 800 76 L800 83 C764 75 700 89 624 77 C416 43 196 119 0 73 Z" fill="#ffffff" opacity="0.65"/>
            <path d="M30 88 C220 124 430 60 640 88 L640 92 C430 64 220 129 30 92 Z" fill="${ACC}" opacity="0.18"/>
          </g>
-       </svg>
-       <svg style="position:fixed;bottom:0;left:0;width:100%;height:200px;pointer-events:none;z-index:0" viewBox="0 0 800 200" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+       </svg>`
+  const shadeBottomSvg = (pos: LayerPos) =>
+    `<svg style="position:${pos};bottom:0;left:0;width:100%;height:200px;pointer-events:none;z-index:0" viewBox="0 0 800 200" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
          <defs>
            <linearGradient id="wgB" x1="0" y1="1" x2="1" y2="0.7">
              <stop offset="0" stop-color="${ACC}" stop-opacity="0.18"/>
@@ -344,16 +398,27 @@ export function renderInvoiceHtml(
            <path d="M0 178 C200 146 420 196 636 168 C700 160 760 172 800 162 L800 169 C760 179 700 167 636 175 C420 203 200 153 0 185 Z" fill="#ffffff" opacity="0.6"/>
          </g>
        </svg>`
+
+  const customTopImg = (pos: LayerPos) => companySettings.invoice_bg_image_top_url
+    ? `<img src="${companySettings.invoice_bg_image_top_url}" style="position:${pos === 'fixed' ? 'absolute' : pos};top:0;left:0;width:100%;height:auto;pointer-events:none;z-index:0;display:block;" />`
+    : ''
+  const customBottomImg = (pos: LayerPos) => companySettings.invoice_bg_image_bottom_url
+    ? `<img src="${companySettings.invoice_bg_image_bottom_url}" style="position:${pos === 'fixed' ? 'absolute' : pos};bottom:0;left:0;width:100%;height:auto;pointer-events:none;z-index:0;display:block;" />`
     : ''
 
-  const customImagesHtml = bgStyle === 'custom_images' 
-    ? `${companySettings.invoice_bg_image_top_url ? `<img src="${companySettings.invoice_bg_image_top_url}" style="position:absolute;top:0;left:0;width:100%;height:auto;pointer-events:none;z-index:0;display:block;" />` : ''}
-       ${companySettings.invoice_bg_image_bottom_url ? `<img src="${companySettings.invoice_bg_image_bottom_url}" style="position:absolute;bottom:0;left:0;width:100%;height:auto;pointer-events:none;z-index:0;display:block;" />` : ''}`
+  const bgTop = (pos: LayerPos) =>
+    bgStyle === 'shade' ? shadeTopSvg(pos)
+    : bgStyle === 'custom_images' ? customTopImg(pos)
+    : ''
+  const bgBottom = (pos: LayerPos) =>
+    bgStyle === 'shade' ? shadeBottomSvg(pos)
+    : bgStyle === 'custom_images' ? customBottomImg(pos)
     : ''
 
+  const fullBleed = bgStyle === 'shade' || bgStyle === 'custom_images'
   // Shade bleeds to the paper edge: zero the @page margin and carry it on the body instead
-  const pageMargin = (bgStyle === 'shade' || bgStyle === 'custom_images') ? '0' : '15mm 12mm'
-  const bodyPad = (bgStyle === 'shade' || bgStyle === 'custom_images') ? '53px 64px 46px' : '53px 64px 46px'
+  const pageMargin = fullBleed ? '0' : '15mm 12mm'
+  const bodyPad = '53px 64px 46px'
 
   // Tagline splits into "Get Budget" / "Designs" (last word bold on its own line)
   const tagWords = (co.tagline || '').trim().split(/\s+/)
@@ -367,27 +432,8 @@ export function renderInvoiceHtml(
   const waIcon = `<img src="data:image/svg+xml,${waIconSvg}" width="17" height="17" style="width:17px;height:17px;display:inline-block;position:relative;top:9px;flex-shrink:0" />`
   const globeIcon = `<img src="data:image/svg+xml,${globeIconSvg}" width="17" height="17" style="width:17px;height:17px;display:inline-block;position:relative;top:9px;flex-shrink:0" />`
 
-  const html = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8"/>
-  <title>${inv.invoice_number}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=Open+Sans:ital,wght@0,400;0,600;0,700;1,400;1,700&display=swap" rel="stylesheet">
-  <style>
-    * { margin:0; padding:0; box-sizing:border-box }
-    body { font-family: ${FONT}; color: #222; background:#fff; font-size:13px; ${bgCss} }
-    .disp { font-family: 'Poppins', ${FONT} }
-    @page { margin: ${pageMargin}; size: A4 portrait }
-    @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact } }
-  </style>
-</head>
-<body style="padding:${bodyPad};max-width:${(bgStyle === 'shade' || bgStyle === 'custom_images') ? '210mm' : '800px'};margin:0 auto;position:relative;min-height:297mm">
-  ${cornerSvg}${shadeSvg}${customImagesHtml}
-  <div style="position:relative;z-index:1;display:flex;flex-direction:column;min-height:${(bgStyle === 'shade' || bgStyle === 'custom_images') ? '258mm' : '248mm'}">
-
-  <!-- ── UNIFIED HEADER + CONTACT + META (single table keeps column widths consistent) ── -->
+  // ── UNIFIED HEADER + CONTACT + META (single table keeps column widths consistent) ──
+  const headerBlock = `
   <table style="width:100%;border-collapse:collapse;margin-bottom:14px">
     <tr>
       <td style="vertical-align:top;width:62%;padding-right:16px">
@@ -452,9 +498,49 @@ export function renderInvoiceHtml(
         </div>
       </td>
     </tr>
-  </table>
+  </table>`
 
-  <!-- ── ITEMS TABLE ── -->
+  // ── CONTINUATION HEADER (pages 2+) — minimal branded strip: logo/name left,
+  //    "(Continued)" label + page counter right, invoice/client/date meta line,
+  //    then a brand-gradient accent rule. All HTML, so the accent-to-white
+  //    transition rasterizes perfectly clean (no jsPDF overdraw artifacts). ──
+  const contHeader = (page: number, totalPages: number) => `
+  <div style="margin-bottom:16px">
+    <table style="width:100%;border-collapse:collapse">
+      <tr>
+        <td style="vertical-align:middle;padding:0">
+          <div style="display:flex;align-items:center">
+            ${logoBlockSized(30)}
+            ${showName ? `<div class="disp" style="font-size:17px;font-weight:800;color:#111;letter-spacing:-0.3px;margin-left:8px;line-height:1">${co.name}</div>` : ''}
+          </div>
+        </td>
+        <td style="vertical-align:middle;text-align:right;padding:0;white-space:nowrap">
+          <div class="disp" style="font-size:14.5px;font-weight:800;color:#0f0f0f;letter-spacing:0.4px">INVOICE <span style="font-weight:600;color:#777">(Continued)</span></div>
+          <div style="font-size:11px;color:#888;margin-top:3px">Page ${page} of ${totalPages}</div>
+        </td>
+      </tr>
+    </table>
+    <div style="display:flex;flex-wrap:wrap;gap:6px 26px;margin-top:12px;font-size:11.5px;color:#555">
+      <span style="white-space:nowrap"><span style="font-weight:700;color:#111">Invoice No.</span>&nbsp;&nbsp;${inv.invoice_number}</span>
+      <span style="white-space:nowrap"><span style="font-weight:700;color:#111">Client</span>&nbsp;&nbsp;${inv.client?.name || ''}</span>
+      <span style="white-space:nowrap"><span style="font-weight:700;color:#111">Date</span>&nbsp;&nbsp;${dd(inv.issue_date)}</span>
+    </div>
+    <div style="height:3px;background:linear-gradient(90deg,${NAVY},${NAVY_LIGHT});border-radius:2px;margin-top:12px"></div>
+  </div>`
+
+  // ── CONTINUATION FOOTER (all pages except the last) ──
+  const contFooter = (page: number, totalPages: number) => `
+  <div style="margin-top:auto;border-top:1px solid ${CELL_BORD};padding-top:14px;display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#666">
+    <div style="display:flex;align-items:baseline;gap:12px">
+      <span style="font-weight:700;color:${NAVY};font-size:11.5px">${co.name}</span>
+      ${co.website ? `<span>${co.website}</span>` : ''}
+    </div>
+    <div>Page ${page} of ${totalPages}</div>
+    <div style="font-style:italic;font-weight:600;color:${NAVY}">${page === 1 ? 'Continued on next page &#8594;' : 'Continued &#8594;'}</div>
+  </div>`
+
+  // ── ITEMS TABLE (thead repeats on every PDF page that carries rows) ──
+  const itemsTable = (rowsHtml: string) => `
   <table style="width:100%;border-collapse:collapse;margin:14px 0 12px">
     <thead>
       <tr style="background:linear-gradient(180deg,${HEAD_TOP} 0%,${HEAD_BOT} 100%);height:${ROW_H}px">
@@ -467,13 +553,12 @@ export function renderInvoiceHtml(
       </tr>
     </thead>
     <tbody>
-      ${allItemRows || `<tr><td colspan="6" style="padding:20px;text-align:center;color:#999;font-size:12px">No items</td></tr>`}
+      ${rowsHtml}
     </tbody>
-  </table>
+  </table>`
 
-  ${separateExpensesBlock}
-
-  <!-- ── TOTALS (right block, reference style) ── -->
+  // ── TOTALS (right block, reference style) ──
+  const totalsBlock = `
   <table style="width:100%;border-collapse:collapse;margin-top:6px">
     <tr>
       <td style="width:42%"></td>
@@ -544,11 +629,12 @@ export function renderInvoiceHtml(
         </table>` : ''}
       </td>
     </tr>
-  </table>
+  </table>`
 
-  ${inv.notes ? `<div style="margin-top:14px;font-size:11.5px;color:#444;font-style:italic">${inv.notes}</div>` : ''}
+  const notesBlock = inv.notes ? `<div style="margin-top:14px;font-size:11.5px;color:#444;font-style:italic">${inv.notes}</div>` : ''
 
-  <!-- ── FOOTER: payment info | QR | thank-you (pinned to page bottom) ── -->
+  // ── FOOTER: payment info | QR | thank-you (pinned to page bottom) ──
+  const footerBlock = `
   <div style="margin-top:auto;padding-top:44px;padding-bottom:32px">
     <table style="width:100%;border-collapse:collapse">
       <tr>
@@ -557,20 +643,166 @@ export function renderInvoiceHtml(
         <td style="vertical-align:middle;padding:0;width:38%">${thankBlock}</td>
       </tr>
     </table>
-  </div>
-  
+  </div>`
+
+  const brandStrip = (rightExtra?: string) => `
   <div style="border-top:1px solid ${CELL_BORD};padding-top:16px;display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:#666">
     <div style="font-weight:700;color:${NAVY}">${co.name}</div>
     <div style="display:flex;gap:18px">
       ${co.phone ? `<span>${co.phone}</span>` : ''}
       ${co.website ? `<span>${co.website}</span>` : ''}
+      ${rightExtra ? `<span>${rightExtra}</span>` : ''}
     </div>
-  </div>
+  </div>`
+
+  const fontLinks = `
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=Open+Sans:ital,wght@0,400;0,600;0,700;1,400;1,700&display=swap" rel="stylesheet">`
+
+  const autoprintScript = opts?.autoprint ? `<script>document.fonts.ready.then(function(){setTimeout(function(){window.print()},200)})</script>` : ''
+
+  return {
+    inv, co, NAVY, NAVY_LIGHT, CELL_BORD, FONT, bgStyle, bgCss, fullBleed, pageMargin, bodyPad,
+    fontLinks, headerBlock, contHeader, contFooter, itemsTable, itemRows, emptyRow,
+    expensesBlock, totalsBlock, notesBlock, footerBlock, brandStrip,
+    cornerSvg, bgTop, bgBottom, autoprintScript,
+  }
+}
+
+/** Single-flow document (print / preview / public hosted page). */
+export function renderInvoiceHtml(
+  inv: any,
+  companySettings: Record<string, string>,
+  opts?: InvoiceRenderOpts,
+): string {
+  const p = buildInvoiceParts(inv, companySettings, opts)
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8"/>
+  <title>${inv.invoice_number}</title>
+  ${p.fontLinks}
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box }
+    body { font-family: ${p.FONT}; color: #222; background:#fff; font-size:13px; ${p.bgCss} }
+    .disp { font-family: 'Poppins', ${p.FONT} }
+    @page { margin: ${p.pageMargin}; size: A4 portrait }
+    @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact } }
+  </style>
+</head>
+<body style="padding:${p.bodyPad};max-width:${p.fullBleed ? '210mm' : '800px'};margin:0 auto;position:relative;min-height:297mm">
+  ${p.cornerSvg('fixed')}${p.bgStyle === 'shade' ? p.bgTop('fixed') + p.bgBottom('fixed') : ''}${p.bgStyle === 'custom_images' ? p.bgTop('fixed') + p.bgBottom('fixed') : ''}
+  <div style="position:relative;z-index:1;display:flex;flex-direction:column;min-height:${p.fullBleed ? '258mm' : '248mm'}">
+
+  ${p.headerBlock}
+
+  ${p.itemsTable(p.itemRows.join('') || p.emptyRow)}
+
+  ${p.expensesBlock}
+
+  ${p.totalsBlock}
+
+  ${p.notesBlock}
+
+  ${p.footerBlock}
+
+  ${p.brandStrip()}
 
   </div>
-  ${opts?.autoprint ? `<script>document.fonts.ready.then(function(){setTimeout(function(){window.print()},200)})</script>` : ''}
+  ${p.autoprintScript}
 </body>
 </html>`
+}
 
-  return html
+// ── PAGINATED PDF COMPOSITION ────────────────────────────────────────────────
+// The Download PDF pipeline lays the invoice out as discrete A4-proportioned
+// pages (800 × 1131 css px ≙ 210 × 297 mm) so html2canvas can rasterize each
+// page separately — table rows never split, every page carries its own header/
+// footer, and totals + payment info appear only on the last page.
+
+export const PDF_PAGE_W = 800
+export const PDF_PAGE_H = 1131  // 800 × 297/210
+export const PDF_PAD_TOP = 53
+export const PDF_PAD_BOTTOM = 46
+export const PDF_PAD_X = 64
+
+const pageHeadCss = (p: InvoiceRenderParts) => `
+    * { margin:0; padding:0; box-sizing:border-box }
+    body { font-family: ${p.FONT}; color: #222; background:#fff; font-size:13px; margin:0 }
+    .disp { font-family: 'Poppins', ${p.FONT} }
+    .pdf-page { position:relative; width:${PDF_PAGE_W}px; height:${PDF_PAGE_H}px; background:#ffffff; overflow:hidden; ${p.bgCss} }`
+
+/**
+ * Off-screen measurement document: every block wrapped in an overflow:hidden
+ * (BFC) div so measured heights include the block's own margins. Same width /
+ * horizontal padding as the real pages, so text wraps — and rows measure —
+ * identically to the final render.
+ */
+export function renderMeasureHtml(p: InvoiceRenderParts): string {
+  const wrap = (key: string, html: string) => html ? `<div data-m="${key}" style="overflow:hidden">${html}</div>` : `<div data-m="${key}" style="overflow:hidden;display:none"></div>`
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8"/>
+  <title>measure</title>
+  ${p.fontLinks}
+  <style>${pageHeadCss(p)}</style>
+</head>
+<body style="width:${PDF_PAGE_W}px">
+  <div style="padding:0 ${PDF_PAD_X}px">
+    ${wrap('header', p.headerBlock)}
+    ${wrap('contHeader', p.contHeader(2, 9))}
+    ${wrap('table', p.itemsTable(p.itemRows.join('') || p.emptyRow))}
+    ${wrap('expenses', p.expensesBlock)}
+    ${wrap('totals', p.totalsBlock)}
+    ${wrap('notes', p.notesBlock)}
+    ${wrap('footer', p.footerBlock)}
+    ${wrap('brand', p.brandStrip('Page 9 of 9'))}
+    ${wrap('contFooter', p.contFooter(1, 9))}
+  </div>
+</body>
+</html>`
+}
+
+/**
+ * Compose the final paginated document. `pageRows` holds the item-row indices
+ * for each page (the last entry may be empty — a totals/footer-only page).
+ */
+export function renderPaginatedInvoiceHtml(p: InvoiceRenderParts, pageRows: number[][]): string {
+  const N = pageRows.length
+  const pagesHtml = pageRows.map((rows, i) => {
+    const isFirst = i === 0
+    const isLast = i === N - 1
+    const rowsHtml = rows.map(r => p.itemRows[r]).join('')
+    // Empty invoice: keep the "No items" placeholder on the (single) page
+    const tableHtml = rows.length > 0
+      ? p.itemsTable(rowsHtml)
+      : (isFirst && p.itemRows.length === 0 ? p.itemsTable(p.emptyRow) : '')
+    return `
+  <div class="pdf-page">
+    ${isFirst ? p.cornerSvg('absolute') + p.bgTop('absolute') : ''}${isLast ? p.bgBottom('absolute') : ''}
+    <div style="position:relative;z-index:1;display:flex;flex-direction:column;height:100%;padding:${PDF_PAD_TOP}px ${PDF_PAD_X}px ${PDF_PAD_BOTTOM}px">
+      ${isFirst ? p.headerBlock : p.contHeader(i + 1, N)}
+      ${tableHtml}
+      ${isLast
+        ? `${p.expensesBlock}${p.totalsBlock}${p.notesBlock}${p.footerBlock}${p.brandStrip(N > 1 ? `Page ${N} of ${N}` : '')}`
+        : p.contFooter(i + 1, N)}
+    </div>
+  </div>`
+  }).join('\n')
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8"/>
+  <title>${p.inv.invoice_number}</title>
+  ${p.fontLinks}
+  <style>${pageHeadCss(p)}</style>
+</head>
+<body>
+${pagesHtml}
+</body>
+</html>`
 }

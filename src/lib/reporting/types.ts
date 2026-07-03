@@ -72,6 +72,7 @@ export interface ReportProject {
   objective: string | null
   startDate: string | null
   endDate: string | null
+  walletAllocation: number // Fetched from ad_wallet_ledger
 }
 
 export interface ReportMetricRow {
@@ -181,6 +182,10 @@ export interface DailySeriesPoint {
   ctr: number
   /** Cost per result = spend / (leads || conversions || clicks). 0 when no results. */
   cpr: number
+  /** Actual money spent including GST */
+  actualCost: number
+  gstAmount: number
+  remainingAllocation: number
 }
 
 export interface WeeklySeriesPoint extends DailySeriesPoint {
@@ -197,7 +202,10 @@ export interface DerivedKPIs {
   avgDailySpend: number
   avgDailyLeads: number
   campaignDuration: number  // days in range
-  remainingBudget: number   // budget - spend
+  remainingBudget: number   // deprecated fallback, use remainingAllocation
+  actualCost: number
+  gstAmount: number
+  remainingAllocation: number // walletAllocation - actualCost
 }
 
 // ─── Benchmark Summary (output of Benchmark Engine) ──────────────────────────

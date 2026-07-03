@@ -25,18 +25,21 @@ const INK       = '#111827'
 const GREY_PILL = '#4B5563'
 const RED_PILL  = '#EF4444'
 
-export type DailyRowWithBalance = DailySeriesPoint & { balance: number }
+export type DailyRowWithBalance = DailySeriesPoint & { balance: number; actualCost: number; gstAmount: number }
 
 /**
  * Computes the full chronological (oldest → newest) daily performance series
- * with a running "balance to spend" against the campaign's ad budget.
+ * with a running "remaining allocation" against the campaign's wallet allocation.
  */
 export function computeDailyRows(data: RenderData): DailyRowWithBalance[] {
   const { project, kpi } = data
-  let cumulative = 0
+  let cumulativeCost = 0
+  const taxPercent = project.taxPercent || 0
   return kpi.dailySeries.map(row => {
-    cumulative += row.spend
-    return { ...row, balance: project.adBudget - cumulative }
+    const gstAmount = row.spend * (taxPercent / 100)
+    const actualCost = row.spend + gstAmount
+    cumulativeCost += actualCost
+    return { ...row, actualCost, gstAmount, balance: project.walletAllocation - cumulativeCost }
   })
 }
 
@@ -196,7 +199,7 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
             <MetaLine s={s} pairs={[['Daily Budget', `₹${money(dailyBudget)}`], ['Expected Budget', `₹${num(project.adBudget)}`]]} />
           </div>
 
-          {/* KPI circle row */}
+          {/* Performance KPI circle row */}
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'center', marginBottom: `${30 * s}px` }}>
             <KpiCircle s={s} label="Reach"       value={num(p.reach)}        grad={['#8B5CF6', '#6D28D9']} icon="users" />
             <KpiDivider s={s} />
@@ -204,15 +207,17 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
             <KpiDivider s={s} />
             <KpiCircle s={s} label="Clicks"      value={num(p.clicks)}       grad={['#22B8F2', '#2563EB']} icon="cursor" />
             <KpiDivider s={s} />
-            <KpiCircle s={s} label="Spend"       value={`₹${money(p.spend)}`} grad={['#A855F7', '#7C3AED']} icon="rupee" />
+            <KpiCircle s={s} label="Meta Spend"  value={`₹${money(p.spend)}`} grad={['#A855F7', '#7C3AED']} icon="rupee" />
             <KpiDivider s={s} />
             <KpiCircle s={s} label="CPR"         value={`₹${money(d.costPerResult)}`} grad={['#FB923C', '#EF4444']} icon="percent" />
           </div>
 
-          {/* Budget status pills */}
-          <div style={{ display: 'flex', justifyContent: 'center', gap: `${20 * s}px`, marginBottom: `${36 * s}px` }}>
-            <Pill s={s} bg={GREY_PILL} label="Total Remaining Amount" value={`₹${money(d.remainingBudget)}`} />
-            <Pill s={s} bg={RED_PILL}  label="Remaining Days" value={`${remainingDays} Days`} />
+          {/* Financial summary pills */}
+          <div style={{ display: 'flex', justifyContent: 'center', gap: `${20 * s}px`, marginBottom: `${36 * s}px`, flexWrap: 'wrap' }}>
+            <Pill s={s} bg={'#047857'} label="Wallet Allocation" value={`₹${money(project.walletAllocation)}`} />
+            <Pill s={s} bg={'#B45309'} label="Total Actual Cost" value={`₹${money(p.spend * (1 + (project.taxPercent || 0) / 100))}`} />
+            <Pill s={s} bg={RED_PILL}  label="Remaining Allocation" value={`₹${money(project.walletAllocation - (p.spend * (1 + (project.taxPercent || 0) / 100)))}`} />
+            <Pill s={s} bg={GREY_PILL} label="Service Charge" value={project.serviceChargeType === 'percent' ? `${project.serviceChargeValue}%` : `₹${money(project.serviceChargeValue)}`} />
           </div>
         </div>
       )}
@@ -230,7 +235,7 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
         </div>
 
         {/* Header row */}
-        <TableRow s={s} cells={['Date', 'Spend', 'Reach', 'Impressions', 'CPR', 'Balance to Spend']} header />
+        <TableRow s={s} cells={['Date', 'Meta Spend', 'GST', 'Actual Cost', 'Reach', 'Impr.', 'CPR', 'Remaining']} header />
         {tableRows.length === 0 ? (
           <div style={{ display: 'flex', padding: `${24 * s}px`, color: '#9CA3AF', fontSize: `${22 * s}px` }}>
             No daily metrics recorded for this period.
@@ -244,6 +249,8 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
             cells={[
               ddmmyyyy(r.date),
               `₹${money(r.spend)}`,
+              `₹${money(r.gstAmount)}`,
+              `₹${money(r.actualCost)}`,
               num(r.reach),
               num(r.impressions),
               `₹${money(r.cpr)}`,
@@ -263,7 +270,7 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
           <div style={{ display: 'flex', fontWeight: 800, color: PURPLE, fontSize: `${24 * s}px` }}>
             {brand.agencyName}
           </div>
-          <div style={{ display: 'flex' }}>Connected by Creativity</div>
+          <div style={{ display: 'flex' }}>Powered by Cirqle CRM</div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
           {brand.contactPhone  && <div style={{ display: 'flex' }}>{brand.contactPhone}</div>}
@@ -337,17 +344,17 @@ function Pill({ s, bg, label, value }: { s: number; bg: string; label: string; v
 function TableRow({
   s, cells, header, zebra, last,
 }: { s: number; cells: string[]; header?: boolean; zebra?: boolean; last?: boolean }) {
-  // Column flex weights: Date, Spend, Reach, Impressions, CPR, Balance
-  const flex = [2, 1.4, 1.5, 1.6, 1.1, 1.8]
+  // Column flex weights: Date, Meta Spend, GST, Actual Cost, Reach, Impr., CPR, Remaining
+  const flex = [1.8, 1.4, 1.0, 1.4, 1.1, 1.2, 1.1, 1.8]
   const bg = header ? PURPLE : zebra ? '#F5F3FF' : '#FFFFFF'
   return (
     <div style={{
       display: 'flex',
       background: bg,
       color: header ? '#FFFFFF' : '#374151',
-      fontSize: `${21 * s}px`,
+      fontSize: `${(header ? 19 : 20) * s}px`,
       fontWeight: header ? 700 : 500,
-      padding: `${13 * s}px ${18 * s}px`,
+      padding: `${13 * s}px ${16 * s}px`,
       borderLeft: header ? 'none' : `${1 * s}px solid #EDE9FE`,
       borderRight: header ? 'none' : `${1 * s}px solid #EDE9FE`,
       borderBottom: last ? `${1 * s}px solid #EDE9FE` : 'none',

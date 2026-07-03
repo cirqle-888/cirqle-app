@@ -2100,24 +2100,32 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
           input={((): ReceiptInput => {
             const allocs = (receiptEntry.allocations || []).filter(a => !a.deleted_at)
             
+            console.log("RECEIPT ENTRY:", JSON.stringify(receiptEntry, null, 2))
+            
+            // Helper to handle Supabase returning an array or object for a relation
+            const unwrap = (obj: any) => (Array.isArray(obj) ? obj[0] : obj)
+            
             // Build the list of invoices for the receipt. Fallback to the direct_invoice if there are no allocations.
-            let receiptInvoices = allocs.map(a => ({
-              number: a.invoice?.invoice_number || '—',
-              outstanding: a.invoice ? Number(a.invoice.total_amount) - Number(a.invoice.paid_amount || 0) : 0,
-            }))
-            let firstClient = allocs.find(a => a.invoice?.client?.name)?.invoice?.client?.name || ''
+            let receiptInvoices = allocs.map(a => {
+              const inv = unwrap(a.invoice)
+              return {
+                number: inv?.invoice_number || '—',
+                outstanding: inv ? Number(inv.total_amount) - Number(inv.paid_amount || 0) : 0,
+              }
+            })
+            
+            let firstClient = allocs.find(a => unwrap(unwrap(a.invoice)?.client)?.name)
+            let firstClientName = firstClient ? unwrap(unwrap(firstClient.invoice)?.client)?.name : ''
             
             if (receiptInvoices.length === 0 && receiptEntry.direct_invoice) {
+              const directInv = unwrap(receiptEntry.direct_invoice)
               receiptInvoices = [{
-                number: receiptEntry.direct_invoice.invoice_number || '—',
-                outstanding: Number(receiptEntry.direct_invoice.total_amount) - Number(receiptEntry.direct_invoice.paid_amount || 0),
+                number: directInv?.invoice_number || '—',
+                outstanding: directInv ? Number(directInv.total_amount) - Number(directInv.paid_amount || 0) : 0,
               }]
-              firstClient = receiptEntry.direct_invoice.client?.name || ''
+              firstClientName = unwrap(directInv?.client)?.name || ''
             }
 
-            // Prefer the stored receipt_number (RCPT-YYMM-CQxxx-NNN, generated
-            // atomically by the DB function in migration 011 — all historical
-            // entries are backfilled so this should always be non-null for
             // inflow entries). The UUID-derived fallback covers only outflow
             // entries opened via the receipt icon, or any entry created before
             // migration 011 was applied to this environment.

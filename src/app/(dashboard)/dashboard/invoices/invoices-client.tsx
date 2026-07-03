@@ -154,6 +154,7 @@ interface Props {
   initialInvoices: Invoice[]
   clients: { id: string; name: string; code: string; phone?: string; email?: string; address?: string; default_currency?: string }[]
   bankAccounts: { id: string; name: string }[]
+  cashbookCategories: { id: string; name: string }[]
   services: { id: string; name: string }[]
   companySettings: Record<string, string>
   exchangeRates: { currency: string; rate_to_inr: number; rate_date?: string }[]
@@ -220,7 +221,7 @@ function hasActiveAllocations(inv: Invoice): boolean {
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export default function InvoicesClient({ initialInvoices, clients, bankAccounts, services, companySettings, exchangeRates, visibility }: Props) {
+export default function InvoicesClient({ initialInvoices, clients, bankAccounts, cashbookCategories, services, companySettings, exchangeRates, visibility }: Props) {
   const showAmounts     = visibility.amounts
   const showLinePricing = visibility.linePricing
   const supabase = createClient()
@@ -988,6 +989,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const prevPaidInr = inv.paid_amount_inr || 0
     const prevStatus = inv.status
 
+    // Find the invoice category
+    const invoiceCategoryId = cashbookCategories?.find(c => c.name.toLowerCase().includes('invoice'))?.id || null
+
     // Call server action — records payment + creates cashbook inflow entry atomically
     const res = await recordInvoicePayment({
       invoiceId,
@@ -1009,7 +1013,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       newPaid,
       newPaidInr,
       newStatus,
-      categoryId:     null,  // cashbook entry created without category; user can set it in cashbook
+      categoryId:     invoiceCategoryId,
     })
 
     if (!res.ok) { toastError(res.error ?? 'Payment failed'); setSaving(false); return }
@@ -2453,119 +2457,23 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   }
 
   // Genuine file download (distinct from Print, which only offers the OS print
-  // dialog's "Save as PDF" — not a real download event). Renders the same
-  // print-safe HTML (plain hex colors, no oklch/CSS vars — see render-html.ts)
-  // into an off-screen iframe, captures it with html2canvas, and saves via
-  // jsPDF. jsPDF's .save() triggers a real browser download, so on Cirqle
-  // Desktop it lands in the common Downloads shelf like any other file.
+  // dialog's "Save as PDF" — not a real download event). Delegates to the
+  // row-aware pagination pipeline in lib/invoices/download-pdf.ts: measures the
+  // real row heights, packs whole rows onto A4 pages (never splitting one
+  // across a page break), and rasterizes each page separately. jsPDF's .save()
+  // triggers a real browser download, so on Cirqle Desktop it lands in the
+  // common Downloads shelf like any other file.
   async function downloadInvoicePdf(inv: Invoice) {
     setDownloadingInvId(inv.id)
-    const iframe = document.createElement('iframe')
     try {
-      // forRaster flattens the gradient-clipped thank-you text to a solid colour —
-      // html2canvas can't clip a gradient to text and would paint solid boxes.
-      const html = buildInvoiceHtml(inv, { forRaster: true })
-      // Don't hardcode height initially so it can expand
-      iframe.style.cssText = 'position:fixed; top:-99999px; left:-99999px; width:800px; border:0;'
-      document.body.appendChild(iframe)
-      const doc = iframe.contentDocument
-      if (!doc) throw new Error('Could not create render frame')
-      doc.open(); doc.write(html); doc.close()
-
-      // Wait for the frame (incl. any logo/QR/background <img>s) to finish loading,
-      // with a safety timeout in case an image is slow/unreachable.
-      await new Promise<void>(resolve => {
-        if (doc.readyState === 'complete') { resolve(); return }
-        iframe.addEventListener('load', () => resolve(), { once: true })
-        setTimeout(resolve, 1500)
+      const { downloadInvoicePdf: download } = await import('@/lib/invoices/download-pdf')
+      await download(inv as any, companySettings, {
+        otherOutstanding: includeOutstanding.has(inv.id) ? (otherOutstandingByInvoice[inv.id] || 0) : undefined,
       })
-
-      // Fix height so html2canvas captures everything
-      iframe.style.height = doc.body.scrollHeight + 'px'
-
-      const { default: html2canvas } = await import('html2canvas')
-      const canvas = await html2canvas(doc.body, { scale: 2, useCORS: true, backgroundColor: '#ffffff' })
-      const imgData = canvas.toDataURL('image/jpeg', 0.8)
-
-      // Preload logo for headers
-      const logoUrl = companySettings.logo_url_light || companySettings.logo_url
-      let headerLogo: HTMLImageElement | null = null
-      if (logoUrl) {
-        headerLogo = new Image()
-        headerLogo.crossOrigin = 'anonymous'
-        headerLogo.src = logoUrl
-        await new Promise(r => { headerLogo!.onload = r; headerLogo!.onerror = r })
-      }
-
-      const { default: jsPDF } = await import('jspdf')
-      // Force A4 size for standard pagination
-      const pdf = new jsPDF({ orientation: 'portrait', unit: 'px', format: 'a4', compress: true })
-      
-      const pdfWidth = pdf.internal.pageSize.getWidth()
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width
-      const pageHeight = pdf.internal.pageSize.getHeight()
-      
-      let heightLeft = pdfHeight
-      let position = 0
-      const headerHeight = 65 // px
-      const NAVY = companySettings.invoice_primary_color || '#1a2744'
-
-      pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight, undefined, 'FAST')
-      heightLeft -= pageHeight
-      let pageNum = 1
-
-      while (heightLeft > 0) {
-        position = position - pageHeight + headerHeight
-        pdf.addPage()
-        
-        pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight, undefined, 'FAST')
-        
-        // Draw solid white header background to mask the overlapping image
-        pdf.setFillColor(255, 255, 255)
-        pdf.rect(0, 5, pdfWidth, headerHeight - 5, 'F')
-        
-        // Top accent line matching invoice theme
-        pdf.setFillColor(NAVY)
-        pdf.rect(0, 0, pdfWidth, 5, 'F')
-        
-        // Add subtle bottom border to header
-        pdf.setDrawColor(234, 234, 234)
-        pdf.setLineWidth(1)
-        pdf.line(24, headerHeight - 1, pdfWidth - 24, headerHeight - 1)
-        
-        // Add branding (Logo or Text)
-        if (headerLogo && headerLogo.complete && headerLogo.naturalHeight > 0) {
-          const lh = 22
-          const lw = lh * (headerLogo.naturalWidth / headerLogo.naturalHeight)
-          pdf.addImage(headerLogo, 'PNG', pdfWidth - 24 - lw, 22, lw, lh)
-        } else {
-          pdf.setFontSize(16)
-          pdf.setFont('helvetica', 'bold')
-          pdf.setTextColor(NAVY)
-          pdf.text(companySettings.company_name || 'CIRQLE', pdfWidth - 24, 38, { align: 'right' })
-        }
-        
-        // Add invoice detail
-        pdf.setFontSize(12)
-        pdf.setFont('helvetica', 'bold')
-        pdf.setTextColor(17, 17, 17)
-        pdf.text(`INVOICE ${inv.invoice_number}`, 24, 32)
-        
-        pdf.setFontSize(9)
-        pdf.setFont('helvetica', 'normal')
-        pdf.setTextColor(119, 119, 119)
-        pdf.text(`Page ${pageNum + 1}`, 24, 44)
-
-        heightLeft -= (pageHeight - headerHeight)
-        pageNum++
-      }
-
-      pdf.save(`${inv.invoice_number}.pdf`)
     } catch (e) {
       console.error('Invoice PDF download failed', e)
       toastError('Could not generate the PDF. Try Print instead.')
     } finally {
-      document.body.removeChild(iframe)
       setDownloadingInvId(null)
     }
   }

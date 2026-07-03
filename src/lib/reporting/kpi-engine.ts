@@ -33,7 +33,7 @@ export function buildKPIData(
   const toAdRows = (rows: ReportMetricRow[]) =>
     rows.map(r => ({
       metric_date: r.date,
-      spend: r.spend * taxMultiplier,
+      spend: r.spend, // Raw Meta Spend (excluding GST)
       revenue: r.revenue,
       impressions: r.impressions,
       clicks: r.clicks,
@@ -86,6 +86,9 @@ export function buildKPIData(
         roas: agg.roas,
         ctr: agg.ctr,
         cpr: dayResults > 0 ? agg.spend / dayResults : 0,
+        actualCost: agg.spend * taxMultiplier,
+        gstAmount: agg.spend * (taxMultiplier - 1),
+        remainingAllocation: 0, // Computed cumulatively in layout rendering
       }
     })
 
@@ -107,12 +110,19 @@ export function buildKPIData(
         roas: agg.roas,
         ctr: agg.ctr,
         cpr: weekResults > 0 ? agg.spend / weekResults : 0,
+        actualCost: agg.spend * taxMultiplier,
+        gstAmount: agg.spend * (taxMultiplier - 1),
+        remainingAllocation: 0,
       }
     })
 
   // ── Derived KPIs ────────────────────────────────────────────────────────
   const profit = primary.revenue - primary.spend
   const budget = project.adBudget
+  const walletAllocation = project.walletAllocation || 0
+  const actualCost = primary.spend * taxMultiplier
+  const gstAmount = primary.spend * (taxMultiplier - 1)
+  const remainingAllocation = walletAllocation - actualCost
   const results = primary.leads || primary.conversions || primary.clicks
   const campaignDays = metrics.length
 
@@ -122,11 +132,14 @@ export function buildKPIData(
     roi: primary.spend > 0 ? (profit / primary.spend) * 100 : 0,
     conversionRate: primary.clicks > 0 ? (primary.leads / primary.clicks) * 100 : 0,
     costPerResult: results > 0 ? primary.spend / results : 0,
-    budgetUtilisation: budget > 0 ? (primary.spend / budget) * 100 : 0,
+    budgetUtilisation: walletAllocation > 0 ? (actualCost / walletAllocation) * 100 : 0,
     avgDailySpend: campaignDays > 0 ? primary.spend / campaignDays : 0,
     avgDailyLeads: campaignDays > 0 ? primary.leads / campaignDays : 0,
     campaignDuration: campaignDays,
     remainingBudget: Math.max(0, budget - primary.spend),
+    actualCost,
+    gstAmount,
+    remainingAllocation,
   }
 
   return {
