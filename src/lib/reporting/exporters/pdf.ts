@@ -243,8 +243,9 @@ function buildKPIPage(doc: Doc, d: RenderData) {
   let y = MARGIN
   const p = d.kpi.primary
   const derived = d.kpi.derived
+  const pageTitle = 'Performance Detail'
 
-  pageHeader(doc, 'Performance Detail', d)
+  pageHeader(doc, pageTitle, d)
   y = 30
 
   const rows = [
@@ -262,66 +263,68 @@ function buildKPIPage(doc: Doc, d: RenderData) {
     ['Remaining Budget', `₹${inr(derived.remainingBudget)}`, '—', '—'],
   ]
 
-  drawTable(doc, rows, MARGIN, y, [70, 40, 40, 30], brand.primaryColor)
+  y = drawTable(doc, rows, MARGIN, y, [70, 40, 40, 30], brand.primaryColor, d, pageTitle)
 }
 
 // ─── AI narrative page ────────────────────────────────────────────────────────
 
 function buildAINarrativePage(doc: Doc, d: RenderData) {
   let y = MARGIN
-  pageHeader(doc, 'AI Analysis & Recommendations', d)
+  const pageTitle = 'AI Analysis & Recommendations'
+  pageHeader(doc, pageTitle, d)
   y = 30
 
   const ai = d.ai
   const brand = d.brand
 
-  sectionHeader(doc, 'Executive Summary', y, brand.primaryColor)
+  y = sectionHeader(doc, 'Executive Summary', y, brand.primaryColor, d, pageTitle)
   y += 8
-  y = addWrappedText(doc, ai.executiveSummary, MARGIN, y, CONTENT, 10)
+  y = addWrappedText(doc, ai.executiveSummary, MARGIN, y, CONTENT, 10, d, pageTitle)
   y += 4
 
-  sectionHeader(doc, 'Key Insights', y, brand.primaryColor)
+  y = sectionHeader(doc, 'Key Insights', y, brand.primaryColor, d, pageTitle)
   y += 8
   for (const insight of ai.keyInsights) {
-    y = addWrappedText(doc, `• ${insight}`, MARGIN + 3, y, CONTENT - 3, 9)
+    y = addWrappedText(doc, `• ${insight}`, MARGIN + 3, y, CONTENT - 3, 9, d, pageTitle)
     y += 2
   }
   y += 4
 
-  sectionHeader(doc, 'Risks', y, brand.primaryColor)
+  y = sectionHeader(doc, 'Risks', y, brand.primaryColor, d, pageTitle)
   y += 8
   for (const risk of ai.risks) {
-    y = addWrappedText(doc, `⚠ ${risk}`, MARGIN + 3, y, CONTENT - 3, 9)
+    y = addWrappedText(doc, `⚠ ${risk}`, MARGIN + 3, y, CONTENT - 3, 9, d, pageTitle)
     y += 2
   }
   y += 4
 
-  sectionHeader(doc, 'Opportunities', y, brand.primaryColor)
+  y = sectionHeader(doc, 'Opportunities', y, brand.primaryColor, d, pageTitle)
   y += 8
   for (const opp of ai.opportunities) {
-    y = addWrappedText(doc, `↑ ${opp}`, MARGIN + 3, y, CONTENT - 3, 9)
+    y = addWrappedText(doc, `↑ ${opp}`, MARGIN + 3, y, CONTENT - 3, 9, d, pageTitle)
     y += 2
   }
   y += 4
 
-  sectionHeader(doc, 'Recommended Actions', y, brand.primaryColor)
+  y = sectionHeader(doc, 'Recommended Actions', y, brand.primaryColor, d, pageTitle)
   y += 8
   ai.recommendedActions.forEach((action, i) => {
-    y = addWrappedText(doc, `${i + 1}. ${action}`, MARGIN + 3, y, CONTENT - 3, 9)
+    y = addWrappedText(doc, `${i + 1}. ${action}`, MARGIN + 3, y, CONTENT - 3, 9, d, pageTitle)
     y += 2
   })
   y += 4
 
-  sectionHeader(doc, 'Budget Recommendation', y, brand.primaryColor)
+  y = sectionHeader(doc, 'Budget Recommendation', y, brand.primaryColor, d, pageTitle)
   y += 8
-  addWrappedText(doc, ai.budgetRecommendations, MARGIN, y, CONTENT, 9)
+  y = addWrappedText(doc, ai.budgetRecommendations, MARGIN, y, CONTENT, 9, d, pageTitle)
 }
 
 // ─── Forecast page ────────────────────────────────────────────────────────────
 
 function buildForecastPage(doc: Doc, d: RenderData) {
   let y = MARGIN
-  pageHeader(doc, 'Forecast & Health', d)
+  const pageTitle = 'Forecast & Health'
+  pageHeader(doc, pageTitle, d)
   y = 30
 
   const brand = d.brand
@@ -329,34 +332,35 @@ function buildForecastPage(doc: Doc, d: RenderData) {
   const health = d.health
 
   // Health detail
-  sectionHeader(doc, `Campaign Health — Score ${health.score}/100 (Grade ${health.grade})`, y, brand.primaryColor)
+  y = sectionHeader(doc, `Campaign Health — Score ${health.score}/100 (Grade ${health.grade})`, y, brand.primaryColor, d, pageTitle)
   y += 8
   doc.setFontSize(9)
   doc.setTextColor(80, 80, 80)
   for (const exp of health.result.explanations) {
-    doc.text(`• ${exp}`, MARGIN + 3, y)
-    y += LINE_H
+    // We use addWrappedText to handle potential page breaks for long health explanations
+    y = addWrappedText(doc, `• ${exp}`, MARGIN + 3, y, CONTENT - 3, 9, d, pageTitle)
+    y += (LINE_H - 9 * 0.45)
   }
   y += 6
 
   // Forecast table
-  sectionHeader(doc, 'Spend Forecast', y, brand.primaryColor)
+  y = sectionHeader(doc, 'Spend Forecast', y, brand.primaryColor, d, pageTitle)
   y += 8
-  drawTable(doc, [
+  y = drawTable(doc, [
     ['Period', 'Forecast Spend', 'Model', 'Confidence', 'Trend'],
     ['7 days',  `₹${inr(fc.spend7d.predicted_value)}`,  fc.spend7d.model_used,  `${fc.spend7d.confidence}%`,  fc.spend7d.trend],
     ['30 days', `₹${inr(fc.spend30d.predicted_value)}`, fc.spend30d.model_used, `${fc.spend30d.confidence}%`, fc.spend30d.trend],
     ['90 days', `₹${inr(fc.spend90d.predicted_value)}`, fc.spend90d.model_used, `${fc.spend90d.confidence}%`, fc.spend90d.trend],
-  ], MARGIN, y, [40, 45, 45, 30, 20], brand.primaryColor)
+  ], MARGIN, y, [40, 45, 45, 30, 20], brand.primaryColor, d, pageTitle)
 
-  y += 44
-  sectionHeader(doc, 'Leads Forecast', y, brand.primaryColor)
+  y += 12
+  y = sectionHeader(doc, 'Leads Forecast', y, brand.primaryColor, d, pageTitle)
   y += 8
-  drawTable(doc, [
+  y = drawTable(doc, [
     ['Period', 'Forecast Leads', 'Model', 'Confidence', 'Trend'],
     ['7 days',  fmt2(fc.leads7d.predicted_value),  fc.leads7d.model_used,  `${fc.leads7d.confidence}%`,  fc.leads7d.trend],
     ['30 days', fmt2(fc.leads30d.predicted_value), fc.leads30d.model_used, `${fc.leads30d.confidence}%`, fc.leads30d.trend],
-  ], MARGIN, y, [40, 45, 45, 30, 20], brand.primaryColor)
+  ], MARGIN, y, [40, 45, 45, 30, 20], brand.primaryColor, d, pageTitle)
 }
 
 // ─── Footers ──────────────────────────────────────────────────────────────────
@@ -372,8 +376,8 @@ function addFooters(doc: Doc, d: RenderData) {
     const footerText = d.brand.footerText
       ?? (d.brand.showPoweredBy ? `Powered by ${d.brand.agencyName}` : d.brand.agencyName)
 
-    doc.text(footerText, MARGIN, 295)
-    doc.text(`Page ${i} of ${total}`, PAGE_W - MARGIN, 295, { align: 'right' })
+    doc.text(footerText, MARGIN, 285)
+    doc.text(`Page ${i} of ${total}`, PAGE_W - MARGIN, 285, { align: 'right' })
 
     if (d.brand.confidentialWatermark) {
       doc.setFontSize(48)
@@ -397,47 +401,109 @@ function pageHeader(doc: Doc, title: string, d: RenderData) {
   doc.text(`${d.project.campaignName} · ${d.config.dateFrom} – ${d.config.dateTo}`, PAGE_W - MARGIN, 14, { align: 'right' })
 }
 
-function sectionHeader(doc: Doc, label: string, y: number, color: string) {
+function sectionHeader(doc: Doc, label: string, y: number, color: string, d?: RenderData, pageTitle?: string): number {
+  let currentY = y
+  const MAX_Y = 265
+  if (currentY + 15 > MAX_Y) {
+    doc.addPage()
+    currentY = MARGIN
+    if (d && pageTitle) {
+      pageHeader(doc, pageTitle + ' (continued)', d)
+      currentY = 30
+    }
+  }
+
   setDraw(doc, color)
   doc.setLineWidth(0.5)
-  doc.line(MARGIN, y + 4, PAGE_W - MARGIN, y + 4)
+  doc.line(MARGIN, currentY + 4, PAGE_W - MARGIN, currentY + 4)
   doc.setFontSize(10)
   doc.setFont('helvetica', 'bold')
   doc.setTextColor(40, 40, 40)
-  doc.text(label, MARGIN, y + 1)
+  doc.text(label, MARGIN, currentY + 1)
+  
+  return currentY
 }
 
-function drawTable(doc: Doc, rows: string[][], x: number, y: number, colWidths: number[], headerColor: string) {
+function drawTable(doc: Doc, rows: string[][], x: number, y: number, colWidths: number[], headerColor: string, d?: RenderData, pageTitle?: string): number {
   const rowH = 8
+  const MAX_Y = 265
+  let currentY = y
+
   rows.forEach((row, ri) => {
+    if (currentY + rowH > MAX_Y) {
+      doc.addPage()
+      currentY = MARGIN
+      if (d && pageTitle) {
+        pageHeader(doc, pageTitle + ' (continued)', d)
+        currentY = 30
+      }
+      // Re-draw table header on new page if breaking mid-table
+      if (ri > 0) {
+        setFill(doc, headerColor)
+        doc.rect(x, currentY, colWidths.reduce((a, b) => a + b, 0), rowH, 'F')
+        doc.setTextColor(255, 255, 255)
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(8)
+        let cx = x + 2
+        rows[0].forEach((cell, ci) => {
+          doc.text(String(cell), cx, currentY + 5.5)
+          cx += colWidths[ci] ?? 30
+        })
+        currentY += rowH
+      }
+    }
+
     if (ri === 0) {
       setFill(doc, headerColor)
-      doc.rect(x, y + ri * rowH, colWidths.reduce((a, b) => a + b, 0), rowH, 'F')
+      doc.rect(x, currentY, colWidths.reduce((a, b) => a + b, 0), rowH, 'F')
       doc.setTextColor(255, 255, 255)
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(8)
     } else {
       doc.setFillColor(ri % 2 === 0 ? 248 : 255, ri % 2 === 0 ? 248 : 255, ri % 2 === 0 ? 252 : 255)
-      doc.rect(x, y + ri * rowH, colWidths.reduce((a, b) => a + b, 0), rowH, 'F')
+      doc.rect(x, currentY, colWidths.reduce((a, b) => a + b, 0), rowH, 'F')
       doc.setTextColor(40, 40, 40)
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(8)
     }
     let cx = x + 2
     row.forEach((cell, ci) => {
-      doc.text(String(cell), cx, y + ri * rowH + 5.5)
+      doc.text(String(cell), cx, currentY + 5.5)
       cx += colWidths[ci] ?? 30
     })
+    
+    currentY += rowH
   })
+  return currentY
 }
 
-function addWrappedText(doc: Doc, text: string, x: number, y: number, maxW: number, size: number): number {
+function addWrappedText(doc: Doc, text: string, x: number, y: number, maxW: number, size: number, d?: RenderData, pageTitle?: string): number {
   doc.setFontSize(size)
   doc.setTextColor(60, 60, 60)
   doc.setFont('helvetica', 'normal')
   const lines = doc.splitTextToSize(text, maxW)
-  doc.text(lines, x, y)
-  return y + lines.length * (size * 0.45)
+  const lineHeight = size * 0.45
+  const MAX_Y = 265
+  
+  let currentY = y
+  
+  lines.forEach((line: string) => {
+    if (currentY + lineHeight > MAX_Y) {
+      doc.addPage()
+      currentY = MARGIN
+      if (d && pageTitle) {
+        pageHeader(doc, pageTitle + ' (continued)', d)
+        currentY = 30
+      }
+      doc.setFontSize(size)
+      doc.setTextColor(60, 60, 60)
+      doc.setFont('helvetica', 'normal')
+    }
+    doc.text(line, x, currentY)
+    currentY += lineHeight
+  })
+  
+  return currentY
 }
 
 function setFill(doc: Doc, hex: string) {

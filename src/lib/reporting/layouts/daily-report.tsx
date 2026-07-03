@@ -214,10 +214,8 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
 
           {/* Financial summary pills */}
           <div style={{ display: 'flex', justifyContent: 'center', gap: `${20 * s}px`, marginBottom: `${36 * s}px`, flexWrap: 'wrap' }}>
-            <Pill s={s} bg={'#047857'} label="Wallet Allocation" value={`₹${money(project.walletAllocation)}`} />
-            <Pill s={s} bg={'#B45309'} label="Total Actual Cost" value={`₹${money(p.spend * (1 + (project.taxPercent || 0) / 100))}`} />
-            <Pill s={s} bg={RED_PILL}  label="Remaining Allocation" value={`₹${money(project.walletAllocation - (p.spend * (1 + (project.taxPercent || 0) / 100)))}`} />
-            <Pill s={s} bg={GREY_PILL} label="Service Charge" value={project.serviceChargeType === 'percent' ? `${project.serviceChargeValue}%` : `₹${money(project.serviceChargeValue)}`} />
+            <Pill s={s} bg={RED_PILL}  label="Total Remaining Amount" value={`₹${money(project.walletAllocation - (p.spend * (1 + (project.taxPercent || 0) / 100)))}`} />
+            <Pill s={s} bg={GREY_PILL} label="Remaining Days" value={`${remainingDays} Days`} />
           </div>
         </div>
       )}
@@ -235,7 +233,7 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
         </div>
 
         {/* Header row */}
-        <TableRow s={s} cells={['Date', 'Meta Spend', 'GST', 'Actual Cost', 'Reach', 'Impr.', 'CPR', 'Remaining']} header />
+        <TableRow s={s} cells={['Date', 'Meta Spend', 'GST', 'Reach', 'Impressions', 'CPR', 'Remaining Amount']} header />
         {tableRows.length === 0 ? (
           <div style={{ display: 'flex', padding: `${24 * s}px`, color: '#9CA3AF', fontSize: `${22 * s}px` }}>
             No daily metrics recorded for this period.
@@ -250,7 +248,6 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
               ddmmyyyy(r.date),
               `₹${money(r.spend)}`,
               `₹${money(r.gstAmount)}`,
-              `₹${money(r.actualCost)}`,
               num(r.reach),
               num(r.impressions),
               `₹${money(r.cpr)}`,
@@ -344,8 +341,8 @@ function Pill({ s, bg, label, value }: { s: number; bg: string; label: string; v
 function TableRow({
   s, cells, header, zebra, last,
 }: { s: number; cells: string[]; header?: boolean; zebra?: boolean; last?: boolean }) {
-  // Column flex weights: Date, Meta Spend, GST, Actual Cost, Reach, Impr., CPR, Remaining
-  const flex = [1.8, 1.4, 1.0, 1.4, 1.1, 1.2, 1.1, 1.8]
+  // Column flex weights: Date, Meta Spend, GST, Reach, Impressions, CPR, Remaining Amount (7 columns)
+  const flex = [1.8, 1.4, 1.0, 1.1, 1.2, 1.1, 1.8]
   const bg = header ? PURPLE : zebra ? '#F5F3FF' : '#FFFFFF'
   return (
     <div style={{
