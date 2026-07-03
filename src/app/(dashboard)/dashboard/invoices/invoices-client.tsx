@@ -2487,6 +2487,16 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       const canvas = await html2canvas(doc.body, { scale: 2, useCORS: true, backgroundColor: '#ffffff' })
       const imgData = canvas.toDataURL('image/jpeg', 0.8)
 
+      // Preload logo for headers
+      const logoUrl = companySettings.logo_url_light || companySettings.logo_url
+      let headerLogo: HTMLImageElement | null = null
+      if (logoUrl) {
+        headerLogo = new Image()
+        headerLogo.crossOrigin = 'anonymous'
+        headerLogo.src = logoUrl
+        await new Promise(r => { headerLogo!.onload = r; headerLogo!.onerror = r })
+      }
+
       const { default: jsPDF } = await import('jspdf')
       // Force A4 size for standard pagination
       const pdf = new jsPDF({ orientation: 'portrait', unit: 'px', format: 'a4', compress: true })
@@ -2497,7 +2507,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       
       let heightLeft = pdfHeight
       let position = 0
-      const headerHeight = 60 // px
+      const headerHeight = 65 // px
+      const NAVY = companySettings.invoice_primary_color || '#1a2744'
 
       pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight, undefined, 'FAST')
       heightLeft -= pageHeight
@@ -2511,24 +2522,39 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         
         // Draw solid white header background to mask the overlapping image
         pdf.setFillColor(255, 255, 255)
-        pdf.rect(0, 0, pdfWidth, headerHeight, 'F')
+        pdf.rect(0, 5, pdfWidth, headerHeight - 5, 'F')
+        
+        // Top accent line matching invoice theme
+        pdf.setFillColor(NAVY)
+        pdf.rect(0, 0, pdfWidth, 5, 'F')
         
         // Add subtle bottom border to header
-        pdf.setDrawColor(230, 230, 230)
+        pdf.setDrawColor(234, 234, 234)
         pdf.setLineWidth(1)
-        pdf.line(20, headerHeight - 1, pdfWidth - 20, headerHeight - 1)
+        pdf.line(24, headerHeight - 1, pdfWidth - 24, headerHeight - 1)
         
-        // Add branding
-        pdf.setFontSize(16)
-        pdf.setFont('helvetica', 'bold')
-        pdf.setTextColor(0, 0, 0)
-        pdf.text('CIRQLE', pdfWidth - 20, 35, { align: 'right' })
+        // Add branding (Logo or Text)
+        if (headerLogo && headerLogo.complete && headerLogo.naturalHeight > 0) {
+          const lh = 22
+          const lw = lh * (headerLogo.naturalWidth / headerLogo.naturalHeight)
+          pdf.addImage(headerLogo, 'PNG', pdfWidth - 24 - lw, 22, lw, lh)
+        } else {
+          pdf.setFontSize(16)
+          pdf.setFont('helvetica', 'bold')
+          pdf.setTextColor(NAVY)
+          pdf.text(companySettings.company_name || 'CIRQLE', pdfWidth - 24, 38, { align: 'right' })
+        }
         
         // Add invoice detail
-        pdf.setFontSize(10)
+        pdf.setFontSize(12)
+        pdf.setFont('helvetica', 'bold')
+        pdf.setTextColor(17, 17, 17)
+        pdf.text(`INVOICE ${inv.invoice_number}`, 24, 32)
+        
+        pdf.setFontSize(9)
         pdf.setFont('helvetica', 'normal')
-        pdf.setTextColor(100, 100, 100)
-        pdf.text(`Invoice ${inv.invoice_number}  •  Page ${pageNum + 1}`, 20, 35)
+        pdf.setTextColor(119, 119, 119)
+        pdf.text(`Page ${pageNum + 1}`, 24, 44)
 
         heightLeft -= (pageHeight - headerHeight)
         pageNum++

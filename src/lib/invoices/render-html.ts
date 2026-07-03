@@ -549,7 +549,7 @@ export function renderInvoiceHtml(
   ${inv.notes ? `<div style="margin-top:14px;font-size:11.5px;color:#444;font-style:italic">${inv.notes}</div>` : ''}
 
   <!-- ── FOOTER: payment info | QR | thank-you (pinned to page bottom) ── -->
-  <div style="margin-top:auto;padding-top:44px">
+  <div style="margin-top:auto;padding-top:44px;padding-bottom:32px">
     <table style="width:100%;border-collapse:collapse">
       <tr>
         <td style="vertical-align:middle;padding:0;width:38%">${paymentBlock}</td>
@@ -557,6 +557,14 @@ export function renderInvoiceHtml(
         <td style="vertical-align:middle;padding:0;width:38%">${thankBlock}</td>
       </tr>
     </table>
+  </div>
+  
+  <div style="border-top:1px solid ${CELL_BORD};padding-top:16px;display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:#666">
+    <div style="font-weight:700;color:${NAVY}">${co.name}</div>
+    <div style="display:flex;gap:18px">
+      ${co.phone ? `<span>${co.phone}</span>` : ''}
+      ${co.website ? `<span>${co.website}</span>` : ''}
+    </div>
   </div>
 
   </div>
