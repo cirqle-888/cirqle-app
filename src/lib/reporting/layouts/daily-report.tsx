@@ -34,7 +34,7 @@ export type DailyRowWithBalance = DailySeriesPoint & { balance: number; actualCo
 export function computeDailyRows(data: RenderData): DailyRowWithBalance[] {
   const { project, kpi } = data
   let cumulativeCost = 0
-  const taxPercent = project.taxPercent || 0
+  const taxPercent = project.taxPercent || 18
   return kpi.dailySeries.map(row => {
     const gstAmount = row.spend * (taxPercent / 100)
     const actualCost = row.spend + gstAmount
