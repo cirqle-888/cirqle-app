@@ -2133,7 +2133,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             const legacyNo = `RCPT-${compact}-${receiptEntry.id.slice(-4).toUpperCase()}`
             return {
               receiptNo: receiptEntry.receipt_number || legacyNo,
-              defaultClientName: firstClient,
+              defaultClientName: firstClientName || '',
               amount: receiptEntry.amount ?? receiptEntry.amount_inr ?? 0,
               currency: receiptEntry.currency,
               dateISO: receiptEntry.entry_date,
