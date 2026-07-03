@@ -267,7 +267,6 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
           <div style={{ display: 'flex', fontWeight: 800, color: PURPLE, fontSize: `${24 * s}px` }}>
             {brand.agencyName}
           </div>
-          <div style={{ display: 'flex' }}>Powered by Cirqle CRM</div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
           {brand.contactPhone  && <div style={{ display: 'flex' }}>{brand.contactPhone}</div>}
