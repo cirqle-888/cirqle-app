@@ -207,7 +207,7 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
             <KpiDivider s={s} />
             <KpiCircle s={s} label="Clicks"      value={num(p.clicks)}       grad={['#22B8F2', '#2563EB']} icon="cursor" />
             <KpiDivider s={s} />
-            <KpiCircle s={s} label="Meta Spend"  value={`₹${money(p.spend)}`} grad={['#A855F7', '#7C3AED']} icon="rupee" />
+            <KpiCircle s={s} label="Meta Spend"  value={`₹${money(d.actualCost)}`} grad={['#A855F7', '#7C3AED']} icon="rupee" />
             <KpiDivider s={s} />
             <KpiCircle s={s} label="CPR"         value={`₹${money(d.costPerResult)}`} grad={['#FB923C', '#EF4444']} icon="percent" />
           </div>

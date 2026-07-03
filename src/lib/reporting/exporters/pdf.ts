@@ -167,7 +167,7 @@ function buildCoverPage(doc: Doc, d: RenderData) {
   y += 10
 
   const kpis = [
-    { label: 'Total Spend',   value: `₹${inr(p.spend)}`,      sub: `${fmt1(derived.budgetUtilisation)}% of budget` },
+    { label: 'Total Spend',   value: `₹${inr(derived.actualCost)}`,      sub: `${fmt1(derived.budgetUtilisation)}% of budget` },
     { label: 'Revenue',       value: `₹${inr(p.revenue)}`,    sub: `ROAS ${fmt2(p.roas)}` },
     { label: 'Impressions',   value: fmtN(p.impressions),      sub: `Reach ${fmtN(p.reach)}` },
     { label: 'Clicks',        value: fmtN(p.clicks),           sub: `CTR ${fmt2(p.ctr)}%` },
