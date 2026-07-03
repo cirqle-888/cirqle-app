@@ -104,7 +104,9 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
     Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000),
   )
   const periodLabel = `${shortDate(startDate)} - ${shortDate(endDate)}`
-  const dailyBudget = project.adBudget > 0 ? project.adBudget / planDays : 0
+  const reportTaxMult = 1 + ((project.taxPercent || 18) / 100)
+  const expectedBudgetIncGst = project.adBudget * reportTaxMult
+  const dailyBudget = expectedBudgetIncGst > 0 ? expectedBudgetIncGst / planDays : 0
   const remainingDays = Math.max(
     0,
     Math.round((new Date(endDate).getTime() - Date.now()) / 86400000),
@@ -196,7 +198,7 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: `${6 * s}px`, marginBottom: `${30 * s}px` }}>
             <MetaLine s={s} pairs={[['Client', project.clientName], ['Campaign', project.campaignName]]} />
             <MetaLine s={s} pairs={[['Campaign Period', periodLabel], ['Campaign Plan', `${planDays} Days`]]} />
-            <MetaLine s={s} pairs={[['Daily Budget', `₹${money(dailyBudget)}`], ['Expected Budget', `₹${num(project.adBudget)}`]]} />
+            <MetaLine s={s} pairs={[['Daily Budget', `₹${money(dailyBudget)}`], ['Expected Budget', `₹${num(expectedBudgetIncGst)}`]]} />
           </div>
 
           {/* Performance KPI circle row */}
