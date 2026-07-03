@@ -29,10 +29,11 @@ export function buildKPIData(
   project: ReportProject,
 ): KPIData {
   // ── Convert ReportMetricRows → Partial<AdDailyMetricRow> for existing helpers
+  const taxMultiplier = 1 + ((project.taxPercent || 0) / 100)
   const toAdRows = (rows: ReportMetricRow[]) =>
     rows.map(r => ({
       metric_date: r.date,
-      spend: r.spend,
+      spend: r.spend * taxMultiplier,
       revenue: r.revenue,
       impressions: r.impressions,
       clicks: r.clicks,
