@@ -72,7 +72,7 @@ export async function fetchReportData(opts: FetchReportDataOptions): Promise<Rep
     adBudgetCurrency: projectRow.ad_budget_currency ?? 'INR',
     serviceChargeType: projectRow.service_charge_type,
     serviceChargeValue: Number(projectRow.service_charge_value ?? 0),
-    taxPercent: Number(projectRow.tax_percent ?? 0),
+    taxPercent: Number(projectRow.tax_percent) || 18,
     objective: projectRow.objective,
     startDate: projectRow.start_date,
     endDate: projectRow.end_date,
