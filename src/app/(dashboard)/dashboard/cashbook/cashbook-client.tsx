@@ -1803,27 +1803,23 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                           ? `₹${outstanding.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
                           : `${invCur} ${outstanding.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
                         return (
-                          <label className={`flex items-center gap-2.5 px-3 py-2.5 rounded-lg cursor-pointer transition-colors border ${form.fully_paid ? 'bg-green-500/10 border-green-500/30' : 'bg-secondary border-transparent hover:border-border'}`}>
-                            <input
-                              type="checkbox"
-                              checked={form.fully_paid}
-                              onChange={e => {
-                                const checked = e.target.checked
-                                setForm(p => {
-                                  const newAmount = checked ? String(outstanding) : p.amount
-                                  const fx = fxFor(newAmount, p.currency)
-                                  return { ...p, fully_paid: checked, amount: newAmount, rate: fx.rate, amountInr: fx.amountInr, rateSource: fx.rateSource }
-                                })
-                              }}
-                              className="w-4 h-4 accent-green-500"
-                            />
-                            <div>
-                              <span className="text-sm font-medium">Mark as fully paid</span>
-                              <span className="text-xs text-muted-foreground ml-2">
-                                — fills {outstandingLabel} and closes the invoice
-                              </span>
+                          <div className="space-y-1.5">
+                            <label className="text-xs text-muted-foreground block">Quick Amount</label>
+                            <div className="flex gap-2 flex-wrap">
+                              {[outstanding, outstanding / 2].filter(v => v > 0).map((v, i) => (
+                                <button key={i}
+                                  type="button"
+                                  onClick={() => setForm(p => {
+                                    const newAmount = String(v)
+                                    const fx = fxFor(newAmount, p.currency)
+                                    return { ...p, fully_paid: false, amount: newAmount, rate: fx.rate, amountInr: fx.amountInr, rateSource: fx.rateSource }
+                                  })}
+                                  className={`text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${parseFloat(form.amount) === v ? 'bg-violet-500/20 border-violet-500/50 text-violet-300' : 'bg-secondary border-transparent hover:border-border'}`}>
+                                  {i === 0 ? 'Full' : 'Half'} {invCur === 'INR' ? '₹' : invCur + ' '}{v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </button>
+                              ))}
                             </div>
-                          </label>
+                          </div>
                         )
                       })()}
                     </div>

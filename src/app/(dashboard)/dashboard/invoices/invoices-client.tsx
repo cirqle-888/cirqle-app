@@ -946,11 +946,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
   // Open the pay panel with the payment currency defaulted to the invoice's.
   function openPayPanel(inv: Invoice) {
-    // Mutual exclusion with the cashbook-allocation path (see hasActiveAllocations).
-    if (hasActiveAllocations(inv)) {
-      toastError('This invoice is paid via cashbook allocation — manage it there, not with Record Payment.')
-      return
-    }
+
     const cur = (inv.currency || 'INR') as Currency
     const fx = payFx('', cur)
     setPayForm(p => ({ ...p, amount: '', currency: cur, rate: fx.rate, amountInr: '', rateSource: fx.rateSource }))
@@ -2893,8 +2889,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               {['sent', 'partial', 'overdue'].includes(inv.status) && (
                 <button
                   onClick={() => openPayPanel(inv)}
-                  disabled={hasActiveAllocations(inv)}
-                  title={hasActiveAllocations(inv) ? 'Paid via cashbook allocation — manage it there' : undefined}
+
                   className="flex-1 min-w-[120px] py-1.5 px-3 bg-green-600 hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-green-600 text-white text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 transition-colors">
                   <CreditCard className="w-3.5 h-3.5" />Record Payment
                 </button>
@@ -2902,8 +2897,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               {inv.status === 'draft' && (
                 <button
                   onClick={() => openPayPanel(inv)}
-                  disabled={hasActiveAllocations(inv)}
-                  title={hasActiveAllocations(inv) ? 'Paid via cashbook allocation — manage it there' : undefined}
+
                   className="flex-1 min-w-[120px] py-1.5 px-3 bg-foreground/[0.06] hover:bg-foreground/[0.1] disabled:opacity-40 disabled:cursor-not-allowed text-foreground text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 transition-colors border border-border/40">
                   <CreditCard className="w-3.5 h-3.5" />Quick Pay
                 </button>
@@ -2931,11 +2925,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 </button>
               )}
             </div>
-            {hasActiveAllocations(inv) && (
-              <p className="px-1 pt-2 text-[11px] text-amber-500/90">
-                Paid via cashbook allocation — record or adjust payment from the cashbook entry, not here.
-              </p>
-            )}
+
 
             {/* Status override dropdown */}
             <details className="mt-2">
