@@ -32,11 +32,21 @@ export async function aiParseOfferProducts(text: string): Promise<{ products: Pa
   return {
     products: products
       .filter((p: any) => p && typeof p.name === 'string' && p.name.trim())
-      .map((p: any) => ({
-        name: String(p.name).trim(),
-        weight: p.weight ? String(p.weight).trim() : null,
-        price: typeof p.price === 'number' ? p.price : null,
-        mrp: typeof p.mrp === 'number' ? p.mrp : null,
-      })),
+      .map((p: any) => {
+        const baseName = String(p.name).trim()
+        const w = p.weight ? String(p.weight).trim() : ''
+        // Weight lives in the product name as a single column, so fold any
+        // separately-detected pack size back into the name (unless it's
+        // already present) and leave the structured weight field empty.
+        const name = w && !baseName.toLowerCase().includes(w.toLowerCase())
+          ? `${baseName} ${w}`
+          : baseName
+        return {
+          name,
+          weight: null,
+          price: typeof p.price === 'number' ? p.price : null,
+          mrp: typeof p.mrp === 'number' ? p.mrp : null,
+        }
+      }),
   }
 }

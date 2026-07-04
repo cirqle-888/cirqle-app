@@ -167,8 +167,11 @@ function ProductRow({
                     onClick={() => {
                       onUpdate({
                         catalog_id: item.id,
-                        name: item.name,
-                        weight: item.weight || product.weight || '',
+                        // Weight is part of the name (single column); append a
+                        // legacy catalog weight if the name doesn't already have it.
+                        name: item.weight && !item.name.toLowerCase().includes(item.weight.toLowerCase())
+                          ? `${item.name} ${item.weight}`
+                          : item.name,
                         image_url: item.image_url || product.image_url || '',
                       })
                       setShowAutocomplete(false)
@@ -272,15 +275,6 @@ function ProductRow({
       {isExpanded && (
         <div className="p-4 pt-2 border-t border-white/5 space-y-4">
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>Weight / Size</label>
-              <input
-                value={product.weight || ''}
-                onChange={e => onUpdate({ weight: e.target.value })}
-                className={inputCls}
-                placeholder="e.g. 1L, 5kg"
-              />
-            </div>
             <div>
               <label className={labelCls}>Page</label>
               <input
@@ -549,13 +543,7 @@ function ProductGridCard({
             value={product.name}
             onChange={e => onUpdate({ name: e.target.value })}
             className="bg-transparent font-medium text-white/90 text-[13px] leading-snug w-full focus:outline-none focus:bg-white/10 hover:bg-white/5 rounded px-1 -mx-1 transition-colors"
-            placeholder="Product name"
-          />
-          <input
-            value={product.weight || ''}
-            onChange={e => onUpdate({ weight: e.target.value })}
-            className="mt-1 text-[10px] text-white/50 bg-transparent w-full focus:outline-none focus:bg-white/10 hover:bg-white/5 rounded px-1 -mx-1 transition-colors"
-            placeholder="Weight/Size (e.g. 1L, 500g)"
+            placeholder="Product name (include weight, e.g. Rice 5kg)"
           />
           <div className="mt-auto pt-3 flex items-end justify-between gap-2">
              <div className="shrink-0 flex items-center gap-0.5">
@@ -738,9 +726,15 @@ export default function OfferIntakeClient({
         const lower = p.name.toLowerCase()
         const match = catalog.find(c => c.name.toLowerCase() === lower)
           || catalog.find(c => c.name.toLowerCase().includes(lower) || lower.includes(c.name.toLowerCase()))
+        // Weight is a single column with the name. If we matched an older
+        // catalog product that still stores weight separately, append it.
+        const name = match?.weight && !p.name.toLowerCase().includes(match.weight.toLowerCase())
+          ? `${p.name} ${match.weight}`
+          : p.name
         return {
           ...p,
-          weight: p.weight || match?.weight || null,
+          name,
+          weight: null,
           _key: `bulk-${Date.now()}-${i}`,
           include: true,
           matchedCatalogId: match?.id,
@@ -767,7 +761,7 @@ export default function OfferIntakeClient({
         _key: `bulk-add-${Date.now()}-${order}`,
         catalog_id: match?.id,
         name: r.name,
-        weight: r.weight || '',
+        weight: '',
         image_url: match?.image_url || '',
         offer_type: 'price' as const,
         price: r.price ?? null,
@@ -1286,13 +1280,8 @@ export default function OfferIntakeClient({
                       <input
                         value={row.name}
                         onChange={e => updateBulkPasteRow(row._key, { name: e.target.value })}
+                        placeholder="Product name (include weight, e.g. Rice 5kg)"
                         className="flex-1 min-w-0 bg-transparent text-sm text-white/90 focus:outline-none"
-                      />
-                      <input
-                        value={row.weight || ''}
-                        onChange={e => updateBulkPasteRow(row._key, { weight: e.target.value })}
-                        placeholder="weight"
-                        className="w-20 shrink-0 bg-white/5 rounded-lg px-2 py-1 text-xs text-white/70 focus:outline-none"
                       />
                       <input
                         type="number"
