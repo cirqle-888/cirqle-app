@@ -32,6 +32,7 @@ import {
 import { computeServiceCharge, gstOnSpend, spendWithGst } from '@/lib/advertising/budget'
 import { IntegrationsTab } from './integrations-tab'
 import { Archive, ArchiveRestore } from 'lucide-react'
+import { FavoriteToggle } from '@/components/ui/favorite-toggle'
 
 type Project = AdProjectRow & { 
   client?: { id: string; name: string; code: string } | null,
@@ -142,6 +143,13 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, ev
                   Archived
                 </span>
               )}
+              <FavoriteToggle
+                entityType="campaign"
+                entityId={project.id}
+                href={`/dashboard/advertising/${project.id}`}
+                label={project.campaign_name}
+                iconKey="Megaphone"
+              />
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
               {adRefLabel(project.id)} · {project.client?.name || 'No client'} · {PLATFORM_LABEL[project.platform] || project.platform}

@@ -2,12 +2,14 @@ import Sidebar from '@/components/layout/sidebar'
 import { PrivacyProvider } from '@/contexts/privacy-context'
 import { RoleProvider, type ServerEmployee } from '@/contexts/role-context'
 import { PermissionProvider, type PermissionUser } from '@/contexts/permission-context'
+import { FavoritesProvider } from '@/contexts/favorites-context'
 import { CommandPalette } from '@/components/ui/command-palette'
 import { BirthdayCelebration } from '@/components/ui/birthday-celebration'
 import { FxRatesAutoSync } from './fx-rates-auto-sync'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { isBirthdayToday } from '@/lib/utils/birthday'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { listFavoritesForEmployee } from '@/lib/favorites/queries'
 
 // Workspace logo URL fetch — pulls both dark and light variants.
 // Service-role client so RLS on company_settings can't block it.
@@ -42,6 +44,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
     ),
     fetchLogoUrls(),
   ])
+  // Favorites need the employee id from meResult, so this can't join the
+  // Promise.all above — fetched right after, still before first paint.
+  const initialFavorites = meResult.user
+    ? await listFavoritesForEmployee(meResult.user.employeeId).catch(() => [])
+    : []
   const me = meResult.user
   const loadFailed = meResult.failed
   const { logoUrl, logoUrlDark, faviconUrl } = logos
@@ -89,6 +96,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <PrivacyProvider>
       <RoleProvider initialEmployee={serverEmployee}>
         <PermissionProvider user={user} logoUrl={logoUrl} logoUrlDark={logoUrlDark} faviconUrl={faviconUrl}>
+          <FavoritesProvider initialFavorites={initialFavorites}>
           {/* h-dvh = dynamic viewport height (adapts as Safari toolbar shows/hides).
               h-screen (100vh) on iOS uses the *large* viewport (toolbar-hidden),
               making the container taller than the visible area when the address bar
@@ -112,6 +120,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               />
             )}
           </div>
+          </FavoritesProvider>
         </PermissionProvider>
       </RoleProvider>
     </PrivacyProvider>

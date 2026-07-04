@@ -10,19 +10,11 @@ import { useTheme } from '@/contexts/theme-context'
 import {
   LayoutDashboard,
   CheckSquare,
-  Users2,
-  FileText,
-  BookOpen,
-  Wallet,
-  BarChart3,
-  Sheet,
-  Settings,
   LogOut,
   ChevronRight,
   TrendingUp,
   Lock,
   Unlock,
-  Upload,
   Menu,
   X,
   ChevronLeft,
@@ -34,18 +26,16 @@ import {
   KeyRound,
   UserCircle,
   ChevronDown,
-  Inbox,
-  PhoneCall,
-  Award,
-  Activity,
   Tag,
   Package,
-  Blocks,
-  Megaphone,
 } from 'lucide-react'
+import { navSections } from '@/lib/nav-sections'
 import { CommandPaletteTrigger } from '@/components/ui/command-palette'
 import { NotificationBell } from '@/components/layout/notification-bell'
 import { EmployeeAvatar } from '@/components/ui/employee-avatar'
+import { FavoritesSection } from '@/components/layout/favorites-section'
+import { FavoriteToggle } from '@/components/ui/favorite-toggle'
+import { AppLauncherTrigger } from '@/components/layout/app-launcher'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 
 // ─────────────────────────────────────────────────────
@@ -112,71 +102,9 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
   )
 }
 
-// ─────────────────────────────────────────────────────
-// Nav definition — grouped by workflow (top = most used)
-// ─────────────────────────────────────────────────────
-type NavItem = { label: string; href: string; icon: typeof LayoutDashboard; requiredPerm?: string; adminOnly?: boolean }
-type NavSection = { label?: string; items: NavItem[] }
-
-const navSections: NavSection[] = [
-  {
-    items: [
-      { label: 'Dashboard',     href: '/dashboard',               icon: LayoutDashboard, requiredPerm: 'dashboard.view' },
-      { label: 'Requests',      href: '/dashboard/requests',      icon: Inbox, requiredPerm: 'requests.view' },
-      { label: 'Tasks',         href: '/dashboard/tasks',         icon: CheckSquare },
-      { label: 'Contributions', href: '/dashboard/contributions', icon: TrendingUp },
-    ],
-  },
-  {
-    label: 'Money',
-    items: [
-      { label: 'Quotations',  href: '/dashboard/quotations', icon: BookOpen, requiredPerm: 'billing.view_quotations' },
-      { label: 'Invoices',    href: '/dashboard/invoices',   icon: FileText, requiredPerm: 'billing.view_invoices' },
-      { label: 'Follow-ups',  href: '/dashboard/invoices/follow-ups', icon: PhoneCall, requiredPerm: 'billing.view_invoices' },
-      { label: 'Cash Book',   href: '/dashboard/cashbook',   icon: Wallet,   requiredPerm: 'cashbook.view' },
-    ],
-  },
-  {
-    label: 'Team',
-    items: [
-      { label: 'HR & Payroll', href: '/dashboard/payroll', icon: Users2, requiredPerm: 'payroll.view' },
-    ],
-  },
-  {
-    label: 'Insights',
-    items: [
-      // Reports is gated by reports.view — admins always have it; non-admins
-      // see the tab only when their designation grants it in Settings → Designations.
-      { label: 'Reports', href: '/dashboard/reports', icon: BarChart3, requiredPerm: 'reports.view' },
-      // Contribution Analysis: spreadsheet-style per-task profitability / earnings
-      // BI report. Same reports.view gate. Lives under Insights, NOT Settings.
-      { label: 'Contribution Analysis', href: '/dashboard/reports/contribution-analysis', icon: Sheet, requiredPerm: 'reports.view' },
-      // Client Ranking: payment reliability + business value scoring per client.
-      { label: 'Client Ranking', href: '/dashboard/clients/ranking', icon: Award, requiredPerm: 'reports.view' },
-      // Business Health Center: cash/collections, overdue aging, client risk
-      // (reuses Client Ranking's scoring), and whether the scheduled crons
-      // are actually running. Same reports.view gate.
-      { label: 'Business Health', href: '/dashboard/health', icon: Activity, requiredPerm: 'reports.view' },
-    ],
-  },
-  {
-    label: 'Apps',
-    items: [
-      { label: 'Advertising',    href: '/dashboard/advertising', icon: Megaphone, requiredPerm: 'advertising.view' },
-      { label: 'Apps Directory', href: '/dashboard/apps',        icon: Blocks },
-    ],
-  },
-  {
-    label: 'System',
-    items: [
-      // Bulk Import is strictly admin-only — it can mass-create tasks,
-      // contributions, and cashbook entries, so it shouldn't surface to
-      // non-admin team members who might happen to hold `tasks.create`.
-      { label: 'Bulk Import', href: '/dashboard/import',   icon: Upload,   adminOnly: true },
-      { label: 'Settings',    href: '/dashboard/settings', icon: Settings, requiredPerm: 'settings.access' },
-    ],
-  },
-]
+// Nav definition (grouped by workflow, top = most used) lives in
+// src/lib/nav-sections.ts — shared with the icon-grid app launcher so both
+// surfaces render the exact same destinations/permissions from one place.
 
 // ─────────────────────────────────────────────────────
 // Profile action menu items (shared between sidebar + employee sheet)
@@ -436,11 +364,13 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
       {/* Search trigger + notifications */}
       <div className={`py-2 border-b border-sidebar-border transition-all duration-300 flex items-center gap-1.5 ${isCollapsed ? 'flex-col px-0' : 'px-3'}`}>
         <CommandPaletteTrigger className={isCollapsed ? '' : 'w-full flex-1'} isCollapsed={isCollapsed} />
+        <AppLauncherTrigger />
         <NotificationBell isCollapsed={isCollapsed} />
       </div>
 
       {/* Nav */}
       <nav className={`flex-1 py-4 overflow-y-auto ${isCollapsed ? 'px-2' : 'px-3'}`}>
+        <FavoritesSection isCollapsed={isCollapsed} activeHref={activeHref} onNavClick={onNavClick} />
         {visibleNavSections.map((section, sIdx) => {
           const visibleItems = section.items
           return (
@@ -460,36 +390,50 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
               <div className="space-y-0.5">
                 {visibleItems.map(({ label, href, icon: Icon }) => {
                   const active = href === activeHref
+                  const iconKey = Icon.displayName || 'Star'
                   return (
-                    <Link
-                      key={href}
-                      href={href}
-                      onClick={onNavClick}
-                      title={isCollapsed ? label : undefined}
-                      className={`flex items-center rounded-lg text-sm font-medium transition-all duration-300 group ${
-                        isCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2.5'
-                      } ${
-                        active
-                          ? 'bg-primary/15 text-primary'
-                          : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-                      }`}
-                    >
-                      <span className="relative shrink-0">
-                        <Icon className={`w-4 h-4 shrink-0 transition-colors ${active ? 'text-primary' : 'text-muted-foreground group-hover:text-sidebar-accent-foreground'}`} />
-                        {href === '/dashboard/requests' && requestsBadge > 0 && isCollapsed && (
-                          <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400" />
-                        )}
-                      </span>
-                      <div className={`flex items-center overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0' : 'flex-1 opacity-100'}`}>
-                        <span className="flex-1 truncate whitespace-nowrap">{label}</span>
-                        {href === '/dashboard/requests' && requestsBadge > 0 && (
-                          <span className="ml-2 shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-bold flex items-center justify-center">
-                            {requestsBadge > 99 ? '99+' : requestsBadge}
-                          </span>
-                        )}
-                        {active && <ChevronRight className="w-3 h-3 text-primary shrink-0 ml-2" />}
-                      </div>
-                    </Link>
+                    <div key={href} className="relative group">
+                      <Link
+                        href={href}
+                        onClick={onNavClick}
+                        title={isCollapsed ? label : undefined}
+                        className={`flex items-center rounded-lg text-sm font-medium transition-all duration-300 ${
+                          isCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2.5'
+                        } ${
+                          active
+                            ? 'bg-primary/15 text-primary'
+                            : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+                        }`}
+                      >
+                        <span className="relative shrink-0">
+                          <Icon className={`w-4 h-4 shrink-0 transition-colors ${active ? 'text-primary' : 'text-muted-foreground group-hover:text-sidebar-accent-foreground'}`} />
+                          {href === '/dashboard/requests' && requestsBadge > 0 && isCollapsed && (
+                            <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400" />
+                          )}
+                        </span>
+                        <div className={`flex items-center overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0' : 'flex-1 opacity-100'}`}>
+                          <span className="flex-1 truncate whitespace-nowrap">{label}</span>
+                          {href === '/dashboard/requests' && requestsBadge > 0 && (
+                            <span className="ml-2 shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-bold flex items-center justify-center">
+                              {requestsBadge > 99 ? '99+' : requestsBadge}
+                            </span>
+                          )}
+                          {active && <ChevronRight className="w-3 h-3 text-primary shrink-0 ml-2" />}
+                        </div>
+                      </Link>
+                      {!isCollapsed && (
+                        <FavoriteToggle
+                          entityType="nav_page"
+                          // href doubles as the entity id — each nav page must be
+                          // individually identifiable or pinning one replaces another
+                          entityId={href}
+                          href={href}
+                          label={label}
+                          iconKey={iconKey}
+                          className="absolute right-1.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100"
+                        />
+                      )}
+                    </div>
                   )
                 })}
               </div>

@@ -74,6 +74,12 @@ export const PERMS = {
   /** See ₹ inflow/outflow values and bank balance figures. */
   CASHBOOK_VIEW_AMOUNTS: 'cashbook.view_amounts',
 
+  // Business Partners — referral/collection-partner statements (read-only over invoices)
+  PARTNERS_VIEW:   'finance.partner.view',
+  PARTNERS_CREATE: 'finance.partner.create',
+  PARTNERS_EDIT:   'finance.partner.edit',
+  PARTNERS_EXPORT: 'finance.partner.export',
+
   // External Request Portal
   REQUESTS_VIEW:          'requests.view',
   REQUESTS_REVIEW:        'requests.review',

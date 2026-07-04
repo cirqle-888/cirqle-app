@@ -383,6 +383,12 @@ function dlBtnCenter() {
   if (dlBtnRect && state.showToolbar) return { x: dlBtnRect.x + dlBtnRect.w / 2, y: dlBtnRect.y + dlBtnRect.h / 2 }
   return { x: b.width - 40, y: state.showToolbar ? TOOLBAR_H / 2 : 12 }
 }
+// Pending safety-net timers, one per in-flight icon — see flyDownloadFx().
+const fxTimeouts = []
+// Well past the ~560ms CSS animation in download-fx.html; only fires if the
+// real onfinish → fx:done round-trip never arrives.
+const FX_SAFETY_MS = 1500
+
 function ensureFxOverlay() {
   if (fxOverlay) return
   fxOverlay = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-ui.js') } })
@@ -391,15 +397,44 @@ function ensureFxOverlay() {
   fxOverlay.webContents.loadFile(path.join(__dirname, 'download-fx.html'))
   const b = win.getContentBounds()
   fxOverlay.setBounds({ x: 0, y: 0, width: b.width, height: b.height })
+  console.log('[fx] overlay created')
+}
+// Lands exactly one in-flight icon: decrements the counter, tears down the
+// overlay once nothing is left in flight, and pulses the ⬇ button. Called
+// either by the real 'fx:done' IPC (renderer confirms its animation finished)
+// or by the safety-net timeout below — never both, for the same flight.
+function landOneFlight() {
+  fxInFlight = Math.max(0, fxInFlight - 1)
+  if (fxInFlight === 0 && fxOverlay) {
+    win.contentView.removeChildView(fxOverlay)
+    fxOverlay = null
+    console.log('[fx] overlay removed, all flights landed')
+  }
+  if (chrome) chrome.webContents.send('downloads:pulse') // land → pulse the ⬇ button
 }
 function flyDownloadFx(source) {
   if (!win) return
   const payload = { from: paneCenter(source), to: dlBtnCenter() }
   ensureFxOverlay()
   fxInFlight++
+  console.log('[fx] flight started, in-flight =', fxInFlight)
   const send = () => { if (fxOverlay) fxOverlay.webContents.send('fx:fly', payload) }
   if (fxOverlay.webContents.isLoadingMainFrame()) fxOverlay.webContents.once('did-finish-load', send)
   else send()
+
+  // Safety net: a transparent WebContentsView still captures mouse events
+  // (see comment above paneCenter), so if the renderer's onfinish → fx:done
+  // round-trip is ever dropped (failed IPC, overlay never finishing load,
+  // etc.) the overlay would otherwise sit on top of the whole window
+  // FOREVER, silently blocking every click and drag underneath it. Force-land
+  // this flight if that round-trip doesn't arrive in time.
+  const timer = setTimeout(() => {
+    const i = fxTimeouts.indexOf(timer)
+    if (i >= 0) fxTimeouts.splice(i, 1)
+    console.warn('[fx] safety-net timeout fired — fx:done never arrived, force-removing overlay')
+    landOneFlight()
+  }, FX_SAFETY_MS)
+  fxTimeouts.push(timer)
 }
 
 // ── Native drag-out of a downloaded file (to WhatsApp, Finder, anywhere) ───────
@@ -735,17 +770,28 @@ ipcMain.on('downloads:shareWA', (_e, id) => { const d = downloads.find((x) => x.
 // Native OS file drag from a shelf item → drop onto WhatsApp, Finder, anywhere.
 ipcMain.on('downloads:startDrag', (e, id) => {
   const d = downloads.find((x) => x.id === id)
-  if (!d || !fs.existsSync(d.path)) return
-  try { e.sender.startDrag({ file: d.path, icon: dragIconFor(d.path) }) }
-  catch { try { e.sender.startDrag({ file: d.path, icon: FALLBACK_DRAG_ICON }) } catch { /* give up */ } }
+  if (!d) { console.warn('[drag] startDrag: no download record for id', id); return }
+  if (!fs.existsSync(d.path)) { console.warn('[drag] startDrag: file no longer exists at', d.path); return }
+  try {
+    e.sender.startDrag({ file: d.path, icon: dragIconFor(d.path) })
+  } catch (err) {
+    console.error('[drag] startDrag failed with resolved icon, retrying with fallback icon:', err)
+    try {
+      e.sender.startDrag({ file: d.path, icon: FALLBACK_DRAG_ICON })
+    } catch (err2) {
+      console.error('[drag] startDrag failed even with fallback icon — giving up:', err2)
+    }
+  }
 })
 
 // ── Download flying-animation callbacks ───────────────────────────────────────
 ipcMain.on('fx:report-btn', (_e, rect) => { dlBtnRect = rect })
 ipcMain.on('fx:done', () => {
-  fxInFlight = Math.max(0, fxInFlight - 1)
-  if (fxInFlight === 0 && fxOverlay) { win.contentView.removeChildView(fxOverlay); fxOverlay = null }
-  if (chrome) chrome.webContents.send('downloads:pulse') // land → pulse the ⬇ button
+  // This flight landed for real — cancel its safety-net timeout so it doesn't
+  // double-decrement fxInFlight later.
+  const timer = fxTimeouts.shift()
+  if (timer) clearTimeout(timer)
+  landOneFlight()
 })
 
 // ── Duplicate / compare: toggle a 2nd Cirqle page in the right pane ───────────

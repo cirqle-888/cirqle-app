@@ -7,6 +7,7 @@ import { NextResponse, type NextRequest } from 'next/server'
  */
 const ROUTE_PERMS: Array<[RegExp, string]> = [
   [/^\/dashboard\/cashbook/,                'cashbook.view'],
+  [/^\/dashboard\/partners/,                'finance.partner.view'],
   [/^\/dashboard\/payroll/,                 'payroll.view'],
   [/^\/dashboard\/invoices/,                'billing.view_invoices'],
   [/^\/dashboard\/quotations/,              'billing.view_quotations'],

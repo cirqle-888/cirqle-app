@@ -19,6 +19,7 @@ const ROUTE_LABELS: Record<string, string> = {
   invoices:      'Invoices',
   quotations:    'Quotations',
   cashbook:      'Cash Book',
+  partners:      'Business Partners',
   payroll:       'HR & Payroll',
   reports:       'Reports',
   import:        'Bulk Import',
