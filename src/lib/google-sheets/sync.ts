@@ -113,7 +113,6 @@ export async function syncCampaignToSheet(
       .join(', ')
     return [
       p.name || '',
-      p.weight || '',
       price1,
       price2,
       p.mrp ? String(p.mrp) : '',
@@ -129,7 +128,7 @@ export async function syncCampaignToSheet(
   const payload = {
     offerTitle: campaign.title || '',
     offerDate,
-    headers: ['Product', 'Weight', 'Price 1', 'Price 2', 'MRP', 'Offer Text', 'Badge', 'Image URL', 'Offer Date', 'Page'],
+    headers: ['Product', 'Price 1', 'Price 2', 'MRP', 'Offer Text', 'Badge', 'Image URL', 'Offer Date', 'Page'],
     rows,
   }
 
