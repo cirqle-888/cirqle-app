@@ -32,7 +32,7 @@ export async function refreshStoredEarningsFromBilling(taskId: string) {
 
   const { data: scores } = await supabase
     .from('contribution_scores')
-    .select('employee_id, score_percentage, earnings_inr')
+    .select('employee_id, score_percentage, earnings_inr, is_manual_override')
     .eq('task_id', taskId)
   if (!scores || scores.length === 0) return { updated: 0, message: 'No scores' }
 
@@ -68,8 +68,10 @@ export async function refreshStoredEarningsFromBilling(taskId: string) {
 
   let updated = 0
   for (const s of scores) {
-    // SAFETY: never recompute earnings-only imports (score% = 0).
+    // SAFETY: never recompute earnings-only imports (score% = 0), and never
+    // touch manual overrides (same rule as the full engine).
     if (!(s.score_percentage && s.score_percentage > 0)) continue
+    if (s.is_manual_override) continue
     const newEarn = r2(remainingPool * (s.score_percentage / 100) * ((rating.get(s.employee_id) ?? 100) / 100))
     if (Math.abs((s.earnings_inr || 0) - newEarn) > 0.01) {
       await supabase.from('contribution_scores')

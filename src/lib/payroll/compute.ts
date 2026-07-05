@@ -11,6 +11,101 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { loadActiveAgreements, syncTaskAgreementEarnings } from '@/lib/sync/agreement-earnings'
+
+const r2 = (n: number) => Math.round(n * 100) / 100
+
+/**
+ * Bring the month's CACHED `contribution_scores.earnings_inr` back in line
+ * with CURRENT billing before payroll sums it.
+ *
+ * Why: payroll sums the cached value, but the Contribution Analysis report
+ * recomputes live (`remainingPool × score% × rating%` from current billing /
+ * commission% / rating). Any task whose billing, pricing, tools, or rating
+ * changed after contributions were saved leaves the cache stale — so payroll
+ * silently drifts from the report, and the ⚡ "Recalculate" button used to
+ * just re-sum the same stale numbers.
+ *
+ * SAFETY (same rules as refreshStoredEarningsFromBilling / the engine):
+ *  - only rows with score_percentage > 0 are recomputed — earnings-only
+ *    imports (score% = 0, flat ₹ amount) are NEVER touched;
+ *  - manual-override rows are left exactly as the admin set them;
+ *  - employee commission agreements are re-applied on top for changed tasks.
+ */
+export async function refreshMonthStoredEarnings(
+  admin: SupabaseClient,
+  monthStart: string,
+  nextMonthStart: string,
+): Promise<{ refreshed: number }> {
+  const { data: tasks } = await admin
+    .from('tasks')
+    .select('id, billing_amount_inr, client_id, service_id')
+    .gte('task_date', monthStart)
+    .lt('task_date', nextMonthStart)
+    .is('deleted_at', null)
+  if (!tasks || tasks.length === 0) return { refreshed: 0 }
+  const taskById = new Map(tasks.map((t: any) => [t.id, t]))
+  const taskIds = tasks.map((t: any) => t.id)
+
+  // Scores worth recomputing: score% > 0 and not manually overridden.
+  const scores: any[] = []
+  const CHUNK = 200
+  for (let i = 0; i < taskIds.length; i += CHUNK) {
+    const { data } = await admin
+      .from('contribution_scores')
+      .select('task_id, employee_id, score_percentage, earnings_inr, is_manual_override')
+      .in('task_id', taskIds.slice(i, i + CHUNK))
+      .gt('score_percentage', 0)
+    if (data) scores.push(...data.filter((s: any) => !s.is_manual_override))
+  }
+  if (scores.length === 0) return { refreshed: 0 }
+
+  // Reference data — mirrors buildAnalysisRows (the report) exactly.
+  const [pricingRes, empRes, taskToolsRes, toolsRes] = await Promise.all([
+    admin.from('client_service_pricing').select('client_id, service_id, commission_percentage'),
+    admin.from('employees').select('id, performance_rating'),
+    admin.from('task_tools').select('task_id, tool_id').in('task_id', taskIds),
+    admin.from('tools').select('id, fixed_percentage, is_active'),
+  ])
+  const pmap = new Map((pricingRes.data || []).map((p: any) => [`${p.client_id}|${p.service_id}`, p.commission_percentage]))
+  const rating = new Map((empRes.data || []).map((e: any) => [e.id, Number(e.performance_rating) || 100]))
+  const toolPctById = new Map((toolsRes.data || []).map((t: any) => [t.id, t.is_active !== false ? Number(t.fixed_percentage) || 0 : 0]))
+  const toolPctByTask = new Map<string, number>()
+  for (const tt of (taskToolsRes.data || []) as any[]) {
+    toolPctByTask.set(tt.task_id, (toolPctByTask.get(tt.task_id) || 0) + (toolPctById.get(tt.tool_id) || 0))
+  }
+
+  let refreshed = 0
+  const changedTasks = new Set<string>()
+  for (const s of scores) {
+    const t: any = taskById.get(s.task_id)
+    if (!t) continue
+    const commPct = (t.client_id && t.service_id)
+      ? (pmap.get(`${t.client_id}|${t.service_id}`) ?? 50)
+      : 50
+    const pool = (t.billing_amount_inr || 0) * commPct / 100
+    const remainingPool = pool * (1 - (toolPctByTask.get(t.id) || 0) / 100)
+    const newEarn = r2(remainingPool * (s.score_percentage / 100) * ((rating.get(s.employee_id) ?? 100) / 100))
+    if (Math.abs((s.earnings_inr || 0) - newEarn) > 0.01) {
+      const { error } = await admin
+        .from('contribution_scores')
+        .update({ earnings_inr: newEarn })
+        .eq('task_id', s.task_id)
+        .eq('employee_id', s.employee_id)
+      if (!error) { refreshed++; changedTasks.add(s.task_id) }
+    }
+  }
+
+  // Re-layer commission agreements on the tasks we touched (no-op without any).
+  if (changedTasks.size > 0) {
+    const { available, agreements } = await loadActiveAgreements(admin as any)
+    if (available && agreements.length > 0) {
+      for (const taskId of changedTasks) await syncTaskAgreementEarnings(taskId)
+    }
+  }
+
+  return { refreshed }
+}
 
 export async function computeMonthlyCommissions(
   admin: SupabaseClient,
@@ -25,6 +120,15 @@ export async function computeMonthlyCommissions(
   const nextMonthStart = `${nextMonthStr}-01`
 
   const commissionByEmployee: Record<string, number> = {}
+
+  // 0) Re-sync the month's cached earnings with current billing FIRST, so the
+  // sums below (and therefore payroll) match the Contribution Analysis report.
+  // Best-effort: a refresh failure must not block payroll math.
+  try {
+    await refreshMonthStoredEarnings(admin, monthStart, nextMonthStart)
+  } catch (e) {
+    console.error('[payroll] earnings refresh failed (continuing with cached values):', e)
+  }
 
   // 1) Task-linked scores: find this month's task ids, then sum their scores.
   const { data: monthTasks, error: tasksErr } = await admin
