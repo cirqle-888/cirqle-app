@@ -13,7 +13,7 @@
  * Cirqle's Quick Capture via the `cirqle:capture` window event (preload-cirqle).
  */
 
-const { app, BaseWindow, WebContentsView, ipcMain, globalShortcut, clipboard, shell, Menu, nativeImage } = require('electron')
+const { app, BaseWindow, WebContentsView, ipcMain, globalShortcut, clipboard, shell, Menu, nativeImage, screen } = require('electron')
 const path = require('path')
 const fs = require('fs')
 
@@ -258,16 +258,71 @@ function shareImageToWhatsApp(image, { autoPaste = false } = {}) {
   if (autoPaste) setTimeout(() => pasteIntoWhatsappComposer(wa), 250)
   return { ok: true, pasted: autoPaste }
 }
+// Best-effort MIME type for the synthetic WhatsApp drop — WhatsApp Web uses it
+// to decide between photo preview and document attachment.
+const MIME_BY_EXT = {
+  pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+  gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', mp4: 'video/mp4',
+  mov: 'video/quicktime', mp3: 'audio/mpeg', doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  csv: 'text/csv', txt: 'text/plain', zip: 'application/zip',
+}
+function mimeFor(filePath) {
+  const ext = (path.extname(filePath) || '').slice(1).toLowerCase()
+  return MIME_BY_EXT[ext] || 'application/octet-stream'
+}
+
+/**
+ * Deliver a file into WhatsApp Web as if it were dropped on the open chat.
+ *
+ * Why this exists: a drag started with webContents.startDrag() can land in
+ * Finder, the Desktop, or any OTHER app, but Chromium never delivers it to a
+ * WebContentsView of the SAME app — so "drag from the Downloads shelf onto the
+ * WhatsApp pane" silently did nothing. We detect that case after the drag ends
+ * and finish the drop ourselves: read the file, rebuild it as a File object
+ * inside the WhatsApp page, and dispatch a real DragEvent('drop') on the chat.
+ * WhatsApp then shows its normal attachment preview — nothing is sent until
+ * the user presses Send.
+ */
+async function dropFileIntoWhatsApp(wa, filePath) {
+  if (!wa) return { ok: false, reason: 'no whatsapp view' }
+  try {
+    const stat = fs.statSync(filePath)
+    if (stat.size > 60 * 1024 * 1024) return { ok: false, reason: 'file too large' } // WhatsApp caps ~64MB
+    const b64 = fs.readFileSync(filePath).toString('base64')
+    const ok = await wa.webContents.executeJavaScript(`(async () => {
+      const res = await fetch('data:${mimeFor(filePath)};base64,${b64}')
+      const blob = await res.blob()
+      const file = new File([blob], ${JSON.stringify(path.basename(filePath))}, { type: ${JSON.stringify(mimeFor(filePath))} })
+      const dt = new DataTransfer()
+      dt.items.add(file)
+      // #main = the open conversation. Fall back to the app root so a drop
+      // still registers if WhatsApp changes its DOM.
+      const target = document.querySelector('#main') || document.querySelector('#app') || document.body
+      for (const type of ['dragenter', 'dragover', 'drop']) {
+        target.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt }))
+      }
+      return true
+    })()`, true)
+    return { ok: !!ok }
+  } catch (e) { return { ok: false, reason: String(e) } }
+}
+
 function shareFileToWhatsApp(filePath, opts) {
   try {
     if (isImageFile(filePath)) {
       const img = nativeImage.createFromPath(filePath)
       if (!img.isEmpty()) return shareImageToWhatsApp(img, opts)
     }
-    // Non-image (PDF etc.) can't be pasted into WhatsApp Web — reveal it to drag in.
-    focusWhatsapp()
-    shell.showItemInFolder(filePath)
-    return { ok: true, revealed: true }
+    // Non-image (PDF etc.): synthesize a drop on the open chat — same path the
+    // drag-out uses. Reveal in Finder only if that fails (old behavior).
+    const wa = focusWhatsapp()
+    dropFileIntoWhatsApp(wa, filePath).then((r) => {
+      if (!r.ok) shell.showItemInFolder(filePath)
+    })
+    return { ok: true }
   } catch (e) { return { ok: false, reason: String(e) } }
 }
 function dataUrlToImage(dataUrl) {
@@ -443,12 +498,20 @@ function flyDownloadFx(source) {
 const FALLBACK_DRAG_ICON = nativeImage.createFromDataURL(
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 )
-function dragIconFor(filePath) {
+async function dragIconFor(filePath) {
   try {
     if (isImageFile(filePath)) {
       const img = nativeImage.createFromPath(filePath)
       if (!img.isEmpty()) return img.resize({ width: 64, quality: 'good' })
     }
+  } catch { /* fall through */ }
+  // Real OS file icon (what Finder shows) — covers PDF and every other type.
+  // The old fallback chain ended at a 1×1 TRANSPARENT png whenever assets/
+  // wasn't packaged (electron-builder only shipped src/**), so PDF drags
+  // started with an invisible ghost — indistinguishable from "drag is broken".
+  try {
+    const icon = await app.getFileIcon(filePath, { size: 'normal' })
+    if (icon && !icon.isEmpty()) return icon
   } catch { /* fall through */ }
   try {
     const appIcon = nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'icon.png'))
@@ -768,7 +831,7 @@ ipcMain.on('downloads:copy', (_e, id) => {
 })
 ipcMain.on('downloads:shareWA', (_e, id) => { const d = downloads.find((x) => x.id === id); if (d) shareFileToWhatsApp(d.path) })
 // Native OS file drag from a shelf item → drop onto WhatsApp, Finder, anywhere.
-ipcMain.on('downloads:startDrag', (e, id) => {
+ipcMain.on('downloads:startDrag', async (e, id) => {
   const d = downloads.find((x) => x.id === id)
   if (!d) { console.warn('[drag] startDrag: no download record for id', id); return }
   if (!fs.existsSync(d.path)) { console.warn('[drag] startDrag: file no longer exists at', d.path); return }
@@ -778,19 +841,70 @@ ipcMain.on('downloads:startDrag', (e, id) => {
   // invisible catcher instead of passing through to WhatsApp, so the file
   // silently vanished. Hide it for the (synchronous, blocking) duration of the
   // drag so the view underneath can actually receive the drop.
+  // dlCatcher is a full-window transparent scrim ABOVE the panes; while it's
+  // visible, a native drop over the WhatsApp pane lands on IT (no drop
+  // handler) and silently vanishes. startDrag() returns IMMEDIATELY on this
+  // Electron version (verified: cursor still at the drag origin when it
+  // returns), so a finally{ show() } re-covers the panes mid-drag and defeats
+  // the fix. Instead: hide the catcher now and re-show it once the drag is
+  // over — detected by polling the cursor from the drag origin (see below).
   if (dlCatcher) dlCatcher.setVisible(false)
   try {
-    e.sender.startDrag({ file: d.path, icon: dragIconFor(d.path) })
+    e.sender.startDrag({ file: d.path, icon: await dragIconFor(d.path) })
+    console.log('[drag] startDrag issued for', d.name)
   } catch (err) {
     console.error('[drag] startDrag failed with resolved icon, retrying with fallback icon:', err)
     try {
       e.sender.startDrag({ file: d.path, icon: FALLBACK_DRAG_ICON })
     } catch (err2) {
       console.error('[drag] startDrag failed even with fallback icon — giving up:', err2)
+      if (dlCatcher) dlCatcher.setVisible(true)
+      return
     }
-  } finally {
-    if (dlCatcher) dlCatcher.setVisible(true)
   }
+
+  // Watch the drag from main: sample the cursor until it stops moving for a
+  // moment away from the origin (= the user dropped), then re-arm the catcher.
+  // If the drop point is inside the active WhatsApp pane, also complete the
+  // drop synthetically — Chromium won't deliver an own-app drag to an own-app
+  // WebContentsView, so without this the release does nothing.
+  const cb0 = win.getContentBounds()
+  const start = screen.getCursorScreenPoint()
+  let last = { x: start.x, y: start.y }
+  let stillFor = 0
+  let ticks = 0
+  const timer = setInterval(async () => {
+    ticks++
+    const pt = screen.getCursorScreenPoint()
+    const moved = Math.abs(pt.x - last.x) > 2 || Math.abs(pt.y - last.y) > 2
+    const awayFromStart = Math.abs(pt.x - start.x) > 40 || Math.abs(pt.y - start.y) > 40
+    last = { x: pt.x, y: pt.y }
+    if (moved || !awayFromStart) { stillFor = 0 } else { stillFor++ }
+    // 3 quiet samples (~450ms) away from the origin ≈ the drop happened.
+    // 20s cap: give up and just restore the catcher.
+    if (stillFor >= 3 || ticks > 130) {
+      clearInterval(timer)
+      if (dlCatcher) dlCatcher.setVisible(true)
+      if (ticks > 130) return
+      try {
+        const wa = whatsapps[state.activeWa]
+        if (!wa || state.rightPane === 'cirqle2' || !state.showWhatsapp) return
+        const x = pt.x - cb0.x, y = pt.y - cb0.y
+        const wb = wa.getBounds()
+        const pb = downloadsPanel ? downloadsPanel.getBounds() : null
+        const inWa = x >= wb.x && x <= wb.x + wb.width && y >= wb.y && y <= wb.y + wb.height
+        const inPanel = pb && x >= pb.x && x <= pb.x + pb.width && y >= pb.y && y <= pb.y + pb.height
+        console.log('[drag] drop-end hit test:', JSON.stringify({ cursor: { x, y }, waBounds: wb, inWa, inPanel }))
+        if (inWa && !inPanel) {
+          const r = await dropFileIntoWhatsApp(wa, d.path)
+          console.log('[drag] synthetic drop result:', JSON.stringify(r))
+          if (r.ok) closeDownloadsPanel() // get the shelf out of the way of WhatsApp's attach preview
+        }
+      } catch (err) {
+        console.error('[drag] post-drag WhatsApp handoff failed:', err)
+      }
+    }
+  }, 150)
 })
 
 // ── Download flying-animation callbacks ───────────────────────────────────────

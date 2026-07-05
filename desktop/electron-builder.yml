@@ -4,6 +4,7 @@ directories:
   output: dist
 files:
   - src/**/*
+  - assets/**/*
   - package.json
 mac:
   category: public.app-category.business
