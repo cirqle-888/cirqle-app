@@ -922,7 +922,15 @@ app.whenReady().then(() => {
   win.on('close', (e) => {
     if (process.platform === 'darwin' && !quitting) {
       e.preventDefault()
-      win.hide()
+      // Hiding a window that's in native fullscreen strands its (now empty)
+      // fullscreen Space as a black screen. Leave fullscreen first and hide
+      // only after the transition completes.
+      if (win.isFullScreen()) {
+        win.once('leave-full-screen', () => win.hide())
+        win.setFullScreen(false)
+      } else {
+        win.hide()
+      }
     }
   })
   globalShortcut.register('CommandOrControl+Shift+N', sendClipboardToCirqle)
