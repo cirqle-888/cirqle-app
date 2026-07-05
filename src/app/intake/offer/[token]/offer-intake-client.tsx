@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import {
   Plus, Loader2, CheckCircle2, Check, X, ChevronDown, ChevronUp,
-  Upload, Search, Tag, Calendar, MessageSquare, RefreshCw,
+  Upload, Search, Calendar, MessageSquare, RefreshCw,
   ImageIcon, Trash2, GripVertical, Copy, FilePlus, CopyPlus, LayoutGrid, List,
   ArrowUp, ArrowDown, Shuffle, Sparkles, ClipboardPaste,
+  ArrowLeft, AlertTriangle, FileSpreadsheet, Pencil, SlidersHorizontal,
 } from 'lucide-react'
 import { saveCampaign, getImageUploadUrl, aiParseProductList, type ProductInput, type ProductBadgeInput, type CampaignInput } from './actions'
 import type { ParsedOfferProduct } from '@/lib/ai/offer-capture'
@@ -698,10 +699,12 @@ export default function OfferIntakeClient({
 
   const [catalogPageTarget, setCatalogPageTarget] = useState<number>(1)
 
-  // ── Bulk paste (AI) ─────────────────────────────────────────────────────
+  // ── Bulk paste (AI) — the PRIMARY flow: paste → review → generate sheet ──
   type BulkPasteRow = ParsedOfferProduct & { _key: string; include: boolean; matchedCatalogId?: string }
   const [bulkPasteOpen, setBulkPasteOpen] = useState(false)
   const [bulkPasteText, setBulkPasteText] = useState('')
+  const [bulkPasteHint, setBulkPasteHint] = useState('')
+  const [hintOpen, setHintOpen] = useState(false)
   const [bulkPasteBusy, setBulkPasteBusy] = useState(false)
   const [bulkPasteReview, setBulkPasteReview] = useState<BulkPasteRow[] | null>(null)
   const [bulkPasteTargetPage, setBulkPasteTargetPage] = useState(1)
@@ -713,69 +716,119 @@ export default function OfferIntakeClient({
     setBulkPasteOpen(true)
   }
 
+  // Fuzzy-match parsed names against this client's catalog (already in memory)
+  // so a reused product picks up its known image/weight instead of starting
+  // blank. Match on the weight-stripped name too — "Bru Coffee 200g" should
+  // still find the catalog's "Bru Coffee".
+  function toReviewRows(parsed: ParsedOfferProduct[]): BulkPasteRow[] {
+    return parsed.map((p, i) => {
+      const lower = p.name.toLowerCase()
+      const bare = lower.replace(/\s*\d+(?:\.\d+)?\s*(?:gm?|kg|ml|l|ltr|pcs?|pack|nos?)\b/gi, '').trim()
+      const match = catalog.find(c => c.name.toLowerCase() === lower)
+        || catalog.find(c => c.name.toLowerCase() === bare)
+        || catalog.find(c => c.name.toLowerCase().includes(lower) || lower.includes(c.name.toLowerCase()))
+        || (bare.length > 3 ? catalog.find(c => c.name.toLowerCase().includes(bare) || bare.includes(c.name.toLowerCase())) : undefined)
+      // Weight is a single column with the name. If we matched an older
+      // catalog product that still stores weight separately, append it.
+      const name = match?.weight && !p.name.toLowerCase().includes(match.weight.toLowerCase())
+        ? `${p.name} ${match.weight}`
+        : p.name
+      return {
+        ...p,
+        name,
+        weight: null,
+        _key: `bulk-${Date.now()}-${i}`,
+        include: true,
+        matchedCatalogId: match?.id,
+      }
+    })
+  }
+
   async function runBulkPasteParse() {
     if (!bulkPasteText.trim()) return
     setBulkPasteBusy(true)
-    const res = await aiParseProductList(token, bulkPasteText)
+    const res = await aiParseProductList(token, bulkPasteText, bulkPasteHint.trim() || undefined)
     setBulkPasteBusy(false)
     if (res.ok && res.data) {
-      // Fuzzy-match each parsed name against this client's existing catalog
-      // (already loaded in memory) so a reused product picks up its known
-      // image/weight instead of starting blank.
-      const rows: BulkPasteRow[] = res.data.products.map((p, i) => {
-        const lower = p.name.toLowerCase()
-        const match = catalog.find(c => c.name.toLowerCase() === lower)
-          || catalog.find(c => c.name.toLowerCase().includes(lower) || lower.includes(c.name.toLowerCase()))
-        // Weight is a single column with the name. If we matched an older
-        // catalog product that still stores weight separately, append it.
-        const name = match?.weight && !p.name.toLowerCase().includes(match.weight.toLowerCase())
-          ? `${p.name} ${match.weight}`
-          : p.name
-        return {
-          ...p,
-          name,
-          weight: null,
-          _key: `bulk-${Date.now()}-${i}`,
-          include: true,
-          matchedCatalogId: match?.id,
-        }
-      })
-      setBulkPasteReview(rows)
+      setBulkPasteReview(toReviewRows(res.data.products))
     } else {
       setError(res.error || 'Could not parse that text.')
     }
   }
 
+  // Quick Capture handoff: the dashboard's Capture Engine already parsed the
+  // pasted text and stashed the draft before navigating here — consume it
+  // straight into the review table so the employee doesn't paste twice.
+  useEffect(() => {
+    let rows: BulkPasteRow[] = []
+    try {
+      const raw = sessionStorage.getItem('cirqle:capture:draft')
+      if (!raw) return
+      const draft = JSON.parse(raw)
+      if (draft?.type !== 'offer') return
+      sessionStorage.removeItem('cirqle:capture:draft')
+      const parsed = Array.isArray(draft.fields?.products) ? draft.fields.products : []
+      rows = toReviewRows(parsed)
+    } catch { /* corrupt draft — ignore */ }
+    if (rows.length) {
+      // One-time mount handoff from an external store — the review table can
+      // only exist after this read, so the extra render is inherent.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setBulkPasteReview(rows)
+      setBulkPasteOpen(true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   function updateBulkPasteRow(key: string, updates: Partial<BulkPasteRow>) {
     setBulkPasteReview(prev => prev?.map(r => r._key === key ? { ...r, ...updates } : r) || null)
   }
 
-  function confirmBulkPaste() {
+  /**
+   * Apply the reviewed rows to the product list. With `generate` set, it also
+   * saves + syncs the sheet in the same click — the "WhatsApp list → designer
+   * sheet in under 2 minutes" path.
+   */
+  function confirmBulkPaste(generate = false) {
     if (!bulkPasteReview) return
     const included = bulkPasteReview.filter(r => r.include && r.name.trim())
     if (!included.length) return
     let order = products.length
     const newRows = included.map(r => {
       const match = r.matchedCatalogId ? catalog.find(c => c.id === r.matchedCatalogId) : undefined
+      // AI-detected promo tag → a real badge: reuse a predefined badge when the
+      // label matches one, otherwise carry it as a custom label.
+      const badgeLabel = (r.badge || '').trim()
+      const isBogo = /buy\s*1\s*get\s*1|bogo/i.test(badgeLabel)
+      const known = badgeLabel && !isBogo
+        ? badges.find(b => b.label.toLowerCase() === badgeLabel.toLowerCase())
+        : undefined
+      const productBadges = badgeLabel && !isBogo
+        ? [known
+            ? { badge_id: known.id, color: known.color } as ProductBadgeInput
+            : { custom_label: badgeLabel, color: 'amber' } as ProductBadgeInput]
+        : []
       return {
         _key: `bulk-add-${Date.now()}-${order}`,
         catalog_id: match?.id,
         name: r.name,
         weight: '',
         image_url: match?.image_url || '',
-        offer_type: 'price' as const,
+        offer_type: (isBogo ? 'bogo' : 'price') as ProductInput['offer_type'],
         price: r.price ?? null,
         mrp: r.mrp ?? null,
-        offer_text: '',
-        badges: [],
+        offer_text: isBogo ? 'Buy 1 Get 1' : '',
+        badges: productBadges,
         page: bulkPasteTargetPage,
         display_order: order++,
       }
     })
-    setProducts(prev => [...prev, ...newRows])
+    const merged = [...products, ...newRows]
+    setProducts(merged)
     setBulkPasteOpen(false)
     setBulkPasteReview(null)
     setBulkPasteText('')
+    if (generate) void saveProducts(merged)
   }
 
   function addBlankProduct(page: number) {
@@ -871,10 +924,16 @@ export default function OfferIntakeClient({
     return res.data.publicUrl
   }
 
-  async function handleSave() {
-    const invalid = products.find(p => !p.name.trim())
+  /**
+   * Save the given product list (usually the current state, but bulk-paste's
+   * one-click "Generate Sheet" passes the freshly-merged list directly since
+   * setState hasn't flushed yet). saveCampaign also fires the Google Sheet
+   * sync server-side.
+   */
+  async function saveProducts(list: LocalProduct[]) {
+    const invalid = list.find(p => !p.name.trim())
     if (invalid) { setError('All products need a name.'); return }
-    if (products.length === 0) { setError('Add at least one product.'); return }
+    if (list.length === 0) { setError('Add at least one product.'); return }
 
     setSaving(true); setError(''); setSaved(false)
 
@@ -885,7 +944,7 @@ export default function OfferIntakeClient({
       offer_date_from: dateType === 'range' ? offerDateFrom || undefined : undefined,
       offer_date_to: dateType === 'range' ? offerDateTo || undefined : undefined,
       client_note: clientNote.trim() || undefined,
-      products: products.map((p, i) => ({
+      products: list.map((p, i) => ({
         id: p.id,
         catalog_id: p.catalog_id,
         name: p.name.trim(),
@@ -914,6 +973,12 @@ export default function OfferIntakeClient({
       setError(res.error || 'Could not save. Please try again.')
     }
   }
+
+  function handleSave() { void saveProducts(products) }
+
+  // Paste/review flow active — the bottom note + save controls belong to the
+  // editor and would just add noise (the review table has its own CTA).
+  const inPasteFlow = !!bulkPasteReview || bulkPasteOpen || products.length === 0
 
   const dateDisplay = dateType === 'single'
     ? (offerDate ? fmtDate(offerDate) : '')
@@ -1031,7 +1096,200 @@ export default function OfferIntakeClient({
         </div>
        </div>
 
-        {/* ── Products section — full width of the (wide) outer container ── */}
+        {/* ── Products area ──
+            Three states, in priority order:
+            1. Review table  — AI just parsed a list; confirm/fix, then generate.
+            2. Paste hero    — empty campaign (or "Bulk Paste" clicked): the
+                               WhatsApp-paste box IS the front door, not a modal.
+            3. Editor        — the full per-product editor ("Edit Products" mode). */}
+        {bulkPasteReview ? (
+        <div className="mb-8">
+          <div className="bg-[#1a1a24] border border-white/10 rounded-3xl shadow-xl overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-white/10">
+              <div>
+                <h2 className="font-bold text-white/90 flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-violet-400" />
+                  AI found {bulkPasteReview.length} product{bulkPasteReview.length !== 1 ? 's' : ''}
+                </h2>
+                <p className="text-xs text-white/40 mt-0.5">Fix anything inline, uncheck what you don&apos;t want, then generate the sheet.</p>
+              </div>
+              <button
+                onClick={() => { setBulkPasteReview(null); setBulkPasteOpen(true) }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/5 border border-white/10 text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" /> Edit text
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-[10px] uppercase tracking-wider text-white/30 border-b border-white/10">
+                    <th className="px-3 py-2.5 w-8"></th>
+                    <th className="px-2 py-2.5 w-8 text-left">#</th>
+                    <th className="px-2 py-2.5 w-14 text-left">Image</th>
+                    <th className="px-2 py-2.5 text-left min-w-[200px]">Product</th>
+                    <th className="px-2 py-2.5 w-24 text-right">Price ₹</th>
+                    <th className="px-2 py-2.5 w-24 text-right">MRP ₹</th>
+                    <th className="px-2 py-2.5 w-32 text-left">Badge</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bulkPasteReview.map((row, i) => {
+                    const matchImg = row.matchedCatalogId ? catalog.find(c => c.id === row.matchedCatalogId)?.image_url : undefined
+                    return (
+                      <tr key={row._key} className={`border-b border-white/5 last:border-0 ${row.include ? '' : 'opacity-35'}`}>
+                        <td className="px-3 py-2 align-middle">
+                          <input type="checkbox" checked={row.include} onChange={e => updateBulkPasteRow(row._key, { include: e.target.checked })} className="accent-violet-500" />
+                        </td>
+                        <td className="px-2 py-2 text-white/30 text-xs align-middle">{i + 1}</td>
+                        <td className="px-2 py-2 align-middle">
+                          {matchImg ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={matchImg} alt="" className="w-9 h-9 rounded-lg object-cover bg-white/5 border border-white/10" />
+                          ) : row.matchedCatalogId ? (
+                            <div className="w-9 h-9 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center"><ImageIcon className="w-4 h-4 text-white/20" /></div>
+                          ) : (
+                            <span title="Not in this client's catalog yet — will be added as a new product on save" className="inline-flex items-center gap-1 text-[10px] px-1.5 py-1 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/25 whitespace-nowrap">
+                              <AlertTriangle className="w-3 h-3" /> New
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-2 py-2 align-middle">
+                          <input
+                            value={row.name}
+                            onChange={e => updateBulkPasteRow(row._key, { name: e.target.value })}
+                            placeholder="Product name incl. weight — e.g. Rice 5kg"
+                            className="w-full bg-transparent border border-transparent hover:border-white/10 focus:bg-white/5 focus:border-violet-500/50 rounded-lg px-2 py-1.5 text-sm font-medium text-white/90 focus:outline-none"
+                          />
+                        </td>
+                        <td className="px-2 py-2 align-middle">
+                          <input
+                            type="number" step="0.01" min="0"
+                            value={row.price ?? ''}
+                            onChange={e => updateBulkPasteRow(row._key, { price: e.target.value ? parseFloat(e.target.value) : null })}
+                            className="w-full text-right bg-transparent border border-transparent hover:border-white/10 focus:bg-white/5 focus:border-violet-500/50 rounded-lg px-2 py-1.5 text-sm font-semibold text-emerald-400 focus:outline-none"
+                            placeholder="—"
+                          />
+                        </td>
+                        <td className="px-2 py-2 align-middle">
+                          <input
+                            type="number" step="0.01" min="0"
+                            value={row.mrp ?? ''}
+                            onChange={e => updateBulkPasteRow(row._key, { mrp: e.target.value ? parseFloat(e.target.value) : null })}
+                            className="w-full text-right bg-transparent border border-transparent hover:border-white/10 focus:bg-white/5 focus:border-violet-500/50 rounded-lg px-2 py-1.5 text-sm text-white/50 focus:outline-none"
+                            placeholder="—"
+                          />
+                        </td>
+                        <td className="px-2 py-2 align-middle">
+                          <input
+                            value={row.badge ?? ''}
+                            onChange={e => updateBulkPasteRow(row._key, { badge: e.target.value || null })}
+                            placeholder="—"
+                            className="w-full bg-transparent border border-transparent hover:border-white/10 focus:bg-white/5 focus:border-violet-500/50 rounded-lg px-2 py-1.5 text-xs text-amber-300 focus:outline-none"
+                          />
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="px-5 py-4 border-t border-white/10 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-xs text-white/50">
+                <span>Add to</span>
+                <select value={bulkPasteTargetPage} onChange={e => setBulkPasteTargetPage(parseInt(e.target.value, 10))}
+                  className="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-white/80">
+                  {Array.from({ length: Math.max(1, ...products.map(p => p.page || 1)) }, (_, i) => i + 1).map(n => (
+                    <option key={n} value={n}>Page {n}</option>
+                  ))}
+                  <option value={Math.max(1, ...products.map(p => p.page || 1)) + 1}>New Page {Math.max(1, ...products.map(p => p.page || 1)) + 1}</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => confirmBulkPaste(false)}
+                  disabled={!bulkPasteReview.some(r => r.include) || saving}
+                  className="flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium rounded-xl bg-white/5 border border-white/10 text-white/70 hover:bg-white/10 disabled:opacity-50 transition-colors"
+                >
+                  <Pencil className="w-3.5 h-3.5" /> Add &amp; edit details
+                </button>
+                <button
+                  onClick={() => confirmBulkPaste(true)}
+                  disabled={!bulkPasteReview.some(r => r.include) || saving}
+                  className="flex items-center gap-2 px-5 py-2.5 text-sm font-bold rounded-xl bg-violet-600 hover:bg-violet-500 text-white shadow-lg shadow-violet-900/40 disabled:opacity-50 transition-colors"
+                >
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+                  {saving ? 'Generating…' : `Generate Sheet (${bulkPasteReview.filter(r => r.include).length})`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        ) : (bulkPasteOpen || products.length === 0) ? (
+        <div className="mb-8 max-w-2xl mx-auto">
+          <div className="bg-[#1a1a24] border border-white/10 rounded-3xl p-5 sm:p-6 shadow-xl">
+            <div className="flex items-center justify-between">
+              <h2 className="font-bold text-white/90 flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-violet-400" /> Paste your offer list
+              </h2>
+              {products.length > 0 && (
+                <button onClick={() => setBulkPasteOpen(false)} className="p-1.5 rounded-lg hover:bg-white/10 text-white/50"><X className="w-4 h-4" /></button>
+              )}
+            </div>
+            <p className="text-xs text-white/40 mt-1 mb-4">
+              Copy the product list from WhatsApp and paste it below — AI fills in names, prices, MRP and badges for you.
+            </p>
+            <textarea
+              value={bulkPasteText}
+              onChange={e => setBulkPasteText(e.target.value)}
+              placeholder={'Bru Coffee 200g  145\nEastern Chilli Powder 500g  MRP 129  Offer 109\nSweet / Masala Number  63'}
+              rows={9}
+              autoFocus
+              className={`${inputCls} resize-y font-mono min-h-[180px]`}
+            />
+            <button
+              onClick={() => setHintOpen(o => !o)}
+              className="mt-3 flex items-center gap-1.5 text-xs text-white/40 hover:text-white/70 transition-colors"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              AI instructions <span className="text-white/25">(optional)</span>
+              {hintOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+            {hintOpen && (
+              <input
+                value={bulkPasteHint}
+                onChange={e => setBulkPasteHint(e.target.value)}
+                placeholder={'e.g. "the second number is MRP" or "ignore lines starting with *"'}
+                className={inputCls + ' mt-2'}
+              />
+            )}
+            <button
+              onClick={runBulkPasteParse}
+              disabled={!bulkPasteText.trim() || bulkPasteBusy}
+              className="w-full mt-4 py-3 text-sm font-bold rounded-2xl bg-violet-600 hover:bg-violet-500 text-white shadow-lg shadow-violet-900/40 disabled:opacity-40 transition-all flex items-center justify-center gap-2"
+            >
+              {bulkPasteBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ClipboardPaste className="w-4 h-4" />}
+              {bulkPasteBusy ? 'AI is reading your list…' : 'Parse with AI'}
+            </button>
+            <div className="flex items-center justify-center gap-5 mt-4">
+              <button
+                onClick={() => { setBulkPasteOpen(false); if (!products.length) addBlankProduct(1) }}
+                className="text-xs text-white/40 hover:text-white/80 transition-colors"
+              >
+                Add manually instead
+              </button>
+              <button
+                onClick={() => { setCatalogPageTarget(1); setShowCatalog(true) }}
+                className="text-xs text-white/40 hover:text-white/80 transition-colors"
+              >
+                Search past products
+              </button>
+            </div>
+          </div>
+        </div>
+        ) : (
         <div className="mb-8">
           <div className="flex items-center justify-between mb-3 px-1">
              <h2 className="text-sm font-semibold text-white/70">
@@ -1065,21 +1323,6 @@ export default function OfferIntakeClient({
           </div>
 
           <div className="space-y-6">
-            {products.length === 0 && (
-              <div className="bg-white/3 border border-dashed border-white/10 rounded-2xl py-10 text-center">
-                <Tag className="w-8 h-8 text-white/15 mx-auto mb-3" />
-                <p className="text-sm text-white/30">No products yet</p>
-                <div className="flex justify-center mt-4 gap-2">
-                  <button onClick={() => addBlankProduct(1)} className="px-4 py-2.5 rounded-xl text-sm font-semibold bg-violet-600 hover:bg-violet-500 text-white transition-colors">
-                    Add manually
-                  </button>
-                  <button onClick={() => { setCatalogPageTarget(1); setShowCatalog(true) }} className="px-4 py-2.5 rounded-xl text-sm font-semibold bg-white/10 hover:bg-white/20 text-white transition-colors">
-                    Search past products
-                  </button>
-                </div>
-              </div>
-            )}
-
             {Array.from(new Set(products.map(p => p.page || 1))).sort((a, b) => a - b).map(pageNum => {
                const pageProducts = products.filter(p => (p.page || 1) === pageNum)
                return (
@@ -1174,9 +1417,11 @@ export default function OfferIntakeClient({
              </div>
           )}
         </div>
+        )}
 
        <div className="max-w-2xl mx-auto">
         {/* ── Note to team ── */}
+        {!inPasteFlow && (
         <div className="mb-4">
           <button
             onClick={() => setShowNote(o => !o)}
@@ -1196,6 +1441,7 @@ export default function OfferIntakeClient({
             />
           )}
         </div>
+        )}
 
         {/* ── Error ── */}
         {error && (
@@ -1206,6 +1452,8 @@ export default function OfferIntakeClient({
         )}
 
         {/* ── Save button ── */}
+        {!inPasteFlow && (
+        <>
         <button
           onClick={handleSave}
           disabled={saving || products.length === 0}
@@ -1214,8 +1462,8 @@ export default function OfferIntakeClient({
           {saving
             ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
             : campaignId
-              ? <><RefreshCw className="w-4 h-4" /> Update offer list</>
-              : <><CheckCircle2 className="w-4 h-4" /> Submit offer list</>
+              ? <><RefreshCw className="w-4 h-4" /> Update offer list &amp; sheet</>
+              : <><FileSpreadsheet className="w-4 h-4" /> Save &amp; generate sheet</>
           }
         </button>
 
@@ -1224,105 +1472,14 @@ export default function OfferIntakeClient({
             You can update this list any time — changes are logged for the Cirqle team.
           </p>
         )}
+        </>
+        )}
 
         <p className="text-center text-[11px] text-white/20 mt-8">
           Cirqle Design · cirqle.work · This page is private to {client.name}.
         </p>
        </div>
       </div>
-
-      {/* Bulk Paste modal */}
-      {bulkPasteOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="bg-[#1a1a24] border border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl max-h-[90dvh] flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 shrink-0">
-              <div>
-                <h2 className="font-bold text-white/90 flex items-center gap-1.5"><Sparkles className="w-4 h-4 text-violet-400" /> Bulk Paste</h2>
-                <p className="text-xs text-white/40 mt-0.5">
-                  {bulkPasteReview ? 'Review what was found — uncheck or edit anything before adding.' : 'Paste your product list — one product per line, any format.'}
-                </p>
-              </div>
-              <button onClick={() => setBulkPasteOpen(false)} className="p-1.5 rounded-lg hover:bg-white/10 text-white/50"><X className="w-4 h-4" /></button>
-            </div>
-
-            {!bulkPasteReview ? (
-              <>
-                <div className="p-5 space-y-3 overflow-y-auto">
-                  <textarea
-                    value={bulkPasteText}
-                    onChange={e => setBulkPasteText(e.target.value)}
-                    placeholder={'Rice 5kg  350\nSugar 1kg  42\nEastern Chilli Powder 500gm  109.90'}
-                    rows={10}
-                    autoFocus
-                    className={`${inputCls} resize-none font-mono`}
-                  />
-                </div>
-                <div className="px-5 py-4 border-t border-white/10 flex justify-end gap-2 shrink-0">
-                  <button onClick={() => setBulkPasteOpen(false)} className="px-4 py-2 text-sm rounded-xl bg-white/5 border border-white/10 text-white/70 hover:bg-white/10 transition-colors">Cancel</button>
-                  <button
-                    onClick={runBulkPasteParse}
-                    disabled={!bulkPasteText.trim() || bulkPasteBusy}
-                    className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-xl bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-50 transition-colors"
-                  >
-                    {bulkPasteBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ClipboardPaste className="w-4 h-4" />}
-                    {bulkPasteBusy ? 'Reading…' : 'Parse Products'}
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="p-5 space-y-2 overflow-y-auto">
-                  {bulkPasteReview.length === 0 ? (
-                    <p className="text-sm text-white/40 text-center py-6">No products found.</p>
-                  ) : bulkPasteReview.map(row => (
-                    <div key={row._key} className={`flex items-center gap-2 rounded-xl border px-3 py-2 ${row.include ? 'bg-white/5 border-white/10' : 'bg-transparent border-white/5 opacity-40'}`}>
-                      <input type="checkbox" checked={row.include} onChange={e => updateBulkPasteRow(row._key, { include: e.target.checked })} className="accent-violet-500 shrink-0" />
-                      <input
-                        value={row.name}
-                        onChange={e => updateBulkPasteRow(row._key, { name: e.target.value })}
-                        placeholder="Product name (include weight, e.g. Rice 5kg)"
-                        className="flex-1 min-w-0 bg-transparent text-sm text-white/90 focus:outline-none"
-                      />
-                      <input
-                        type="number"
-                        value={row.price ?? ''}
-                        onChange={e => updateBulkPasteRow(row._key, { price: e.target.value ? parseFloat(e.target.value) : null })}
-                        placeholder="price"
-                        className="w-20 shrink-0 bg-white/5 rounded-lg px-2 py-1 text-xs text-white/70 focus:outline-none"
-                      />
-                      {row.matchedCatalogId && (
-                        <span title="Matched an existing catalog product — image will be reused" className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">matched</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                <div className="px-5 py-4 border-t border-white/10 flex items-center justify-between gap-2 shrink-0">
-                  <div className="flex items-center gap-2 text-xs text-white/50">
-                    <span>Add to</span>
-                    <select value={bulkPasteTargetPage} onChange={e => setBulkPasteTargetPage(parseInt(e.target.value, 10))}
-                      className="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-white/80">
-                      {Array.from({ length: Math.max(1, ...products.map(p => p.page || 1)) }, (_, i) => i + 1).map(n => (
-                        <option key={n} value={n}>Page {n}</option>
-                      ))}
-                      <option value={Math.max(1, ...products.map(p => p.page || 1)) + 1}>New Page {Math.max(1, ...products.map(p => p.page || 1)) + 1}</option>
-                    </select>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => setBulkPasteReview(null)} className="px-4 py-2 text-sm rounded-xl bg-white/5 border border-white/10 text-white/70 hover:bg-white/10 transition-colors">Back</button>
-                    <button
-                      onClick={confirmBulkPaste}
-                      disabled={!bulkPasteReview.some(r => r.include)}
-                      className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-xl bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-50 transition-colors"
-                    >
-                      <Plus className="w-4 h-4" /> Add {bulkPasteReview.filter(r => r.include).length} Product{bulkPasteReview.filter(r => r.include).length !== 1 ? 's' : ''}
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Catalog picker modal */}
       {showCatalog && (

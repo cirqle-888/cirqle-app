@@ -9,7 +9,10 @@ export function buildOfferDraft(products: ParsedOfferProduct[], client: Detected
   const n = products.length
   return {
     type: 'offer',
-    target: '/dashboard/apps/offer-intake',
+    // Land on the INTERNAL offer-preparation form (client preselected when
+    // matched, picker otherwise) — not the settings page, which listed intake
+    // links but couldn't consume the parsed draft.
+    target: client ? `/dashboard/offer-prepare/${client.id}` : '/dashboard/offer-prepare',
     summary: `${n} product${n === 1 ? '' : 's'}${client ? ` · ${client.name}` : ''}`,
     client,
     fields: {

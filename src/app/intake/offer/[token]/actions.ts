@@ -417,13 +417,14 @@ export async function getImageUploadUrl(
 export async function aiParseProductList(
   token: string,
   text: string,
+  hint?: string,
 ): Promise<ActionResult<{ products: ParsedOfferProduct[] }>> {
   const client = await resolveOfferToken(token)
   if (!client) return { ok: false, error: 'Invalid link.' }
   if (!text.trim()) return { ok: false, error: 'Paste a product list first.' }
 
   try {
-    const result = await aiParseOfferProducts(text)
+    const result = await aiParseOfferProducts(text, hint)
     if (!result.products.length) return { ok: false, error: 'No products found in that text.' }
     return { ok: true, data: result }
   } catch (e: any) {

@@ -13,21 +13,38 @@ export interface ParsedOfferProduct {
   price?: number | null
   mrp?: number | null
   weight?: string | null
+  badge?: string | null
 }
 
 const SYSTEM_PROMPT =
-  `You extract a list of supermarket/retail products from pasted text (one product per line, in any` +
-  ` rough format — e.g. "EASTERN CHILLI POWDER 500GM 109.90" or "Rice 5kg - Rs 350" or "Sugar 42"). For each line, extract:\n` +
-  `- name: the product name, title-cased, WITHOUT the weight or price in it\n` +
+  `You extract a list of supermarket/retail products from pasted text (usually a WhatsApp offer list).\n` +
+  `RULES:\n` +
+  `- EXACTLY ONE product per LINE. A newline is the ONLY product separator.\n` +
+  `- "/", "&", "+", "-", "," INSIDE a line are part of the product NAME, never a separator. ` +
+  `e.g. "Sweet / Masala Number 63" is ONE product named "Sweet / Masala Number" priced 63.\n` +
+  `- Keep the pack size / weight IN the name if present (e.g. "Bru Coffee 200g"), and also copy it to the weight field.\n` +
+  `For each line extract:\n` +
+  `- name: the product name, title-cased, INCLUDING any pack size, WITHOUT the price\n` +
   `- weight: pack size / quantity if present (e.g. "500g", "1kg", "250ml"), else null\n` +
-  `- price: the selling/offer price as a plain number, else null\n` +
-  `- mrp: a second, higher "MRP"/"was" price if BOTH an offer price and an original price appear on the same line, else null\n` +
-  `Skip blank lines, headers, or lines that aren't actually a product. Do not think out loud, do not explain, ` +
-  `do not use <think> tags. Respond with ONLY a JSON object: ` +
-  `{ "products": [ { "name": string, "weight": string|null, "price": number|null, "mrp": number|null }, ... ] } — no other text whatsoever.`
+  `- price: the selling/offer price as a plain number (handles "109.90", "Rs 350", "265/-", "@ 145", "35rs"), else null\n` +
+  `- mrp: a second, HIGHER "MRP"/"was"/original price if BOTH prices appear on the same line, else null. ` +
+  `The lower number is always the offer price. "(Save X)" means mrp = price + X.\n` +
+  `- badge: a promo tag if the line carries one (e.g. "NEW", "HOT", "OFFER", ⚡/🔥 prefixes, "Buy 1 Get 1"), else null\n` +
+  `Skip blank lines, greetings, dates, shop names, and headers — lines that aren't actually a product.\n` +
+  `Do not think out loud, do not explain, do not use <think> tags. Respond with ONLY a JSON object: ` +
+  `{ "products": [ { "name": string, "weight": string|null, "price": number|null, "mrp": number|null, "badge": string|null }, ... ] } — no other text whatsoever.`
 
-export async function aiParseOfferProducts(text: string): Promise<{ products: ParsedOfferProduct[] }> {
-  const result = await callGroqJSON(SYSTEM_PROMPT, text, { maxTokens: 4000 })
+export async function aiParseOfferProducts(
+  text: string,
+  hint?: string,
+): Promise<{ products: ParsedOfferProduct[] }> {
+  // An optional user-supplied correction (e.g. "the number after each name is
+  // MRP, not offer price") rides along as an extra system rule. Kept separate
+  // from the pasted text so the model can't confuse it with a product line.
+  const system = hint?.trim()
+    ? `${SYSTEM_PROMPT}\nADDITIONAL USER INSTRUCTION (follow it, it overrides defaults): ${hint.trim().slice(0, 500)}`
+    : SYSTEM_PROMPT
+  const result = await callGroqJSON(system, text, { maxTokens: 4000 })
   const products = Array.isArray(result?.products) ? result.products : []
   return {
     products: products
@@ -46,6 +63,7 @@ export async function aiParseOfferProducts(text: string): Promise<{ products: Pa
           weight: null,
           price: typeof p.price === 'number' ? p.price : null,
           mrp: typeof p.mrp === 'number' ? p.mrp : null,
+          badge: typeof p.badge === 'string' && p.badge.trim() ? p.badge.trim() : null,
         }
       }),
   }

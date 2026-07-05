@@ -907,6 +907,11 @@ ipcMain.on('splitter:end', () => {
   if (chrome) chrome.webContents.send('state', state)
 })
 
+// macOS: closing the window should hide it (keep the app + all views alive in
+// the dock) rather than destroy it. Destroying leaves no window for the dock
+// click to reopen — the previous behavior forced a full quit + relaunch.
+let quitting = false
+
 app.whenReady().then(() => {
   loadDownloads() // restore the downloads history (files that still exist on disk)
   win = new BaseWindow({ width: 1440, height: 900, minWidth: 900, minHeight: 600, title: 'Cirqle Desktop' })
@@ -914,9 +919,17 @@ app.whenReady().then(() => {
   buildMenu()
   layout()
   win.on('resize', layout)
+  win.on('close', (e) => {
+    if (process.platform === 'darwin' && !quitting) {
+      e.preventDefault()
+      win.hide()
+    }
+  })
   globalShortcut.register('CommandOrControl+Shift+N', sendClipboardToCirqle)
   setInterval(pollClipboard, 1500)
 })
 
+app.on('activate', () => { if (win && !win.isDestroyed()) win.show() })
+app.on('before-quit', () => { quitting = true })
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
 app.on('will-quit', () => globalShortcut.unregisterAll())
