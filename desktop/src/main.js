@@ -772,6 +772,13 @@ ipcMain.on('downloads:startDrag', (e, id) => {
   const d = downloads.find((x) => x.id === id)
   if (!d) { console.warn('[drag] startDrag: no download record for id', id); return }
   if (!fs.existsSync(d.path)) { console.warn('[drag] startDrag: file no longer exists at', d.path); return }
+  // dlCatcher is a full-window transparent scrim that sits ABOVE the WhatsApp/
+  // Cirqle views (so a click anywhere outside the panel dismisses it). During a
+  // native OS drag, macOS hit-tests by z-order — the drop was landing on that
+  // invisible catcher instead of passing through to WhatsApp, so the file
+  // silently vanished. Hide it for the (synchronous, blocking) duration of the
+  // drag so the view underneath can actually receive the drop.
+  if (dlCatcher) dlCatcher.setVisible(false)
   try {
     e.sender.startDrag({ file: d.path, icon: dragIconFor(d.path) })
   } catch (err) {
@@ -781,6 +788,8 @@ ipcMain.on('downloads:startDrag', (e, id) => {
     } catch (err2) {
       console.error('[drag] startDrag failed even with fallback icon — giving up:', err2)
     }
+  } finally {
+    if (dlCatcher) dlCatcher.setVisible(true)
   }
 })
 
