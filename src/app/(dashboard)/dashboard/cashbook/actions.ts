@@ -14,6 +14,7 @@ import { PERMS } from '@/lib/permissions/keys'
 import { fetchRates } from '@/lib/fx/sync'
 import { syncDraftInvoiceExpenses } from '@/lib/sync/integrity'
 import { recomputeCampaignBilling } from '@/lib/advertising/billing'
+import { logActivity } from '@/lib/activity/log'
 
 const REVALIDATE = '/dashboard/cashbook'
 
@@ -189,6 +190,16 @@ export async function insertCashbookEntries(
         await syncDraftInvoiceExpenses(entryId)
       }
     }
+  }
+
+  // Timeline: expense / inflow recorded (one row for the series)
+  if (firstEntry) {
+    void logActivity({
+      actorId: guard.employeeId, entityType: 'cashbook', entityId: (firstEntry as any).id,
+      action: basePayload.type === 'outflow' ? 'expense_added' : 'payment_received',
+      category: 'finance', clientId: basePayload.client_id ?? null,
+      detail: { label: baseDescription || basePayload.type, amount: basePayload.amount, currency: basePayload.currency, count: baseDates.length },
+    })
   }
 
   revalidatePath(REVALIDATE)

@@ -6,7 +6,7 @@
 import {
   LayoutDashboard, CheckSquare, Users2, FileText, BookOpen, Wallet, BarChart3, Sheet,
   Settings, TrendingUp, Upload, Inbox, PhoneCall, Award, Activity, Blocks, Megaphone, Handshake,
-  SlidersHorizontal,
+  SlidersHorizontal, MessageSquare, ClipboardCheck,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -19,6 +19,8 @@ export const navSections: NavSection[] = [
       { label: 'Dashboard',     href: '/dashboard',               icon: LayoutDashboard, requiredPerm: 'dashboard.view' },
       { label: 'Requests',      href: '/dashboard/requests',      icon: Inbox, requiredPerm: 'requests.view' },
       { label: 'Tasks',         href: '/dashboard/tasks',         icon: CheckSquare },
+      { label: 'Chat',          href: '/dashboard/chat',          icon: MessageSquare, requiredPerm: 'chat.access' },
+      { label: 'Approvals',     href: '/dashboard/approvals',     icon: ClipboardCheck },
       { label: 'Contributions', href: '/dashboard/contributions', icon: TrendingUp },
     ],
   },
@@ -56,6 +58,9 @@ export const navSections: NavSection[] = [
       // What-If Planner: simulate increments / commission / pricing / draft
       // agreements over a completed period, then apply via review + snapshot.
       { label: 'What-If Planner', href: '/dashboard/reports/what-if', icon: SlidersHorizontal, requiredPerm: 'reports.view' },
+      // Universal activity timeline — everything happening across the workspace.
+      // Gated by timeline.view_all (seeded in migration 014).
+      { label: 'Activity', href: '/dashboard/activity', icon: Activity, requiredPerm: 'timeline.view_all' },
     ],
   },
   {

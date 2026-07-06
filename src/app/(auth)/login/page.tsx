@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Eye, EyeOff } from 'lucide-react'
-import { resolveLoginEmail, getCompanyLogo } from './actions'
+import { resolveLoginEmail, getCompanyLogo, recordLoginActivity } from './actions'
 
 const REMEMBER_KEY = 'cirqle-login-id'
 
@@ -85,6 +85,9 @@ function LoginInner() {
       setLoading(false)
       return
     }
+
+    // Timeline: record the sign-in (fire-and-forget; resolved server-side)
+    void recordLoginActivity()
 
     // Step 3: persist the typed identifier (CQID or email — whichever the
     // user prefers) for next time, or clear it if they unchecked the box.

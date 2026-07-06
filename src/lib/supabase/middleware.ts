@@ -6,6 +6,8 @@ import { NextResponse, type NextRequest } from 'next/server'
  * If a non-admin user visits a path with a required perm they lack, redirect to /dashboard.
  */
 const ROUTE_PERMS: Array<[RegExp, string]> = [
+  [/^\/dashboard\/activity/,                'timeline.view_all'],
+  [/^\/dashboard\/chat/,                    'chat.access'],
   [/^\/dashboard\/cashbook/,                'cashbook.view'],
   [/^\/dashboard\/partners/,                'finance.partner.view'],
   [/^\/dashboard\/payroll/,                 'payroll.view'],

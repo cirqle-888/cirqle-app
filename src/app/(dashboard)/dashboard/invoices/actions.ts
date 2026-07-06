@@ -11,6 +11,7 @@ import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission } from '@/lib/auth/enforce'
 import { PERMS } from '@/lib/permissions/keys'
+import { logActivity } from '@/lib/activity/log'
 
 interface ActionResult<T = void> {
   ok: boolean
@@ -130,6 +131,13 @@ export async function recordInvoicePayment(
     })
     .select('id')
     .single()
+
+  // Timeline: payment received on this invoice (fire-and-forget)
+  void logActivity({
+    actorId: guard.employeeId, entityType: 'invoice', entityId: input.invoiceId,
+    action: 'payment_received', category: 'billing', clientId: input.clientId ?? null,
+    detail: { label: input.invoiceNumber, amount: input.amount, currency: input.currency, status: input.newStatus },
+  })
 
   if (entryErr || !entry) {
     // Payment already recorded — don't fail, just skip cashbook entry

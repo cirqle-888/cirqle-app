@@ -21,6 +21,7 @@ import { recomputeCampaignBilling, writeInvoiceLines } from '@/lib/advertising/b
 import { getWalletSummary, getEntryUncredited } from '@/lib/advertising/wallet'
 import { createManualRequest } from '@/app/(dashboard)/dashboard/requests/actions'
 import { logRequestActivity } from '@/lib/requests/core'
+import { logActivity } from '@/lib/activity/log'
 
 interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
 
@@ -180,6 +181,11 @@ export async function createAdProject(
   await logAdEvent(admin, id, 'created', guard.employeeId, {
     campaign_name: name, request_id: input.requestId || null,
   })
+  void logActivity({
+    actorId: guard.employeeId, entityType: 'project', entityId: id,
+    action: 'created', clientId: input.clientId || null, projectId: id,
+    detail: { label: name },
+  })
 
   // One task per campaign (the work item). Billing = the agency service charge.
   const serviceCharge = computeServiceCharge(
@@ -274,6 +280,10 @@ export async function updateAdStatus(id: string, status: string): Promise<Action
     .update({ status, updated_at: new Date().toISOString() }).eq('id', id)
   if (error) return { ok: false, error: error.message }
   await logAdEvent(admin, id, 'status_changed', guard.employeeId, { to: status })
+  void logActivity({
+    actorId: guard.employeeId, entityType: 'project', entityId: id,
+    action: 'status_changed', projectId: id, detail: { to: status },
+  })
   revalidatePath(REVALIDATE); revalidatePath(`${REVALIDATE}/${id}`)
   return { ok: true }
 }
@@ -554,6 +564,12 @@ export async function createInvoiceForProject(projectId: string): Promise<Action
   await writeInvoiceLines(admin, projectId, (inv as any).id, project)
   await logAdEvent(admin, projectId, 'invoice_created', guard.employeeId, {
     invoice_id: (inv as any).id, invoice_number: invoiceNumber,
+  })
+  void logActivity({
+    actorId: guard.employeeId, entityType: 'invoice', entityId: (inv as any).id,
+    action: 'generated', category: 'billing',
+    clientId: (project as any).client_id ?? null, projectId,
+    detail: { label: invoiceNumber },
   })
 
   revalidatePath(REVALIDATE); revalidatePath('/dashboard/invoices')

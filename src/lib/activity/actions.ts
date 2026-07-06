@@ -70,7 +70,7 @@ export async function fetchEntityActivity(
       return { ok: false, error: error.message }
     }
     return { ok: true, rows: (data ?? []) as ActivityLogRow[] }
-  } catch (err: any) {
+  } catch {
     return { ok: true, rows: [], setupNeeded: true }
   }
 }

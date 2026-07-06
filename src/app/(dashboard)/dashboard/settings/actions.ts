@@ -25,6 +25,10 @@ export async function upsertCompanySettings(
       admin.from('company_settings').upsert({ key, value }, { onConflict: 'key' }),
     ),
   )
+  void logActivity({
+    actorId: auth.employeeId, entityType: 'setting', action: 'changed',
+    detail: { label: entries.map(e => e.key).join(', ') },
+  })
   return { ok: true }
 }
 
@@ -100,6 +104,10 @@ export async function createClient(form: Record<string, unknown>): Promise<Actio
   const admin = createAdminClient()
   const { data, error } = await admin.from('clients').insert(sanitizeClientForm(form)).select().single()
   if (error) return { ok: false, error: error.message }
+  void logActivity({
+    actorId: auth.employeeId, entityType: 'client', entityId: data.id,
+    action: 'created', clientId: data.id, detail: { label: data.name ?? data.code },
+  })
   return { ok: true, data }
 }
 
@@ -113,6 +121,10 @@ export async function updateClient(
   const admin = createAdminClient()
   const { data, error } = await admin.from('clients').update({ ...sanitizeClientForm(form), pricing_pending: false }).eq('id', id).select().single()
   if (error) return { ok: false, error: error.message }
+  void logActivity({
+    actorId: auth.employeeId, entityType: 'client', entityId: id,
+    action: 'edited', clientId: id, detail: { label: data.name ?? data.code },
+  })
   return { ok: true, data }
 }
 
@@ -153,6 +165,10 @@ export async function deactivateClient(id: string): Promise<ActionResult> {
   const admin = createAdminClient()
   const { error } = await admin.from('clients').update({ is_active: false }).eq('id', id)
   if (error) return { ok: false, error: error.message }
+  void logActivity({
+    actorId: auth.employeeId, entityType: 'client', entityId: id,
+    action: 'archived', clientId: id,
+  })
   return { ok: true }
 }
 
