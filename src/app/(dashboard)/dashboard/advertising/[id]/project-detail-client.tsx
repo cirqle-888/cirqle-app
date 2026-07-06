@@ -654,8 +654,16 @@ function BudgetTab({ project, invoice, canManage, onChange, services = [], servi
   const [msg, setMsg] = useState<string | null>(null)
 
   async function save() {
-    setBusy(true); setMsg(null)
     const { adSpend, days } = resolveBudget(budget, project.start_date, project.end_date)
+    if (budget.mode === 'daily' && (Number(budget.dailyBudget) || 0) <= 0) {
+      setMsg('Enter a daily budget amount before saving — it is currently empty, which would zero out the total.')
+      return
+    }
+    if (budget.mode === 'daily' && days <= 0) {
+      setMsg('No days to budget for — pick a duration or set the campaign start/end date above.')
+      return
+    }
+    setBusy(true); setMsg(null)
     const res = await saveAdBudget(project.id, {
       adBudget: adSpend,
       adBudgetCurrency: budget.currency,
