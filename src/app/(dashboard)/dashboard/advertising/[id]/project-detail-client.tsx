@@ -28,11 +28,13 @@ import {
   updateAdStatus, saveAdBudget, upsertDailyMetric, approveDailyMetric, deleteDailyMetric,
   addAdNote, createInvoiceForProject, setMetricSyncState, softDeleteAdProject,
   allocateToCampaign, removeWalletTransaction, setAdProjectArchived, generateTaskForProject,
+  updateAdProject,
 } from '../actions'
 import { computeServiceCharge, gstOnSpend, spendWithGst } from '@/lib/advertising/budget'
 import { IntegrationsTab } from './integrations-tab'
 import { Archive, ArchiveRestore } from 'lucide-react'
 import { FavoriteToggle } from '@/components/ui/favorite-toggle'
+import { TimelineTab } from '@/components/activity/timeline-tab'
 
 type Project = AdProjectRow & { 
   client?: { id: string; name: string; code: string } | null,
@@ -76,7 +78,7 @@ const num = (v: number | null | undefined) =>
   v == null ? '—' : Number(v).toLocaleString('en-IN')
 const round2 = (v: number) => Math.round(v * 100) / 100
 
-type Tab = 'overview' | 'daily' | 'budget' | 'notes' | 'integrations' | 'reports'
+type Tab = 'overview' | 'daily' | 'budget' | 'notes' | 'integrations' | 'reports' | 'timeline'
 
 export default function ProjectDetailClient({ project, metrics, tasks, notes, events, invoice, services, servicePricing, allocations = [], wallet = null, allocSupported = false, perms }: Props) {
   const router = useRouter()
@@ -125,6 +127,7 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, ev
     { key: 'notes', label: 'Notes' },
     { key: 'integrations', label: 'Integrations' },
     { key: 'reports', label: 'Reports' },
+    { key: 'timeline', label: 'Timeline' },
   ]
 
   return (
@@ -238,6 +241,9 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, ev
       {tab === 'reports' && (
         <ProjectReportsTab projectId={project.id} clientId={project.client_id ?? ''} canEdit={perms.edit} />
       )}
+      {tab === 'timeline' && (
+        <TimelineTab scope={{ projectId: project.id }} />
+      )}
     </div>
   )
 }
@@ -258,6 +264,21 @@ function OverviewTab({ project, agg, remaining, health, allocations = [], wallet
 }) {
   const router = useRouter()
   void remaining // superseded by the GST-aware remaining below
+  const [editingDates, setEditingDates] = useState(false)
+  const [startDateInput, setStartDateInput] = useState(project.start_date ?? '')
+  const [endDateInput, setEndDateInput] = useState(project.end_date ?? '')
+  const [savingDates, setSavingDates] = useState(false)
+
+  async function saveDates() {
+    setSavingDates(true)
+    const res = await updateAdProject(project.id, {
+      startDate: startDateInput || null,
+      endDate: endDateInput || null,
+    })
+    setSavingDates(false)
+    if (res.ok) { setEditingDates(false); router.refresh() }
+  }
+
   const allocated = round2(allocations.reduce((s, a) => s + Number(a.amount_inr || 0), 0))
   const hasAllocations = allocations.length > 0
   const basis = allocated
@@ -296,7 +317,32 @@ function OverviewTab({ project, agg, remaining, health, allocations = [], wallet
           <div className="text-2xl font-bold">{health.score}<span className="text-base font-normal text-muted-foreground">/100 · {health.label}</span></div>
         </div>
         <div className="text-right text-xs text-muted-foreground">
-          {project.start_date || '—'} → {project.end_date || '—'}
+          {editingDates ? (
+            <div className="flex items-center gap-1.5">
+              <input type="date" value={startDateInput} onChange={e => setStartDateInput(e.target.value)}
+                className="rounded border border-border bg-background px-1.5 py-0.5 text-xs" />
+              <span>→</span>
+              <input type="date" value={endDateInput} onChange={e => setEndDateInput(e.target.value)}
+                className="rounded border border-border bg-background px-1.5 py-0.5 text-xs" />
+              <button onClick={saveDates} disabled={savingDates}
+                className="rounded bg-pink-500 px-2 py-0.5 text-xs font-medium text-white hover:bg-pink-600 disabled:opacity-50">
+                {savingDates ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Save'}
+              </button>
+              <button onClick={() => {
+                setStartDateInput(project.start_date ?? ''); setEndDateInput(project.end_date ?? ''); setEditingDates(false)
+              }} className="text-xs text-muted-foreground hover:text-foreground">Cancel</button>
+            </div>
+          ) : (
+            <button
+              onClick={() => perms.edit && setEditingDates(true)}
+              disabled={!perms.edit}
+              className={`inline-flex items-center gap-1 ${perms.edit ? 'hover:text-foreground cursor-pointer' : 'cursor-default'}`}
+              title={perms.edit ? 'Edit campaign dates' : undefined}
+            >
+              <Calendar className="h-3 w-3" />
+              {project.start_date || '—'} → {project.end_date || '—'}
+            </button>
+          )}
         </div>
       </div>
 
