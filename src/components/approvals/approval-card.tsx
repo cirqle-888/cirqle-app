@@ -10,6 +10,8 @@
  */
 
 import { useEffect, useState, useTransition } from 'react'
+import { usePermissions } from '@/contexts/permission-context'
+import { displayEmployee } from '@/lib/utils/employee-display'
 import { CheckCircle2, XCircle, PencilLine, MessageSquarePlus, History, Ban, Clock } from 'lucide-react'
 import {
   getApproval, decideApproval, commentOnApproval, cancelApproval,
@@ -50,6 +52,13 @@ export function ApprovalCard({ approvalId, statusHint, meId, compact = false }: 
   const [error, setError] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
 
+  // Privacy: CQID-first (approverLabel for a named person arrives as "CQID||Name")
+  const { revealNames } = usePermissions()
+  const mask = (name?: string | null, cqid?: string | null) =>
+    displayEmployee({ name: name ?? '', cqid: cqid ?? '' }, { revealNames, canReveal: true })
+  const maskLabel = (label: string) =>
+    label.includes('||') ? mask(label.split('||')[1], label.split('||')[0]) : label
+
   useEffect(() => {
     const t = setTimeout(() => {
       startTransition(async () => {
@@ -88,7 +97,7 @@ export function ApprovalCard({ approvalId, statusHint, meId, compact = false }: 
           <p className="text-sm font-semibold leading-snug">{approval.title}</p>
           <p className="mt-0.5 text-xs text-muted-foreground">
             {approval.entityType !== 'other' && <span className="capitalize">{approval.entityType.replace('_', ' ')} · </span>}
-            by {approval.requestedBy.name} · approver: {approval.approverLabel}
+            by {mask(approval.requestedBy.name, approval.requestedBy.cqid)} · approver: {maskLabel(approval.approverLabel)}
             {approval.dueAt && (
               <span className="ml-1 inline-flex items-center gap-0.5">
                 <Clock className="h-3 w-3" /> due {new Date(approval.dueAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
@@ -105,7 +114,7 @@ export function ApprovalCard({ approvalId, statusHint, meId, compact = false }: 
 
       {approval.status !== 'pending' && approval.decidedBy && (
         <p className="mt-2 text-xs text-muted-foreground">
-          {style.label} by <span className="font-medium">{approval.decidedBy.name}</span>
+          {style.label} by <span className="font-medium">{mask(approval.decidedBy.name, approval.decidedBy.cqid)}</span>
           {approval.decidedAt && ` · ${new Date(approval.decidedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}`}
         </p>
       )}
@@ -165,7 +174,7 @@ export function ApprovalCard({ approvalId, statusHint, meId, compact = false }: 
         <div className="mt-1.5 space-y-1 border-l-2 border-border pl-3">
           {events.map(e => (
             <p key={e.id} className="text-xs text-muted-foreground">
-              <span className="font-medium text-foreground/80">{e.actor?.name ?? 'System'}</span>{' '}
+              <span className="font-medium text-foreground/80">{e.actor ? mask(e.actor.name, e.actor.cqid) : 'System'}</span>{' '}
               {EVENT_LABEL[e.event] ?? e.event}
               {e.comment && <> — “{e.comment}”</>}
               <span className="ml-1 opacity-70">

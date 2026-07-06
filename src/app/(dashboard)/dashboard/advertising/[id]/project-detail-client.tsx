@@ -35,6 +35,7 @@ import { IntegrationsTab } from './integrations-tab'
 import { Archive, ArchiveRestore } from 'lucide-react'
 import { FavoriteToggle } from '@/components/ui/favorite-toggle'
 import { TimelineTab } from '@/components/activity/timeline-tab'
+import { DiscussButton } from '@/components/chat/discuss-button'
 
 type Project = AdProjectRow & { 
   client?: { id: string; name: string; code: string } | null,
@@ -153,6 +154,7 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, ev
                 label={project.campaign_name}
                 iconKey="Megaphone"
               />
+              <DiscussButton entityType="project" entityId={project.id} variant="icon" label="Discuss this campaign in chat" />
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
               {adRefLabel(project.id)} · {project.client?.name || 'No client'} · {PLATFORM_LABEL[project.platform] || project.platform}

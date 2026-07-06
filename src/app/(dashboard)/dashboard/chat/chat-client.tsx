@@ -20,6 +20,8 @@ import {
   CornerUpLeft, Mic, Check, CheckCheck,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { usePermissions } from '@/contexts/permission-context'
+import { displayEmployee } from '@/lib/utils/employee-display'
 import { ApprovalCard } from '@/components/approvals/approval-card'
 import { VoiceRecorderButton, VoiceBubble, type VoiceRecording } from '@/components/chat/voice'
 import { RequestApprovalDialog } from '@/components/approvals/request-approval-dialog'
@@ -27,7 +29,7 @@ import {
   listConversations, createChannel, getOrCreateDm, joinChannel,
   listChatEmployees, getMessages, getThread, sendMessage, deleteMessage, markRead,
   toggleReaction, createAttachmentUploadUrl, sendFileMessage, searchMessages,
-  sendVoiceMessage, getMessage, getReadReceipts,
+  sendVoiceMessage, getMessage, getReadReceipts, listClientsForChat,
   type ChatConversation, type ChatMessage, type ChatSearchHit, type ReplySnapshot, type ReadReceiptDetail,
 } from './actions'
 
@@ -72,6 +74,22 @@ export function ChatClient(props: { me: Me; canCreateChannels: boolean }) {
 function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boolean }) {
   const searchParams = useSearchParams()
   const deepLinkId = searchParams.get('c')
+
+  // ── Privacy: CQID-first everywhere; names only for admin + reveal toggle ──
+  const { revealNames } = usePermissions()
+  const showName = useCallback(
+    (name?: string | null, cqid?: string | null) =>
+      displayEmployee({ name: name ?? '', cqid: cqid ?? '' }, { revealNames, canReveal: true }),
+    [revealNames],
+  )
+  /** DM conversation names arrive as "CQID||Name" — resolve per privacy. */
+  const convDisplayName = useCallback((conv: ChatConversation): string => {
+    if (conv.type === 'dm' && conv.name?.includes('||')) {
+      const [cqid, name] = conv.name.split('||')
+      return showName(name, cqid)
+    }
+    return conv.name ?? ''
+  }, [showName])
 
   const [conversations, setConversations] = useState<ChatConversation[]>([])
   const [listError, setListError] = useState<string | null>(null)
@@ -135,62 +153,130 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
     }
   }, [deepLinkId, conversations, openConversation])
 
-  // ── Realtime: the open conversation's messages ─────────────────────────────
+  // ── Realtime: ONE workspace-wide subscription (RLS scopes events to my
+  //    conversations). Open conversation renders instantly; other rooms get
+  //    live unread bumps + alerts — no more waiting on the 30s poll.
+  const activeIdRef = useRef<string | null>(null)
+  const conversationsRef = useRef<ChatConversation[]>([])
+  useEffect(() => { activeIdRef.current = activeId }, [activeId])
+  useEffect(() => { conversationsRef.current = conversations }, [conversations])
+
+  const [alerts, setAlerts] = useState<{ id: string; title: string; body: string; convId: string }[]>([])
+
+  const notifyIncoming = useCallback((convId: string, senderId: string | null, kind: string, body: string) => {
+    const conv = conversationsRef.current.find(c => c.id === convId)
+    const member = conv?.members.find(mm => mm.employeeId === senderId)
+    const sender = member ? showName(member.name, member.cqid) : 'New message'
+    const where = conv ? (conv.type === 'dm' ? '' : ` in #${convDisplayName(conv)}`) : ''
+    const preview = kind === 'voice' ? '🎤 Voice message' : kind === 'file' ? '📎 File' : kind === 'approval' ? '🟡 Approval request' : body.slice(0, 80)
+    // 1. soft beep
+    try {
+      const ctx = new AudioContext()
+      const osc = ctx.createOscillator(); const gain = ctx.createGain()
+      osc.connect(gain); gain.connect(ctx.destination)
+      osc.frequency.value = 880; gain.gain.setValueAtTime(0.08, ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.25)
+      osc.start(); osc.stop(ctx.currentTime + 0.25)
+      setTimeout(() => void ctx.close().catch(() => {}), 400)
+    } catch { /* audio blocked until first interaction — fine */ }
+    // 2. system notification when the window is hidden/unfocused
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.hidden) {
+      try {
+        const n = new Notification(`${sender}${where}`, { body: preview, tag: convId })
+        n.onclick = () => { window.focus(); openConversation(convId); n.close() }
+      } catch { /* unsupported */ }
+    }
+    // 3. in-app toast
+    const alertId = crypto.randomUUID()
+    setAlerts(prev => [...prev.slice(-2), { id: alertId, title: `${sender}${where}`, body: preview, convId }])
+    setTimeout(() => setAlerts(prev => prev.filter(a => a.id !== alertId)), 6000)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showName, convDisplayName])
+
   useEffect(() => {
-    if (!activeId) return
+    // Ask once for system-notification permission (no-op if decided already)
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      const t = setTimeout(() => { void Notification.requestPermission().catch(() => {}) }, 2000)
+      return () => clearTimeout(t)
+    }
+  }, [])
+
+  useEffect(() => {
     const supabase = createClient()
     const channel = supabase
-      .channel(`conv:${activeId}`)
+      .channel('workspace-chat')
       .on('postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeId}` },
+        { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload) => {
           const row = payload.new as Record<string, unknown>
-          if (row.conversation_id !== activeId) return
-          if (row.parent_id) return // thread replies render in the thread panel
-          setMessages(prev => {
-            if (prev.some(m => m.id === row.id)) return prev
-            return [...prev, {
-              id: String(row.id),
-              conversationId: String(row.conversation_id),
-              senderId: (row.sender_id as string | null) ?? null,
-              senderName: row.sender_id === me.employeeId ? me.name : null,
-              senderCqid: null,
-              body: String(row.body ?? ''),
-              kind: String(row.kind ?? 'text'),
-              createdAt: String(row.created_at),
-              editedAt: null,
-              deletedAt: (row.deleted_at as string | null) ?? null,
-              parentId: null,
-              metadata: (row.metadata as Record<string, unknown>) ?? {},
-              replyCount: 0,
-              reactions: {},
-              attachments: [],
-              readerIds: [],
-            }]
-          })
-          if (row.sender_id !== me.employeeId) void markRead(activeId)
-          // Voice/file messages need signed attachment URLs — hydrate fully.
-          if (row.kind !== 'text' && row.sender_id !== me.employeeId) {
-            void getMessage(String(row.id)).then(res => {
-              if (res.ok) setMessages(prev => prev.map(m => (m.id === res.data.id ? res.data : m)))
+          const convId = String(row.conversation_id)
+          const mine = row.sender_id === me.employeeId
+
+          if (convId === activeIdRef.current) {
+            if (row.parent_id) return // thread replies render in the thread panel
+            setMessages(prev => {
+              if (prev.some(m => m.id === row.id)) return prev
+              return [...prev, {
+                id: String(row.id),
+                conversationId: convId,
+                senderId: (row.sender_id as string | null) ?? null,
+                senderName: mine ? me.name : null,
+                senderCqid: mine ? me.cqid : null,
+                body: String(row.body ?? ''),
+                kind: String(row.kind ?? 'text'),
+                createdAt: String(row.created_at),
+                editedAt: null,
+                deletedAt: (row.deleted_at as string | null) ?? null,
+                parentId: null,
+                metadata: (row.metadata as Record<string, unknown>) ?? {},
+                replyCount: 0,
+                reactions: {},
+                attachments: [],
+                readerIds: [],
+              }]
             })
+            if (!mine) {
+              void markRead(convId)
+              if (row.kind !== 'text') {
+                void getMessage(String(row.id)).then(res => {
+                  if (res.ok) setMessages(prev => prev.map(m => (m.id === res.data.id ? res.data : m)))
+                })
+              }
+            }
+            return
           }
+
+          // Message in ANOTHER conversation: live unread bump + alert.
+          if (mine) return
+          setConversations(prev => prev.map(c => c.id === convId
+            ? {
+                ...c,
+                unread: c.unread + 1,
+                lastMessage: {
+                  body: String(row.kind ?? 'text') === 'text' ? String(row.body ?? '') : `[${row.kind}]`,
+                  senderName: null, senderCqid: null,
+                  createdAt: String(row.created_at),
+                },
+              }
+            : c))
+          notifyIncoming(convId, (row.sender_id as string | null) ?? null, String(row.kind ?? 'text'), String(row.body ?? ''))
         })
       .on('postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'message_reads', filter: `conversation_id=eq.${activeId}` },
+        { event: 'INSERT', schema: 'public', table: 'message_reads' },
         (payload) => {
-          const row = payload.new as { message_id?: string; employee_id?: string }
+          const row = payload.new as { message_id?: string; employee_id?: string; conversation_id?: string }
           if (!row.message_id || !row.employee_id) return
-          // Only meaningful on my own messages (receipts are sender-visible)
+          if (row.conversation_id !== activeIdRef.current) return
           setMessages(prev => prev.map(m =>
             m.id === row.message_id && m.senderId === me.employeeId && !m.readerIds.includes(row.employee_id!)
               ? { ...m, readerIds: [...m.readerIds, row.employee_id!] }
               : m))
         })
       .on('postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeId}` },
+        { event: 'UPDATE', schema: 'public', table: 'messages' },
         (payload) => {
           const row = payload.new as Record<string, unknown>
+          if (row.conversation_id !== activeIdRef.current) return
           setMessages(prev => prev.map(m => m.id === row.id
             ? {
                 ...m,
@@ -203,13 +289,14 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
         })
       .subscribe()
     return () => { void supabase.removeChannel(channel) }
-  }, [activeId, me.employeeId, me.name])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me.employeeId, me.name, me.cqid])
 
   const memberNames = useMemo(() => {
     const map = new Map<string, string>()
-    active?.members.forEach(m => map.set(m.employeeId, m.name || m.cqid))
+    active?.members.forEach(m => map.set(m.employeeId, showName(m.name, m.cqid)))
     return map
-  }, [active])
+  }, [active, showName])
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages.length])
 
@@ -217,13 +304,34 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
   const handleSendRoot = useCallback((text: string) => {
     if (!activeId) return
     const replyToId = replyTo?.id ?? null
+    const replySnap = replyTo
     setReplyTo(null)
+    // Optimistic: render instantly, reconcile with the server row on ack.
+    const tempId = `tmp-${crypto.randomUUID()}`
+    const optimistic: ChatMessage = {
+      id: tempId, conversationId: activeId, senderId: me.employeeId,
+      senderName: me.name, senderCqid: me.cqid, body: text, kind: 'text',
+      createdAt: new Date().toISOString(), editedAt: null, deletedAt: null,
+      parentId: null,
+      metadata: replySnap ? { replyTo: {
+        messageId: replySnap.id, senderId: replySnap.senderId,
+        senderName: replySnap.senderName ?? '', senderCqid: replySnap.senderCqid ?? '',
+        kind: replySnap.kind, preview: replySnap.kind === 'text' ? replySnap.body.slice(0, 90) : replySnap.kind,
+      } } : {},
+      replyCount: 0, reactions: {}, attachments: [], readerIds: [],
+    }
+    setMessages(prev => [...prev, optimistic])
     startTransition(async () => {
       const res = await sendMessage(activeId, text, { replyToId })
-      if (res.ok) setMessages(prev => (prev.some(m => m.id === res.data.id) ? prev : [...prev, res.data]))
-      else alert(res.error)
+      if (res.ok) {
+        setMessages(prev => prev.map(m => (m.id === tempId ? res.data : m))
+          .filter((m, i, arr) => arr.findIndex(x => x.id === m.id) === i)) // dedupe vs realtime echo
+      } else {
+        setMessages(prev => prev.filter(m => m.id !== tempId))
+        alert(res.error)
+      }
     })
-  }, [activeId, replyTo])
+  }, [activeId, replyTo, me])
 
   const handleUpload = useCallback((file: File) => {
     if (!activeId) return
@@ -341,8 +449,14 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
     return out
   }, [messages])
 
-  const channels = conversations.filter(c => c.type === 'channel' || c.type === 'group')
-  const dms      = conversations.filter(c => c.type === 'dm')
+  const isChannelish = (c: ChatConversation) => c.type === 'channel' || c.type === 'group'
+  const groups = {
+    general:     conversations.filter(c => isChannelish(c) && (c.category ?? 'general') === 'general'),
+    department:  conversations.filter(c => isChannelish(c) && c.category === 'department'),
+    client:      conversations.filter(c => isChannelish(c) && c.category === 'client'),
+    discussion:  conversations.filter(c => c.category === 'discussion' && c.isMember),
+    dms:         conversations.filter(c => c.type === 'dm'),
+  }
 
   return (
     <div className="flex h-full">
@@ -393,31 +507,44 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
                     <span className="ml-2 font-normal text-muted-foreground">{dayLabel(hit.createdAt)}</span>
                   </span>
                   <span className="block truncate text-xs text-muted-foreground">
-                    {hit.senderName ? `${hit.senderName}: ` : ''}{hit.snippet}
+                    {hit.senderCqid || hit.senderName ? `${showName(hit.senderName, hit.senderCqid)}: ` : ''}{hit.snippet}
                   </span>
                 </button>
               ))}
             </>
           ) : (
             <>
-              <SectionLabel>Channels</SectionLabel>
-              {channels.map(c => (
-                <ConversationRow key={c.id} conv={c} active={c.id === activeId}
-                  onClick={() => (c.isMember ? openConversation(c.id) : handleJoin(c.id))} />
+              {([
+                ['Channels', groups.general, true],
+                ['Departments', groups.department, false],
+                ['Clients', groups.client, false],
+                ['Discussions', groups.discussion, false],
+              ] as [string, ChatConversation[], boolean][]).map(([label, list, always]) => (
+                (always || list.length > 0) && (
+                  <div key={label}>
+                    <SectionLabel>{label}</SectionLabel>
+                    {list.map(c => (
+                      <ConversationRow key={c.id} conv={c} active={c.id === activeId}
+                        displayName={convDisplayName(c)} showName={showName}
+                        onClick={() => (c.isMember ? openConversation(c.id) : handleJoin(c.id))} />
+                    ))}
+                    {label === 'Channels' && canCreateChannels && (
+                      <button onClick={() => setShowNewMenu('channel')}
+                        className="flex w-full items-center gap-2 px-4 py-1.5 text-sm text-muted-foreground hover:text-foreground">
+                        <Plus className="h-3.5 w-3.5" /> New channel
+                      </button>
+                    )}
+                  </div>
+                )
               ))}
-              {canCreateChannels && (
-                <button onClick={() => setShowNewMenu('channel')}
-                  className="flex w-full items-center gap-2 px-4 py-1.5 text-sm text-muted-foreground hover:text-foreground">
-                  <Plus className="h-3.5 w-3.5" /> New channel
-                </button>
-              )}
 
               <SectionLabel>Direct messages</SectionLabel>
-              {dms.map(c => (
+              {groups.dms.map(c => (
                 <ConversationRow key={c.id} conv={c} active={c.id === activeId}
+                  displayName={convDisplayName(c)} showName={showName}
                   onClick={() => openConversation(c.id)} />
               ))}
-              {dms.length === 0 && (
+              {groups.dms.length === 0 && (
                 <p className="px-4 py-1 text-xs text-muted-foreground">No direct messages yet.</p>
               )}
             </>
@@ -439,10 +566,10 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
                 <ArrowLeft className="h-4 w-4" />
               </button>
               {active.type === 'dm'
-                ? <span className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs font-medium">{initials(active.name ?? '')}</span>
+                ? <span className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs font-medium">{initials(convDisplayName(active))}</span>
                 : active.isPrivate ? <Lock className="h-4 w-4 text-muted-foreground" /> : <Hash className="h-4 w-4 text-muted-foreground" />}
               <div className="min-w-0">
-                <p className="truncate text-sm font-semibold">{active.name}</p>
+                <p className="truncate text-sm font-semibold">{convDisplayName(active)}</p>
                 {active.topic && <p className="truncate text-xs text-muted-foreground">{active.topic}</p>}
               </div>
               <span className="ml-auto inline-flex items-center gap-2">
@@ -473,7 +600,9 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
                   </div>
                   {g.rows.map(m => (
                     <MessageRow key={m.id} m={m} me={me}
-                      senderName={m.senderName ?? (m.senderId ? memberNames.get(m.senderId) ?? '…' : 'System')}
+                      senderName={m.senderId === me.employeeId
+                        ? showName(me.name, me.cqid)
+                        : (m.senderId ? memberNames.get(m.senderId) ?? showName(m.senderName, m.senderCqid) : 'System')}
                       isDm={active.type === 'dm'}
                       memberCount={active.members.length}
                       highlighted={highlightId === m.id}
@@ -482,6 +611,7 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
                       onReply={() => setThreadRootId(m.id)}
                       onQuote={() => setReplyTo(m)}
                       onJumpTo={jumpToMessage}
+                      showName={showName}
                     />
                   ))}
                 </div>
@@ -490,7 +620,7 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
             </div>
 
             <Composer
-              placeholder={`Message ${active.type === 'dm' ? active.name : `#${active.name}`}`}
+              placeholder={`Message ${active.type === 'dm' ? convDisplayName(active) : `#${convDisplayName(active)}`}`}
               members={active.members.filter(m => m.employeeId !== me.employeeId)}
               disabled={pending}
               onSend={handleSendRoot}
@@ -498,6 +628,7 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
               onVoice={handleVoice}
               replyTo={replyTo}
               onCancelReply={() => setReplyTo(null)}
+              showName={showName}
             />
           </>
         )}
@@ -516,6 +647,20 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
             setMessages(prev => prev.map(m => m.id === threadRootId ? { ...m, replyCount: m.replyCount + 1 } : m))
           }}
         />
+      )}
+
+      {/* Incoming-message toasts */}
+      {alerts.length > 0 && (
+        <div className="fixed bottom-4 right-4 z-50 flex w-72 flex-col gap-2">
+          {alerts.map(a => (
+            <button key={a.id}
+              onClick={() => { setAlerts(prev => prev.filter(x => x.id !== a.id)); openConversation(a.convId) }}
+              className="rounded-xl border border-border bg-background p-3 text-left shadow-xl transition-transform hover:scale-[1.02]">
+              <span className="block text-xs font-semibold">{a.title}</span>
+              <span className="block truncate text-xs text-muted-foreground">{a.body}</span>
+            </button>
+          ))}
+        </div>
       )}
 
       {showApprovalDialog && activeId && (
@@ -544,7 +689,7 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
 
 // ── Composer (shared by main thread + reply panel) ───────────────────────────
 
-function Composer({ placeholder, members, disabled, onSend, onFile, onVoice, replyTo, onCancelReply }: {
+function Composer({ placeholder, members, disabled, onSend, onFile, onVoice, replyTo, onCancelReply, showName }: {
   placeholder: string
   members: { employeeId: string; name: string; cqid: string }[]
   disabled: boolean
@@ -553,7 +698,9 @@ function Composer({ placeholder, members, disabled, onSend, onFile, onVoice, rep
   onVoice?: (rec: VoiceRecording) => void
   replyTo?: ChatMessage | null
   onCancelReply?: () => void
+  showName?: (name?: string | null, cqid?: string | null) => string
 }) {
+  const mask = showName ?? ((name?: string | null, cqid?: string | null) => cqid || name || '—')
   const [draft, setDraft] = useState('')
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -584,7 +731,8 @@ function Composer({ placeholder, members, disabled, onSend, onFile, onVoice, rep
     const caret = taRef.current?.selectionStart ?? draft.length
     const upToCaret = draft.slice(0, caret)
     const at = upToCaret.lastIndexOf('@')
-    const next = `${draft.slice(0, at)}@${m.name || m.cqid} ${draft.slice(caret)}`
+    // CQID-first: never leak names into message bodies via mentions.
+    const next = `${draft.slice(0, at)}@${m.cqid || m.name} ${draft.slice(caret)}`
     setDraft(next)
     setMentionQuery(null)
     taRef.current?.focus()
@@ -605,7 +753,7 @@ function Composer({ placeholder, members, disabled, onSend, onFile, onVoice, rep
           <CornerUpLeft className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <span className="min-w-0 flex-1">
             <span className="block text-xs font-medium">
-              Replying to {replyTo.senderName ?? 'message'}
+              Replying to {mask(replyTo.senderName, replyTo.senderCqid)}
             </span>
             <span className="block truncate text-xs text-muted-foreground">
               {replyTo.kind === 'voice'
@@ -623,8 +771,8 @@ function Composer({ placeholder, members, disabled, onSend, onFile, onVoice, rep
           {mentionMatches.map(m => (
             <button key={m.employeeId} onClick={() => insertMention(m)}
               className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted">
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-medium">{initials(m.name)}</span>
-              <span className="text-sm">{m.name}</span>
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-medium">{initials(mask(m.name, m.cqid))}</span>
+              <span className="text-sm">{mask(m.name, m.cqid)}</span>
               <span className="ml-auto text-xs text-muted-foreground">{m.cqid}</span>
             </button>
           ))}
@@ -668,7 +816,7 @@ function Composer({ placeholder, members, disabled, onSend, onFile, onVoice, rep
 
 // ── Message row ───────────────────────────────────────────────────────────────
 
-function MessageRow({ m, me, senderName, onDelete, onReact, onReply, onQuote, onJumpTo, isDm = false, memberCount = 2, highlighted = false, inThread = false }: {
+function MessageRow({ m, me, senderName, onDelete, onReact, onReply, onQuote, onJumpTo, isDm = false, memberCount = 2, highlighted = false, inThread = false, showName }: {
   m: ChatMessage
   me: Me
   senderName: string
@@ -681,7 +829,9 @@ function MessageRow({ m, me, senderName, onDelete, onReact, onReply, onQuote, on
   memberCount?: number
   highlighted?: boolean
   inThread?: boolean
+  showName?: (name?: string | null, cqid?: string | null) => string
 }) {
+  const mask = showName ?? ((name?: string | null, cqid?: string | null) => cqid || name || '—')
   const [showEmoji, setShowEmoji] = useState(false)
   const mine = m.senderId === me.employeeId
   const replySnap = (m.metadata.replyTo ?? null) as ReplySnapshot | null
@@ -703,7 +853,7 @@ function MessageRow({ m, me, senderName, onDelete, onReact, onReply, onQuote, on
           <span className="text-muted-foreground">{timeLabel(m.createdAt)}</span>
           {m.editedAt && <span className="text-muted-foreground">(edited)</span>}
           {mine && !inThread && (
-            <ReadTicks m={m} isDm={isDm} memberCount={memberCount} />
+            <ReadTicks m={m} isDm={isDm} memberCount={memberCount} mask={mask} />
           )}
         </p>
         {replySnap && (
@@ -711,7 +861,7 @@ function MessageRow({ m, me, senderName, onDelete, onReact, onReply, onQuote, on
             onClick={() => !replyUnavailable && onJumpTo?.(replySnap.messageId)}
             className={`mb-1 flex w-full max-w-sm items-center gap-2 rounded-lg border-l-2 border-l-foreground/50 bg-muted/50 px-2.5 py-1.5 text-left ${replyUnavailable ? 'cursor-default opacity-70' : 'hover:bg-muted'}`}>
             <span className="min-w-0 flex-1">
-              <span className="block text-[11px] font-medium text-foreground/80">{replySnap.senderName}</span>
+              <span className="block text-[11px] font-medium text-foreground/80">{mask(replySnap.senderName, replySnap.senderCqid)}</span>
               {replyUnavailable ? (
                 <span className="block text-xs italic text-muted-foreground">
                   {replySnap.kind === 'voice' ? 'Original voice message unavailable' : 'Original message unavailable'}
@@ -844,7 +994,10 @@ function MessageRow({ m, me, senderName, onDelete, onReact, onReply, onQuote, on
 // Group: ✓✓ + count; click opens the detailed list (names, designation, time
 //        + who hasn't read). Detail endpoint re-verifies sender server-side.
 
-function ReadTicks({ m, isDm, memberCount }: { m: ChatMessage; isDm: boolean; memberCount: number }) {
+function ReadTicks({ m, isDm, memberCount, mask }: {
+  m: ChatMessage; isDm: boolean; memberCount: number
+  mask: (name?: string | null, cqid?: string | null) => string
+}) {
   const [open, setOpen] = useState(false)
   const others = Math.max(1, memberCount - 1)
   const readCount = m.readerIds.length
@@ -871,12 +1024,15 @@ function ReadTicks({ m, isDm, memberCount }: { m: ChatMessage; isDm: boolean; me
           </>
         )}
       </button>
-      {open && <ReceiptsPopover messageId={m.id} onClose={() => setOpen(false)} />}
+      {open && <ReceiptsPopover messageId={m.id} onClose={() => setOpen(false)} mask={mask} />}
     </span>
   )
 }
 
-function ReceiptsPopover({ messageId, onClose }: { messageId: string; onClose: () => void }) {
+function ReceiptsPopover({ messageId, onClose, mask }: {
+  messageId: string; onClose: () => void
+  mask: (name?: string | null, cqid?: string | null) => string
+}) {
   const [detail, setDetail] = useState<ReadReceiptDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -903,9 +1059,9 @@ function ReceiptsPopover({ messageId, onClose }: { messageId: string; onClose: (
                 <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Read by</p>
                 {detail.readers.map(r => (
                   <div key={r.employeeId} className="flex items-center gap-2 py-0.5">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[9px] font-medium">{initials(r.name)}</span>
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[9px] font-medium">{initials(mask(r.name, r.cqid))}</span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-xs">{r.name}</span>
+                      <span className="block truncate text-xs">{mask(r.name, r.cqid)}</span>
                       {r.designation && <span className="block truncate text-[10px] text-muted-foreground">{r.designation}</span>}
                     </span>
                     <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
@@ -920,9 +1076,9 @@ function ReceiptsPopover({ messageId, onClose }: { messageId: string; onClose: (
                 <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Not yet read</p>
                 {detail.unread.map(u => (
                   <div key={u.employeeId} className="flex items-center gap-2 py-0.5 opacity-70">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[9px] font-medium">{initials(u.name)}</span>
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[9px] font-medium">{initials(mask(u.name, u.cqid))}</span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-xs">{u.name}</span>
+                      <span className="block truncate text-xs">{mask(u.name, u.cqid)}</span>
                       {u.designation && <span className="block truncate text-[10px] text-muted-foreground">{u.designation}</span>}
                     </span>
                   </div>
@@ -966,8 +1122,14 @@ function ThreadPanel({ rootId, conversationId, me, members, onClose, onReplySent
 
   useEffect(() => { endRef.current?.scrollIntoView() }, [replies.length])
 
-  const nameOf = (m: ChatMessage) =>
-    m.senderName ?? members.find(x => x.employeeId === m.senderId)?.name ?? '…'
+  const { revealNames } = usePermissions()
+  const nameOf = (m: ChatMessage) => {
+    const member = members.find(x => x.employeeId === m.senderId)
+    return displayEmployee(
+      { name: m.senderName ?? member?.name ?? '', cqid: m.senderCqid ?? member?.cqid ?? '' },
+      { revealNames, canReveal: true },
+    )
+  }
 
   const sendReply = (text: string) => {
     startTransition(async () => {
@@ -1034,8 +1196,10 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   return <p className="px-4 pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">{children}</p>
 }
 
-function ConversationRow({ conv, active, onClick }: {
+function ConversationRow({ conv, active, onClick, displayName, showName }: {
   conv: ChatConversation; active: boolean; onClick: () => void
+  displayName: string
+  showName: (name?: string | null, cqid?: string | null) => string
 }) {
   return (
     <button onClick={onClick}
@@ -1043,13 +1207,14 @@ function ConversationRow({ conv, active, onClick }: {
         active ? 'bg-muted' : 'hover:bg-muted/50'
       }`}>
       {conv.type === 'dm'
-        ? <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium">{initials(conv.name ?? '')}</span>
+        ? <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium">{initials(displayName)}</span>
         : conv.isPrivate ? <Lock className="h-4 w-4 shrink-0 text-muted-foreground" /> : <Hash className="h-4 w-4 shrink-0 text-muted-foreground" />}
       <span className="min-w-0 flex-1">
-        <span className={`block truncate text-sm ${conv.unread > 0 ? 'font-semibold' : ''}`}>{conv.name}</span>
+        <span className={`block truncate text-sm ${conv.unread > 0 ? 'font-semibold' : ''}`}>{displayName}</span>
         {conv.lastMessage && (
           <span className="block truncate text-xs text-muted-foreground">
-            {conv.lastMessage.senderName ? `${conv.lastMessage.senderName.split(' ')[0]}: ` : ''}{conv.lastMessage.body}
+            {(conv.lastMessage.senderCqid || conv.lastMessage.senderName)
+              ? `${showName(conv.lastMessage.senderName, conv.lastMessage.senderCqid)}: ` : ''}{conv.lastMessage.body}
           </span>
         )}
       </span>
@@ -1069,10 +1234,16 @@ function NewConversationDialog({ mode, canCreateChannels, onClose, onCreated }: 
   onClose: () => void
   onCreated: (id: string) => void
 }) {
+  const { revealNames } = usePermissions()
+  const mask = (name?: string | null, cqid?: string | null) =>
+    displayEmployee({ name: name ?? '', cqid: cqid ?? '' }, { revealNames, canReveal: true })
   const [tab, setTab] = useState<'channel' | 'dm'>(mode === 'channel' && canCreateChannels ? 'channel' : 'dm')
   const [name, setName] = useState('')
   const [topic, setTopic] = useState('')
   const [isPrivate, setIsPrivate] = useState(false)
+  const [category, setCategory] = useState<'general' | 'department' | 'client'>('general')
+  const [clientId, setClientId] = useState('')
+  const [clients, setClients] = useState<{ id: string; name: string }[]>([])
   const [employees, setEmployees] = useState<{ id: string; name: string; cqid: string }[]>([])
   const [filter, setFilter] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -1080,7 +1251,15 @@ function NewConversationDialog({ mode, canCreateChannels, onClose, onCreated }: 
 
   useEffect(() => {
     listChatEmployees().then(res => { if (res.ok) setEmployees(res.data) })
+    listClientsForChat().then(res => { if (res.ok) setClients(res.data) })
   }, [])
+
+  // Picking a client auto-names the channel after them.
+  const pickClient = (id: string) => {
+    setClientId(id)
+    const c = clients.find(x => x.id === id)
+    if (c) setName(c.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40))
+  }
 
   const filtered = employees.filter(e =>
     !filter || e.name.toLowerCase().includes(filter.toLowerCase()) || e.cqid.toLowerCase().includes(filter.toLowerCase()))
@@ -1110,7 +1289,26 @@ function NewConversationDialog({ mode, canCreateChannels, onClose, onCreated }: 
 
         {tab === 'channel' ? (
           <div className="space-y-3">
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="channel-name"
+            {/* Category: General / Department / Client */}
+            <div className="flex gap-1 rounded-lg bg-muted p-0.5">
+              {([['general', 'General'], ['department', 'Department'], ['client', 'Client']] as const).map(([key, label]) => (
+                <button key={key} onClick={() => setCategory(key)}
+                  className={`flex-1 rounded-md px-2 py-1 text-xs font-medium ${category === key ? 'bg-background shadow-sm' : 'text-muted-foreground'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {category === 'client' && (
+              <select value={clientId} onChange={e => pickClient(e.target.value)}
+                className="w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm outline-none focus:border-foreground/40">
+                <option value="">Choose client…</option>
+                {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            )}
+
+            <input value={name} onChange={e => setName(e.target.value)}
+              placeholder={category === 'department' ? 'design-team' : category === 'client' ? 'auto-named from client' : 'channel-name'}
               className="w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm outline-none focus:border-foreground/40" />
             <input value={topic} onChange={e => setTopic(e.target.value)} placeholder="Topic (optional)"
               className="w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm outline-none focus:border-foreground/40" />
@@ -1119,13 +1317,16 @@ function NewConversationDialog({ mode, canCreateChannels, onClose, onCreated }: 
               Private (invite-only)
             </label>
             <button
-              disabled={!name.trim() || pending}
+              disabled={!name.trim() || pending || (category === 'client' && !clientId)}
               onClick={() => startTransition(async () => {
-                const res = await createChannel({ name, topic, isPrivate })
+                const res = await createChannel({
+                  name, topic, isPrivate, category,
+                  clientId: category === 'client' ? clientId : null,
+                })
                 if (res.ok) onCreated(res.data.id); else setError(res.error)
               })}
               className="w-full rounded-lg bg-foreground py-2 text-sm font-medium text-background disabled:opacity-40">
-              {pending ? 'Creating…' : 'Create channel'}
+              {pending ? 'Creating…' : category === 'client' ? 'Create client channel' : category === 'department' ? 'Create department channel' : 'Create channel'}
             </button>
           </div>
         ) : (
@@ -1140,8 +1341,8 @@ function NewConversationDialog({ mode, canCreateChannels, onClose, onCreated }: 
                     if (res.ok) onCreated(res.data.id); else setError(res.error)
                   })}
                   className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-muted">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-medium">{initials(e.name)}</span>
-                  <span className="text-sm">{e.name}</span>
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-medium">{initials(mask(e.name, e.cqid))}</span>
+                  <span className="text-sm">{mask(e.name, e.cqid)}</span>
                   <span className="ml-auto text-xs text-muted-foreground">{e.cqid}</span>
                 </button>
               ))}

@@ -31,13 +31,15 @@ export interface ChatMember {
 
 export interface ChatConversation {
   id: string
-  type: 'channel' | 'dm' | 'group' | 'project' | 'task' | 'client'
-  name: string | null          // resolved display name (DM = other person's name)
+  type: 'channel' | 'dm' | 'group' | 'project' | 'task' | 'client' | 'request'
+  name: string | null          // resolved display name (DM = other person)
   topic: string | null
   isPrivate: boolean
   isMember: boolean
   unread: number
-  lastMessage: { body: string; senderName: string | null; createdAt: string } | null
+  /** Sidebar grouping: general | department | client | discussion (entity rooms) */
+  category: string | null
+  lastMessage: { body: string; senderName: string | null; senderCqid: string | null; createdAt: string } | null
   members: ChatMember[]
 }
 
@@ -220,6 +222,7 @@ export interface ReplySnapshot {
   messageId: string
   senderId: string | null
   senderName: string
+  senderCqid: string
   kind: string
   preview: string          // body / transcript / file name snippet
   durationMs?: number      // voice originals
@@ -247,6 +250,7 @@ async function buildReplySnapshot(admin: any, replyToId: string, conversationId:
     messageId: t.id,
     senderId: t.sender_id ?? null,
     senderName: sender?.name ?? sender?.cqid ?? 'Someone',
+    senderCqid: sender?.cqid ?? '',
     kind: t.kind ?? 'text',
     preview,
     durationMs: typeof meta.durationMs === 'number' ? meta.durationMs : undefined,
@@ -328,7 +332,7 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
   const { data: convs, error: convErr } = await admin
     .from('conversations')
     .select(`
-      id, type, name, topic, is_private, created_at, archived_at,
+      id, type, name, topic, is_private, category, created_at, archived_at,
       members:conversation_members(employee_id, role, employee:employee_id(id, name, cqid))
     `)
     .or(orFilter)
@@ -361,16 +365,21 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
       return { employeeId: m.employee_id, role: m.role, name: emp?.name ?? '', cqid: emp?.cqid ?? '' }
     })
 
-    // DM display name = the other participant
+    // DM display: keep BOTH name and cqid — the client masks per privacy rules.
     let name = c.name
     if (c.type === 'dm') {
       const other = members.find(m => m.employeeId !== me.employeeId)
-      name = other?.name || other?.cqid || 'Direct message'
+      name = other ? `${other.cqid}||${other.name}` : 'Direct message' // client splits + masks
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const last: any = (lastRes as any)?.data ?? null
     const lastSender = last ? (Array.isArray(last.sender) ? last.sender[0] : last.sender) : null
+
+    // Entity rooms group under "Discussions" in the sidebar.
+    const category = ['task', 'project', 'request', 'client'].includes(c.type)
+      ? 'discussion'
+      : (c.category ?? 'general')
 
     return {
       id: c.id,
@@ -380,9 +389,11 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
       isPrivate: c.is_private,
       isMember,
       unread: ('count' in unreadRes ? unreadRes.count : 0) ?? 0,
+      category,
       lastMessage: last ? {
         body: last.deleted_at ? 'Message deleted' : (last.kind === 'text' ? last.body : `[${last.kind}]`),
         senderName: lastSender?.name ?? null,
+        senderCqid: lastSender?.cqid ?? null,
         createdAt: last.created_at,
       } : null,
       members,
@@ -404,6 +415,10 @@ export async function createChannel(input: {
   isPrivate?: boolean
   memberIds?: string[]
   type?: 'channel' | 'group'
+  /** Sidebar group: general (default) | department | client */
+  category?: 'general' | 'department' | 'client'
+  /** For client channels: links the conversation to the CRM client */
+  clientId?: string | null
 }): Promise<Result<{ id: string }>> {
   const auth = await requireChatUser()
   if (!auth.ok) return auth
@@ -415,33 +430,39 @@ export async function createChannel(input: {
   if (!name) return { ok: false, error: 'Channel name is required.' }
 
   const admin = createAdminClient()
-  const { data: conv, error } = await admin
-    .from('conversations')
-    .insert({
-      type: input.type ?? 'channel',
-      name,
-      topic: (input.topic || '').trim() || null,
-      is_private: input.isPrivate ?? false,
-      created_by: me.employeeId,
-    })
-    .select('id').single()
-  if (error) return { ok: false, error: error.message }
+  const insertRow: Record<string, unknown> = {
+    type: input.type ?? 'channel',
+    name,
+    topic: (input.topic || '').trim() || null,
+    is_private: input.isPrivate ?? false,
+    created_by: me.employeeId,
+    category: input.category ?? 'general',
+    client_id: input.clientId ?? null,
+  }
+  let res = await admin.from('conversations').insert(insertRow).select('id').single()
+  // Migration 019 not applied → retry without the new column
+  if (res.error && /category/.test(res.error.message)) {
+    delete insertRow.category
+    res = await admin.from('conversations').insert(insertRow).select('id').single()
+  }
+  if (res.error || !res.data) return { ok: false, error: res.error?.message ?? 'Insert failed' }
+  const convId = res.data.id as string
 
   const memberRows = [
-    { conversation_id: conv.id, employee_id: me.employeeId, role: 'owner' },
+    { conversation_id: convId, employee_id: me.employeeId, role: 'owner' },
     ...(input.memberIds ?? [])
       .filter(id => id !== me.employeeId)
-      .map(id => ({ conversation_id: conv.id, employee_id: id, role: 'member' })),
+      .map(id => ({ conversation_id: convId, employee_id: id, role: 'member' })),
   ]
   const { error: memErr } = await admin.from('conversation_members').insert(memberRows)
   if (memErr) return { ok: false, error: memErr.message }
 
   void logActivity({
-    actorId: me.employeeId, entityType: 'message', entityId: conv.id,
-    action: 'created', category: 'chat', conversationId: conv.id,
+    actorId: me.employeeId, entityType: 'message', entityId: convId,
+    action: 'created', category: 'chat', conversationId: convId,
     detail: { label: `#${name}` },
   })
-  return { ok: true, data: { id: conv.id } }
+  return { ok: true, data: { id: convId } }
 }
 
 /** Open (or create) the 1:1 DM with another employee. */
@@ -836,6 +857,7 @@ export interface ChatSearchHit {
   conversationId: string
   conversationName: string | null
   senderName: string | null
+  senderCqid: string | null
   snippet: string
   createdAt: string
 }
@@ -857,7 +879,7 @@ export async function searchMessages(query: string): Promise<Result<ChatSearchHi
 
   const { data, error } = await admin
     .from('messages')
-    .select('id, conversation_id, body, created_at, sender:sender_id(name), conversation:conversation_id(name, type)')
+    .select('id, conversation_id, body, created_at, sender:sender_id(name, cqid), conversation:conversation_id(name, type)')
     .in('conversation_id', convIds)
     .is('deleted_at', null)
     .textSearch('body_search', q, { type: 'websearch', config: 'english' })
@@ -876,6 +898,7 @@ export async function searchMessages(query: string): Promise<Result<ChatSearchHi
         conversationId: r.conversation_id,
         conversationName: (conv as { name?: string } | null)?.name ?? null,
         senderName: (sender as { name?: string } | null)?.name ?? null,
+        senderCqid: (sender as { cqid?: string } | null)?.cqid ?? null,
         snippet: body.length > 140 ? `${body.slice(0, 140)}…` : body,
         createdAt: r.created_at,
       }
@@ -958,8 +981,8 @@ export async function markRead(conversationId: string): Promise<Result<null>> {
 // ── Read receipts (Wave C+) ───────────────────────────────────────────────────
 
 export interface ReadReceiptDetail {
-  readers: { employeeId: string; name: string; designation: string | null; readAt: string }[]
-  unread:  { employeeId: string; name: string; designation: string | null }[]
+  readers: { employeeId: string; name: string; cqid: string; designation: string | null; readAt: string }[]
+  unread:  { employeeId: string; name: string; cqid: string; designation: string | null }[]
 }
 
 /** Detailed receipt list for ONE message — the SENDER only (privacy rule). */
@@ -980,11 +1003,11 @@ export async function getReadReceipts(messageId: string): Promise<Result<ReadRec
 
   const [{ data: reads }, { data: members }] = await Promise.all([
     admin.from('message_reads')
-      .select('employee_id, read_at, employee:employee_id(name, designation:designation_id(name))')
+      .select('employee_id, read_at, employee:employee_id(name, cqid, designation:designation_id(name))')
       .eq('message_id', messageId)
       .order('read_at', { ascending: true }),
     admin.from('conversation_members')
-      .select('employee_id, employee:employee_id(name, designation:designation_id(name))')
+      .select('employee_id, employee:employee_id(name, cqid, designation:designation_id(name))')
       .eq('conversation_id', msg.conversation_id),
   ])
 
@@ -992,7 +1015,7 @@ export async function getReadReceipts(messageId: string): Promise<Result<ReadRec
   const unwrap = (e: any) => {
     const emp = Array.isArray(e) ? e[0] : e
     const des = emp?.designation ? (Array.isArray(emp.designation) ? emp.designation[0] : emp.designation) : null
-    return { name: emp?.name ?? '', designation: des?.name ?? null }
+    return { name: emp?.name ?? '', cqid: emp?.cqid ?? '', designation: des?.name ?? null }
   }
 
   const readIds = new Set((reads ?? []).map(r => r.employee_id))
@@ -1149,4 +1172,100 @@ export async function getMessage(messageId: string): Promise<Result<ChatMessage>
   if (!membership.ok) return membership
   const [enriched] = await enrichMessages(admin, [mapMessage(row)], auth.me.employeeId)
   return { ok: true, data: enriched }
+}
+
+// ── Client list + entity discussions (F5/F6) ──────────────────────────────────
+
+/** Active clients for the "client channel" dropdown. */
+export async function listClientsForChat(): Promise<Result<{ id: string; name: string }[]>> {
+  const auth = await requireChatUser()
+  if (!auth.ok) return auth
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from('clients')
+    .select('id, name, is_active')
+    .eq('is_active', true)
+    .order('name')
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data: (data ?? []).map(c => ({ id: c.id, name: c.name ?? '' })) }
+}
+
+export type DiscussEntityType = 'task' | 'project' | 'request' | 'client'
+
+const ENTITY_TABLE: Record<DiscussEntityType, { table: string; labelCol: string; convCol: string }> = {
+  task:    { table: 'tasks',         labelCol: 'title',         convCol: 'task_id' },
+  project: { table: 'ad_projects',   labelCol: 'campaign_name', convCol: 'project_id' },
+  request: { table: 'task_requests', labelCol: 'title',         convCol: 'request_id' },
+  client:  { table: 'clients',       labelCol: 'name',          convCol: 'client_id' },
+}
+
+/**
+ * Find (or create) the discussion room for a CRM entity, join the caller,
+ * and return the conversation id. Powers the "Discuss" buttons on requests,
+ * tasks, advertising projects and clients — one room per entity (unique
+ * indexes in migration 019).
+ */
+export async function getOrCreateEntityConversation(
+  entityType: DiscussEntityType,
+  entityId: string,
+): Promise<Result<{ id: string }>> {
+  const auth = await requireChatUser()
+  if (!auth.ok) return auth
+  const me = auth.me
+  const admin = createAdminClient()
+  const cfg = ENTITY_TABLE[entityType]
+  if (!cfg) return { ok: false, error: 'Unsupported entity type.' }
+
+  // Entity must exist (also yields the room name). Dynamic column → cast.
+  const { data: entityRaw } = await admin
+    .from(cfg.table).select(`id, ${cfg.labelCol}`).eq('id', entityId).maybeSingle()
+  const entity = entityRaw as unknown as Record<string, unknown> | null
+  if (!entity) return { ok: false, error: 'Record not found.' }
+  const label = String(entity[cfg.labelCol] ?? entityType)
+
+  // Existing room?
+  const { data: existing } = await admin
+    .from('conversations')
+    .select('id')
+    .eq('type', entityType)
+    .eq(cfg.convCol, entityId)
+    .is('archived_at', null)
+    .maybeSingle()
+
+  let convId = existing?.id as string | undefined
+  if (!convId) {
+    const { data: conv, error } = await admin
+      .from('conversations')
+      .insert({
+        type: entityType,
+        name: label.slice(0, 80),
+        is_private: false,
+        [cfg.convCol]: entityId,
+        created_by: me.employeeId,
+      })
+      .select('id').single()
+    if (error) {
+      // Unique-index race: someone created it concurrently — fetch theirs.
+      const { data: retry } = await admin
+        .from('conversations').select('id')
+        .eq('type', entityType).eq(cfg.convCol, entityId).maybeSingle()
+      if (!retry) return { ok: false, error: error.message }
+      convId = retry.id
+    } else {
+      convId = conv.id
+      void logActivity({
+        actorId: me.employeeId, entityType: 'message', entityId: convId,
+        action: 'created', category: 'chat', conversationId: convId,
+        detail: { label: `Discussion: ${label.slice(0, 50)}` },
+      })
+    }
+  }
+
+  // Auto-join the caller (idempotent) — Discuss = open + become a member.
+  await admin.from('conversation_members').upsert(
+    { conversation_id: convId, employee_id: me.employeeId, role: 'member' },
+    { onConflict: 'conversation_id,employee_id', ignoreDuplicates: true },
+  )
+
+  return { ok: true, data: { id: convId! } }
 }

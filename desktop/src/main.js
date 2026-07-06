@@ -1036,6 +1036,29 @@ ipcMain.on('splitter:end', () => {
 let quitting = false
 
 app.whenReady().then(() => {
+  // ── Microphone for chat voice notes ─────────────────────────────────────
+  // 1. macOS: ask the OS once (shows the system dialog; remembered after).
+  //    Requires NSMicrophoneUsageDescription in Info.plist (electron-builder.yml).
+  if (process.platform === 'darwin') {
+    const { systemPreferences } = require('electron')
+    if (systemPreferences.getMediaAccessStatus('microphone') !== 'granted') {
+      systemPreferences.askForMediaAccess('microphone').catch(() => {})
+    }
+  }
+  // 2. Chromium layer: grant getUserMedia to our own app, deny everyone else.
+  //    (Without this handler Electron silently DENIES media requests — the
+  //    reason voice recording showed "Microphone access is needed".)
+  const { session } = require('electron')
+  session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
+    const url = details?.requestingUrl || wc?.getURL() || ''
+    const trusted = url.startsWith(CIRQLE_URL) || url.startsWith('https://web.whatsapp.com')
+    if ((permission === 'media' || permission === 'microphone' || permission === 'audioCapture') && trusted) {
+      return callback(true)
+    }
+    if (permission === 'notifications' && trusted) return callback(true)
+    callback(false)
+  })
+
   loadDownloads() // restore the downloads history (files that still exist on disk)
   win = new BaseWindow({ width: 1440, height: 900, minWidth: 900, minHeight: 600, title: 'Cirqle Desktop' })
   createViews()

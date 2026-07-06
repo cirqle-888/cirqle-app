@@ -14,6 +14,7 @@ const ContributionEntryPanel = dynamic(
   { ssr: false },
 )
 const ActivityPanel = dynamic(() => import('@/components/activity/activity-panel'), { ssr: false })
+const DiscussButton = dynamic(() => import('@/components/chat/discuss-button').then(m => m.DiscussButton), { ssr: false })
 
 interface TaskEditModalProps {
   task: any
@@ -443,6 +444,9 @@ export function TaskEditModal({
           {activeTab === 'activity' && (
             <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
               <div className="overflow-y-auto flex-1 p-6">
+                <div className="mb-2 flex justify-end">
+                  <DiscussButton entityType="task" entityId={task.id} label="Discuss in chat" />
+                </div>
                 <ActivityPanel entityType="task" entityId={task.id} />
               </div>
               <div

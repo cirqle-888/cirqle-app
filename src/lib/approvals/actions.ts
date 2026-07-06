@@ -33,8 +33,8 @@ export interface ApprovalSummary {
   title: string
   description: string | null
   status: ApprovalStatus
-  requestedBy: { id: string; name: string }
-  decidedBy: { id: string; name: string } | null
+  requestedBy: { id: string; name: string; cqid: string }
+  decidedBy: { id: string; name: string; cqid: string } | null
   approverLabel: string
   conversationId: string | null
   dueAt: string | null
@@ -48,7 +48,7 @@ export interface ApprovalEvent {
   id: string
   event: string
   comment: string | null
-  actor: { id: string; name: string } | null
+  actor: { id: string; name: string; cqid: string } | null
   versionNo: number | null
   createdAt: string
 }
@@ -78,7 +78,7 @@ function canDecideRow(me: CurrentUser, row: any): boolean {
 function approverLabel(row: any): string {
   const emp = Array.isArray(row.approver_employee) ? row.approver_employee[0] : row.approver_employee
   const des = Array.isArray(row.approver_designation) ? row.approver_designation[0] : row.approver_designation
-  if (emp?.name) return emp.name
+  if (emp?.cqid || emp?.name) return `${emp?.cqid ?? ''}||${emp?.name ?? ''}`
   if (des?.name) return `Any ${des.name}`
   if (row.approver_permission) return `Anyone with ${row.approver_permission}`
   return 'Any admin'
@@ -95,8 +95,8 @@ function mapApproval(me: CurrentUser, r: any): ApprovalSummary {
     title: r.title,
     description: r.description ?? null,
     status: r.status,
-    requestedBy: { id: r.requested_by, name: req?.name ?? '' },
-    decidedBy: dec ? { id: r.decided_by, name: dec.name ?? '' } : null,
+    requestedBy: { id: r.requested_by, name: req?.name ?? '', cqid: req?.cqid ?? '' },
+    decidedBy: dec ? { id: r.decided_by, name: dec.name ?? '', cqid: dec.cqid ?? '' } : null,
     approverLabel: approverLabel(r),
     conversationId: r.conversation_id ?? null,
     dueAt: r.due_at ?? null,
@@ -111,9 +111,9 @@ const APPROVAL_SELECT = `
   approver_employee_id, approver_designation_id, approver_permission,
   client_id, project_id, task_id, conversation_id, message_id,
   requested_by, decided_by, decided_at, due_at, created_at,
-  requester:requested_by(name),
-  decider:decided_by(name),
-  approver_employee:approver_employee_id(name),
+  requester:requested_by(name, cqid),
+  decider:decided_by(name, cqid),
+  approver_employee:approver_employee_id(name, cqid),
   approver_designation:approver_designation_id(name)
 `
 
@@ -411,7 +411,7 @@ export async function getApproval(approvalId: string): Promise<Result<{ approval
   if (!row) return { ok: false, error: 'Approval not found.' }
 
   const { data: events } = await admin.from('approval_events')
-    .select('id, event, comment, version_no, created_at, actor:actor_id(id, name)')
+    .select('id, event, comment, version_no, created_at, actor:actor_id(id, name, cqid)')
     .eq('approval_id', approvalId)
     .order('created_at', { ascending: true })
 
@@ -424,7 +424,7 @@ export async function getApproval(approvalId: string): Promise<Result<{ approval
         const actor = Array.isArray(e.actor) ? e.actor[0] : e.actor
         return {
           id: e.id, event: e.event, comment: e.comment ?? null,
-          actor: actor ? { id: actor.id, name: actor.name ?? '' } : null,
+          actor: actor ? { id: actor.id, name: actor.name ?? '', cqid: actor.cqid ?? '' } : null,
           versionNo: e.version_no ?? null, createdAt: e.created_at,
         }
       }),
@@ -434,14 +434,14 @@ export async function getApproval(approvalId: string): Promise<Result<{ approval
 
 /** Lightweight option lists for the request dialog. */
 export async function getApprovalFormOptions(): Promise<Result<{
-  employees: { id: string; name: string }[]
+  employees: { id: string; name: string; cqid: string }[]
   designations: { id: string; name: string }[]
 }>> {
   const auth = await requireUser()
   if (!auth.ok) return auth
   const admin = createAdminClient()
   const [{ data: emps }, { data: desigs }] = await Promise.all([
-    admin.from('employees').select('id, name, is_archived')
+    admin.from('employees').select('id, name, cqid, is_archived')
       .or('is_archived.is.null,is_archived.eq.false').order('name'),
     admin.from('designations').select('id, name').order('name'),
   ])
@@ -449,7 +449,7 @@ export async function getApprovalFormOptions(): Promise<Result<{
     ok: true,
     data: {
       employees: (emps ?? []).filter(e => e.id !== auth.me.employeeId)
-        .map(e => ({ id: e.id, name: e.name ?? '' })),
+        .map(e => ({ id: e.id, name: e.name ?? '', cqid: e.cqid ?? '' })),
       designations: (desigs ?? []).map(d => ({ id: d.id, name: d.name ?? '' })),
     },
   }

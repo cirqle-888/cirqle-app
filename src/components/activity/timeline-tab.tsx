@@ -25,6 +25,7 @@ import { getTimeline, type TimelineItem, type TimelineScope } from '@/lib/activi
 import { timelineSentence, timelineHref, ALL_CATEGORIES } from '@/lib/activity/timeline-copy'
 import type { ActivityCategory } from '@/lib/activity/log'
 import { usePermissions } from '@/contexts/permission-context'
+import { displayEmployee } from '@/lib/utils/employee-display'
 
 // ── Category icons ────────────────────────────────────────────────────────────
 
@@ -79,7 +80,10 @@ function DiffDetail({ detail }: { detail: unknown }) {
   )
 }
 
-function TimelineRow({ item }: { item: TimelineItem }) {
+function TimelineRow({ item, mask }: {
+  item: TimelineItem
+  mask: (name?: string | null, cqid?: string | null) => string
+}) {
   const [expanded, setExpanded] = useState(false)
   const Icon = CATEGORY_ICON[item.category] ?? Users
   const rowInput = {
@@ -100,7 +104,7 @@ function TimelineRow({ item }: { item: TimelineItem }) {
 
       <div className="min-w-0 flex-1">
         <div className="text-sm leading-snug">
-          <span className="font-medium">{item.actor?.name || 'System'}</span>{' '}
+          <span className="font-medium">{item.actor ? mask(item.actor.name, item.actor.cqid) : 'System'}</span>{' '}
           <span className="text-foreground/90">{sentence}</span>
           {href && (
             <Link
@@ -140,8 +144,13 @@ export interface TimelineTabProps {
 }
 
 export function TimelineTab({ scope, variant = 'default' }: TimelineTabProps) {
-  const { can, user } = usePermissions()
+  const { can, user, revealNames } = usePermissions()
   const canFinance = user.isAdmin || can('timeline.view_finance')
+  const mask = useCallback(
+    (name?: string | null, cqid?: string | null) =>
+      displayEmployee({ name: name ?? '', cqid: cqid ?? '' }, { revealNames, canReveal: true }),
+    [revealNames],
+  )
 
   const categories = useMemo(
     () => ALL_CATEGORIES.filter(c => canFinance || (c.key !== 'billing' && c.key !== 'finance')),
@@ -248,7 +257,7 @@ export function TimelineTab({ scope, variant = 'default' }: TimelineTabProps) {
             {g.label}
           </div>
           <div className="divide-y divide-border/60">
-            {g.rows.map(item => <TimelineRow key={item.id} item={item} />)}
+            {g.rows.map(item => <TimelineRow key={item.id} item={item} mask={mask} />)}
           </div>
         </div>
       ))}

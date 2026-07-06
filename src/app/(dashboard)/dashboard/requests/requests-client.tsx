@@ -33,6 +33,7 @@ import {
   assignRequestEmployee, createManualRequest, searchTasksForLink, linkRequestToTask,
   reorderStaffPriority, bulkSetRequestStatus, bulkAssignRequestEmployee, aiCaptureRequest,
 } from './actions'
+import { DiscussButton } from '@/components/chat/discuss-button'
 import { CampaignCard } from '@/components/campaigns/campaign-card'
 import { useBatchSelection } from '@/lib/hooks/use-batch-selection'
 import { BatchActionBar, type BatchAction } from '@/components/ui/batch-action-bar'
@@ -1049,6 +1050,7 @@ export default function RequestsClient({
                 <div className="overflow-y-auto flex-1 p-5 space-y-5">
               {/* Action bar */}
               <div className="flex flex-wrap gap-2">
+                <DiscussButton entityType="request" entityId={open.id} label="Discuss" />
                 {perms.start && !open.promoted_task_id && ['submitted', 'under_review', 'approved'].includes(open.status) && (
                   <Link href={`/dashboard/tasks?fromRequest=${open.id}`}
                     className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg gradient-bg text-white hover:opacity-90 transition-opacity">

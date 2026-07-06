@@ -9,6 +9,8 @@
 import { useEffect, useState, useTransition } from 'react'
 import { X } from 'lucide-react'
 import { requestApproval, getApprovalFormOptions } from '@/lib/approvals/actions'
+import { usePermissions } from '@/contexts/permission-context'
+import { displayEmployee } from '@/lib/utils/employee-display'
 
 const ENTITY_TYPES = [
   { key: 'other',           label: 'General' },
@@ -34,7 +36,10 @@ export function RequestApprovalDialog({ conversationId, defaults, onClose, onCre
   const [approverId, setApproverId] = useState('')
   const [designationId, setDesignationId] = useState('')
   const [dueAt, setDueAt] = useState('')
-  const [options, setOptions] = useState<{ employees: { id: string; name: string }[]; designations: { id: string; name: string }[] }>({ employees: [], designations: [] })
+  const [options, setOptions] = useState<{ employees: { id: string; name: string; cqid: string }[]; designations: { id: string; name: string }[] }>({ employees: [], designations: [] })
+  const { revealNames } = usePermissions()
+  const mask = (name?: string | null, cqid?: string | null) =>
+    displayEmployee({ name: name ?? '', cqid: cqid ?? '' }, { revealNames, canReveal: true })
   const [error, setError] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
 
@@ -112,7 +117,7 @@ export function RequestApprovalDialog({ conversationId, defaults, onClose, onCre
           {approverMode === 'person' && (
             <select value={approverId} onChange={e => setApproverId(e.target.value)} className={inputCls}>
               <option value="">Choose person…</option>
-              {options.employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+              {options.employees.map(e => <option key={e.id} value={e.id}>{mask(e.name, e.cqid)}</option>)}
             </select>
           )}
           {approverMode === 'designation' && (

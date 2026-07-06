@@ -13,6 +13,10 @@ mac:
   # Unsigned, free build (no Apple Developer account). Gatekeeper blocks the
   # first launch — see README for the one-time right-click → Open / xattr step.
   identity: null
+  # Microphone permission (chat voice notes): macOS shows this text in the
+  # system dialog; without the key, mic access is silently denied.
+  extendInfo:
+    NSMicrophoneUsageDescription: "Cirqle uses the microphone to record voice notes in team chat."
 dmg:
   title: "Cirqle Workspace Setup"
   icon: assets/icon.icns

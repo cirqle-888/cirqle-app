@@ -8,6 +8,8 @@
 import { useCallback, useEffect, useState, useTransition } from 'react'
 import { RefreshCw, Plus, Inbox } from 'lucide-react'
 import { getApprovals, type ApprovalSummary } from '@/lib/approvals/actions'
+import { usePermissions } from '@/contexts/permission-context'
+import { displayEmployee } from '@/lib/utils/employee-display'
 import { ApprovalCard } from '@/components/approvals/approval-card'
 import { RequestApprovalDialog } from '@/components/approvals/request-approval-dialog'
 
@@ -19,6 +21,11 @@ const STATUS_DOT: Record<string, string> = {
 }
 
 export function ApprovalsClient({ meId }: { meId: string }) {
+  const { revealNames } = usePermissions()
+  const mask = (name?: string | null, cqid?: string | null) =>
+    displayEmployee({ name: name ?? '', cqid: cqid ?? '' }, { revealNames, canReveal: true })
+  const maskLabel = (label: string) =>
+    label.includes('||') ? mask(label.split('||')[1], label.split('||')[0]) : label
   const [tab, setTab] = useState<Tab>('awaiting_me')
   const [rows, setRows] = useState<ApprovalSummary[]>([])
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -87,7 +94,7 @@ export function ApprovalsClient({ meId }: { meId: string }) {
                 <span className="block truncate text-sm font-medium">{r.title}</span>
                 <span className="block text-xs text-muted-foreground">
                   <span className="capitalize">{r.entityType.replace('_', ' ')}</span>
-                  {' · '}{tab === 'awaiting_me' ? `from ${r.requestedBy.name}` : `approver: ${r.approverLabel}`}
+                  {' · '}{tab === 'awaiting_me' ? `from ${mask(r.requestedBy.name, r.requestedBy.cqid)}` : `approver: ${maskLabel(r.approverLabel)}`}
                   {' · '}{new Date(r.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                   {r.dueAt && ` · due ${new Date(r.dueAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`}
                 </span>
