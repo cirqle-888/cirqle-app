@@ -26,6 +26,35 @@ export type EntityType =
   | 'cashbook'
   | 'score'
   | 'note'
+  // Wave A additions (docs/cirqle-connect/DATABASE_SCHEMA.md §1) — the DB CHECK
+  // was dropped in migration 014; this union is now the source of truth.
+  | 'client'
+  | 'project'
+  | 'file'
+  | 'message'
+  | 'approval'
+  | 'kb_document'
+  | 'auth'
+  | 'setting'
+  | 'leave'
+  | 'quotation'
+
+/** Timeline filter groups — mirrors migration 014 backfill mapping. */
+export type ActivityCategory =
+  | 'tasks' | 'billing' | 'chat' | 'files'
+  | 'advertising' | 'crm' | 'employees' | 'finance'
+
+/** Default category per entity type (writers may override, e.g. payroll expense vs advance). */
+export const DEFAULT_CATEGORY: Record<EntityType, ActivityCategory> = {
+  task: 'tasks', contribution: 'tasks', score: 'tasks',
+  invoice: 'billing', quotation: 'billing',
+  cashbook: 'finance', payroll: 'finance',
+  employee: 'employees', auth: 'employees', leave: 'employees',
+  client: 'crm', setting: 'crm', kb_document: 'crm', note: 'crm',
+  project: 'advertising',
+  file: 'files',
+  message: 'chat', approval: 'crm',
+}
 
 export type ActivityAction =
   // Tasks
@@ -52,6 +81,14 @@ export interface LogActivityInput {
   detail?:     Record<string, unknown> | unknown[] | null
   /** Free-text note for manual 'note' actions */
   note?:       string | null
+  // ── Wave A: timeline category + scope (all optional, backward compatible) ──
+  /** Filter group. Derived from entityType via DEFAULT_CATEGORY when omitted. */
+  category?:   ActivityCategory
+  /** Scope links so entity timelines are single index scans (migration 014). */
+  clientId?:   string | null
+  projectId?:  string | null
+  taskId?:     string | null
+  conversationId?: string | null
 }
 
 /**
@@ -62,7 +99,7 @@ export interface LogActivityInput {
 export async function logActivity(input: LogActivityInput): Promise<void> {
   try {
     const admin = createAdminClient()
-    const { error } = await admin.from('activity_logs').insert({
+    const legacyRow = {
       actor_id:    input.actorId    ?? null,
       subject_id:  input.subjectId  ?? null,
       entity_type: input.entityType,
@@ -70,9 +107,29 @@ export async function logActivity(input: LogActivityInput): Promise<void> {
       action:      input.action,
       detail:      input.detail     ?? null,
       note:        input.note       ?? null,
+    }
+    // Auto-derive scope from the entity itself so existing writers
+    // (task/client/project actions) populate scope columns without changes.
+    const autoScope = {
+      client_id:  input.clientId  ?? (input.entityType === 'client'  ? input.entityId ?? null : null),
+      project_id: input.projectId ?? (input.entityType === 'project' ? input.entityId ?? null : null),
+      task_id:    input.taskId    ?? (input.entityType === 'task'    ? input.entityId ?? null : null),
+    }
+    const { error } = await admin.from('activity_logs').insert({
+      ...legacyRow,
+      category:        input.category ?? DEFAULT_CATEGORY[input.entityType] ?? 'crm',
+      ...autoScope,
+      conversation_id: input.conversationId ?? null,
     })
     if (error) {
-      console.warn('[activity_log] write failed:', error.message)
+      // PGRST204 = column not found → migration 014 not applied yet.
+      // Fall back to the legacy shape so logging never silently stops.
+      if ((error as { code?: string }).code === 'PGRST204') {
+        const { error: legacyErr } = await admin.from('activity_logs').insert(legacyRow)
+        if (legacyErr) console.warn('[activity_log] write failed (legacy fallback):', legacyErr.message)
+      } else {
+        console.warn('[activity_log] write failed:', error.message)
+      }
     }
   } catch (err) {
     // Never propagate — log failures must be invisible to users
