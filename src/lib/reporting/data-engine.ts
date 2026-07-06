@@ -36,6 +36,7 @@ export async function fetchReportData(opts: FetchReportDataOptions): Promise<Rep
       id, client_id, campaign_name, platform, campaign_type, status,
       ad_budget_amount, ad_budget_currency, service_charge_type,
       service_charge_value, tax_percent, objective, optimization_goal,
+      budget_input_mode, daily_budget, budget_days,
       start_date, end_date,
       client:clients(id, name, code)
     `)
@@ -72,7 +73,13 @@ export async function fetchReportData(opts: FetchReportDataOptions): Promise<Rep
     adBudgetCurrency: projectRow.ad_budget_currency ?? 'INR',
     serviceChargeType: projectRow.service_charge_type,
     serviceChargeValue: Number(projectRow.service_charge_value ?? 0),
-    taxPercent: Number(projectRow.tax_percent) || 18,
+    // Invoice/service-charge tax — legitimately 0 for most campaigns.
+    // GST on Meta ad spend is a fixed platform rate (AD_SPEND_GST_RATE in
+    // lib/advertising/budget.ts), NOT derived from this field.
+    taxPercent: Number(projectRow.tax_percent ?? 0),
+    budgetInputMode: projectRow.budget_input_mode ?? 'total',
+    dailyBudgetConfigured: projectRow.daily_budget != null ? Number(projectRow.daily_budget) : null,
+    budgetDaysConfigured: projectRow.budget_days != null ? Number(projectRow.budget_days) : null,
     objective: projectRow.objective,
     startDate: projectRow.start_date,
     endDate: projectRow.end_date,

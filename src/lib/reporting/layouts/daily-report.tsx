@@ -16,6 +16,7 @@
 import React from 'react'
 import type { RenderData, DailySeriesPoint } from '../types'
 import { META_LOGO_DATA_URI } from './meta-logo'
+import { AD_SPEND_GST_RATE } from '@/lib/advertising/budget'
 
 // ─── Brand tokens ───────────────────────────────────────────────────────────
 const PURPLE   = '#6D28D9'
@@ -34,9 +35,9 @@ export type DailyRowWithBalance = DailySeriesPoint & { balance: number; actualCo
 export function computeDailyRows(data: RenderData): DailyRowWithBalance[] {
   const { project, kpi } = data
   let cumulativeCost = 0
-  const taxPercent = project.taxPercent || 18
+  // Fixed platform GST rate — independent of the project's own invoice tax_percent.
   return kpi.dailySeries.map(row => {
-    const gstAmount = row.spend * (taxPercent / 100)
+    const gstAmount = row.spend * AD_SPEND_GST_RATE
     const actualCost = row.spend + gstAmount
     cumulativeCost += actualCost
     return { ...row, actualCost, gstAmount, balance: project.walletAllocation - cumulativeCost }
@@ -97,16 +98,29 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
   const reportDate = longDate(data.config.dateTo)
   const startDate = project.startDate ?? data.config.dateFrom
   const endDate   = project.endDate   ?? data.config.dateTo
-  // Campaign plan length uses the end−start convention (e.g. 07→20 Feb = 13 days),
-  // matching the established Cirqle daily-report template and its daily-budget math.
+  // Campaign plan length uses the end−start convention (e.g. 07→20 Feb = 13 days).
+  // This describes the campaign's overall flight window (Campaign Period below),
+  // which may span longer than the Budget tab's own configured duration.
   const planDays  = Math.max(
     1,
     Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000),
   )
   const periodLabel = `${shortDate(startDate)} - ${shortDate(endDate)}`
-  const reportTaxMult = 1 + ((project.taxPercent || 18) / 100)
-  const expectedBudgetIncGst = project.adBudget * reportTaxMult
-  const dailyBudget = expectedBudgetIncGst > 0 ? expectedBudgetIncGst / planDays : 0
+
+  // "Expected Budget" is the raw ad-spend budget as configured (GST-exclusive),
+  // matching the Budget tab's "Total" and the Overview tab's "Budget (Estimated)"
+  // card — GST is applied to actual spend, never to the planned budget figure.
+  const expectedBudget = project.adBudget
+
+  // "Daily Budget" / "Campaign Plan" mirror the Budget tab exactly when the
+  // project uses daily-budget mode (daily_budget × budget_days), instead of
+  // being re-derived from the campaign's overall start/end dates.
+  const usesDailyBudget = project.budgetInputMode === 'daily' && project.dailyBudgetConfigured != null
+  const budgetPlanDays = usesDailyBudget ? (project.budgetDaysConfigured || planDays) : planDays
+  const dailyBudget = usesDailyBudget
+    ? project.dailyBudgetConfigured!
+    : (expectedBudget > 0 ? expectedBudget / planDays : 0)
+
   const remainingDays = Math.max(
     0,
     Math.round((new Date(endDate).getTime() - Date.now()) / 86400000),
@@ -197,8 +211,8 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
           {/* Centered key:value pairs */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: `${6 * s}px`, marginBottom: `${30 * s}px` }}>
             <MetaLine s={s} pairs={[['Client', project.clientName], ['Campaign', project.campaignName]]} />
-            <MetaLine s={s} pairs={[['Campaign Period', periodLabel], ['Campaign Plan', `${planDays} Days`]]} />
-            <MetaLine s={s} pairs={[['Daily Budget', `₹${money(dailyBudget)}`], ['Expected Budget', `₹${num(expectedBudgetIncGst)}`]]} />
+            <MetaLine s={s} pairs={[['Campaign Period', periodLabel], ['Campaign Plan', `${budgetPlanDays} Days`]]} />
+            <MetaLine s={s} pairs={[['Daily Budget', `₹${money(dailyBudget)}`], ['Expected Budget', `₹${num(expectedBudget)}`]]} />
           </div>
 
           {/* Performance KPI circle row */}
@@ -216,7 +230,7 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
 
           {/* Financial summary pills */}
           <div style={{ display: 'flex', justifyContent: 'center', gap: `${20 * s}px`, marginBottom: `${36 * s}px`, flexWrap: 'wrap' }}>
-            <Pill s={s} bg={RED_PILL}  label="Total Remaining Amount" value={`₹${money(project.walletAllocation - (p.spend * (1 + (project.taxPercent || 0) / 100)))}`} />
+            <Pill s={s} bg={RED_PILL}  label="Total Remaining Amount" value={`₹${money(project.walletAllocation - (p.spend * (1 + AD_SPEND_GST_RATE)))}`} />
             <Pill s={s} bg={GREY_PILL} label="Remaining Days" value={`${remainingDays} Days`} />
           </div>
         </div>

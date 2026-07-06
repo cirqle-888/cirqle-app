@@ -69,6 +69,12 @@ export interface ReportProject {
   serviceChargeType: string
   serviceChargeValue: number
   taxPercent: number
+  /** 'total' (lump-sum adBudget) or 'daily' (dailyBudgetConfigured × budgetDaysConfigured). */
+  budgetInputMode: string
+  /** Raw per-day ad spend rate as configured on the Budget tab (mode === 'daily'). */
+  dailyBudgetConfigured: number | null
+  /** Configured duration in days (mode === 'daily'), matching the Budget tab's "Duration". */
+  budgetDaysConfigured: number | null
   objective: string | null
   startDate: string | null
   endDate: string | null

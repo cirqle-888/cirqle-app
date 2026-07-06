@@ -12,6 +12,7 @@
  */
 
 import { aggregateMetrics, aggregateByPeriod } from '@/lib/advertising/reporting'
+import { AD_SPEND_GST_RATE } from '@/lib/advertising/budget'
 import type {
   KPIData, KPIDeltas, DailySeriesPoint, WeeklySeriesPoint, DerivedKPIs,
 } from './types'
@@ -29,7 +30,9 @@ export function buildKPIData(
   project: ReportProject,
 ): KPIData {
   // ── Convert ReportMetricRows → Partial<AdDailyMetricRow> for existing helpers
-  const taxMultiplier = 1 + ((project.taxPercent || 18) / 100)
+  // GST on ad-platform spend is a fixed rate (not the project's own configurable
+  // invoice tax_percent, which is a separate concept and may legitimately be 0).
+  const taxMultiplier = 1 + AD_SPEND_GST_RATE
   const toAdRows = (rows: ReportMetricRow[]) =>
     rows.map(r => ({
       metric_date: r.date,
