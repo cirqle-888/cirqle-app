@@ -123,6 +123,13 @@ export const PERMS = {
   SETTINGS_ACCESS:              'settings.access',
   SETTINGS_MANAGE_DESIGNATIONS: 'settings.manage_designations',
   SETTINGS_MANAGE_COMPANY:      'settings.manage_company',
+
+  // Recruitment / Careers module
+  RECRUITMENT_VIEW:      'recruitment.view',
+  RECRUITMENT_EDIT:      'recruitment.edit',
+  RECRUITMENT_DELETE:    'recruitment.delete',
+  RECRUITMENT_INTERVIEW: 'recruitment.interview',
+  RECRUITMENT_ADMIN:     'recruitment.admin',
 } as const
 
 export type PermKey = typeof PERMS[keyof typeof PERMS]

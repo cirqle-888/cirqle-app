@@ -26,6 +26,8 @@ export interface TimelineScope {
   projectId?:  string
   taskId?:     string
   employeeId?: string
+  /** Recruitment module — job_applications.id (migration 020). */
+  applicationId?: string
   global?:     boolean
 }
 
@@ -61,7 +63,10 @@ export async function getTimeline(
   if (scope.employeeId && scope.employeeId !== me.employeeId && !hasPermission(me, 'employees.view')) {
     return { ok: false, error: 'You do not have permission to view other employees’ timelines.' }
   }
-  if (!scope.global && !scope.clientId && !scope.projectId && !scope.taskId && !scope.employeeId) {
+  if (scope.applicationId && !hasPermission(me, 'recruitment.view')) {
+    return { ok: false, error: 'You do not have permission to view recruitment activity.' }
+  }
+  if (!scope.global && !scope.clientId && !scope.projectId && !scope.taskId && !scope.employeeId && !scope.applicationId) {
     return { ok: false, error: 'A timeline scope is required.' }
   }
 
@@ -89,6 +94,7 @@ export async function getTimeline(
     if (scope.clientId)  q = q.eq('client_id',  scope.clientId)
     if (scope.projectId) q = q.eq('project_id', scope.projectId)
     if (scope.taskId)    q = q.eq('task_id',    scope.taskId)
+    if (scope.applicationId) q = q.eq('application_id', scope.applicationId)
     if (scope.employeeId) {
       // Employee timeline = things about them OR done by them
       q = q.or(`subject_id.eq.${scope.employeeId},actor_id.eq.${scope.employeeId}`)

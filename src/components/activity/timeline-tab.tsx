@@ -18,7 +18,7 @@ import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
 import {
   CheckSquare, ReceiptText, MessageSquare, Paperclip, Megaphone,
   Users, UserRound, Landmark, ChevronDown, ChevronRight,
-  RefreshCw, ExternalLink,
+  RefreshCw, ExternalLink, Briefcase,
 } from 'lucide-react'
 import Link from 'next/link'
 import { getTimeline, type TimelineItem, type TimelineScope } from '@/lib/activity/timeline'
@@ -32,6 +32,7 @@ import { displayEmployee } from '@/lib/utils/employee-display'
 const CATEGORY_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
   tasks: CheckSquare, billing: ReceiptText, chat: MessageSquare, files: Paperclip,
   advertising: Megaphone, crm: Users, employees: UserRound, finance: Landmark,
+  recruitment: Briefcase,
 }
 
 function formatRelative(iso: string): string {

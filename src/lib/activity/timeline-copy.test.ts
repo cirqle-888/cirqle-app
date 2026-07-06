@@ -42,9 +42,9 @@ describe('timelineHref', () => {
 })
 
 describe('categories', () => {
-  it('exposes all 8 filter groups', () => {
+  it('exposes all 9 filter groups', () => {
     expect(ALL_CATEGORIES.map(c => c.key)).toEqual([
-      'tasks', 'billing', 'chat', 'files', 'advertising', 'crm', 'employees', 'finance',
+      'tasks', 'billing', 'chat', 'files', 'advertising', 'crm', 'employees', 'finance', 'recruitment',
     ])
   })
 })

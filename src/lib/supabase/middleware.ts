@@ -8,6 +8,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 const ROUTE_PERMS: Array<[RegExp, string]> = [
   [/^\/dashboard\/activity/,                'timeline.view_all'],
   [/^\/dashboard\/chat/,                    'chat.access'],
+  [/^\/dashboard\/recruitment/,             'recruitment.view'],
   [/^\/dashboard\/cashbook/,                'cashbook.view'],
   [/^\/dashboard\/partners/,                'finance.partner.view'],
   [/^\/dashboard\/payroll/,                 'payroll.view'],
@@ -156,6 +157,7 @@ export async function updateSession(request: NextRequest) {
                   || pathname.startsWith('/intake')   // client/agency request portal — tokenized, no login
                   || pathname.startsWith('/i/')        // public hosted invoice — tokenized, no login
                   || pathname.startsWith('/start/')    // client hub — single link to all that client's intake apps
+                  || pathname.startsWith('/careers')   // public job application form — no login
                   || pathname.startsWith('/api/shortcut') // iOS Shortcuts API — its own bearer-token auth
                   || pathname.startsWith('/api/cron/')  // Vercel Cron — its own CRON_SECRET bearer-token auth, no Supabase session.
                                                          // Pre-existing bug fixed here: this prefix was missing, so every cron

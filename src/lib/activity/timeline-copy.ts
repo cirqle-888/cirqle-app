@@ -33,6 +33,8 @@ const ENTITY_NOUN: Record<string, string> = {
   file: 'file', message: 'message', approval: 'approval',
   kb_document: 'document', auth: 'account', setting: 'setting',
   leave: 'leave request', quotation: 'quotation',
+  job_application: 'application', job_position: 'position',
+  interview: 'interview', offer: 'offer',
 }
 
 const ACTION_VERB: Record<string, string> = {
@@ -51,6 +53,13 @@ const ACTION_VERB: Record<string, string> = {
   approved: 'approved', rejected: 'rejected', published: 'published',
   accepted: 'marked as accepted', note: 'added a note on',
   mention: 'mentioned someone in',
+  applied: 'received an application for', stage_changed: 'moved the stage of',
+  note_added: 'added an internal note on', document_added: 'attached a document to',
+  interview_scheduled: 'scheduled an interview for', interview_completed: 'completed an interview for',
+  interview_cancelled: 'cancelled an interview for',
+  offer_sent: 'sent an offer to', offer_accepted: 'recorded an accepted offer for',
+  offer_declined: 'recorded a declined offer for',
+  position_created: 'opened a position for', position_closed: 'closed the position for',
 }
 
 /**
@@ -83,6 +92,10 @@ export function timelineHref(row: TimelineRowInput): string | null {
     case 'project':      return id ? `/dashboard/advertising/${id}` : '/dashboard/advertising'
     case 'kb_document':  return null // KB arrives in Wave E
     case 'setting':      return '/dashboard/settings'
+    case 'job_application': return id ? `/dashboard/recruitment/applications/${id}` : '/dashboard/recruitment/applications'
+    case 'job_position':    return '/dashboard/recruitment/positions'
+    case 'interview':        return id ? `/dashboard/recruitment/applications/${id}` : '/dashboard/recruitment/interviews'
+    case 'offer':             return id ? `/dashboard/recruitment/applications/${id}` : '/dashboard/recruitment/offers'
     default:             return null
   }
 }
@@ -99,4 +112,5 @@ export const ALL_CATEGORIES: { key: ActivityCategory; label: string }[] = [
   { key: 'crm',         label: 'CRM' },
   { key: 'employees',   label: 'Employees' },
   { key: 'finance',     label: 'Finance' },
+  { key: 'recruitment', label: 'Recruitment' },
 ]

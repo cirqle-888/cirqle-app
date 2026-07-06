@@ -22,6 +22,12 @@ export type NotificationType =
   | 'invoice_overdue'
   | 'offer_sync_failed'
   | 'followup_escalated'
+  // Recruitment module
+  | 'application_received'
+  | 'interview_scheduled'
+  | 'interview_reminder'
+  | 'candidate_selected'
+  | 'offer_accepted'
 
 interface NotificationContent {
   type: NotificationType | (string & {})
@@ -65,9 +71,10 @@ export async function notifyAdmins(input: NotificationContent): Promise<void> {
       .eq('is_active', true)
     if (empErr || !employees) { console.warn('notifyAdmins: could not list employees:', empErr?.message); return }
 
-    const adminIds = employees
-      .filter((e: any) => !e.designation_id || e.designation?.is_admin === true)
-      .map((e: any) => e.id as string)
+    type EmployeeRow = { id: string; designation_id: string | null; designation: { is_admin: boolean } | { is_admin: boolean }[] | null }
+    const adminIds = (employees as EmployeeRow[])
+      .filter(e => !e.designation_id || (Array.isArray(e.designation) ? e.designation[0]?.is_admin : e.designation?.is_admin) === true)
+      .map(e => e.id)
     if (!adminIds.length) return
 
     const rows = adminIds.map(employeeId => ({

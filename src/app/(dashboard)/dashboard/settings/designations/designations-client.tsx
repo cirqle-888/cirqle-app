@@ -49,7 +49,7 @@ interface Props {
 // Module order — controls the section order in the right pane.
 const MODULE_ORDER = [
   'dashboard', 'tasks', 'contributions', 'employees',
-  'payroll', 'billing', 'cashbook', 'reports', 'settings',
+  'payroll', 'billing', 'cashbook', 'recruitment', 'reports', 'settings',
 ] as const
 
 const MODULE_LABELS: Record<string, string> = {
@@ -60,6 +60,7 @@ const MODULE_LABELS: Record<string, string> = {
   payroll:       'Payroll',
   billing:       'Billing',
   cashbook:      'Cashbook',
+  recruitment:   'Recruitment',
   reports:       'Reports',
   settings:      'Settings',
 }

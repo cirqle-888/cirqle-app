@@ -38,11 +38,17 @@ export type EntityType =
   | 'setting'
   | 'leave'
   | 'quotation'
+  // Recruitment module
+  | 'job_application'
+  | 'job_position'
+  | 'interview'
+  | 'offer'
 
 /** Timeline filter groups — mirrors migration 014 backfill mapping. */
 export type ActivityCategory =
   | 'tasks' | 'billing' | 'chat' | 'files'
   | 'advertising' | 'crm' | 'employees' | 'finance'
+  | 'recruitment'
 
 /** Default category per entity type (writers may override, e.g. payroll expense vs advance). */
 export const DEFAULT_CATEGORY: Record<EntityType, ActivityCategory> = {
@@ -54,6 +60,8 @@ export const DEFAULT_CATEGORY: Record<EntityType, ActivityCategory> = {
   project: 'advertising',
   file: 'files',
   message: 'chat', approval: 'crm',
+  job_application: 'recruitment', job_position: 'recruitment',
+  interview: 'recruitment', offer: 'recruitment',
 }
 
 export type ActivityAction =
@@ -67,6 +75,11 @@ export type ActivityAction =
   | 'employee_created' | 'employee_archived' | 'designation_changed'
   // Manual
   | 'note'
+  // Recruitment
+  | 'applied' | 'stage_changed' | 'note_added' | 'document_added'
+  | 'interview_scheduled' | 'interview_completed' | 'interview_cancelled'
+  | 'offer_sent' | 'offer_accepted' | 'offer_declined'
+  | 'position_created' | 'position_closed'
 
 export interface LogActivityInput {
   /** The employee who performed the action (omit for system jobs) */
@@ -89,6 +102,8 @@ export interface LogActivityInput {
   projectId?:  string | null
   taskId?:     string | null
   conversationId?: string | null
+  /** Recruitment module scope — job_applications.id (migration 020). */
+  applicationId?: string | null
 }
 
 /**
@@ -114,6 +129,7 @@ export async function logActivity(input: LogActivityInput): Promise<void> {
       client_id:  input.clientId  ?? (input.entityType === 'client'  ? input.entityId ?? null : null),
       project_id: input.projectId ?? (input.entityType === 'project' ? input.entityId ?? null : null),
       task_id:    input.taskId    ?? (input.entityType === 'task'    ? input.entityId ?? null : null),
+      application_id: input.applicationId ?? (input.entityType === 'job_application' ? input.entityId ?? null : null),
     }
     const { error } = await admin.from('activity_logs').insert({
       ...legacyRow,

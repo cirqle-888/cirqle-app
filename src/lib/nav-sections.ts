@@ -7,6 +7,7 @@ import {
   LayoutDashboard, CheckSquare, Users2, FileText, BookOpen, Wallet, BarChart3, Sheet,
   Settings, TrendingUp, Upload, Inbox, PhoneCall, Award, Activity, Blocks, Megaphone, Handshake,
   SlidersHorizontal, MessageSquare, ClipboardCheck,
+  Briefcase, ClipboardList, CalendarClock, BadgeCheck, PieChart,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -38,6 +39,16 @@ export const navSections: NavSection[] = [
     label: 'Team',
     items: [
       { label: 'HR & Payroll', href: '/dashboard/payroll', icon: Users2, requiredPerm: 'payroll.view' },
+    ],
+  },
+  {
+    label: 'Recruitment',
+    items: [
+      { label: 'Open Positions', href: '/dashboard/recruitment/positions',    icon: Briefcase,     requiredPerm: 'recruitment.view' },
+      { label: 'Applications',   href: '/dashboard/recruitment/applications', icon: ClipboardList, requiredPerm: 'recruitment.view' },
+      { label: 'Interviews',     href: '/dashboard/recruitment/interviews',   icon: CalendarClock, requiredPerm: 'recruitment.view' },
+      { label: 'Offers',         href: '/dashboard/recruitment/offers',       icon: BadgeCheck,    requiredPerm: 'recruitment.view' },
+      { label: 'Reports',        href: '/dashboard/recruitment/reports',      icon: PieChart,      requiredPerm: 'recruitment.view' },
     ],
   },
   {
