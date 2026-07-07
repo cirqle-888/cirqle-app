@@ -9,9 +9,18 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('__CIRQLE_DESKTOP__', {
-  version: 1,
+  version: 2,
   retry: (pane) => ipcRenderer.send('retry', pane),
   updateLogo: (url) => ipcRenderer.send('cirqle:logo', url),
+
+  /**
+   * Fire a native OS notification (system tone + high-priority dock bounce),
+   * handled in the main process. Called by the web app's DesktopNotifier for
+   * new chat messages and bell notifications. Payload:
+   * `{ title, body, tag?, url? }` where url is an in-app path the click
+   * handler navigates the Cirqle pane to.
+   */
+  notify: (payload) => ipcRenderer.send('cirqle:notify', payload),
 
   /**
    * Share a canvas-rendered image (e.g. a payment receipt PNG data URL) to the

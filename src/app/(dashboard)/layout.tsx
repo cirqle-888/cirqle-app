@@ -5,6 +5,7 @@ import { PermissionProvider, type PermissionUser } from '@/contexts/permission-c
 import { FavoritesProvider } from '@/contexts/favorites-context'
 import { WorkspaceProvider } from '@/contexts/workspace-context'
 import { CommandPalette } from '@/components/ui/command-palette'
+import { DesktopNotifier } from '@/components/desktop/desktop-notifier'
 import { BirthdayCelebration } from '@/components/ui/birthday-celebration'
 import { FxRatesAutoSync } from './fx-rates-auto-sync'
 import { loadCurrentUser } from '@/lib/permissions/check'
@@ -129,6 +130,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               {children}
             </main>
             <CommandPalette />
+            <DesktopNotifier />
             <FxRatesAutoSync />
             {showBirthday && me && (
               <BirthdayCelebration

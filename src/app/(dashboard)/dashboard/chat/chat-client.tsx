@@ -165,6 +165,14 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
   const activeIdRef = useRef<string | null>(null)
   const conversationsRef = useRef<ChatConversation[]>([])
   useEffect(() => { activeIdRef.current = activeId }, [activeId])
+  // Publish the active conversation globally so the app-wide DesktopNotifier
+  // can suppress a native notification for the conversation I'm reading.
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(window as any).__cirqleActiveConv = activeId
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return () => { (window as any).__cirqleActiveConv = null }
+  }, [activeId])
   useEffect(() => { conversationsRef.current = conversations }, [conversations])
 
   // Typing indicators — ephemeral realtime broadcast (no DB). Keyed by
@@ -214,8 +222,13 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
       osc.start(); osc.stop(ctx.currentTime + 0.25)
       setTimeout(() => void ctx.close().catch(() => {}), 400)
     } catch { /* audio blocked until first interaction — fine */ }
-    // 2. system notification when the window is hidden/unfocused
-    if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.hidden) {
+    // 2. system notification when the window is hidden/unfocused.
+    //    In the desktop app the app-wide DesktopNotifier owns native
+    //    notifications (fires regardless of focus, with tone + dock bounce),
+    //    so skip the web Notification here to avoid a double alert.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const inDesktop = typeof window !== 'undefined' && !!(window as any).__CIRQLE_DESKTOP__?.notify
+    if (!inDesktop && typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.hidden) {
       try {
         const n = new Notification(`${sender}${where}`, { body: preview, tag: convId })
         n.onclick = () => { window.focus(); openConversation(convId); n.close() }

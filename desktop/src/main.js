@@ -13,7 +13,7 @@
  * Cirqle's Quick Capture via the `cirqle:capture` window event (preload-cirqle).
  */
 
-const { app, BaseWindow, WebContentsView, ipcMain, globalShortcut, clipboard, shell, Menu, nativeImage, screen } = require('electron')
+const { app, BaseWindow, WebContentsView, ipcMain, globalShortcut, clipboard, shell, Menu, nativeImage, screen, Notification } = require('electron')
 const path = require('path')
 const fs = require('fs')
 
@@ -801,6 +801,54 @@ function pollClipboard() {
     }
   } catch { /* ignore */ }
 }
+
+// ── Native notifications (from the Cirqle web view's DesktopNotifier) ─────────
+// High-priority OS notification with the system notification tone + a critical
+// dock bounce, fired regardless of which pane is focused (a chat message that
+// arrives while the user is in the WhatsApp pane still alerts them). Clicking
+// focuses the window, reveals the Cirqle pane, and navigates to the source.
+let lastNotifyAt = 0
+ipcMain.on('cirqle:notify', (_e, payload) => {
+  try {
+    if (!Notification.isSupported()) return
+    const now = Date.now()
+    // Light rate-limit so a burst (e.g. backfill) can't spam the OS.
+    if (now - lastNotifyAt < 400) return
+    lastNotifyAt = now
+
+    const title = String(payload?.title || 'Cirqle').slice(0, 120)
+    const body = String(payload?.body || '').slice(0, 240)
+    const url = typeof payload?.url === 'string' ? payload.url : null
+
+    const n = new Notification({
+      title,
+      body,
+      silent: false,          // play the system notification tone
+      timeoutType: 'default',
+      tag: payload?.tag ? String(payload.tag) : undefined,
+    })
+    n.on('click', () => {
+      if (win) {
+        if (win.isMinimized && win.isMinimized()) win.restore?.()
+        win.show?.()
+        win.focus?.()
+      }
+      if (cirqle) {
+        ensureCirqleVisible()
+        if (url) { try { cirqle.webContents.loadURL(CIRQLE_URL + url) } catch { /* bad url — ignore */ } }
+        cirqle.webContents.focus()
+      }
+    })
+    n.show()
+
+    // High priority: bounce the dock until the app is focused (macOS), and
+    // flash the taskbar on Windows/Linux.
+    if (process.platform === 'darwin' && app.dock) app.dock.bounce('critical')
+    else if (win && win.flashFrame) win.flashFrame(true)
+  } catch (err) {
+    console.error('[notify] failed:', err)
+  }
+})
 
 // ── IPC from the toolbar / splitter / overlay / error page ────────────────────
 ipcMain.on('layout:preset', (_e, p) => applyPreset(p))
