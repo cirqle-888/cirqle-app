@@ -72,6 +72,8 @@ export interface ChatMessage {
   /** Employee ids who read this message — populated ONLY on the caller's own
    *  messages (read receipts are sender-visible; SECURITY: stripped otherwise). */
   readerIds: string[]
+  /** Employee ids who PLAYED this voice note — own voice messages only. */
+  playedByIds: string[]
 }
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string }
@@ -121,6 +123,7 @@ function mapMessage(r: any): ChatMessage {
     reactions: {},
     attachments: [],
     readerIds: [],
+    playedByIds: [],
   }
 }
 
@@ -134,12 +137,14 @@ async function enrichMessages(admin: any, msgs: ChatMessage[], meId?: string): P
   const ids = msgs.map(m => m.id)
   // Read receipts are only ever attached to the caller's OWN messages.
   const ownIds = meId ? msgs.filter(m => m.senderId === meId).map(m => m.id) : []
+  // Voice "played" receipts — own voice messages only (migration 021).
+  const ownVoiceIds = meId ? msgs.filter(m => m.senderId === meId && m.kind === 'voice').map(m => m.id) : []
   // Quoted-reply targets: check which originals were deleted since.
   const replyTargetIds = [...new Set(msgs
     .map(m => (m.metadata as { replyTo?: { messageId?: string } }).replyTo?.messageId)
     .filter((x): x is string => typeof x === 'string'))]
 
-  const [repliesRes, reactionsRes, attachRes, readsRes, replyTargetsRes] = await Promise.all([
+  const [repliesRes, reactionsRes, attachRes, readsRes, replyTargetsRes, playsRes] = await Promise.all([
     admin.from('messages').select('parent_id').in('parent_id', ids).is('deleted_at', null),
     admin.from('message_reactions').select('message_id, employee_id, emoji').in('message_id', ids),
     admin.from('message_attachments').select('id, message_id, storage_path, file_name, mime_type, size_bytes').in('message_id', ids),
@@ -148,6 +153,12 @@ async function enrichMessages(admin: any, msgs: ChatMessage[], meId?: string): P
       : Promise.resolve({ data: [] }),
     replyTargetIds.length
       ? admin.from('messages').select('id, deleted_at').in('id', replyTargetIds)
+      : Promise.resolve({ data: [] }),
+    // Graceful pre-migration: swallow errors if message_plays (021) not applied.
+    ownVoiceIds.length
+      ? admin.from('message_plays').select('message_id, employee_id').in('message_id', ownVoiceIds).then(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (r: any) => (r.error ? { data: [] } : r))
       : Promise.resolve({ data: [] }),
   ])
 
@@ -185,6 +196,12 @@ async function enrichMessages(admin: any, msgs: ChatMessage[], meId?: string): P
     readers.get(r.message_id)!.push(r.employee_id)
   }
 
+  const players = new Map<string, string[]>()
+  for (const r of ('data' in playsRes ? playsRes.data : []) ?? []) {
+    if (!players.has(r.message_id)) players.set(r.message_id, [])
+    players.get(r.message_id)!.push(r.employee_id)
+  }
+
   const deletedTargets = new Set(
     ((('data' in replyTargetsRes ? replyTargetsRes.data : []) ?? [])
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -208,6 +225,7 @@ async function enrichMessages(admin: any, msgs: ChatMessage[], meId?: string): P
       reactions: reactions.get(m.id) ?? {},
       attachments: attachments.get(m.id) ?? [],
       readerIds: readers.get(m.id) ?? [],
+      playedByIds: players.get(m.id) ?? [],
     }
   })
 }
@@ -959,6 +977,34 @@ export async function editMessage(messageId: string, body: string): Promise<Resu
     .update({ body: text, edited_at: new Date().toISOString() })
     .eq('id', messageId)
   if (error) return { ok: false, error: error.message }
+  return { ok: true, data: null }
+}
+
+/** Record that the caller played a voice note (idempotent, first play only).
+ *  The sender sees a "played" tick via the message_plays realtime publication.
+ *  Graceful pre-migration: swallows the error if migration 021 isn't applied. */
+export async function markVoicePlayed(messageId: string): Promise<Result<null>> {
+  const auth = await requireChatUser()
+  if (!auth.ok) return auth
+  const me = auth.me
+  const admin = createAdminClient()
+
+  const { data: msg } = await admin
+    .from('messages')
+    .select('id, sender_id, conversation_id, kind')
+    .eq('id', messageId).maybeSingle()
+  if (!msg || msg.kind !== 'voice') return { ok: true, data: null } // nothing to record
+  if (msg.sender_id === me.employeeId) return { ok: true, data: null } // don't record own plays
+
+  const membership = await requireMembership(msg.conversation_id, me.employeeId)
+  if (!membership.ok) return membership
+
+  try {
+    await admin.from('message_plays').upsert(
+      { message_id: messageId, employee_id: me.employeeId, conversation_id: msg.conversation_id },
+      { onConflict: 'message_id,employee_id', ignoreDuplicates: true },
+    )
+  } catch { /* migration 021 not applied yet */ }
   return { ok: true, data: null }
 }
 

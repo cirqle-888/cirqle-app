@@ -29,7 +29,7 @@ import {
   listConversations, createChannel, getOrCreateDm, joinChannel,
   listChatEmployees, getMessages, getThread, sendMessage, deleteMessage, editMessage, markRead,
   toggleReaction, createAttachmentUploadUrl, sendFileMessage, searchMessages,
-  sendVoiceMessage, getMessage, getReadReceipts, listClientsForChat,
+  sendVoiceMessage, getMessage, getReadReceipts, markVoicePlayed, listClientsForChat,
   type ChatConversation, type ChatMessage, type ChatSearchHit, type ReplySnapshot, type ReadReceiptDetail,
 } from './actions'
 
@@ -268,6 +268,7 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
                 reactions: {},
                 attachments: [],
                 readerIds: [],
+                playedByIds: [],
               }]
             })
             if (!mine) {
@@ -322,6 +323,17 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
               }
             : m))
         })
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'message_plays' },
+        (payload) => {
+          const row = payload.new as { message_id?: string; employee_id?: string; conversation_id?: string }
+          if (!row.message_id || !row.employee_id) return
+          if (row.conversation_id !== activeIdRef.current) return
+          setMessages(prev => prev.map(m =>
+            m.id === row.message_id && m.senderId === me.employeeId && !m.playedByIds.includes(row.employee_id!)
+              ? { ...m, playedByIds: [...m.playedByIds, row.employee_id!] }
+              : m))
+        })
       .on('broadcast', { event: 'typing' }, ({ payload }) => {
         const p = payload as { conversationId?: string; employeeId?: string; name?: string; cqid?: string }
         if (!p.employeeId || p.employeeId === me.employeeId) return
@@ -360,7 +372,7 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
         senderName: replySnap.senderName ?? '', senderCqid: replySnap.senderCqid ?? '',
         kind: replySnap.kind, preview: replySnap.kind === 'text' ? replySnap.body.slice(0, 90) : replySnap.kind,
       } } : {},
-      replyCount: 0, reactions: {}, attachments: [], readerIds: [],
+      replyCount: 0, reactions: {}, attachments: [], readerIds: [], playedByIds: [],
     }
     setMessages(prev => [...prev, optimistic])
     startTransition(async () => {
@@ -654,6 +666,7 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
                         const res = await editMessage(m.id, body)
                         if (!res.ok) { const fresh = await getMessage(m.id); if (fresh.ok) setMessages(prev => prev.map(x => x.id === m.id ? fresh.data : x)) }
                       }}
+                      onPlayVoice={() => { void markVoicePlayed(m.id) }}
                       onReact={emoji => handleReact(m.id, emoji)}
                       onReply={() => setThreadRootId(m.id)}
                       onQuote={() => setReplyTo(m)}
@@ -876,12 +889,13 @@ function Composer({ placeholder, members, disabled, onSend, onTyping, onFile, on
 
 // ── Message row ───────────────────────────────────────────────────────────────
 
-function MessageRow({ m, me, senderName, onDelete, onEdit, onReact, onReply, onQuote, onJumpTo, isDm = false, memberCount = 2, highlighted = false, inThread = false, showName }: {
+function MessageRow({ m, me, senderName, onDelete, onEdit, onPlayVoice, onReact, onReply, onQuote, onJumpTo, isDm = false, memberCount = 2, highlighted = false, inThread = false, showName }: {
   m: ChatMessage
   me: Me
   senderName: string
   onDelete: () => void
   onEdit?: (body: string) => Promise<void>
+  onPlayVoice?: () => void
   onReact: (emoji: string) => void
   onReply?: () => void
   onQuote?: () => void
@@ -972,6 +986,10 @@ function MessageRow({ m, me, senderName, onDelete, onEdit, onReact, onReply, onQ
             transcript={typeof m.metadata.transcript === 'string' ? m.metadata.transcript : null}
             transcriptStatus={typeof m.metadata.transcriptStatus === 'string' ? m.metadata.transcriptStatus : null}
             fileName={m.attachments[0]?.fileName}
+            onFirstPlay={mine ? undefined : onPlayVoice}
+            playedLabel={mine && m.playedByIds.length > 0
+              ? (isDm ? 'Played' : `Played by ${m.playedByIds.length}`)
+              : null}
           />
         ) : m.kind === 'approval' && typeof m.metadata.approvalId === 'string' ? (
           <ApprovalCard

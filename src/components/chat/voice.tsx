@@ -13,7 +13,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Mic, Send, Trash2, Download, Lock, FileText } from 'lucide-react'
+import { Mic, Send, Trash2, Download, Lock, FileText, Check } from 'lucide-react'
 
 const PEAK_COUNT = 64
 const MAX_MS = 5 * 60 * 1000
@@ -207,19 +207,24 @@ export function VoiceRecorderButton({ disabled, onRecorded }: {
 
 const SPEEDS = [1, 1.5, 2]
 
-export function VoiceBubble({ url, durationMs, peaks, transcript, transcriptStatus, fileName }: {
+export function VoiceBubble({ url, durationMs, peaks, transcript, transcriptStatus, fileName, onFirstPlay, playedLabel }: {
   url: string | null
   durationMs: number
   peaks: number[]
   transcript: string | null
   transcriptStatus: string | null
   fileName?: string
+  /** Fired once, the first time this bubble is played (recipient side). */
+  onFirstPlay?: () => void
+  /** Sender side: e.g. "Played" — shown once a recipient has listened. */
+  playedLabel?: string | null
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [playing, setPlaying] = useState(false)
   const [progress, setProgress] = useState(0) // 0..1
   const [speedIdx, setSpeedIdx] = useState(0)
   const [showTranscript, setShowTranscript] = useState(false)
+  const firedPlay = useRef(false)
 
   const bars = peaks.length ? peaks : Array.from({ length: PEAK_COUNT }, () => 0.4)
 
@@ -282,6 +287,13 @@ export function VoiceBubble({ url, durationMs, peaks, transcript, transcriptStat
         )}
       </div>
 
+      {playedLabel && (
+        <p className="mt-1 flex items-center gap-1 text-[11px] text-sky-500">
+          <span className="inline-flex"><Check className="h-3 w-3" /><Check className="-ml-1.5 h-3 w-3" /></span>
+          {playedLabel}
+        </p>
+      )}
+
       {/* Transcript */}
       {transcriptStatus === 'pending' && (
         <p className="mt-1.5 animate-pulse text-xs text-muted-foreground">Transcribing…</p>
@@ -303,7 +315,10 @@ export function VoiceBubble({ url, durationMs, peaks, transcript, transcriptStat
           ref={audioRef}
           src={url}
           preload="metadata"
-          onPlay={() => setPlaying(true)}
+          onPlay={() => {
+            setPlaying(true)
+            if (!firedPlay.current) { firedPlay.current = true; onFirstPlay?.() }
+          }}
           onPause={() => setPlaying(false)}
           onEnded={() => { setPlaying(false); setProgress(0) }}
           onTimeUpdate={e => {
