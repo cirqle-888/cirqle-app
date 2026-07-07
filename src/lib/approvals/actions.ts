@@ -40,6 +40,9 @@ export interface ApprovalSummary {
   dueAt: string | null
   createdAt: string
   decidedAt: string | null
+  /** Current step (1-based) and total steps — >1 means a sequential chain. */
+  step: number
+  totalSteps: number
   /** True when the CALLER may decide this approval right now. */
   canDecide: boolean
 }
@@ -85,7 +88,7 @@ function approverLabel(row: any): string {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapApproval(me: CurrentUser, r: any): ApprovalSummary {
+function mapApproval(me: CurrentUser, r: any, totalSteps = 1): ApprovalSummary {
   const req = Array.isArray(r.requester) ? r.requester[0] : r.requester
   const dec = Array.isArray(r.decider) ? r.decider[0] : r.decider
   return {
@@ -102,12 +105,25 @@ function mapApproval(me: CurrentUser, r: any): ApprovalSummary {
     dueAt: r.due_at ?? null,
     createdAt: r.created_at,
     decidedAt: r.decided_at ?? null,
+    step: r.step ?? 1,
+    totalSteps,
     canDecide: canDecideRow(me, r),
   }
 }
 
+/** Map approval_id → number of chain steps (1 for non-chain approvals). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function stepCounts(admin: any, approvalIds: string[]): Promise<Map<string, number>> {
+  const counts = new Map<string, number>()
+  if (approvalIds.length === 0) return counts
+  const { data } = await admin.from('approval_steps').select('approval_id').in('approval_id', approvalIds)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const s of (data ?? []) as any[]) counts.set(s.approval_id, (counts.get(s.approval_id) ?? 0) + 1)
+  return counts
+}
+
 const APPROVAL_SELECT = `
-  id, entity_type, entity_id, title, description, status,
+  id, entity_type, entity_id, title, description, status, step,
   approver_employee_id, approver_designation_id, approver_permission,
   client_id, project_id, task_id, conversation_id, message_id,
   requested_by, decided_by, decided_at, due_at, created_at,
@@ -156,6 +172,10 @@ export async function requestApproval(input: {
   title: string
   description?: string
   approver: { employeeId?: string; designationId?: string; permission?: string }
+  /** Optional SEQUENTIAL chain (ordered). When 2+ entries, the request advances
+   *  step-by-step and only finalizes on the last step's approval. `approver`
+   *  above is ignored when `steps` has entries (step 1 comes from steps[0]). */
+  steps?: { employeeId?: string; designationId?: string; permission?: string }[]
   conversationId?: string | null
   dueAt?: string | null
   clientId?: string | null
@@ -170,6 +190,11 @@ export async function requestApproval(input: {
   }
   const title = (input.title || '').trim()
   if (!title) return { ok: false, error: 'A title is required.' }
+
+  // A chain is 2+ steps. One step (or none) behaves exactly as before.
+  const chain = (input.steps ?? []).filter(s => s.employeeId || s.designationId || s.permission)
+  const isChain = chain.length >= 2
+  const firstApprover = isChain ? chain[0] : input.approver
 
   const admin = createAdminClient()
 
@@ -197,9 +222,12 @@ export async function requestApproval(input: {
     entity_id: input.entityId ?? null,
     title,
     description: (input.description || '').trim() || null,
-    approver_employee_id: input.approver.employeeId ?? null,
-    approver_designation_id: input.approver.designationId ?? null,
-    approver_permission: input.approver.permission ?? null,
+    // approver_* always mirrors the CURRENT step (step 1 here) so every existing
+    // decide/eligibility path keeps working unchanged for chains.
+    approver_employee_id: firstApprover.employeeId ?? null,
+    approver_designation_id: firstApprover.designationId ?? null,
+    approver_permission: firstApprover.permission ?? null,
+    step: 1,
     conversation_id: input.conversationId ?? null,
     message_id: messageId,
     client_id: input.clientId ?? null,
@@ -209,6 +237,19 @@ export async function requestApproval(input: {
     due_at: input.dueAt ?? null,
   }).select('id, approver_employee_id, approver_designation_id, approver_permission').single()
   if (error) return { ok: false, error: error.message }
+
+  // Persist the ordered chain (only for real 2+ step chains; migration 021).
+  if (isChain) {
+    const rows = chain.map((s, i) => ({
+      approval_id: appr.id,
+      step_no: i + 1,
+      approver_employee_id: s.employeeId ?? null,
+      approver_designation_id: s.designationId ?? null,
+      approver_permission: s.permission ?? null,
+    }))
+    const { error: stepsErr } = await admin.from('approval_steps').insert(rows)
+    if (stepsErr) return { ok: false, error: `Could not save approval steps: ${stepsErr.message}` }
+  }
 
   // Link the chat card to its approval
   if (messageId) {
@@ -268,8 +309,80 @@ export async function decideApproval(input: {
     }
   }
 
-  // Optimistic single-decision guard: only flips if still pending.
   const now = new Date().toISOString()
+  const currentStep = (row as { step?: number }).step ?? 1
+
+  // ── Sequential chain: on APPROVE, if a later step exists, advance instead of
+  //    finalizing. Reject / changes at any step finalizes the whole request. ──
+  const { data: steps } = await admin
+    .from('approval_steps')
+    .select('id, step_no, approver_employee_id, approver_designation_id, approver_permission')
+    .eq('approval_id', input.approvalId)
+    .order('step_no', { ascending: true })
+  const chainSteps = steps ?? []
+  const nextStep = chainSteps.find(s => s.step_no > currentStep)
+
+  if (input.decision === 'approved' && chainSteps.length >= 2 && nextStep) {
+    // Advance to the next approver (approval stays pending). Guarded on the
+    // current step so two concurrent approvers can't double-advance.
+    const { data: advanced, error: advErr } = await admin
+      .from('approvals')
+      .update({
+        step: nextStep.step_no,
+        approver_employee_id: nextStep.approver_employee_id,
+        approver_designation_id: nextStep.approver_designation_id,
+        approver_permission: nextStep.approver_permission,
+        updated_at: now,
+      })
+      .eq('id', input.approvalId)
+      .eq('status', 'pending')
+      .eq('step', currentStep)
+      .select('id')
+    if (advErr) return { ok: false, error: advErr.message }
+    if (!advanced?.length) return { ok: false, error: 'Someone else just advanced this request.' }
+
+    void admin.from('approval_steps')
+      .update({ status: 'approved', decided_by: me.employeeId, decided_at: now })
+      .eq('approval_id', input.approvalId).eq('step_no', currentStep).then(undefined, () => {})
+    void admin.from('approval_events').insert({
+      approval_id: input.approvalId, actor_id: me.employeeId,
+      event: 'approved', comment: (input.comment || '').trim() || null,
+    }).then(undefined, () => {})
+
+    // Chat card: still pending, now on step k/N.
+    if (row.message_id) {
+      void admin.from('messages')
+        .update({ metadata: { approvalStatus: 'pending', approvalId: input.approvalId, step: nextStep.step_no, totalSteps: chainSteps.length } })
+        .eq('id', row.message_id).then(undefined, () => {})
+    }
+    // Notify the next approver(s).
+    const nextApproverIds = await eligibleApproverIds(admin, {
+      approver_employee_id: nextStep.approver_employee_id,
+      approver_designation_id: nextStep.approver_designation_id,
+      approver_permission: nextStep.approver_permission,
+    })
+    for (const empId of nextApproverIds) {
+      if (empId === me.employeeId) continue
+      void createNotification({
+        employeeId: empId,
+        type: 'approval_requested',
+        title: `Approval needed (step ${nextStep.step_no}/${chainSteps.length}): ${row.title}`,
+        message: `Approved at step ${currentStep} by ${me.name || me.cqid}`,
+        link: row.conversation_id ? `/dashboard/chat?c=${row.conversation_id}` : '/dashboard/approvals',
+        sourceKey: `approval:${input.approvalId}:step:${nextStep.step_no}:${empId}`,
+      })
+    }
+    void logActivity({
+      actorId: me.employeeId, entityType: 'approval', entityId: input.approvalId,
+      action: 'approved', clientId: row.client_id ?? null, projectId: row.project_id ?? null,
+      taskId: row.task_id ?? null, conversationId: row.conversation_id ?? null,
+      detail: { label: row.title, step: currentStep, advancedTo: nextStep.step_no },
+    })
+    return { ok: true, data: { status: 'pending' } }
+  }
+
+  // ── Final decision (single approver, last step, or a rejection). ──
+  // Optimistic single-decision guard: only flips if still pending.
   const { data: updated, error } = await admin
     .from('approvals')
     .update({ status: input.decision, decided_by: me.employeeId, decided_at: now, updated_at: now })
@@ -278,6 +391,13 @@ export async function decideApproval(input: {
     .select('id')
   if (error) return { ok: false, error: error.message }
   if (!updated?.length) return { ok: false, error: 'Someone else just decided this request.' }
+
+  // Record the final step's outcome on the chain (if any).
+  if (chainSteps.length >= 2) {
+    void admin.from('approval_steps')
+      .update({ status: input.decision, decided_by: me.employeeId, decided_at: now })
+      .eq('approval_id', input.approvalId).eq('step_no', currentStep).then(undefined, () => {})
+  }
 
   void admin.from('approval_events').insert({
     approval_id: input.approvalId, actor_id: me.employeeId,
@@ -399,7 +519,9 @@ export async function getApprovals(
     rows = (data ?? []).filter((r: any) => canDecideRow(me, r))
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return { ok: true, data: rows.map((r: any) => mapApproval(me, r)) }
+  const counts = await stepCounts(admin, rows.map((r: any) => r.id))
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return { ok: true, data: rows.map((r: any) => mapApproval(me, r, counts.get(r.id) ?? 1)) }
 }
 
 export async function getApproval(approvalId: string): Promise<Result<{ approval: ApprovalSummary; events: ApprovalEvent[] }>> {
@@ -415,10 +537,12 @@ export async function getApproval(approvalId: string): Promise<Result<{ approval
     .eq('approval_id', approvalId)
     .order('created_at', { ascending: true })
 
+  const counts = await stepCounts(admin, [approvalId])
+
   return {
     ok: true,
     data: {
-      approval: mapApproval(auth.me, row),
+      approval: mapApproval(auth.me, row, counts.get(approvalId) ?? 1),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       events: (events ?? []).map((e: any) => {
         const actor = Array.isArray(e.actor) ? e.actor[0] : e.actor

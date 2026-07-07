@@ -35,6 +35,9 @@ export function RequestApprovalDialog({ conversationId, defaults, onClose, onCre
   const [approverMode, setApproverMode] = useState<'admin' | 'person' | 'designation'>('admin')
   const [approverId, setApproverId] = useState('')
   const [designationId, setDesignationId] = useState('')
+  // Optional sequential steps AFTER the primary approver (step 1).
+  type StepRow = { mode: 'person' | 'designation'; employeeId: string; designationId: string }
+  const [chainSteps, setChainSteps] = useState<StepRow[]>([])
   const [dueAt, setDueAt] = useState('')
   const [options, setOptions] = useState<{ employees: { id: string; name: string; cqid: string }[]; designations: { id: string; name: string }[] }>({ employees: [], designations: [] })
   const { revealNames } = usePermissions()
@@ -47,21 +50,33 @@ export function RequestApprovalDialog({ conversationId, defaults, onClose, onCre
     getApprovalFormOptions().then(res => { if (res.ok) setOptions(res.data) })
   }, [])
 
+  const primaryApprover =
+    approverMode === 'person'      ? { employeeId: approverId } :
+    approverMode === 'designation' ? { designationId } :
+    {} // default rule: any admin
+
   const submit = () => {
     setError(null)
     if (!title.trim()) { setError('A title is required.'); return }
     if (approverMode === 'person' && !approverId) { setError('Pick an approver.'); return }
     if (approverMode === 'designation' && !designationId) { setError('Pick a designation.'); return }
+    for (const s of chainSteps) {
+      if (s.mode === 'person' && !s.employeeId) { setError('Every step needs an approver.'); return }
+      if (s.mode === 'designation' && !s.designationId) { setError('Every step needs a designation.'); return }
+    }
+    // Build the ordered chain only when extra steps were added.
+    const steps = chainSteps.length > 0
+      ? [primaryApprover, ...chainSteps.map(s =>
+          s.mode === 'person' ? { employeeId: s.employeeId } : { designationId: s.designationId })]
+      : undefined
     startTransition(async () => {
       const res = await requestApproval({
         entityType,
         entityId: defaults?.entityId ?? null,
         title,
         description,
-        approver:
-          approverMode === 'person'      ? { employeeId: approverId } :
-          approverMode === 'designation' ? { designationId } :
-          {}, // default rule: any admin
+        approver: primaryApprover,
+        steps,
         conversationId: conversationId ?? null,
         dueAt: dueAt ? new Date(dueAt).toISOString() : null,
         taskId: defaults?.taskId ?? null,
@@ -126,6 +141,46 @@ export function RequestApprovalDialog({ conversationId, defaults, onClose, onCre
               {options.designations.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
           )}
+
+          {/* Sequential steps — each approves in order; the request only
+              finalizes once the LAST step approves. */}
+          {chainSteps.map((s, i) => (
+            <div key={i} className="rounded-lg border border-border/60 bg-muted/20 p-2">
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-xs font-medium text-muted-foreground">Then step {i + 2}</span>
+                <button onClick={() => setChainSteps(prev => prev.filter((_, j) => j !== i))}
+                  className="text-xs text-muted-foreground hover:text-destructive">Remove</button>
+              </div>
+              <div className="space-y-1.5">
+                <select value={s.mode}
+                  onChange={e => setChainSteps(prev => prev.map((x, j) => j === i ? { ...x, mode: e.target.value as 'person' | 'designation' } : x))}
+                  className={inputCls}>
+                  <option value="person">A specific person</option>
+                  <option value="designation">Anyone in a designation</option>
+                </select>
+                {s.mode === 'person' ? (
+                  <select value={s.employeeId}
+                    onChange={e => setChainSteps(prev => prev.map((x, j) => j === i ? { ...x, employeeId: e.target.value } : x))}
+                    className={inputCls}>
+                    <option value="">Choose person…</option>
+                    {options.employees.map(e => <option key={e.id} value={e.id}>{mask(e.name, e.cqid)}</option>)}
+                  </select>
+                ) : (
+                  <select value={s.designationId}
+                    onChange={e => setChainSteps(prev => prev.map((x, j) => j === i ? { ...x, designationId: e.target.value } : x))}
+                    className={inputCls}>
+                    <option value="">Choose designation…</option>
+                    {options.designations.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </select>
+                )}
+              </div>
+            </div>
+          ))}
+          <button
+            onClick={() => setChainSteps(prev => [...prev, { mode: 'person', employeeId: '', designationId: '' }])}
+            className="w-full rounded-lg border border-dashed border-border py-1.5 text-xs text-muted-foreground hover:text-foreground hover:border-foreground/40">
+            + Add sequential step
+          </button>
 
           <button onClick={submit} disabled={pending || !title.trim()}
             className="w-full rounded-lg bg-foreground py-2 text-sm font-medium text-background disabled:opacity-40">

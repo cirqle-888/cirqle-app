@@ -105,7 +105,14 @@ export function ApprovalCard({ approvalId, statusHint, meId, compact = false }: 
             )}
           </p>
         </div>
-        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${style.cls}`}>{style.label}</span>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${style.cls}`}>{style.label}</span>
+          {approval.totalSteps > 1 && (
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+              Step {approval.step} / {approval.totalSteps}
+            </span>
+          )}
+        </div>
       </div>
 
       {approval.description && (
