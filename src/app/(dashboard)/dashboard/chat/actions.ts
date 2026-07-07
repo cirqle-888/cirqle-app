@@ -363,7 +363,11 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
     const isMember = lastReadByConv.has(c.id)
     const [lastRes, unreadRes] = await Promise.all([
       admin.from('messages')
-        .select('body, kind, deleted_at, created_at, sender:sender_id(name)')
+        // cqid is REQUIRED here, not just name — the client's displayEmployee()
+        // falls back to showing the raw name whenever cqid is empty, so
+        // dropping cqid from this select silently leaked real names into every
+        // DM's last-message preview regardless of the reveal-names toggle.
+        .select('body, kind, deleted_at, created_at, sender:sender_id(name, cqid)')
         .eq('conversation_id', c.id)
         .order('created_at', { ascending: false })
         .limit(1).maybeSingle(),
