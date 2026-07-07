@@ -3,11 +3,16 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { usePermissions } from '@/contexts/permission-context'
+import { useFavorites } from '@/contexts/favorites-context'
+import { useWorkspace } from '@/contexts/workspace-context'
+import { navSections, type NavItem } from '@/lib/nav-sections'
+import { resolveFavoriteIcon, iconKeyFor } from '@/lib/favorites/icon-map'
+import { recordUsage, listFrequent, listRecent, type UsageItem } from '@/lib/quick-actions/actions'
+import { FavoriteToggle } from '@/components/ui/favorite-toggle'
 import {
   Search, X, ArrowRight,
-  LayoutDashboard, CheckSquare, TrendingUp, FileText,
-  BookOpen, Wallet, Users2, BarChart3, Settings, Upload,
-  Hash, User, Clock, AlertCircle,
+  CheckSquare, FileText, Hash, User, AlertCircle, Star, Clock3, Flame,
 } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -22,34 +27,9 @@ interface Result {
   badge?: string
   badgeColor?: string
   href: string
-}
-
-// ─── Static nav items ─────────────────────────────────────────────────────────
-
-const NAV_ITEMS: Result[] = [
-  { id: 'nav-dashboard',     kind: 'nav', label: 'Dashboard',     href: '/dashboard',               sublabel: 'Overview & analytics' },
-  { id: 'nav-tasks',         kind: 'nav', label: 'Tasks',          href: '/dashboard/tasks',          sublabel: 'Manage tasks' },
-  { id: 'nav-contributions', kind: 'nav', label: 'Contributions',  href: '/dashboard/contributions',  sublabel: 'Team contributions' },
-  { id: 'nav-invoices',      kind: 'nav', label: 'Invoices',       href: '/dashboard/invoices',       sublabel: 'Billing & payments' },
-  { id: 'nav-quotations',    kind: 'nav', label: 'Quotations',     href: '/dashboard/quotations',     sublabel: 'Quote management' },
-  { id: 'nav-cashbook',      kind: 'nav', label: 'Cash Book',      href: '/dashboard/cashbook',       sublabel: 'Cash flow tracking' },
-  { id: 'nav-payroll',       kind: 'nav', label: 'HR & Payroll',   href: '/dashboard/payroll',        sublabel: 'Employees & salary' },
-  { id: 'nav-reports',       kind: 'nav', label: 'Reports',        href: '/dashboard/reports',        sublabel: 'Performance reports' },
-  { id: 'nav-import',        kind: 'nav', label: 'Bulk Import',    href: '/dashboard/import',         sublabel: 'Import data' },
-  { id: 'nav-settings',      kind: 'nav', label: 'Settings',       href: '/dashboard/settings',       sublabel: 'App settings' },
-]
-
-const NAV_ICONS: Record<string, React.ElementType> = {
-  'nav-dashboard':     LayoutDashboard,
-  'nav-tasks':         CheckSquare,
-  'nav-contributions': TrendingUp,
-  'nav-invoices':      FileText,
-  'nav-quotations':    BookOpen,
-  'nav-cashbook':      Wallet,
-  'nav-payroll':       Users2,
-  'nav-reports':       BarChart3,
-  'nav-settings':      Settings,
-  'nav-import':        Upload,
+  icon?: React.ElementType
+  /** Present for nav results — lets the row render a star + record usage. */
+  navItem?: NavItem
 }
 
 // ─── Status styling helpers ───────────────────────────────────────────────────
@@ -82,10 +62,7 @@ function capitalize(s: string) {
 // ─── Kind icon ────────────────────────────────────────────────────────────────
 
 function KindIcon({ result }: { result: Result }) {
-  if (result.kind === 'nav') {
-    const Icon = NAV_ICONS[result.id] || ArrowRight
-    return <Icon className="w-4 h-4 shrink-0 text-muted-foreground" />
-  }
+  if (result.icon) { const Icon = result.icon; return <Icon className="w-4 h-4 shrink-0 text-muted-foreground" /> }
   if (result.kind === 'task')    return <CheckSquare className="w-4 h-4 shrink-0 text-muted-foreground" />
   if (result.kind === 'invoice') return <FileText className="w-4 h-4 shrink-0 text-muted-foreground" />
   if (result.kind === 'client')  return <User className="w-4 h-4 shrink-0 text-muted-foreground" />
@@ -94,9 +71,10 @@ function KindIcon({ result }: { result: Result }) {
 
 // ─── Section label ────────────────────────────────────────────────────────────
 
-function SectionLabel({ label }: { label: string }) {
+function SectionLabel({ label, icon: Icon }: { label: string; icon?: React.ElementType }) {
   return (
     <div className="flex items-center gap-2 px-3 pt-3 pb-1.5">
+      {Icon && <Icon className="w-3 h-3 text-muted-foreground/40" />}
       <span className="text-[9px] font-semibold text-muted-foreground/40 uppercase tracking-widest">{label}</span>
       <div className="flex-1 h-px bg-foreground/[0.04]" />
     </div>
@@ -113,28 +91,42 @@ function ResultRow({ result, active, onSelect }: { result: Result; active: boole
   }, [active])
 
   return (
-    <button
-      ref={rowRef}
-      type="button"
-      onClick={onSelect}
-      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors rounded-lg mx-1 ${
-        active ? 'bg-violet-500/15 text-foreground' : 'text-foreground hover:bg-foreground/[0.04]'
+    <div
+      className={`w-full flex items-center gap-2 px-1 mx-1 rounded-lg transition-colors ${
+        active ? 'bg-violet-500/15' : 'hover:bg-foreground/[0.04]'
       }`}
     >
-      <KindIcon result={result} />
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium truncate">{result.label}</div>
-        {result.sublabel && (
-          <div className="text-xs text-muted-foreground/60 truncate">{result.sublabel}</div>
+      <button
+        ref={rowRef}
+        type="button"
+        onClick={onSelect}
+        className="flex-1 min-w-0 flex items-center gap-3 py-2.5 pl-2 text-left"
+      >
+        <KindIcon result={result} />
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium truncate text-foreground">{result.label}</div>
+          {result.sublabel && (
+            <div className="text-xs text-muted-foreground/60 truncate">{result.sublabel}</div>
+          )}
+        </div>
+        {result.badge && (
+          <span className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full ${result.badgeColor}`}>
+            {result.badge}
+          </span>
         )}
-      </div>
-      {result.badge && (
-        <span className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full ${result.badgeColor}`}>
-          {result.badge}
-        </span>
+        {active && <ArrowRight className="w-3.5 h-3.5 shrink-0 text-violet-400" />}
+      </button>
+      {result.kind === 'nav' && (
+        <FavoriteToggle
+          entityType="nav_page"
+          href={result.href}
+          label={result.label}
+          iconKey={result.navItem?.icon ? iconKeyFor(result.navItem.icon) : 'Star'}
+          size={14}
+          className="mr-1"
+        />
       )}
-      {active && <ArrowRight className="w-3.5 h-3.5 shrink-0 text-violet-400" />}
-    </button>
+    </div>
   )
 }
 
@@ -142,13 +134,36 @@ function ResultRow({ result, active, onSelect }: { result: Result; active: boole
 
 export function CommandPalette() {
   const router = useRouter()
+  const { user, can } = usePermissions()
+  const { favorites } = useFavorites()
+  const { current: activeWorkspace } = useWorkspace()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [activeIndex, setActiveIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const [dbResults, setDbResults] = useState<Result[]>([])
+  const [frequent, setFrequent] = useState<UsageItem[]>([])
+  const [recent, setRecent] = useState<UsageItem[]>([])
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  // Every module/page the viewer has permission to reach — the full catalogue,
+  // not a stale hand-picked subset. Workspace-restricted hrefs (if any) are
+  // ranked first, never hidden — Quick Actions can always reach anything
+  // Search results should be able to reach, per spec.
+  const allNavItems: NavItem[] = useMemo(
+    () => navSections.flatMap(s => s.items).filter(i =>
+      (!i.requiredPerm || can(i.requiredPerm)) && (!i.adminOnly || user.isAdmin)
+    ),
+    [can, user.isAdmin],
+  )
+  const workspaceHrefs = activeWorkspace.sidebarModuleHrefs
+  const sortedNavItems = useMemo(() => {
+    if (!workspaceHrefs) return allNavItems
+    const inWorkspace = allNavItems.filter(i => workspaceHrefs.includes(i.href))
+    const rest = allNavItems.filter(i => !workspaceHrefs.includes(i.href))
+    return [...inWorkspace, ...rest]
+  }, [allNavItems, workspaceHrefs])
 
   // ── Open/close keyboard shortcut ──────────────────────────────────────────
   useEffect(() => {
@@ -163,14 +178,20 @@ export function CommandPalette() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // ── Focus input when opened ───────────────────────────────────────────────
+  // ── Focus input + load Frequent/Recent when opened ────────────────────────
+  // Deferred setState (setTimeout 0) — no sync setState in an effect body,
+  // per the react-compiler lint rule.
   useEffect(() => {
-    if (open) {
+    if (!open) return
+    const t = setTimeout(() => {
       setQuery('')
       setDbResults([])
       setActiveIndex(0)
       requestAnimationFrame(() => inputRef.current?.focus())
-    }
+      void listFrequent().then(setFrequent)
+      void listRecent().then(setRecent)
+    }, 0)
+    return () => clearTimeout(t)
   }, [open])
 
   // ── DB search ─────────────────────────────────────────────────────────────
@@ -251,27 +272,72 @@ export function CommandPalette() {
   // ── Build visible list ────────────────────────────────────────────────────
   const { sections, flat } = useMemo(() => {
     const q = query.toLowerCase().trim()
-    const navFiltered = q
-      ? NAV_ITEMS.filter(n => n.label.toLowerCase().includes(q) || (n.sublabel ?? '').toLowerCase().includes(q))
-      : NAV_ITEMS
-
-    type Section = { label: string; items: Result[] }
+    type Section = { label: string; items: Result[]; icon?: React.ElementType }
     const sections: Section[] = []
 
-    if (navFiltered.length > 0) sections.push({ label: 'Pages', items: navFiltered })
-
-    if (dbResults.length > 0) {
-      const tasks    = dbResults.filter(r => r.kind === 'task')
-      const invoices = dbResults.filter(r => r.kind === 'invoice')
-      const clients  = dbResults.filter(r => r.kind === 'client')
-      if (tasks.length)    sections.push({ label: 'Tasks',    items: tasks })
-      if (invoices.length) sections.push({ label: 'Invoices', items: invoices })
-      if (clients.length)  sections.push({ label: 'Clients',  items: clients })
+    if (!q) {
+      // Empty query: Favorites → Frequent → Recent (the three Quick Actions tabs).
+      if (favorites.length > 0) {
+        sections.push({
+          label: 'Favorites', icon: Star,
+          items: favorites.map(f => ({
+            id: `fav-${f.id}`, kind: 'nav' as const, label: f.label, href: f.href,
+            icon: resolveFavoriteIcon(f.iconKey),
+          })),
+        })
+      }
+      if (frequent.length > 0) {
+        sections.push({
+          label: 'Frequently used', icon: Flame,
+          items: frequent.map(u => ({
+            id: `freq-${u.itemKey}`, kind: 'nav' as const, label: u.label, href: u.href,
+            sublabel: `Used ${u.count}×`,
+          })),
+        })
+      }
+      if (recent.length > 0) {
+        sections.push({
+          label: 'Recently used', icon: Clock3,
+          items: recent.map(u => ({
+            id: `rec-${u.itemKey}`, kind: 'nav' as const, label: u.label, href: u.href,
+          })),
+        })
+      }
+      // Nothing pinned/used yet — fall back to the full catalogue so the
+      // palette is never empty on first use.
+      if (sections.length === 0) {
+        sections.push({
+          label: 'All modules',
+          items: sortedNavItems.map(n => ({
+            id: `nav-${n.href}`, kind: 'nav' as const, label: n.label, sublabel: n.href,
+            href: n.href, icon: n.icon, navItem: n,
+          })),
+        })
+      }
+    } else {
+      const navFiltered = sortedNavItems.filter(n => n.label.toLowerCase().includes(q))
+      if (navFiltered.length > 0) {
+        sections.push({
+          label: 'Pages',
+          items: navFiltered.map(n => ({
+            id: `nav-${n.href}`, kind: 'nav' as const, label: n.label, sublabel: n.href,
+            href: n.href, icon: n.icon, navItem: n,
+          })),
+        })
+      }
+      if (dbResults.length > 0) {
+        const tasks    = dbResults.filter(r => r.kind === 'task')
+        const invoices = dbResults.filter(r => r.kind === 'invoice')
+        const clients  = dbResults.filter(r => r.kind === 'client')
+        if (tasks.length)    sections.push({ label: 'Tasks',    items: tasks })
+        if (invoices.length) sections.push({ label: 'Invoices', items: invoices })
+        if (clients.length)  sections.push({ label: 'Clients',  items: clients })
+      }
     }
 
     const flat = sections.flatMap(s => s.items)
     return { sections, flat }
-  }, [query, dbResults])
+  }, [query, dbResults, favorites, frequent, recent, sortedNavItems])
 
   // ── Keyboard nav ──────────────────────────────────────────────────────────
   function onKeyDown(e: React.KeyboardEvent) {
@@ -288,12 +354,19 @@ export function CommandPalette() {
   }
 
   function navigate(result: Result) {
+    void recordUsage({
+      itemKey: `${result.kind}:${result.href}`,
+      itemType: result.kind,
+      label: result.label,
+      href: result.href,
+      workspaceId: activeWorkspace.isSystem ? null : activeWorkspace.id,
+    })
     router.push(result.href)
     setOpen(false)
   }
 
-  // Reset active index when list changes
-  useEffect(() => { setActiveIndex(0) }, [flat.length])
+  // Reset active index when list changes (deferred — same lint rule as above).
+  useEffect(() => { const t = setTimeout(() => setActiveIndex(0), 0); return () => clearTimeout(t) }, [flat.length])
 
   if (!open) return null
 
@@ -316,7 +389,7 @@ export function CommandPalette() {
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Search tasks, invoices, pages…"
+            placeholder="Search modules, tasks, invoices, clients…"
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/40"
           />
           <div className="flex items-center gap-2">
@@ -347,7 +420,7 @@ export function CommandPalette() {
             let idx = 0
             return sections.map(section => (
               <div key={section.label}>
-                <SectionLabel label={section.label} />
+                <SectionLabel label={section.label} icon={section.icon} />
                 {section.items.map(item => {
                   const thisIdx = idx++
                   return (

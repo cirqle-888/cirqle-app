@@ -9,15 +9,31 @@
 import {
   LayoutDashboard, Inbox, CheckSquare, TrendingUp, BookOpen, FileText, PhoneCall,
   Wallet, Handshake, Users2, BarChart3, Sheet, Award, Activity, Megaphone,
-  Blocks, Upload, Settings, Star, SlidersHorizontal, type LucideIcon,
+  Blocks, Upload, Settings, Star, SlidersHorizontal,
+  MessageSquare, ClipboardCheck, NotebookPen, LayoutGrid,
+  Briefcase, ClipboardList, CalendarClock, BadgeCheck, PieChart,
+  type LucideIcon,
 } from 'lucide-react'
 
 export const FAVORITE_ICON_MAP: Record<string, LucideIcon> = {
   LayoutDashboard, Inbox, CheckSquare, TrendingUp, BookOpen, FileText, PhoneCall,
   Wallet, Handshake, Users2, BarChart3, Sheet, Award, Activity, Megaphone,
   Blocks, Upload, Settings, Star, SlidersHorizontal,
+  MessageSquare, ClipboardCheck, NotebookPen, LayoutGrid,
+  Briefcase, ClipboardList, CalendarClock, BadgeCheck, PieChart,
 }
 
 export function resolveFavoriteIcon(iconKey: string): LucideIcon {
   return FAVORITE_ICON_MAP[iconKey] || Star
+}
+
+// Reverse lookup (component reference → its string key) — built once. Lets a
+// caller holding only the icon COMPONENT (e.g. NavItem.icon) find its stable
+// string key without relying on the icon's (unofficial) displayName field.
+const ICON_TO_KEY = new Map<LucideIcon, string>(
+  Object.entries(FAVORITE_ICON_MAP).map(([key, Icon]) => [Icon, key]),
+)
+
+export function iconKeyFor(icon: LucideIcon): string {
+  return ICON_TO_KEY.get(icon) ?? 'Star'
 }
