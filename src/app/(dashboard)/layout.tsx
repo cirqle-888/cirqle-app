@@ -3,6 +3,7 @@ import { PrivacyProvider } from '@/contexts/privacy-context'
 import { RoleProvider, type ServerEmployee } from '@/contexts/role-context'
 import { PermissionProvider, type PermissionUser } from '@/contexts/permission-context'
 import { FavoritesProvider } from '@/contexts/favorites-context'
+import { WorkspaceProvider } from '@/contexts/workspace-context'
 import { CommandPalette } from '@/components/ui/command-palette'
 import { BirthdayCelebration } from '@/components/ui/birthday-celebration'
 import { FxRatesAutoSync } from './fx-rates-auto-sync'
@@ -10,6 +11,7 @@ import { loadCurrentUser } from '@/lib/permissions/check'
 import { isBirthdayToday } from '@/lib/utils/birthday'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { listFavoritesForEmployee } from '@/lib/favorites/queries'
+import { getMyWorkspaceState } from '@/lib/workspaces/actions'
 
 // Workspace logo URL fetch — pulls both dark and light variants.
 // Service-role client so RLS on company_settings can't block it.
@@ -49,6 +51,21 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const initialFavorites = meResult.user
     ? await listFavoritesForEmployee(meResult.user.employeeId).catch(() => [])
     : []
+
+  // Graceful pre-migration fallback: if migration 022 isn't applied yet, the
+  // workspaces table doesn't exist — fall back to a single synthetic
+  // "All Workspace" so the app renders exactly as it did before this feature.
+  const FALLBACK_ALL_WORKSPACE = {
+    id: '', name: 'All Workspace', icon: 'LayoutGrid', color: 'slate',
+    sidebarModuleHrefs: null, dashboardWidgetKeys: null,
+    defaultLandingHref: '/dashboard', isSystem: true, memberIds: [],
+  }
+  const wsState = meResult.user
+    ? await getMyWorkspaceState().catch(() => null)
+    : null
+  const initialWorkspaceState = wsState?.ok
+    ? wsState.data
+    : { current: FALLBACK_ALL_WORKSPACE, available: [FALLBACK_ALL_WORKSPACE], canManage: false }
   const me = meResult.user
   const loadFailed = meResult.failed
   const { logoUrl, logoUrlDark, faviconUrl } = logos
@@ -97,6 +114,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <RoleProvider initialEmployee={serverEmployee}>
         <PermissionProvider user={user} logoUrl={logoUrl} logoUrlDark={logoUrlDark} faviconUrl={faviconUrl}>
           <FavoritesProvider initialFavorites={initialFavorites}>
+          <WorkspaceProvider initial={initialWorkspaceState}>
           {/* h-dvh = dynamic viewport height (adapts as Safari toolbar shows/hides).
               h-screen (100vh) on iOS uses the *large* viewport (toolbar-hidden),
               making the container taller than the visible area when the address bar
@@ -120,6 +138,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               />
             )}
           </div>
+          </WorkspaceProvider>
           </FavoritesProvider>
         </PermissionProvider>
       </RoleProvider>

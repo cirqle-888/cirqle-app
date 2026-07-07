@@ -30,6 +30,8 @@ import {
   Package,
 } from 'lucide-react'
 import { navSections } from '@/lib/nav-sections'
+import { useWorkspace } from '@/contexts/workspace-context'
+import { WorkspaceSwitcher } from '@/components/layout/workspace-switcher'
 import { CommandPaletteTrigger } from '@/components/ui/command-palette'
 import { NotificationBell } from '@/components/layout/notification-bell'
 import { EmployeeAvatar } from '@/components/ui/employee-avatar'
@@ -215,6 +217,7 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
   const router = useRouter()
   const { user, can, logoUrl, logoUrlDark, faviconUrl } = usePermissions()
   const { isUnlocked } = usePrivacy()
+  const { current: activeWorkspace } = useWorkspace()
   // Local state so a broken/expired logo URL can fall back to the brand mark
   // without leaving a broken-image placeholder visible.
   const [logoBroken, setLogoBroken] = useState(false)
@@ -254,6 +257,11 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
 
   // Pre-compute visible sections once per permission change — avoids re-filtering on
   // every route transition (pathname is the only thing changing in the common case).
+  // Workspace scoping is a pure UI filter LAYERED ON TOP of the permission
+  // filter below — it can only hide items the workspace didn't select, never
+  // reveal anything the viewer's permissions don't already allow. A workspace
+  // with sidebarModuleHrefs=null (e.g. "All Workspace") applies no restriction.
+  const workspaceHrefs = activeWorkspace.sidebarModuleHrefs
   const visibleNavSections = useMemo(
     () =>
       navSections
@@ -261,11 +269,12 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
           ...s,
           items: s.items.filter(i =>
             (!i.requiredPerm || can(i.requiredPerm)) &&
-            (!i.adminOnly || user.isAdmin)
+            (!i.adminOnly || user.isAdmin) &&
+            (!workspaceHrefs || workspaceHrefs.includes(i.href))
           ),
         }))
         .filter(s => s.items.length > 0),
-    [can, user.isAdmin],
+    [can, user.isAdmin, workspaceHrefs],
   )
 
   // Most-specific matching nav href wins, so a parent ("Invoices") doesn't also
@@ -367,6 +376,8 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
         <AppLauncherTrigger />
         <NotificationBell isCollapsed={isCollapsed} />
       </div>
+
+      <WorkspaceSwitcher isCollapsed={isCollapsed} />
 
       {/* Nav */}
       <nav className={`flex-1 py-4 overflow-y-auto ${isCollapsed ? 'px-2' : 'px-3'}`}>

@@ -99,25 +99,12 @@ CREATE POLICY item_usage_owner_only ON item_usage FOR SELECT
   USING (employee_id = current_employee_id());   -- owner-only, no admin bypass — it's personal usage data
 REVOKE INSERT, UPDATE, DELETE ON item_usage FROM authenticated, anon;
 
--- ── Quick Actions: manual favorites ─────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS quick_action_favorites (
-  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  employee_id  uuid NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-  item_key     text NOT NULL,
-  item_type    text NOT NULL DEFAULT 'nav',
-  label        text NOT NULL,
-  href         text NOT NULL,
-  sort_order   int NOT NULL DEFAULT 0,
-  created_at   timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (employee_id, item_key)
-);
-CREATE INDEX IF NOT EXISTS idx_qa_favorites_owner ON quick_action_favorites (employee_id, sort_order);
-
-ALTER TABLE quick_action_favorites ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS qa_favorites_owner_only ON quick_action_favorites;
-CREATE POLICY qa_favorites_owner_only ON quick_action_favorites FOR SELECT
-  USING (employee_id = current_employee_id());
-REVOKE INSERT, UPDATE, DELETE ON quick_action_favorites FROM authenticated, anon;
+-- NOTE: Quick Actions "Favorites" deliberately does NOT get its own table —
+-- supabase/migrations/20260705120000_favorites.sql already ships a generic
+-- per-employee employee_favorites table (entity_type/entity_id/href/label/
+-- icon_key/position) with add/remove/reorder actions in lib/favorites/actions.ts.
+-- Quick Actions reuses it with entity_type='nav_page', the exact same pattern
+-- the sidebar's own pinned-favorites section already uses.
 
 -- ── Permission key: who besides admins can manage workspaces ────────────────
 INSERT INTO permissions (module, action, key, label, description, display_order) VALUES
