@@ -15,6 +15,7 @@
  */
 
 import { createAdminClient } from '@/lib/supabase/admin'
+import { sendWebPush } from '@/lib/push/send'
 
 export type NotificationType =
   | 'recurring_tasks_generated'
@@ -53,6 +54,16 @@ export async function createNotification(input: NotificationContent & { employee
     // Unique-violation on (type, source_key, employee_id) = "already notified for this period" — expected.
     if (error && error.code !== '23505') {
       console.warn('createNotification failed:', error.message)
+    }
+    // Web push to the employee's devices (best-effort; no-op without VAPID/subs).
+    // Skipped on duplicate (23505) so a cron re-run doesn't re-push.
+    if (!error) {
+      void sendWebPush(input.employeeId, {
+        title: input.title,
+        body: input.message ?? undefined,
+        url: input.link ?? '/dashboard',
+        tag: input.sourceKey ?? undefined,
+      })
     }
   } catch (err) {
     console.warn('createNotification threw:', err)
@@ -98,6 +109,15 @@ export async function notifyAdmins(input: NotificationContent): Promise<void> {
       } else {
         console.warn('notifyAdmins failed:', error.message)
       }
+    }
+    // Web push each admin's devices (best-effort).
+    for (const employeeId of adminIds) {
+      void sendWebPush(employeeId, {
+        title: input.title,
+        body: input.message ?? undefined,
+        url: input.link ?? '/dashboard',
+        tag: input.sourceKey ?? undefined,
+      })
     }
   } catch (err) {
     console.warn('notifyAdmins threw:', err)
