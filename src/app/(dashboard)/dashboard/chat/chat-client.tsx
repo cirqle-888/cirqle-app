@@ -17,7 +17,7 @@ import { useSearchParams } from 'next/navigation'
 import {
   Hash, Lock, MessageSquare, Plus, Send, ArrowLeft, Users2,
   Trash2, RefreshCw, X, Paperclip, Search, SmilePlus, Reply, Download, FileText, ClipboardCheck,
-  CornerUpLeft, Mic, Check, CheckCheck,
+  CornerUpLeft, Mic, Check, CheckCheck, Pencil,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { usePermissions } from '@/contexts/permission-context'
@@ -27,7 +27,7 @@ import { VoiceRecorderButton, VoiceBubble, type VoiceRecording } from '@/compone
 import { RequestApprovalDialog } from '@/components/approvals/request-approval-dialog'
 import {
   listConversations, createChannel, getOrCreateDm, joinChannel,
-  listChatEmployees, getMessages, getThread, sendMessage, deleteMessage, markRead,
+  listChatEmployees, getMessages, getThread, sendMessage, deleteMessage, editMessage, markRead,
   toggleReaction, createAttachmentUploadUrl, sendFileMessage, searchMessages,
   sendVoiceMessage, getMessage, getReadReceipts, listClientsForChat,
   type ChatConversation, type ChatMessage, type ChatSearchHit, type ReplySnapshot, type ReadReceiptDetail,
@@ -51,6 +51,12 @@ function dayLabel(iso: string): string {
 }
 function initials(name: string): string {
   return name.split(/\s+/).map(w => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || '?'
+}
+function typingLabel(names: string[]): string {
+  if (names.length === 0) return ''
+  if (names.length === 1) return `${names[0]} is typing…`
+  if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`
+  return `${names[0]} and ${names.length - 1} others are typing…`
 }
 function formatBytes(n: number | null): string {
   if (!n) return ''
@@ -160,6 +166,35 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
   const conversationsRef = useRef<ChatConversation[]>([])
   useEffect(() => { activeIdRef.current = activeId }, [activeId])
   useEffect(() => { conversationsRef.current = conversations }, [conversations])
+
+  // Typing indicators — ephemeral realtime broadcast (no DB). Keyed by
+  // employeeId with a timestamp; entries auto-expire ~4s after the last keypress.
+  const chatChannelRef = useRef<ReturnType<ReturnType<typeof createClient>['channel']> | null>(null)
+  const lastTypingSentRef = useRef(0)
+  const [typingBy, setTypingBy] = useState<Record<string, { name: string; cqid: string; at: number }>>({})
+  const broadcastTyping = useCallback(() => {
+    const now = Date.now()
+    if (now - lastTypingSentRef.current < 2000) return // throttle to once / 2s
+    lastTypingSentRef.current = now
+    chatChannelRef.current?.send({
+      type: 'broadcast', event: 'typing',
+      payload: { conversationId: activeIdRef.current, employeeId: me.employeeId, name: me.name, cqid: me.cqid },
+    })
+  }, [me.employeeId, me.name, me.cqid])
+  // Expire stale typing entries so the indicator disappears when people stop.
+  useEffect(() => {
+    const t = setInterval(() => {
+      setTypingBy(prev => {
+        const now = Date.now()
+        const next = Object.fromEntries(Object.entries(prev).filter(([, v]) => now - v.at < 4000))
+        return Object.keys(next).length === Object.keys(prev).length ? prev : next
+      })
+    }, 1500)
+    return () => clearInterval(t)
+  }, [])
+  // Clear the indicator when switching conversations (deferred — no sync
+  // setState in an effect body, per the react-compiler lint rule).
+  useEffect(() => { const t = setTimeout(() => setTypingBy({}), 0); return () => clearTimeout(t) }, [activeId])
 
   const [alerts, setAlerts] = useState<{ id: string; title: string; body: string; convId: string }[]>([])
 
@@ -287,8 +322,15 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
               }
             : m))
         })
+      .on('broadcast', { event: 'typing' }, ({ payload }) => {
+        const p = payload as { conversationId?: string; employeeId?: string; name?: string; cqid?: string }
+        if (!p.employeeId || p.employeeId === me.employeeId) return
+        if (p.conversationId !== activeIdRef.current) return
+        setTypingBy(prev => ({ ...prev, [p.employeeId!]: { name: p.name ?? '', cqid: p.cqid ?? '', at: Date.now() } }))
+      })
       .subscribe()
-    return () => { void supabase.removeChannel(channel) }
+    chatChannelRef.current = channel
+    return () => { chatChannelRef.current = null; void supabase.removeChannel(channel) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me.employeeId, me.name, me.cqid])
 
@@ -607,6 +649,11 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
                       memberCount={active.members.length}
                       highlighted={highlightId === m.id}
                       onDelete={() => startTransition(async () => { await deleteMessage(m.id) })}
+                      onEdit={async body => {
+                        setMessages(prev => prev.map(x => x.id === m.id ? { ...x, body, editedAt: new Date().toISOString() } : x))
+                        const res = await editMessage(m.id, body)
+                        if (!res.ok) { const fresh = await getMessage(m.id); if (fresh.ok) setMessages(prev => prev.map(x => x.id === m.id ? fresh.data : x)) }
+                      }}
                       onReact={emoji => handleReact(m.id, emoji)}
                       onReply={() => setThreadRootId(m.id)}
                       onQuote={() => setReplyTo(m)}
@@ -619,11 +666,22 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
               <div ref={bottomRef} />
             </div>
 
+            {Object.keys(typingBy).length > 0 && (
+              <div className="flex items-center gap-1.5 px-4 pb-0.5 text-xs text-muted-foreground">
+                <span className="flex gap-0.5">
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.3s]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.15s]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/60" />
+                </span>
+                {typingLabel(Object.values(typingBy).map(v => showName(v.name, v.cqid)))}
+              </div>
+            )}
             <Composer
               placeholder={`Message ${active.type === 'dm' ? convDisplayName(active) : `#${convDisplayName(active)}`}`}
               members={active.members.filter(m => m.employeeId !== me.employeeId)}
               disabled={pending}
               onSend={handleSendRoot}
+              onTyping={broadcastTyping}
               onFile={handleUpload}
               onVoice={handleVoice}
               replyTo={replyTo}
@@ -689,11 +747,12 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
 
 // ── Composer (shared by main thread + reply panel) ───────────────────────────
 
-function Composer({ placeholder, members, disabled, onSend, onFile, onVoice, replyTo, onCancelReply, showName }: {
+function Composer({ placeholder, members, disabled, onSend, onTyping, onFile, onVoice, replyTo, onCancelReply, showName }: {
   placeholder: string
   members: { employeeId: string; name: string; cqid: string }[]
   disabled: boolean
   onSend: (text: string) => void
+  onTyping?: () => void
   onFile?: (file: File) => void
   onVoice?: (rec: VoiceRecording) => void
   replyTo?: ChatMessage | null
@@ -716,6 +775,7 @@ function Composer({ placeholder, members, disabled, onSend, onFile, onVoice, rep
 
   const updateDraft = (value: string) => {
     setDraft(value)
+    if (value.trim()) onTyping?.()
     // Mention autocomplete: token after the last '@' before the caret
     const caret = taRef.current?.selectionStart ?? value.length
     const upToCaret = value.slice(0, caret)
@@ -816,11 +876,12 @@ function Composer({ placeholder, members, disabled, onSend, onFile, onVoice, rep
 
 // ── Message row ───────────────────────────────────────────────────────────────
 
-function MessageRow({ m, me, senderName, onDelete, onReact, onReply, onQuote, onJumpTo, isDm = false, memberCount = 2, highlighted = false, inThread = false, showName }: {
+function MessageRow({ m, me, senderName, onDelete, onEdit, onReact, onReply, onQuote, onJumpTo, isDm = false, memberCount = 2, highlighted = false, inThread = false, showName }: {
   m: ChatMessage
   me: Me
   senderName: string
   onDelete: () => void
+  onEdit?: (body: string) => Promise<void>
   onReact: (emoji: string) => void
   onReply?: () => void
   onQuote?: () => void
@@ -833,7 +894,20 @@ function MessageRow({ m, me, senderName, onDelete, onReact, onReply, onQuote, on
 }) {
   const mask = showName ?? ((name?: string | null, cqid?: string | null) => cqid || name || '—')
   const [showEmoji, setShowEmoji] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
   const mine = m.senderId === me.employeeId
+  const canEdit = mine && m.kind === 'text' && !!onEdit
+  const beginEdit = () => { setDraft(m.body); setEditing(true) }
+  const saveEdit = async () => {
+    const next = draft.trim()
+    if (!next || next === m.body) { setEditing(false); return }
+    setSavingEdit(true)
+    await onEdit?.(next)
+    setSavingEdit(false)
+    setEditing(false)
+  }
   const replySnap = (m.metadata.replyTo ?? null) as ReplySnapshot | null
   const replyUnavailable = m.metadata.replyToUnavailable === true
 
@@ -905,6 +979,26 @@ function MessageRow({ m, me, senderName, onDelete, onReact, onReply, onQuote, on
             statusHint={typeof m.metadata.approvalStatus === 'string' ? m.metadata.approvalStatus : undefined}
             meId={me.employeeId}
           />
+        ) : editing ? (
+          <div className="mt-0.5">
+            <textarea
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void saveEdit() }
+                if (e.key === 'Escape') { e.preventDefault(); setEditing(false) }
+              }}
+              rows={Math.min(6, draft.split('\n').length)}
+              autoFocus
+              className="w-full resize-none rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+            />
+            <div className="mt-1 flex items-center gap-2 text-xs">
+              <button onClick={() => void saveEdit()} disabled={savingEdit}
+                className="rounded bg-foreground px-2 py-0.5 font-medium text-background disabled:opacity-50">Save</button>
+              <button onClick={() => setEditing(false)} className="text-muted-foreground hover:text-foreground">Cancel</button>
+              <span className="text-muted-foreground">Enter to save · Esc to cancel</span>
+            </div>
+          </div>
         ) : (
           m.body && <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{m.body}</p>
         )}
@@ -975,6 +1069,11 @@ function MessageRow({ m, me, senderName, onDelete, onReact, onReply, onQuote, on
         {!inThread && onReply && (
           <button onClick={onReply} className="rounded p-1 text-muted-foreground hover:text-foreground" aria-label="Reply in thread">
             <Reply className="h-3.5 w-3.5" />
+          </button>
+        )}
+        {canEdit && !editing && (
+          <button onClick={beginEdit} className="rounded p-1 text-muted-foreground hover:text-foreground" aria-label="Edit message">
+            <Pencil className="h-3.5 w-3.5" />
           </button>
         )}
         {mine && (

@@ -932,6 +932,36 @@ export async function deleteMessage(messageId: string): Promise<Result<null>> {
   return { ok: true, data: null }
 }
 
+/** Edit a text message's body. Own messages only (moderators cannot rewrite
+ *  someone's words — deletion is the moderation tool). Voice/approval/file
+ *  cards aren't editable. The realtime UPDATE handler propagates body +
+ *  edited_at to open clients for free. */
+export async function editMessage(messageId: string, body: string): Promise<Result<null>> {
+  const auth = await requireChatUser()
+  if (!auth.ok) return auth
+  const me = auth.me
+  const text = (body || '').trim()
+  if (!text) return { ok: false, error: 'Message cannot be empty.' }
+  if (text.length > 4000) return { ok: false, error: 'Message is too long.' }
+
+  const admin = createAdminClient()
+  const { data: msg } = await admin
+    .from('messages')
+    .select('id, sender_id, kind, deleted_at')
+    .eq('id', messageId).maybeSingle()
+  if (!msg) return { ok: false, error: 'Message not found.' }
+  if (msg.deleted_at) return { ok: false, error: 'Cannot edit a deleted message.' }
+  if (msg.sender_id !== me.employeeId) return { ok: false, error: 'You can only edit your own messages.' }
+  if (msg.kind !== 'text') return { ok: false, error: 'Only text messages can be edited.' }
+
+  const { error } = await admin
+    .from('messages')
+    .update({ body: text, edited_at: new Date().toISOString() })
+    .eq('id', messageId)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data: null }
+}
+
 /** Mark a conversation read up to now.
  *  Also writes normalized per-message receipts (migration 018) — the upsert
  *  is idempotent, so re-opening after being offline back-fills anything
