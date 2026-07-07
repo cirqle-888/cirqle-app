@@ -6,7 +6,7 @@
 import {
   LayoutDashboard, CheckSquare, Users2, FileText, BookOpen, Wallet, BarChart3, Sheet,
   Settings, TrendingUp, Upload, Inbox, PhoneCall, Award, Activity, Blocks, Megaphone, Handshake,
-  SlidersHorizontal, MessageSquare, ClipboardCheck, NotebookPen,
+  SlidersHorizontal, MessageSquare, ClipboardCheck, NotebookPen, LayoutGrid,
   Briefcase, ClipboardList, CalendarClock, BadgeCheck, PieChart,
   type LucideIcon,
 } from 'lucide-react'
@@ -89,6 +89,7 @@ export const navSections: NavSection[] = [
       // contributions, and cashbook entries, so it shouldn't surface to
       // non-admin team members who might happen to hold `tasks.create`.
       { label: 'Bulk Import', href: '/dashboard/import',   icon: Upload,   adminOnly: true },
+      { label: 'Workspaces',  href: '/dashboard/settings/workspaces', icon: LayoutGrid, requiredPerm: 'workspaces.manage' },
       { label: 'Settings',    href: '/dashboard/settings', icon: Settings, requiredPerm: 'settings.access' },
     ],
   },
