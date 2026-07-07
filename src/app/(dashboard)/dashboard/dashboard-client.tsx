@@ -34,6 +34,7 @@ import {
 } from './dashboard-utils'
 import type { Granularity, DrawerType } from './dashboard-utils'
 import DashboardAnalytics from './dashboard-analytics'
+import { useWorkspace } from '@/contexts/workspace-context'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -263,6 +264,11 @@ function AdminDashboard({
   const [amountDisplay, setAmountDisplay] = useAmountDisplay()
   const f = amountDisplay === 'full' ? fmtFull : fmt
 
+  // Per-workspace dashboard widget scoping — dashboardWidgetKeys=null (e.g.
+  // "All Workspace") means unrestricted, matching today's behavior exactly.
+  const { current: activeWorkspace } = useWorkspace()
+  const shouldShow = (key: string) => !activeWorkspace.dashboardWidgetKeys || activeWorkspace.dashboardWidgetKeys.includes(key)
+
   useEffect(() => {
     const params = new URLSearchParams(searchParams.toString())
     if (dateFilter) params.set('date', JSON.stringify(dateFilter)); else params.delete('date')
@@ -389,7 +395,7 @@ function AdminDashboard({
             payroll, contributions, overdue money). Replaces the old narrower
             "Today's Focus" (3 tiles) rather than stacking a second, competing
             "what needs attention" section next to it. */}
-        {(smartFocusCount > 0 || todayTasks.length > 0) && (
+        {shouldShow('smart_focus') && (smartFocusCount > 0 || todayTasks.length > 0) && (
           <section>
             <div className="flex items-center gap-2 mb-3">
               <div className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
@@ -446,7 +452,7 @@ function AdminDashboard({
         )}
 
         {/* ── Collections follow-up widget ──────────────── */}
-        {followupCounts && (followupCounts.urgent + followupCounts.regular + followupCounts.needsSent) > 0 && (
+        {shouldShow('followups') && followupCounts && (followupCounts.urgent + followupCounts.regular + followupCounts.needsSent) > 0 && (
           <Link
             href="/dashboard/invoices/follow-ups"
             className="block bg-card border border-border rounded-2xl p-4 hover:border-primary/30 transition-colors group"
@@ -465,6 +471,7 @@ function AdminDashboard({
         )}
 
         {/* ── Total Expected Cash hero ──────────────────── */}
+        {shouldShow('cash_overview') && (
         <div className="bg-card border border-primary/20 rounded-2xl p-5 relative overflow-hidden">
           <div className="absolute -right-8 -top-8 w-36 h-36 rounded-full bg-gradient-to-br from-violet-500/10 to-purple-600/5 pointer-events-none" />
           <div className="relative">
@@ -500,9 +507,10 @@ function AdminDashboard({
             )}
           </div>
         </div>
+        )}
 
         {/* ── FX Variance card (Live mode only) ────────── */}
-        {fxMode === 'live' && (
+        {shouldShow('cash_overview') && fxMode === 'live' && (
           <div className="bg-card border border-violet-500/20 rounded-2xl p-4 grid grid-cols-3 gap-3">
             <div>
               <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1"
@@ -546,6 +554,7 @@ function AdminDashboard({
         {/* ── Streamed analytics (KPIs · Production · Pulse · bottom grid) ──── */}
         {/* These read the two heavy promises via use(); the shell above already
             painted. The fallback mirrors the real section's dimensions. */}
+        {shouldShow('analytics') && (
         <Suspense fallback={<AnalyticsSkeleton />}>
           <DashboardAnalytics
             allAnalyticsTasksPromise={allAnalyticsTasksPromise}
@@ -565,6 +574,7 @@ function AdminDashboard({
             displayFull={amountDisplay === 'full'}
           />
         </Suspense>
+        )}
       </div>
 
       {/* Drawer */}
