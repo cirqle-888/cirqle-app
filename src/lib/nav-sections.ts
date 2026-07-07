@@ -6,7 +6,7 @@
 import {
   LayoutDashboard, CheckSquare, Users2, FileText, BookOpen, Wallet, BarChart3, Sheet,
   Settings, TrendingUp, Upload, Inbox, PhoneCall, Award, Activity, Blocks, Megaphone, Handshake,
-  SlidersHorizontal, MessageSquare, ClipboardCheck,
+  SlidersHorizontal, MessageSquare, ClipboardCheck, NotebookPen,
   Briefcase, ClipboardList, CalendarClock, BadgeCheck, PieChart,
   type LucideIcon,
 } from 'lucide-react'
@@ -22,6 +22,7 @@ export const navSections: NavSection[] = [
       { label: 'Tasks',         href: '/dashboard/tasks',         icon: CheckSquare },
       { label: 'Chat',          href: '/dashboard/chat',          icon: MessageSquare, requiredPerm: 'chat.access' },
       { label: 'Approvals',     href: '/dashboard/approvals',     icon: ClipboardCheck },
+      { label: 'Workspace',     href: '/dashboard/workspace',     icon: NotebookPen },
       { label: 'Contributions', href: '/dashboard/contributions', icon: TrendingUp },
     ],
   },
