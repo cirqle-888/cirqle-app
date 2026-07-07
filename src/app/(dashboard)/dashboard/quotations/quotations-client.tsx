@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
+import { RequestApprovalDialog } from '@/components/approvals/request-approval-dialog'
 import { createClient } from '@/lib/supabase/client'
 import { getStatusColor, getStatusLabel, generateQuotationNumber } from '@/lib/utils/invoice'
 import { formatCurrency } from '@/lib/calculations/currency'
@@ -167,6 +168,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
   const searchParams = useSearchParams()
 
   const [editClientId, setEditClientId] = useState<string | null>(null)
+  const [approvalQuote, setApprovalQuote] = useState<{ id: string; quotation_number: string } | null>(null)
   const [quotations, setQuotations] = useState<Quotation[]>(initialQuotations)
   const [clients, setClients] = useState<ClientRow[]>(initialClients)
   const [showForm, setShowForm] = useState(false)
@@ -602,6 +604,17 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                   <StatusWorkflow status={quo.status} />
                 </div>
 
+                {/* Request approval */}
+                <div className="px-5 pt-3">
+                  <button
+                    onClick={() => setApprovalQuote({ id: quo.id, quotation_number: quo.quotation_number })}
+                    className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 text-sm font-medium transition-colors"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    Request Approval
+                  </button>
+                </div>
+
                 {/* Convert to Invoice (expanded view, approved only) */}
                 {quo.status === 'approved' && (
                   <div className="px-5 pb-4">
@@ -917,6 +930,14 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
 
       {editClientId && (
         <ClientEditModal clientId={editClientId} onClose={() => setEditClientId(null)} />
+      )}
+
+      {approvalQuote && (
+        <RequestApprovalDialog
+          defaults={{ entityType: 'quotation', entityId: approvalQuote.id, title: `Approve quotation ${approvalQuote.quotation_number}` }}
+          onClose={() => setApprovalQuote(null)}
+          onCreated={() => setApprovalQuote(null)}
+        />
       )}
     </div>
   )

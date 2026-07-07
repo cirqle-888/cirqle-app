@@ -7,6 +7,7 @@ import dynamic from 'next/dynamic'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { useCopy } from '@/lib/hooks/use-copy'
 import Header from '@/components/layout/header'
+import { RequestApprovalDialog } from '@/components/approvals/request-approval-dialog'
 import { ActiveFilterChips } from '@/components/ui/active-filter-chips'
 import { TokenizedSearch, type SearchFacet } from '@/components/ui/tokenized-search'
 import { recordMatchesFacets, type FacetFieldDef } from '@/lib/search/match-facets'
@@ -153,7 +154,7 @@ interface Invoice {
 interface Props {
   initialInvoices: Invoice[]
   clients: { id: string; name: string; code: string; phone?: string; email?: string; address?: string; default_currency?: string }[]
-  bankAccounts: { id: string; name: string }[]
+  bankAccounts: { id: string; name: string; is_default?: boolean }[]
   cashbookCategories: { id: string; name: string }[]
   services: { id: string; name: string }[]
   companySettings: Record<string, string>
@@ -312,16 +313,21 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   // "Allocate From Cash Book" — the invoice this modal is open for, if any.
   const [allocatingInvoice, setAllocatingInvoice] = useState<Invoice | null>(null)
 
+  // "Request approval" — the invoice this dialog is open for, if any.
+  const [approvalInvoice, setApprovalInvoice] = useState<{ id: string; invoice_number: string; client_id: string | null } | null>(null)
+
   // "Add Client Expenses" — the invoice this modal is open for, if any.
   const [addExpenseInvoice, setAddExpenseInvoice] = useState<Invoice | null>(null)
 
   // Payment form. `amount` is in the payment `currency`; `amountInr` is the
   // INR base; `rate` is rate_to_inr. Defaults to the invoice currency when the
   // pay panel opens (see openPayPanel).
+  const defaultBankAccountId = useMemo(() => bankAccounts.find(b => b.is_default)?.id || '', [bankAccounts])
+
   const [payForm, setPayForm] = useState({
     amount: '', currency: 'INR' as Currency, rate: '', amountInr: '', rateSource: 'settings' as RateSource,
     payment_date: new Date().toISOString().split('T')[0],
-    payment_method: 'bank_transfer', reference: '', notes: '', bank_account_id: '',
+    payment_method: 'bank_transfer', reference: '', notes: '', bank_account_id: defaultBankAccountId,
   })
 
   // currency → rate_to_inr, from Settings/exchange_rates (for the FX widget).
@@ -1049,7 +1055,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         ))
       },
     })
-    setPayForm({ amount: '', currency: (inv.currency || 'INR') as Currency, rate: '', amountInr: '', rateSource: 'settings', payment_date: new Date().toISOString().split('T')[0], payment_method: 'bank_transfer', reference: '', notes: '', bank_account_id: '' })
+    setPayForm({ amount: '', currency: (inv.currency || 'INR') as Currency, rate: '', amountInr: '', rateSource: 'settings', payment_date: new Date().toISOString().split('T')[0], payment_method: 'bank_transfer', reference: '', notes: '', bank_account_id: defaultBankAccountId })
     setIsAdvancePayment(false)
     setPanelMode('detail')
     setSaving(false)
@@ -2884,6 +2890,12 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                   <CreditCard className="w-3.5 h-3.5" />Quick Pay
                 </button>
               )}
+              <button
+                onClick={() => setApprovalInvoice({ id: inv.id, invoice_number: inv.invoice_number, client_id: inv.client_id ?? null })}
+                title="Request approval for this invoice"
+                className="flex-1 min-w-[120px] py-1.5 px-3 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 transition-colors">
+                <CheckCircle className="w-3.5 h-3.5" />Request Approval
+              </button>
               {/* Allocate From Cash Book — alternate entry point into the same
                   allocation engine. Shown when the invoice still has a balance
                   and isn't already taking a direct "Record Payment" (mutual
@@ -5795,6 +5807,14 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           unsettled={invPaidInr(allocatingInvoice) === 0}
           onClose={() => setAllocatingInvoice(null)}
           onUpdate={() => { setAllocatingInvoice(null); router.refresh() }}
+        />
+      )}
+
+      {approvalInvoice && (
+        <RequestApprovalDialog
+          defaults={{ entityType: 'invoice', entityId: approvalInvoice.id, title: `Approve invoice ${approvalInvoice.invoice_number}` }}
+          onClose={() => setApprovalInvoice(null)}
+          onCreated={() => setApprovalInvoice(null)}
         />
       )}
 
