@@ -566,7 +566,14 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           ? STATUS_GROUPS.active.includes(inv.status) || (isOverdue(inv.due_date || '', inv.status, inv.issue_date) && inv.status !== 'paid')
           : STATUS_GROUPS.closed.includes(inv.status)
       if (!inTab) return false
-      if (filterStatus && inv.status !== filterStatus) return false
+      // 'overdue' is never a literal status value — it's derived from due_date
+      // vs. today (see isOverdue). Match the same computed state the red
+      // "Overdue" badge on each row uses, not a literal status-column equality.
+      if (filterStatus === 'overdue') {
+        if (!isOverdue(inv.due_date || '', inv.status, inv.issue_date) || inv.status === 'paid') return false
+      } else if (filterStatus && inv.status !== filterStatus) {
+        return false
+      }
       if (filterClient && inv.client_id !== filterClient) return false
       if (activeFacets.length && !recordMatchesFacets(activeFacets, inv, INVOICE_FIELDS, invoiceGeneric)) return false
       return true
