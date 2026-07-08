@@ -15,7 +15,7 @@ import {
   createGroup, updateGroup, deactivateGroup,
   createParameter, updateParameter, deactivateParameter,
   createTool, updateTool, deactivateTool, quickEditTool,
-  createBankAccount, updateBankAccount, deactivateBankAccount, setDefaultBankAccount,
+  createBankAccount, updateBankAccount, deactivateBankAccount, reactivateBankAccount, setDefaultBankAccount,
   createCashbookCategory, updateCashbookCategory, deactivateCashbookCategory,
   upsertExchangeRate,
   syncExchangeRates,
@@ -282,6 +282,16 @@ export default function SettingsClient(props: Props) {
     const q = empSearch.toLowerCase()
     return pool.filter((e: any) => e.cqid?.toLowerCase().includes(q) || e.name?.toLowerCase().includes(q) || e.role?.toLowerCase().includes(q))
   }, [employees, empSearch, empFilter])
+
+  // Bank account filter tabs: active | archived | all — mirrors the employee
+  // filter so an archived account (e.g. one accidentally archived, or one
+  // that still has historical entries) isn't stranded invisible forever.
+  const [bankFilter, setBankFilter] = useState<'active' | 'archived' | 'all'>('active')
+  const filteredBankAccounts = useMemo(() => {
+    if (bankFilter === 'active')   return bankAccounts.filter((b) => b.is_active !== false)
+    if (bankFilter === 'archived') return bankAccounts.filter((b) => b.is_active === false)
+    return bankAccounts
+  }, [bankAccounts, bankFilter])
 
   // Invite link modal state
   const [inviteLink, setInviteLink] = useState<{ employeeId: string; cqid: string; url: string; expiresAt: string } | null>(null)
@@ -2072,14 +2082,32 @@ export default function SettingsClient(props: Props) {
           {tab === 'Bank Accounts' && (
             <div>
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-sm font-semibold">Bank Accounts</h2>
+                <h2 className="text-sm font-semibold">Bank Accounts ({filteredBankAccounts.length})</h2>
                 <button onClick={() => openForm('bank', { is_active: true, type: 'bank', currency: 'INR', opening_balance: 0 })} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90">
                   <Plus className="w-4 h-4" /> Add Account
                 </button>
               </div>
+              <div className="flex items-center gap-2 mb-3">
+                <div className="flex bg-secondary border border-border rounded-lg p-0.5">
+                  {(['active', 'archived', 'all'] as const).map(f => (
+                    <button
+                      key={f}
+                      onClick={() => setBankFilter(f)}
+                      className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${bankFilter === f ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                    >
+                      {f === 'active' ? 'Active' : f === 'archived' ? 'Archived' : 'All'}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="space-y-2">
-                {bankAccounts.filter(b => b.is_active !== false).map(b => (
-                  <div key={b.id} className="bg-card border border-border rounded-xl px-4 py-3 flex items-center justify-between">
+                {filteredBankAccounts.length === 0 && (
+                  <p className="text-sm text-muted-foreground py-6 text-center">
+                    {bankFilter === 'archived' ? 'No archived accounts.' : 'No accounts.'}
+                  </p>
+                )}
+                {filteredBankAccounts.map(b => (
+                  <div key={b.id} className={`bg-card border border-border rounded-xl px-4 py-3 flex items-center justify-between ${b.is_active === false ? 'opacity-60' : ''}`}>
                     <div>
                       <p className="font-medium text-sm flex items-center gap-1.5">
                         {b.name}
@@ -2088,24 +2116,42 @@ export default function SettingsClient(props: Props) {
                       <p className="text-xs text-muted-foreground capitalize">{b.type} · {b.currency} · {b.account_number}</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className={`text-xs px-2 py-0.5 rounded-md bg-green-500/15 text-green-400`}>Active</span>
-                      <button
-                        onClick={() => !b.is_default && makeDefaultBank(b.id)}
-                        disabled={b.is_default}
-                        className={`p-2 rounded-lg transition-colors ${b.is_default ? 'text-yellow-400' : 'text-muted-foreground hover:text-yellow-400 hover:bg-secondary'}`}
-                        title={b.is_default ? 'Default account' : 'Set as default account'}
-                      >
-                        <Star className="w-3.5 h-3.5" fill={b.is_default ? 'currentColor' : 'none'} />
-                      </button>
+                      <span className={`text-xs px-2 py-0.5 rounded-md ${b.is_active === false ? 'bg-amber-500/15 text-amber-400' : 'bg-green-500/15 text-green-400'}`}>
+                        {b.is_active === false ? 'Archived' : 'Active'}
+                      </span>
+                      {b.is_active !== false && (
+                        <button
+                          onClick={() => !b.is_default && makeDefaultBank(b.id)}
+                          disabled={b.is_default}
+                          className={`p-2 rounded-lg transition-colors ${b.is_default ? 'text-yellow-400' : 'text-muted-foreground hover:text-yellow-400 hover:bg-secondary'}`}
+                          title={b.is_default ? 'Default account' : 'Set as default account'}
+                        >
+                          <Star className="w-3.5 h-3.5" fill={b.is_default ? 'currentColor' : 'none'} />
+                        </button>
+                      )}
                       <button onClick={() => { setEditingId(b.id); setShowForm('bank'); setForm(b) }} className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground">
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
-                      <button onClick={() => requestDelete('Bank Account', b.id, b.name, async () => {
-                        await deactivateBankAccount(b.id)
-                        setBankAccounts(prev => prev.filter((x: any) => x.id !== b.id))
-                      })} className="p-2 rounded-lg hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400 transition-colors" title="Archive bank account">
-                        <Archive className="w-3.5 h-3.5" />
-                      </button>
+                      {b.is_active === false ? (
+                        <button
+                          onClick={async () => {
+                            const res = await reactivateBankAccount(b.id)
+                            if (!res.ok) { alert(res.error || 'Failed to restore'); return }
+                            setBankAccounts(prev => prev.map((x) => x.id === b.id ? { ...x, is_active: true } : x))
+                          }}
+                          className="p-2 rounded-lg hover:bg-emerald-500/15 text-muted-foreground hover:text-emerald-400 transition-colors"
+                          title="Restore bank account"
+                        >
+                          <ArchiveRestore className="w-3.5 h-3.5" />
+                        </button>
+                      ) : (
+                        <button onClick={() => requestDelete('Bank Account', b.id, b.name, async () => {
+                          await deactivateBankAccount(b.id)
+                          setBankAccounts(prev => prev.map((x) => x.id === b.id ? { ...x, is_active: false } : x))
+                        })} className="p-2 rounded-lg hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400 transition-colors" title="Archive bank account">
+                          <Archive className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
