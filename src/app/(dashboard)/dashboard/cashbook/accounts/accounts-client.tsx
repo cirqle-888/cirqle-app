@@ -86,10 +86,11 @@ export default function AccountsClient({ entries, accounts, isAdmin }: Props) {
   const cashAccount: Account = { id: CASH_ID, name: 'Cash in Hand', type: 'cash', is_active: true }
   const hasCash = entries.some(e => !e.bank_account_id)
 
-  const allAccounts: Account[] = [
+  const allAccounts: Account[] = useMemo(() => [
     ...accounts.filter(a => a.is_active),
     ...(hasCash ? [cashAccount] : []),
-  ]
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cashAccount is a fresh object literal each render; only its identity-independent fields matter here.
+  ], [accounts, hasCash])
 
   // ── Per-account summary cards ──────────────────────────────────────────────
   const summaries = useMemo(() => {
@@ -107,9 +108,23 @@ export default function AccountsClient({ entries, accounts, isAdmin }: Props) {
     return map
   }, [entries])
 
+  // Sum only the accounts actually rendered as cards (active + virtual cash).
+  // summaries also contains stray keys for INACTIVE accounts that still have
+  // historical entries — those have no card, so folding them into the total
+  // silently produced a "total ≠ sum of visible cards" mismatch.
   const totalBalance = useMemo(() =>
-    Object.values(summaries).reduce((s, v) => s + round2(v.inflow - v.outflow), 0)
-  , [summaries])
+    allAccounts.reduce((s, a) => s + round2((summaries[a.id]?.inflow ?? 0) - (summaries[a.id]?.outflow ?? 0)), 0)
+  , [summaries, allAccounts])
+
+  // Inactive accounts that still carry a non-zero balance — surfaced so money
+  // sitting in a deactivated account isn't silently invisible.
+  const hiddenInactiveBalances = useMemo(() => {
+    const activeIds = new Set(allAccounts.map(a => a.id))
+    return accounts
+      .filter(a => !a.is_active && summaries[a.id] && !activeIds.has(a.id))
+      .map(a => ({ ...a, balance: round2(summaries[a.id].inflow - summaries[a.id].outflow) }))
+      .filter(a => Math.abs(a.balance) > 0.01)
+  }, [accounts, allAccounts, summaries])
 
   // ── Entries for the selected account ──────────────────────────────────────
   const selected = allAccounts.find(a => a.id === selectedId)
@@ -237,6 +252,17 @@ export default function AccountsClient({ entries, accounts, isAdmin }: Props) {
             <p className="text-[11px] text-muted-foreground mt-1">across {allAccounts.length} account{allAccounts.length !== 1 ? 's' : ''}</p>
           </div>
         </div>
+
+        {hiddenInactiveBalances.length > 0 && (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-400">
+            <span className="font-semibold">Note:</span> {hiddenInactiveBalances.map((a, i) => (
+              <span key={a.id}>
+                {i > 0 && ', '}
+                <span className="font-medium">{a.name}</span> (deactivated) still holds {a.balance >= 0 ? '' : '−'}{inr(Math.abs(a.balance))}
+              </span>
+            ))} — not shown as a card, but excluded from the Total above too.
+          </div>
+        )}
 
         {/* ── Selected account ledger ──────────────────────────────────────── */}
         {selected && (
