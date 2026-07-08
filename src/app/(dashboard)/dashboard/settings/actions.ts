@@ -475,6 +475,18 @@ export async function deactivateBankAccount(id: string): Promise<ActionResult> {
   return { ok: true }
 }
 
+export async function setDefaultBankAccount(id: string): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { error: clearError } = await admin.from('bank_accounts').update({ is_default: false }).neq('id', id)
+  if (clearError) return { ok: false, error: clearError.message }
+  const { error } = await admin.from('bank_accounts').update({ is_default: true }).eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
 // ── Cashbook Categories ───────────────────────────────────────────────────────
 
 export async function createCashbookCategory(

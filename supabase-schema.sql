@@ -127,8 +127,10 @@ CREATE TABLE bank_accounts (
   opening_balance DECIMAL(12,2) DEFAULT 0,
   is_active BOOLEAN DEFAULT true,
   display_order INTEGER DEFAULT 0,
+  is_default BOOLEAN DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+CREATE UNIQUE INDEX bank_accounts_one_default ON bank_accounts ((is_default)) WHERE is_default = true;
 
 INSERT INTO bank_accounts (name, type, currency, opening_balance, display_order) VALUES
   ('Cash in Bank', 'bank', 'INR', 0, 1),

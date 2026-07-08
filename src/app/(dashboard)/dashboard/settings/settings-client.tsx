@@ -15,13 +15,13 @@ import {
   createGroup, updateGroup, deactivateGroup,
   createParameter, updateParameter, deactivateParameter,
   createTool, updateTool, deactivateTool, quickEditTool,
-  createBankAccount, updateBankAccount, deactivateBankAccount,
+  createBankAccount, updateBankAccount, deactivateBankAccount, setDefaultBankAccount,
   createCashbookCategory, updateCashbookCategory, deactivateCashbookCategory,
   upsertExchangeRate,
   syncExchangeRates,
   upsertMatrixCell,
 } from './actions'
-import { Plus, X, Edit2, Archive, ArchiveRestore, Save, ChevronDown, ChevronLeft, ChevronRight, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Mail, Send, RotateCcw as ResetKey, RefreshCw } from 'lucide-react'
+import { Plus, X, Edit2, Archive, ArchiveRestore, Save, ChevronDown, ChevronLeft, ChevronRight, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Mail, Send, RotateCcw as ResetKey, RefreshCw, Star } from 'lucide-react'
 import type { Currency } from '@/types'
 import InfoTip from '@/components/ui/info-tip'
 import { usePrivacy, getStoredPin, setStoredPin, isForceLocked } from '@/contexts/privacy-context'
@@ -647,6 +647,12 @@ export default function SettingsClient(props: Props) {
     setSaving(false)
     if (!res.ok) { alert(res.error || 'Failed to save bank account'); return }
     setShowForm(null)
+  }
+
+  async function makeDefaultBank(id: string) {
+    setBankAccounts(prev => prev.map(b => ({ ...b, is_default: b.id === id })))
+    const res = await setDefaultBankAccount(id)
+    if (!res.ok) alert(res.error || 'Failed to set default account')
   }
 
   // --- Cash Categories ---
@@ -2075,11 +2081,22 @@ export default function SettingsClient(props: Props) {
                 {bankAccounts.filter(b => b.is_active !== false).map(b => (
                   <div key={b.id} className="bg-card border border-border rounded-xl px-4 py-3 flex items-center justify-between">
                     <div>
-                      <p className="font-medium text-sm">{b.name}</p>
+                      <p className="font-medium text-sm flex items-center gap-1.5">
+                        {b.name}
+                        {b.is_default && <span className="text-xs px-2 py-0.5 rounded-md bg-yellow-500/15 text-yellow-400">Default</span>}
+                      </p>
                       <p className="text-xs text-muted-foreground capitalize">{b.type} · {b.currency} · {b.account_number}</p>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className={`text-xs px-2 py-0.5 rounded-md bg-green-500/15 text-green-400`}>Active</span>
+                      <button
+                        onClick={() => !b.is_default && makeDefaultBank(b.id)}
+                        disabled={b.is_default}
+                        className={`p-2 rounded-lg transition-colors ${b.is_default ? 'text-yellow-400' : 'text-muted-foreground hover:text-yellow-400 hover:bg-secondary'}`}
+                        title={b.is_default ? 'Default account' : 'Set as default account'}
+                      >
+                        <Star className="w-3.5 h-3.5" fill={b.is_default ? 'currentColor' : 'none'} />
+                      </button>
                       <button onClick={() => { setEditingId(b.id); setShowForm('bank'); setForm(b) }} className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground">
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>

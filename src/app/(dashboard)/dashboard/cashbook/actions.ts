@@ -285,6 +285,23 @@ export async function softDeleteCashbookEntry(id: string): Promise<ActionResult>
   return { ok: true }
 }
 
+// ─── Toggle Review Status ─────────────────────────────────────────────────────
+
+export async function toggleCashbookEntryReview(id: string, is_reviewed: boolean): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.CASHBOOK_EDIT)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('cashbook_entries')
+    .update({ is_reviewed })
+    .eq('id', id)
+  if (error) return { ok: false, error: error.message }
+
+  revalidatePath(REVALIDATE)
+  return { ok: true }
+}
+
 // ─── Allocation Rebuild Actions (admin only) ──────────────────────────────────
 //
 // Safe rebuild workflow:

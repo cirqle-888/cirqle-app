@@ -5,7 +5,7 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
-import { insertCashbookEntries, updateCashbookEntry, softDeleteCashbookEntry, fetchLiveRate, backupAndResetAllocations } from './actions'
+import { insertCashbookEntries, updateCashbookEntry, softDeleteCashbookEntry, fetchLiveRate, backupAndResetAllocations, toggleCashbookEntryReview } from './actions'
 import { formatCompact, round2 } from '@/lib/calculations/currency'
 import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
 import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, RefreshCw, Landmark, CheckCircle, ArrowLeftRight, Copy } from 'lucide-react'
@@ -62,6 +62,7 @@ interface Entry {
   type: 'inflow' | 'outflow'
   category_id: string
   bank_account_id?: string
+  is_reviewed?: boolean
   // Monetary fields are optional because they are stripped from the payload
   // for viewers without `cashbook.view_amounts`. UI must coalesce or gate on
   // `showAmounts` before rendering.
@@ -314,12 +315,12 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
 
   const invoiceCategoryId = useMemo(() => categories.find(c => c.name.toLowerCase().includes('invoice'))?.id, [categories])
   const salaryCategoryId  = useMemo(() => categories.find(c => c.name.toLowerCase().includes('salary'))?.id, [categories])
-
+  const defaultBankAccountId = useMemo(() => bankAccounts.find(b => b.is_default)?.id || '', [bankAccounts])
 
   const [form, setForm] = useState({
     type: 'inflow' as 'inflow' | 'outflow',
     category_id: invoiceCategoryId,
-    bank_account_id: '',
+    bank_account_id: defaultBankAccountId,
     amount: '',
     currency: 'INR' as Currency,
     rate: '',
@@ -518,7 +519,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         ))
         setShowForm(false)
         setFormEditingId(null)
-        setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: '', amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: new Date().toISOString().split('T')[0], description: '', reference: '', linked_invoice_id: '', client_filter_id: '', fully_paid: false })
+        setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: new Date().toISOString().split('T')[0], description: '', reference: '', linked_invoice_id: '', client_filter_id: '', fully_paid: false })
       }
       setSaving(false)
       return
@@ -585,7 +586,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       setEntries(prev => [...[...allInserted].reverse(), ...prev])
       setShowForm(false)
       setRecurringMonths(0)
-      setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: '', amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: new Date().toISOString().split('T')[0], description: '', reference: '', linked_invoice_id: '', client_filter_id: '', fully_paid: false })
+      setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: new Date().toISOString().split('T')[0], description: '', reference: '', linked_invoice_id: '', client_filter_id: '', fully_paid: false })
     }
     setSaving(false)
   }
@@ -659,6 +660,17 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       setEditForm({})
     }
     setSaving(false)
+  }
+
+  async function handleToggleReview(entry: Entry) {
+    if (!entry.bank_account_id) return
+    const newStatus = !entry.is_reviewed
+    setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, is_reviewed: newStatus } : e))
+    const res = await toggleCashbookEntryReview(entry.id, newStatus)
+    if (!res.ok) {
+      setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, is_reviewed: !newStatus } : e))
+      alert(res.error || 'Failed to update review status')
+    }
   }
 
   async function handleSoftDelete(entryId: string) {
@@ -1340,6 +1352,11 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                             <button onClick={() => openDuplicateForm(entry)} className="p-1.5 rounded-md hover:bg-amber-500/10 text-muted-foreground hover:text-amber-500 transition-colors" title="Duplicate to today">
                               <Copy className="w-3.5 h-3.5" />
                             </button>
+                            {!!entry.bank_account_id && (
+                              <button onClick={() => handleToggleReview(entry)} className={`p-1.5 rounded-md transition-colors ${entry.is_reviewed ? 'text-green-500 hover:bg-green-500/10' : 'text-muted-foreground hover:bg-green-500/10 hover:text-green-400'}`} title={entry.is_reviewed ? "Mark as unreviewed" : "Mark as reviewed"}>
+                                <CheckCircle className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                             <button onClick={() => openEditForm(entry)} className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors" title="Edit entry (full form)">
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
@@ -1582,6 +1599,11 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                             <button onClick={() => openDuplicateForm(entry)} className="lg:opacity-0 opacity-100 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-amber-500/10 text-muted-foreground hover:text-amber-500" title="Duplicate to today">
                               <Copy className="w-3.5 h-3.5" />
                             </button>
+                            {!!entry.bank_account_id && (
+                              <button onClick={() => handleToggleReview(entry)} className={`lg:opacity-0 opacity-100 group-hover:opacity-100 transition-opacity p-1.5 rounded-md ${entry.is_reviewed ? 'text-green-500 hover:bg-green-500/10' : 'text-muted-foreground hover:bg-green-500/10 hover:text-green-400'}`} title={entry.is_reviewed ? "Mark as unreviewed" : "Mark as reviewed"}>
+                                <CheckCircle className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                             <button onClick={() => openEditForm(entry)} className="lg:opacity-0 opacity-100 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary" title="Edit entry (full form with FX options)">
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>

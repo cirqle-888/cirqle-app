@@ -44,7 +44,7 @@ export default async function InvoicesPage() {
       .order('name'),
     supabase
       .from('bank_accounts')
-      .select('id, name')
+      .select('id, name, is_default')
       .eq('is_active', true),
     supabase
       .from('services')
