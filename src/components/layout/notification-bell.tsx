@@ -5,6 +5,8 @@ import { createPortal } from 'react-dom'
 import { Bell, Check, ExternalLink } from 'lucide-react'
 import { getMyNotifications, markNotificationRead, markAllNotificationsRead, type NotificationRow } from '@/app/api/notifications/actions'
 import { PushToggle } from '@/components/notifications/push-toggle'
+import { createClient } from '@/lib/supabase/client'
+import { usePermissions } from '@/contexts/permission-context'
 
 function relativeTime(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime()
@@ -38,13 +40,33 @@ export function NotificationBell({ isCollapsed = false }: { isCollapsed?: boolea
     setLoaded(true)
   }, [])
 
-  // Light poll so the badge updates without a full page nav — notifications
-  // are low-frequency (cron-driven), so 60s is plenty responsive.
+  // Load once, then rely on realtime (below). A slow poll stays only as a
+  // reconnect/missed-event safety net.
   useEffect(() => {
     void refresh()
-    const id = setInterval(refresh, 60000)
+    const id = setInterval(refresh, 120000)
     return () => clearInterval(id)
   }, [refresh])
+
+  // Realtime: new notifications for me land instantly (migration 023 published
+  // the table). Prepends the row + bumps the badge with no poll lag.
+  const { user } = usePermissions()
+  const employeeId = user.employeeId
+  useEffect(() => {
+    if (!employeeId) return
+    const supabase = createClient()
+    const channel = supabase
+      .channel('notif-bell')
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `employee_id=eq.${employeeId}` },
+        (payload) => {
+          const row = payload.new as unknown as NotificationRow
+          setRows(prev => prev.some(n => n.id === row.id) ? prev : [row, ...prev].slice(0, 30))
+          if (!row.read) setUnreadCount(c => c + 1)
+        })
+      .subscribe()
+    return () => { void supabase.removeChannel(channel) }
+  }, [employeeId])
 
   // The sidebar root has `overflow-hidden` (for its collapse-width animation),
   // which clips any absolutely-positioned descendant to the sidebar's own
