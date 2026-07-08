@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('desk', {
   dlOpenFolder: () => ipcRenderer.send('downloads:openFolder'),
   dlCopy: (id) => ipcRenderer.send('downloads:copy', id),
   dlShareWA: (id) => ipcRenderer.send('downloads:shareWA', id),
+  dlQuickLook: (id) => ipcRenderer.send('downloads:quicklook', id),
   dlStartDrag: (id) => ipcRenderer.send('downloads:startDrag', id),
   onDownloadsList: (cb) => ipcRenderer.on('downloads:list', (_e, list) => cb(list)),
 

@@ -16,6 +16,7 @@
 const { app, BaseWindow, WebContentsView, ipcMain, globalShortcut, clipboard, shell, Menu, nativeImage, screen, Notification } = require('electron')
 const path = require('path')
 const fs = require('fs')
+const { spawn } = require('child_process')
 
 const CIRQLE_URL = (process.env.CIRQLE_URL || 'https://app.cirqle.work').replace(/\/$/, '')
 const WHATSAPP_URL = 'https://web.whatsapp.com/'
@@ -184,6 +185,22 @@ function clearDownloads() {
   pushDownloadsUpdate(); saveDownloads(); buildMenu()
 }
 
+// ── Quick Look (macOS) ──────────────────────────────────────────────────────
+// Electron has no native Quick Look API, but every Mac ships `qlmanage` (the
+// same CLI the OS uses internally) — `qlmanage -p <file>` pops the real,
+// native Quick Look panel (spacebar-to-close, resizable, full codec/preview
+// support for images/PDFs/docs). Track the one running instance and kill it
+// before starting another so re-triggering Quick Look on a new file swaps the
+// panel's content instead of stacking duplicate windows.
+let qlProcess = null
+function quickLookFile(filePath) {
+  if (process.platform !== 'darwin') return
+  if (qlProcess) { try { qlProcess.kill() } catch { /* already exited */ } }
+  qlProcess = spawn('qlmanage', ['-p', filePath], { stdio: 'ignore' })
+  qlProcess.on('exit', () => { qlProcess = null })
+  qlProcess.on('error', () => { qlProcess = null })
+}
+
 // The compact native "Downloads" submenu still lives in the menu bar (unclipped);
 // the rich actions live in the floating panel.
 function downloadsMenuTemplate() {
@@ -192,6 +209,7 @@ function downloadsMenuTemplate() {
     ? done.slice(0, 15).map((d) => ({
         label: truncate(d.name, 48),
         submenu: [
+          { label: 'Quick Look', accelerator: 'Space', click: () => quickLookFile(d.path) },
           { label: 'Open', click: () => shell.openPath(d.path) },
           { label: 'Show in Folder', click: () => shell.showItemInFolder(d.path) },
           { label: 'Share to Linked WhatsApp', click: () => shareFileToWhatsApp(d.path) },
@@ -903,6 +921,7 @@ ipcMain.on('downloads:copy', (_e, id) => {
   else clipboard.writeText(d.path)
 })
 ipcMain.on('downloads:shareWA', (_e, id) => { const d = downloads.find((x) => x.id === id); if (d) shareFileToWhatsApp(d.path) })
+ipcMain.on('downloads:quicklook', (_e, id) => { const d = downloads.find((x) => x.id === id); if (d && fs.existsSync(d.path)) quickLookFile(d.path) })
 // Native OS file drag from a shelf item → drop onto WhatsApp, Finder, anywhere.
 ipcMain.on('downloads:startDrag', async (e, id) => {
   const d = downloads.find((x) => x.id === id)
@@ -1159,4 +1178,4 @@ app.whenReady().then(() => {
 app.on('activate', () => { if (win && !win.isDestroyed()) win.show() })
 app.on('before-quit', () => { quitting = true })
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
-app.on('will-quit', () => globalShortcut.unregisterAll())
+app.on('will-quit', () => { globalShortcut.unregisterAll(); if (qlProcess) { try { qlProcess.kill() } catch { /* already exited */ } } })
