@@ -187,6 +187,14 @@ export function FloatingCommsWidget() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employeeId])
 
+  // Relay the combined unread count to the Cirqle Desktop shell so it can show
+  // a native top-bar + dock badge (no-op in a normal browser).
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const b = (window as any).__CIRQLE_DESKTOP__
+    if (b && typeof b.setBadge === 'function') b.setBadge(totalBadge)
+  }, [totalBadge])
+
   // Auto-dismiss the toast.
   useEffect(() => {
     if (!toast) return

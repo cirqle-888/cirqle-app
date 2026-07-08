@@ -850,6 +850,28 @@ ipcMain.on('cirqle:notify', (_e, payload) => {
   }
 })
 
+// ── Unread badge relay (Cirqle web view → toolbar bell + dock) ────────────────
+ipcMain.on('cirqle:badge', (_e, count) => {
+  const n = Math.max(0, parseInt(count, 10) || 0)
+  if (chrome) chrome.webContents.send('notif-badge', n)
+  try {
+    // macOS: numeric dock badge. Others: taskbar overlay isn't per-count, so
+    // just use the app badge count where supported.
+    if (process.platform === 'darwin' && app.dock) app.dock.setBadge(n > 0 ? String(n) : '')
+    if (typeof app.setBadgeCount === 'function') app.setBadgeCount(n)
+  } catch { /* badge unsupported on this platform */ }
+})
+
+// Toolbar bell click → reveal + focus the Cirqle pane on the chat page.
+ipcMain.on('cirqle:openNotifications', () => {
+  ensureCirqleVisible()
+  if (cirqle) {
+    const url = CIRQLE_URL + '/dashboard/chat'
+    if (!(cirqle.webContents.getURL() || '').includes('/dashboard/chat')) cirqle.webContents.loadURL(url)
+    cirqle.webContents.focus()
+  }
+})
+
 // ── IPC from the toolbar / splitter / overlay / error page ────────────────────
 ipcMain.on('layout:preset', (_e, p) => applyPreset(p))
 ipcMain.on('reload', (_e, which) => {

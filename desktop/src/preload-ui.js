@@ -25,6 +25,10 @@ contextBridge.exposeInMainWorld('desk', {
   onState: (cb) => ipcRenderer.on('state', (_e, s) => cb(s)),
   onDownloads: (cb) => ipcRenderer.on('downloads', (_e, d) => cb(d)),
 
+  // Notification badge in the toolbar (relayed from the Cirqle web view).
+  onNotifBadge: (cb) => ipcRenderer.on('notif-badge', (_e, n) => cb(n)),
+  openNotifications: () => ipcRenderer.send('cirqle:openNotifications'),
+
   // Downloads panel (Chrome/Safari-style shelf)
   toggleDownloads: () => ipcRenderer.send('downloads:toggle'),
   closeDownloads: () => ipcRenderer.send('downloads:close'),

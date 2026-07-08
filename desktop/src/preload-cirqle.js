@@ -23,6 +23,13 @@ contextBridge.exposeInMainWorld('__CIRQLE_DESKTOP__', {
   notify: (payload) => ipcRenderer.send('cirqle:notify', payload),
 
   /**
+   * Report the current unread count (chat + notifications) so the desktop
+   * shell can show a top-bar bell badge + a dock badge. Called by the web
+   * app's FloatingCommsWidget whenever the total changes.
+   */
+  setBadge: (count) => ipcRenderer.send('cirqle:badge', count),
+
+  /**
    * Share a canvas-rendered image (e.g. a payment receipt PNG data URL) to the
    * linked WhatsApp pane. `action` is one of:
    *   'copy'     — copy image to clipboard + focus WhatsApp (paste with ⌘V)   [default]
