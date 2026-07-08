@@ -264,7 +264,37 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   useEffect(() => {
     setInvoices(initialInvoices)
   }, [initialInvoices])
-  
+
+  // ── Supabase Realtime: keep the invoice list live ─────────────────────────
+  // The task → invoice sync is fully server-side (a task hitting 'done' creates/
+  // updates its client-month draft line; un-doing or deleting it removes the
+  // line). This subscription pushes that change to an already-open Invoices page
+  // so it never goes stale — router.refresh() re-runs the server component and
+  // flows fresh data through the initialInvoices effect above, preserving all
+  // local UI state (open panel, filters, selection).
+  //
+  // Debounced: a batch generate (or a multi-line retotal) fires many row events;
+  // 1200 ms coalesces the burst into a single refetch while still feeling live.
+  // Unique channel name per mount so React Strict Mode's dev double-effect
+  // remount doesn't collide with an in-flight removeChannel.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const trigger = () => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => { timer = null; router.refresh() }, 1200)
+    }
+    const channel = supabase
+      .channel(`invoices-live-${crypto.randomUUID()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices' }, trigger)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'invoice_items' }, trigger)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'invoice_expense_items' }, trigger)
+      .subscribe()
+    return () => {
+      if (timer) clearTimeout(timer)
+      supabase.removeChannel(channel)
+    }
+  }, [supabase, router])
+
   const [searchDraft, setSearchDraft] = useState('')
   const activeFacets = useMemo<SearchFacet[]>(
     () => searchDraft.trim() ? [...searchFacets, { field: 'any', op: 'contains' as const, text: searchDraft.trim() }] : searchFacets,
