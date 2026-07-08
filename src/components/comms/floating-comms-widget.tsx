@@ -126,8 +126,12 @@ export function FloatingCommsWidget() {
   useEffect(() => {
     if (!employeeId) return
     const supabase = createClient()
+    // Unique per mount — a static topic name gets reused (returns the same,
+    // already-subscribed channel) if the previous mount's async removeChannel
+    // hasn't finished yet, which throws under React Strict Mode's dev
+    // double-effect remount.
     const channel = supabase
-      .channel('comms-widget')
+      .channel(`comms-widget-${crypto.randomUUID()}`)
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload) => {

@@ -248,8 +248,12 @@ export default function PayrollClient({
       if (timer) clearTimeout(timer)
       timer = setTimeout(() => { timer = null; refreshScores() }, 1500)
     }
+    // Unique per mount — a static topic name gets reused (returns the same,
+    // already-subscribed channel) if the previous mount's async removeChannel
+    // hasn't finished yet, which throws under React Strict Mode's dev
+    // double-effect remount.
     const channel = supabase
-      .channel('payroll-scores-live')
+      .channel(`payroll-scores-live-${crypto.randomUUID()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'contribution_scores' }, trigger)
       .subscribe()
     return () => {

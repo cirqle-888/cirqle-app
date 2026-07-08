@@ -55,8 +55,12 @@ export function NotificationBell({ isCollapsed = false }: { isCollapsed?: boolea
   useEffect(() => {
     if (!employeeId) return
     const supabase = createClient()
+    // Unique per mount — supabase-js reuses a channel object when a topic name
+    // is still registered (removeChannel() on unmount is async), so a static
+    // name breaks under React Strict Mode's double-effect dev remount:
+    // .on() would fire on an already-subscribed() channel and throw.
     const channel = supabase
-      .channel('notif-bell')
+      .channel(`notif-bell-${crypto.randomUUID()}`)
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'notifications', filter: `employee_id=eq.${employeeId}` },
         (payload) => {

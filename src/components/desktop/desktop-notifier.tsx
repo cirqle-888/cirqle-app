@@ -54,8 +54,12 @@ export function DesktopNotifier() {
     if (!bridge?.notify || !employeeId) return // browser, or not signed in → no-op
 
     const supabase = createClient()
+    // Unique per mount — a static topic name gets reused (returns the same,
+    // already-subscribed channel) if the previous mount's async removeChannel
+    // hasn't finished yet, which throws under React Strict Mode's dev
+    // double-effect remount.
     const channel = supabase
-      .channel('desktop-notifier')
+      .channel(`desktop-notifier-${crypto.randomUUID()}`)
       // ── Chat messages (RLS delivers only my conversations) ──
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages' },
