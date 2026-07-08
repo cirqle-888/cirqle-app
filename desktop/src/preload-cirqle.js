@@ -46,3 +46,12 @@ ipcRenderer.on('cirqle:capture', (_e, payload) => {
     window.dispatchEvent(new CustomEvent('cirqle:capture', { detail: payload }))
   } catch { /* page not ready */ }
 })
+
+// Toolbar bell click, relayed to whatever page is currently loaded — the
+// FloatingCommsWidget (mounted globally in the dashboard layout) listens for
+// this and pops its Alerts tab open.
+ipcRenderer.on('cirqle:openNotifications', () => {
+  try {
+    window.dispatchEvent(new CustomEvent('cirqle:openNotifications'))
+  } catch { /* page not ready */ }
+})

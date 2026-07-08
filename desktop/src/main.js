@@ -862,12 +862,15 @@ ipcMain.on('cirqle:badge', (_e, count) => {
   } catch { /* badge unsupported on this platform */ }
 })
 
-// Toolbar bell click → reveal + focus the Cirqle pane on the chat page.
+// Toolbar bell click → reveal + focus the Cirqle pane and tell the currently
+// loaded page to pop open its notifications panel (FloatingCommsWidget,
+// mounted globally) — NOT a navigation. The old behavior forced a jump to
+// /dashboard/chat, which lands on the full chat page rather than showing
+// notifications at all.
 ipcMain.on('cirqle:openNotifications', () => {
   ensureCirqleVisible()
   if (cirqle) {
-    const url = CIRQLE_URL + '/dashboard/chat'
-    if (!(cirqle.webContents.getURL() || '').includes('/dashboard/chat')) cirqle.webContents.loadURL(url)
+    cirqle.webContents.send('cirqle:openNotifications')
     cirqle.webContents.focus()
   }
 })

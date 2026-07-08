@@ -122,6 +122,14 @@ export function FloatingCommsWidget() {
     return () => { clearTimeout(t); clearInterval(id) }
   }, [refreshConvs, refreshNotifs])
 
+  // Desktop toolbar bell click → open this widget on the Alerts tab, no
+  // matter which page is currently showing.
+  useEffect(() => {
+    const onOpenNotifications = () => { setOpen(true); setTab('alerts') }
+    window.addEventListener('cirqle:openNotifications', onOpenNotifications)
+    return () => window.removeEventListener('cirqle:openNotifications', onOpenNotifications)
+  }, [])
+
   // ── Realtime: messages (RLS-scoped to my conversations) + my notifications ──
   useEffect(() => {
     if (!employeeId) return
