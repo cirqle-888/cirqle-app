@@ -13,11 +13,12 @@ import { FavoriteToggle } from '@/components/ui/favorite-toggle'
 import {
   Search, X, ArrowRight,
   CheckSquare, FileText, Hash, User, AlertCircle, Star, Clock3, Flame,
+  Briefcase, Users, FileSignature, Receipt, Banknote, Plus
 } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type ResultKind = 'nav' | 'task' | 'invoice' | 'client'
+type ResultKind = 'nav' | 'task' | 'invoice' | 'client' | 'employee' | 'project' | 'quotation' | 'payroll' | 'cashbook' | 'action'
 
 interface Result {
   id: string
@@ -66,6 +67,12 @@ function KindIcon({ result }: { result: Result }) {
   if (result.kind === 'task')    return <CheckSquare className="w-4 h-4 shrink-0 text-muted-foreground" />
   if (result.kind === 'invoice') return <FileText className="w-4 h-4 shrink-0 text-muted-foreground" />
   if (result.kind === 'client')  return <User className="w-4 h-4 shrink-0 text-muted-foreground" />
+  if (result.kind === 'employee') return <Users className="w-4 h-4 shrink-0 text-muted-foreground" />
+  if (result.kind === 'project') return <Briefcase className="w-4 h-4 shrink-0 text-muted-foreground" />
+  if (result.kind === 'quotation') return <FileSignature className="w-4 h-4 shrink-0 text-muted-foreground" />
+  if (result.kind === 'payroll') return <Banknote className="w-4 h-4 shrink-0 text-muted-foreground" />
+  if (result.kind === 'cashbook') return <Receipt className="w-4 h-4 shrink-0 text-muted-foreground" />
+  if (result.kind === 'action') return <Plus className="w-4 h-4 shrink-0 text-muted-foreground" />
   return <Hash className="w-4 h-4 shrink-0 text-muted-foreground" />
 }
 
@@ -201,7 +208,7 @@ export function CommandPalette() {
     const supabase = createClient()
     const term = q.toLowerCase()
 
-    const [tasksRes, invoicesRes, clientsRes] = await Promise.all([
+    const [tasksRes, invoicesRes, clientsRes, employeesRes, projectsRes, quotationsRes, payrollRes, cashbookRes] = await Promise.all([
       supabase
         .from('tasks')
         .select('id, title, status, task_date, client:clients(name)')
@@ -218,6 +225,36 @@ export function CommandPalette() {
         .from('clients')
         .select('id, name, code')
         .or(`name.ilike.%${term}%,code.ilike.%${term}%`)
+        .limit(5),
+
+      supabase
+        .from('employees')
+        .select('id, name, email')
+        .or(`name.ilike.%${term}%,email.ilike.%${term}%`)
+        .limit(5),
+
+      supabase
+        .from('ad_projects')
+        .select('id, campaign_name, client:clients(name)')
+        .ilike('campaign_name', `%${term}%`)
+        .limit(5),
+
+      supabase
+        .from('quotations')
+        .select('id, quotation_number, status, client:clients(name)')
+        .ilike('quotation_number', `%${term}%`)
+        .limit(5),
+
+      supabase
+        .from('payroll')
+        .select('id, payslip_number, month, year, status, employee:employees(name)')
+        .ilike('payslip_number', `%${term}%`)
+        .limit(5),
+
+      supabase
+        .from('cashbook_entries')
+        .select('id, description, amount, entry_date')
+        .ilike('description', `%${term}%`)
         .limit(5),
     ])
 
@@ -256,6 +293,60 @@ export function CommandPalette() {
         label: c.name,
         sublabel: c.code ? `Code: ${c.code}` : undefined,
         href: `/dashboard/tasks?client=${c.id}`,
+      })
+    }
+
+    for (const e of employeesRes.data ?? []) {
+      results.push({
+        id: `employee-${e.id}`,
+        kind: 'employee',
+        label: e.name,
+        sublabel: e.email,
+        href: `/dashboard/payroll`,
+      })
+    }
+
+    for (const p of projectsRes.data ?? []) {
+      const client = Array.isArray(p.client) ? p.client[0] : p.client
+      results.push({
+        id: `project-${p.id}`,
+        kind: 'project',
+        label: p.campaign_name,
+        sublabel: client?.name ?? 'Unknown client',
+        href: `/dashboard/advertising`,
+      })
+    }
+
+    for (const q of quotationsRes.data ?? []) {
+      const client = Array.isArray(q.client) ? q.client[0] : q.client
+      results.push({
+        id: `quotation-${q.id}`,
+        kind: 'quotation',
+        label: q.quotation_number,
+        sublabel: `${client?.name ?? 'Unknown client'} · ${q.status}`,
+        href: `/dashboard/quotations`,
+      })
+    }
+
+    for (const pr of payrollRes.data ?? []) {
+      const emp = Array.isArray(pr.employee) ? pr.employee[0] : pr.employee
+      results.push({
+        id: `payroll-${pr.id}`,
+        kind: 'payroll',
+        label: pr.payslip_number || `Payslip`,
+        sublabel: `${emp?.name ?? 'Unknown employee'} · ${pr.month}/${pr.year}`,
+        badge: capitalize(pr.status || ''),
+        href: `/dashboard/payroll`,
+      })
+    }
+
+    for (const cb of cashbookRes.data ?? []) {
+      results.push({
+        id: `cashbook-${cb.id}`,
+        kind: 'cashbook',
+        label: cb.description || 'Entry',
+        sublabel: `${cb.entry_date} · Amount: ${cb.amount}`,
+        href: `/dashboard/cashbook`,
       })
     }
 
@@ -314,6 +405,18 @@ export function CommandPalette() {
           })),
         })
       }
+
+      // Add Quick Actions when query is empty
+      sections.push({
+        label: 'Quick Actions',
+        icon: Plus,
+        items: [
+          { id: 'qa-task', kind: 'action', label: 'Create new task', href: '/dashboard/tasks?new=true' },
+          { id: 'qa-invoice', kind: 'action', label: 'Create new invoice', href: '/dashboard/invoices?new=true' },
+          { id: 'qa-quotation', kind: 'action', label: 'Create new quotation', href: '/dashboard/quotations?new=true' },
+          { id: 'qa-cashbook', kind: 'action', label: 'Add cashbook entry', href: '/dashboard/cashbook?new=true' },
+        ],
+      })
     } else {
       const navFiltered = sortedNavItems.filter(n => n.label.toLowerCase().includes(q))
       if (navFiltered.length > 0) {
@@ -326,12 +429,23 @@ export function CommandPalette() {
         })
       }
       if (dbResults.length > 0) {
-        const tasks    = dbResults.filter(r => r.kind === 'task')
-        const invoices = dbResults.filter(r => r.kind === 'invoice')
-        const clients  = dbResults.filter(r => r.kind === 'client')
-        if (tasks.length)    sections.push({ label: 'Tasks',    items: tasks })
-        if (invoices.length) sections.push({ label: 'Invoices', items: invoices })
-        if (clients.length)  sections.push({ label: 'Clients',  items: clients })
+        const tasks      = dbResults.filter(r => r.kind === 'task')
+        const invoices   = dbResults.filter(r => r.kind === 'invoice')
+        const clients    = dbResults.filter(r => r.kind === 'client')
+        const employees  = dbResults.filter(r => r.kind === 'employee')
+        const projects   = dbResults.filter(r => r.kind === 'project')
+        const quotations = dbResults.filter(r => r.kind === 'quotation')
+        const payroll    = dbResults.filter(r => r.kind === 'payroll')
+        const cashbook   = dbResults.filter(r => r.kind === 'cashbook')
+
+        if (tasks.length)      sections.push({ label: 'Tasks',      items: tasks })
+        if (invoices.length)   sections.push({ label: 'Invoices',   items: invoices })
+        if (clients.length)    sections.push({ label: 'Clients',    items: clients })
+        if (employees.length)  sections.push({ label: 'Employees',  items: employees })
+        if (projects.length)   sections.push({ label: 'Projects',   items: projects })
+        if (quotations.length) sections.push({ label: 'Quotations', items: quotations })
+        if (payroll.length)    sections.push({ label: 'Payroll',    items: payroll })
+        if (cashbook.length)   sections.push({ label: 'Cashbook',   items: cashbook })
       }
     }
 

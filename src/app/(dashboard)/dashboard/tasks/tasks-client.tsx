@@ -19,7 +19,9 @@ import { formatCurrency } from '@/lib/calculations/currency'
 import Link from 'next/link'
 import Combobox from '@/components/ui/combobox'
 import { TitleAutocomplete } from '@/components/tasks/title-autocomplete'
-import { QuickCreateClientModal, QuickCreateServiceModal } from '@/components/tasks/quick-create-modals'
+
+const QuickCreateClientModal = dynamic(() => import('@/components/tasks/quick-create-modals').then(mod => mod.QuickCreateClientModal), { ssr: false })
+const QuickCreateServiceModal = dynamic(() => import('@/components/tasks/quick-create-modals').then(mod => mod.QuickCreateServiceModal), { ssr: false })
 import { markRequestPromoted, getRequestBriefForTask } from '@/app/(dashboard)/dashboard/requests/actions'
 import AppSelect from '@/components/ui/app-select'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
