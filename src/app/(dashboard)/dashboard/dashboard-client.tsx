@@ -103,12 +103,12 @@ function Drawer({ type, onClose, todayTasks, unscoredDoneTasks, overdueInvoices,
     today: {
       title: "Today's Tasks", items: todayTasks,
       render: t => (
-        <div className="flex items-center gap-3 px-5 py-3 hover:bg-secondary/40 transition-colors">
+        <div className="flex items-center gap-3 px-5 py-3 hover:bg-muted/50 transition-colors group">
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{t.title}</p>
-            <p className="text-xs text-muted-foreground">{t.client?.name || '—'}{t.service ? ` · ${t.service.name}` : ''}</p>
+            <p className="text-sm font-medium text-foreground truncate group-hover:text-primary transition-colors">{t.title}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{t.client?.name || '—'}{t.service ? ` · ${t.service.name}` : ''}</p>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-3 shrink-0">
             {t.billing_amount_inr > 0 && <span className="text-xs font-mono text-muted-foreground">{fmt(t.billing_amount_inr)}</span>}
             <StatusBadge status={t.status} />
           </div>
@@ -118,28 +118,28 @@ function Drawer({ type, onClose, todayTasks, unscoredDoneTasks, overdueInvoices,
     missing: {
       title: 'Missing Contributions', items: unscoredDoneTasks,
       render: t => (
-        <Link href="/dashboard/contributions" className="flex items-center gap-3 px-5 py-3 hover:bg-secondary/40 transition-colors group">
-          <div className="w-1.5 h-1.5 rounded-full bg-orange-400 shrink-0" />
+        <Link href="/dashboard/contributions" className="flex items-center gap-3 px-5 py-3 hover:bg-muted/50 transition-colors group">
+          <div className="w-1.5 h-1.5 rounded-full bg-orange-500 shrink-0" />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{t.title}</p>
-            <p className="text-xs text-muted-foreground">{t.client?.name || '—'}{t.task_date ? ` · ${fmtDate(t.task_date)}` : ''}{t.billing_amount_inr > 0 ? ` · ${fmt(t.billing_amount_inr)}` : ''}</p>
+            <p className="text-sm font-medium text-foreground truncate group-hover:text-primary transition-colors">{t.title}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{t.client?.name || '—'}{t.task_date ? ` · ${fmtDate(t.task_date)}` : ''}{t.billing_amount_inr > 0 ? ` · ${fmt(t.billing_amount_inr)}` : ''}</p>
           </div>
-          <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/40 group-hover:text-foreground shrink-0" />
+          <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/50 group-hover:text-foreground shrink-0 transition-colors" />
         </Link>
       ),
     },
     overdue: {
       title: 'Overdue Invoices', items: overdueInvoices,
       render: inv => (
-        <Link href="/dashboard/invoices" className="flex items-center gap-3 px-5 py-3 hover:bg-secondary/40 transition-colors group">
-          <div className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
+        <Link href="/dashboard/invoices" className="flex items-center gap-3 px-5 py-3 hover:bg-muted/50 transition-colors group">
+          <div className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium">{inv.invoice_number || `#${inv.id?.slice(0,6)}`}</p>
-            <p className="text-xs text-muted-foreground">{inv.client?.name}{inv.due_date ? ` · Due ${fmtDate(inv.due_date)}` : ''}</p>
+            <p className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">{inv.invoice_number || `#${inv.id?.slice(0,6)}`}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{inv.client?.name}{inv.due_date ? ` · Due ${fmtDate(inv.due_date)}` : ''}</p>
           </div>
           <div className="text-right shrink-0">
-            <p className="text-sm font-semibold text-red-400">{fmt((inv.total_amount||0)-(inv.paid_amount||0))}</p>
-            {inv.due_date && <p className="text-[10px] text-red-400/60">{daysLate(inv.due_date)}d late</p>}
+            <p className="text-sm font-semibold text-red-500">{fmt((inv.total_amount||0)-(inv.paid_amount||0))}</p>
+            {inv.due_date && <p className="text-[10px] text-red-500/80 mt-0.5 font-medium">{daysLate(inv.due_date)}d late</p>}
           </div>
         </Link>
       ),
@@ -147,15 +147,15 @@ function Drawer({ type, onClose, todayTasks, unscoredDoneTasks, overdueInvoices,
     due: {
       title: 'Due Invoices', items: dueInvoices,
       render: inv => (
-        <Link href="/dashboard/invoices" className="flex items-center gap-3 px-5 py-3 hover:bg-secondary/40 transition-colors group">
-          <div className="w-1.5 h-1.5 rounded-full bg-yellow-400 shrink-0" />
+        <Link href="/dashboard/invoices" className="flex items-center gap-3 px-5 py-3 hover:bg-muted/50 transition-colors group">
+          <div className="w-1.5 h-1.5 rounded-full bg-yellow-500 shrink-0" />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium">{inv.invoice_number || `#${inv.id?.slice(0,6)}`}</p>
-            <p className="text-xs text-muted-foreground">{inv.client?.name}{inv.due_date ? ` · Due ${fmtDate(inv.due_date)}` : ''}</p>
+            <p className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">{inv.invoice_number || `#${inv.id?.slice(0,6)}`}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{inv.client?.name}{inv.due_date ? ` · Due ${fmtDate(inv.due_date)}` : ''}</p>
           </div>
           <div className="text-right shrink-0">
-            <p className="text-sm font-semibold text-yellow-400">{fmt((inv.total_amount||0)-(inv.paid_amount||0))}</p>
-            {inv.due_date && <p className="text-[10px] text-muted-foreground">{daysToGo(inv.due_date)}d to go</p>}
+            <p className="text-sm font-semibold text-yellow-500">{fmt((inv.total_amount||0)-(inv.paid_amount||0))}</p>
+            {inv.due_date && <p className="text-[10px] text-muted-foreground mt-0.5 font-medium">{daysToGo(inv.due_date)}d to go</p>}
           </div>
         </Link>
       ),
@@ -163,25 +163,25 @@ function Drawer({ type, onClose, todayTasks, unscoredDoneTasks, overdueInvoices,
     toBeInvoiced: {
       title: 'To Be Invoiced', items: toBeInvoiced,
       render: t => (
-        <Link href="/dashboard/invoices" className="flex items-center gap-3 px-5 py-3 hover:bg-secondary/40 transition-colors group">
-          <div className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />
+        <Link href="/dashboard/invoices" className="flex items-center gap-3 px-5 py-3 hover:bg-muted/50 transition-colors group">
+          <div className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{t.title}</p>
-            <p className="text-xs text-muted-foreground">{t.client?.name || '—'}{t.task_date ? ` · ${fmtDate(t.task_date)}` : ''}</p>
+            <p className="text-sm font-medium text-foreground truncate group-hover:text-primary transition-colors">{t.title}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{t.client?.name || '—'}{t.task_date ? ` · ${fmtDate(t.task_date)}` : ''}</p>
           </div>
-          <span className="text-sm font-semibold shrink-0">{fmt(t.billing_amount_inr||0)}</span>
+          <span className="text-sm font-semibold text-blue-500 shrink-0">{fmt(t.billing_amount_inr||0)}</span>
         </Link>
       ),
     },
     active: {
       title: 'Active Tasks', items: activeTasks,
       render: t => (
-        <div className="flex items-center gap-3 px-5 py-3 hover:bg-secondary/40 transition-colors">
+        <div className="flex items-center gap-3 px-5 py-3 hover:bg-muted/50 transition-colors group">
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{t.title}</p>
-            <p className="text-xs text-muted-foreground">{t.client?.name || '—'}{t.service ? ` · ${t.service.name}` : ''}</p>
+            <p className="text-sm font-medium text-foreground truncate group-hover:text-primary transition-colors">{t.title}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{t.client?.name || '—'}{t.service ? ` · ${t.service.name}` : ''}</p>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-3 shrink-0">
             {t.billing_amount_inr > 0 && <span className="text-xs font-mono text-muted-foreground">{fmt(t.billing_amount_inr)}</span>}
             <StatusBadge status={t.status} />
           </div>
@@ -606,25 +606,25 @@ function FocusCard({ icon, color, title, count, unit, sub, items, onClick }: {
   sub?: string; items: string[]; onClick: () => void
 }) {
   const borders: Record<string, string> = {
-    blue: 'border-blue-500/25 hover:border-blue-500/50', orange: 'border-orange-500/25 hover:border-orange-500/50', red: 'border-red-500/25 hover:border-red-500/50',
-    violet: 'border-violet-500/25 hover:border-violet-500/50', cyan: 'border-cyan-500/25 hover:border-cyan-500/50', amber: 'border-amber-500/25 hover:border-amber-500/50', emerald: 'border-emerald-500/25 hover:border-emerald-500/50',
+    blue: 'border-blue-500/25 hover:border-blue-500/60', orange: 'border-orange-500/25 hover:border-orange-500/60', red: 'border-red-500/25 hover:border-red-500/60',
+    violet: 'border-violet-500/25 hover:border-violet-500/60', cyan: 'border-cyan-500/25 hover:border-cyan-500/60', amber: 'border-amber-500/25 hover:border-amber-500/60', emerald: 'border-emerald-500/25 hover:border-emerald-500/60',
   }
   const bgs: Record<string, string> = {
     blue: 'bg-blue-500/15', orange: 'bg-orange-500/15', red: 'bg-red-500/15',
     violet: 'bg-violet-500/15', cyan: 'bg-cyan-500/15', amber: 'bg-amber-500/15', emerald: 'bg-emerald-500/15',
   }
   return (
-    <button onClick={onClick} className={`group text-left bg-card border ${borders[color]} rounded-xl p-4 transition-all`}>
-      <div className="flex items-start gap-3">
+    <button onClick={onClick} className={`group text-left bg-card border ${borders[color]} shadow-sm rounded-xl p-4.5 transition-all hover:shadow-md hover:bg-muted/30`}>
+      <div className="flex items-start gap-3.5">
         <div className={`w-8 h-8 rounded-lg ${bgs[color]} flex items-center justify-center shrink-0 mt-0.5`}>{icon}</div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold">{title}</p>
-          <p className="text-xs text-muted-foreground mt-0.5">{count} {unit}{count !== 1 ? 's' : ''}{sub ? ` · ${sub}` : ''}</p>
-          <div className="mt-2 space-y-0.5">
-            {items.map((item, i) => <p key={i} className="text-xs text-muted-foreground/70 truncate">· {item}</p>)}
+          <p className="text-sm font-bold text-foreground group-hover:text-primary transition-colors">{title}</p>
+          <p className="text-[11px] font-medium text-muted-foreground mt-0.5">{count} {unit}{count !== 1 ? 's' : ''}{sub ? ` · ${sub}` : ''}</p>
+          <div className="mt-2.5 space-y-1">
+            {items.map((item, i) => <p key={i} className="text-[11px] font-medium text-muted-foreground/80 truncate">· {item}</p>)}
           </div>
         </div>
-        <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors shrink-0 mt-0.5" />
+        <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors shrink-0 mt-0.5 group-hover:translate-x-0.5" />
       </div>
     </button>
   )

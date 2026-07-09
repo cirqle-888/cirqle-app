@@ -424,13 +424,13 @@ export default function DashboardAnalytics({
                   </tr></thead>
                   <tbody className="divide-y divide-border/50">
                     {[...trendData].reverse().map((row, i) => (
-                      <tr key={i} className="hover:bg-secondary/30">
-                        <td className="px-4 py-2 font-medium">{row.period}</td>
-                        <td className="px-4 py-2 text-right text-green-400">{f(row.inflow)}</td>
-                        <td className="px-4 py-2 text-right text-red-400">{f(row.outflow)}</td>
-                        <td className={`px-4 py-2 text-right font-semibold ${row.net >= 0 ? 'text-green-400' : 'text-red-400'}`}>{f(row.net)}</td>
-                        <td className="px-4 py-2 text-right text-foreground">{f(row.taskValue)}</td>
-                        <td className="px-4 py-2 text-right text-muted-foreground">{row.taskCount}</td>
+                      <tr key={i} className="group hover:bg-muted/50 transition-colors">
+                        <td className="px-4 py-3 font-medium text-foreground">{row.period}</td>
+                        <td className="px-4 py-3 text-right text-green-500 font-medium">{f(row.inflow)}</td>
+                        <td className="px-4 py-3 text-right text-red-500 font-medium">{f(row.outflow)}</td>
+                        <td className={`px-4 py-3 text-right font-semibold ${row.net >= 0 ? 'text-green-500' : 'text-red-500'}`}>{f(row.net)}</td>
+                        <td className="px-4 py-3 text-right text-foreground font-medium">{f(row.taskValue)}</td>
+                        <td className="px-4 py-3 text-right text-muted-foreground">{row.taskCount}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -479,17 +479,17 @@ export default function DashboardAnalytics({
                 {clientDues.length === 0 ? (
                   <p className="px-4 py-6 text-center text-sm text-muted-foreground">No outstanding amounts</p>
                 ) : clientDues.map((c, i) => (
-                  <div key={i} className="flex items-center gap-3 px-4 py-2.5">
-                    <span className="text-xs text-muted-foreground w-5 shrink-0">{i+1}</span>
-                    <p className="text-sm font-medium flex-1">{c.name}</p>
+                  <div key={i} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/30 transition-colors">
+                    <span className="text-[11px] font-medium text-muted-foreground w-5 shrink-0">{i+1}</span>
+                    <p className="text-sm font-medium text-foreground flex-1">{c.name}</p>
                     <span className="text-xs text-muted-foreground">{c.invoiceCount} inv</span>
-                    <span className="text-sm font-semibold text-orange-400">{fmtFull(c.outstanding)}</span>
+                    <span className="text-sm font-semibold text-orange-500">{fmtFull(c.outstanding)}</span>
                   </div>
                 ))}
                 {clientDues.length > 0 && (
-                  <div className="flex items-center gap-3 px-4 py-2.5 bg-secondary/30">
-                    <span className="text-xs font-semibold flex-1">Total</span>
-                    <span className="text-sm font-bold text-orange-400">{fmtFull(clientDues.reduce((s,c) => s+c.outstanding, 0))}</span>
+                  <div className="flex items-center gap-3 px-4 py-3 bg-secondary/50 border-t border-border">
+                    <span className="text-xs font-semibold text-foreground flex-1">Total Outstanding</span>
+                    <span className="text-sm font-bold text-orange-500">{fmtFull(clientDues.reduce((s,c) => s+c.outstanding, 0))}</span>
                   </div>
                 )}
               </div>
@@ -539,16 +539,16 @@ export default function DashboardAnalytics({
                   </tr></thead>
                   <tbody className="divide-y divide-border/40">
                     {jobsVsPayroll.map((row, i) => (
-                      <tr key={i} className="hover:bg-secondary/30 transition-colors">
-                        <td className="px-3 py-2 font-medium">{row.label}</td>
-                        <td className="px-3 py-2 text-right text-muted-foreground">{row.payroll ? f(row.payroll) : '—'}</td>
-                        <td className="px-3 py-2 text-right text-green-400">{row.jobsDone ? f(row.jobsDone) : '—'}</td>
-                        <td className={`px-3 py-2 text-right font-semibold ${row.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>{row.profit ? f(row.profit) : '—'}</td>
-                        <td className={`px-3 py-2 text-right font-semibold ${row.pct >= 50 ? 'text-green-400' : row.pct >= 30 ? 'text-yellow-400' : 'text-red-400'}`}>{row.jobsDone ? `${row.pct}%` : '—'}</td>
-                        <td className="px-3 py-2 text-right text-green-400 border-l border-border/30">{row.inflow ? f(row.inflow) : '—'}</td>
-                        <td className="px-3 py-2 text-right text-red-400">{row.outflow ? f(row.outflow) : '—'}</td>
-                        <td className={`px-3 py-2 text-right font-semibold ${row.netCash >= 0 ? 'text-green-400' : 'text-red-400'}`}>{f(row.netCash)}</td>
-                        <td className={`px-3 py-2 text-right text-[11px] ${row.cashChange == null ? 'text-muted-foreground' : row.cashChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      <tr key={i} className="group hover:bg-muted/50 transition-colors">
+                        <td className="px-3 py-3 font-medium text-foreground">{row.label}</td>
+                        <td className="px-3 py-3 text-right text-muted-foreground">{row.payroll ? f(row.payroll) : '—'}</td>
+                        <td className="px-3 py-3 text-right text-green-500 font-medium">{row.jobsDone ? f(row.jobsDone) : '—'}</td>
+                        <td className={`px-3 py-3 text-right font-semibold ${row.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>{row.profit ? f(row.profit) : '—'}</td>
+                        <td className={`px-3 py-3 text-right font-semibold ${row.pct >= 50 ? 'text-green-500' : row.pct >= 30 ? 'text-yellow-500' : 'text-red-500'}`}>{row.jobsDone ? `${row.pct}%` : '—'}</td>
+                        <td className="px-3 py-3 text-right text-green-500 font-medium border-l border-border/30">{row.inflow ? f(row.inflow) : '—'}</td>
+                        <td className="px-3 py-3 text-right text-red-500 font-medium">{row.outflow ? f(row.outflow) : '—'}</td>
+                        <td className={`px-3 py-3 text-right font-semibold ${row.netCash >= 0 ? 'text-green-500' : 'text-red-500'}`}>{f(row.netCash)}</td>
+                        <td className={`px-3 py-3 text-right text-[11px] font-medium ${row.cashChange == null ? 'text-muted-foreground' : row.cashChange >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                           {row.cashChange == null ? '—' : `${row.cashChange >= 0 ? '+' : ''}${row.cashChange}%`}
                         </td>
                       </tr>
@@ -600,21 +600,21 @@ export default function DashboardAnalytics({
 
       {/* ── Bottom: Active Tasks + Cash + Team ─────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-card border border-border rounded-xl">
+        <div className="bg-card border border-border rounded-xl shadow-sm">
           <div className="px-4 py-3.5 border-b border-border flex items-center justify-between">
             <h2 className="font-semibold text-sm">Active Tasks</h2>
-            <button onClick={() => setDrawer('active')} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">View all <ChevronRight className="w-3 h-3" /></button>
+            <button onClick={() => setDrawer('active')} className="text-xs font-medium text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors">View all <ChevronRight className="w-3 h-3" /></button>
           </div>
           <div className="divide-y divide-border/60">
             {activeTasks.length === 0 ? (
               <p className="px-4 py-8 text-center text-sm text-muted-foreground">No active tasks</p>
             ) : activeTasks.slice(0, 7).map(t => (
-              <div key={t.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-secondary/40">
+              <div key={t.id} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/50 transition-colors group">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{t.title}</p>
-                  <p className="text-xs text-muted-foreground">{t.client?.name || '—'}{t.service ? ` · ${t.service.name}` : ''}</p>
+                  <p className="text-sm font-medium text-foreground truncate group-hover:text-primary transition-colors">{t.title}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{t.client?.name || '—'}{t.service ? ` · ${t.service.name}` : ''}</p>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-3 shrink-0">
                   {t.billing_amount_inr > 0 && <span className="text-xs text-muted-foreground font-mono">{f(t.billing_amount_inr)}</span>}
                   <StatusBadge status={t.status} />
                 </div>
@@ -625,21 +625,21 @@ export default function DashboardAnalytics({
 
         <div className="space-y-4">
           {/* Cash flow */}
-          <div className="bg-card border border-border rounded-xl">
+          <div className="bg-card border border-border rounded-xl shadow-sm">
             <div className="px-4 py-3.5 border-b border-border flex items-center justify-between">
               <div>
                 <h2 className="font-semibold text-sm">Cash Flow</h2>
-                <p className="text-[11px] text-muted-foreground mt-0.5">In: <span className="text-green-400">{f(periodInflow)}</span> · Out: <span className="text-red-400">{f(periodOutflow)}</span></p>
+                <p className="text-[11px] text-muted-foreground mt-0.5 font-medium">In: <span className="text-green-500">{f(periodInflow)}</span> · Out: <span className="text-red-500">{f(periodOutflow)}</span></p>
               </div>
-              <Link href="/dashboard/cashbook" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">Cash Book <ArrowRight className="w-3 h-3" /></Link>
+              <Link href="/dashboard/cashbook" className="text-xs font-medium text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors">Cash Book <ArrowRight className="w-3 h-3" /></Link>
             </div>
-            <div className="divide-y divide-border/60 max-h-48 overflow-y-auto">
+            <div className="divide-y divide-border/60 max-h-56 overflow-y-auto">
               {filteredCashbook.length === 0 ? (
                 <p className="px-4 py-6 text-center text-sm text-muted-foreground">No entries for this period</p>
               ) : filteredCashbook.slice(-10).reverse().map((e, i) => (
-                <div key={i} className="px-4 py-2 flex items-center gap-3">
-                  <div className="flex-1 min-w-0"><p className="text-xs truncate">{e.description || (e.type==='inflow' ? 'Income' : 'Expense')}</p><p className="text-[11px] text-muted-foreground/60">{fmtDate(e.entry_date)}</p></div>
-                  <span className={`text-sm font-semibold shrink-0 ${e.type==='inflow' ? 'text-green-400' : 'text-red-400'}`}>{e.type==='inflow' ? '+' : '−'}{f(e.amount_inr||0)}</span>
+                <div key={i} className="px-4 py-2.5 flex items-center gap-3 hover:bg-muted/30 transition-colors">
+                  <div className="flex-1 min-w-0"><p className="text-xs font-medium text-foreground truncate">{e.description || (e.type==='inflow' ? 'Income' : 'Expense')}</p><p className="text-[11px] text-muted-foreground/80 mt-0.5">{fmtDate(e.entry_date)}</p></div>
+                  <span className={`text-sm font-semibold shrink-0 ${e.type==='inflow' ? 'text-green-500' : 'text-red-500'}`}>{e.type==='inflow' ? '+' : '−'}{f(e.amount_inr||0)}</span>
                 </div>
               ))}
             </div>
@@ -647,26 +647,26 @@ export default function DashboardAnalytics({
 
           {/* Team earnings */}
           {employees.length > 0 && (
-            <div className="bg-card border border-border rounded-xl">
+            <div className="bg-card border border-border rounded-xl shadow-sm">
               <div className="px-4 py-3.5 border-b border-border flex items-center justify-between">
-                <div><h2 className="font-semibold text-sm">Team Earnings</h2><p className="text-[11px] text-muted-foreground mt-0.5">{periodLabel}</p></div>
-                <Link href="/dashboard/reports" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">Reports <BarChart2 className="w-3 h-3" /></Link>
+                <div><h2 className="font-semibold text-sm">Team Earnings</h2><p className="text-[11px] text-muted-foreground mt-0.5 font-medium">{periodLabel}</p></div>
+                <Link href="/dashboard/reports" className="text-xs font-medium text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors">Reports <BarChart2 className="w-3 h-3" /></Link>
               </div>
-              <div className="p-3 flex flex-wrap gap-2">
+              <div className="p-3 flex flex-wrap gap-2.5">
                 {teamEarnings.map((emp, i) => {
                   const colors = ['from-violet-500 to-purple-600','from-blue-500 to-cyan-500','from-emerald-500 to-green-600','from-orange-500 to-amber-500','from-pink-500 to-rose-500','from-teal-500 to-cyan-600']
                   return (
-                    <div key={emp.id} className="flex items-center gap-2 bg-secondary px-3 py-2 rounded-xl">
-                      <div className={`w-7 h-7 rounded-full bg-gradient-to-br ${colors[i%colors.length]} flex items-center justify-center shrink-0`}>
+                    <div key={emp.id} className="flex items-center gap-2.5 bg-secondary/60 border border-border/50 px-3.5 py-2.5 rounded-xl hover:border-primary/30 transition-colors">
+                      <div className={`w-8 h-8 rounded-full bg-gradient-to-br ${colors[i%colors.length]} flex items-center justify-center shrink-0 shadow-sm`}>
                         <span className="text-white text-[10px] font-bold">{emp.cqid?.replace('CQID','') || '?'}</span>
                       </div>
                       <div>
-                        <p className="text-xs font-semibold leading-tight">{dn(emp)}</p>
-                        <p className={`text-[11px] font-semibold leading-tight ${emp.earnings > 0 ? 'text-green-400' : 'text-muted-foreground'}`}>
+                        <p className="text-xs font-semibold text-foreground leading-tight">{dn(emp)}</p>
+                        <p className={`text-[11px] font-bold leading-tight mt-0.5 ${emp.earnings > 0 ? 'text-green-500' : 'text-muted-foreground'}`}>
                           {emp.earnings > 0 ? f(emp.earnings) : emp.taskCount > 0 ? `${emp.taskCount} tasks` : 'No data'}
                         </p>
                         {emp.taskCount > 0 && (
-                          <p className="text-[10px] text-muted-foreground/70 leading-tight mt-0.5">
+                          <p className="text-[10px] text-muted-foreground leading-tight mt-0.5 font-medium">
                             {emp.taskCount} task{emp.taskCount === 1 ? '' : 's'} · {emp.creatives.toLocaleString('en-IN', { maximumFractionDigits: 1 })} creative{emp.creatives === 1 ? '' : 's'}
                           </p>
                         )}
@@ -699,25 +699,25 @@ function KpiCard({ label, value, icon, color, sub, badge, trend, onClick, clicka
   const neutral   = showTrend && trend!.pct === 0
 
   return (
-    <Tag onClick={onClick} className={`bg-card border border-border rounded-xl p-4 ${clickable ? 'hover:border-border/80 hover:bg-secondary/20 transition-all text-left w-full cursor-pointer' : ''}`}>
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-[11px] text-muted-foreground font-medium leading-tight">{label}</p>
-        <div className={`w-6 h-6 rounded-md flex items-center justify-center ${cm[color] || cm.purple}`}>{icon}</div>
+    <Tag onClick={onClick} className={`bg-card border border-border shadow-sm rounded-xl p-4 ${clickable ? 'hover:border-primary/30 hover:shadow-md hover:bg-muted/30 transition-all text-left w-full cursor-pointer' : ''}`}>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">{label}</p>
+        <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${cm[color] || cm.purple}`}>{icon}</div>
       </div>
-      <div className="flex items-end gap-1.5">
-        <p className="text-lg font-bold leading-tight">{value}</p>
-        {badge != null && badge > 0 && <span className={`text-[10px] font-bold mb-0.5 px-1.5 py-0.5 rounded-full ${cm[color]}`}>{badge}</span>}
+      <div className="flex items-end gap-2">
+        <p className="text-2xl font-bold tracking-tight text-foreground leading-none">{value}</p>
+        {badge != null && badge > 0 && <span className={`text-[10px] font-bold mb-0.5 px-2 py-0.5 rounded-full ${cm[color]}`}>{badge}</span>}
       </div>
-      <div className="flex items-center gap-1.5 mt-0.5">
-        {sub && <p className="text-[11px] text-muted-foreground">{sub}</p>}
+      <div className="flex items-center gap-1.5 mt-2">
+        {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
         {showTrend && !neutral && (
-          <span className={`text-[10px] font-semibold flex items-center gap-0.5 ${positive ? 'text-green-400' : 'text-red-400'}`}>
-            {positive ? <TrendingUp className="w-3 h-3"/> : <TrendingDown className="w-3 h-3"/>}
-            {Math.abs(trend!.pct!)}% vs last mo.
+          <span className={`text-[11px] font-medium flex items-center gap-1 ${positive ? 'text-green-500' : 'text-red-500'}`}>
+            {positive ? <TrendingUp className="w-3.5 h-3.5"/> : <TrendingDown className="w-3.5 h-3.5"/>}
+            {Math.abs(trend!.pct!)}% vs prev
           </span>
         )}
         {showTrend && neutral && (
-          <span className="text-[10px] text-muted-foreground/50">= last mo.</span>
+          <span className="text-[11px] text-muted-foreground/50 font-medium">= last mo.</span>
         )}
       </div>
     </Tag>
@@ -771,14 +771,14 @@ function InvoiceTable({ title, color, invoices, showDaysLate, showDaysToGo }: { 
                 const owed = (inv.total_amount||0) - (inv.paid_amount||0)
                 const days = inv.due_date ? (showDaysLate ? daysLate(inv.due_date) : -daysToGo(inv.due_date)) : null
                 return (
-                  <tr key={i} className="hover:bg-secondary/30">
-                    <td className="px-4 py-2 font-mono font-medium">{inv.invoice_number || `#${inv.id?.slice(0,6)}`}</td>
-                    <td className="px-4 py-2">{inv.client?.name || '—'}</td>
-                    <td className="px-4 py-2 text-right text-muted-foreground">{fmtFull(inv.total_amount||0)}</td>
-                    <td className={`px-4 py-2 text-right font-semibold ${color==='red' ? 'text-red-400' : 'text-yellow-400'}`}>{fmtFull(owed)}</td>
-                    <td className="px-4 py-2 text-right">
+                  <tr key={i} className="group hover:bg-muted/50 transition-colors">
+                    <td className="px-4 py-3 font-mono font-medium text-foreground">{inv.invoice_number || `#${inv.id?.slice(0,6)}`}</td>
+                    <td className="px-4 py-3 font-medium text-foreground">{inv.client?.name || '—'}</td>
+                    <td className="px-4 py-3 text-right text-muted-foreground">{fmtFull(inv.total_amount||0)}</td>
+                    <td className={`px-4 py-3 text-right font-semibold ${color==='red' ? 'text-red-500' : 'text-yellow-500'}`}>{fmtFull(owed)}</td>
+                    <td className="px-4 py-3 text-right">
                       {days != null && (
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${showDaysLate ? 'bg-red-500/15 text-red-400' : 'bg-yellow-500/15 text-yellow-400'}`}>
+                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-semibold ${showDaysLate ? 'bg-red-500/15 text-red-500' : 'bg-yellow-500/15 text-yellow-500'}`}>
                           {showDaysLate ? `${days}d late` : `${Math.abs(days)}d to go`}
                         </span>
                       )}
@@ -818,11 +818,11 @@ function TaskInvoiceTable({ title, tasks }: { title: string; tasks: any[] }) {
             </tr></thead>
             <tbody className="divide-y divide-border/40">
               {tasks.map((t, i) => (
-                <tr key={i} className="hover:bg-secondary/30">
-                  <td className="px-4 py-2 font-medium max-w-[180px] truncate">{t.title || '—'}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{t.client?.name || '—'}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{t.task_date ? fmtDate(t.task_date) : '—'}</td>
-                  <td className="px-4 py-2 text-right font-semibold text-blue-400">{fmtFull(t.billing_amount_inr||0)}</td>
+                <tr key={i} className="group hover:bg-muted/50 transition-colors">
+                  <td className="px-4 py-3 font-medium text-foreground max-w-[180px] truncate">{t.title || '—'}</td>
+                  <td className="px-4 py-3 font-medium text-foreground">{t.client?.name || '—'}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{t.task_date ? fmtDate(t.task_date) : '—'}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-blue-500">{fmtFull(t.billing_amount_inr||0)}</td>
                 </tr>
               ))}
             </tbody>
@@ -845,16 +845,16 @@ function RankTable({ title, icon, rows }: { title: string; icon: React.ReactNode
         {rows.length === 0 ? (
           <p className="px-4 py-5 text-center text-sm text-muted-foreground">No data</p>
         ) : rows.map((row, i) => (
-          <div key={i} className="px-4 py-2.5">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-[10px] text-muted-foreground w-4 shrink-0">{i+1}</span>
-              <span className="text-xs font-medium flex-1 truncate">{row.label}</span>
+          <div key={i} className="px-4 py-3 hover:bg-muted/30 transition-colors">
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="text-[10px] text-muted-foreground w-4 shrink-0 font-medium">{i+1}</span>
+              <span className="text-xs font-medium text-foreground flex-1 truncate">{row.label}</span>
               <span className="text-xs font-semibold text-foreground shrink-0">{fmtFull(row.value)}</span>
             </div>
-            <div className="ml-6 h-1 bg-border/50 rounded-full overflow-hidden">
-              <div className="h-full gradient-bg rounded-full" style={{ width: `${Math.round((row.value/maxVal)*100)}%` }} />
+            <div className="ml-6 h-1.5 bg-secondary rounded-full overflow-hidden">
+              <div className="h-full bg-primary/80 rounded-full" style={{ width: `${Math.round((row.value/maxVal)*100)}%` }} />
             </div>
-            {row.sub && <p className="text-[10px] text-muted-foreground ml-6 mt-0.5">{row.sub}</p>}
+            {row.sub && <p className="text-[10px] text-muted-foreground ml-6 mt-1 font-medium">{row.sub}</p>}
           </div>
         ))}
       </div>
