@@ -31,12 +31,37 @@ export function ModalOverlay({
   const contentRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (isConfirmation) return
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
+    // Lock body scroll when mounted
+    const originalStyle = window.getComputedStyle(document.body).overflow
+    document.body.style.overflow = 'hidden'
+
+    if (!isConfirmation) {
+      const onKey = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') onClose()
+      }
+      document.addEventListener('keydown', onKey)
+      
+      // Auto-focus the dialog when it opens to trap keyboard focus
+      setTimeout(() => {
+        if (contentRef.current && !contentRef.current.contains(document.activeElement)) {
+          const firstInput = contentRef.current.querySelector('input, button, select, textarea') as HTMLElement
+          if (firstInput) {
+            firstInput.focus()
+          } else {
+            contentRef.current.focus()
+          }
+        }
+      }, 10)
+
+      return () => {
+        document.body.style.overflow = originalStyle
+        document.removeEventListener('keydown', onKey)
+      }
     }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
+
+    return () => {
+      document.body.style.overflow = originalStyle
+    }
   }, [onClose, isConfirmation])
 
   // Alignment: centered dialog by default; bottom-anchored sheet on mobile when opted in.
@@ -55,7 +80,13 @@ export function ModalOverlay({
         }
       }}
     >
-      <div ref={contentRef} className="contents">
+      <div
+        ref={contentRef}
+        role="dialog"
+        aria-modal="true"
+        className={sheetOnMobile ? "w-full max-h-[90vh] sm:max-h-[85vh] flex flex-col focus:outline-none" : "w-full max-h-[90vh] flex flex-col focus:outline-none max-w-fit"}
+        tabIndex={-1}
+      >
         {children}
       </div>
     </div>

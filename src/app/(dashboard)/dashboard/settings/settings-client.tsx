@@ -21,16 +21,18 @@ import {
   syncExchangeRates,
   upsertMatrixCell,
 } from './actions'
-import { Plus, X, Edit2, Archive, ArchiveRestore, Save, ChevronDown, ChevronLeft, ChevronRight, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Mail, Send, RotateCcw as ResetKey, RefreshCw, Star } from 'lucide-react'
+import { Plus, X, Edit2, Archive, ArchiveRestore, Save, ChevronDown, ChevronLeft, ChevronRight, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Mail, Send, RotateCcw as ResetKey, RefreshCw, Star, LayoutGrid, List, Building2, MapPin } from 'lucide-react'
 import type { Currency } from '@/types'
 import InfoTip from '@/components/ui/info-tip'
 import { usePrivacy, getStoredPin, setStoredPin, isForceLocked } from '@/contexts/privacy-context'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { generateInviteToken, revokeInviteToken, archiveEmployee, restoreEmployee, adminResetPassword, updateEmployeeAvatar } from './employee-actions'
-import { RecalcBillingModal } from './recalc-billing-modal'
-import { RecalcCommissionsModal } from './recalc-commissions-modal'
+import dynamic from 'next/dynamic'
+
+const RecalcBillingModal = dynamic(() => import('./recalc-billing-modal').then(mod => mod.RecalcBillingModal), { ssr: false })
+const RecalcCommissionsModal = dynamic(() => import('./recalc-commissions-modal').then(mod => mod.RecalcCommissionsModal), { ssr: false })
+const PerformanceHistoryModal = dynamic(() => import('./performance-history-modal').then(mod => mod.PerformanceHistoryModal), { ssr: false })
 import { EmployeeAvatar, AvatarPicker } from '@/components/ui/employee-avatar'
-import { PerformanceHistoryModal } from './performance-history-modal'
 import { DEFAULT_TEMPLATES, TEMPLATE_KEYS, TEMPLATE_DOCS, templatesFromSettings, type MessageTemplates } from '@/lib/messaging/templates'
 import { INTAKE_KINDS, INTAKE_KIND_META } from '@/lib/services/intake'
 import { isDesktop, getReceiptSharePref, setReceiptSharePref, RECEIPT_SHARE_LABELS, RECEIPT_SHARE_HINTS, type ReceiptShareAction } from '@/lib/desktop'
@@ -211,9 +213,10 @@ export default function SettingsClient(props: Props) {
   // ── Quick Edit ─────────────────────────────────────
   const [quickEdit, setQuickEdit] = useState(false)
 
-  // ── Per-tab search + sort ───────────────────────────
+  // ── Per-tab search + sort + view ───────────────────────────
   const [clientSearch, setClientSearch] = useState('')
   const [clientSort, setClientSort] = useState<'name' | 'code'>('name')
+  const [clientViewMode, setClientViewMode] = useState<'list' | 'grid'>('list')
   const [serviceSearch, setServiceSearch] = useState('')
   const [serviceSort, setServiceSort] = useState<'name' | 'usage'>('usage')
   const [groupSearch, setGroupSearch] = useState('')
@@ -1701,105 +1704,223 @@ export default function SettingsClient(props: Props) {
                     }`}>
                     <Zap className="w-3 h-3" /> {quickEdit ? 'Exit edit' : 'Quick edit'}
                   </button>
+                  {/* View Toggle */}
+                  <div className="flex items-center bg-secondary border border-border rounded-lg p-0.5">
+                    <button onClick={() => setClientViewMode('list')} className={`p-1 rounded-md transition-colors ${clientViewMode === 'list' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                      <List className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => setClientViewMode('grid')} className={`p-1 rounded-md transition-colors ${clientViewMode === 'grid' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                      <LayoutGrid className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
-                <button onClick={() => openClientForm()} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90">
+                <button onClick={() => openClientForm()} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:shadow-lg hover:shadow-primary/20 hover:opacity-90 transition-all">
                   <Plus className="w-4 h-4" /> Add Client
                 </button>
               </div>
-              <div className="flex items-center gap-2 mb-3">
-                <SearchBar value={clientSearch} onChange={setClientSearch} placeholder="Search clients…" className="flex-1" />
+              <div className="flex items-center gap-2 mb-4">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <input
+                    value={clientSearch}
+                    onChange={e => setClientSearch(e.target.value)}
+                    placeholder="Search clients by name, code, or email…"
+                    className="w-full pl-9 pr-3 py-2 bg-card border border-border hover:border-border/80 focus:border-primary rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all shadow-sm"
+                  />
+                </div>
                 <button onClick={() => setClientSort(s => s === 'name' ? 'code' : 'name')}
-                  className="flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg bg-secondary border border-border text-muted-foreground hover:text-foreground transition-colors shrink-0">
-                  <ArrowUpDown className="w-3 h-3" />
+                  className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-card border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-all shadow-sm shrink-0">
+                  <ArrowUpDown className="w-3.5 h-3.5" />
                   Sort: {clientSort === 'name' ? 'Name' : 'Code'}
                 </button>
               </div>
               {quickEdit && (
-                <p className="text-[11px] text-amber-400/70 bg-amber-500/5 border border-amber-500/15 rounded-lg px-3 py-2 mb-3 flex items-center gap-1.5">
+                <p className="text-[11px] text-amber-400/70 bg-amber-500/5 border border-amber-500/15 rounded-lg px-3 py-2 mb-4 flex items-center gap-1.5">
                   <Zap className="w-3 h-3 shrink-0" /> Click any field to edit — changes auto-save when you leave the field. Use the ✏️ button for full edit.
                 </p>
               )}
-              <div className="space-y-1.5">
-                {filteredClients.map((client: any) => quickEdit ? (
-                  <div key={client.id} className="bg-card border border-amber-500/20 rounded-xl px-3 py-2.5 flex items-center gap-2">
-                    <input
-                      key={`${client.id}-name`}
-                      defaultValue={client.name}
-                      onBlur={e => qeSave(quickEditClient, client.id, 'name', e.target.value.trim(), setClients as any)}
-                      className="flex-1 bg-secondary border border-border/0 hover:border-border focus:border-primary rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:bg-background transition-colors"
-                      placeholder="Name"
-                    />
-                    <input
-                      key={`${client.id}-code`}
-                      defaultValue={client.code}
-                      onBlur={e => qeSave(quickEditClient, client.id, 'code', e.target.value.trim().toUpperCase(), setClients as any)}
-                      className="w-16 bg-secondary border border-border/0 hover:border-border focus:border-primary rounded-lg px-2 py-1.5 text-sm font-mono text-center focus:outline-none focus:bg-background transition-colors"
-                      placeholder="Code"
-                    />
-                    <input
-                      key={`${client.id}-phone`}
-                      defaultValue={client.phone || ''}
-                      onBlur={e => qeSave(quickEditClient, client.id, 'phone', e.target.value.trim(), setClients as any)}
-                      className="w-36 bg-secondary border border-border/0 hover:border-border focus:border-primary rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:bg-background transition-colors"
-                      placeholder="Phone"
-                    />
-                    <input
-                      key={`${client.id}-email`}
-                      defaultValue={client.email || ''}
-                      onBlur={e => qeSave(quickEditClient, client.id, 'email', e.target.value.trim(), setClients as any)}
-                      className="w-44 bg-secondary border border-border/0 hover:border-border focus:border-primary rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:bg-background transition-colors"
-                      placeholder="Email"
-                    />
-                    <button onClick={() => openClientForm(client)} className="p-1.5 rounded-lg hover:bg-secondary transition-colors text-muted-foreground/40 hover:text-foreground shrink-0">
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ) : (
-                  <div key={client.id} className="bg-card border border-border rounded-xl px-5 py-4 flex items-center justify-between">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="font-medium">{client.name}</p>
-                        <span className="text-xs font-mono bg-secondary px-2 py-0.5 rounded">{client.code}</span>
-                        {client.pricing_pending && (
-                          <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/25">
-                            Needs pricing
-                          </span>
-                        )}
-                        {clientOutstanding[client.id]?.outstanding > 0 && (
-                          <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-400 border border-orange-500/20">
-                            ₹{Math.round(clientOutstanding[client.id].outstanding).toLocaleString('en-IN')} outstanding
-                          </span>
-                        )}
-                        {clientOutstanding[client.id] && clientOutstanding[client.id].outstanding <= 0 && clientOutstanding[client.id].billed > 0 && (
-                          <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 border border-green-500/20">
-                            Paid up
-                          </span>
-                        )}
+
+              {clientViewMode === 'grid' && !quickEdit ? (
+                /* Grid View */
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {filteredClients.map((client: any) => {
+                    const initials = (client.name.match(/\b\w/g) || []).slice(0, 2).join('').toUpperCase()
+                    return (
+                      <div key={client.id} className="group relative bg-card border border-border/60 hover:border-primary/30 hover:shadow-md hover:shadow-primary/5 rounded-2xl p-5 transition-all overflow-hidden flex flex-col h-full">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary/10 to-violet-500/10 border border-primary/10 flex items-center justify-center text-primary font-semibold text-sm shrink-0 shadow-inner">
+                              {initials}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-semibold text-foreground truncate">{client.name}</p>
+                              <p className="text-xs text-muted-foreground font-mono mt-0.5">{client.code}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => openClientForm(client)} className="p-1.5 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"><Edit2 className="w-3.5 h-3.5" /></button>
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5 mb-4 flex-1">
+                          {client.email && (
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground truncate">
+                              <Mail className="w-3.5 h-3.5 shrink-0" /> <span className="truncate">{client.email}</span>
+                            </div>
+                          )}
+                          {client.phone && (
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground truncate">
+                              <Building2 className="w-3.5 h-3.5 shrink-0" /> <span className="truncate">{client.phone}</span>
+                            </div>
+                          )}
+                          {client.country && (
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground truncate">
+                              <MapPin className="w-3.5 h-3.5 shrink-0" /> <span className="truncate">{client.country}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap gap-1.5 mt-auto pt-4 border-t border-border/40">
+                          {client.pricing_pending && (
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-500 border border-amber-500/20">Needs pricing</span>
+                          )}
+                          {clientOutstanding[client.id]?.outstanding > 0 && (
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-orange-500/10 text-orange-500 border border-orange-500/20">
+                              ₹{Math.round(clientOutstanding[client.id].outstanding).toLocaleString('en-IN')} out
+                            </span>
+                          )}
+                          {clientOutstanding[client.id] && clientOutstanding[client.id].outstanding <= 0 && clientOutstanding[client.id].billed > 0 && (
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">Paid</span>
+                          )}
+                          {!client.pricing_pending && !(clientOutstanding[client.id]?.outstanding > 0) && !(clientOutstanding[client.id] && clientOutstanding[client.id].outstanding <= 0 && clientOutstanding[client.id].billed > 0) && (
+                            <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-secondary text-muted-foreground border border-border/50">Active</span>
+                          )}
+                        </div>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {[client.email, client.phone].filter(Boolean).join(' · ')}
-                        {clientOutstanding[client.id]?.billed > 0 && (
-                          <span className="ml-2 text-muted-foreground/60">
-                            Billed: ₹{Math.round(clientOutstanding[client.id].billed).toLocaleString('en-IN')}
-                            {' · '}Paid: ₹{Math.round(clientOutstanding[client.id].paid).toLocaleString('en-IN')}
-                          </span>
-                        )}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button onClick={() => openClientForm(client)} className="p-2 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground">
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => requestDelete('Client', client.id, client.name, async () => {
-                        await deactivateClient(client.id)
-                        setClients(prev => prev.filter((x: any) => x.id !== client.id))
-                      })} className="p-2 rounded-lg hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400 transition-colors" title="Archive client">
-                        <Archive className="w-4 h-4" />
-                      </button>
-                    </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                /* List View / Quick Edit */
+                <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-secondary/50 text-muted-foreground sticky top-0 z-10 backdrop-blur-md">
+                        <tr>
+                          <th className="text-left font-medium px-4 py-3 text-xs w-[300px]">Client</th>
+                          <th className="text-left font-medium px-4 py-3 text-xs">Contact Info</th>
+                          <th className="text-left font-medium px-4 py-3 text-xs">Financial Status</th>
+                          <th className="text-right font-medium px-4 py-3 text-xs w-[100px]">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/40">
+                        {filteredClients.map((client: any) => quickEdit ? (
+                          <tr key={client.id} className="bg-amber-500/5 group">
+                            <td className="px-4 py-2.5">
+                              <div className="flex items-center gap-2">
+                                <input
+                                  key={`${client.id}-name`}
+                                  defaultValue={client.name}
+                                  onBlur={e => qeSave(quickEditClient, client.id, 'name', e.target.value.trim(), setClients as any)}
+                                  className="w-[180px] bg-background border border-border/50 hover:border-border focus:border-primary rounded-md px-2 py-1 text-sm focus:outline-none transition-colors"
+                                  placeholder="Name"
+                                />
+                                <input
+                                  key={`${client.id}-code`}
+                                  defaultValue={client.code}
+                                  onBlur={e => qeSave(quickEditClient, client.id, 'code', e.target.value.trim().toUpperCase(), setClients as any)}
+                                  className="w-16 bg-background border border-border/50 hover:border-border focus:border-primary rounded-md px-2 py-1 text-sm font-mono focus:outline-none transition-colors"
+                                  placeholder="Code"
+                                />
+                              </div>
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <div className="flex flex-col gap-1.5">
+                                <input
+                                  key={`${client.id}-email`}
+                                  defaultValue={client.email || ''}
+                                  onBlur={e => qeSave(quickEditClient, client.id, 'email', e.target.value.trim(), setClients as any)}
+                                  className="w-full bg-background border border-border/50 hover:border-border focus:border-primary rounded-md px-2 py-1 text-xs focus:outline-none transition-colors"
+                                  placeholder="Email"
+                                />
+                                <input
+                                  key={`${client.id}-phone`}
+                                  defaultValue={client.phone || ''}
+                                  onBlur={e => qeSave(quickEditClient, client.id, 'phone', e.target.value.trim(), setClients as any)}
+                                  className="w-full bg-background border border-border/50 hover:border-border focus:border-primary rounded-md px-2 py-1 text-xs focus:outline-none transition-colors"
+                                  placeholder="Phone"
+                                />
+                              </div>
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <span className="text-[11px] text-muted-foreground/60 italic">Quick edit restricted</span>
+                            </td>
+                            <td className="px-4 py-2.5 text-right">
+                              <button onClick={() => openClientForm(client)} className="p-1.5 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground">
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        ) : (
+                          <tr key={client.id} className="hover:bg-secondary/40 transition-colors group">
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className="w-8 h-8 rounded-lg bg-secondary border border-border/50 flex items-center justify-center text-foreground font-semibold text-xs shrink-0">
+                                  {(client.name.match(/\b\w/g) || []).slice(0, 2).join('').toUpperCase()}
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="font-medium text-foreground truncate">{client.name}</p>
+                                  <p className="text-xs font-mono text-muted-foreground mt-0.5">{client.code}</p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                                {client.email && <span className="truncate">{client.email}</span>}
+                                {client.phone && <span className="truncate">{client.phone}</span>}
+                                {!client.email && !client.phone && <span className="opacity-40 italic">No contact info</span>}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {client.pricing_pending && (
+                                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-500 border border-amber-500/20">Needs pricing</span>
+                                )}
+                                {clientOutstanding[client.id]?.outstanding > 0 && (
+                                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-orange-500/10 text-orange-500 border border-orange-500/20">
+                                    ₹{Math.round(clientOutstanding[client.id].outstanding).toLocaleString('en-IN')} out
+                                  </span>
+                                )}
+                                {clientOutstanding[client.id] && clientOutstanding[client.id].outstanding <= 0 && clientOutstanding[client.id].billed > 0 && (
+                                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">Paid</span>
+                                )}
+                                {clientOutstanding[client.id]?.billed > 0 && (
+                                  <span className="text-[10px] text-muted-foreground ml-1">
+                                    Billed: ₹{Math.round(clientOutstanding[client.id].billed).toLocaleString('en-IN')}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button onClick={() => openClientForm(client)} className="p-1.5 rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground">
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </button>
+                                <button onClick={() => requestDelete('Client', client.id, client.name, async () => {
+                                  await deactivateClient(client.id)
+                                  setClients(prev => prev.filter((x: any) => x.id !== client.id))
+                                })} className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors" title="Archive client">
+                                  <Archive className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                ))}
-              </div>
+                </div>
+              )}
             </div>
           )}
 

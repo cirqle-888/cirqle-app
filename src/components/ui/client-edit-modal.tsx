@@ -185,36 +185,51 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
         </div>
 
         {loading ? (
-          <div className="flex items-center justify-center py-16 text-muted-foreground text-sm">Loading…</div>
+          <div className="flex items-center justify-center py-20">
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-6 h-6 rounded-full border-2 border-primary border-t-transparent animate-spin"></div>
+              <p className="text-muted-foreground text-sm font-medium">Loading details…</p>
+            </div>
+          </div>
         ) : (
-          <form onSubmit={handleSubmit} className="p-6 space-y-4">
-            <div className="flex flex-col sm:grid sm:grid-cols-3 gap-3">
+          <form onSubmit={handleSubmit} className="p-6 space-y-6">
+            <div className="flex flex-col sm:grid sm:grid-cols-3 gap-4">
               <div className="sm:col-span-2">
                 <Field label="Client Name" required>
-                  <input value={form.name || ''} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} required className={inputCls} />
+                  <input value={form.name || ''} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} required className={inputCls} placeholder="e.g. Acme Corp" />
                 </Field>
               </div>
-              <Field label="Code">
-                <div className="w-full bg-secondary/50 border border-border rounded-lg px-3 py-2 text-sm font-mono font-bold text-primary">{form.code || '—'}</div>
+              <Field label="Client Code">
+                <div className="w-full bg-secondary/30 border border-border/60 rounded-lg px-3 py-2 text-sm font-mono font-semibold text-primary/80 flex items-center">{form.code || 'Auto-generated'}</div>
               </Field>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Field label="Email"><input type="email" value={form.email || ''} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} className={inputCls} /></Field>
-              <Field label="Phone"><input value={form.phone || ''} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} className={inputCls} /></Field>
-            </div>
+            {/* Contact Information Card */}
+            <div className="bg-secondary/20 border border-border/50 rounded-xl p-4 space-y-4">
+              <h3 className="text-xs font-semibold text-foreground uppercase tracking-wider mb-2">Contact Information</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Field label="Email Address">
+                  <input type="email" value={form.email || ''} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} className={inputCls} placeholder="contact@acme.com" />
+                </Field>
+                <Field label="Phone Number">
+                  <input value={form.phone || ''} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} className={inputCls} placeholder="+1 234 567 8900" />
+                </Field>
+              </div>
 
-            <Field label="Address">
-              <textarea value={form.address || ''} onChange={e => setForm(p => ({ ...p, address: e.target.value }))} rows={2} className={inputCls + ' resize-none'} />
-            </Field>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Field label="Country"><input value={form.country || ''} onChange={e => setForm(p => ({ ...p, country: e.target.value }))} className={inputCls} placeholder="India" /></Field>
-              <Field label="Default Currency">
-                <AppSelect value={form.default_currency || 'INR'} onChange={e => setForm(p => ({ ...p, default_currency: e.target.value }))}>
-                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-                </AppSelect>
+              <Field label="Billing Address">
+                <textarea value={form.address || ''} onChange={e => setForm(p => ({ ...p, address: e.target.value }))} rows={2} className={inputCls + ' resize-none placeholder:text-muted-foreground/50'} placeholder="123 Business Rd&#10;Suite 100" />
               </Field>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Field label="Country">
+                  <input value={form.country || ''} onChange={e => setForm(p => ({ ...p, country: e.target.value }))} className={inputCls} placeholder="United States" />
+                </Field>
+                <Field label="Default Currency">
+                  <AppSelect value={form.default_currency || 'INR'} onChange={e => setForm(p => ({ ...p, default_currency: e.target.value }))}>
+                    {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </AppSelect>
+                </Field>
+              </div>
             </div>
 
             {/* Billing Cycle */}

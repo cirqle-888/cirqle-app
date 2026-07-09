@@ -19,7 +19,9 @@ import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { TokenizedSearch, type SearchFacet } from '@/components/ui/tokenized-search'
 import { recordMatchesFacets, type FacetFieldDef } from '@/lib/search/match-facets'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
-import { ClientEditModal } from '@/components/ui/client-edit-modal'
+import dynamic from 'next/dynamic'
+
+const ClientEditModal = dynamic(() => import('@/components/ui/client-edit-modal').then(mod => mod.ClientEditModal), { ssr: false })
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

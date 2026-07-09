@@ -5,6 +5,9 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { completeRegistration } from './actions'
 import { AvatarPicker } from '@/components/ui/employee-avatar'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 
 interface Props {
   token: string
@@ -108,94 +111,102 @@ export default function RegisterClient({ token, employee }: Props) {
             </Section>
 
             <Section title="Account">
-              <Field label="Email address" required>
-                <input
+              <div className="space-y-1.5">
+                <Label htmlFor="email" required>Email address</Label>
+                <Input
+                  id="email"
                   type="email"
                   value={email}
                   onChange={e => setEmail(e.target.value)}
                   required
-                  className={inputCls}
                   placeholder="you@example.com"
                 />
-              </Field>
-              <Field label="Password" required>
-                <input
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="password" required>Password</Label>
+                <Input
+                  id="password"
                   type="password"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   required
                   minLength={8}
-                  className={inputCls}
                   placeholder="At least 8 characters"
                 />
-              </Field>
-              <Field label="Confirm password" required>
-                <input
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="confirm" required>Confirm password</Label>
+                <Input
+                  id="confirm"
                   type="password"
                   value={confirm}
                   onChange={e => setConfirm(e.target.value)}
                   required
                   minLength={8}
-                  className={inputCls}
                   placeholder="Re-enter password"
                 />
-              </Field>
+              </div>
             </Section>
 
             <Section title="Personal details">
-              <Field label="Full name" required>
-                <input
+              <div className="space-y-1.5">
+                <Label htmlFor="name" required>Full name</Label>
+                <Input
+                  id="name"
                   type="text"
                   value={name}
                   onChange={e => setName(e.target.value)}
                   required
-                  className={inputCls}
                   placeholder="Your full name"
                 />
-              </Field>
-              <Field label="Phone" required>
-                <input
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="phone" required>Phone</Label>
+                <Input
+                  id="phone"
                   type="tel"
                   value={phone}
                   onChange={e => setPhone(e.target.value)}
                   required
-                  className={inputCls}
                   placeholder="+91 9XXXX XXXXX"
                 />
-              </Field>
-              <Field label="Date of birth" required>
-                <input
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="dob" required>Date of birth</Label>
+                <Input
+                  id="dob"
                   type="date"
                   value={dob}
                   onChange={e => setDob(e.target.value)}
                   required
                   max={new Date().toISOString().slice(0, 10)}
-                  className={inputCls}
                 />
-              </Field>
+              </div>
             </Section>
 
             <Section title="Emergency contact">
-              <Field label="Contact name" required>
-                <input
+              <div className="space-y-1.5">
+                <Label htmlFor="emerName" required>Contact name</Label>
+                <Input
+                  id="emerName"
                   type="text"
                   value={emerName}
                   onChange={e => setEmerName(e.target.value)}
                   required
-                  className={inputCls}
                   placeholder="e.g. Parent / spouse"
                 />
-              </Field>
-              <Field label="Contact phone" required>
-                <input
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="emerPhone" required>Contact phone</Label>
+                <Input
+                  id="emerPhone"
                   type="tel"
                   value={emerPhone}
                   onChange={e => setEmerPhone(e.target.value)}
                   required
-                  className={inputCls}
                   placeholder="+91 9XXXX XXXXX"
                 />
-              </Field>
+              </div>
             </Section>
 
             {error && (
@@ -207,13 +218,14 @@ export default function RegisterClient({ token, employee }: Props) {
               </div>
             )}
 
-            <button
+            <Button
               type="submit"
-              disabled={loading}
-              className="w-full gradient-bg text-white font-medium py-2.5 rounded-lg text-sm hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              loading={loading}
+              className="w-full bg-gradient-to-r from-primary to-violet-600 text-primary-foreground hover:from-primary/90 hover:to-violet-600/90"
+              size="lg"
             >
-              {loading ? 'Creating account…' : 'Complete registration'}
-            </button>
+              Complete registration
+            </Button>
 
             <p className="text-center text-xs text-muted-foreground">
               Already have an account?{' '}
@@ -230,9 +242,6 @@ export default function RegisterClient({ token, employee }: Props) {
   )
 }
 
-const inputCls =
-  'w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-colors'
-
 function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
     <div>
@@ -242,27 +251,7 @@ function Section({ title, subtitle, children }: { title: string; subtitle?: stri
         </h3>
         {subtitle && <span className="text-[11px] text-muted-foreground/60">{subtitle}</span>}
       </div>
-      <div className="space-y-3">{children}</div>
-    </div>
-  )
-}
-
-function Field({
-  label,
-  required,
-  children,
-}: {
-  label: string
-  required?: boolean
-  children: React.ReactNode
-}) {
-  return (
-    <div>
-      <label className="block text-sm font-medium text-foreground mb-1">
-        {label}
-        {required && <span className="text-destructive ml-0.5">*</span>}
-      </label>
-      {children}
+      <div className="space-y-4">{children}</div>
     </div>
   )
 }

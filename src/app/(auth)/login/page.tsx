@@ -5,6 +5,9 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Eye, EyeOff } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { resolveLoginEmail, getCompanyLogo, recordLoginActivity } from './actions'
 
 const REMEMBER_KEY = 'cirqle-login-id'
@@ -133,11 +136,12 @@ function LoginInner() {
         {/* Card */}
         <div className="bg-card border border-border rounded-2xl p-6 shadow-xl">
           <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-1.5">
+            <div className="space-y-1.5">
+              <Label htmlFor="identifier">
                 Email or CQID
-              </label>
-              <input
+              </Label>
+              <Input
+                id="identifier"
                 type="text"
                 value={identifier}
                 onChange={e => setIdentifier(e.target.value)}
@@ -147,16 +151,16 @@ function LoginInner() {
                 spellCheck={false}
                 inputMode="email"
                 autoComplete="username"
-                className="w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-colors"
                 placeholder="you@cirqle.work  or  CQID00X"
+                error={!!error}
               />
             </div>
 
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-sm font-medium text-foreground">
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password">
                   Password
-                </label>
+                </Label>
                 <Link
                   href="/forgot-password"
                   className="text-xs text-primary hover:underline"
@@ -164,28 +168,30 @@ function LoginInner() {
                   Forgot password?
                 </Link>
               </div>
-              {/* Wrapper holds the input + the show/hide eye toggle.
-                  Padding-right on the input reserves space for the icon button. */}
               <div className="relative">
-                <input
+                <Input
+                  id="password"
                   ref={passwordRef}
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   required
                   autoComplete="current-password"
-                  className="w-full bg-secondary border border-border rounded-lg pl-3 pr-10 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-colors"
                   placeholder="••••••••"
+                  className="pr-10"
+                  error={!!error}
                 />
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon-sm"
                   onClick={() => setShowPassword(s => !s)}
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground transition-colors"
+                  className="absolute right-1 top-1 text-muted-foreground hover:text-foreground"
                   tabIndex={-1}
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
+                </Button>
               </div>
             </div>
 
@@ -210,13 +216,15 @@ function LoginInner() {
               </div>
             )}
 
-            <button
+            <Button
               type="submit"
-              disabled={loading || !hydrated}
-              className="w-full gradient-bg text-white font-medium py-2.5 rounded-lg text-sm hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed mt-2"
+              loading={loading}
+              disabled={!hydrated}
+              className="w-full mt-2 bg-gradient-to-r from-primary to-violet-600 text-primary-foreground hover:from-primary/90 hover:to-violet-600/90"
+              size="lg"
             >
-              {loading ? 'Signing in…' : 'Sign in'}
-            </button>
+              Sign in
+            </Button>
 
             <p className="text-center text-xs text-muted-foreground pt-1">
               You'll stay signed in on this device.

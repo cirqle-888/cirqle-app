@@ -65,3 +65,29 @@ export async function publishAdEvent(eventType: AdEventType, payload: AdEventPay
     // Notify admin
   }
 }
+
+/**
+ * Publishes MULTIPLE advertising events (batched).
+ */
+export async function publishAdEventsBatch(events: { eventType: AdEventType; payload: AdEventPayload }[]) {
+  const supabase = createAdminClient()
+
+  const validEvents = events.filter(e => e.payload.projectId)
+  if (!validEvents.length) return
+
+  const rows = validEvents.map(e => ({
+    project_id: e.payload.projectId,
+    event_type: e.eventType,
+    created_by: e.payload.employeeId || null,
+    metadata: e.payload.metadata || {}
+  }))
+
+  await supabase.from('ad_events').insert(rows)
+
+  for (const e of events) {
+    if (e.eventType === 'sync_failed') {
+      // Notify admin
+    }
+  }
+}
+

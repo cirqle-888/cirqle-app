@@ -123,3 +123,64 @@ export async function notifyAdmins(input: NotificationContent): Promise<void> {
     console.warn('notifyAdmins threw:', err)
   }
 }
+
+/** Notify every active admin employee of MULTIPLE notifications (batched). */
+export async function notifyAdminsBatch(inputs: NotificationContent[]): Promise<void> {
+  if (!inputs.length) return
+  try {
+    const admin = createAdminClient()
+    const { data: employees, error: empErr } = await admin
+      .from('employees')
+      .select('id, designation_id, designation:designation_id(is_admin)')
+      .eq('is_active', true)
+    if (empErr || !employees) { console.warn('notifyAdminsBatch: could not list employees:', empErr?.message); return }
+
+    type EmployeeRow = { id: string; designation_id: string | null; designation: { is_admin: boolean } | { is_admin: boolean }[] | null }
+    const adminIds = (employees as EmployeeRow[])
+      .filter(e => !e.designation_id || (Array.isArray(e.designation) ? e.designation[0]?.is_admin : e.designation?.is_admin) === true)
+      .map(e => e.id)
+    if (!adminIds.length) return
+
+    const rows: any[] = []
+    for (const input of inputs) {
+      for (const employeeId of adminIds) {
+        rows.push({
+          employee_id: employeeId,
+          type: input.type,
+          title: input.title,
+          message: input.message ?? null,
+          link: input.link ?? null,
+          source_key: input.sourceKey ?? null,
+        })
+      }
+    }
+    
+    // Attempt bulk insert; ignores 23505 constraints via fallback.
+    const { error } = await admin.from('notifications').insert(rows)
+    if (error) {
+      if (error.code === '23505') {
+        for (const row of rows) {
+          const { error: rowErr } = await admin.from('notifications').insert(row)
+          if (rowErr && rowErr.code !== '23505') console.warn('notifyAdminsBatch row failed:', rowErr.message)
+        }
+      } else {
+        console.warn('notifyAdminsBatch failed:', error.message)
+      }
+    }
+    
+    // Web push each admin's devices for each notification
+    for (const employeeId of adminIds) {
+      for (const input of inputs) {
+        void sendWebPush(employeeId, {
+          title: input.title,
+          body: input.message ?? undefined,
+          url: input.link ?? '/dashboard',
+          tag: input.sourceKey ?? undefined,
+        })
+      }
+    }
+  } catch (err) {
+    console.warn('notifyAdminsBatch threw:', err)
+  }
+}
+

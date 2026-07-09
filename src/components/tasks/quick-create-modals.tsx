@@ -2,16 +2,17 @@
 
 import { useState } from 'react'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
-import { X, Loader2, Building2, Briefcase, AlertTriangle } from 'lucide-react'
+import { X, Building2, Briefcase, AlertTriangle } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import AppSelect from '@/components/ui/app-select'
 import {
   quickCreateClient, quickCreateService,
   type QuickClientInput, type QuickServiceInput,
 } from '@/app/(dashboard)/dashboard/tasks/quick-create-actions'
 
 const CURRENCIES = ['INR', 'AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
-const inputCls =
-  'w-full bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20'
-const labelCls = 'block text-xs font-medium text-muted-foreground mb-1.5'
 
 // ─── Quick-create CLIENT ────────────────────────────────────────────────────────
 
@@ -49,31 +50,31 @@ export function QuickCreateClientModal({
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground"><X className="w-4 h-4" /></button>
         </div>
 
-        <div className="p-5 space-y-3.5">
-          <div>
-            <label className={labelCls}>Client name *</label>
-            <input autoFocus value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} className={inputCls} placeholder="e.g. Sea Star Supermarket" />
+        <div className="p-5 space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="clientName" required>Client name</Label>
+            <Input id="clientName" autoFocus value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g. Sea Star Supermarket" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>Phone</label>
-              <input value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} className={inputCls} placeholder="+91…" />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="clientPhone">Phone</Label>
+              <Input id="clientPhone" value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} placeholder="+91…" />
             </div>
-            <div>
-              <label className={labelCls}>Currency</label>
-              <select value={form.default_currency} onChange={e => setForm(p => ({ ...p, default_currency: e.target.value }))} className={inputCls}>
+            <div className="space-y-1.5">
+              <Label htmlFor="clientCurrency">Currency</Label>
+              <AppSelect id="clientCurrency" value={form.default_currency} onChange={e => setForm(p => ({ ...p, default_currency: e.target.value }))}>
                 {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
+              </AppSelect>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>Contact name</label>
-              <input value={form.contact_name} onChange={e => setForm(p => ({ ...p, contact_name: e.target.value }))} className={inputCls} placeholder="Optional" />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="clientContact">Contact name</Label>
+              <Input id="clientContact" value={form.contact_name} onChange={e => setForm(p => ({ ...p, contact_name: e.target.value }))} placeholder="Optional" />
             </div>
-            <div>
-              <label className={labelCls}>Email</label>
-              <input value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} className={inputCls} placeholder="Optional" />
+            <div className="space-y-1.5">
+              <Label htmlFor="clientEmail">Email</Label>
+              <Input id="clientEmail" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} placeholder="Optional" />
             </div>
           </div>
 
@@ -87,10 +88,10 @@ export function QuickCreateClientModal({
         </div>
 
         <div className="flex gap-3 px-5 pb-5">
-          <button onClick={onClose} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80 transition-colors">Cancel</button>
-          <button onClick={submit} disabled={saving || !form.name.trim()} className="flex-1 bg-primary text-primary-foreground text-sm font-medium py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
-            {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Adding…</> : 'Add Client'}
-          </button>
+          <Button variant="outline" onClick={onClose} className="flex-1">Cancel</Button>
+          <Button onClick={submit} disabled={!form.name.trim()} loading={saving} className="flex-1">
+            Add Client
+          </Button>
         </div>
       </div>
     </ModalOverlay>
@@ -145,29 +146,29 @@ export function QuickCreateServiceModal({
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground"><X className="w-4 h-4" /></button>
         </div>
 
-        <div className="p-5 space-y-3.5">
-          <div>
-            <label className={labelCls}>Service name *</label>
-            <input autoFocus value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} className={inputCls} placeholder="e.g. Offer Flyer" />
+        <div className="p-5 space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="serviceName" required>Service name</Label>
+            <Input id="serviceName" autoFocus value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g. Offer Flyer" />
           </div>
-          <div>
-            <label className={labelCls}>Pricing type</label>
-            <select value={form.pricing_type} onChange={e => setForm(p => ({ ...p, pricing_type: e.target.value }))} className={inputCls}>
+          <div className="space-y-1.5">
+            <Label htmlFor="serviceType">Pricing type</Label>
+            <AppSelect id="serviceType" value={form.pricing_type} onChange={e => setForm(p => ({ ...p, pricing_type: e.target.value }))}>
               {PRICING_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </select>
+            </AppSelect>
           </div>
 
           {canSeePricing ? (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={labelCls}>Default price</label>
-                <input value={form.priceStr} onChange={e => setForm(p => ({ ...p, priceStr: e.target.value }))} className={inputCls} placeholder="Optional" inputMode="decimal" />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="servicePrice">Default price</Label>
+                <Input id="servicePrice" value={form.priceStr} onChange={e => setForm(p => ({ ...p, priceStr: e.target.value }))} placeholder="Optional" inputMode="decimal" />
               </div>
-              <div>
-                <label className={labelCls}>Currency</label>
-                <select value={form.default_currency} onChange={e => setForm(p => ({ ...p, default_currency: e.target.value }))} className={inputCls}>
+              <div className="space-y-1.5">
+                <Label htmlFor="serviceCurrency">Currency</Label>
+                <AppSelect id="serviceCurrency" value={form.default_currency} onChange={e => setForm(p => ({ ...p, default_currency: e.target.value }))}>
                   {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
+                </AppSelect>
               </div>
             </div>
           ) : (
@@ -180,10 +181,10 @@ export function QuickCreateServiceModal({
         </div>
 
         <div className="flex gap-3 px-5 pb-5">
-          <button onClick={onClose} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80 transition-colors">Cancel</button>
-          <button onClick={submit} disabled={saving || !form.name.trim()} className="flex-1 bg-primary text-primary-foreground text-sm font-medium py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
-            {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Adding…</> : 'Add Service'}
-          </button>
+          <Button variant="outline" onClick={onClose} className="flex-1">Cancel</Button>
+          <Button onClick={submit} disabled={!form.name.trim()} loading={saving} className="flex-1">
+            Add Service
+          </Button>
         </div>
       </div>
     </ModalOverlay>

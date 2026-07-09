@@ -7,9 +7,9 @@
  */
 
 import { createAdminClient } from '@/lib/supabase/server'
-import { publishAdEvent } from './events'
+import { publishAdEvent, publishAdEventsBatch, AdEventType, AdEventPayload } from './events'
 import { AdDailyMetricRow } from './types'
-import { notifyAdmins } from '@/lib/notifications/create'
+import { notifyAdmins, notifyAdminsBatch } from '@/lib/notifications/create'
 import { aggregateMetrics } from './reporting'
 
 export interface IngestRow {
@@ -150,14 +150,20 @@ export async function ingestMetrics(
         .from('ad_projects').select('*').in('id', projectIds)
       const projById = new Map<string, any>((projMeta || []).map((p: any) => [p.id, p]))
 
+      const eventsBatch: { eventType: AdEventType; payload: AdEventPayload }[] = []
+      const notificationsBatch: any[] = []
+
       for (const pid of projectIds) {
         const projectRows = upsertPayloads.filter(p => p.project_id === pid)
         if (projectRows.length === 0) continue
 
-        await publishAdEvent('metrics_imported', {
-          projectId: pid,
-          employeeId: employeeId || undefined,
-          metadata: { source, rows_processed: projectRows.length }
+        eventsBatch.push({
+          eventType: 'metrics_imported',
+          payload: {
+            projectId: pid,
+            employeeId: employeeId || undefined,
+            metadata: { source, rows_processed: projectRows.length }
+          }
         })
 
         const meta = projById.get(pid)
@@ -171,7 +177,7 @@ export async function ingestMetrics(
         // engagement/hiring campaigns have no revenue, so ROAS 0 there is normal,
         // not an alert condition.
         if (agg.spend > 0 && agg.revenue > 0 && agg.roas < lowRoasThreshold) {
-          await notifyAdmins({
+          notificationsBatch.push({
             type: 'low_roas',
             title: 'Low ROAS Alert',
             message: `${label} ROAS is ${agg.roas.toFixed(2)}, below threshold ${lowRoasThreshold}.`,
@@ -181,7 +187,7 @@ export async function ingestMetrics(
         }
 
         if (agg.clicks > 0 && agg.cpc > highCpcThreshold) {
-          await notifyAdmins({
+          notificationsBatch.push({
             type: 'high_cpc',
             title: 'High CPC Alert',
             message: `${label} CPC is ${agg.cpc.toFixed(2)}, above threshold ${highCpcThreshold}.`,
@@ -190,8 +196,12 @@ export async function ingestMetrics(
           })
         }
       }
+
+      await publishAdEventsBatch(eventsBatch)
+      await notifyAdminsBatch(notificationsBatch)
     }
   }
 
   return result
 }
+
