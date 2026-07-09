@@ -1681,7 +1681,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
     const stopInline = (e: React.MouseEvent) => { if (inlineEditMode) e.stopPropagation() }
     switch (key) {
       case 'client': return (
-        <td key={key} className="px-4 py-3 text-muted-foreground" onClick={stopInline}>
+        <td key={key} className="px-5 py-3.5 text-muted-foreground" onClick={stopInline}>
           {inlineEditMode ? (
             <select value={task.client_id} onChange={async e => {
               const newId = e.target.value
@@ -1700,7 +1700,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
         </td>
       )
       case 'service': return (
-        <td key={key} className="px-4 py-3 text-muted-foreground" onClick={stopInline}>
+        <td key={key} className="px-5 py-3.5 text-muted-foreground" onClick={stopInline}>
           {inlineEditMode ? (
             <select value={task.service_id} onChange={async e => {
               const newId = e.target.value
@@ -1714,7 +1714,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
         </td>
       )
       case 'date': return (
-        <td key={key} className="px-4 py-3 text-muted-foreground whitespace-nowrap" onClick={stopInline}>
+        <td key={key} className="px-5 py-3.5 text-muted-foreground whitespace-nowrap" onClick={stopInline}>
           {inlineEditMode ? (
             <input type="date" defaultValue={task.task_date} onBlur={async e => {
               const val = e.target.value
@@ -1727,7 +1727,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
         </td>
       )
       case 'billing': return (
-        <td key={key} className="px-4 py-3 text-right font-medium" onClick={stopInline}>
+        <td key={key} className="px-5 py-3.5 text-right font-medium" onClick={stopInline}>
           {role !== 'team_lead' && inlineEditMode ? (
             <input type="number" defaultValue={task.billing_amount ?? 0} onBlur={async e => {
               const val = parseFloat(e.target.value) || 0
@@ -1740,17 +1740,17 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
         </td>
       )
       case 'qty': return (
-        <td key={key} className="px-3 py-3 text-center text-sm font-medium text-foreground" onClick={stopInline}>
+        <td key={key} className="px-4 py-3.5 text-center text-sm font-medium text-foreground" onClick={stopInline}>
           {task.quantity ?? 1}
         </td>
       )
       case 'total': return (
-        <td key={key} className="px-4 py-3 text-right font-medium" onClick={stopInline}>
+        <td key={key} className="px-5 py-3.5 text-right font-medium" onClick={stopInline}>
           {formatCurrency(task.billing_amount ?? 0, task.currency as Currency)}
         </td>
       )
       case 'status': return (
-        <td key={key} className="px-4 py-3" onClick={e => e.stopPropagation()}>
+        <td key={key} className="px-5 py-3.5" onClick={e => e.stopPropagation()}>
           <select value={task.status} onChange={e => updateStatus(task.id, e.target.value)}
             className={`text-xs px-2 py-1 rounded-md border-0 cursor-pointer ${getStatusColor(task.status)}`}
             style={{ background: 'transparent' }}>
@@ -2311,9 +2311,8 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                 wraps or which optional buttons are visible. */}
             <thead className="sticky z-10 bg-card" style={{ top: 0 }}>
               <tr className="border-b border-border bg-secondary/50">
-                {/* Bulk select checkbox column */}
                 {bulkMode && (
-                  <th className="w-10 pl-4 pr-2 py-3 bg-secondary/95 backdrop-blur-sm">
+                  <th className="w-10 pl-5 pr-2 py-3.5 bg-secondary/95 backdrop-blur-sm">
                     <input
                       type="checkbox"
                       checked={visibleTasks.length > 0 && visibleTasks.every(t => selectedTasks.has(t.id))}
@@ -2325,15 +2324,15 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                     />
                   </th>
                 )}
-                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground w-20 bg-secondary/95 backdrop-blur-sm">Task No.</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground w-full bg-secondary/95 backdrop-blur-sm">Task Title</th>
+                <th className="text-left px-5 py-3.5 text-xs font-medium text-muted-foreground w-20 bg-secondary/95 backdrop-blur-sm">Task No.</th>
+                <th className="text-left px-5 py-3.5 text-xs font-medium text-muted-foreground w-full bg-secondary/95 backdrop-blur-sm">Task Title</th>
                 {/* Reorderable columns — drag handle on hover (desktop), panel for mobile */}
                 <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleColHeaderDragEnd}>
                   <SortableContext items={visibleCols} strategy={horizontalListSortingStrategy}>
                     {visibleCols.map(key => {
                       const base = 'text-xs font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm pl-6'
                       if (key === 'client') return (
-                        <SortableColHeader key="client" id="client" className={`text-left px-4 py-3 ${base}`}>
+                        <SortableColHeader key="client" id="client" className={`text-left px-5 py-3.5 ${base}`}>
                           <button onClick={() => setSortBy(s => s === 'client' ? 'date_desc' : 'client')}
                             className={`flex items-center gap-1 hover:text-foreground transition-colors ${sortBy === 'client' ? 'text-violet-400' : ''}`}>
                             Client <span className={`text-[10px] ${sortBy === 'client' ? 'opacity-100' : 'opacity-30'}`}>↕</span>
@@ -2341,12 +2340,12 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                         </SortableColHeader>
                       )
                       if (key === 'service') return (
-                        <SortableColHeader key="service" id="service" className={`text-left px-4 py-3 ${base}`}>
+                        <SortableColHeader key="service" id="service" className={`text-left px-5 py-3.5 ${base}`}>
                           Service
                         </SortableColHeader>
                       )
                       if (key === 'date') return (
-                        <SortableColHeader key="date" id="date" className={`text-left px-4 py-3 ${base}`}>
+                        <SortableColHeader key="date" id="date" className={`text-left px-5 py-3.5 ${base}`}>
                           <button onClick={() => setSortBy(s => s === 'date_desc' ? 'date_asc' : 'date_desc')}
                             className={`flex items-center gap-1 hover:text-foreground transition-colors ${sortBy === 'date_desc' || sortBy === 'date_asc' ? 'text-violet-400' : ''}`}>
                             Date
@@ -2357,7 +2356,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                         </SortableColHeader>
                       )
                       if (key === 'billing') return (
-                        <SortableColHeader key="billing" id="billing" className={`text-right px-4 py-3 ${base}`}>
+                        <SortableColHeader key="billing" id="billing" className={`text-right px-5 py-3.5 ${base}`}>
                           <button onClick={() => setSortBy(s => s === 'amount_desc' ? 'date_desc' : 'amount_desc')}
                             className={`flex items-center gap-1 ml-auto hover:text-foreground transition-colors ${sortBy === 'amount_desc' ? 'text-violet-400' : ''}`}>
                             Billing <span className={`text-[10px] ${sortBy === 'amount_desc' ? 'opacity-100' : 'opacity-30'}`}>↓</span>
@@ -2365,17 +2364,17 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                         </SortableColHeader>
                       )
                       if (key === 'qty') return (
-                        <SortableColHeader key="qty" id="qty" className={`text-center px-3 py-3 w-14 ${base}`}>
+                        <SortableColHeader key="qty" id="qty" className={`text-center px-4 py-3.5 w-14 ${base}`}>
                           Qty
                         </SortableColHeader>
                       )
                       if (key === 'total') return (
-                        <SortableColHeader key="total" id="total" className={`text-right px-4 py-3 ${base}`}>
+                        <SortableColHeader key="total" id="total" className={`text-right px-5 py-3.5 ${base}`}>
                           Total
                         </SortableColHeader>
                       )
                       if (key === 'status') return (
-                        <SortableColHeader key="status" id="status" className={`text-left px-4 py-3 ${base}`}>
+                        <SortableColHeader key="status" id="status" className={`text-left px-5 py-3.5 ${base}`}>
                           Status
                         </SortableColHeader>
                       )
@@ -2447,7 +2446,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                     {dateTasks.map(task => (
                 <tr key={task.id}
                   data-taskid={task.id}
-                  className={`hover-gradient-row group ${inlineEditMode ? '' : 'cursor-pointer'} ${bulkMode && selectedTasks.has(task.id) ? 'bg-violet-500/[0.07]' : ''} ${highlightedTaskId === task.id ? 'ring-1 ring-violet-400 bg-violet-500/10' : ''}`}
+                  className={`group transition-colors hover:bg-muted/50 ${inlineEditMode ? '' : 'cursor-pointer'} ${bulkMode && selectedTasks.has(task.id) ? 'bg-violet-500/[0.07]' : ''} ${highlightedTaskId === task.id ? 'ring-1 ring-violet-400 bg-violet-500/10' : ''}`}
                   onClick={
                     bulkMode
                       ? () => setSelectedTasks(prev => {
@@ -2462,7 +2461,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                   }
                 >
                   {bulkMode && (
-                    <td className="w-10 pl-4 pr-2 py-3" onClick={e => e.stopPropagation()}>
+                    <td className="w-10 pl-5 pr-2 py-3.5" onClick={e => e.stopPropagation()}>
                       <input
                         type="checkbox"
                         checked={selectedTasks.has(task.id)}
@@ -2477,7 +2476,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                     </td>
                   )}
                   {/* Task No. column */}
-                  <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                  <td className="px-5 py-3.5" onClick={e => e.stopPropagation()}>
                     <span
                       title={`Task code · click to copy ${taskCode(task)}`}
                       onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(taskCode(task)) }}
@@ -2487,7 +2486,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                     </span>
                   </td>
                   {/* Task Title column */}
-                  <td className="px-4 py-3" onClick={e => inlineEditMode && e.stopPropagation()}>
+                  <td className="px-5 py-3.5" onClick={e => inlineEditMode && e.stopPropagation()}>
                     {inlineEditMode ? (
                       <input
                         type="text"
@@ -3104,7 +3103,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                             <div
                               key={task.id + section.label + (section.paramName || '')}
                               onClick={() => openEdit(task)}
-                              className="bg-card border border-border rounded-xl p-3 hover:border-foreground/25 transition-colors group cursor-pointer"
+                              className="bg-card border border-border/60 rounded-xl p-3 hover:border-violet-500/30 hover:shadow-sm transition-all group cursor-pointer"
                             >
                               <div className="flex items-start gap-2">
                                 <div className="flex-1 min-w-0">
