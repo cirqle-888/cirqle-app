@@ -1,0 +1,15 @@
+src/lib/supabase/client.ts(5,30): error TS2558: Expected 2 type arguments, but got 3.
+src/lib/supabase/client.ts(23,7): error TS2304: Cannot find name 'logger'.
+src/lib/supabase/client.ts(31,5): error TS2304: Cannot find name 'logger'.
+src/lib/supabase/middleware.ts(132,39): error TS2558: Expected 2 type arguments, but got 3.
+src/lib/supabase/middleware.ts(138,16): error TS7006: Parameter 'cookiesToSet' implicitly has an 'any' type.
+src/lib/supabase/middleware.ts(139,35): error TS7031: Binding element 'name' implicitly has an 'any' type.
+src/lib/supabase/middleware.ts(139,41): error TS7031: Binding element 'value' implicitly has an 'any' type.
+src/lib/supabase/middleware.ts(141,35): error TS7031: Binding element 'name' implicitly has an 'any' type.
+src/lib/supabase/middleware.ts(141,41): error TS7031: Binding element 'value' implicitly has an 'any' type.
+src/lib/supabase/middleware.ts(141,48): error TS7031: Binding element 'options' implicitly has an 'any' type.
+src/lib/supabase/server.ts(19,29): error TS2558: Expected 2 type arguments, but got 3.
+src/lib/supabase/server.ts(25,16): error TS7006: Parameter 'cookiesToSet' implicitly has an 'any' type.
+src/lib/supabase/server.ts(27,37): error TS7031: Binding element 'name' implicitly has an 'any' type.
+src/lib/supabase/server.ts(27,43): error TS7031: Binding element 'value' implicitly has an 'any' type.
+src/lib/supabase/server.ts(27,50): error TS7031: Binding element 'options' implicitly has an 'any' type.

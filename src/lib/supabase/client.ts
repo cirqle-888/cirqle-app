@@ -1,7 +1,16 @@
 import { createBrowserClient } from '@supabase/ssr'
+import { Database } from '../../types/supabase'
+import { logger } from '../logger'
 
 export function createClient() {
   return createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
+}
+
+export function createTypedClient() {
+  return createBrowserClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
@@ -19,7 +28,7 @@ export async function safeFetchAll(query: any) {
   for (let page = 0; page < 100; page++) {
     const { data, error } = await query.range(page * PAGE, (page + 1) * PAGE - 1)
     if (error) {
-      console.error('safeFetchAll error:', error)
+      logger.error('safeFetchAll error', error)
       break
     }
     if (data) allData.push(...data)
@@ -27,7 +36,7 @@ export async function safeFetchAll(query: any) {
   }
   
   if (allData.length >= 5000) {
-    console.warn(`[PERF WARNING] safeFetchAll fetched a very large dataset: ${allData.length} rows. Consider adding date filters or cursor pagination if this grows further.`)
+    logger.warn(`[PERF WARNING] safeFetchAll fetched a very large dataset: ${allData.length} rows. Consider adding date filters or cursor pagination if this grows further.`)
   }
   return { data: allData }
 }

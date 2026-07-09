@@ -1,0 +1,17 @@
+{
+  "appId": "work.cirqle.app",
+  "appName": "Cirqle",
+  "webDir": "www",
+  "server": {
+    "url": "https://app.cirqle.work",
+    "cleartext": false,
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false
+  },
+  "ios": {
+    "contentInset": "always",
+    "limitsNavigationsToAppBoundDomains": false
+  }
+}

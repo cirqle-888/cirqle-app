@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Cirqle</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0b0b0c; color: #fff;
+      font-family: -apple-system, system-ui, Roboto, sans-serif;
+      display: flex; align-items: center; justify-content: center; }
+    .box { text-align: center; opacity: .85; }
+    .spinner { width: 34px; height: 34px; margin: 0 auto 14px;
+      border: 3px solid rgba(255,255,255,.2); border-top-color: #fff;
+      border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <!-- Fallback shown only if the live app can't load (offline). Capacitor
+       normally loads https://app.cirqle.work directly via server.url. -->
+  <div class="box">
+    <div class="spinner"></div>
+    <div>Connecting to Cirqle…</div>
+  </div>
+</body>
+</html>
