@@ -17,7 +17,8 @@
  * On any failure the record is updated with status=failed + error_message.
  */
 
-import { createAdminClient } from '@/lib/supabase/server'
+import { createTypedAdminClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 import { buildRenderData } from './render-engine'
 import { generatePDF } from './exporters/pdf'
 import { generateExcel } from './exporters/excel'
@@ -33,7 +34,7 @@ import type {
  * Returns OrchestrationResult with all export URLs.
  */
 export async function generateReport(config: ReportConfig): Promise<OrchestrationResult> {
-  const admin = createAdminClient()
+  const admin = createTypedAdminClient()
   const t0 = Date.now()
   let reportId = ''
 
@@ -82,7 +83,7 @@ export async function generateReport(config: ReportConfig): Promise<Orchestratio
         const result = await uploadExport(reportId, format, buffer, renderData)
         return result
       } catch (err: any) {
-        console.error(`[Orchestrator] Export ${format} failed:`, err.message)
+        logger.error(`[Orchestrator] Export ${format} failed`, err)
         return null
       }
     })
@@ -152,13 +153,13 @@ export async function generateReport(config: ReportConfig): Promise<Orchestratio
         status:            'ready',
         generation_time_ms: generationTimeMs,
         generated_at:       new Date().toISOString(),
-        render_data:        renderData,
-        ai_narrative:       renderData.ai,
+        render_data:        renderData as any,
+        ai_narrative:       renderData.ai as any,
         ...urlMap,
       })
       .eq('id', reportId)
 
-    if (updateErr) console.error('[Orchestrator] Failed to update report record:', updateErr.message)
+    if (updateErr) logger.error('[Orchestrator] Failed to update report record', new Error(updateErr.message))
 
     // ── 7. Track generated event ───────────────────────────────────────
     // Use .then(null, () => {}) instead of .catch() — Supabase returns a
@@ -179,7 +180,7 @@ export async function generateReport(config: ReportConfig): Promise<Orchestratio
       delivery,
     }
   } catch (err: any) {
-    console.error('[Orchestrator] Fatal error:', err)
+    logger.error('[Orchestrator] Fatal error', err)
     await markFailed(admin, reportId, err.message)
     return {
       reportId,
@@ -221,7 +222,7 @@ async function runExporter(format: ReportFormat, data: RenderData): Promise<Buff
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-async function markFailed(admin: ReturnType<typeof createAdminClient>, reportId: string, message: string) {
+async function markFailed(admin: ReturnType<typeof createTypedAdminClient>, reportId: string, message: string) {
   try {
     await admin.from('ad_reports').update({
       status:        'failed',

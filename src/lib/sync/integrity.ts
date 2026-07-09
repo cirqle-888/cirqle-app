@@ -1,4 +1,4 @@
-import { createAdminClient } from '@/lib/supabase/server'
+import { createTypedAdminClient } from '@/lib/supabase/server'
 import { calculateCommission } from '@/lib/calculations/commission'
 import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
 import { syncTaskAgreementEarnings } from '@/lib/sync/agreement-earnings'
@@ -21,7 +21,7 @@ const r2 = (n: number) => Math.round(n * 100) / 100
  * so historical imported earnings are never zeroed out.
  */
 export async function refreshStoredEarningsFromBilling(taskId: string) {
-  const supabase = createAdminClient()
+  const supabase = createTypedAdminClient()
 
   const { data: task } = await supabase
     .from('tasks')
@@ -52,13 +52,14 @@ export async function refreshStoredEarningsFromBilling(taskId: string) {
   let toolPct = 0
   const { data: taskTools } = await supabase.from('task_tools').select('tool_id').eq('task_id', taskId)
   if (taskTools && taskTools.length) {
+    const validToolIds = taskTools.map(t => t.tool_id).filter((id): id is string => id !== null)
     const { data: tools } = await supabase
-      .from('tools').select('fixed_percentage, is_active').in('id', taskTools.map(t => t.tool_id))
+      .from('tools').select('fixed_percentage, is_active').in('id', validToolIds)
     toolPct = (tools || []).reduce((s, t) => s + (t.is_active !== false ? Number(t.fixed_percentage) || 0 : 0), 0)
   }
 
   // Current performance ratings for the contributing employees.
-  const empIds = Array.from(new Set(scores.map(s => s.employee_id)))
+  const empIds = Array.from(new Set(scores.map(s => s.employee_id).filter((id): id is string => id !== null)))
   const { data: emps } = await supabase.from('employees').select('id, performance_rating').in('id', empIds)
   const rating = new Map<string, number>()
   for (const e of (emps || [])) rating.set(e.id, Number(e.performance_rating) || 100)
@@ -72,11 +73,11 @@ export async function refreshStoredEarningsFromBilling(taskId: string) {
     // touch manual overrides (same rule as the full engine).
     if (!(s.score_percentage && s.score_percentage > 0)) continue
     if (s.is_manual_override) continue
-    const newEarn = r2(remainingPool * (s.score_percentage / 100) * ((rating.get(s.employee_id) ?? 100) / 100))
+    const newEarn = r2(remainingPool * (s.score_percentage / 100) * ((rating.get(s.employee_id!) ?? 100) / 100))
     if (Math.abs((s.earnings_inr || 0) - newEarn) > 0.01) {
       await supabase.from('contribution_scores')
         .update({ earnings_inr: newEarn })
-        .eq('task_id', taskId).eq('employee_id', s.employee_id)
+        .eq('task_id', taskId).eq('employee_id', s.employee_id!)
       updated++
     }
   }
@@ -92,7 +93,7 @@ export async function refreshStoredEarningsFromBilling(taskId: string) {
  * This should be called whenever a task's billing amount, service_id, or task_date changes.
  */
 export async function recalcTaskCommissions(taskId: string, userId?: string) {
-  const supabase = createAdminClient()
+  const supabase = createTypedAdminClient()
 
   // 1. Fetch Task
   const { data: task } = await supabase.from('tasks').select('*').eq('id', taskId).single()
@@ -117,7 +118,7 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
     supabase.from('tool_services').select('tool_id, service_id'),
     supabase.from('group_services').select('group_id, service_id'),
     supabase.from('client_service_pricing').select('client_id, service_id, commission_percentage'),
-    supabase.from('employee_performance_history').select('*').order('effective_from', { ascending: false }),
+    (supabase as any).from('employee_performance_history').select('*').order('effective_from', { ascending: false }),
     supabase.from('task_tools').select('tool_id').eq('task_id', taskId),
     supabase.from('contribution_scores').select('*').eq('task_id', taskId)
   ])
@@ -144,11 +145,11 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
   const linkedToolIds = toolServices.filter(ts => ts.service_id === task.service_id).map(ts => ts.tool_id)
   const taskToolsForCalc = tools
     .filter(t => linkedToolIds.length > 0 ? linkedToolIds.includes(t.id) : true)
-    .map(t => ({ tool: t, used: usedToolIds.has(t.id) }))
+    .map(t => ({ tool: t as any, used: usedToolIds.has(t.id) }))
 
   const effectiveEmployees = employees.map(emp => ({
     ...emp,
-    performance_rating: getEffectivePerformanceRating(emp.id, task.task_date, performanceHistory, emp.performance_rating)
+    performance_rating: getEffectivePerformanceRating(emp.id, task.task_date, performanceHistory as any, emp.performance_rating || 100)
   }))
 
   try {
@@ -183,7 +184,7 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
             earnings_inr: e.earnings,
             previous_earnings_inr: oldScore.earnings_inr || 0,
             previous_score_percentage: oldScore.score_percentage || 0,
-            previous_performance_rating_used: oldScore.previous_performance_rating_used || 100,
+            previous_performance_rating_used: (oldScore as any).previous_performance_rating_used || 100,
             recalculated_at: new Date().toISOString(),
             recalculated_by: userId || null
           })
@@ -218,7 +219,7 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
  * and recalculate the total of the parent draft invoice.
  */
 export async function syncDraftInvoices(taskId: string) {
-  const supabase = createAdminClient()
+  const supabase = createTypedAdminClient()
 
   const { data: task } = await supabase.from('tasks')
     .select('id, title, status, client_id, task_date, billing_amount_inr, currency, billing_amount')
@@ -231,15 +232,15 @@ export async function syncDraftInvoices(taskId: string) {
   const taskAmt = task.billing_amount || 0
   const invoiceIdsToRecalculate = new Set<string>()
 
-  if (items && items.length > 0) {
-    // Extract unique invoice IDs
-    const invoiceIds = Array.from(new Set(items.map(i => i.invoice_id)))
-
-    // Find which of these invoices are in 'draft' status
-    const { data: invoices } = await supabase.from('invoices').select('id, status').in('id', invoiceIds).eq('status', 'draft')
-    if (invoices && invoices.length > 0) {
-      const draftInvoiceIds = new Set(invoices.map(inv => inv.id))
-      const draftItemsToUpdate = items.filter(i => draftInvoiceIds.has(i.invoice_id))
+    if (items && items.length > 0) {
+      // Extract unique invoice IDs
+      const invoiceIds = Array.from(new Set(items.map(i => i.invoice_id).filter((id): id is string => id !== null)))
+  
+      // Find which of these invoices are in 'draft' status
+      const { data: invoices } = await supabase.from('invoices').select('id, status').in('id', invoiceIds).eq('status', 'draft')
+      if (invoices && invoices.length > 0) {
+        const draftInvoiceIds = new Set(invoices.map(inv => inv.id))
+        const draftItemsToUpdate = items.filter(i => draftInvoiceIds.has(i.invoice_id!))
       
       for (const item of draftItemsToUpdate) {
         const newTotal = taskAmt * (item.quantity || 1)
@@ -249,9 +250,9 @@ export async function syncDraftInvoices(taskId: string) {
           unit_price: taskAmt,
           description: task.title,
           total: newTotal
-        }).eq('id', item.id)
+        }).eq('id', item.id!)
         
-        invoiceIdsToRecalculate.add(item.invoice_id)
+        invoiceIdsToRecalculate.add(item.invoice_id!)
       }
     }
   } else if (task.status === 'done' && task.client_id && task.task_date) {
@@ -318,7 +319,7 @@ export async function syncDraftInvoices(taskId: string) {
 }
 
 export async function syncDraftInvoiceExpenses(entryId: string) {
-  const supabase = createAdminClient()
+  const supabase = createTypedAdminClient()
 
   // 1. Get the entry
   const { data: entry } = await supabase.from('cashbook_entries')

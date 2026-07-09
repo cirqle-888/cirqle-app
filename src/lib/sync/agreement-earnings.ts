@@ -1,4 +1,4 @@
-import { createAdminClient } from '@/lib/supabase/server'
+import { createTypedAdminClient } from '@/lib/supabase/server'
 import { matchAgreement, computeAgreementEarning, type CommissionAgreement } from '@/lib/calculations/agreements'
 
 /**
@@ -16,7 +16,7 @@ import { matchAgreement, computeAgreementEarning, type CommissionAgreement } fro
  */
 
 export async function loadActiveAgreements(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: ReturnType<typeof createTypedAdminClient>,
 ): Promise<{ available: boolean; agreements: CommissionAgreement[] }> {
   try {
     const { data, error } = await admin
@@ -31,7 +31,7 @@ export async function loadActiveAgreements(
 }
 
 export async function syncTaskAgreementEarnings(taskId: string): Promise<{ changed: number }> {
-  const admin = createAdminClient()
+  const admin = createTypedAdminClient()
 
   const { available, agreements } = await loadActiveAgreements(admin)
   if (!available) return { changed: 0 } // pre-migration / no table → no-op
@@ -51,8 +51,8 @@ export async function syncTaskAgreementEarnings(taskId: string): Promise<{ chang
 
   // Fast exit: if no active agreement is even for one of these employees, skip
   // all the pool math (keeps the common case cheap).
-  const empIds = new Set(scores.map(s => s.employee_id))
-  const anyRelevant = agreements.some(a => empIds.has(a.employee_id))
+  const empIds = new Set(scores.map(s => s.employee_id).filter((id): id is string => id !== null))
+  const anyRelevant = agreements.some(a => a.employee_id && empIds.has(a.employee_id))
   if (!anyRelevant) {
     // Still reset any stale agreement tags (rare), but no pool math needed.
     return await resetStaleTags(admin, taskId, scores)
@@ -73,7 +73,7 @@ export async function syncTaskAgreementEarnings(taskId: string): Promise<{ chang
   const { data: taskTools } = await admin.from('task_tools').select('tool_id').eq('task_id', taskId)
   if (taskTools && taskTools.length) {
     const { data: tools } = await admin
-      .from('tools').select('fixed_percentage, is_active').in('id', taskTools.map(t => t.tool_id))
+      .from('tools').select('fixed_percentage, is_active').in('id', taskTools.map(t => t.tool_id).filter((id): id is string => id !== null))
     toolPct = (tools || []).reduce((s, t) => s + (t.is_active !== false ? Number(t.fixed_percentage) || 0 : 0), 0)
   }
   const billingInr = task.billing_amount_inr || 0
@@ -85,7 +85,7 @@ export async function syncTaskAgreementEarnings(taskId: string): Promise<{ chang
 
     const eligible = (s.score_percentage || 0) > 0
     const ag = eligible
-      ? matchAgreement(agreements, s.employee_id, task.client_id, task.service_id, task.task_date)
+      ? matchAgreement(agreements, s.employee_id!, task.client_id, task.service_id, task.task_date)
       : null
 
     if (ag) {
@@ -97,7 +97,7 @@ export async function syncTaskAgreementEarnings(taskId: string): Promise<{ chang
       if (needs) {
         await admin.from('contribution_scores')
           .update({ earnings_inr: newEarn, earning_source: 'agreement', agreement_id: ag.id })
-          .eq('task_id', taskId).eq('employee_id', s.employee_id)
+          .eq('task_id', taskId).eq('employee_id', s.employee_id!)
         changed++
       }
     } else if (s.earning_source !== 'contribution' || s.agreement_id != null) {
@@ -105,7 +105,7 @@ export async function syncTaskAgreementEarnings(taskId: string): Promise<{ chang
       // the base contribution value by the recompute step that ran before us).
       await admin.from('contribution_scores')
         .update({ earning_source: 'contribution', agreement_id: null })
-        .eq('task_id', taskId).eq('employee_id', s.employee_id)
+        .eq('task_id', taskId).eq('employee_id', s.employee_id!)
       changed++
     }
   }
@@ -113,9 +113,9 @@ export async function syncTaskAgreementEarnings(taskId: string): Promise<{ chang
 }
 
 async function resetStaleTags(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: ReturnType<typeof createTypedAdminClient>,
   taskId: string,
-  scores: { employee_id: string; earning_source?: string | null; agreement_id?: string | null; is_manual_override?: boolean | null }[],
+  scores: { employee_id: string | null; earning_source?: string | null; agreement_id?: string | null; is_manual_override?: boolean | null }[],
 ): Promise<{ changed: number }> {
   let changed = 0
   for (const s of scores) {
@@ -123,7 +123,7 @@ async function resetStaleTags(
     if (s.earning_source === 'agreement' || s.agreement_id != null) {
       await admin.from('contribution_scores')
         .update({ earning_source: 'contribution', agreement_id: null })
-        .eq('task_id', taskId).eq('employee_id', s.employee_id)
+        .eq('task_id', taskId).eq('employee_id', s.employee_id!)
       changed++
     }
   }
