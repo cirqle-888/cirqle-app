@@ -5,6 +5,7 @@ import { X, Search, Check } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { ModalOverlay } from './modal-overlay'
 import AppSelect from './app-select'
+import { Button } from './button'
 import type { Currency } from '@/types'
 
 interface Props {
@@ -16,7 +17,7 @@ interface Props {
 
 const CURRENCIES: Currency[] = ['INR', 'AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
 
-const inputCls = 'w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50'
+const inputCls = 'w-full bg-background border border-input rounded-lg px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50'
 
 function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
   return (
@@ -337,9 +338,9 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
               </div>
             )}
 
-            <div className="flex gap-3 pt-2 border-t border-border">
-              <button type="button" onClick={onClose} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80">Cancel</button>
-              <button type="submit" disabled={saving} className="flex-1 gradient-bg text-white text-sm font-medium py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>
+            <div className="flex gap-3 pt-2 border-t border-border mt-4">
+              <Button type="button" variant="outline" onClick={onClose} className="flex-1" size="lg">Cancel</Button>
+              <Button type="submit" loading={saving} className="flex-1 bg-gradient-to-r from-primary to-violet-600 hover:from-primary/90 hover:to-violet-600/90 text-primary-foreground" size="lg">Save</Button>
             </div>
           </form>
         )}

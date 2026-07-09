@@ -7,6 +7,7 @@ import { serverSaveTask, serverDeleteTask } from '@/app/(dashboard)/dashboard/ta
 import { ModalOverlay } from './modal-overlay'
 import AppSelect from './app-select'
 import Combobox from './combobox'
+import { Button } from './button'
 import type { Currency } from '@/types'
 
 const ContributionEntryPanel = dynamic(
@@ -54,7 +55,7 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: '❌ Cancelled',
 }
 
-const inputCls = 'w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50'
+const inputCls = 'w-full bg-background border border-input rounded-lg px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50'
 
 export function TaskEditModal({
   task, clients, services, clientPricings = [], showFinancials = true,
@@ -375,18 +376,17 @@ export function TaskEditModal({
               {confirmDelete ? (
                 <div className="bg-red-500/10 border border-red-500/25 rounded-xl p-3 space-y-2">
                   <p className="text-xs font-medium text-red-400">Delete this task permanently? This cannot be undone.</p>
-                  <div className="flex gap-2">
-                    <button type="button" onClick={() => setConfirmDelete(false)} className="flex-1 bg-secondary text-xs font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors">Keep task</button>
-                    <button type="button" onClick={handleDelete} disabled={deleting} className="flex-1 bg-red-500 text-white text-xs font-semibold px-3 py-2 rounded-lg hover:bg-red-600 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5">
-                      {deleting ? <span className="w-3.5 h-3.5 border-2 border-foreground/30 border-t-white rounded-full animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                  <div className="flex gap-2 mt-3">
+                    <Button type="button" variant="outline" onClick={() => setConfirmDelete(false)} className="flex-1">Keep task</Button>
+                    <Button type="button" variant="destructive" onClick={handleDelete} loading={deleting} className="flex-1">
                       Yes, delete
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ) : (
-                <button type="button" onClick={() => setConfirmDelete(true)} className="text-xs text-red-400/60 hover:text-red-400 flex items-center gap-1 transition-colors">
-                  <Trash2 className="w-3 h-3" /> Delete this task
-                </button>
+                <Button type="button" variant="ghost" onClick={() => setConfirmDelete(true)} className="text-red-400/60 hover:text-red-400 hover:bg-red-500/10 h-auto py-1 px-2 text-xs">
+                  <Trash2 className="w-3 h-3 mr-1" /> Delete this task
+                </Button>
               )}
 
               {saveError && (
@@ -400,10 +400,10 @@ export function TaskEditModal({
               className="flex gap-3 px-6 pt-3 border-t border-border bg-card sm:rounded-b-2xl shrink-0"
               style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 12px)' }}
             >
-              <button type="button" onClick={onClose} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80">Cancel</button>
-              <button type="submit" disabled={saving} className="flex-1 gradient-bg text-white text-sm font-medium py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50">
-                {saving ? 'Saving…' : 'Save Changes'}
-              </button>
+              <Button type="button" variant="outline" onClick={onClose} className="flex-1" size="lg">Cancel</Button>
+              <Button type="submit" loading={saving} className="flex-1 bg-gradient-to-r from-primary to-violet-600 hover:from-primary/90 hover:to-violet-600/90 text-primary-foreground" size="lg">
+                Save Changes
+              </Button>
             </div>
           </form>
           )}
@@ -429,12 +429,12 @@ export function TaskEditModal({
                 className="flex gap-3 px-6 pt-3 border-t border-border bg-card sm:rounded-b-2xl shrink-0"
                 style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 12px)' }}
               >
-                <button type="button" onClick={onClose} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80">Close</button>
+                <Button type="button" variant="outline" onClick={onClose} className="flex-1" size="lg">Close</Button>
                 <a
                   href={`/dashboard/contributions?highlight=${task.id}`}
-                  className="flex-1 flex items-center justify-center gap-1.5 text-sm font-medium py-2.5 rounded-lg border border-border text-muted-foreground hover:text-foreground transition-colors"
+                  className="flex-1 flex items-center justify-center gap-2 text-sm font-medium py-2 rounded-lg border border-input shadow-sm hover:bg-accent hover:text-accent-foreground transition-colors"
                 >
-                  <BarChart2 className="w-3.5 h-3.5" /> Full report
+                  <BarChart2 className="w-4 h-4" /> Full report
                 </a>
               </div>
             </div>
@@ -453,7 +453,7 @@ export function TaskEditModal({
                 className="flex gap-3 px-6 pt-3 border-t border-border bg-card sm:rounded-b-2xl shrink-0"
                 style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 12px)' }}
               >
-                <button type="button" onClick={onClose} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80">Close</button>
+                <Button type="button" variant="outline" onClick={onClose} className="flex-1" size="lg">Close</Button>
               </div>
             </div>
           )}

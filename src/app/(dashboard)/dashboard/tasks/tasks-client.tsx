@@ -53,6 +53,7 @@ import { useToast, ToastContainer } from '@/components/ui/toast'
 import { BatchActionBar, type BatchAction } from '@/components/ui/batch-action-bar'
 import { formatTaskDate, fullTaskDate } from '@/lib/utils/format-date'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { Button } from '@/components/ui/button'
 import { usePrivacy } from "@/contexts/privacy-context"
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from "@/lib/utils"
 
@@ -1672,7 +1673,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
   }, [dateScopedTasks, employees, dn, localAssignments, localGroupAssignments, localParamAssignments, filterAssignee])
 
   // py-2.5 on mobile = 40px touch target; py-2 keeps desktop density unchanged.
-  const inputCls = 'w-full bg-secondary border border-border rounded-lg px-3 py-2.5 sm:py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50'
+  const inputCls = 'w-full bg-background border border-input rounded-lg px-3 py-2.5 sm:py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50'
 
   // Renders the correct <td> for a given column key + task. Used by the table body
   // to honour the user's chosen column order.
@@ -4814,10 +4815,10 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                 <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 -mb-1">{addError}</p>
               )}
               <div className="sticky bottom-0 -mx-5 sm:-mx-6 px-5 sm:px-6 -mb-4 pb-4 pt-3 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/85 border-t border-border flex gap-3">
-                <button type="button" onClick={() => { setShowForm(false); setAddError(null) }} className="flex-1 bg-secondary text-sm font-medium py-3 sm:py-2.5 rounded-lg hover:bg-secondary/80 transition-colors">Cancel</button>
-                <button type="submit" disabled={saving || !selectedService} className="flex-1 gradient-bg text-white text-sm font-medium py-3 sm:py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1.5">
-                  {saving ? 'Saving…' : <>Add Task {previewTaskNumber != null && <span className="opacity-70">#{previewTaskNumber}</span>}</>}
-                </button>
+                <Button type="button" variant="outline" onClick={() => { setShowForm(false); setAddError(null) }} className="flex-1" size="lg">Cancel</Button>
+                <Button type="submit" disabled={!selectedService} loading={saving} className="flex-1 bg-gradient-to-r from-primary to-violet-600 hover:from-primary/90 hover:to-violet-600/90 text-primary-foreground" size="lg">
+                  Add Task {previewTaskNumber != null && <span className="opacity-70 ml-1">#{previewTaskNumber}</span>}
+                </Button>
               </div>
             </form>
           </div>
