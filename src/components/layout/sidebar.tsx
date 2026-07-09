@@ -32,18 +32,15 @@ import {
 import { navSections } from '@/lib/nav-sections'
 import { useWorkspace } from '@/contexts/workspace-context'
 import { WorkspaceSwitcher } from '@/components/layout/workspace-switcher'
-import { CommandPaletteTrigger } from '@/components/ui/command-palette'
-import { NotificationBell } from '@/components/layout/notification-bell'
 import { EmployeeAvatar } from '@/components/ui/employee-avatar'
 import { FavoritesSection } from '@/components/layout/favorites-section'
 import { FavoriteToggle } from '@/components/ui/favorite-toggle'
-import { AppLauncherTrigger } from '@/components/layout/app-launcher'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 
 // ─────────────────────────────────────────────────────
 // Change Password Modal
 // ─────────────────────────────────────────────────────
-function ChangePasswordModal({ onClose }: { onClose: () => void }) {
+export function ChangePasswordModal({ onClose }: { onClose: () => void }) {
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [error, setError] = useState('')
@@ -111,7 +108,7 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
 // ─────────────────────────────────────────────────────
 // Profile action menu items (shared between sidebar + employee sheet)
 // ─────────────────────────────────────────────────────
-function ProfileActions({
+export function ProfileActions({
   onChangePassword,
   compact = false,
 }: {
@@ -211,8 +208,6 @@ function ProfileActions({
 // Sidebar content (shared between desktop and mobile)
 // ─────────────────────────────────────────────────────
 function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () => void; isCollapsed?: boolean }) {
-  const [showPwdModal, setShowPwdModal] = useState(false)
-  const [profileOpen, setProfileOpen] = useState(false)
   const pathname = usePathname()
   const router = useRouter()
   const { user, can, logoUrl, logoUrlDark, faviconUrl } = usePermissions()
@@ -370,13 +365,6 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
         )}
       </div>
 
-      {/* Search trigger + notifications */}
-      <div className={`py-2 border-b border-sidebar-border transition-all duration-300 flex items-center gap-1.5 ${isCollapsed ? 'flex-col px-0' : 'px-3'}`}>
-        <CommandPaletteTrigger className={isCollapsed ? '' : 'w-full flex-1'} isCollapsed={isCollapsed} />
-        <AppLauncherTrigger />
-        <NotificationBell isCollapsed={isCollapsed} />
-      </div>
-
       <WorkspaceSwitcher isCollapsed={isCollapsed} />
 
       {/* Nav */}
@@ -412,12 +400,12 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
                           isCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2.5'
                         } ${
                           active
-                            ? 'bg-primary/15 text-primary'
+                            ? 'bg-sidebar-accent/60 text-foreground shadow-sm ring-1 ring-border/50'
                             : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
                         }`}
                       >
                         <span className="relative shrink-0">
-                          <Icon className={`w-4 h-4 shrink-0 transition-colors ${active ? 'text-primary' : 'text-muted-foreground group-hover:text-sidebar-accent-foreground'}`} />
+                          <Icon className={`w-4 h-4 shrink-0 transition-colors ${active ? 'text-foreground' : 'text-muted-foreground group-hover:text-sidebar-accent-foreground'}`} />
                           {href === '/dashboard/requests' && requestsBadge > 0 && isCollapsed && (
                             <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400" />
                           )}
@@ -429,7 +417,7 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
                               {requestsBadge > 99 ? '99+' : requestsBadge}
                             </span>
                           )}
-                          {active && <ChevronRight className="w-3 h-3 text-primary shrink-0 ml-2" />}
+                          {active && <ChevronRight className="w-3.5 h-3.5 text-foreground/40 shrink-0 ml-2" />}
                         </div>
                       </Link>
                       {!isCollapsed && (
@@ -452,57 +440,6 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
           )
         })}
       </nav>
-
-      {/* ── Profile actions — in-flow, above the border, so never clipped ── */}
-      {!isCollapsed && profileOpen && (
-        <div className={`transition-all duration-200 ${isCollapsed ? 'px-2' : 'px-3'} pb-1`}>
-          <div className="bg-sidebar-accent/50 border border-sidebar-border rounded-xl p-1">
-            <ProfileActions onChangePassword={() => setShowPwdModal(true)} />
-          </div>
-        </div>
-      )}
-
-      {/* ── Profile row + sign-out (collapsed) ── */}
-      <div className={`border-t border-sidebar-border pb-3 transition-all duration-300 ${isCollapsed ? 'px-2 pt-2' : 'px-3 pt-2'}`}>
-        {isCollapsed ? (
-          <button
-            onClick={handleSignOut}
-            title="Sign out"
-            className="flex items-center justify-center p-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:bg-sidebar-accent hover:text-destructive transition-all duration-300 w-full"
-          >
-            <LogOut className="w-4 h-4 shrink-0" />
-          </button>
-        ) : (
-          <button
-            onClick={() => setProfileOpen(o => !o)}
-            className={`flex items-center gap-2.5 px-3 py-2 rounded-lg w-full transition-colors group ${profileOpen ? 'bg-sidebar-accent' : 'hover:bg-sidebar-accent'}`}
-          >
-            {user.cqid ? (
-              <EmployeeAvatar
-                avatarUrl={null}
-                name={user.cqid}
-                cqid={user.cqid}
-                size={28}
-                rounded="full"
-                className="shrink-0"
-              />
-            ) : (
-              <UserCircle className="w-7 h-7 text-muted-foreground shrink-0" />
-            )}
-            <div className="flex-1 min-w-0 text-left">
-              <div className="text-sm font-medium text-sidebar-foreground truncate leading-tight">
-                {user.cqid ?? 'Account'}
-              </div>
-              {isUnlocked && user.name && (
-                <div className="text-[11px] text-muted-foreground truncate leading-tight">{user.name}</div>
-              )}
-            </div>
-            <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground shrink-0 transition-transform duration-200 ${profileOpen ? 'rotate-180' : ''}`} />
-          </button>
-        )}
-      </div>
-
-      {showPwdModal && <ChangePasswordModal onClose={() => setShowPwdModal(false)} />}
     </div>
   )
 }
@@ -577,6 +514,16 @@ export default function Sidebar() {
     if (stored !== null) {
       setIsPinned(stored === 'true')
     }
+    
+    // Auto-collapse on tablet
+    const checkWidth = () => {
+      if (window.innerWidth >= 768 && window.innerWidth < 1024) {
+        setIsPinned(false)
+      }
+    }
+    window.addEventListener('resize', checkWidth)
+    checkWidth()
+    return () => window.removeEventListener('resize', checkWidth)
   }, [])
 
   const togglePin = () => {
