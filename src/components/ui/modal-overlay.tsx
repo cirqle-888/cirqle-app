@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 
 interface ModalOverlayProps {
   onClose: () => void
@@ -29,6 +29,19 @@ export function ModalOverlay({
   onClose, children, isConfirmation = false, sheetOnMobile = false, className = '', zIndex = 'z-50',
 }: ModalOverlayProps) {
   const contentRef = useRef<HTMLDivElement>(null)
+
+  // Announce the dialog by its visible title: find the first heading in the
+  // content, give it an id if it lacks one, and point aria-labelledby at it.
+  // One hook here labels every ModalOverlay consumer without per-modal wiring.
+  const fallbackTitleId = useId()
+  const [labelledBy, setLabelledBy] = useState<string | undefined>(undefined)
+  useEffect(() => {
+    const heading = contentRef.current?.querySelector('h1, h2, h3')
+    if (heading) {
+      if (!heading.id) heading.id = fallbackTitleId
+      setLabelledBy(heading.id)
+    }
+  }, [fallbackTitleId])
 
   useEffect(() => {
     // Lock body scroll when mounted
@@ -117,6 +130,7 @@ export function ModalOverlay({
         ref={contentRef}
         role="dialog"
         aria-modal="true"
+        aria-labelledby={labelledBy}
         className={sheetOnMobile ? "w-full max-h-[90vh] sm:max-h-[85vh] flex flex-col focus:outline-none" : "w-full max-h-[90vh] flex flex-col focus:outline-none max-w-fit"}
         tabIndex={-1}
       >
