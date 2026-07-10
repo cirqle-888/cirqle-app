@@ -56,8 +56,24 @@ export function FilterDropdown({
       if (typeof target.closest === 'function' && target.closest('[data-filter-dropdown-panel="true"]')) return
       setOpen(false); setSearch('')
     }
+    // Escape closes and hands focus back to the trigger, matching native
+    // select behavior for keyboard users (previously only outside-click closed).
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation() // don't also close a parent modal
+        setOpen(false); setSearch('')
+        containerRef.current?.querySelector('button')?.focus()
+      }
+    }
     document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    // Capture phase so this runs before ModalOverlay's bubble-phase Escape —
+    // stopPropagation there would otherwise be too late (same-node listeners
+    // fire in attachment order, and the modal attaches first).
+    document.addEventListener('keydown', onKey, true)
+    return () => {
+      document.removeEventListener('mousedown', handler)
+      document.removeEventListener('keydown', onKey, true)
+    }
   }, [open])
 
   // Compute portal position — auto-flip right when overflowing
