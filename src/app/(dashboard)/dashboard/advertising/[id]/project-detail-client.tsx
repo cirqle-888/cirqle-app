@@ -930,7 +930,7 @@ function NotesTab({ projectId, notes, events, canEdit, onChange }: {
             <input value={body} onChange={e => setBody(e.target.value)} placeholder="Add a note…"
               className="flex-1 rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-pink-500/40"
               onKeyDown={e => { if (e.key === 'Enter') add() }} />
-            <button onClick={add} disabled={busy} className="rounded-lg gradient-bg px-3 py-2 text-sm font-medium text-white disabled:opacity-50 hover:opacity-90">
+            <button onClick={add} disabled={busy} aria-label="Add note" className="rounded-lg gradient-bg px-3 py-2 text-sm font-medium text-white disabled:opacity-50 hover:opacity-90">
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             </button>
           </div>

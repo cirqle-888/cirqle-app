@@ -1120,7 +1120,7 @@ export default function RequestsClient({
                       onKeyDown={e => { if (e.key === 'Enter') doLinkSearch() }}
                       placeholder="Search by title or #task number…"
                       className="flex-1 bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50" />
-                    <button onClick={doLinkSearch} disabled={linkSearching || !linkQ.trim()}
+                    <button onClick={doLinkSearch} disabled={linkSearching || !linkQ.trim()} aria-label="Search tasks"
                       className="px-3 rounded-xl bg-secondary border border-border hover:bg-secondary/70 disabled:opacity-50 transition-colors shrink-0">
                       {linkSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
                     </button>
@@ -1211,7 +1211,7 @@ export default function RequestsClient({
                     <input value={updateMsg} onChange={e => setUpdateMsg(e.target.value)}
                       className="flex-1 bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50"
                       placeholder='e.g. "Waiting for your content — please upload to the Drive folder"' />
-                    <button onClick={doPostUpdate} disabled={busy || !updateMsg.trim()}
+                    <button onClick={doPostUpdate} disabled={busy || !updateMsg.trim()} aria-label="Post update"
                       className="px-3 rounded-xl gradient-bg text-white hover:opacity-90 disabled:opacity-50 transition-opacity shrink-0">
                       <MessageSquarePlus className="w-4 h-4" />
                     </button>
@@ -1226,7 +1226,7 @@ export default function RequestsClient({
                   <div className="flex gap-2">
                     <textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)}
                       className="flex-1 bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm resize-none focus:outline-none focus:border-violet-500/50" />
-                    <button onClick={doSaveNotes} disabled={busy}
+                    <button onClick={doSaveNotes} disabled={busy} aria-label="Save notes"
                       className="px-3 rounded-xl bg-secondary border border-border hover:bg-secondary/70 disabled:opacity-50 transition-colors shrink-0">
                       <Save className="w-4 h-4" />
                     </button>
@@ -1243,7 +1243,7 @@ export default function RequestsClient({
                       onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && noteMsg.trim()) { e.preventDefault(); doPostNote() } }}
                       className="flex-1 bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50"
                       placeholder='e.g. "Called client, awaiting brand assets"' />
-                    <button onClick={doPostNote} disabled={busy || !noteMsg.trim()}
+                    <button onClick={doPostNote} disabled={busy || !noteMsg.trim()} aria-label="Post internal note"
                       className="px-3 rounded-xl bg-secondary border border-border hover:bg-secondary/70 disabled:opacity-50 transition-colors shrink-0">
                       <MessageSquarePlus className="w-4 h-4" />
                     </button>

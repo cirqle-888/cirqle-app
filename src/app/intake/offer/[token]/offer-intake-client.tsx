@@ -383,11 +383,11 @@ function ProductRow({
                     placeholder="Custom" className="bg-transparent text-xs text-white/80 focus:outline-none w-20"
                   />
                   {Object.keys(BADGE_COLOR).map(c => (
-                    <button key={c} onClick={() => setCustomColor(c)}
+                    <button key={c} onClick={() => setCustomColor(c)} aria-label={`Badge color ${c}`}
                       className={`w-3 h-3 rounded-full border ${customColor === c ? 'ring-1 ring-white/50' : ''} ${BADGE_COLOR[c].split(' ')[0]}`} />
                   ))}
-                  <button onClick={addCustomBadge} className="text-emerald-400 hover:text-emerald-300"><Check className="w-3 h-3" /></button>
-                  <button onClick={() => setCustomBadgeOpen(false)} className="text-white/30 hover:text-white/60"><X className="w-3 h-3" /></button>
+                  <button onClick={addCustomBadge} aria-label="Add badge" className="text-emerald-400 hover:text-emerald-300"><Check className="w-3 h-3" /></button>
+                  <button onClick={() => setCustomBadgeOpen(false)} aria-label="Cancel adding badge" className="text-white/30 hover:text-white/60"><X className="w-3 h-3" /></button>
                 </div>
               )}
             </div>
@@ -1034,7 +1034,7 @@ export default function OfferIntakeClient({
                 </p>
               )}
             </div>
-            <button className="p-1.5 bg-white/5 hover:bg-white/10 rounded text-white/60 hover:text-white transition-colors">
+            <button aria-label={headerExpanded ? 'Collapse offer details' : 'Expand offer details'} aria-expanded={headerExpanded} className="p-1.5 bg-white/5 hover:bg-white/10 rounded text-white/60 hover:text-white transition-colors">
               {headerExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
             </button>
           </div>

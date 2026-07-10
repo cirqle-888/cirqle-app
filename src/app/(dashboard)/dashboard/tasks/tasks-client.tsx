@@ -270,10 +270,10 @@ function SortablePanelRow({ id, label, onUp, onDown, isFirst, isLast }: {
         <GripVertical className="w-3.5 h-3.5" />
       </span>
       <span className="flex-1 text-xs">{label}</span>
-      <button onClick={onUp} disabled={isFirst} className="p-0.5 rounded text-muted-foreground hover:text-foreground disabled:opacity-20 transition-colors">
+      <button onClick={onUp} disabled={isFirst} aria-label={`Move ${label} column up`} className="p-0.5 rounded text-muted-foreground hover:text-foreground disabled:opacity-20 transition-colors">
         <ChevronUp className="w-3.5 h-3.5" />
       </button>
-      <button onClick={onDown} disabled={isLast} className="p-0.5 rounded text-muted-foreground hover:text-foreground disabled:opacity-20 transition-colors">
+      <button onClick={onDown} disabled={isLast} aria-label={`Move ${label} column down`} className="p-0.5 rounded text-muted-foreground hover:text-foreground disabled:opacity-20 transition-colors">
         <ChevronDown className="w-3.5 h-3.5" />
       </button>
     </div>
