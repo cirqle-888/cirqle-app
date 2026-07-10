@@ -35,32 +35,65 @@ export function ModalOverlay({
     const originalStyle = window.getComputedStyle(document.body).overflow
     document.body.style.overflow = 'hidden'
 
-    if (!isConfirmation) {
-      const onKey = (e: KeyboardEvent) => {
-        if (e.key === 'Escape') onClose()
-      }
-      document.addEventListener('keydown', onKey)
-      
-      // Auto-focus the dialog when it opens to trap keyboard focus
-      setTimeout(() => {
-        if (contentRef.current && !contentRef.current.contains(document.activeElement)) {
-          const firstInput = contentRef.current.querySelector('input, button, select, textarea') as HTMLElement
-          if (firstInput) {
-            firstInput.focus()
-          } else {
-            contentRef.current.focus()
-          }
-        }
-      }, 10)
+    // Remember what had focus so it can be handed back when the dialog closes
+    // — without this, closing a modal dropped keyboard users at <body>.
+    const previouslyFocused = document.activeElement as HTMLElement | null
 
-      return () => {
-        document.body.style.overflow = originalStyle
-        document.removeEventListener('keydown', onKey)
+    const FOCUSABLE =
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isConfirmation) onClose()
+
+      // Focus trap: keep Tab / Shift+Tab cycling inside the dialog. Applies to
+      // confirmations too — Escape is what's deliberately disabled there.
+      if (e.key === 'Tab' && contentRef.current) {
+        // getClientRects catches elements hidden without display:none, which
+        // offsetParent misses. The (el as any).disabled property check matters
+        // too: a button can carry disabled=true as a DOM property while the
+        // attribute selector :not([disabled]) still matches — focus() on it
+        // silently no-ops and the trap would appear stuck.
+        const focusables = [...contentRef.current.querySelectorAll<HTMLElement>(FOCUSABLE)]
+          .filter(el =>
+            el.getClientRects().length > 0 &&
+            el.getAttribute('aria-hidden') !== 'true' &&
+            !(el as HTMLButtonElement).disabled)
+        if (focusables.length === 0) return
+        const idx = focusables.indexOf(document.activeElement as HTMLElement)
+        if (e.shiftKey && idx <= 0) {
+          e.preventDefault()
+          focusables[focusables.length - 1].focus()
+        } else if (!e.shiftKey && (idx === -1 || idx === focusables.length - 1)) {
+          e.preventDefault()
+          focusables[0].focus()
+        }
       }
     }
+    document.addEventListener('keydown', onKey)
+
+    // Move focus into the dialog when it opens. Confirmations focus the
+    // container (not a button) so a held Enter key can't accidentally
+    // trigger a destructive action.
+    setTimeout(() => {
+      if (contentRef.current && !contentRef.current.contains(document.activeElement)) {
+        const firstInput = isConfirmation
+          ? null
+          : contentRef.current.querySelector('input, button, select, textarea') as HTMLElement | null
+        if (firstInput) {
+          firstInput.focus()
+        } else {
+          contentRef.current.focus()
+        }
+      }
+    }, 10)
 
     return () => {
       document.body.style.overflow = originalStyle
+      document.removeEventListener('keydown', onKey)
+      // Restore focus to whatever opened the dialog, if it's still in the DOM.
+      if (previouslyFocused && document.contains(previouslyFocused)) {
+        previouslyFocused.focus()
+      }
     }
   }, [onClose, isConfirmation])
 
