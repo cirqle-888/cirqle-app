@@ -43,6 +43,10 @@ next-env.d.ts
 # Local dev scratch/debug scripts (archived, not part of the app)
 /_archive/
 
+# Generated performance artifacts (keep the .md summaries, not the raw output)
+/docs/performance/bundle-before/
+/docs/performance/*.log
+
 # Claude session artifacts
 /.claude/
 
