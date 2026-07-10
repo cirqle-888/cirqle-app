@@ -81,9 +81,6 @@ interface Props {
 const CURRENCIES: Currency[] = ['INR', 'AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
 const QUO_STATUSES = ['draft', 'sent', 'approved', 'rejected', 'converted']
 
-const INPUT_CLS =
-  'w-full bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-colors'
-
 // ─── Status workflow steps ────────────────────────────────────────────────────
 
 const WORKFLOW_STEPS = ['draft', 'sent', 'approved', 'converted'] as const
