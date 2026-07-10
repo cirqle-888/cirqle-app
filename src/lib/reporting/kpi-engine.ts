@@ -75,7 +75,7 @@ export function buildKPIData(
   // ── Daily series ────────────────────────────────────────────────────────
   const dailyGroups = aggregateByPeriod(primaryAdRows, 'daily')
   const dailySeries: DailySeriesPoint[] = Object.entries(dailyGroups)
-    .sort(([a], [b]) => a.localeCompare(b))
+    .sort(([a], [b]) => b.localeCompare(a)) // Sort by date descending (newest first)
     .map(([date, agg]) => {
       const dayResults = agg.leads || agg.conversions || agg.clicks
       return {

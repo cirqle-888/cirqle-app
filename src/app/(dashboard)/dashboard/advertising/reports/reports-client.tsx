@@ -8,10 +8,13 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import {
   FileText, Plus, Calendar, Download, Clock, CheckCircle, XCircle, Loader2,
-  BarChart2, Megaphone, ChevronDown,
+  BarChart2, Megaphone, ChevronDown, Eye,
 } from 'lucide-react'
+import WebReportViewer from './components/WebReportViewer'
+import type { RenderData } from '@/lib/reporting/types'
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -173,9 +176,9 @@ function ReportCard({ report: r }: { report: Report }) {
         <div className="flex-shrink-0">{statusIcon}</div>
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-medium text-sm text-foreground truncate max-w-[280px]">
+            <Link href={`/dashboard/advertising/reports/${r.id}`} className="font-medium text-sm text-foreground hover:underline truncate max-w-[280px]">
               {r.project?.campaign_name ?? 'Unknown Campaign'}
-            </span>
+            </Link>
             <span className="rounded-full bg-muted px-2 py-0.5 text-xs capitalize">{r.template}</span>
             <span className="rounded-full bg-muted px-2 py-0.5 text-xs capitalize">{r.report_type}</span>
           </div>
@@ -259,6 +262,8 @@ function GenerateTab({ projects, canEdit }: { projects: Project[]; canEdit: bool
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [previewData, setPreviewData] = useState<RenderData | null>(null)
+  const [previewing, setPreviewing] = useState(false)
 
   const selectedProject = projects.find(p => p.id === projectId)
 
@@ -321,6 +326,51 @@ function GenerateTab({ projects, canEdit }: { projects: Project[]; canEdit: bool
       setError(err.message)
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function onPreview() {
+    if (!projectId) { setError('Select a campaign'); return }
+    if (!dateFrom || !dateTo) { setError('Select a date range'); return }
+
+    setPreviewing(true); setError(null); setSuccess(null)
+
+    try {
+      const body: any = {
+        projectId,
+        clientId: selectedProject?.client_id ?? '',
+        reportType,
+        template,
+        dateFrom,
+        dateTo,
+        formats,
+        sections: Object.keys(sections).length > 0 ? sections : undefined,
+      }
+
+      if (withComparison) {
+        const from = new Date(dateFrom)
+        const to   = new Date(dateTo)
+        const days = Math.round((to.getTime() - from.getTime()) / 86400000) + 1
+        const compTo = new Date(from); compTo.setDate(compTo.getDate() - 1)
+        const compFrom = new Date(compTo); compFrom.setDate(compFrom.getDate() - days + 1)
+        body.comparisonFrom = compFrom.toISOString().slice(0, 10)
+        body.comparisonTo   = compTo.toISOString().slice(0, 10)
+      }
+
+      const res = await fetch('/api/advertising/reports/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Failed to preview')
+
+      setPreviewData(json)
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setPreviewing(false)
     }
   }
 
@@ -443,14 +493,49 @@ function GenerateTab({ projects, canEdit }: { projects: Project[]; canEdit: bool
       {error && <p className="text-sm text-red-500 bg-red-50 dark:bg-red-950/20 rounded-lg px-3 py-2">{error}</p>}
       {success && <p className="text-sm text-green-600 bg-green-50 dark:bg-green-950/20 rounded-lg px-3 py-2">{success}</p>}
 
-      <button
-        onClick={onGenerate}
-        disabled={loading || !canEdit}
-        className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
-      >
-        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-        {loading ? 'Generating…' : 'Generate Report'}
-      </button>
+      <div className="flex gap-3">
+        <button
+          onClick={onGenerate}
+          disabled={loading || previewing || !canEdit}
+          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+        >
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+          {loading ? 'Generating…' : 'Generate Report'}
+        </button>
+        <button
+          onClick={onPreview}
+          disabled={loading || previewing || !canEdit}
+          className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50 transition-colors"
+        >
+          {previewing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
+          Preview
+        </button>
+      </div>
+
+      {previewData && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-background">
+          <div className="flex items-center justify-between p-4 border-b border-border bg-card">
+            <h2 className="text-lg font-semibold">Report Preview</h2>
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setPreviewData(null); onGenerate(); }}
+                className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+              >
+                Generate Report
+              </button>
+              <button
+                onClick={() => setPreviewData(null)}
+                className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-muted transition-colors"
+              >
+                Close Preview
+              </button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-auto">
+            <WebReportViewer data={previewData} />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
