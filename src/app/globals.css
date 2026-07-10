@@ -142,6 +142,17 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* ── Global keyboard-focus floor ──
+     :focus-visible fires only for keyboard/assistive-tech focus, so mouse
+     and touch interactions stay ring-free. Tailwind utility classes live
+     in a higher cascade layer, so any element that styles its own focus
+     (focus:outline-none, focus-visible:ring-*) still wins — this rule is
+     purely the fallback for the many interactive elements that declare
+     nothing and previously showed no focus indicator at all. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
   body {
     @apply bg-background text-foreground;
   }
