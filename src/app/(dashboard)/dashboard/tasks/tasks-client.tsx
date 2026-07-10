@@ -2327,7 +2327,11 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                 <th className="text-left px-5 py-3.5 text-xs font-medium text-muted-foreground w-20 bg-secondary/95 backdrop-blur-sm">Task No.</th>
                 <th className="text-left px-5 py-3.5 text-xs font-medium text-muted-foreground w-full bg-secondary/95 backdrop-blur-sm">Task Title</th>
                 {/* Reorderable columns — drag handle on hover (desktop), panel for mobile */}
-                <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleColHeaderDragEnd}>
+                {/* accessibility.container portals dnd-kit's hidden live-region <div>s to
+                    <body> — rendered inline they'd sit inside this <tr>, which is invalid
+                    HTML and triggers React's hydration-error warning on every load. */}
+                <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleColHeaderDragEnd}
+                  accessibility={{ container: typeof document !== 'undefined' ? document.body : undefined }}>
                   <SortableContext items={visibleCols} strategy={horizontalListSortingStrategy}>
                     {visibleCols.map(key => {
                       const base = 'text-xs font-medium text-muted-foreground bg-secondary/95 backdrop-blur-sm pl-6'
