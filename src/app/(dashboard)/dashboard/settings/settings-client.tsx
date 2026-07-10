@@ -3,7 +3,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Handshake } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import Header from '@/components/layout/header'
 import AppSelect from '@/components/ui/app-select'
 import { createClient as createSupabaseClient } from '@/lib/supabase/client'
@@ -21,7 +21,7 @@ import {
   syncExchangeRates,
   upsertMatrixCell,
 } from './actions'
-import { Plus, X, Edit2, Archive, ArchiveRestore, Save, ChevronDown, ChevronLeft, ChevronRight, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Mail, Send, RotateCcw as ResetKey, RefreshCw, Star, LayoutGrid, List, Building2, MapPin } from 'lucide-react'
+import { Plus, X, Edit2, Archive, ArchiveRestore, Save, ChevronDown, ChevronLeft, ChevronRight, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Mail, Send, RotateCcw as ResetKey, RefreshCw, Star, LayoutGrid, List, Building2, MapPin, Users, Handshake } from 'lucide-react'
 import type { Currency } from '@/types'
 import InfoTip from '@/components/ui/info-tip'
 import { usePrivacy, getStoredPin, setStoredPin, isForceLocked } from '@/contexts/privacy-context'
@@ -1530,13 +1530,18 @@ export default function SettingsClient(props: Props) {
                   </button>
                 </div>
               </div>
-              <div className="flex items-center gap-2 mb-3">
-                <div className="flex bg-secondary border border-border rounded-lg p-0.5">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="flex bg-secondary/30 backdrop-blur-sm border border-border/50 rounded-lg p-0.5 w-fit">
                   {(['active', 'archived', 'all'] as const).map(f => (
                     <button
                       key={f}
                       onClick={() => setEmpFilter(f)}
-                      className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${empFilter === f ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                      className={cn(
+                        "px-3 py-1.5 text-[13px] font-medium rounded-md transition-all",
+                        empFilter === f
+                          ? "bg-background text-foreground shadow-sm ring-1 ring-border/50"
+                          : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                      )}
                     >
                       {f === 'active' ? 'Active' : f === 'archived' ? 'Archived' : 'All'}
                     </button>
@@ -1548,61 +1553,85 @@ export default function SettingsClient(props: Props) {
               </div>
 
               {/* Employee Access Info Banner */}
-              <div className="mb-4 bg-blue-500/5 border border-blue-500/20 rounded-xl p-4">
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-blue-500/15 flex items-center justify-center shrink-0">
-                    <KeyRound className="w-4 h-4 text-blue-400" />
+              <div className="mb-6 bg-blue-500/[0.02] border border-blue-500/10 rounded-2xl p-5 shadow-sm">
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center shrink-0 border border-blue-500/20 shadow-sm">
+                    <KeyRound className="w-4 h-4 text-blue-500 dark:text-blue-400" />
                   </div>
                   <div className="flex-1">
-                    <p className="text-sm font-semibold text-blue-300 mb-1">Giving Employees App Access</p>
-                    <p className="text-xs text-muted-foreground leading-relaxed">
+                    <p className="text-sm font-semibold text-foreground mb-1">Giving Employees App Access</p>
+                    <p className="text-[13px] text-muted-foreground leading-relaxed mb-3">
                       Each employee can log into the app with their own email and password. Their role controls what they see.
                       To set up access:
                     </p>
-                    <ol className="text-xs text-muted-foreground mt-2 space-y-1 list-decimal list-inside">
+                    <ol className="text-[13px] text-muted-foreground space-y-1.5 list-decimal list-inside">
                       <li>Make sure the employee record below has their correct email address</li>
-                      <li>Go to <a href="https://supabase.com/dashboard/project/lgqarkdmlyfpacyqhfha/auth/users" target="_blank" className="text-blue-400 underline hover:text-blue-300">Supabase Auth → Users</a> and invite them by email</li>
-                      <li>They receive a login link, set their password, and can log in at <strong className="text-foreground">/login</strong></li>
+                      <li>Go to <a href="https://supabase.com/dashboard/project/lgqarkdmlyfpacyqhfha/auth/users" target="_blank" className="text-blue-500 dark:text-blue-400 underline hover:text-blue-600 dark:hover:text-blue-300 font-medium">Supabase Auth → Users</a> and invite them by email</li>
+                      <li>They receive a login link, set their password, and can log in at <strong className="text-foreground font-semibold">/login</strong></li>
                       <li>The app automatically recognizes their role from their employee record</li>
                     </ol>
                   </div>
                 </div>
               </div>
 
-              <div className="space-y-2">
-                {filteredEmployees.map(emp => (
-                  <div key={emp.id} className="bg-card border border-border rounded-xl px-5 py-4 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
+              <div className="space-y-3">
+                {filteredEmployees.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 px-4 border border-dashed border-border/60 rounded-2xl bg-secondary/10">
+                    <div className="w-12 h-12 rounded-full bg-secondary/50 flex items-center justify-center mb-3">
+                      <Users className="w-5 h-5 text-muted-foreground" />
+                    </div>
+                    <h3 className="text-sm font-medium text-foreground mb-1">No employees found</h3>
+                    <p className="text-xs text-muted-foreground text-center max-w-sm">
+                      {empSearch ? 'No employees match your search criteria.' : 'Add your first employee to get started with payroll and access management.'}
+                    </p>
+                  </div>
+                ) : filteredEmployees.map(emp => (
+                  <div key={emp.id} className="group bg-card border border-border/40 rounded-2xl px-5 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:border-primary/20 hover:shadow-sm transition-all">
+                    <div className="flex items-center gap-4">
                       <EmployeeAvatar
                         avatarUrl={(emp as any).avatar_url}
                         name={emp.name}
                         cqid={emp.cqid}
-                        size={36}
-                        rounded="lg"
+                        size={40}
+                        rounded="xl"
+                        className="shadow-sm border border-border/50"
                       />
                       <div>
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium">{emp.cqid}</p>
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <p className="font-semibold text-sm tracking-tight text-foreground">{emp.cqid}</p>
                           {isUnlocked && emp.name && (
-                            <span className="text-sm text-foreground/70">— {emp.name}</span>
+                            <span className="text-[13px] text-foreground/80 font-medium">— {emp.name}</span>
                           )}
                           {emp.auth_id
-                            ? <span className="text-[10px] bg-green-500/15 text-green-400 border border-green-500/25 px-1.5 py-0.5 rounded-full">Has Access</span>
-                            : <span className="text-[10px] bg-gray-500/15 text-gray-500 border border-gray-500/20 px-1.5 py-0.5 rounded-full">No Login</span>
+                            ? <span className="text-[10px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-emerald-500"></span>Has Access</span>
+                            : <span className="text-[10px] font-medium bg-secondary/50 text-muted-foreground border border-border px-2 py-0.5 rounded-full">No Login</span>
                           }
                         </div>
-                        <p className="text-xs text-muted-foreground">
-                          {ds(emp.email, '••••@••••.com')} · {emp.role.replace(/_/g, ' ')} · {emp.performance_rating}% rating
+                        <p className="text-[13px] text-muted-foreground flex items-center flex-wrap gap-2">
+                          <span>{ds(emp.email, '••••@••••.com')}</span>
+                          <span className="w-1 h-1 rounded-full bg-border"></span>
+                          <span className="capitalize">{emp.role.replace(/_/g, ' ')}</span>
+                          <span className="w-1 h-1 rounded-full bg-border"></span>
+                          <span className="flex items-center gap-1"><Zap className="w-3 h-3 text-amber-500/70" /> {emp.performance_rating}% rating</span>
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 opacity-100 md:opacity-40 md:group-hover:opacity-100 transition-opacity flex-wrap">
                       {emp.is_archived && (
-                        <span className="text-xs px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-400">Archived</span>
+                        <span className="text-[11px] font-medium px-2 py-1 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">Archived</span>
                       )}
                       {!emp.is_archived && (
-                        <span className={`text-xs px-2 py-0.5 rounded-md ${emp.is_active ? 'bg-green-500/15 text-green-400' : 'bg-gray-500/15 text-gray-400'}`}>{emp.is_active ? 'Active' : 'Inactive'}</span>
+                        <span className={cn(
+                          "text-[11px] font-medium px-2 py-1 rounded-md border",
+                          emp.is_active 
+                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" 
+                            : "bg-secondary text-muted-foreground border-border"
+                        )}>
+                          {emp.is_active ? 'Active' : 'Inactive'}
+                        </span>
                       )}
+
+                      <div className="h-4 w-px bg-border/50 mx-1 hidden sm:block" />
 
                       {/* Invite to register — when no auth_id and not archived */}
                       {!emp.auth_id && !emp.is_archived && (
@@ -1610,7 +1639,7 @@ export default function SettingsClient(props: Props) {
                           onClick={() => handleGenerateInvite(emp)}
                           disabled={inviteBusy === emp.id}
                           title="Generate invite link"
-                          className="p-2 rounded-lg hover:bg-violet-500/15 text-muted-foreground hover:text-violet-400 transition-colors disabled:opacity-50"
+                          className="p-1.5 rounded-lg hover:bg-violet-500/10 text-muted-foreground hover:text-violet-600 dark:hover:text-violet-400 transition-colors disabled:opacity-50"
                         >
                           <Send className="w-4 h-4" />
                         </button>
@@ -1622,7 +1651,7 @@ export default function SettingsClient(props: Props) {
                           onClick={() => handleAdminResetPassword(emp)}
                           disabled={inviteBusy === emp.id}
                           title="Reset password (admin)"
-                          className="p-2 rounded-lg hover:bg-blue-500/15 text-muted-foreground hover:text-blue-400 transition-colors disabled:opacity-50"
+                          className="p-1.5 rounded-lg hover:bg-blue-500/10 text-muted-foreground hover:text-blue-600 dark:hover:text-blue-400 transition-colors disabled:opacity-50"
                         >
                           <ResetKey className="w-4 h-4" />
                         </button>
@@ -1638,9 +1667,9 @@ export default function SettingsClient(props: Props) {
                         }}
                         title={(emp as any).portal_token ? 'Copy portal link' : 'No portal token — run SQL migration'}
                         disabled={!(emp as any).portal_token}
-                        className="p-2 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-violet-400 disabled:opacity-30"
+                        className="p-1.5 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground disabled:opacity-30"
                       >
-                        {copiedPortalId === emp.id ? <Check className="w-4 h-4 text-green-400" /> : <Link2 className="w-4 h-4" />}
+                        {copiedPortalId === emp.id ? <Check className="w-4 h-4 text-emerald-500" /> : <Link2 className="w-4 h-4" />}
                       </button>
 
                       {/* Change avatar */}
@@ -1649,7 +1678,7 @@ export default function SettingsClient(props: Props) {
                           setAvatarModal({ id: emp.id, cqid: emp.cqid, name: emp.name, currentUrl: (emp as any).avatar_url ?? null })
                           setAvatarPickerValue((emp as any).avatar_url ?? null)
                         }}
-                        className="p-2 rounded-lg hover:bg-violet-500/15 text-muted-foreground hover:text-violet-400 transition-colors"
+                        className="p-1.5 rounded-lg hover:bg-violet-500/10 text-muted-foreground hover:text-violet-600 dark:hover:text-violet-400 transition-colors"
                         title="Change avatar"
                       >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -1657,11 +1686,11 @@ export default function SettingsClient(props: Props) {
                         </svg>
                       </button>
 
-                      <button onClick={() => openEmployeeForm(emp)} className="p-2 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground" title="Edit">
+                      <button onClick={() => openEmployeeForm(emp)} className="p-1.5 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground" title="Edit">
                         <Edit2 className="w-4 h-4" />
                       </button>
 
-                      <Link href={`/dashboard/employees/${emp.id}/agreements`} className="p-2 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-primary" title="Commission Agreements">
+                      <Link href={`/dashboard/employees/${emp.id}/agreements`} className="p-1.5 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground" title="Commission Agreements">
                         <Handshake className="w-4 h-4" />
                       </Link>
 
@@ -1669,7 +1698,7 @@ export default function SettingsClient(props: Props) {
                         <button
                           onClick={() => handleRestore(emp)}
                           disabled={inviteBusy === emp.id}
-                          className="p-2 rounded-lg hover:bg-emerald-500/15 text-muted-foreground hover:text-emerald-400 transition-colors disabled:opacity-50"
+                          className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-muted-foreground hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors disabled:opacity-50"
                           title="Restore employee"
                         >
                           <ArchiveRestore className="w-4 h-4" />
@@ -1678,7 +1707,7 @@ export default function SettingsClient(props: Props) {
                         <button
                           onClick={() => handleArchive(emp)}
                           disabled={inviteBusy === emp.id}
-                          className="p-2 rounded-lg hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400 transition-colors disabled:opacity-50"
+                          className="p-1.5 rounded-lg hover:bg-red-500/10 text-muted-foreground hover:text-red-600 dark:hover:text-red-400 transition-colors disabled:opacity-50"
                           title="Archive employee"
                         >
                           <Archive className="w-4 h-4" />

@@ -655,28 +655,28 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
         actions={
           <div className="flex items-center gap-2">
             {tab === 'Records' && <>
-              <button onClick={exportPayrollCSV} className="flex items-center gap-1.5 bg-secondary border border-border text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap">
+              <button onClick={exportPayrollCSV} className="flex items-center gap-1.5 bg-secondary/50 hover:bg-secondary border border-border/50 text-[13px] font-medium px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground transition-all shadow-sm whitespace-nowrap">
                 <Download className="w-4 h-4 shrink-0" /><span className="hidden sm:inline">Export CSV</span>
               </button>
-              <button onClick={() => setShowPayrollForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-3 py-2 rounded-lg hover:opacity-90 whitespace-nowrap">
+              <button onClick={() => setShowPayrollForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-[13px] font-medium px-3 py-1.5 rounded-lg hover:opacity-90 whitespace-nowrap shadow-sm">
                 <Plus className="w-4 h-4 shrink-0" /> Add Manual
               </button>
             </>}
             {tab === 'Overview' && (
-              <button onClick={() => setShowBulkGenerate(true)} className="flex items-center gap-1.5 bg-secondary border border-border text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap">
+              <button onClick={() => setShowBulkGenerate(true)} className="flex items-center gap-1.5 bg-secondary/50 hover:bg-secondary border border-border/50 text-[13px] font-medium px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground transition-all shadow-sm whitespace-nowrap">
                 <Zap className="w-4 h-4 shrink-0" /> Bulk Generate
               </button>
             )}
             {tab === 'Advances' && <>
-              <button onClick={exportAdvancesCSV} className="flex items-center gap-1.5 bg-secondary border border-border text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap">
+              <button onClick={exportAdvancesCSV} className="flex items-center gap-1.5 bg-secondary/50 hover:bg-secondary border border-border/50 text-[13px] font-medium px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground transition-all shadow-sm whitespace-nowrap">
                 <Download className="w-4 h-4 shrink-0" /><span className="hidden sm:inline">Export CSV</span>
               </button>
-              <button onClick={() => setShowAdvanceForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-3 py-2 rounded-lg hover:opacity-90 whitespace-nowrap">
+              <button onClick={() => setShowAdvanceForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-[13px] font-medium px-3 py-1.5 rounded-lg hover:opacity-90 whitespace-nowrap shadow-sm">
                 <Plus className="w-4 h-4 shrink-0" /> Add Advance
               </button>
             </>}
             {tab === 'Credits' && (
-              <button onClick={() => setShowCreditForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-3 py-2 rounded-lg hover:opacity-90 whitespace-nowrap">
+              <button onClick={() => setShowCreditForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-[13px] font-medium px-3 py-1.5 rounded-lg hover:opacity-90 whitespace-nowrap shadow-sm">
                 <Plus className="w-4 h-4 shrink-0" /> Add Credit
               </button>
             )}
@@ -688,15 +688,18 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
 
         {/* ── Sticky tab bar — stays pinned just below the Header as the
               page scrolls (top offset matches Header height: 68/72px). ── */}
-        <div className="sticky top-[68px] sm:top-[72px] z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 py-2 bg-background/95 backdrop-blur-sm border-b border-border">
-          <div className="flex gap-1 bg-secondary rounded-xl p-1 w-fit overflow-x-auto max-w-full hide-scrollbar">
+        <div className="sticky top-[68px] sm:top-[72px] z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 py-2 bg-background/80 backdrop-blur-md border-b border-border/50">
+          <div className="flex bg-secondary/30 border border-border/50 p-0.5 w-fit overflow-x-auto max-w-full hide-scrollbar rounded-xl">
             {TABS.map(t => (
               <button key={t} onClick={() => setTab(t)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors relative whitespace-nowrap ${tab === t ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                className={cn(
+                  "px-4 py-1.5 rounded-lg text-[13px] font-medium transition-all relative whitespace-nowrap",
+                  tab === t ? "bg-background text-foreground shadow-sm ring-1 ring-border/50" : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                )}>
                 {t}
                 {t === 'Overview' && missingContribTasks.length > 0 &&
                   viewMonth === now.getMonth() + 1 && viewYear === now.getFullYear() && (
-                  <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[9px] font-bold flex items-center justify-center leading-none">
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[9px] font-bold flex items-center justify-center leading-none shadow-sm ring-2 ring-background">
                     {missingContribTasks.length > 99 ? '99+' : missingContribTasks.length}
                   </span>
                 )}
@@ -837,7 +840,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
             )}
 
             {/* Employee cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {empList.filter(e => e.is_active).map(emp => {
                 const commission = monthCommissions[emp.id] || 0
                 const record         = monthPayroll.find(r => r.employee_id === emp.id)
@@ -849,69 +852,69 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
 
                 return (
                   <div key={emp.id}
-                    className="bg-card border border-border rounded-xl p-4 hover:border-primary/30 transition-all cursor-pointer group"
+                    className="group bg-card border border-border/40 rounded-2xl p-5 hover:border-primary/20 hover:shadow-sm transition-all cursor-pointer flex flex-col"
                     onClick={() => setSelectedEmp(emp)}>
                     {/* Card header */}
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-9 h-9 rounded-xl gradient-bg flex items-center justify-center shrink-0">
-                          <span className="text-white text-xs font-bold tracking-wide">{avatarText(dn(emp), emp.cqid)}</span>
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl gradient-bg flex items-center justify-center shrink-0 shadow-sm border border-border/50">
+                          <span className="text-white text-sm font-bold tracking-wide">{avatarText(dn(emp), emp.cqid)}</span>
                         </div>
                         <div>
-                          <p className="text-sm font-semibold leading-tight">{dn(emp)}</p>
-                          <p className="text-[11px] text-muted-foreground capitalize">{emp.role.replace(/_/g, ' ')}</p>
+                          <p className="text-[15px] font-semibold tracking-tight text-foreground">{dn(emp)}</p>
+                          <p className="text-[12px] text-muted-foreground capitalize">{emp.role.replace(/_/g, ' ')}</p>
                         </div>
                       </div>
                       {record
                         ? record.status === 'paid'
-                          ? <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-green-500/15 text-green-700 shrink-0 dark:text-green-400">Paid</span>
-                          : <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-700 shrink-0 dark:text-amber-400">Pending</span>
+                          ? <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">Paid</span>
+                          : <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 shrink-0">Pending</span>
                         : commission > 0
-                          ? <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-blue-500/15 text-blue-700 shrink-0 dark:text-blue-400">Ready</span>
-                          : <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-secondary text-muted-foreground shrink-0">No data</span>
+                          ? <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 shrink-0">Ready</span>
+                          : <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-secondary text-muted-foreground border border-border/50 shrink-0">No data</span>
                       }
                     </div>
 
                     {/* Breakdown */}
-                    <div className="space-y-1.5 text-xs">
-                      <div className="flex justify-between">
+                    <div className="space-y-2 text-[13px] bg-secondary/30 rounded-xl p-3 border border-border/50 mb-4 flex-1">
+                      <div className="flex justify-between items-center">
                         <span className="text-muted-foreground">Base</span>
-                        <span>₹{(emp.base_salary || 0).toLocaleString('en-IN')}</span>
+                        <span className="font-medium">₹{(emp.base_salary || 0).toLocaleString('en-IN')}</span>
                       </div>
                       <div className="flex justify-between items-center group/comm">
                         <span className="text-muted-foreground">Commission</span>
                         <div className="flex items-center gap-1.5">
-                          <span className={commission > 0 ? 'text-green-700 dark:text-green-400' : 'text-muted-foreground'}>
+                          <span className={cn("font-medium", commission > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground')}>
                             {commission > 0 ? `+₹${commission.toLocaleString('en-IN')}` : '—'}
                           </span>
                         </div>
                       </div>
-                      <div className="flex justify-between items-center font-semibold text-sm pt-1.5 border-t border-border/60">
-                        <span className="flex items-center gap-1.5">
+                      <div className="flex justify-between items-center font-semibold text-sm pt-2 mt-1 border-t border-border/60">
+                        <span className="flex items-center gap-1.5 text-foreground">
                           Net Payable
                           {record && payrollOutOfSync(record) && (
                             <button
                               onClick={e => { e.stopPropagation(); handleRefreshPayroll(record.id) }}
                               disabled={refreshingId === record.id}
                               title="Live commission changed. Click to refresh."
-                              className="text-amber-500 hover:text-amber-400 transition-colors disabled:opacity-50"
+                              className="text-amber-500 hover:text-amber-600 dark:hover:text-amber-400 transition-colors disabled:opacity-50"
                             >
-                              <RefreshCw className={`w-3 h-3 ${refreshingId === record.id ? 'animate-spin' : ''}`} />
+                              <RefreshCw className={`w-3.5 h-3.5 ${refreshingId === record.id ? 'animate-spin' : ''}`} />
                             </button>
                           )}
                         </span>
-                        <span>₹{(record?.net_salary ?? netEst).toLocaleString('en-IN')}</span>
+                        <span className="text-foreground tabular-nums">₹{(record?.net_salary ?? netEst).toLocaleString('en-IN')}</span>
                       </div>
                     </div>
 
                     {/* Attendance + next payday */}
-                    <div className="mt-2.5 flex items-center justify-between text-[11px] text-muted-foreground">
+                    <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-4">
                       {workedDays > 0
-                        ? <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {workedDays} day{workedDays !== 1 ? 's' : ''} active</span>
+                        ? <span className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5" /> {workedDays} day{workedDays !== 1 ? 's' : ''} active</span>
                         : <span />
                       }
                       {isCurrentMonth && !record && (
-                        <span className={`flex items-center gap-1 ${daysToPayday <= 3 ? 'text-amber-400' : ''}`}>
+                        <span className={`flex items-center gap-1 ${daysToPayday <= 3 ? 'text-amber-600 dark:text-amber-400 font-medium' : ''}`}>
                           Pay {daysToPayday === 0 ? 'today' : daysToPayday === 1 ? 'tomorrow' : `in ${daysToPayday}d`}
                           {' · '}{nextPayDate.getDate()} {MONTHS[nextPayDate.getMonth()]}
                         </span>
@@ -920,27 +923,27 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
 
                     {/* Action buttons */}
                     {record && record.status !== 'paid' && (
-                      <div className="mt-3 flex gap-2">
+                      <div className="flex gap-2 mt-auto">
                         <button onClick={e => { e.stopPropagation(); confirmMarkPaid(record.id) }}
-                          className="flex-1 text-xs py-1.5 rounded-lg bg-secondary hover:bg-green-500/10 hover:text-green-400 border border-border hover:border-green-500/30 transition-all font-medium">
+                          className="flex-1 text-[13px] py-2 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 transition-all font-medium shadow-sm">
                           Mark Paid
                         </button>
                         <button onClick={e => { e.stopPropagation(); setPayslipModal({ employeeId: emp.id }) }}
                           title="Send payslip"
-                          className="px-2.5 py-1.5 rounded-lg bg-secondary hover:bg-primary/10 hover:text-primary border border-border hover:border-primary/30 transition-all">
-                          <Mail className="w-3.5 h-3.5" />
+                          className="px-3 py-2 rounded-lg bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground border border-border/50 transition-all shadow-sm">
+                          <Mail className="w-4 h-4" />
                         </button>
                       </div>
                     )}
                     {record && record.status === 'paid' && (
-                      <div className="mt-3 flex gap-2">
+                      <div className="flex gap-2 mt-auto">
                         <button onClick={e => { e.stopPropagation(); setPayslipModal({ employeeId: emp.id }) }}
-                          className="flex-1 text-xs py-1.5 rounded-lg bg-secondary hover:bg-primary/10 hover:text-primary border border-border hover:border-primary/30 transition-all font-medium flex items-center justify-center gap-1.5">
-                          <Mail className="w-3.5 h-3.5" /> Send Payslip
+                          className="flex-1 text-[13px] py-2 rounded-lg bg-secondary hover:bg-secondary/80 text-foreground border border-border/50 transition-all font-medium flex items-center justify-center gap-2 shadow-sm">
+                          <Mail className="w-4 h-4 text-muted-foreground" /> Send Payslip
                         </button>
                         <button onClick={e => { e.stopPropagation(); confirmMarkUnpaid(record.id) }}
                           title="Undo payment"
-                          className="px-2.5 py-1.5 rounded-lg text-muted-foreground/50 hover:text-red-400 hover:bg-red-500/5 border border-transparent hover:border-red-500/20 transition-all text-xs">
+                          className="px-3 py-2 rounded-lg text-muted-foreground hover:text-red-600 dark:hover:text-red-400 bg-secondary/30 hover:bg-red-500/10 border border-border/30 hover:border-red-500/20 transition-all shadow-sm">
                           Undo
                         </button>
                       </div>
@@ -952,11 +955,10 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                           setPayForm(p => ({ ...p, employee_id: emp.id, month: viewMonth, year: viewYear, base_salary: String(emp.base_salary || ''), commission_earned: String(commission) }))
                           setShowPayrollForm(true)
                         }}
-                        className="mt-3 w-full text-xs py-1.5 rounded-lg bg-secondary hover:bg-primary/10 hover:text-primary border border-border hover:border-primary/30 transition-all font-medium">
+                        className="w-full text-[13px] py-2 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 transition-all font-medium mt-auto shadow-sm">
                         Add to Payroll
                       </button>
                     )}
-                    <p className="text-[10px] text-primary mt-1.5 opacity-0 group-hover:opacity-60 transition-opacity">View details & history →</p>
                   </div>
                 )
               })}
@@ -970,28 +972,28 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
         {tab === 'Records' && (
           <div className="bg-card border border-border rounded-xl">
             {/* Filter Bar */}
-            <div className="px-4 py-3 border-b border-border flex flex-wrap gap-3 bg-secondary/20">
+            <div className="px-5 py-4 border-b border-border flex flex-wrap gap-3 bg-secondary/10">
               <select value={recordsFilterMonth} onChange={e => setRecordsFilterMonth(e.target.value)}
-                className="text-xs bg-background border border-border rounded-lg px-3 py-2 outline-none focus:border-primary">
+                className="text-[13px] bg-background border border-border/50 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm">
                 <option value="all">All Months</option>
                 {MONTHS.map((m, i) => <option key={m} value={String(i + 1)}>{m}</option>)}
               </select>
               <select value={recordsFilterYear} onChange={e => setRecordsFilterYear(e.target.value)}
-                className="text-xs bg-background border border-border rounded-lg px-3 py-2 outline-none focus:border-primary">
+                className="text-[13px] bg-background border border-border/50 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm">
                 <option value="all">All Years</option>
                 {Array.from(new Set(payroll.map(r => r.year))).sort().reverse().map(y => (
                   <option key={y} value={String(y)}>{y}</option>
                 ))}
               </select>
               <select value={recordsFilterEmpId} onChange={e => setRecordsFilterEmpId(e.target.value)}
-                className="text-xs bg-background border border-border rounded-lg px-3 py-2 outline-none focus:border-primary max-w-[200px] truncate">
+                className="text-[13px] bg-background border border-border/50 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm max-w-[200px] truncate">
                 <option value="all">All Employees</option>
                 {empList.filter(e => e.is_active).map(e => (
                   <option key={e.id} value={e.id}>{dn(e)}</option>
                 ))}
               </select>
               <select value={recordsFilterStatus} onChange={e => setRecordsFilterStatus(e.target.value)}
-                className="text-xs bg-background border border-border rounded-lg px-3 py-2 outline-none focus:border-primary">
+                className="text-[13px] bg-background border border-border/50 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm">
                 <option value="all">All Status</option>
                 <option value="paid">Paid</option>
                 <option value="pending">Pending</option>
@@ -1002,7 +1004,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                   setRecordsFilterYear('all')
                   setRecordsFilterEmpId('all')
                   setRecordsFilterStatus('all')
-                }} className="text-xs text-muted-foreground hover:text-foreground px-2">
+                }} className="text-[13px] font-medium text-muted-foreground hover:text-foreground px-3 py-2 rounded-lg hover:bg-secondary/50 transition-all">
                   Clear Filters
                 </button>
               )}
@@ -1010,53 +1012,60 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
 
             {/* Desktop Table View */}
             <div className="hidden lg:block overflow-x-auto">
-            <table className="w-full text-sm min-w-[700px]">
+            <table className="w-full text-[13px] min-w-[700px]">
               <thead>
-                <tr className="border-b border-border bg-secondary/50">
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Employee</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Period</th>
-                  <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground">Base</th>
-                  <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground">Commission</th>
-                  <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground">Deductions</th>
-                  <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground">Net</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Status</th>
-                  <th className="w-10 px-4 py-3" />
+                <tr className="border-b border-border/50 bg-secondary/30">
+                  <th className="text-left px-5 py-3.5 font-semibold text-muted-foreground">Employee</th>
+                  <th className="text-left px-5 py-3.5 font-semibold text-muted-foreground">Period</th>
+                  <th className="text-right px-5 py-3.5 font-semibold text-muted-foreground">Base</th>
+                  <th className="text-right px-5 py-3.5 font-semibold text-muted-foreground">Commission</th>
+                  <th className="text-right px-5 py-3.5 font-semibold text-muted-foreground">Deductions</th>
+                  <th className="text-right px-5 py-3.5 font-semibold text-foreground">Net Payable</th>
+                  <th className="text-left px-5 py-3.5 font-semibold text-muted-foreground">Status</th>
+                  <th className="w-12 px-5 py-3.5" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
+              <tbody className="divide-y divide-border/40">
                 {filteredRecords.length === 0 && (
-                  <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-muted-foreground">No payroll records match the filters.</td></tr>
+                  <tr><td colSpan={8} className="px-5 py-12 text-center text-[13px] text-muted-foreground bg-secondary/5">No payroll records match the filters.</td></tr>
                 )}
                 {filteredRecords.map(record => {
                   const emp = empList.find(e => e.id === record.employee_id)
                   const ded = (record.advances_deducted || 0) + (record.other_deductions || 0)
                   return (
-                    <tr key={record.id} className="hover:bg-secondary/20">
-                      <td className="px-4 py-3">
-                        <p className="font-medium">{dn(emp || record.employee)}</p>
-                        <p className="text-xs text-muted-foreground">{(emp || record.employee)?.cqid}</p>
+                    <tr key={record.id} className="hover:bg-secondary/20 transition-colors group">
+                      <td className="px-5 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg gradient-bg flex items-center justify-center shrink-0 shadow-sm border border-border/50">
+                            <span className="text-white text-[10px] font-bold tracking-wide">{avatarText(dn(emp || record.employee), (emp || record.employee)?.cqid || '')}</span>
+                          </div>
+                          <div>
+                            <p className="font-semibold text-foreground tracking-tight">{dn(emp || record.employee)}</p>
+                            <p className="text-[11px] text-muted-foreground">{(emp || record.employee)?.cqid}</p>
+                          </div>
+                        </div>
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">{MONTHS[record.month - 1]} {record.year}</td>
-                      <td className="px-4 py-3 text-right text-muted-foreground">₹{(record.base_salary || 0).toLocaleString('en-IN')}</td>
-                      <td className="px-4 py-3 text-right text-green-700 dark:text-green-400">+₹{(record.commission_earned || 0).toLocaleString('en-IN')}</td>
-                      <td className="px-4 py-3 text-right text-red-700 dark:text-red-400">{ded > 0 ? `-₹${ded.toLocaleString('en-IN')}` : '—'}</td>
-                      <td className="px-4 py-3 text-right font-semibold">₹{(record.net_salary || 0).toLocaleString('en-IN')}</td>
-                      <td className="px-4 py-3">
+                      <td className="px-5 py-3 text-muted-foreground">{MONTHS[record.month - 1]} {record.year}</td>
+                      <td className="px-5 py-3 text-right font-medium">₹{(record.base_salary || 0).toLocaleString('en-IN')}</td>
+                      <td className="px-5 py-3 text-right font-medium text-emerald-600 dark:text-emerald-400">+₹{(record.commission_earned || 0).toLocaleString('en-IN')}</td>
+                      <td className="px-5 py-3 text-right font-medium text-red-600 dark:text-red-400">{ded > 0 ? `-₹${ded.toLocaleString('en-IN')}` : '—'}</td>
+                      <td className="px-5 py-3 text-right font-semibold text-foreground tabular-nums text-[14px]">₹{(record.net_salary || 0).toLocaleString('en-IN')}</td>
+                      <td className="px-5 py-3">
                         {record.status === 'paid'
-                          ? <div className="flex items-center gap-1.5">
-                              <span className="text-xs px-2 py-0.5 rounded-md bg-green-500/15 text-green-700 dark:text-green-400">Paid {record.paid_date}</span>
+                          ? <div className="flex items-center gap-2">
+                              <span className="text-[11px] font-medium px-2 py-1 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 whitespace-nowrap">Paid {record.paid_date}</span>
                               <button onClick={() => confirmMarkUnpaid(record.id)} title="Undo payment"
-                                className="text-xs px-1.5 py-0.5 rounded-md text-muted-foreground/50 hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                                className="text-[11px] px-2 py-1 rounded-md text-muted-foreground hover:text-red-600 dark:hover:text-red-400 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100">
                                 Undo
                               </button>
                             </div>
-                          : <button onClick={() => confirmMarkPaid(record.id)} className="text-xs px-2 py-1 rounded-md bg-yellow-500/15 text-yellow-400 hover:bg-yellow-500/25 transition-colors">Mark Paid</button>
+                          : <button onClick={() => confirmMarkPaid(record.id)} className="text-[11px] font-medium px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 border border-amber-500/20 transition-colors whitespace-nowrap">Mark Paid</button>
                         }
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-5 py-3 text-right">
                         <button onClick={() => printSalarySlip(record)} title="Print salary slip"
-                          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
-                          <Printer className="w-3.5 h-3.5" />
+                          className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition-colors opacity-0 group-hover:opacity-100">
+                          <Printer className="w-4 h-4" />
                         </button>
                       </td>
                     </tr>
@@ -1067,49 +1076,54 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
             </div>
 
             {/* Mobile Card View */}
-            <div className="lg:hidden flex flex-col p-2 gap-2">
+            <div className="lg:hidden flex flex-col p-3 gap-3">
               {filteredRecords.length === 0 && (
-                <div className="px-4 py-10 text-center text-sm text-muted-foreground">No payroll records match the filters.</div>
+                <div className="px-5 py-12 text-center text-[13px] text-muted-foreground bg-secondary/5 rounded-xl border border-border/40">No payroll records match the filters.</div>
               )}
               {filteredRecords.map(record => {
                 const emp = empList.find(e => e.id === record.employee_id)
                 const ded = (record.advances_deducted || 0) + (record.other_deductions || 0)
                 return (
-                  <div key={record.id} className="bg-background rounded-lg border border-border p-3 flex flex-col gap-2">
+                  <div key={record.id} className="bg-card rounded-xl border border-border/50 p-4 flex flex-col gap-3 shadow-sm">
                     <div className="flex justify-between items-start">
-                      <div>
-                        <p className="font-semibold text-sm">{dn(emp || record.employee)}</p>
-                        <p className="text-[11px] text-muted-foreground">{(emp || record.employee)?.cqid} • {MONTHS[record.month - 1]} {record.year}</p>
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg gradient-bg flex items-center justify-center shrink-0 shadow-sm border border-border/50">
+                          <span className="text-white text-[10px] font-bold tracking-wide">{avatarText(dn(emp || record.employee), (emp || record.employee)?.cqid || '')}</span>
+                        </div>
+                        <div>
+                          <p className="font-semibold text-sm tracking-tight text-foreground">{dn(emp || record.employee)}</p>
+                          <p className="text-[11px] text-muted-foreground">{(emp || record.employee)?.cqid} • {MONTHS[record.month - 1]} {record.year}</p>
+                        </div>
                       </div>
                       <div className="flex items-center gap-1">
-                        <button onClick={() => printSalarySlip(record)} title="Print salary slip" className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
-                          <Printer className="w-3.5 h-3.5" />
+                        <button onClick={() => printSalarySlip(record)} title="Print salary slip" className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition-colors">
+                          <Printer className="w-4 h-4" />
                         </button>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs mt-1">
+                    <div className="bg-secondary/30 rounded-xl p-3 grid grid-cols-2 gap-x-3 gap-y-2 text-[13px] border border-border/50">
                       <div className="text-muted-foreground">Base Salary</div>
-                      <div className="text-right">₹{(record.base_salary || 0).toLocaleString('en-IN')}</div>
+                      <div className="text-right font-medium">₹{(record.base_salary || 0).toLocaleString('en-IN')}</div>
                       
                       <div className="text-muted-foreground">Commission</div>
-                      <div className="text-right text-green-700 dark:text-green-400">+₹{(record.commission_earned || 0).toLocaleString('en-IN')}</div>
+                      <div className="text-right font-medium text-emerald-600 dark:text-emerald-400">+₹{(record.commission_earned || 0).toLocaleString('en-IN')}</div>
                       
                       <div className="text-muted-foreground">Deductions</div>
-                      <div className="text-right text-red-400">{ded > 0 ? `-₹${ded.toLocaleString('en-IN')}` : '—'}</div>
+                      <div className="text-right font-medium text-red-600 dark:text-red-400">{ded > 0 ? `-₹${ded.toLocaleString('en-IN')}` : '—'}</div>
                       
-                      <div className="font-medium pt-1 mt-1 border-t border-border">Net Salary</div>
-                      <div className="text-right font-bold pt-1 mt-1 border-t border-border">₹{(record.net_salary || 0).toLocaleString('en-IN')}</div>
+                      <div className="font-semibold pt-2 mt-1 border-t border-border/60 text-foreground">Net Salary</div>
+                      <div className="text-right font-bold pt-2 mt-1 border-t border-border/60 text-foreground tabular-nums">₹{(record.net_salary || 0).toLocaleString('en-IN')}</div>
                     </div>
-                    <div className="mt-2 flex justify-end">
+                    <div className="mt-1 flex justify-end">
                       {record.status === 'paid'
-                        ? <div className="flex items-center gap-1.5">
-                            <span className="text-xs px-2 py-0.5 rounded-md bg-green-500/15 text-green-400">Paid {record.paid_date}</span>
+                        ? <div className="flex items-center gap-2">
+                            <span className="text-[11px] font-medium px-2 py-1 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 whitespace-nowrap">Paid {record.paid_date}</span>
                             <button onClick={() => confirmMarkUnpaid(record.id)} title="Undo payment"
-                              className="text-xs px-2 py-1 rounded-md text-muted-foreground/50 hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                              className="text-[11px] px-3 py-1.5 rounded-lg text-muted-foreground hover:text-red-600 dark:hover:text-red-400 hover:bg-red-500/10 bg-secondary/30 transition-colors">
                               Undo
                             </button>
                           </div>
-                        : <button onClick={() => confirmMarkPaid(record.id)} className="text-xs px-3 py-1.5 rounded-md bg-yellow-500/15 text-yellow-400 hover:bg-yellow-500/25 transition-colors font-medium">Mark Paid</button>
+                        : <button onClick={() => confirmMarkPaid(record.id)} className="text-[12px] font-medium px-4 py-1.5 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 border border-amber-500/20 transition-colors">Mark Paid</button>
                       }
                     </div>
                   </div>
@@ -1140,16 +1154,16 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
               </div>
             </div>
             <div className="hidden lg:block overflow-auto">
-              <table className="w-full text-sm border-collapse">
+              <table className="w-full text-[13px] border-collapse">
                 <thead>
-                  <tr className="bg-secondary/60 border-b border-border">
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground sticky left-0 bg-secondary/60 min-w-[120px]">Employee</th>
+                  <tr className="bg-secondary/30 border-b border-border/50">
+                    <th className="text-left px-5 py-3.5 font-semibold text-muted-foreground sticky left-0 bg-secondary/30 min-w-[120px]">Employee</th>
                     {last6Months.map(m => (
-                      <th key={`${m.year}-${m.month}`} className={`px-4 py-3 text-right text-xs font-semibold min-w-[90px] ${m.month === now.getMonth() + 1 && m.year === now.getFullYear() ? 'text-primary' : 'text-muted-foreground'}`}>
+                      <th key={`${m.year}-${m.month}`} className={`px-5 py-3.5 text-right font-semibold min-w-[90px] ${m.month === now.getMonth() + 1 && m.year === now.getFullYear() ? 'text-primary' : 'text-muted-foreground'}`}>
                         {m.label}
                       </th>
                     ))}
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-foreground min-w-[90px]">Total</th>
+                    <th className="px-5 py-3.5 text-right font-semibold text-foreground min-w-[90px]">Total</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -1171,22 +1185,22 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                     const displayTotal = totalNet + totalComm
                     return (
                       <tr key={emp.id} className="hover-gradient-row" onClick={() => setSelectedEmp(emp)}>
-                        <td className="px-4 py-3 sticky left-0 bg-transparent align-top z-10">
-                          <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-lg gradient-bg flex items-center justify-center shrink-0">
+                        <td className="px-5 py-3 sticky left-0 bg-transparent align-top z-10 border-r border-border/20 backdrop-blur-md">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-lg gradient-bg flex items-center justify-center shrink-0 shadow-sm border border-border/50">
                               <span className="text-white text-[10px] font-bold tracking-wide">{avatarText(dn(emp), emp.cqid)}</span>
                             </div>
                             <div>
-                              <p className="text-xs font-semibold text-foreground">{dn(emp)}</p>
-                              <p className="text-[10px] text-muted-foreground">{emp.cqid}</p>
+                              <p className="font-semibold text-foreground tracking-tight">{dn(emp)}</p>
+                              <p className="text-[11px] text-muted-foreground">{emp.cqid}</p>
                             </div>
                           </div>
                         </td>
                         {monthNets.map(m => (
-                          <td key={`${m.year}-${m.month}`} className="px-4 py-3 text-right">
+                          <td key={`${m.year}-${m.month}`} className="px-5 py-3 text-right tabular-nums">
                             {m.hasRecord ? (
                               <div>
-                                <p className={`text-xs font-semibold ${m.status === 'paid' ? 'text-green-400' : 'text-amber-400'}`}>
+                                <p className={`font-semibold ${m.status === 'paid' ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
                                   {formatCompact(m.net)}
                                 </p>
                                 {m.commission > 0 && (
@@ -1195,25 +1209,25 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                               </div>
                             ) : m.commission > 0 ? (
                               <div>
-                                <p className="text-xs font-semibold text-amber-500/80">
+                                <p className="font-semibold text-amber-500/80">
                                   {formatCompact(m.commission)}
                                 </p>
                                 <p className="text-[10px] text-muted-foreground">pending gen</p>
                               </div>
                             ) : (
-                              <span className="text-[11px] text-muted-foreground/30">—</span>
+                              <span className="text-muted-foreground/30">—</span>
                             )}
                           </td>
                         ))}
-                        <td className="px-4 py-3 text-right">
-                          <p className="text-xs font-bold">{displayTotal > 0 ? `${formatCompact(displayTotal)}` : '—'}</p>
+                        <td className="px-5 py-3 text-right tabular-nums">
+                          <p className="font-bold text-foreground text-[14px]">{displayTotal > 0 ? `${formatCompact(displayTotal)}` : '—'}</p>
                         </td>
                       </tr>
                     )
                   })}
                 </tbody>
                 <tfoot>
-                  <tr className="bg-secondary/40 border-t-2 border-border">
+                  <tr className="bg-secondary/40 border-t border-border">
                     <td className="px-4 py-3 text-xs font-semibold text-muted-foreground sticky left-0 bg-secondary/40">Monthly Total</td>
                     {last6Months.map(m => {
                       const mk = `${m.year}-${String(m.month).padStart(2, '0')}`
@@ -1244,7 +1258,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
             </div>
 
             {/* Mobile Card View */}
-            <div className="lg:hidden flex flex-col p-2 gap-2">
+            <div className="lg:hidden flex flex-col p-3 gap-3">
               {empList.filter(e => e.is_active).map(emp => {
                 const monthNets = last6Months.map(m => {
                   const mk = `${m.year}-${String(m.month).padStart(2, '0')}`
@@ -1262,42 +1276,42 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                 const totalComm = monthNets.reduce((s, m) => s + (!m.hasRecord ? m.commission : 0), 0)
                 const displayTotal = totalNet + totalComm
                 return (
-                  <div key={emp.id} className="bg-background rounded-lg border border-border p-3 cursor-pointer hover:border-primary/30 transition-colors" onClick={() => setSelectedEmp(emp)}>
-                    <div className="flex items-center justify-between mb-3 pb-3 border-b border-border/50">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-lg gradient-bg flex items-center justify-center shrink-0">
+                  <div key={emp.id} className="bg-card rounded-xl border border-border/50 p-4 shadow-sm cursor-pointer hover:border-primary/30 transition-all flex flex-col gap-3" onClick={() => setSelectedEmp(emp)}>
+                    <div className="flex items-center justify-between pb-3 border-b border-border/50">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl gradient-bg flex items-center justify-center shrink-0 shadow-sm border border-border/50">
                           <span className="text-white text-[11px] font-bold tracking-wide">{avatarText(dn(emp), emp.cqid)}</span>
                         </div>
                         <div>
-                          <p className="text-sm font-semibold">{dn(emp)}</p>
+                          <p className="font-semibold text-[14px] tracking-tight text-foreground">{dn(emp)}</p>
                           <p className="text-[11px] text-muted-foreground">{emp.cqid}</p>
                         </div>
                       </div>
                       <div className="text-right">
                         <p className="text-[10px] text-muted-foreground mb-0.5">6mo Total</p>
-                        <p className="text-sm font-bold">{displayTotal > 0 ? `${formatCompact(displayTotal)}` : '—'}</p>
+                        <p className="text-[14px] font-bold text-foreground tabular-nums">{displayTotal > 0 ? `${formatCompact(displayTotal)}` : '—'}</p>
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       {monthNets.map(m => (
-                        <div key={`${m.year}-${m.month}`} className="bg-secondary/40 rounded p-2 flex justify-between items-center">
+                        <div key={`${m.year}-${m.month}`} className="bg-secondary/30 border border-border/50 rounded-lg p-2.5 flex justify-between items-center">
                           <span className="text-[11px] font-medium text-muted-foreground">{m.label}</span>
                           <div className="text-right">
                             {m.hasRecord ? (
                               <div>
-                                <p className={`text-xs font-semibold ${m.status === 'paid' ? 'text-green-400' : 'text-amber-400'}`}>
+                                <p className={`text-[13px] font-semibold ${m.status === 'paid' ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
                                   {formatCompact(m.net)}
                                 </p>
                                 {m.commission > 0 && (
-                                  <p className="text-[9px] text-muted-foreground">+{formatCompact(m.commission)} comm</p>
+                                  <p className="text-[10px] text-muted-foreground">+{formatCompact(m.commission)} comm</p>
                                 )}
                               </div>
                             ) : m.commission > 0 ? (
                               <div>
-                                <p className="text-xs font-semibold text-amber-500/80">
+                                <p className="text-[13px] font-semibold text-amber-500/80">
                                   {formatCompact(m.commission)}
                                 </p>
-                                <p className="text-[9px] text-muted-foreground">pending gen</p>
+                                <p className="text-[10px] text-muted-foreground">pending gen</p>
                               </div>
                             ) : (
                               <span className="text-[11px] text-muted-foreground/30">—</span>
@@ -1310,8 +1324,8 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                 )
               })}
 
-              <div className="bg-secondary/40 rounded-lg border border-border p-3 mt-1">
-                <p className="text-xs font-semibold text-muted-foreground mb-2">Company Monthly Totals</p>
+              <div className="bg-secondary/20 rounded-xl border border-border/50 p-4 mt-2 shadow-sm">
+                <p className="text-[13px] font-semibold text-muted-foreground mb-3">Company Monthly Totals</p>
                 <div className="grid grid-cols-2 gap-2">
                   {last6Months.map(m => {
                     const mk = `${m.year}-${String(m.month).padStart(2, '0')}`
@@ -1321,9 +1335,9 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                       return s + (rec?.net_salary || rawComm)
                     }, 0)
                     return (
-                      <div key={`${m.year}-${m.month}`} className="flex justify-between items-center bg-background/60 rounded p-2 border border-border/30">
+                      <div key={`${m.year}-${m.month}`} className="flex justify-between items-center bg-card rounded-lg p-2.5 border border-border/40 shadow-sm">
                         <span className="text-[11px] font-medium text-muted-foreground">{m.label}</span>
-                        {total > 0 ? <span className="text-xs font-bold gradient-text">{formatCompact(total)}</span> : <span className="text-[11px] text-muted-foreground/30">—</span>}
+                        {total > 0 ? <span className="text-[13px] font-bold text-foreground tabular-nums">{formatCompact(total)}</span> : <span className="text-[11px] text-muted-foreground/30">—</span>}
                       </div>
                     )
                   })}
@@ -1350,68 +1364,68 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
               const trend        = hist.length >= 2 ? hist[hist.length - 1].commission - hist[hist.length - 2].commission : 0
 
               return (
-                <div key={emp.id}
-                  className="bg-card border border-border rounded-xl p-5 hover:border-primary/30 transition-all cursor-pointer"
-                  onClick={() => setSelectedEmp(emp)}>
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-11 h-11 rounded-xl gradient-bg flex items-center justify-center shrink-0">
-                        <span className="text-white font-bold text-sm tracking-wide">{avatarText(dn(emp), emp.cqid)}</span>
+                  <div key={emp.id}
+                    className="group bg-card border border-border/40 rounded-2xl p-5 hover:border-primary/20 hover:shadow-sm transition-all cursor-pointer flex flex-col"
+                    onClick={() => setSelectedEmp(emp)}>
+                    <div className="flex items-start justify-between mb-5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl gradient-bg flex items-center justify-center shrink-0 shadow-sm border border-border/50">
+                          <span className="text-white font-bold text-sm tracking-wide">{avatarText(dn(emp), emp.cqid)}</span>
+                        </div>
+                        <div>
+                          <p className="font-semibold text-[15px] tracking-tight text-foreground">{dn(emp)}</p>
+                          <p className="text-[12px] text-muted-foreground capitalize">{emp.role.replace(/_/g, ' ')}</p>
+                          {isUnlocked && emp.email && <p className="text-[12px] text-muted-foreground">{emp.email}</p>}
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-semibold">{dn(emp)}</p>
-                        <p className="text-xs text-muted-foreground capitalize">{emp.role.replace(/_/g, ' ')}</p>
-                        {isUnlocked && emp.email && <p className="text-xs text-muted-foreground">{emp.email}</p>}
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-end gap-1.5">
-                      <span className={`text-xs px-2 py-0.5 rounded-md ${emp.is_active ? 'bg-green-500/15 text-green-400' : 'bg-gray-500/15 text-gray-400'}`}>
-                        {emp.is_active ? 'Active' : 'Inactive'}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground">{emp.performance_rating}% rating</span>
-                    </div>
-                  </div>
-
-                  {/* Mini stats */}
-                  <div className="grid grid-cols-3 gap-2 text-sm mb-4">
-                    {[
-                      { label: 'Base/mo', value: `${formatCompact(emp.base_salary || 0)}` },
-                      { label: 'All-time earned', value: `${formatCompact(allTimeEarned)}` },
-                      { label: 'Tasks', value: String(taskCount) },
-                    ].map(s => (
-                      <div key={s.label} className="bg-secondary/50 rounded-lg p-2.5">
-                        <p className="text-[10px] text-muted-foreground uppercase font-medium mb-0.5">{s.label}</p>
-                        <p className="font-semibold text-xs">{s.value}</p>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Trend + last commission */}
-                  {recordCount > 0 && (
-                    <div className="flex items-center justify-between text-xs mb-4">
-                      <span className="text-muted-foreground">Last commission</span>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-semibold text-green-400">+₹{(latestRecord?.commission_earned || 0).toLocaleString('en-IN')}</span>
-                        {trend !== 0 && (
-                          trend > 0
-                            ? <span className="flex items-center gap-0.5 text-green-400"><TrendingUp className="w-3 h-3" />+₹{Math.abs(trend).toLocaleString('en-IN')}</span>
-                            : <span className="flex items-center gap-0.5 text-red-400"><TrendingDown className="w-3 h-3" />-₹{Math.abs(trend).toLocaleString('en-IN')}</span>
-                        )}
+                      <div className="flex flex-col items-end gap-1.5">
+                        <span className={`text-[10px] font-medium px-2 py-0.5 rounded-md ${emp.is_active ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' : 'bg-gray-500/10 text-gray-500 border border-gray-500/20'}`}>
+                          {emp.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground font-medium">{emp.performance_rating}% rating</span>
                       </div>
                     </div>
-                  )}
 
-                  <div className="flex items-center justify-between">
-                    <button onClick={e => { e.stopPropagation(); toggleReveal(emp.id, emp.reveal_salary) }}
-                      className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded-md transition-colors ${emp.reveal_salary ? 'bg-purple-500/15 text-purple-400' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}>
-                      {emp.reveal_salary ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-                      {emp.reveal_salary ? 'Salary visible' : 'Salary hidden'}
-                    </button>
-                    <span className="text-[10px] text-primary">Full profile & history →</span>
+                    {/* Mini stats */}
+                    <div className="grid grid-cols-3 gap-2 text-[13px] mb-5">
+                      {[
+                        { label: 'Base/mo', value: `${formatCompact(emp.base_salary || 0)}` },
+                        { label: 'All-time earned', value: `${formatCompact(allTimeEarned)}` },
+                        { label: 'Tasks', value: String(taskCount) },
+                      ].map(s => (
+                        <div key={s.label} className="bg-secondary/30 border border-border/50 rounded-xl p-3 flex flex-col justify-center text-center">
+                          <p className="text-[10px] text-muted-foreground uppercase font-medium mb-1">{s.label}</p>
+                          <p className="font-semibold text-foreground">{s.value}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Trend + last commission */}
+                    {recordCount > 0 && (
+                      <div className="flex items-center justify-between text-[13px] mb-5 bg-secondary/20 p-3 rounded-xl border border-border/30">
+                        <span className="text-muted-foreground">Last commission</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-emerald-600 dark:text-emerald-400">+₹{(latestRecord?.commission_earned || 0).toLocaleString('en-IN')}</span>
+                          {trend !== 0 && (
+                            trend > 0
+                              ? <span className="flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-md"><TrendingUp className="w-3 h-3" />+₹{Math.abs(trend).toLocaleString('en-IN')}</span>
+                              : <span className="flex items-center gap-0.5 text-red-600 dark:text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded-md"><TrendingDown className="w-3 h-3" />-₹{Math.abs(trend).toLocaleString('en-IN')}</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between mt-auto">
+                      <button onClick={e => { e.stopPropagation(); toggleReveal(emp.id, emp.reveal_salary) }}
+                        className={`flex items-center gap-1.5 text-[12px] font-medium px-3 py-1.5 rounded-lg transition-colors border shadow-sm ${emp.reveal_salary ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20' : 'bg-secondary text-muted-foreground hover:text-foreground border-border/50'}`}>
+                        {emp.reveal_salary ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                        {emp.reveal_salary ? 'Salary visible' : 'Salary hidden'}
+                      </button>
+                      <span className="text-[11px] font-medium text-primary opacity-0 group-hover:opacity-100 transition-opacity">Full profile →</span>
+                    </div>
                   </div>
-                </div>
-              )
-            })}
+                )
+              })}
           </div>
           </div>
           )
@@ -1423,26 +1437,26 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
         {tab === 'Advances' && (
           <div className="bg-card border border-border rounded-xl">
             <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[500px]">
+            <table className="w-full text-[13px] min-w-[500px]">
               <thead>
-                <tr className="border-b border-border bg-secondary/50">
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Employee</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Date</th>
-                  <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground">Amount</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Reason</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Status</th>
+                <tr className="border-b border-border/50 bg-secondary/30">
+                  <th className="text-left px-5 py-3.5 font-semibold text-muted-foreground">Employee</th>
+                  <th className="text-left px-5 py-3.5 font-semibold text-muted-foreground">Date</th>
+                  <th className="text-right px-5 py-3.5 font-semibold text-muted-foreground">Amount</th>
+                  <th className="text-left px-5 py-3.5 font-semibold text-muted-foreground">Reason</th>
+                  <th className="text-left px-5 py-3.5 font-semibold text-muted-foreground">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
-                {advList.length === 0 && <tr><td colSpan={5} className="px-4 py-10 text-center text-sm text-muted-foreground">No advances</td></tr>}
+              <tbody className="divide-y divide-border/40">
+                {advList.length === 0 && <tr><td colSpan={5} className="px-5 py-12 text-center text-[13px] text-muted-foreground bg-secondary/5">No advances</td></tr>}
                 {advList.map((adv: any) => (
-                  <tr key={adv.id} className="hover:bg-secondary/20">
-                    <td className="px-4 py-3 font-medium">{adv.employee?.cqid}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{adv.advance_date}</td>
-                    <td className="px-4 py-3 text-right font-semibold">₹{(adv.amount || 0).toLocaleString('en-IN')}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{adv.reason || '—'}</td>
-                    <td className="px-4 py-3">
-                      <span className={`text-xs px-2 py-0.5 rounded-md ${adv.status === 'repaid' ? 'bg-green-500/15 text-green-400' : 'bg-orange-500/15 text-orange-400'}`}>
+                  <tr key={adv.id} className="hover:bg-secondary/20 transition-colors">
+                    <td className="px-5 py-3.5 font-medium text-foreground">{adv.employee?.cqid}</td>
+                    <td className="px-5 py-3.5 text-muted-foreground">{adv.advance_date}</td>
+                    <td className="px-5 py-3.5 text-right font-semibold text-foreground tabular-nums">₹{(adv.amount || 0).toLocaleString('en-IN')}</td>
+                    <td className="px-5 py-3.5 text-muted-foreground">{adv.reason || '—'}</td>
+                    <td className="px-5 py-3.5">
+                      <span className={`text-[11px] font-medium px-2.5 py-1 rounded-md border ${adv.status === 'repaid' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'}`}>
                         {adv.status}
                       </span>
                     </td>
@@ -1460,29 +1474,29 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
         {tab === 'Credits' && (
           <div className="bg-card border border-border rounded-xl">
             <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[500px]">
+            <table className="w-full text-[13px] min-w-[500px]">
               <thead>
-                <tr className="border-b border-border bg-secondary/50">
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Entity</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Date</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Type</th>
-                  <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground">Amount</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Notes</th>
+                <tr className="border-b border-border/50 bg-secondary/30">
+                  <th className="text-left px-5 py-3.5 font-semibold text-muted-foreground">Entity</th>
+                  <th className="text-left px-5 py-3.5 font-semibold text-muted-foreground">Date</th>
+                  <th className="text-left px-5 py-3.5 font-semibold text-muted-foreground">Type</th>
+                  <th className="text-right px-5 py-3.5 font-semibold text-muted-foreground">Amount</th>
+                  <th className="text-left px-5 py-3.5 font-semibold text-muted-foreground">Notes</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
-                {creditList.length === 0 && <tr><td colSpan={5} className="px-4 py-10 text-center text-sm text-muted-foreground">No credit entries</td></tr>}
+              <tbody className="divide-y divide-border/40">
+                {creditList.length === 0 && <tr><td colSpan={5} className="px-5 py-12 text-center text-[13px] text-muted-foreground bg-secondary/5">No credit entries</td></tr>}
                 {creditList.map((cr: any) => (
-                  <tr key={cr.id} className="hover:bg-secondary/20">
-                    <td className="px-4 py-3 font-medium">{cr.employee?.cqid || cr.entity_type}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{cr.credit_date}</td>
-                    <td className="px-4 py-3">
-                      <span className={`text-xs px-2 py-0.5 rounded-md ${cr.credit_type === 'given' ? 'bg-orange-500/15 text-orange-400' : 'bg-green-500/15 text-green-400'}`}>
+                  <tr key={cr.id} className="hover:bg-secondary/20 transition-colors">
+                    <td className="px-5 py-3.5 font-medium text-foreground">{cr.employee?.cqid || cr.entity_type}</td>
+                    <td className="px-5 py-3.5 text-muted-foreground">{cr.credit_date}</td>
+                    <td className="px-5 py-3.5">
+                      <span className={`text-[11px] font-medium px-2.5 py-1 rounded-md border ${cr.credit_type === 'given' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'}`}>
                         {cr.credit_type}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right font-semibold">₹{(cr.amount || 0).toLocaleString('en-IN')}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{cr.notes || '—'}</td>
+                    <td className="px-5 py-3.5 text-right font-semibold text-foreground tabular-nums">₹{(cr.amount || 0).toLocaleString('en-IN')}</td>
+                    <td className="px-5 py-3.5 text-muted-foreground">{cr.notes || '—'}</td>
                   </tr>
                 ))}
               </tbody>
