@@ -69,12 +69,30 @@ const ClientEditModal = dynamic(
   { ssr: false },
 )
 
+// ── Internal work (no client) ────────────────────────────────────────────────
+// A task with client_id NULL is Cirqle's own work — internal marketing, brand
+// design, company videos. The task→invoice DB trigger only fires for tasks
+// WITH a client, so internal tasks can never generate an invoice. This
+// sentinel is UI-only: it stands in for "internal" in the filter dropdown and
+// the Add Task form, and is always converted to NULL before saving.
+const INTERNAL_CLIENT = '__internal__'
+
+// Shown wherever a client name would normally appear, so internal work reads
+// as a deliberate label instead of a data gap ('—').
+function InternalBadge({ className = '' }: { className?: string }) {
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-cyan-500/15 text-cyan-400 border border-cyan-500/20 ${className}`}>
+      Internal
+    </span>
+  )
+}
+
 interface Task {
   id: string
   task_number?: number | null
   title: string
   description?: string
-  client_id: string
+  client_id: string | null
   service_id: string
   status: string
   billing_amount?: number       // stripped from employee payloads; present only for admins
@@ -409,7 +427,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
 
       // Apply filters
       if (filterStatus)  q = q.eq('status', filterStatus)
-      if (filterClient)  q = q.eq('client_id', filterClient)
+      if (filterClient)  q = filterClient === INTERNAL_CLIENT ? q.is('client_id', null) : q.eq('client_id', filterClient)
       if (filterService) q = q.eq('service_id', filterService)
 
       // Search query
@@ -886,7 +904,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       task_number: task.task_number != null ? String(task.task_number) : '',
       title: task.title,
       description: task.description || '',
-      client_id: task.client_id,
+      client_id: task.client_id ?? '',   // internal task → '' in the form, saved back as NULL
       service_id: task.service_id,
       status: task.status,
       quantity: task.quantity ? String(task.quantity) : '1',
@@ -933,7 +951,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
         ...(editForm.task_number ? { task_number: parseInt(editForm.task_number, 10) } : {}),
         title: editForm.title,
         description: editForm.description || null,
-        client_id: editForm.client_id,
+        client_id: editForm.client_id || null,   // internal tasks keep NULL through edits
         service_id: editForm.service_id,
         status: editForm.status,
         billing_amount: amount,
@@ -1162,7 +1180,9 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       task_number: tn,
       title: form.title,
       description: form.description || null,
-      client_id: form.client_id,
+      // Empty or the Internal sentinel → NULL: internal Cirqle work with no
+      // client. The task→invoice trigger ignores NULL-client tasks entirely.
+      client_id: form.client_id && form.client_id !== INTERNAL_CLIENT ? form.client_id : null,
       service_id: form.service_id,
       status: form.status,
       billing_amount: computedAmount,
@@ -1494,7 +1514,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
   const filteredTasks = useMemo(() => {
     let t = tasks
     if (filterStatus)  t = t.filter(x => x.status === filterStatus)
-    if (filterClient)  t = t.filter(x => x.client?.id === filterClient)
+    if (filterClient)  t = filterClient === INTERNAL_CLIENT ? t.filter(x => !x.client_id) : t.filter(x => x.client?.id === filterClient)
     if (filterService) t = t.filter(x => x.service?.id === filterService)
     // Named search facets (Title / Client / Service / Task # / Amount) with
     // operators — OR within a field, AND across. Generic text is handled by the
@@ -1516,6 +1536,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
           const matches =
             x.title?.toLowerCase().includes(q) ||
             x.client?.name?.toLowerCase().includes(q) ||
+            (!x.client_id && 'internal'.includes(q)) ||   // "internal" finds client-less tasks
             x.service?.name?.toLowerCase().includes(q) ||
             taskCodeMatches(x, trimmed)
           if (!matches) return
@@ -1612,7 +1633,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
   // loop is O(1) per task instead of O(assignments × 3 tables) per task.
   const statusCounts = useMemo(() => {
     const base = tasks.filter(t => {
-      if (filterClient  && t.client?.id  !== filterClient)  return false
+      if (filterClient === INTERNAL_CLIENT ? !!t.client_id : (filterClient && t.client?.id !== filterClient)) return false
       if (filterService && t.service?.id !== filterService) return false
       if (assigneeTaskIdSet && !assigneeTaskIdSet.has(t.id)) return false
       if (filterDate && !matchesDateFilter(t.task_date, filterDate)) return false
@@ -1639,7 +1660,9 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
         result.push({ value: t.client.id, label: t.client.name })
       }
     })
-    return result.sort((a, b) => a.label.localeCompare(b.label))
+    result.sort((a, b) => a.label.localeCompare(b.label))
+    // "Internal" pinned first — filters to tasks with NO client (Cirqle's own work).
+    return [{ value: INTERNAL_CLIENT, label: 'Internal — Cirqle' }, ...result]
   }, [clients, tasks])
 
   // ── Smart Mode: with a date filter active, dropdowns only offer values that
@@ -1653,7 +1676,9 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
   const scopedClientOptions = useMemo(() => {
     if (!dateScopedTasks) return clientFilterOptions
     const ids = new Set(dateScopedTasks.map(t => t.client?.id).filter(Boolean))
-    return clientFilterOptions.filter(o => ids.has(o.value) || o.value === filterClient)
+    const hasInternal = dateScopedTasks.some(t => !t.client_id)
+    return clientFilterOptions.filter(o =>
+      ids.has(o.value) || o.value === filterClient || (o.value === INTERNAL_CLIENT && hasInternal))
   }, [dateScopedTasks, clientFilterOptions, filterClient])
   const scopedServiceOptions = useMemo(() => {
     const all = services.map(s => ({ value: s.id, label: s.name }))
@@ -1683,19 +1708,22 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       case 'client': return (
         <td key={key} className="px-5 py-3.5 text-muted-foreground" onClick={stopInline}>
           {inlineEditMode ? (
-            <select value={task.client_id} onChange={async e => {
-              const newId = e.target.value
+            <select value={task.client_id ?? ''} onChange={async e => {
+              const newId = e.target.value || null   // '' = internal (no client)
               await serverInlineTaskUpdate(task.id, { client_id: newId })
-              const c = clients.find(x => x.id === newId)
+              const c = newId ? clients.find(x => x.id === newId) : undefined
               setTasks(prev => prev.map(t => t.id === task.id ? { ...t, client_id: newId, client: c ? { id: c.id, name: c.name, code: c.code } : undefined } : t))
             }} className="bg-secondary border border-border rounded px-2 py-1 text-sm focus:outline-none focus:border-violet-500/50 w-full">
+              <option value="">Internal — Cirqle</option>
               {clients.map(c => <option key={c.id} value={c.id}>{c.code ? `${c.name} · ${c.code}` : c.name}</option>)}
             </select>
-          ) : (
+          ) : task.client ? (
             <span>
-              {task.client?.name || '—'}
-              {task.client?.code && <span className="ml-1.5 text-[10px] font-mono text-muted-foreground/50">{task.client.code}</span>}
+              {task.client.name}
+              {task.client.code && <span className="ml-1.5 text-[10px] font-mono text-muted-foreground/50">{task.client.code}</span>}
             </span>
+          ) : (
+            <InternalBadge />
           )}
         </td>
       )
@@ -1903,8 +1931,12 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                           {task.description && <p className="text-xs text-muted-foreground truncate max-w-[180px]">{task.description}</p>}
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">
-                          {task.client?.name || '—'}
-                          {task.client?.code && <span className="ml-1.5 text-[10px] font-mono text-muted-foreground/50">{task.client.code}</span>}
+                          {task.client ? (
+                            <>
+                              {task.client.name}
+                              {task.client.code && <span className="ml-1.5 text-[10px] font-mono text-muted-foreground/50">{task.client.code}</span>}
+                            </>
+                          ) : <InternalBadge />}
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">{task.service?.name || '—'}</td>
                         <td className="px-4 py-3 text-muted-foreground">{deletedDate.toLocaleDateString('en-GB')}</td>
@@ -2272,7 +2304,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
           <ActiveFilterChips
             chips={[
               ...(filterStatus ? [{ key: 'status', label: 'Status', value: getStatusLabel(filterStatus), onRemove: () => setFilterStatus('') }] : []),
-              ...(filterClient ? [{ key: 'client', label: 'Client', value: clientList.find(c => c.id === filterClient)?.name || 'Selected', onRemove: () => setFilterClient('') }] : []),
+              ...(filterClient ? [{ key: 'client', label: 'Client', value: filterClient === INTERNAL_CLIENT ? 'Internal' : clientList.find(c => c.id === filterClient)?.name || 'Selected', onRemove: () => setFilterClient('') }] : []),
               ...(filterService ? [{ key: 'service', label: 'Service', value: services.find(s => s.id === filterService)?.name || 'Selected', onRemove: () => setFilterService('') }] : []),
               ...(filterAssignee ? [{ key: 'assignee', label: 'Assignee', value: employees.find(e => e.id === filterAssignee)?.name || 'Selected', onRemove: () => setFilterAssignee('') }] : []),
               ...(filterDate ? [{ key: 'date', label: 'Date', value: getDateFilterLabel(filterDate), onRemove: () => setFilterDate(null) }] : []),
@@ -2720,8 +2752,12 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                     </div>
                     {/* Meta line — client · service */}
                     <p className="text-xs text-muted-foreground truncate mt-0.5">
-                      {task.client?.name || '—'}
-                      {task.client?.code && <span className="ml-1 text-[10px] font-mono text-muted-foreground/50">{task.client.code}</span>}
+                      {task.client ? (
+                        <>
+                          {task.client.name}
+                          {task.client.code && <span className="ml-1 text-[10px] font-mono text-muted-foreground/50">{task.client.code}</span>}
+                        </>
+                      ) : <InternalBadge />}
                       {' '}<span className="text-muted-foreground/40">·</span> {task.service?.name || '—'}
                     </p>
                   </div>
@@ -2906,11 +2942,19 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
           else if (boardGroupBy === 'client') {
             const byClient = new Map<string, typeof visibleTasks>()
             visibleTasks.forEach(t => {
-              const k = t.client_id || 'unknown'
+              const k = t.client_id || INTERNAL_CLIENT
               if (!byClient.has(k)) byClient.set(k, [])
               byClient.get(k)!.push(t)
             })
             boardColumns = [...byClient.entries()].map(([cId, tasks]) => {
+              if (cId === INTERNAL_CLIENT) return {
+                key: cId,
+                badge: 'INT',
+                title: 'Internal — Cirqle',
+                color: 'bg-cyan-500/15 border-cyan-500/20 text-cyan-400',
+                sections: [{ label: 'Tasks', tasks }],
+                totalCount: tasks.length,
+              }
               const c = clients.find(x => x.id === cId)
               return {
                 key: cId,
@@ -3154,7 +3198,9 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                               </div>
                               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                                 {boardGroupBy !== 'client' && (
-                                  <span className="text-[10px] text-muted-foreground truncate max-w-[140px]">{task.client?.name || '—'}{task.client?.code ? ` · ${task.client.code}` : ''}</span>
+                                  task.client
+                                    ? <span className="text-[10px] text-muted-foreground truncate max-w-[140px]">{task.client.name}{task.client.code ? ` · ${task.client.code}` : ''}</span>
+                                    : <InternalBadge />
                                 )}
                                 {boardGroupBy !== 'service' && task.service?.name && (
                                   <span className="text-[10px] text-cyan-400/60">{task.service.name}</span>
@@ -3284,7 +3330,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                             key={task.id}
                             onClick={() => openEdit(task)}
                             className={`w-full text-left text-[10px] truncate px-1.5 py-0.5 rounded ${getStatusColor(task.status)} hover:opacity-80 transition-opacity`}
-                            title={`${taskCode(task)} · ${task.title} — ${task.client?.name || ''}`}
+                            title={`${taskCode(task)} · ${task.title} — ${task.client?.name || 'Internal'}`}
                           >
                             <span className="opacity-60 mr-1 font-mono">{taskCode(task)}</span>{task.title}
                           </button>
@@ -4142,9 +4188,12 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
               {/* Client + Service */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Client *</label>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Client <span className="text-muted-foreground/60 font-normal">(empty = internal work)</span></label>
                   <Combobox
-                    options={clientList.map(c => ({ id: c.id, label: c.name, sub: c.code }))}
+                    options={[
+                      { id: INTERNAL_CLIENT, label: 'Internal — Cirqle', sub: 'own brand work · never invoiced' },
+                      ...clientList.map(c => ({ id: c.id, label: c.name, sub: c.code })),
+                    ]}
                     value={form.client_id}
                     onChange={handleClientChange}
                     placeholder="Search client…"
@@ -4184,7 +4233,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                       <Combobox
                         options={tasks
                           .filter(t => !t.parent_task_id)  // only original tasks can be parents
-                          .map(t => ({ id: t.id, label: t.title, sub: `${t.client?.name ?? '—'} · ${t.task_date}` }))}
+                          .map(t => ({ id: t.id, label: t.title, sub: `${t.client?.name ?? 'Internal'} · ${t.task_date}` }))}
                         value={form.parent_task_id}
                         onChange={(parentId: string) => {
                           const parent = tasks.find(t => t.id === parentId)
@@ -4653,7 +4702,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                             className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-secondary hover:bg-secondary/70 text-foreground border border-border transition-colors">
                             Set default price for this service
                           </button>
-                          {form.client_id && (
+                          {form.client_id && form.client_id !== INTERNAL_CLIENT && (
                             <button type="button" onClick={() => setQuickSet({ mode: 'client', price: '', currency: unitCurrency })}
                               className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 transition-colors">
                               Set price for {clients.find(c => c.id === form.client_id)?.name?.split(' ')[0]}

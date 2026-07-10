@@ -1617,6 +1617,10 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const groupMap: Record<string, BatchGroup & { tasks: NonNullable<BatchGroup['tasks']> }> = {}
     uninvoiced.forEach((t: any) => {
       const clientId = t.client_id || t.client?.id
+      // Internal work (client_id NULL) is Cirqle's own — it must never be
+      // swept into an invoice. Without this guard these tasks would group
+      // under an undefined client and generate a client-less invoice.
+      if (!clientId) return
       const clientName = t.client?.name || 'Unknown'
       const clientCode = t.client?.code || 'CLI'
       const month = t.task_date ? t.task_date.slice(0, 7) : 'unknown'
