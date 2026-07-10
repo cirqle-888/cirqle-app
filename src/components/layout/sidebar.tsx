@@ -122,7 +122,9 @@ export function ProfileActions({
 
   async function handleSignOut() {
     const supabase = createClient()
-    await supabase.auth.signOut()
+    // scope 'local' ends only this browser's session — the default ('global')
+    // revokes every session for the user, including the desktop app.
+    await supabase.auth.signOut({ scope: 'local' })
     router.push('/login')
   }
 
@@ -284,7 +286,9 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
 
   async function handleSignOut() {
     const supabase = createClient()
-    await supabase.auth.signOut()
+    // scope 'local' ends only this browser's session — the default ('global')
+    // revokes every session for the user, including the desktop app.
+    await supabase.auth.signOut({ scope: 'local' })
     router.push('/login')
   }
 
