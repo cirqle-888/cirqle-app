@@ -1,5 +1,8 @@
 'use client'
 
+import React from 'react'
+import { FormField, FormLabel, FormControl } from '@/components/ui/form'
+
 import { useState, useTransition } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { getResumeUploadUrl, submitApplication, type PublicPosition } from './actions'
@@ -221,9 +224,9 @@ function Row({ children }: { children: React.ReactNode }) {
 
 function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
   return (
-    <div>
-      <label className={labelCls}>{label}{required && <span className="text-destructive"> *</span>}</label>
-      {children}
-    </div>
+    <FormField>
+      <FormLabel className={labelCls}>{label}{required && <span className="text-destructive"> *</span>}</FormLabel>
+      {React.isValidElement(children) ? <FormControl>{children}</FormControl> : children}
+    </FormField>
   )
 }

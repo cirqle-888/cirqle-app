@@ -1,5 +1,7 @@
 'use client'
 
+import React from 'react'
+
 import { useState, useEffect, useMemo } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
@@ -23,18 +25,19 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
+import { FormField, FormLabel, FormControl } from '@/components/ui/form'
 import dynamic from 'next/dynamic'
 
 const ClientEditModal = dynamic(() => import('@/components/ui/client-edit-modal').then(mod => mod.ClientEditModal), { ssr: false })
 
 function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
   return (
-    <div className="space-y-1.5">
-      <Label className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">
+    <FormField>
+      <FormLabel className="text-xs uppercase tracking-wider font-semibold">
         {label}{required && <span className="text-destructive ml-0.5">*</span>}
-      </Label>
-      {children}
-    </div>
+      </FormLabel>
+      {React.isValidElement(children) ? <FormControl>{children}</FormControl> : children}
+    </FormField>
   )
 }
 

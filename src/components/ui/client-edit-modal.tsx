@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
+import { FormField, FormLabel, FormControl } from '@/components/ui/form'
 import { X, Search, Check } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { ModalOverlay } from './modal-overlay'
@@ -21,12 +22,12 @@ const inputCls = 'w-full bg-background border border-input rounded-lg px-3 py-2 
 
 function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
   return (
-    <div>
-      <label className="block text-xs font-medium text-muted-foreground mb-1">
+    <FormField>
+      <FormLabel className="block text-xs font-medium">
         {label}{required && <span className="text-destructive ml-0.5">*</span>}
-      </label>
-      {children}
-    </div>
+      </FormLabel>
+      {React.isValidElement(children) ? <FormControl>{children}</FormControl> : children}
+    </FormField>
   )
 }
 

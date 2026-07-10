@@ -1,5 +1,7 @@
 'use client'
 
+import { FormField, FormLabel, FormControl } from '@/components/ui/form'
+
 import { useState } from 'react'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
@@ -218,14 +220,16 @@ function toPartnerPatch(form: PartnerInput) {
 
 function Field({ label, value, onChange, type = 'text' }: { label: string; value: string; onChange: (v: string) => void; type?: string }) {
   return (
-    <div>
-      <label className="block text-xs font-medium text-muted-foreground mb-1">{label}</label>
-      <input
-        type={type}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground"
-      />
-    </div>
+    <FormField>
+      <FormLabel className="block text-xs font-medium">{label}</FormLabel>
+      <FormControl>
+        <input
+          type={type}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground"
+        />
+      </FormControl>
+    </FormField>
   )
 }
