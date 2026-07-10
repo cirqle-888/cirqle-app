@@ -97,16 +97,22 @@ export async function serverPermanentDeleteTask(
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const admin = createAdminClient()
-  const { error } = await admin.from('tasks').delete().eq('id', taskId)
-  if (error) return { ok: false, error: error.message }
 
-  void logActivity({
+  // Log BEFORE deleting and await it: written after, the row's auto-derived
+  // task_id references a task that no longer exists and the insert dies on
+  // activity_logs_task_id_fkey — the audit entry was silently lost. Written
+  // first, the FK is valid, and the delete's ON DELETE SET NULL clears
+  // task_id while entity_id + detail keep the historical record.
+  await logActivity({
     actorId:    guard.employeeId,
     entityType: 'task',
     entityId:   taskId,
     action:     'deleted',
     detail:     { title: taskTitle, permanent: true },
   })
+
+  const { error } = await admin.from('tasks').delete().eq('id', taskId)
+  if (error) return { ok: false, error: error.message }
 
   return { ok: true }
 }
