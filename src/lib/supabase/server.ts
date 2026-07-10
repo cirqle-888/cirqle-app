@@ -214,6 +214,9 @@ export function stablePaginationQuery(query: any) {
 export function hasDuplicateRows(data: any[], key: string = 'id'): boolean {
   const seen = new Set()
   for (const row of data) {
+    // Rows without the key can't be judged — queries that don't select `id`
+    // would otherwise all collide on `undefined` and always report duplicates.
+    if (row == null || row[key] === undefined) continue
     if (seen.has(row[key])) return true
     seen.add(row[key])
   }
