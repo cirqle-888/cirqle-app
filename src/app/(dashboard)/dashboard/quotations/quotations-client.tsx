@@ -759,6 +759,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
               <h2 className="font-semibold">New Quotation</h2>
               <button
                 onClick={() => setShowForm(false)}
+                aria-label="Close"
                 className="text-muted-foreground hover:text-foreground transition-colors"
               >
                 <X className="w-4 h-4" />

@@ -2697,6 +2697,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                   </span>
                 </div>
                 <button
+                  aria-label="Clear selection"
                   onClick={() => setSelectedForBulk(new Set())}
                   className="p-1 text-muted-foreground hover:text-foreground rounded"
                 >
@@ -3381,6 +3382,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                   </div>
                   {editable && (
                     <button
+                      aria-label="Remove item"
                       onClick={e => { e.stopPropagation(); removeItem(inv.id, item.id) }}
                       disabled={removingItemId === item.id}
                       className="opacity-0 group-hover:opacity-100 p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all shrink-0 mt-0.5">
@@ -3758,7 +3760,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             <h3 className="font-bold text-base text-foreground tracking-tight">Record Payment</h3>
             <div className="text-xs text-muted-foreground font-medium mt-0.5">{inv.invoice_number} · Balance <span className="text-foreground">{fmt(balance, inv.currency)}</span></div>
           </div>
-          <button onClick={() => setPanelMode('detail')} className="p-2 hover:bg-secondary/80 rounded-xl text-muted-foreground hover:text-foreground transition-colors">
+          <button onClick={() => setPanelMode('detail')} aria-label="Close panel" className="p-2 hover:bg-secondary/80 rounded-xl text-muted-foreground hover:text-foreground transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -3929,7 +3931,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             </h3>
             <p className="text-[11px] text-muted-foreground font-medium mt-1 leading-tight">For one-off / override invoices. Tasks auto-generate drafts.</p>
           </div>
-          <button onClick={() => setPanelMode('detail')} className="p-2 hover:bg-secondary/80 rounded-xl text-muted-foreground hover:text-foreground transition-colors">
+          <button onClick={() => setPanelMode('detail')} aria-label="Close panel" className="p-2 hover:bg-secondary/80 rounded-xl text-muted-foreground hover:text-foreground transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -3992,7 +3994,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                     />
                   </div>
                   {newForm.items.length > 1 && (
-                    <button onClick={() => setNewForm(p => ({ ...p, items: p.items.filter((_, i) => i !== idx) }))}
+                    <button aria-label="Remove line" onClick={() => setNewForm(p => ({ ...p, items: p.items.filter((_, i) => i !== idx) }))}
                       className="p-2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all shrink-0">
                       <X className="w-4 h-4" />
                     </button>
@@ -4041,7 +4043,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             </h3>
             <p className="text-[11px] text-muted-foreground font-medium mt-1 leading-tight">Pick a client + period → fetch done tasks → create invoice</p>
           </div>
-          <button onClick={() => { setPanelMode('detail'); setGenTasks([]) }} className="p-2 hover:bg-secondary/80 rounded-xl text-muted-foreground hover:text-foreground transition-colors">
+          <button onClick={() => { setPanelMode('detail'); setGenTasks([]) }} aria-label="Close panel" className="p-2 hover:bg-secondary/80 rounded-xl text-muted-foreground hover:text-foreground transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -4235,7 +4237,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             </h3>
             <p className="text-[11px] text-muted-foreground font-medium mt-1 leading-tight">Historical scan of un-invoiced done tasks</p>
           </div>
-          <button onClick={() => { setPanelMode('detail'); setBatchGroups([]) }} className="p-2 hover:bg-secondary/80 rounded-xl text-muted-foreground hover:text-foreground transition-colors">
+          <button onClick={() => { setPanelMode('detail'); setBatchGroups([]) }} aria-label="Close panel" className="p-2 hover:bg-secondary/80 rounded-xl text-muted-foreground hover:text-foreground transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -4312,7 +4314,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                   />
                 </div>
                 {hasFilters && (
-                  <button onClick={clearFilters} className="p-1.5 text-red-500 hover:bg-red-500/10 rounded-lg transition-colors" title="Clear all filters">
+                  <button onClick={clearFilters} aria-label="Clear all filters" className="p-1.5 text-red-500 hover:bg-red-500/10 rounded-lg transition-colors" title="Clear all filters">
                     <X className="w-4 h-4" />
                   </button>
                 )}
