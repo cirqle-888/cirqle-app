@@ -76,7 +76,11 @@ async function generateDailyPDF(data: RenderData): Promise<Buffer> {
   const W = 1240
   const H = 1754
 
-  const allRows = computeDailyRows(data)
+  // computeDailyRows returns true chronological (oldest → newest) order with a
+  // correct running balance per day. Reverse to newest-first for display —
+  // the report reads like a statement (latest update first), matching the
+  // WhatsApp/PNG export's own ordering.
+  const allRows = computeDailyRows(data).reverse()
   const firstCap = dailyReportRowCapacity({ width: W, height: H, continuation: false })
   const contCap  = dailyReportRowCapacity({ width: W, height: H, continuation: true })
 

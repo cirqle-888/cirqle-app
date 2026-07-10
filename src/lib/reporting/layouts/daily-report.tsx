@@ -31,17 +31,26 @@ export type DailyRowWithBalance = DailySeriesPoint & { balance: number; actualCo
 /**
  * Computes the full chronological (oldest → newest) daily performance series
  * with a running "remaining allocation" against the campaign's wallet allocation.
+ *
+ * `kpi.dailySeries` is sorted newest-first (see kpi-engine.ts), so it's sorted
+ * into true ascending date order here before accumulating — the running
+ * balance only comes out correct when each day's spend is added in the order
+ * it actually happened. Getting this backwards silently attaches the wrong
+ * balance to the wrong date (e.g. the most recent day showing a HIGHER
+ * remaining balance than an earlier day).
  */
 export function computeDailyRows(data: RenderData): DailyRowWithBalance[] {
   const { project, kpi } = data
   let cumulativeCost = 0
   // Fixed platform GST rate — independent of the project's own invoice tax_percent.
-  return kpi.dailySeries.map(row => {
-    const gstAmount = row.spend * AD_SPEND_GST_RATE
-    const actualCost = row.spend + gstAmount
-    cumulativeCost += actualCost
-    return { ...row, actualCost, gstAmount, balance: project.walletAllocation - cumulativeCost }
-  })
+  return [...kpi.dailySeries]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map(row => {
+      const gstAmount = row.spend * AD_SPEND_GST_RATE
+      const actualCost = row.spend + gstAmount
+      cumulativeCost += actualCost
+      return { ...row, actualCost, gstAmount, balance: project.walletAllocation - cumulativeCost }
+    })
 }
 
 interface LayoutOpts {
