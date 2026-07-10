@@ -90,7 +90,7 @@ function SectionLabel({ label, icon: Icon }: { label: string; icon?: React.Eleme
 
 // ─── Single result row ────────────────────────────────────────────────────────
 
-function ResultRow({ result, active, onSelect }: { result: Result; active: boolean; onSelect: () => void }) {
+function ResultRow({ result, active, onSelect, optionId }: { result: Result; active: boolean; onSelect: () => void; optionId: string }) {
   const rowRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
@@ -106,6 +106,9 @@ function ResultRow({ result, active, onSelect }: { result: Result; active: boole
       <button
         ref={rowRef}
         type="button"
+        id={optionId}
+        role="option"
+        aria-selected={active}
         onClick={onSelect}
         className="flex-1 min-w-0 flex items-center gap-3 py-2.5 pl-2 text-left"
       >
@@ -493,7 +496,7 @@ export function CommandPalette() {
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
 
       {/* Panel */}
-      <div className="relative w-full max-w-xl bg-secondary border border-foreground/15 rounded-2xl shadow-2xl shadow-black/60 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+      <div role="dialog" aria-modal="true" aria-label="Command palette" className="relative w-full max-w-xl bg-secondary border border-foreground/15 rounded-2xl shadow-2xl shadow-black/60 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
 
         {/* Search input */}
         <div className="flex items-center gap-3 px-4 py-3.5 border-b border-foreground/[0.06]">
@@ -503,6 +506,10 @@ export function CommandPalette() {
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="command-palette-results"
+            aria-activedescendant={flat[activeIndex] ? `command-palette-option-${activeIndex}` : undefined}
             placeholder="Search modules, tasks, invoices, clients…"
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/40"
           />
@@ -522,7 +529,7 @@ export function CommandPalette() {
         </div>
 
         {/* Results */}
-        <div className="max-h-[420px] overflow-y-auto py-1.5 overscroll-contain">
+        <div id="command-palette-results" role="listbox" aria-label="Search results" className="max-h-[420px] overflow-y-auto py-1.5 overscroll-contain">
           {flat.length === 0 && !loading && (
             <div className="flex flex-col items-center justify-center py-10 gap-2 text-muted-foreground/40">
               <AlertCircle className="w-8 h-8 opacity-30" />
@@ -542,6 +549,7 @@ export function CommandPalette() {
                       key={item.id}
                       result={item}
                       active={activeIndex === thisIdx}
+                      optionId={`command-palette-option-${thisIdx}`}
                       onSelect={() => navigate(item)}
                     />
                   )
