@@ -19,9 +19,24 @@ import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { TokenizedSearch, type SearchFacet } from '@/components/ui/tokenized-search'
 import { recordMatchesFacets, type FacetFieldDef } from '@/lib/search/match-facets'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
 import dynamic from 'next/dynamic'
 
 const ClientEditModal = dynamic(() => import('@/components/ui/client-edit-modal').then(mod => mod.ClientEditModal), { ssr: false })
+
+function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">
+        {label}{required && <span className="text-destructive ml-0.5">*</span>}
+      </Label>
+      {children}
+    </div>
+  )
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -485,199 +500,254 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
       </div>
 
       {/* ── Quotation list ────────────────────────────────────────────────── */}
-      <div className="p-6 space-y-2">
-        {filteredQuotations.length === 0 && activeFacets.length > 0 && (
-          <div className="bg-card border border-border rounded-xl p-10 text-center text-sm text-muted-foreground">
-            No quotations match your search.
+      <div className="flex-1 bg-card md:rounded-t-xl md:border-t md:border-x border-border/50">
+        <div className="w-full">
+          {/* Table Header (Desktop Only) */}
+          <div className="hidden md:grid grid-cols-[auto_1fr_2fr_1fr_1.5fr_auto] gap-4 px-6 py-3 border-b border-border bg-card/80 backdrop-blur-md sticky top-0 z-10 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            <div className="w-6"></div>
+            <div>Quotation</div>
+            <div>Client</div>
+            <div>Date</div>
+            <div className="text-right">Amount</div>
+            <div className="w-[180px] text-right">Actions</div>
           </div>
-        )}
 
-        {filteredQuotations.length === 0 && activeFacets.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-foreground/[0.04] border border-foreground/15 flex items-center justify-center mb-4">
-              <FileText className="w-7 h-7 text-muted-foreground/40" />
+          {filteredQuotations.length === 0 && activeFacets.length > 0 && (
+            <div className="p-10 text-center text-sm text-muted-foreground">
+              No quotations match your search.
             </div>
-            <h3 className="font-semibold text-foreground mb-1">No quotations yet</h3>
-            <p className="text-sm text-muted-foreground max-w-xs">
-              Create your first quotation to start sending professional price proposals to clients.
-            </p>
-            <button
-              onClick={() => setShowForm(true)}
-              className="mt-4 flex items-center gap-2 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-xl hover:opacity-90"
-            >
-              <Plus className="w-4 h-4" /> New Quotation
-            </button>
-          </div>
-        )}
+          )}
 
-        {filteredQuotations.map(quo => (
-          <div key={quo.id} className="bg-card border border-border rounded-xl overflow-hidden">
-            <div
-              className="hover-gradient-card flex items-center justify-between px-5 py-4 rounded-t-xl border border-transparent"
-              onClick={() => setExpanded(expanded === quo.id ? null : quo.id)}
-            >
-              {/* Left: chevron + info */}
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="shrink-0">
-                  {expanded === quo.id
-                    ? <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                    : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
-                </div>
-                <div className="min-w-0 flex flex-col items-start gap-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-mono text-sm font-bold tracking-tight">{quo.quotation_number}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded-md font-medium ${getStatusColor(quo.status)}`}>
+          {filteredQuotations.length === 0 && activeFacets.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <div className="w-16 h-16 rounded-2xl bg-foreground/[0.04] border border-foreground/15 flex items-center justify-center mb-4">
+                <FileText className="w-7 h-7 text-muted-foreground/40" />
+              </div>
+              <h3 className="font-semibold text-foreground mb-1">No quotations yet</h3>
+              <p className="text-sm text-muted-foreground max-w-xs">
+                Create your first quotation to start sending professional price proposals to clients.
+              </p>
+              <button
+                onClick={() => setShowForm(true)}
+                className="mt-4 flex items-center gap-2 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-xl hover:opacity-90"
+              >
+                <Plus className="w-4 h-4" /> New Quotation
+              </button>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-3 p-4 md:p-0 md:divide-y md:divide-border/50 md:block">
+            {filteredQuotations.map(quo => (
+              <div key={quo.id} className="group flex flex-col bg-card border border-border md:border-none rounded-xl md:rounded-none md:hover:bg-secondary/20 transition-colors">
+                
+                {/* ─── DESKTOP ROW ─── */}
+                <div
+                  className={`hidden md:grid grid-cols-[auto_1fr_2fr_1fr_1.5fr_auto] gap-4 px-6 py-3 items-center cursor-pointer ${expanded === quo.id ? 'bg-secondary/30' : ''}`}
+                  onClick={() => setExpanded(expanded === quo.id ? null : quo.id)}
+                >
+                  {/* Left: chevron */}
+                  <div className="w-6 flex justify-center text-muted-foreground/50 group-hover:text-foreground/70 transition-colors">
+                    {expanded === quo.id ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  </div>
+
+                  {/* Quotation Number & Status */}
+                  <div className="flex flex-col gap-1 min-w-0">
+                    <span className="font-mono text-sm font-semibold text-foreground truncate">{quo.quotation_number}</span>
+                    <span className={`w-fit text-[10px] px-1.5 py-0.5 rounded font-medium ${getStatusColor(quo.status)}`}>
                       {getStatusLabel(quo.status)}
                     </span>
                   </div>
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-xs font-medium text-foreground">{quo.client?.name}</span>
+
+                  {/* Client Info */}
+                  <div className="flex flex-col gap-0.5 min-w-0">
+                    <span className="text-sm font-medium text-foreground truncate">{quo.client?.name}</span>
                     {quo.client?.code && (
-                      <span className="text-[10px] text-muted-foreground font-mono bg-foreground/5 px-1.5 py-0.5 rounded">
-                        {quo.client.code}
-                      </span>
-                    )}
-                    <span className="text-muted-foreground text-[10px]">·</span>
-                    <span className="text-xs text-muted-foreground">{quo.issue_date}</span>
-                    {quo.valid_until && (
-                      <>
-                        <span className="text-muted-foreground text-[10px]">·</span>
-                        <span className="text-xs text-muted-foreground">Valid until: {quo.valid_until}</span>
-                      </>
+                      <span className="text-xs text-muted-foreground truncate">{quo.client.code}</span>
                     )}
                   </div>
-                </div>
-              </div>
 
-              {/* Right: amount + convert button + status select + admin link */}
-              <div className="flex items-center gap-3 shrink-0" onClick={e => e.stopPropagation()}>
-                <span className="font-semibold text-sm tabular-nums">
-                  {formatCurrency(quo.total_amount || 0, quo.currency)}
-                </span>
+                  {/* Dates */}
+                  <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+                    <span className="truncate">{quo.issue_date}</span>
+                    {quo.valid_until && <span className="truncate">Valid: {quo.valid_until}</span>}
+                  </div>
 
-                {/* Convert to Invoice button (row level, approved only) */}
-                {quo.status === 'approved' && (
-                  <button
-                    onClick={() => convertToInvoice(quo)}
-                    disabled={convertingId === quo.id}
-                    className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 disabled:opacity-50 transition-all"
-                  >
-                    {convertingId === quo.id ? (
-                      <>
-                        <span className="w-3.5 h-3.5 border-2 border-emerald-400/40 border-t-emerald-400 rounded-full animate-spin" />
-                        Converting…
-                      </>
-                    ) : (
-                      <>
-                        Convert to Invoice
-                        <ArrowRight className="w-3 h-3" />
-                      </>
+                  {/* Amount */}
+                  <div className="text-right flex flex-col gap-0.5 justify-center">
+                    <span className="font-semibold text-sm tabular-nums text-foreground">
+                      {formatCurrency(quo.total_amount || 0, quo.currency)}
+                    </span>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="w-[180px] flex items-center justify-end gap-2" onClick={e => e.stopPropagation()}>
+                    {quo.status === 'approved' && (
+                      <button
+                        onClick={() => convertToInvoice(quo)}
+                        disabled={convertingId === quo.id}
+                        className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 hover:bg-emerald-500/20 disabled:opacity-50 transition-all group/btn"
+                        title="Convert to Invoice"
+                      >
+                        {convertingId === quo.id ? (
+                          <span className="w-3.5 h-3.5 border-2 border-emerald-500/40 border-t-emerald-500 rounded-full animate-spin" />
+                        ) : (
+                          <ArrowRight className="w-4 h-4 group-hover/btn:translate-x-0.5 transition-transform" />
+                        )}
+                      </button>
                     )}
-                  </button>
-                )}
 
-                <AppSelect
-                  value={quo.status}
-                  onChange={e => updateStatus(quo.id, e.target.value)}
-                  className="text-xs py-1.5 rounded-lg"
-                  wrapperClassName="w-[120px]"
-                >
-                  {QUO_STATUSES.map(s => (
-                    <option key={s} value={s}>{getStatusLabel(s)}</option>
-                  ))}
-                </AppSelect>
-                {isSuperAdmin && (
-                  <button
-                    title="Edit client in Settings"
-                    onClick={() => { if (form.client_id) setEditClientId(form.client_id) }}
-                    className="text-muted-foreground hover:text-violet-400 transition-colors p-1 rounded hover:bg-violet-500/10"
-                  >
-                    <ExternalLink style={{ width: 10, height: 10 }} />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Expanded items */}
-            {expanded === quo.id && (
-              <div className="border-t border-border">
-                {/* Status workflow */}
-                <div className="px-5 pt-4">
-                  <StatusWorkflow status={quo.status} />
-                </div>
-
-                {/* Request approval */}
-                <div className="px-5 pt-3">
-                  <button
-                    onClick={() => setApprovalQuote({ id: quo.id, quotation_number: quo.quotation_number })}
-                    className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 text-sm font-medium transition-colors"
-                  >
-                    <CheckCircle2 className="w-4 h-4" />
-                    Request Approval
-                  </button>
-                </div>
-
-                {/* Convert to Invoice (expanded view, approved only) */}
-                {quo.status === 'approved' && (
-                  <div className="px-5 pb-4">
-                    <button
-                      onClick={() => convertToInvoice(quo)}
-                      disabled={convertingId === quo.id}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl gradient-bg text-white text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-all"
+                    <AppSelect
+                      value={quo.status}
+                      onChange={e => updateStatus(quo.id, e.target.value)}
+                      className="text-xs py-1.5 rounded-md h-8"
+                      wrapperClassName="w-[120px]"
                     >
-                      {convertingId === quo.id ? (
-                        <>
-                          <span className="w-4 h-4 border-2 border-foreground/40 border-t-white rounded-full animate-spin" />
-                          Creating Invoice…
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle2 className="w-4 h-4" />
-                          Convert to Invoice
-                          <ArrowRight className="w-4 h-4" />
-                        </>
-                      )}
-                    </button>
-                  </div>
-                )}
-
-                {quo.items && quo.items.length > 0 && (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm min-w-[500px]">
-                      <thead>
-                      <tr className="bg-secondary/40">
-                        <th className="text-left px-5 py-2 text-xs text-muted-foreground font-medium">Description</th>
-                        <th className="text-center px-4 py-2 text-xs text-muted-foreground font-medium">Qty</th>
-                        <th className="text-right px-4 py-2 text-xs text-muted-foreground font-medium">Rate</th>
-                        <th className="text-right px-5 py-2 text-xs text-muted-foreground font-medium">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/50">
-                      {quo.items.map((item, i) => (
-                        <tr key={i}>
-                          <td className="px-5 py-2.5">{item.description}</td>
-                          <td className="px-4 py-2.5 text-center text-muted-foreground">{item.quantity}</td>
-                          <td className="px-4 py-2.5 text-right text-muted-foreground">
-                            {formatCurrency(item.unit_price, quo.currency)}
-                          </td>
-                          <td className="px-5 py-2.5 text-right font-medium">
-                            {formatCurrency(item.total, quo.currency)}
-                          </td>
-                        </tr>
+                      {QUO_STATUSES.map(s => (
+                        <option key={s} value={s}>{getStatusLabel(s)}</option>
                       ))}
-                    </tbody>
-                  </table>
+                    </AppSelect>
+                    
+                    {isSuperAdmin && (
+                      <button
+                        title="Edit client in Settings"
+                        onClick={() => { if (quo.client?.id) setEditClientId(quo.client.id) }}
+                        className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-muted-foreground hover:text-violet-400 transition-all p-1.5 rounded hover:bg-violet-500/10"
+                      >
+                        <ExternalLink style={{ width: 12, height: 12 }} />
+                      </button>
+                    )}
                   </div>
-                )}
-                {quo.notes && (
-                  <div className="px-5 py-3 border-t border-border/50 text-xs text-muted-foreground">
-                    {quo.notes}
+                </div>
+
+                {/* ─── MOBILE CARD ─── */}
+                <div 
+                  className="md:hidden flex flex-col p-4 cursor-pointer"
+                  onClick={() => setExpanded(expanded === quo.id ? null : quo.id)}
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex flex-col gap-1 min-w-0 pr-3">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-sm font-semibold text-foreground truncate">{quo.quotation_number}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${getStatusColor(quo.status)} shrink-0`}>
+                          {getStatusLabel(quo.status)}
+                        </span>
+                      </div>
+                      <span className="text-sm font-medium text-foreground truncate">{quo.client?.name}</span>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className="font-semibold text-sm tabular-nums text-foreground block">
+                        {formatCurrency(quo.total_amount || 0, quo.currency)}
+                      </span>
+                      <span className="text-xs text-muted-foreground mt-0.5 block">{quo.issue_date}</span>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center justify-between mt-1 pt-3 border-t border-border/40">
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      {expanded === quo.id ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                      {expanded === quo.id ? 'Hide details' : 'View details'}
+                    </div>
+                    <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                      <AppSelect
+                        value={quo.status}
+                        onChange={e => updateStatus(quo.id, e.target.value)}
+                        className="text-xs py-1 rounded-md"
+                        wrapperClassName="w-[110px]"
+                      >
+                        {QUO_STATUSES.map(s => (
+                          <option key={s} value={s}>{getStatusLabel(s)}</option>
+                        ))}
+                      </AppSelect>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Expanded items */}
+                {expanded === quo.id && (
+                  <div className="border-t border-border bg-secondary/10 px-0 md:px-6 py-4 space-y-4 shadow-inner">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 px-4 md:px-0">
+                      {/* Status workflow */}
+                      <div className="bg-card border border-border/50 rounded-xl p-4 flex flex-col justify-center">
+                        <StatusWorkflow status={quo.status} />
+                      </div>
+                      
+                      {/* Actions Box */}
+                      <div className="flex flex-col justify-center gap-2">
+                        {quo.status !== 'approved' && quo.status !== 'rejected' && (
+                          <button
+                            onClick={() => setApprovalQuote({ id: quo.id, quotation_number: quo.quotation_number })}
+                            className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 text-sm font-medium transition-colors"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            Request Approval
+                          </button>
+                        )}
+                        {quo.status === 'approved' && (
+                          <button
+                            onClick={() => convertToInvoice(quo)}
+                            disabled={convertingId === quo.id}
+                            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl gradient-bg text-white text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-all"
+                          >
+                            {convertingId === quo.id ? (
+                              <>
+                                <span className="w-4 h-4 border-2 border-foreground/40 border-t-white rounded-full animate-spin" />
+                                Creating Invoice…
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle2 className="w-4 h-4" />
+                                Convert to Invoice
+                                <ArrowRight className="w-4 h-4" />
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {quo.items && quo.items.length > 0 && (
+                      <div className="mx-4 md:mx-0 overflow-hidden border border-border/50 rounded-xl bg-card">
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm min-w-[500px]">
+                            <thead>
+                              <tr className="bg-secondary/40 border-b border-border/50">
+                                <th className="text-left px-4 py-2.5 text-xs text-muted-foreground font-medium uppercase tracking-wider">Service Description</th>
+                                <th className="text-center px-4 py-2.5 text-xs text-muted-foreground font-medium uppercase tracking-wider w-24">Qty</th>
+                                <th className="text-right px-4 py-2.5 text-xs text-muted-foreground font-medium uppercase tracking-wider w-32">Rate</th>
+                                <th className="text-right px-4 py-2.5 text-xs text-muted-foreground font-medium uppercase tracking-wider w-32">Total</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border/30">
+                              {quo.items.map((item, i) => (
+                                <tr key={i} className="hover:bg-secondary/10 transition-colors">
+                                  <td className="px-4 py-3 font-medium text-foreground">{item.description}</td>
+                                  <td className="px-4 py-3 text-center text-muted-foreground">{item.quantity}</td>
+                                  <td className="px-4 py-3 text-right text-muted-foreground">
+                                    {formatCurrency(item.unit_price, quo.currency)}
+                                  </td>
+                                  <td className="px-4 py-3 text-right font-medium text-foreground">
+                                    {formatCurrency(item.total, quo.currency)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {quo.notes && (
+                      <div className="mx-4 md:mx-0 bg-secondary/30 border border-border/50 rounded-lg p-3 text-sm text-muted-foreground">
+                        <span className="font-semibold text-foreground text-xs uppercase tracking-wider block mb-1">Notes</span>
+                        {quo.notes}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
-            )}
+            ))}
           </div>
-        ))}
+        </div>
       </div>
 
       {/* ── New Quotation Modal ───────────────────────────────────────────── */}
@@ -695,11 +765,10 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <form onSubmit={handleSubmit} className="p-6 space-y-6">
               {/* Client + Currency row */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Client *</label>
+                <Field label="Client" required>
                   <Combobox
                     sortKey="clients"
                     placeholder="Select client…"
@@ -719,154 +788,147 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                       + New Client
                     </button>
                   ) : (
-                    <div className="mt-2 bg-secondary border border-foreground/15 rounded-xl p-3 space-y-2">
+                    <div className="mt-2 bg-secondary/30 border border-border/50 rounded-xl p-4 space-y-4">
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-medium text-muted-foreground">Quick-Add Client</span>
+                        <span className="text-xs font-medium text-foreground">Quick-Add Client</span>
                         {newClientSuccess && (
                           <span className="text-xs text-emerald-400 font-medium">Client added!</span>
                         )}
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-[10px] text-muted-foreground mb-1">Name *</label>
-                          <input
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <Field label="Name" required>
+                          <Input
                             value={newClient.name}
                             onChange={e => handleNewClientNameChange(e.target.value)}
                             placeholder="Client name"
-                            className={INPUT_CLS}
                           />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] text-muted-foreground mb-1">Code</label>
-                          <input
+                        </Field>
+                        <Field label="Code">
+                          <Input
                             value={newClient.code}
                             onChange={e => setNewClient(p => ({ ...p, code: e.target.value.toUpperCase() }))}
                             placeholder="e.g. ABC"
                             maxLength={6}
-                            className={INPUT_CLS}
                           />
-                        </div>
+                        </Field>
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-[10px] text-muted-foreground mb-1">Phone</label>
-                          <input
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <Field label="Phone">
+                          <Input
                             value={newClient.phone}
                             onChange={e => setNewClient(p => ({ ...p, phone: e.target.value }))}
                             placeholder="Phone"
-                            className={INPUT_CLS}
                           />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] text-muted-foreground mb-1">Email</label>
-                          <input
+                        </Field>
+                        <Field label="Email">
+                          <Input
                             type="email"
                             value={newClient.email}
                             onChange={e => setNewClient(p => ({ ...p, email: e.target.value }))}
                             placeholder="Email"
-                            className={INPUT_CLS}
                           />
-                        </div>
+                        </Field>
                       </div>
-                      <div>
-                        <label className="block text-[10px] text-muted-foreground mb-1">Currency</label>
+                      <Field label="Currency">
                         <AppSelect
                           value={newClient.default_currency}
                           onChange={e => setNewClient(p => ({ ...p, default_currency: e.target.value as Currency }))}
                         >
                           {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
                         </AppSelect>
-                      </div>
-                      <div className="flex gap-2 pt-1">
-                        <button
+                      </Field>
+                      <div className="flex gap-3 pt-2">
+                        <Button
                           type="button"
+                          variant="outline"
                           onClick={() => { setShowNewClient(false); setNewClient({ name: '', code: '', phone: '', email: '', default_currency: 'INR' }) }}
-                          className="flex-1 text-xs bg-foreground/5 hover:bg-foreground/10 py-1.5 rounded-lg transition-colors"
+                          className="flex-1"
                         >
                           Cancel
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
                           onClick={handleSaveNewClient}
                           disabled={!newClient.name.trim() || newClientSaving}
-                          className="flex-1 text-xs gradient-bg text-white py-1.5 rounded-lg hover:opacity-90 disabled:opacity-50 transition-opacity"
+                          loading={newClientSaving}
+                          className="flex-1"
                         >
-                          {newClientSaving ? 'Saving…' : 'Save Client'}
-                        </button>
+                          Save Client
+                        </Button>
                       </div>
                     </div>
                   )}
-                </div>
+                </Field>
 
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Currency</label>
+                <Field label="Currency">
                   <AppSelect
                     value={form.currency}
                     onChange={e => setForm(p => ({ ...p, currency: e.target.value as Currency }))}
                   >
                     {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
                   </AppSelect>
-                </div>
+                </Field>
               </div>
 
               {/* Dates */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Issue Date</label>
-                  <input
+                <Field label="Issue Date">
+                  <Input
                     type="date"
                     value={form.issue_date}
                     onChange={e => setForm(p => ({ ...p, issue_date: e.target.value }))}
-                    className={INPUT_CLS}
                   />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Valid Until</label>
-                  <input
+                </Field>
+                <Field label="Valid Until">
+                  <Input
                     type="date"
                     value={form.valid_until}
                     onChange={e => setForm(p => ({ ...p, valid_until: e.target.value }))}
-                    className={INPUT_CLS}
                   />
-                </div>
+                </Field>
               </div>
 
               {/* Line items */}
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-2">Line Items</label>
-                <div className="space-y-2">
+              <div className="space-y-3 pt-2">
+                <Label className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">Line Items</Label>
+                <div className="space-y-3">
                   {form.items.map((item, i) => (
-                    <div key={i} className="flex flex-col sm:grid sm:grid-cols-12 gap-2 sm:items-center">
-                      <input
-                        className={`sm:col-span-5 ${INPUT_CLS}`}
-                        placeholder="Description"
-                        value={item.description}
-                        onChange={e => updateItem(i, 'description', e.target.value)}
-                      />
-                      <input
-                        type="number"
-                        min="1"
-                        className={`sm:col-span-2 ${INPUT_CLS} sm:text-center`}
-                        placeholder="Qty"
-                        value={item.quantity}
-                        onChange={e => updateItem(i, 'quantity', parseFloat(e.target.value) || 1)}
-                      />
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        className={`sm:col-span-3 ${INPUT_CLS}`}
-                        placeholder="Rate"
-                        value={item.unit_price || ''}
-                        onChange={e => updateItem(i, 'unit_price', parseFloat(e.target.value) || 0)}
-                      />
-                      <div className="sm:col-span-2 text-sm font-medium sm:text-right pr-1 tabular-nums">
+                    <div key={i} className="flex flex-col sm:grid sm:grid-cols-12 gap-3 sm:items-center p-3 sm:p-0 bg-secondary/10 sm:bg-transparent rounded-xl border border-border/50 sm:border-transparent">
+                      <div className="sm:col-span-5">
+                        <Input
+                          placeholder="Description"
+                          value={item.description}
+                          onChange={e => updateItem(i, 'description', e.target.value)}
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <Input
+                          type="number"
+                          min="1"
+                          placeholder="Qty"
+                          className="sm:text-center"
+                          value={item.quantity}
+                          onChange={e => updateItem(i, 'quantity', parseFloat(e.target.value) || 1)}
+                        />
+                      </div>
+                      <div className="sm:col-span-3">
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="Rate"
+                          value={item.unit_price || ''}
+                          onChange={e => updateItem(i, 'unit_price', parseFloat(e.target.value) || 0)}
+                        />
+                      </div>
+                      <div className="sm:col-span-2 text-sm font-medium sm:text-right px-1 tabular-nums mt-1 sm:mt-0">
                         {item.total > 0 ? item.total.toLocaleString('en-IN') : '—'}
                       </div>
                     </div>
                   ))}
                 </div>
-                <div className="flex items-center justify-between mt-2">
+                
+                <div className="flex items-center justify-between mt-4 p-3 bg-secondary/10 rounded-xl border border-border/50">
                   <button
                     type="button"
                     onClick={() =>
@@ -875,55 +937,55 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                         items: [...p.items, { description: '', quantity: 1, unit_price: 0, total: 0 }],
                       }))
                     }
-                    className="text-xs text-violet-400 hover:text-violet-300 transition-colors"
+                    className="text-xs text-violet-400 hover:text-violet-300 transition-colors font-medium"
                   >
                     + Add line
                   </button>
-                  <div className="text-sm font-semibold tabular-nums">
+                  <div className="text-sm font-semibold tabular-nums text-foreground">
                     Total: {formatCurrency(totalAmount, form.currency)}
                   </div>
                 </div>
               </div>
 
               {/* Notes */}
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Notes</label>
-                <textarea
+              <Field label="Notes">
+                <Textarea
                   value={form.notes}
                   onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
                   rows={2}
                   placeholder="Optional notes for the client…"
-                  className={`${INPUT_CLS} resize-none`}
+                  className="resize-none"
                 />
-              </div>
+              </Field>
 
               {/* Terms */}
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Terms</label>
-                <textarea
+              <Field label="Terms">
+                <Textarea
                   value={form.terms}
                   onChange={e => setForm(p => ({ ...p, terms: e.target.value }))}
                   rows={2}
-                  className={`${INPUT_CLS} resize-none`}
+                  className="resize-none"
                 />
-              </div>
+              </Field>
 
               {/* Actions */}
-              <div className="flex gap-3 pt-2">
-                <button
+              <div className="flex gap-3 pt-4 border-t border-border">
+                <Button
                   type="button"
+                  variant="outline"
                   onClick={() => setShowForm(false)}
-                  className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80 transition-colors"
+                  className="flex-1"
                 >
                   Cancel
-                </button>
-                <button
+                </Button>
+                <Button
                   type="submit"
                   disabled={saving || !form.client_id}
-                  className="flex-1 gradient-bg text-white text-sm font-medium py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50 transition-opacity"
+                  loading={saving}
+                  className="flex-1 gradient-bg text-white"
                 >
                   {saving ? 'Creating…' : 'Create Quotation'}
-                </button>
+                </Button>
               </div>
             </form>
           </div>

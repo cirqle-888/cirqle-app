@@ -33,7 +33,7 @@ import {
   Calendar, Building2, IndianRupee, MoreHorizontal, Search, Filter,
   Printer, TrendingUp, BadgeCheck, CircleDollarSign, Receipt, Edit2, Save,
   History, Tag, Percent, ChevronDown, ChevronUp, ArrowDownToLine, Gift, ExternalLink, Copy,
-  Wallet, Link2, ShoppingBag, Share2, Layers,
+  Wallet, Link2, ShoppingBag, Share2, Layers, ListTree, ScrollText, Check, AlertCircle,
 } from 'lucide-react'
 import { logFollowup } from "./follow-ups/actions"
 import { recordInvoicePayment } from "./actions"
@@ -2597,9 +2597,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   }
 
   // ── Render helpers ─────────────────────────────────────────────────────────
-  function StatusBadge({ status }: { status: string }) {
+  function StatusBadge({ status, className }: { status: string; className?: string }) {
     return (
-      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${getStatusColor(status)}`}>
+      <span className={cn(`text-[10px] font-semibold px-2 py-0.5 rounded-full ${getStatusColor(status)}`, className)}>
         {getStatusLabel(status)}
       </span>
     )
@@ -2610,9 +2610,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   // ─────────────────────────────────────────────────────────────────────────
   function renderList() {
     return (
-      <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex flex-col h-full overflow-hidden bg-background">
         {/* Search + filter bar */}
-        <div className="px-3 py-2 border-b border-border/40 space-y-2">
+        <div className="px-4 py-3 border-b border-border/40 space-y-3 bg-secondary/20">
           <TokenizedSearch
             facets={searchFacets}
             onFacetsChange={setSearchFacets}
@@ -2627,29 +2627,39 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               { key: 'amount', label: 'Amount ₹', type: 'number' },
             ]}
           />
-          <div className="flex gap-1.5 flex-wrap items-center justify-between w-full">
+          <div className="flex gap-2 flex-wrap items-center justify-between w-full">
             <div className="flex gap-1.5 flex-wrap">
               {['', 'draft', 'reviewed', 'sent', 'partial', 'overdue'].map(s => (
                 <button key={s}
                   onClick={() => setFilterStatus(s)}
-                  className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${filterStatus === s ? 'bg-violet-500/20 border-violet-500/50 text-violet-300' : 'border-border/40 text-muted-foreground hover:border-border'}`}
+                  className={cn(
+                    "text-[11px] px-2.5 py-1 rounded-md font-medium transition-colors border",
+                    filterStatus === s
+                      ? "bg-foreground text-background border-foreground shadow-sm"
+                      : "bg-background text-muted-foreground border-border hover:border-foreground/30 hover:text-foreground"
+                  )}
                 >{s ? getStatusLabel(s) : 'All'}</button>
               ))}
             </div>
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-3">
               <button
                 type="button"
                 onClick={() => setGroupByClient(g => !g)}
                 title="Group the list by client"
-                className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border transition-colors ${groupByClient ? 'bg-violet-500/20 border-violet-500/50 text-violet-300' : 'border-border/40 text-muted-foreground hover:border-border'}`}
+                className={cn(
+                  "flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-md font-medium transition-colors border",
+                  groupByClient
+                    ? "bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/30"
+                    : "bg-background text-muted-foreground border-border hover:border-foreground/30 hover:text-foreground"
+                )}
               >
-                <Layers className="w-2.5 h-2.5" /> Group by Client
+                <Layers className="w-3 h-3" /> Group
               </button>
               {filtered.length > 0 && (
-                <label className="flex items-center gap-1.5 cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                <label className="flex items-center gap-1.5 cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
                   <input
                     type="checkbox"
-                    className="rounded border-border/40 bg-transparent text-violet-500 focus:ring-0 cursor-pointer h-3 w-3"
+                    className="rounded border-border/50 bg-background text-violet-500 focus:ring-0 cursor-pointer h-3.5 w-3.5"
                     checked={filtered.length > 0 && filtered.every(i => selectedForBulk.has(i.id))}
                     onChange={toggleSelectAllBulk}
                   />
@@ -2772,65 +2782,88 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     function renderInvoiceRow(inv: Invoice) {
       const balance = balanceDue(inv)
       const overdue = isOverdue(inv.due_date || '', inv.status, inv.issue_date)
+      const isSelected = selectedInv?.id === inv.id
+
       return (
         <div
           key={inv.id}
           onClick={() => selectInvoice(inv.id)}
-          className="hover-gradient-row px-3 py-3"
+          className={cn(
+            "group relative flex items-start gap-3 px-4 py-3.5 cursor-pointer transition-all border-l-2",
+            isSelected
+              ? "bg-violet-500/5 dark:bg-violet-500/10 border-violet-500"
+              : "border-transparent hover:bg-secondary/50 dark:hover:bg-white/[0.02]"
+          )}
         >
-          <div className="flex items-start gap-3">
-            <div className="pt-1.5" onClick={e => e.stopPropagation()}>
-              <input
-                type="checkbox"
-                className="rounded border-border/40 bg-transparent text-violet-500 focus:ring-0 cursor-pointer h-3.5 w-3.5"
-                checked={selectedForBulk.has(inv.id)}
-                onChange={(e) => toggleBulkSelection(e as unknown as React.MouseEvent, inv.id)}
-              />
-            </div>
-            <div className="flex items-start justify-between gap-2 flex-1 min-w-0">
-              <div className="min-w-0 flex-1 flex flex-col items-start gap-0.5">
-                <div className="flex items-center gap-1.5 mb-0.5">
+          <div className="pt-0.5 shrink-0" onClick={e => e.stopPropagation()}>
+            <input
+              type="checkbox"
+              className={cn(
+                "rounded border-border/50 bg-background text-violet-500 focus:ring-0 cursor-pointer h-4 w-4 transition-opacity",
+                selectedForBulk.has(inv.id) ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+              )}
+              checked={selectedForBulk.has(inv.id)}
+              onChange={(e) => toggleBulkSelection(e as unknown as React.MouseEvent, inv.id)}
+            />
+          </div>
+          
+          <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
                 <button
                   type="button"
                   onClick={e => { e.stopPropagation(); copyInvNum(inv.invoice_number) }}
                   title="Copy invoice number"
-                  className="flex items-center gap-0.5 text-[11px] font-mono text-muted-foreground hover:text-foreground transition-colors group/copy"
+                  className="flex items-center gap-1 text-[11px] font-mono font-medium text-muted-foreground hover:text-foreground transition-colors group/copy"
                 >
                   {inv.invoice_number}
-                  <Copy className="w-2.5 h-2.5 ml-0.5 lg:opacity-0 opacity-50 group-hover/copy:opacity-50 transition-opacity" />
+                  <Copy className="w-2.5 h-2.5 opacity-0 group-hover/copy:opacity-100 transition-opacity" />
                 </button>
-                <StatusBadge status={overdue && inv.status !== 'paid' ? 'overdue' : inv.status} />
+                <StatusBadge status={overdue && inv.status !== 'paid' ? 'overdue' : inv.status} className="h-5 px-1.5 text-[10px]" />
               </div>
-              {!groupByClient && <div className="text-sm font-medium text-foreground truncate">{inv.client?.name || '—'}</div>}
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-[10px] text-muted-foreground">
-                  {inv.billing_period_start ? formatBillingPeriod(inv.billing_period_start) : fmtDate(inv.issue_date)}
-                </span>
-                {(inv.items?.length || 0) > 0 && (
-                  <span className="text-[10px] text-muted-foreground">{inv.items!.length} task{inv.items!.length !== 1 ? 's' : ''}</span>
+              <div className="flex items-center gap-2 shrink-0">
+                <div className={cn(
+                  "text-sm font-semibold tabular-nums",
+                  balance > 0 && overdue ? "text-red-600 dark:text-red-400" : balance > 0 ? "text-foreground" : "text-emerald-600 dark:text-emerald-400"
+                )}>
+                  {fmt(balance > 0 ? balance : inv.total_amount, inv.currency)}
+                </div>
+              </div>
+            </div>
+
+            {!groupByClient && (
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-sm font-medium text-foreground truncate">
+                  {inv.client?.name || '—'}
+                </div>
+                {role === 'super_admin' && (
+                  <button
+                    type="button"
+                    onClick={e => { e.stopPropagation(); setEditClientId(inv.client_id) }}
+                    title={`Edit ${inv.client?.name}`}
+                    className="text-muted-foreground/30 hover:text-violet-500 transition-colors shrink-0"
+                  >
+                    <ExternalLink size={12} />
+                  </button>
                 )}
               </div>
-            </div>
-            <div className="flex flex-col items-end gap-1 shrink-0">
-              <div className={`text-sm font-semibold ${balance > 0 && overdue ? 'text-red-400' : balance > 0 ? 'text-foreground' : 'text-green-400'}`}>
-                {fmt(balance > 0 ? balance : inv.total_amount, inv.currency)}
+            )}
+
+            <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground mt-0.5">
+              <div className="truncate flex items-center gap-1.5">
+                {inv.billing_period_start ? formatBillingPeriod(inv.billing_period_start) : `Issued ${fmtDate(inv.issue_date)}`}
+                {(inv.items?.length || 0) > 0 && (
+                  <>
+                    <span className="opacity-30">·</span>
+                    <span>{inv.items!.length} task{inv.items!.length !== 1 ? 's' : ''}</span>
+                  </>
+                )}
               </div>
-              {balance <= 0 && (
-                <div className="text-[10px] text-green-400">Paid</div>
-              )}
-              {role === 'super_admin' && (
-                <button
-                  type="button"
-                  onClick={e => { e.stopPropagation(); setEditClientId(inv.client_id) }}
-                  title={`Edit ${inv.client?.name}`}
-                  className="text-muted-foreground/30 hover:text-violet-400 transition-colors"
-                >
-                  <ExternalLink size={10} />
-                </button>
-              )}
+              <div className={cn("shrink-0", overdue && inv.status !== 'paid' && "text-red-600 dark:text-red-400 font-medium")}>
+                {inv.status === 'paid' ? 'Paid' : `Due ${fmtDate(inv.due_date)}`}
+              </div>
             </div>
           </div>
-        </div>
         </div>
       )
     }
@@ -2850,30 +2883,30 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     return (
       <div className="flex flex-col h-full overflow-hidden">
         {/* Header */}
-        <div className="px-4 py-3 border-b border-border/40 flex items-start justify-between gap-3">
+        <div className="px-5 py-5 border-b border-border/40 bg-card flex items-start justify-between gap-4 shrink-0">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 mb-0.5">
+            <div className="flex items-center gap-3 mb-1.5">
               <button
                 type="button"
                 onClick={() => copyInvNum(inv.invoice_number)}
                 title="Copy invoice number"
-                className="flex items-center gap-1 font-mono text-xs text-muted-foreground hover:text-foreground transition-colors group"
+                className="flex items-center gap-1.5 font-mono text-sm font-medium text-muted-foreground hover:text-foreground transition-colors group"
               >
                 <span>{inv.invoice_number}</span>
-                <Copy className={`w-3 h-3 shrink-0 transition-colors ${copiedInvNum ? 'text-green-400' : 'lg:opacity-0 opacity-60 group-hover:opacity-60'}`} />
+                <Copy className={`w-3.5 h-3.5 shrink-0 transition-colors ${copiedInvNum ? 'text-green-500' : 'opacity-0 group-hover:opacity-60'}`} />
               </button>
-              <StatusBadge status={overdue && inv.status !== 'paid' ? 'overdue' : inv.status} />
+              <StatusBadge status={overdue && inv.status !== 'paid' ? 'overdue' : inv.status} className="h-6 px-2.5 text-[11px]" />
               {editable && (
-                <span className="text-[9px] text-amber-400/80 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded-full">Editable</span>
+                <span className="text-[10px] uppercase tracking-wider font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md">Editable</span>
               )}
             </div>
-            <h3 className="font-semibold text-foreground">{inv.client?.name}</h3>
-            <div className="flex items-center gap-3 mt-0.5 text-[11px] text-muted-foreground">
-              {periodLabel && <span><Calendar className="inline w-3 h-3 mr-0.5" />{periodLabel}</span>}
-              <span>Issued {fmtDate(inv.issue_date)}</span>
+            <h3 className="text-xl font-bold text-foreground mb-2 truncate">{inv.client?.name}</h3>
+            <div className="flex items-center gap-4 text-xs text-muted-foreground font-medium">
+              {periodLabel && <span className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5" />{periodLabel}</span>}
+              <span className="flex items-center gap-1.5"><span className="opacity-50">Issued</span> {fmtDate(inv.issue_date)}</span>
               {editable ? (
-                <span className="flex items-center gap-1">
-                  <span className="text-muted-foreground">Due</span>
+                <span className="flex items-center gap-1.5">
+                  <span className="opacity-50">Due</span>
                   <input
                     type="date"
                     value={inv.due_date || ''}
@@ -2882,32 +2915,34 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                       await supabase.from('invoices').update({ due_date: val || null }).eq('id', inv.id)
                       setInvoices(prev => prev.map(i => i.id === inv.id ? { ...i, due_date: val } : i))
                     }}
-                    className="bg-transparent border-b border-dashed border-muted-foreground/40 hover:border-violet-500/60 focus:border-violet-500 focus:outline-none text-[11px] text-muted-foreground cursor-pointer"
+                    className="bg-transparent border-b border-dashed border-border hover:border-violet-500/60 focus:border-violet-500 focus:outline-none text-xs cursor-pointer text-foreground"
                   />
                 </span>
               ) : inv.due_date ? (
-                <span className={overdue ? 'text-red-400' : ''}>Due {fmtDate(inv.due_date)}</span>
+                <span className={cn("flex items-center gap-1.5", overdue && inv.status !== 'paid' && 'text-red-600 dark:text-red-400 font-semibold')}>
+                  <span className="opacity-50">Due</span> {fmtDate(inv.due_date)}
+                </span>
               ) : null}
             </div>
           </div>
-          <div className="flex gap-1.5 items-start shrink-0">
+          <div className="flex flex-wrap gap-1.5 items-start justify-end shrink-0">
             <button onClick={() => refreshInvoice(inv.id)} title="Refresh"
-              className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-foreground/5 rounded-lg transition-colors">
-              <RefreshCw className="w-3.5 h-3.5" />
+              className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors border border-transparent hover:border-border/50">
+              <RefreshCw className="w-4 h-4" />
             </button>
             <button onClick={() => setPreviewInv(inv)} title="Preview invoice"
-              className="p-1.5 text-muted-foreground hover:text-violet-400 hover:bg-violet-500/10 rounded-lg transition-colors">
-              <Eye className="w-3.5 h-3.5" />
+              className="p-2 text-muted-foreground hover:text-violet-500 hover:bg-violet-500/10 rounded-lg transition-colors border border-transparent hover:border-violet-500/20">
+              <Eye className="w-4 h-4" />
             </button>
             <button onClick={() => printInvoice(inv)} title="Print"
-              className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-foreground/5 rounded-lg transition-colors">
-              <Printer className="w-3.5 h-3.5" />
+              className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors border border-transparent hover:border-border/50">
+              <Printer className="w-4 h-4" />
             </button>
             <button onClick={() => downloadInvoicePdf(inv)} disabled={downloadingInvId === inv.id} title="Download PDF"
-              className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-foreground/5 rounded-lg transition-colors disabled:opacity-50">
+              className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors border border-transparent hover:border-border/50 disabled:opacity-50">
               {downloadingInvId === inv.id
-                ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                : <Download className="w-3.5 h-3.5" />}
+                ? <RefreshCw className="w-4 h-4 animate-spin" />
+                : <Download className="w-4 h-4" />}
             </button>
             <button
               onClick={() => {
@@ -2924,21 +2959,25 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 window.open(whatsappShareUrl(text, inv.client?.phone ?? null), '_blank', 'noopener,noreferrer')
               }}
               title="Share via WhatsApp"
-              className="p-1.5 text-muted-foreground hover:text-green-400 hover:bg-green-500/10 rounded-lg transition-colors">
-              <Share2 className="w-3.5 h-3.5" />
+              className="p-2 text-muted-foreground hover:text-green-500 hover:bg-green-500/10 rounded-lg transition-colors border border-transparent hover:border-green-500/20">
+              <Share2 className="w-4 h-4" />
             </button>
-            {/* Force-edit toggle — requires reason before unlocking */}
             {!isEditable(inv.status) && (
               <button
                 onClick={() => forceEdit ? lockEdit() : requestEditUnlock(inv.id)}
                 title={forceEdit ? 'Lock editing' : 'Force edit (requires reason)'}
-                className={`p-1.5 rounded-lg transition-colors ${forceEdit ? 'text-amber-400 bg-amber-500/20' : 'text-muted-foreground hover:text-amber-400 hover:bg-amber-500/10'}`}>
-                {forceEdit ? <Lock className="w-3.5 h-3.5" /> : <Edit2 className="w-3.5 h-3.5" />}
+                className={cn(
+                  "p-2 rounded-lg transition-colors border",
+                  forceEdit 
+                    ? "text-amber-500 bg-amber-500/10 border-amber-500/20 hover:bg-amber-500/20" 
+                    : "text-muted-foreground hover:text-amber-500 hover:bg-amber-500/10 border-transparent hover:border-amber-500/20"
+                )}>
+                {forceEdit ? <Lock className="w-4 h-4" /> : <Edit2 className="w-4 h-4" />}
               </button>
             )}
             <button onClick={() => confirmDelete(inv.id)} title="Delete"
-              className="p-1.5 text-muted-foreground hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors">
-              <Trash2 className="w-3.5 h-3.5" />
+              className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors border border-transparent hover:border-red-500/20">
+              <Trash2 className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -3049,152 +3088,149 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           </div>
 
           {/* Amounts */}
-          <div className="bg-foreground/[0.03] rounded-xl border border-border/40 p-3 space-y-2">
-            {/* Currency selector — only on editable drafts (no payments yet) */}
+          <div className="bg-secondary/20 rounded-xl border border-border/50 p-4 space-y-3">
             {editable && invPaidInr(inv) === 0 && (
               <div className="flex justify-between items-center text-sm">
-                <span className="text-muted-foreground">Invoice currency</span>
+                <span className="text-muted-foreground font-medium">Invoice Currency</span>
                 <select
                   value={inv.currency}
                   onChange={e => updateInvoiceCurrency(inv.id, e.target.value as Currency)}
-                  className="bg-background border border-border/40 rounded px-2 py-0.5 text-xs font-mono focus:outline-none focus:border-violet-500/50">
+                  className="bg-background border border-border/50 rounded-lg px-2.5 py-1 text-xs font-mono font-medium focus:outline-none focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/20 transition-all">
                   {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
             )}
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Subtotal</span>
-              <span className="font-medium">{fmt(inv.subtotal || inv.total_amount, inv.currency)}</span>
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-muted-foreground font-medium">Subtotal</span>
+              <span className="font-semibold">{fmt(inv.subtotal || inv.total_amount, inv.currency)}</span>
             </div>
 
-            {/* Tax rate — only show if GST is enabled in settings OR already set on invoice */}
             {(companySettings.gst_enabled === 'true' || (inv.tax_rate || 0) > 0) && (
               <div className="flex justify-between items-center text-sm">
-                <span className="text-muted-foreground">GST / Tax</span>
+                <span className="text-muted-foreground font-medium">GST / Tax</span>
                 {editable ? (
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number" min="0" max="100" step="0.5"
-                      key={`tax-${inv.id}-${inv.tax_rate}`}
-                      defaultValue={inv.tax_rate || 0}
-                      onBlur={e => updateTaxRate(inv.id, parseFloat(e.target.value) || 0)}
-                      className="w-12 bg-background border border-border/40 rounded px-1.5 py-0.5 text-xs text-right focus:outline-none focus:border-violet-500/50"
-                    />
-                    <span className="text-muted-foreground text-xs">%</span>
-                    <span className="text-xs">= {fmt(inv.tax_amount || 0, inv.currency)}</span>
+                  <div className="flex items-center gap-2">
+                    <div className="relative">
+                      <input
+                        type="number" min="0" max="100" step="0.5"
+                        key={`tax-${inv.id}-${inv.tax_rate}`}
+                        defaultValue={inv.tax_rate || 0}
+                        onBlur={e => updateTaxRate(inv.id, parseFloat(e.target.value) || 0)}
+                        className="w-16 bg-background border border-border/50 rounded-md pl-2 pr-4 py-1 text-xs text-right font-medium focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
+                      />
+                      <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">%</span>
+                    </div>
+                    <span className="text-xs font-semibold w-24 text-right">{fmt(inv.tax_amount || 0, inv.currency)}</span>
                   </div>
                 ) : (
-                  <span>{inv.tax_rate || 0}% = {fmt(inv.tax_amount || 0, inv.currency)}</span>
+                  <span className="font-medium text-muted-foreground">
+                    {inv.tax_rate || 0}% = <span className="text-foreground">{fmt(inv.tax_amount || 0, inv.currency)}</span>
+                  </span>
                 )}
               </div>
             )}
 
-            {/* Discount — show if editable or if discount already applied */}
             {(editable || (inv.discount_amount || 0) > 0) && (
               <div className="flex justify-between items-center text-sm">
-                <span className="text-muted-foreground">Discount</span>
+                <span className="text-muted-foreground font-medium">Discount</span>
                 {editable ? (
-                  <div className="flex items-center gap-1">
-                    <span className="text-muted-foreground text-xs">−{getCurrencySymbol(inv.currency)}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-muted-foreground text-xs font-semibold">−{getCurrencySymbol(inv.currency)}</span>
                     <input
                       type="number" min="0"
                       key={`disc-${inv.id}-${inv.discount_amount}`}
                       defaultValue={inv.discount_amount || 0}
                       onBlur={e => updateDiscount(inv.id, parseFloat(e.target.value) || 0)}
-                      className="w-20 bg-background border border-border/40 rounded px-1.5 py-0.5 text-xs text-right focus:outline-none focus:border-violet-500/50"
+                      className="w-24 bg-background border border-border/50 rounded-md px-2 py-1 text-xs text-right font-medium focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
                     />
                   </div>
                 ) : (
-                  <span className="text-orange-400 font-medium">−{fmt(inv.discount_amount || 0, inv.currency)}</span>
+                  <span className="text-orange-500 dark:text-orange-400 font-semibold">−{fmt(inv.discount_amount || 0, inv.currency)}</span>
                 )}
               </div>
             )}
 
-            {/* Previous Balance — editable if draft/reviewed */}
             <div className="flex justify-between items-center text-sm">
               <div className="flex items-center gap-1.5">
-                <span className="text-muted-foreground text-red-400/80">Prev. Balance</span>
+                <span className="text-muted-foreground font-medium text-red-500/80 dark:text-red-400/80">Prev. Balance</span>
                 {editable && (
                   <button
                     onClick={() => autoLoadPrevBalance(inv.id, inv.client_id)}
                     title="Auto-fill from pending invoices of this client"
-                    className="p-0.5 text-red-400/60 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors">
-                    <ArrowDownToLine className="w-3 h-3" />
+                    className="p-1 text-red-500/60 hover:text-red-500 hover:bg-red-500/10 rounded-md transition-colors">
+                    <ArrowDownToLine className="w-3.5 h-3.5" />
                   </button>
                 )}
               </div>
               {editable ? (
-                <div className="flex items-center gap-1">
-                  <span className="text-muted-foreground text-xs text-red-400/70">+{getCurrencySymbol(inv.currency)}</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-red-500/70 dark:text-red-400/70 text-xs font-semibold">+{getCurrencySymbol(inv.currency)}</span>
                   <input
                     type="number" min="0"
                     key={`prevbal-${inv.id}-${inv.previous_balance}`}
                     defaultValue={inv.previous_balance || 0}
                     onBlur={e => updatePreviousBalance(inv.id, parseFloat(e.target.value) || 0)}
-                    className="w-20 bg-background border border-border/40 rounded px-1.5 py-0.5 text-xs text-right focus:outline-none focus:border-red-500/50 text-red-400"
+                    className="w-24 bg-background border border-border/50 rounded-md px-2 py-1 text-xs text-right font-medium focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500 text-red-600 dark:text-red-400"
                   />
                 </div>
               ) : (
-                <span className={(inv.previous_balance ?? 0) > 0 ? 'text-red-400' : 'text-muted-foreground'}>
+                <span className={cn("font-semibold", (inv.previous_balance ?? 0) > 0 ? "text-red-600 dark:text-red-400" : "text-muted-foreground")}>
                   {(inv.previous_balance ?? 0) > 0 ? `+${fmt(inv.previous_balance, inv.currency)}` : '—'}
                 </span>
               )}
             </div>
 
-            <div className="border-t border-border/40 pt-2 flex justify-between">
-              <span className="font-semibold">Total</span>
-              <span className="font-bold text-base">{fmt(inv.total_amount, inv.currency)}</span>
+            <div className="border-t border-border/50 pt-3 flex justify-between items-center">
+              <span className="font-bold text-foreground">Total</span>
+              <span className="font-bold text-lg text-foreground tracking-tight">{fmt(inv.total_amount, inv.currency)}</span>
             </div>
 
-            {/* Exchange rate — manual override for foreign invoices. The auto-fetched
-                Settings rate is the default; correct it to the rate actually billed.
-                total_amount_inr (the ₹ booked value) recomputes from it. */}
             {inv.currency !== 'INR' && showAmounts && (
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-muted-foreground">Exchange rate</span>
-                {/* Editable only while unsettled — once cash is allocated the rate is
-                    effectively locked by the settlement (use Settle-in-full to change it). */}
+              <div className="flex justify-between items-center text-sm bg-foreground/[0.02] p-2 -mx-2 rounded-lg mt-2">
+                <span className="text-muted-foreground font-medium text-xs">Exchange rate</span>
                 {!['paid', 'cancelled', 'bad_debt'].includes(inv.status) && invPaidInr(inv) === 0 ? (
-                  <div className="flex items-center gap-1">
-                    <span className="text-muted-foreground text-xs">1 {inv.currency} = ₹</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-muted-foreground text-[11px] font-medium">1 {inv.currency} = ₹</span>
                     <input
                       type="number" min="0" step="0.0001"
                       key={`rate-${inv.id}-${inv.exchange_rate}`}
                       defaultValue={inv.exchange_rate || ''}
                       onBlur={e => { const v = parseFloat(e.target.value); if (v > 0 && v !== inv.exchange_rate) updateExchangeRate(inv.id, v) }}
-                      className="w-24 bg-background border border-border/40 rounded px-1.5 py-0.5 text-xs text-right font-mono focus:outline-none focus:border-violet-500/50"
+                      className="w-24 bg-background border border-border/50 rounded-md px-2 py-0.5 text-xs text-right font-mono focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
                     />
                     {(rateMap[inv.currency] || 0) > 0 && Math.abs((inv.exchange_rate || 0) - rateMap[inv.currency]) > 0.0001 && (
                       <button
                         onClick={() => updateExchangeRate(inv.id, rateMap[inv.currency])}
                         title={`Reset to Settings rate ₹${rateMap[inv.currency]}`}
-                        className="p-0.5 text-violet-400/70 hover:text-violet-300 hover:bg-violet-500/10 rounded transition-colors">
-                        <RefreshCw className="w-3 h-3" />
+                        className="p-1 text-violet-500/70 hover:text-violet-500 hover:bg-violet-500/10 rounded-md transition-colors">
+                        <RefreshCw className="w-3.5 h-3.5" />
                       </button>
                     )}
                   </div>
                 ) : (
-                  <span className="font-mono text-xs">1 {inv.currency} = ₹{(inv.exchange_rate || 1).toLocaleString('en-IN')}</span>
+                  <span className="font-mono text-xs font-medium">1 {inv.currency} = ₹{(inv.exchange_rate || 1).toLocaleString('en-IN')}</span>
                 )}
               </div>
             )}
+            
             {inv.currency !== 'INR' && showAmounts && (
-              <div className="flex justify-between text-[11px] text-muted-foreground">
-                <span>Value in ₹ (booked)</span>
-                <span className="font-mono">₹{(inv.total_amount_inr ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+              <div className="flex justify-between text-[11px] text-muted-foreground px-2">
+                <span className="font-medium">Value in ₹ (booked)</span>
+                <span className="font-mono font-medium">₹{(inv.total_amount_inr ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
               </div>
             )}
+
             {(inv.paid_amount ?? 0) > 0 && (
-              <>
-                <div className="flex justify-between text-sm text-green-400">
+              <div className="pt-2 space-y-1">
+                <div className="flex justify-between text-sm text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-md font-medium">
                   <span>Paid</span>
                   <span>{fmt(inv.paid_amount, inv.currency)}</span>
                 </div>
-                <div className={`flex justify-between text-sm font-semibold ${balance > 0 ? 'text-orange-400' : 'text-green-400'}`}>
+                <div className={cn("flex justify-between text-sm font-semibold px-3 py-1.5 rounded-md", balance > 0 ? "text-amber-600 dark:text-amber-400 bg-amber-500/10" : "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10")}>
                   <span>Balance Due</span>
                   <span>{fmt(balance, inv.currency)}</span>
                 </div>
-              </>
+              </div>
             )}
           </div>
 
@@ -3279,48 +3315,50 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           })()}
 
           {/* Line items */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                Line Items ({(inv.items?.length || 0) + (inv.expense_items?.length || 0)})
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-semibold text-foreground tracking-tight flex items-center gap-1.5">
+                <ListTree className="w-4 h-4 text-violet-500" />
+                Line Items
+                <span className="text-muted-foreground font-normal ml-1">({(inv.items?.length || 0) + (inv.expense_items?.length || 0)})</span>
               </h4>
               <div className="flex items-center gap-2">
                 {forceEdit && (
-                  <span className="text-[9px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded-full">
-                    ✏️ Force edit on
+                  <span className="text-[10px] text-amber-500 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <Lock className="w-3 h-3" /> Force edit on
                   </span>
                 )}
                 {!forceEdit && isEditable(inv.status) && (
-                  <span className="text-[10px] text-amber-400/70">
-                    <Zap className="inline w-2.5 h-2.5 mr-0.5" />Auto-collecting
+                  <span className="text-[10px] text-amber-500 flex items-center gap-1 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+                    <Zap className="w-3 h-3" />Auto-collecting
                   </span>
                 )}
               </div>
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               {(inv.items || []).length === 0 && (
-                <div className="text-xs text-muted-foreground text-center py-4 bg-foreground/[0.02] rounded-lg border border-dashed border-border/40">
+                <div className="text-xs text-muted-foreground text-center py-6 bg-secondary/30 rounded-xl border border-dashed border-border/50">
                   No items yet — tasks marked "done" auto-appear here
                 </div>
               )}
               {(inv.items || []).sort((a, b) => a.display_order - b.display_order).map(item => (
-                <div key={item.id} className="flex items-start gap-2 p-2 bg-foreground/[0.02] rounded-lg border border-border/30 hover:border-border/60 transition-colors group">
+                <div key={item.id} className="flex items-start gap-3 p-3 bg-card rounded-xl border border-border/40 hover:border-border/80 hover:shadow-sm transition-all group">
                   <div className="flex-1 min-w-0">
                     {editable ? (
                       <input
                         defaultValue={item.description}
                         onBlur={e => { if (e.target.value !== item.description) updateItemDescription(item.id, inv.id, e.target.value) }}
-                        className="w-full bg-transparent text-xs font-medium border-b border-transparent hover:border-border/40 focus:border-violet-500/50 focus:outline-none pb-0.5"
+                        className="w-full bg-transparent text-sm font-medium border-b border-transparent hover:border-border/50 focus:border-violet-500/50 focus:outline-none pb-0.5"
                         placeholder="Description…"
                       />
                     ) : (
-                      <div className="text-xs font-medium truncate">{item.description}</div>
+                      <div className="text-sm font-medium text-foreground truncate">{item.description}</div>
                     )}
-                    <div className="flex items-center gap-2 mt-0.5 text-[10px] text-muted-foreground">
-                      {item.task?.task_date && <span>{fmtDate(item.task.task_date)}</span>}
-                      {item.service?.name && <span>{item.service.name}</span>}
+                    <div className="flex flex-wrap items-center gap-2 mt-1.5 text-[11px] text-muted-foreground">
+                      {item.task?.task_date && <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{fmtDate(item.task.task_date)}</span>}
+                      {item.service?.name && <span className="px-1.5 py-0.5 rounded-md bg-secondary text-secondary-foreground">{item.service.name}</span>}
                       {item.task && (
-                        <span className={`px-1 py-0.5 rounded-full ${getStatusColor(item.task.status)}`}>
+                        <span className={cn("px-1.5 py-0.5 rounded-md", getStatusColor(item.task.status))}>
                           {getStatusLabel(item.task.status)}
                         </span>
                       )}
@@ -3332,43 +3370,45 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                         type="number" min="0"
                         defaultValue={item.unit_price}
                         onBlur={e => { const v = parseFloat(e.target.value); if (v !== item.unit_price) updateItemPrice(item.id, inv.id, v) }}
-                        className="w-20 bg-background border border-border/40 rounded px-1.5 py-0.5 text-xs text-right focus:outline-none focus:border-violet-500/50"
+                        className="w-24 bg-background border border-border/50 rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:border-violet-500/50 transition-colors"
                       />
                     ) : (
-                      <div className="text-xs font-medium">{fmt(item.total, inv.currency)}</div>
+                      <div className="text-sm font-semibold text-foreground">{fmt(item.total, inv.currency)}</div>
                     )}
                     {item.quantity !== 1 && (
-                      <div className="text-[10px] text-muted-foreground">{item.quantity} × {fmt(item.unit_price, inv.currency)}</div>
+                      <div className="text-[11px] text-muted-foreground mt-0.5">{item.quantity} × {fmt(item.unit_price, inv.currency)}</div>
                     )}
                   </div>
                   {editable && (
                     <button
                       onClick={e => { e.stopPropagation(); removeItem(inv.id, item.id) }}
                       disabled={removingItemId === item.id}
-                      className="lg:opacity-0 opacity-100 group-hover:opacity-100 p-0.5 text-muted-foreground hover:text-red-400 transition-all">
-                      <X className="w-3 h-3" />
+                      className="opacity-0 group-hover:opacity-100 p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all shrink-0 mt-0.5">
+                      <X className="w-3.5 h-3.5" />
                     </button>
                   )}
                 </div>
               ))}
-
+              
               {/* Expense items inline in line items */}
               {(inv.expense_items || []).map(exp => (
-                <div key={`exp-${exp.id}`} className="flex items-start gap-2 p-2 bg-amber-500/[0.04] rounded-lg border border-amber-500/20 hover:border-amber-500/30 transition-colors group">
+                <div key={`exp-${exp.id}`} className="flex items-start gap-3 p-3 bg-amber-500/5 rounded-xl border border-amber-500/20 hover:border-amber-500/40 hover:shadow-sm transition-all group">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <ShoppingBag className="w-2.5 h-2.5 text-amber-400/70 shrink-0" />
-                      <div className="text-xs font-medium truncate">{exp.description}</div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <ShoppingBag className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                      <div className="text-sm font-medium text-foreground truncate">{exp.description}</div>
                     </div>
                     {exp.markup_type !== 'none' && (exp.markup_amount || 0) > 0 && showAmounts && (
-                      <div className="text-[10px] text-muted-foreground mt-0.5 ml-4">
-                        Cost {fmt(exp.original_amount || 0, exp.currency as Currency)} + markup {fmt(exp.markup_amount || 0, exp.currency as Currency)}
+                      <div className="text-[11px] text-muted-foreground ml-5 flex items-center gap-1.5">
+                        <span className="opacity-70">Cost {fmt(exp.original_amount || 0, exp.currency as Currency)}</span>
+                        <span className="w-1 h-1 rounded-full bg-border"></span>
+                        <span className="text-amber-600 dark:text-amber-400">Markup {fmt(exp.markup_amount || 0, exp.currency as Currency)}</span>
                       </div>
                     )}
-                    {exp.notes && <div className="text-[10px] text-muted-foreground/60 italic mt-0.5 ml-4">{exp.notes}</div>}
+                    {exp.notes && <div className="text-[11px] text-muted-foreground/70 italic mt-1 ml-5 border-l-2 border-border/50 pl-2">{exp.notes}</div>}
                   </div>
                   <div className="text-right shrink-0">
-                    {showAmounts && <div className="text-xs font-medium text-amber-300/90">{fmt(exp.amount, inv.currency as Currency)}</div>}
+                    {showAmounts && <div className="text-sm font-semibold text-amber-600 dark:text-amber-400">{fmt(exp.amount, inv.currency as Currency)}</div>}
                   </div>
                   {editable && (
                     <button
@@ -3386,10 +3426,10 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                           ))
                         }
                       }}
-                      className="lg:opacity-0 opacity-100 group-hover:opacity-100 p-0.5 text-muted-foreground hover:text-red-400 transition-all shrink-0 mt-0.5"
+                      className="opacity-0 group-hover:opacity-100 p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all shrink-0 mt-0.5"
                       title="Remove expense from invoice"
                     >
-                      <X className="w-3 h-3" />
+                      <X className="w-3.5 h-3.5" />
                     </button>
                   )}
                 </div>
@@ -3399,21 +3439,22 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               {editable && (() => {
                 let addDesc = '', addPrice = 0
                 return (
-                  <div className="flex gap-2 items-center pt-1 border-t border-border/20 mt-1">
+                  <div className="flex gap-3 items-center p-2 mt-2 bg-secondary/10 rounded-xl border border-dashed border-border/50 hover:border-violet-500/30 transition-colors focus-within:border-violet-500/50 focus-within:bg-secondary/20 group">
                     <input
-                      placeholder="+ Add item description…"
+                      placeholder="Add manual line item…"
                       onChange={e => { addDesc = e.target.value }}
-                      className="flex-1 bg-transparent text-xs border-b border-dashed border-border/40 focus:border-violet-500/50 focus:outline-none py-1 placeholder:text-muted-foreground/40"
+                      className="flex-1 bg-transparent text-sm font-medium focus:outline-none px-1 placeholder:text-muted-foreground/50"
                     />
                     <input
                       type="number" min="0" placeholder={getCurrencySymbol(inv.currency)}
                       onChange={e => { addPrice = parseFloat(e.target.value) || 0 }}
-                      className="w-16 bg-background border border-border/40 rounded px-1.5 py-1 text-xs text-right focus:outline-none focus:border-violet-500/50"
+                      className="w-20 bg-background border border-border/50 rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all"
                     />
                     <button
                       onClick={() => addManualItem(inv.id, addDesc, addPrice)}
-                      className="p-1 text-violet-400 hover:text-violet-300 hover:bg-violet-500/10 rounded transition-colors">
-                      <Plus className="w-3.5 h-3.5" />
+                      className="p-1.5 text-violet-500 hover:text-violet-600 hover:bg-violet-500/10 rounded-lg transition-colors border border-transparent group-focus-within:border-violet-500/20"
+                      title="Add item">
+                      <Plus className="w-4 h-4" />
                     </button>
                   </div>
                 )
@@ -3423,61 +3464,64 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
           {/* ── Discount Calculator ─────────────────────────────────────────────── */}
           {(editable || (inv.discount_amount ?? 0) > 0) && (
-            <div className="bg-foreground/[0.03] rounded-xl border border-border/40 overflow-hidden">
+            <div className="bg-orange-500/5 rounded-xl border border-orange-500/20 overflow-hidden mb-6">
               <button
                 onClick={() => {
                   if (!showDiscount) { setShowDiscount(true); loadDiscountCalc(inv.client_id, inv.id) }
                   else setShowDiscount(false)
                 }}
-                className="w-full px-3 py-2.5 flex items-center justify-between text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors">
-                <span className="flex items-center gap-1.5">
-                  <Percent className="w-3.5 h-3.5 text-orange-400" />
+                className="w-full px-4 py-3 flex items-center justify-between text-sm font-semibold text-foreground hover:bg-orange-500/10 transition-colors">
+                <span className="flex items-center gap-2">
+                  <Percent className="w-4 h-4 text-orange-500" />
                   Discount Calculator
                   {(inv.discount_amount ?? 0) > 0 && (
-                    <span className="text-orange-400 font-medium">({fmt(inv.discount_amount, inv.currency)} applied)</span>
+                    <span className="text-orange-600 dark:text-orange-400 font-medium ml-1">({fmt(inv.discount_amount, inv.currency)} applied)</span>
                   )}
                 </span>
-                {showDiscount ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                {showDiscount ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
               </button>
 
               {showDiscount && (
-                <div className="px-3 pb-3 space-y-3 border-t border-border/30">
+                <div className="px-4 pb-4 space-y-4 border-t border-orange-500/20 pt-4 bg-background/50">
                   {discountLoading ? (
-                    <div className="py-4 text-center text-xs text-muted-foreground">Analysing client history…</div>
+                    <div className="py-6 text-center text-sm text-muted-foreground flex flex-col items-center gap-2">
+                      <RefreshCw className="w-5 h-5 animate-spin text-orange-500/50" />
+                      Analysing client history…
+                    </div>
                   ) : discountCalc ? (
                     <>
                       {/* Client stats */}
-                      <div className="grid grid-cols-3 gap-2 pt-2">
-                        <div className="bg-foreground/[0.03] rounded-lg p-2 text-center">
-                          <div className="text-[10px] text-muted-foreground">Total Billed</div>
-                          <div className="text-xs font-semibold">{fmt(discountCalc.totalBilled)}</div>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="bg-card rounded-xl p-3 border border-border/50 text-center shadow-sm">
+                          <div className="text-[11px] text-muted-foreground mb-1 uppercase tracking-wider font-semibold">Total Billed</div>
+                          <div className="text-sm font-bold text-foreground">{fmt(discountCalc.totalBilled)}</div>
                         </div>
-                        <div className="bg-foreground/[0.03] rounded-lg p-2 text-center">
-                          <div className="text-[10px] text-muted-foreground">Payment Rate</div>
-                          <div className={`text-xs font-semibold ${discountCalc.paymentRate >= 0.95 ? 'text-green-400' : discountCalc.paymentRate >= 0.8 ? 'text-amber-400' : 'text-red-400'}`}>
+                        <div className="bg-card rounded-xl p-3 border border-border/50 text-center shadow-sm">
+                          <div className="text-[11px] text-muted-foreground mb-1 uppercase tracking-wider font-semibold">Payment Rate</div>
+                          <div className={`text-sm font-bold ${discountCalc.paymentRate >= 0.95 ? 'text-emerald-500' : discountCalc.paymentRate >= 0.8 ? 'text-amber-500' : 'text-red-500'}`}>
                             {(discountCalc.paymentRate * 100).toFixed(0)}%
                           </div>
                         </div>
-                        <div className="bg-foreground/[0.03] rounded-lg p-2 text-center">
-                          <div className="text-[10px] text-muted-foreground">Invoices</div>
-                          <div className="text-xs font-semibold">{discountCalc.invoiceCount}</div>
+                        <div className="bg-card rounded-xl p-3 border border-border/50 text-center shadow-sm">
+                          <div className="text-[11px] text-muted-foreground mb-1 uppercase tracking-wider font-semibold">Invoices</div>
+                          <div className="text-sm font-bold text-foreground">{discountCalc.invoiceCount}</div>
                         </div>
                       </div>
 
                       {/* Suggestion */}
-                      <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-2.5">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-[10px] text-orange-400/80 font-semibold uppercase tracking-wider flex items-center gap-1">
-                            <Gift className="w-3 h-3" />Suggested Max Discount
+                      <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl p-3.5">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-[11px] text-orange-600 dark:text-orange-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                            <Gift className="w-3.5 h-3.5" />Suggested Max Discount
                           </span>
-                          <span className="text-xs font-bold text-orange-400">{discountCalc.maxPct.toFixed(1)}%</span>
+                          <span className="text-sm font-black text-orange-600 dark:text-orange-400">{discountCalc.maxPct.toFixed(1)}%</span>
                         </div>
                         <div className="flex items-center justify-between">
-                          <span className="text-[10px] text-muted-foreground">Up to</span>
-                          <span className="text-sm font-bold text-orange-300">{fmt(discountCalc.suggestedMax, inv.currency)}</span>
+                          <span className="text-xs text-orange-600/70 dark:text-orange-400/70 font-medium">Up to</span>
+                          <span className="text-lg font-black text-orange-500">{fmt(discountCalc.suggestedMax, inv.currency)}</span>
                         </div>
                         {discountCalc.totalDiscGiven > 0 && (
-                          <div className="text-[10px] text-muted-foreground mt-1">
+                          <div className="text-[11px] text-orange-600/70 dark:text-orange-400/70 mt-2 font-medium">
                             Previously given: {fmt(discountCalc.totalDiscGiven)} across {discountCalc.discHistory.length} invoice(s)
                           </div>
                         )}
@@ -3485,44 +3529,44 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
                       {/* Manual apply */}
                       {editable && (
-                        <div className="space-y-2">
-                          <div className="flex gap-2">
+                        <div className="space-y-3">
+                          <div className="flex gap-3">
                             <div className="flex-1">
-                              <label className="text-[10px] text-muted-foreground mb-1 block">Discount Amount ({getCurrencySymbol(inv.currency)})</label>
+                              <label className="text-xs font-semibold text-foreground mb-1.5 block">Discount Amount ({getCurrencySymbol(inv.currency)})</label>
                               <input
                                 type="number" min="0" max={discountCalc.thisTotal}
                                 value={manualDiscount}
                                 onChange={e => setManualDiscount(e.target.value)}
                                 placeholder={`Max ${fmt(discountCalc.suggestedMax, inv.currency)}`}
-                                className="w-full bg-background border border-border/40 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-orange-500/50"
+                                className="w-full bg-background border border-border/50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all"
                               />
                             </div>
-                            <div className="text-center pt-4 text-[10px] text-muted-foreground">
+                            <div className="text-center pt-8 text-xs font-medium text-muted-foreground w-16">
                               {manualDiscount && discountCalc.thisTotal > 0
                                 ? `${((parseFloat(manualDiscount) / discountCalc.thisTotal) * 100).toFixed(1)}%`
                                 : '—'}
                             </div>
                           </div>
                           <div>
-                            <label className="text-[10px] text-muted-foreground mb-1 block">Reason (optional)</label>
+                            <label className="text-xs font-semibold text-foreground mb-1.5 block">Reason (optional)</label>
                             <input
                               type="text"
                               value={discountReason}
                               onChange={e => setDiscountReason(e.target.value)}
                               placeholder="e.g. Loyalty discount, early payment…"
-                              className="w-full bg-background border border-border/40 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-orange-500/50"
+                              className="w-full bg-background border border-border/50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all"
                             />
                           </div>
-                          <div className="flex gap-2">
+                          <div className="flex gap-3 pt-1">
                             <button
                               onClick={() => setManualDiscount(discountCalc.suggestedMax.toFixed(2))}
-                              className="flex-1 py-1.5 text-[10px] border border-orange-500/30 text-orange-400 rounded-lg hover:bg-orange-500/10 transition-colors">
+                              className="flex-1 py-2 text-xs font-semibold border border-orange-500/30 text-orange-600 dark:text-orange-400 rounded-lg hover:bg-orange-500/10 transition-colors">
                               Use Max ({fmt(discountCalc.suggestedMax, inv.currency)})
                             </button>
                             <button
                               onClick={() => applyDiscount(inv.id, inv.client_id)}
                               disabled={!manualDiscount}
-                              className="flex-1 py-1.5 text-[10px] bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white rounded-lg transition-colors">
+                              className="flex-1 py-2 text-xs font-semibold bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white rounded-lg transition-colors shadow-sm">
                               Apply Discount
                             </button>
                           </div>
@@ -3531,13 +3575,13 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
                       {/* Discount history */}
                       {discountCalc.discHistory.length > 0 && (
-                        <div>
-                          <div className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider mb-1.5">Discount History</div>
-                          <div className="space-y-1 max-h-28 overflow-y-auto">
+                        <div className="pt-2 border-t border-border/40 mt-2">
+                          <div className="text-[11px] text-muted-foreground font-bold uppercase tracking-wider mb-2">Discount History</div>
+                          <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
                             {discountCalc.discHistory.slice(0, 5).map((d: any, i: number) => (
-                              <div key={i} className="flex items-center justify-between text-[10px] p-1.5 bg-foreground/[0.02] rounded border border-border/20">
-                                <span className="text-muted-foreground truncate flex-1 mr-2">{d.reason}</span>
-                                <span className="text-orange-400 font-semibold shrink-0">{fmt(d.discount_amount || 0)}</span>
+                              <div key={i} className="flex items-center justify-between text-xs p-2 bg-card rounded-lg border border-border/50 shadow-sm">
+                                <span className="text-foreground font-medium truncate flex-1 mr-3">{d.reason || 'No reason'}</span>
+                                <span className="text-orange-500 font-bold shrink-0">{fmt(d.discount_amount || 0)}</span>
                               </div>
                             ))}
                           </div>
@@ -3551,40 +3595,43 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           )}
 
           {/* ── Change Log ──────────────────────────────────────────────────────── */}
-          <div className="bg-foreground/[0.03] rounded-xl border border-border/40 overflow-hidden">
+          <div className="bg-secondary/20 rounded-xl border border-border/50 overflow-hidden mb-6">
             <button
               onClick={() => {
                 if (!showChangeLogs) loadChangeLogs(inv.id)
                 else setShowChangeLogs(false)
               }}
-              className="w-full px-3 py-2.5 flex items-center justify-between text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors">
-              <span className="flex items-center gap-1.5">
-                <History className="w-3.5 h-3.5 text-blue-400" />Edit History
+              className="w-full px-4 py-3 flex items-center justify-between text-sm font-semibold text-foreground hover:bg-secondary/30 transition-colors">
+              <span className="flex items-center gap-2">
+                <History className="w-4 h-4 text-blue-500" />Edit History
               </span>
-              {showChangeLogs ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              {showChangeLogs ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
             </button>
             {showChangeLogs && (
-              <div className="px-3 pb-3 border-t border-border/30">
+              <div className="px-4 pb-4 border-t border-border/50 pt-3 bg-background/30">
                 {changeLogsLoading ? (
-                  <div className="py-4 text-center text-xs text-muted-foreground">Loading…</div>
+                  <div className="py-6 text-center text-sm text-muted-foreground flex flex-col items-center gap-2">
+                    <RefreshCw className="w-5 h-5 animate-spin text-blue-500/50" />
+                    Loading history…
+                  </div>
                 ) : changeLogs.length === 0 ? (
-                  <div className="py-4 text-center text-xs text-muted-foreground">No edits recorded yet</div>
+                  <div className="py-6 text-center text-sm text-muted-foreground">No edits recorded yet</div>
                 ) : (
-                  <div className="space-y-1 pt-2 max-h-52 overflow-y-auto">
+                  <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                     {changeLogs.map((log: any) => (
-                      <div key={log.id} className="p-2 bg-foreground/[0.02] rounded-lg border border-border/20 text-[10px]">
-                        <div className="flex items-center justify-between mb-0.5">
-                          <span className="text-blue-400 font-semibold capitalize">{log.field_name.replace(/_/g, ' ')}</span>
-                          <span className="text-muted-foreground">
+                      <div key={log.id} className="p-3 bg-card rounded-xl border border-border/50 text-xs shadow-sm">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-blue-600 dark:text-blue-400 font-bold capitalize">{log.field_name.replace(/_/g, ' ')}</span>
+                          <span className="text-muted-foreground font-medium">
                             {new Date(log.changed_at).toLocaleDateString('en-IN', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })}
                           </span>
                         </div>
-                        <div className="flex items-center gap-1.5 text-muted-foreground">
-                          <span className="line-through opacity-60">{log.old_value || '—'}</span>
-                          <ChevronRight className="w-2.5 h-2.5 shrink-0" />
-                          <span className="text-foreground font-medium">{log.new_value || '—'}</span>
+                        <div className="flex items-center gap-2 text-muted-foreground mb-1.5">
+                          <span className="line-through opacity-70 bg-red-500/10 text-red-600 dark:text-red-400 px-1.5 py-0.5 rounded">{log.old_value || '—'}</span>
+                          <ChevronRight className="w-3 h-3 shrink-0" />
+                          <span className="text-emerald-600 dark:text-emerald-400 font-medium bg-emerald-500/10 px-1.5 py-0.5 rounded">{log.new_value || '—'}</span>
                         </div>
-                        <div className="mt-0.5 text-muted-foreground/60 italic">{log.reason}</div>
+                        <div className="text-[11px] text-muted-foreground/80 italic">{log.reason}</div>
                       </div>
                     ))}
                   </div>
@@ -3611,52 +3658,70 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             if (!hasAnyPayments) return null
 
             return (
-              <div>
-                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                  Payments Received ({payments.length + standaloneLinks.length})
+              <div className="mb-6">
+                <h4 className="text-sm font-semibold text-foreground tracking-tight flex items-center gap-1.5 mb-3">
+                  <span className="text-emerald-500">Payments Received</span>
+                  <span className="text-muted-foreground font-normal ml-0.5">({payments.length + standaloneLinks.length})</span>
                 </h4>
-                <div className="space-y-1">
+                <div className="space-y-2">
                   {/* Direct Payments */}
                   {payments.map(p => (
-                    <div key={p.id} className="flex items-center justify-between p-2 bg-green-500/5 rounded-lg border border-green-500/20 text-xs">
+                    <div key={p.id} className="flex items-center justify-between p-3 bg-emerald-500/5 rounded-xl border border-emerald-500/20 text-sm hover:border-emerald-500/40 hover:shadow-sm transition-all group">
                       <div>
-                        <div className="font-medium text-green-400">{fmt(p.amount, (p.currency as Currency) || inv.currency)}</div>
-                        <div className="text-[10px] text-muted-foreground">
-                          {fmtDate(p.payment_date)} · {METHOD_LABEL[p.payment_method] || p.payment_method}
-                          {p.reference && ` · ${p.reference}`}
+                        <div className="font-bold text-emerald-600 dark:text-emerald-400 mb-1">{fmt(p.amount, (p.currency as Currency) || inv.currency)}</div>
+                        <div className="text-xs text-muted-foreground font-medium flex flex-wrap items-center gap-1.5">
+                          <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{fmtDate(p.payment_date)}</span>
+                          <span className="w-1 h-1 rounded-full bg-border"></span>
+                          <span className="px-1.5 py-0.5 rounded-md bg-secondary text-secondary-foreground">{METHOD_LABEL[p.payment_method] || p.payment_method}</span>
+                          {p.reference && (
+                            <>
+                              <span className="w-1 h-1 rounded-full bg-border"></span>
+                              <span className="font-mono text-[11px] bg-secondary/50 px-1 rounded">{p.reference}</span>
+                            </>
+                          )}
                           {p.currency && p.currency !== 'INR' && p.amount_inr != null && (
-                            <span> · @ {p.exchange_rate} = {fmt(p.amount_inr, 'INR')}</span>
+                            <>
+                              <span className="w-1 h-1 rounded-full bg-border"></span>
+                              <span>@ {p.exchange_rate} = {fmt(p.amount_inr, 'INR')}</span>
+                            </>
                           )}
                         </div>
                       </div>
                       <button
                         onClick={() => deletePayment(inv.id, p.id)}
                         title="Remove this payment"
-                        className="p-1 rounded hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors ml-2 shrink-0"
+                        className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-all ml-2 shrink-0"
                       >
-                        <Trash2 className="w-3 h-3" />
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   ))}
 
                   {/* Cash Book Allocations */}
                   {standaloneLinks.map(a => (
-                    <div key={a.id} className="flex items-center justify-between p-2 bg-violet-500/5 rounded-lg border border-violet-500/20 text-xs">
+                    <div key={a.id} className="flex items-center justify-between p-3 bg-violet-500/5 rounded-xl border border-violet-500/20 text-sm hover:border-violet-500/40 hover:shadow-sm transition-all group">
                       <div>
-                        <div className="font-medium text-green-400">
+                        <div className="font-bold text-emerald-600 dark:text-emerald-400 mb-1">
                           ₹{Number(a.allocated_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                         </div>
-                        <div className="text-[10px] text-muted-foreground flex items-center gap-1">
-                          {fmtDate(a.cashbook_entry!.entry_date)} · Cash Book Allocation
-                          {a.cashbook_entry!.reference && ` · ${a.cashbook_entry!.reference}`}
+                        <div className="text-xs text-muted-foreground font-medium flex flex-wrap items-center gap-1.5">
+                          <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{fmtDate(a.cashbook_entry!.entry_date)}</span>
+                          <span className="w-1 h-1 rounded-full bg-border"></span>
+                          <span className="text-violet-600 dark:text-violet-400">Cash Book Allocation</span>
+                          {a.cashbook_entry!.reference && (
+                            <>
+                              <span className="w-1 h-1 rounded-full bg-border"></span>
+                              <span className="font-mono text-[11px] bg-secondary/50 px-1 rounded">{a.cashbook_entry!.reference}</span>
+                            </>
+                          )}
                         </div>
                       </div>
                       <a
                         href={`/dashboard/cashbook?client=${inv.client_id}&focus=${a.cashbook_entry!.id}`}
-                        className="p-1 rounded hover:bg-violet-500/20 text-muted-foreground hover:text-violet-400 transition-colors ml-2 shrink-0"
+                        className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-violet-500/10 text-muted-foreground hover:text-violet-500 transition-all ml-2 shrink-0"
                         title="View in Cash Book"
                       >
-                        <ExternalLink className="w-3 h-3" />
+                        <ExternalLink className="w-4 h-4" />
                       </a>
                     </div>
                   ))}
@@ -3667,8 +3732,13 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
           {/* Notes */}
           {inv.notes && (
-            <div className="text-xs text-muted-foreground bg-foreground/[0.02] rounded-lg p-3 border border-border/30">
-              {inv.notes}
+            <div className="mb-6">
+               <h4 className="text-sm font-semibold text-foreground tracking-tight flex items-center gap-1.5 mb-3">
+                 <FileText className="w-4 h-4 text-muted-foreground" /> Notes
+               </h4>
+              <div className="text-sm text-muted-foreground bg-secondary/30 rounded-xl p-4 border border-border/50 leading-relaxed shadow-sm">
+                {inv.notes}
+              </div>
             </div>
           )}
         </div>
@@ -3682,29 +3752,29 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   function renderPayPanel(inv: Invoice) {
     const balance = balanceDue(inv)
     return (
-      <div className="flex flex-col h-full overflow-hidden">
-        <div className="px-4 py-3 border-b border-border/40 flex items-center justify-between">
+      <div className="flex flex-col h-full bg-background overflow-hidden">
+        <div className="px-5 py-4 border-b border-border/50 flex items-center justify-between bg-card">
           <div>
-            <h3 className="font-semibold text-sm">Record Payment</h3>
-            <div className="text-xs text-muted-foreground">{inv.invoice_number} · Balance {fmt(balance, inv.currency)}</div>
+            <h3 className="font-bold text-base text-foreground tracking-tight">Record Payment</h3>
+            <div className="text-xs text-muted-foreground font-medium mt-0.5">{inv.invoice_number} · Balance <span className="text-foreground">{fmt(balance, inv.currency)}</span></div>
           </div>
-          <button onClick={() => setPanelMode('detail')} className="p-1.5 hover:bg-foreground/5 rounded-lg text-muted-foreground hover:text-foreground">
-            <X className="w-4 h-4" />
+          <button onClick={() => setPanelMode('detail')} className="p-2 hover:bg-secondary/80 rounded-xl text-muted-foreground hover:text-foreground transition-colors">
+            <X className="w-5 h-5" />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
           {/* Amount + currency + rate (3-way synced) */}
-          <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block">Amount</label>
+          <div className="bg-card border border-border/50 rounded-xl p-4 shadow-sm">
+            <label className="text-xs font-semibold text-foreground uppercase tracking-wider mb-2.5 flex items-center gap-1.5"><CreditCard className="w-3.5 h-3.5" /> Amount</label>
             {balance > 0 && (
-              <div className="flex gap-2 mb-2 flex-wrap">
+              <div className="flex gap-2 mb-3 flex-wrap">
                 {[balance, balance / 2].filter(v => v > 0).map((v, i) => (
                   <button key={i}
                     onClick={() => setPayForm(p => {
                       const fx = payFx(v.toFixed(2), p.currency, p.rate)
                       return { ...p, amount: v.toFixed(2), rate: fx.rate, amountInr: fx.amountInr, rateSource: fx.rateSource }
                     })}
-                    className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${parseFloat(payForm.amount) === v ? 'bg-violet-500/20 border-violet-500/50 text-violet-300' : 'border-border/40 text-muted-foreground hover:border-border'}`}>
+                    className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-all ${parseFloat(payForm.amount) === v ? 'bg-violet-500/10 border-violet-500/40 text-violet-600 dark:text-violet-400' : 'border-border/60 text-muted-foreground hover:bg-secondary/50 hover:border-border hover:text-foreground'}`}>
                     {i === 0 ? 'Full' : 'Half'} {fmt(v, inv.currency)}
                   </button>
                 ))}
@@ -3718,60 +3788,63 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               rateDate={exchangeRates.find(r => r.currency === payForm.currency)?.rate_date}
             />
             {payForm.currency !== inv.currency && (
-              <p className="mt-1.5 text-[11px] text-amber-400">
+              <p className="mt-3 text-[11px] text-amber-600 dark:text-amber-400 font-medium bg-amber-500/10 p-2 rounded-lg border border-amber-500/20">
                 Paying in {payForm.currency} on a {inv.currency} invoice — the balance is reduced by the ₹ value converted at the invoice rate.
               </p>
             )}
           </div>
 
-          <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block">Date</label>
-            <input type="date" value={payForm.payment_date}
-              onChange={e => setPayForm(p => ({ ...p, payment_date: e.target.value }))}
-              className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50"
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">Date</label>
+              <input type="date" value={payForm.payment_date}
+                onChange={e => setPayForm(p => ({ ...p, payment_date: e.target.value }))}
+                className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all shadow-sm"
+              />
+            </div>
+            {bankAccounts.length > 0 && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-foreground">Bank Account <span className="text-muted-foreground font-normal">(optional)</span></label>
+                <AppSelect value={payForm.bank_account_id}
+                  onChange={e => setPayForm(p => ({ ...p, bank_account_id: e.target.value }))}>
+                  <option value="">— none —</option>
+                  {bankAccounts.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </AppSelect>
+              </div>
+            )}
           </div>
 
-          <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block">Method</label>
-            <div className="flex flex-wrap gap-1.5">
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-foreground block">Method</label>
+            <div className="flex flex-wrap gap-2">
               {PAYMENT_METHODS.map(m => (
                 <button key={m}
                   onClick={() => setPayForm(p => ({ ...p, payment_method: m }))}
-                  className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${payForm.payment_method === m ? 'bg-violet-500/20 border-violet-500/50 text-violet-300' : 'border-border/40 text-muted-foreground hover:border-border'}`}>
+                  className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-all shadow-sm ${payForm.payment_method === m ? 'bg-violet-500 border-violet-600 text-white shadow-violet-500/20' : 'bg-card border-border/60 text-muted-foreground hover:bg-secondary hover:border-border hover:text-foreground'}`}>
                   {METHOD_LABEL[m]}
                 </button>
               ))}
             </div>
           </div>
 
-          {bankAccounts.length > 0 && (
-            <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Bank Account (optional)</label>
-              <AppSelect value={payForm.bank_account_id}
-                onChange={e => setPayForm(p => ({ ...p, bank_account_id: e.target.value }))}>
-                <option value="">— none —</option>
-                {bankAccounts.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </AppSelect>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">Reference <span className="text-muted-foreground font-normal">(optional)</span></label>
+              <input type="text" value={payForm.reference}
+                onChange={e => setPayForm(p => ({ ...p, reference: e.target.value }))}
+                placeholder="Txn ID / cheque number…"
+                className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all shadow-sm"
+              />
             </div>
-          )}
 
-          <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block">Reference (optional)</label>
-            <input type="text" value={payForm.reference}
-              onChange={e => setPayForm(p => ({ ...p, reference: e.target.value }))}
-              placeholder="Txn ID / cheque number…"
-              className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50"
-            />
-          </div>
-
-          <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block">Notes (optional)</label>
-            <input type="text" value={payForm.notes}
-              onChange={e => setPayForm(p => ({ ...p, notes: e.target.value }))}
-              placeholder="Any notes about this payment…"
-              className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50"
-            />
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">Notes <span className="text-muted-foreground font-normal">(optional)</span></label>
+              <input type="text" value={payForm.notes}
+                onChange={e => setPayForm(p => ({ ...p, notes: e.target.value }))}
+                placeholder="Any notes about this payment…"
+                className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all shadow-sm"
+              />
+            </div>
           </div>
 
           {/* Live balance remaining */}
@@ -3784,13 +3857,13 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             const after   = balance - entered
             if (entered <= 0) return null
             return (
-              <div className={`flex items-center justify-between px-3 py-2.5 rounded-xl border text-xs font-medium transition-colors ${
+              <div className={`flex items-center justify-between px-4 py-3 rounded-xl border text-sm font-bold transition-all shadow-sm ${
                 after <= 0
-                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                  : 'bg-blue-500/10 border-blue-500/30 text-blue-400'
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                  : 'bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400'
               }`}>
-                <span>{after <= 0 ? '✓ Fully paid' : 'Remaining after payment'}</span>
-                <span className="font-semibold tabular-nums">
+                <span className="flex items-center gap-1.5">{after <= 0 ? <CheckCircle className="w-4 h-4" /> : null}{after <= 0 ? 'Fully paid' : 'Remaining after payment'}</span>
+                <span className="tabular-nums">
                   {after <= 0 ? fmt(0, inv.currency) : fmt(after, inv.currency)}
                 </span>
               </div>
@@ -3798,21 +3871,21 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           })()}
 
           {/* Advance payment toggle */}
-          <div className={`flex items-start gap-3 p-3 rounded-xl border transition-colors cursor-pointer ${isAdvancePayment ? 'bg-amber-500/10 border-amber-500/30' : 'bg-foreground/[0.02] border-border/40 hover:border-border/60'}`}
+          <div className={`flex items-start gap-3 p-4 rounded-xl border transition-all cursor-pointer shadow-sm ${isAdvancePayment ? 'bg-amber-500/10 border-amber-500/30' : 'bg-card border-border/50 hover:border-border/80'}`}
             onClick={() => setIsAdvancePayment(p => !p)}>
-            <div className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${isAdvancePayment ? 'bg-amber-500 border-amber-500' : 'border-border/60'}`}>
-              {isAdvancePayment && <span className="text-[10px] text-white font-bold">✓</span>}
+            <div className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${isAdvancePayment ? 'bg-amber-500 border-amber-600' : 'border-border/80'}`}>
+              {isAdvancePayment && <Check className="w-3 h-3 text-white stroke-[3]" />}
             </div>
             <div>
-              <div className="text-xs font-medium text-foreground flex items-center gap-1.5">
-                <Tag className="w-3 h-3 text-amber-400" />Advance / Excess Payment
+              <div className="text-sm font-bold text-foreground flex items-center gap-1.5 mb-1">
+                <Tag className="w-4 h-4 text-amber-500" />Advance / Excess Payment
               </div>
-              <div className="text-[10px] text-muted-foreground mt-0.5">
+              <div className="text-xs text-muted-foreground font-medium leading-relaxed">
                 Mark this as an advance or accidental excess payment. It will be noted in payment records for future adjustment.
               </div>
               {isAdvancePayment && (
-                <div className="mt-2 text-[10px] bg-amber-500/20 text-amber-300 px-2 py-1 rounded">
-                  ⚠️ This amount exceeds the balance due and will be recorded as advance credit
+                <div className="mt-2.5 text-[11px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-600 dark:text-amber-400 px-2.5 py-1.5 rounded-lg inline-flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5" /> Exceeds balance due
                 </div>
               )}
             </div>
@@ -3821,7 +3894,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           <button
             onClick={() => handlePayment(inv.id)}
             disabled={saving || !payForm.amount}
-            className="w-full py-2.5 bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2 transition-colors">
+            className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm">
             <CreditCard className="w-4 h-4" />
             {saving ? 'Saving…' : isAdvancePayment ? `Record Advance ${payForm.amount ? fmt(parseFloat(payForm.amount), inv.currency) : ''}` : `Record ${payForm.amount ? fmt(parseFloat(payForm.amount), inv.currency) : 'Payment'}`}
           </button>
@@ -3847,26 +3920,29 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const total = newForm.items.reduce((s, i) => s + (i.total || 0), 0)
 
     return (
-      <div className="flex flex-col h-full overflow-hidden">
-        <div className="px-4 py-3 border-b border-border/40 flex items-center justify-between">
+      <div className="flex flex-col h-full bg-background overflow-hidden">
+        <div className="px-5 py-4 border-b border-border/50 flex items-center justify-between bg-card">
           <div>
-            <h3 className="font-semibold text-sm">Manual Invoice</h3>
-            <p className="text-[11px] text-muted-foreground">For one-off / override invoices. Tasks auto-generate drafts.</p>
+            <h3 className="font-bold text-base text-foreground tracking-tight flex items-center gap-2">
+              <FileText className="w-4 h-4 text-violet-500" />
+              Manual Invoice
+            </h3>
+            <p className="text-[11px] text-muted-foreground font-medium mt-1 leading-tight">For one-off / override invoices. Tasks auto-generate drafts.</p>
           </div>
-          <button onClick={() => setPanelMode('detail')} className="p-1.5 hover:bg-foreground/5 rounded-lg text-muted-foreground hover:text-foreground">
-            <X className="w-4 h-4" />
+          <button onClick={() => setPanelMode('detail')} className="p-2 hover:bg-secondary/80 rounded-xl text-muted-foreground hover:text-foreground transition-colors">
+            <X className="w-5 h-5" />
           </button>
         </div>
         {/* Unsaved changes banner */}
         {newFormDirty && (
-          <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-400 text-xs">
-            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          <div className="flex items-center gap-2 px-5 py-2.5 bg-amber-500/10 border-b border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-bold uppercase tracking-wider">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
             <span>Unsaved changes — navigating away will lose this form</span>
           </div>
         )}
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-          <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block">Client *</label>
+        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-6">
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-foreground">Client <span className="text-red-500">*</span></label>
             <Combobox
               options={clients.map(c => ({ id: c.id, label: c.name, sub: c.code }))}
               value={newForm.client_id}
@@ -3875,69 +3951,72 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               sortKey="clients"
             />
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Issue Date</label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">Issue Date</label>
               <input type="date" value={newForm.issue_date}
                 onChange={e => setNewForm(p => ({ ...p, issue_date: e.target.value }))}
-                className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50"
+                className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all shadow-sm"
               />
             </div>
-            <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Due Date</label>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">Due Date</label>
               <input type="date" value={newForm.due_date}
                 onChange={e => setNewForm(p => ({ ...p, due_date: e.target.value }))}
-                className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50"
+                className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all shadow-sm"
               />
             </div>
           </div>
 
           {/* Line items */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs text-muted-foreground">Line Items</label>
+          <div className="bg-card border border-border/50 rounded-xl p-4 shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <label className="text-xs font-semibold text-foreground uppercase tracking-wider">Line Items</label>
               <button onClick={() => setNewForm(p => ({ ...p, items: [...p.items, { description: '', quantity: 1, unit_price: 0, total: 0, service_id: '' }] }))}
-                className="text-[10px] text-violet-400 hover:text-violet-300 flex items-center gap-1">
-                <Plus className="w-3 h-3" />Add row
+                className="text-xs font-bold text-violet-600 dark:text-violet-400 hover:text-violet-500 flex items-center gap-1 px-2 py-1 hover:bg-violet-500/10 rounded-lg transition-colors">
+                <Plus className="w-3.5 h-3.5" />Add row
               </button>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2.5">
               {newForm.items.map((item, idx) => (
-                <div key={idx} className="flex gap-2 items-start">
+                <div key={idx} className="flex gap-2 items-start group">
                   <input value={item.description} onChange={e => updateNewItem(idx, 'description', e.target.value)}
                     placeholder="Description…"
-                    className="flex-1 bg-background border border-border/40 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-violet-500/50"
+                    className="flex-1 bg-background border border-border/50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all"
                   />
-                  <input type="number" value={item.unit_price || ''} onChange={e => updateNewItem(idx, 'unit_price', parseFloat(e.target.value) || 0)}
-                    placeholder={getCurrencySymbol(newForm.currency as any)}
-                    className="w-20 bg-background border border-border/40 rounded-lg px-2 py-1.5 text-xs text-right focus:outline-none focus:border-violet-500/50"
-                  />
+                  <div className="relative">
+                    <span className="absolute left-2.5 top-2 text-muted-foreground text-sm font-medium">{getCurrencySymbol(newForm.currency as any)}</span>
+                    <input type="number" value={item.unit_price || ''} onChange={e => updateNewItem(idx, 'unit_price', parseFloat(e.target.value) || 0)}
+                      placeholder="0.00"
+                      className="w-24 bg-background border border-border/50 rounded-lg pl-7 pr-3 py-2 text-sm text-right focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all font-medium"
+                    />
+                  </div>
                   {newForm.items.length > 1 && (
                     <button onClick={() => setNewForm(p => ({ ...p, items: p.items.filter((_, i) => i !== idx) }))}
-                      className="p-1.5 text-muted-foreground hover:text-red-400">
-                      <X className="w-3.5 h-3.5" />
+                      className="p-2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all shrink-0">
+                      <X className="w-4 h-4" />
                     </button>
                   )}
                 </div>
               ))}
             </div>
+            
+            <div className="flex justify-between items-center text-sm font-bold border-t border-border/50 pt-4 mt-4 text-foreground">
+              <span className="uppercase tracking-wider text-xs text-muted-foreground">Total Amount</span>
+              <span className="text-base text-violet-600 dark:text-violet-400">{fmt(total)}</span>
+            </div>
           </div>
 
-          <div className="flex justify-between text-sm font-semibold border-t border-border/40 pt-3">
-            <span>Total</span>
-            <span>{fmt(total)}</span>
-          </div>
-
-          <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block">Notes</label>
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-foreground">Notes <span className="text-muted-foreground font-normal">(optional)</span></label>
             <textarea value={newForm.notes} onChange={e => setNewForm(p => ({ ...p, notes: e.target.value }))}
-              rows={2} placeholder="Optional notes…"
-              className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:border-violet-500/50"
+              rows={2} placeholder="Optional notes for this invoice…"
+              className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm resize-none focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all shadow-sm"
             />
           </div>
 
           <button onClick={createManualInvoice} disabled={saving || !newForm.client_id}
-            className="w-full py-2.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2 transition-colors">
+            className="w-full py-3 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm hover:shadow-violet-500/25 disabled:hover:shadow-none mt-2">
             <FileText className="w-4 h-4" />
             {saving ? 'Creating…' : 'Create Invoice'}
           </button>
@@ -3953,23 +4032,24 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const selectedCount = genTasks.filter(t => genSelectedIds.has(t.id)).length
     const selectedTotal = genTasks.filter(t => genSelectedIds.has(t.id)).reduce((s, t) => s + (t.billing_amount ?? t.billing_amount_inr ?? 0), 0)
     return (
-      <div className="flex flex-col h-full overflow-hidden">
-        <div className="px-4 py-3 border-b border-border/40 flex items-center justify-between">
+      <div className="flex flex-col h-full bg-background overflow-hidden">
+        <div className="px-5 py-4 border-b border-border/50 flex items-center justify-between bg-card">
           <div>
-            <h3 className="font-semibold text-sm flex items-center gap-1.5">
-              <Zap className="w-4 h-4 text-amber-400" />Generate Invoice
+            <h3 className="font-bold text-base text-foreground tracking-tight flex items-center gap-2">
+              <Zap className="w-4 h-4 text-amber-500" />
+              Generate Invoice
             </h3>
-            <p className="text-[11px] text-muted-foreground">Pick a client + period → fetch done tasks → create invoice</p>
+            <p className="text-[11px] text-muted-foreground font-medium mt-1 leading-tight">Pick a client + period → fetch done tasks → create invoice</p>
           </div>
-          <button onClick={() => { setPanelMode('detail'); setGenTasks([]) }} className="p-1.5 hover:bg-foreground/5 rounded-lg text-muted-foreground hover:text-foreground">
-            <X className="w-4 h-4" />
+          <button onClick={() => { setPanelMode('detail'); setGenTasks([]) }} className="p-2 hover:bg-secondary/80 rounded-xl text-muted-foreground hover:text-foreground transition-colors">
+            <X className="w-5 h-5" />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-6">
 
           {/* Client */}
-          <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block">Client *</label>
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-foreground">Client <span className="text-red-500">*</span></label>
             <Combobox
               options={clients.map(c => ({ id: c.id, label: c.name, sub: c.code }))}
               value={genForm.client_id}
@@ -3980,12 +4060,12 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           </div>
 
           {/* Mode toggle */}
-          <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block">Period Type</label>
-            <div className="flex gap-1.5">
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-foreground">Period Type</label>
+            <div className="flex gap-2">
               {(['range', 'day'] as const).map(m => (
                 <button key={m} onClick={() => setGenForm(p => ({ ...p, mode: m }))}
-                  className={`flex-1 py-1.5 text-xs rounded-lg border transition-colors ${genForm.mode === m ? 'bg-violet-500/20 border-violet-500/50 text-violet-300' : 'border-border/40 text-muted-foreground hover:border-border'}`}>
+                  className={`flex-1 py-2 text-sm font-medium rounded-xl border transition-all shadow-sm ${genForm.mode === m ? 'bg-violet-500 border-violet-600 text-white shadow-violet-500/20' : 'bg-card border-border/60 text-muted-foreground hover:bg-secondary hover:border-border hover:text-foreground'}`}>
                   {m === 'range' ? '📅 Date Range' : '📌 Specific Day'}
                 </button>
               ))}
@@ -3994,99 +4074,110 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
           {/* Date inputs */}
           {genForm.mode === 'range' ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground mb-1.5 block">From</label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-foreground">From</label>
                 <input type="date" value={genForm.date_from}
                   onChange={e => setGenForm(p => ({ ...p, date_from: e.target.value }))}
-                  className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50"
+                  className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all shadow-sm"
                 />
               </div>
-              <div>
-                <label className="text-xs text-muted-foreground mb-1.5 block">To</label>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-foreground">To</label>
                 <input type="date" value={genForm.date_to}
                   onChange={e => setGenForm(p => ({ ...p, date_to: e.target.value }))}
-                  className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50"
+                  className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all shadow-sm"
                 />
               </div>
             </div>
           ) : (
-            <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Date</label>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">Date</label>
               <input type="date" value={genForm.specific_date}
                 onChange={e => setGenForm(p => ({ ...p, specific_date: e.target.value }))}
-                className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50"
+                className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all shadow-sm"
               />
             </div>
           )}
 
           {/* Fetch button */}
           <button onClick={fetchGenTasks} disabled={genLoading || !genForm.client_id}
-            className="w-full py-2 bg-foreground/[0.06] hover:bg-foreground/[0.1] border border-border/40 text-sm font-medium rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50">
-            <Search className="w-3.5 h-3.5" />
+            className="w-full py-3 bg-secondary hover:bg-secondary/80 border border-border/50 text-sm font-bold text-foreground rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm disabled:opacity-50 mt-2">
+            <Search className="w-4 h-4 text-muted-foreground" />
             {genLoading ? 'Fetching…' : 'Fetch Done Tasks'}
           </button>
 
           {/* Task list */}
           {genTasks.length > 0 && (
-            <div>
-              <div className="flex items-center justify-between mb-2">
+            <div className="bg-card border border-border/50 rounded-xl p-4 shadow-sm">
+              <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                   Found {genTasks.length} task{genTasks.length !== 1 ? 's' : ''}
                 </span>
-                <div className="flex gap-2 text-[10px] text-violet-400">
-                  <button onClick={() => setGenSelectedIds(new Set(genTasks.map(t => t.id)))}>All</button>
+                <div className="flex gap-2 text-xs font-bold text-violet-600 dark:text-violet-400">
+                  <button className="hover:text-violet-500 transition-colors" onClick={() => setGenSelectedIds(new Set(genTasks.map(t => t.id)))}>All</button>
                   <span className="text-border">|</span>
-                  <button onClick={() => setGenSelectedIds(new Set())}>None</button>
+                  <button className="hover:text-violet-500 transition-colors" onClick={() => setGenSelectedIds(new Set())}>None</button>
                 </div>
               </div>
-              <div className="space-y-1 max-h-52 overflow-y-auto">
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                 {genTasks.map(task => {
                     const existInvs: any[] = (task as any).existing_invoices || []
                     const activeConflict = existInvs.filter((inv: any) => inv.status !== 'cancelled')
                     const hasConflict = activeConflict.length > 0
                     return (
-                  <label key={task.id} className={`flex items-start gap-2 p-2 rounded-lg border cursor-pointer transition-colors
-                    ${hasConflict ? 'bg-amber-500/5 border-amber-500/30' : genSelectedIds.has(task.id) ? 'bg-violet-500/10 border-violet-500/30' : 'bg-foreground/[0.02] border-border/30 hover:border-border/60'}`}>
+                  <label key={task.id} className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all shadow-sm
+                    ${hasConflict ? 'bg-amber-500/10 border-amber-500/30' : genSelectedIds.has(task.id) ? 'bg-violet-500/10 border-violet-500/40 shadow-violet-500/5' : 'bg-background border-border/50 hover:border-border/80'}`}>
                     <input type="checkbox" checked={genSelectedIds.has(task.id)}
                       onChange={e => setGenSelectedIds(prev => {
                         const n = new Set(prev)
                         e.target.checked ? n.add(task.id) : n.delete(task.id)
                         return n
                       })}
-                      className="accent-violet-500 mt-0.5"
+                      className="accent-violet-500 mt-1 cursor-pointer w-4 h-4"
                     />
                     <div className="flex-1 min-w-0">
-                      <div className="text-xs font-medium truncate">{task.title}</div>
-                      <div className="text-[10px] text-muted-foreground">
-                        {fmtDate(task.task_date)}{task.service?.name ? ` · ${task.service.name}` : ''}
-                        {task.status === 'invoiced' && <span className="ml-1 text-amber-400">· invoiced</span>}
+                      <div className="text-sm font-semibold truncate text-foreground">{task.title}</div>
+                      <div className="text-xs text-muted-foreground font-medium mt-0.5 flex flex-wrap items-center gap-1.5">
+                        <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{fmtDate(task.task_date)}</span>
+                        {task.service?.name && (
+                           <>
+                             <span className="w-1 h-1 rounded-full bg-border"></span>
+                             <span>{task.service.name}</span>
+                           </>
+                        )}
+                        {task.status === 'invoiced' && (
+                          <>
+                             <span className="w-1 h-1 rounded-full bg-border"></span>
+                             <span className="text-amber-500 font-bold">invoiced</span>
+                          </>
+                        )}
                       </div>
                       {hasConflict && (
-                        <div className="mt-1 space-y-0.5">
+                        <div className="mt-2 space-y-1">
                           {activeConflict.map((inv: any) => (
-                            <div key={inv.id} className="text-[9px] text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded px-1.5 py-0.5 inline-flex items-center gap-1 mr-1">
-                              ⚠️ Already in {inv.invoice_number} ({inv.status})
+                            <div key={inv.id} className="text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-500/20 border border-amber-500/30 rounded-lg px-2 py-1 inline-flex items-center gap-1.5 mr-1.5 mb-1">
+                              <AlertTriangle className="w-3 h-3" /> Already in {inv.invoice_number} ({inv.status})
                             </div>
                           ))}
-                          <div className="text-[9px] text-muted-foreground">Including will create a duplicate line item</div>
+                          <div className="text-[11px] text-muted-foreground font-medium">Including will create a duplicate line item</div>
                         </div>
                       )}
                     </div>
-                    <span className="text-xs font-semibold shrink-0">{fmt(task.billing_amount ?? task.billing_amount_inr ?? 0, task.currency || 'INR')}</span>
+                    <span className="text-sm font-bold shrink-0 text-foreground">{fmt(task.billing_amount ?? task.billing_amount_inr ?? 0, task.currency || 'INR')}</span>
                   </label>
                     )
                   })}
               </div>
 
               {/* Summary + create */}
-              <div className="mt-3 pt-3 border-t border-border/40 space-y-3">
-                <div className="flex justify-between text-sm font-semibold">
-                  <span>{selectedCount} item{selectedCount !== 1 ? 's' : ''} selected</span>
-                  <span>{fmt(selectedTotal)}</span>
+              <div className="mt-4 pt-4 border-t border-border/50 space-y-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-semibold text-muted-foreground">{selectedCount} item{selectedCount !== 1 ? 's' : ''} selected</span>
+                  <span className="text-base font-bold text-violet-600 dark:text-violet-400">{fmt(selectedTotal)}</span>
                 </div>
                 <button onClick={createFromGenTasks} disabled={saving || selectedCount === 0}
-                  className="w-full py-2.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2 transition-colors">
+                  className="w-full py-3 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm hover:shadow-violet-500/25 disabled:hover:shadow-none">
                   <FileText className="w-4 h-4" />
                   {saving ? 'Creating…' : `Create Invoice · ${fmt(selectedTotal)}`}
                 </button>
@@ -4095,8 +4186,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           )}
 
           {genTasks.length === 0 && !genLoading && genForm.client_id && (
-            <div className="text-xs text-muted-foreground text-center py-6 bg-foreground/[0.02] rounded-xl border border-dashed border-border/40">
-              Click "Fetch Done Tasks" to see available tasks
+            <div className="text-sm font-medium text-muted-foreground text-center py-12 bg-secondary/30 rounded-2xl border border-dashed border-border/60">
+              Click <span className="font-bold text-foreground">"Fetch Done Tasks"</span> to see available tasks
             </div>
           )}
         </div>
@@ -4134,99 +4225,101 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const clearFilters = () => { setBatchFilterClient(''); setBatchFilterMonthFrom(''); setBatchFilterMonthTo(''); setBatchFilterMinAmount('') }
 
     return (
-      <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex flex-col h-full bg-background overflow-hidden">
 
         {/* Header */}
-        <div className="px-4 py-3 border-b border-border/40 flex items-center justify-between">
+        <div className="px-5 py-4 border-b border-border/50 flex items-center justify-between bg-card">
           <div>
-            <h3 className="font-semibold text-sm flex items-center gap-1.5">
-              <History className="w-4 h-4 text-emerald-400" />Batch Generate — Historical
+            <h3 className="font-bold text-base text-foreground tracking-tight flex items-center gap-2">
+              <History className="w-4 h-4 text-emerald-500" />Batch Generate
             </h3>
-            <p className="text-[11px] text-muted-foreground">Un-invoiced done tasks · grouped by client + month</p>
+            <p className="text-[11px] text-muted-foreground font-medium mt-1 leading-tight">Historical scan of un-invoiced done tasks</p>
           </div>
-          <button onClick={() => { setPanelMode('detail'); setBatchGroups([]) }} className="p-1.5 hover:bg-foreground/5 rounded-lg text-muted-foreground hover:text-foreground">
-            <X className="w-4 h-4" />
+          <button onClick={() => { setPanelMode('detail'); setBatchGroups([]) }} className="p-2 hover:bg-secondary/80 rounded-xl text-muted-foreground hover:text-foreground transition-colors">
+            <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Scan prompt */}
         {batchGroups.length === 0 && !batchLoading && (
-          <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6 text-center">
-            <History className="w-10 h-10 text-emerald-400/30" />
-            <p className="text-sm text-muted-foreground">
+          <div className="flex-1 flex flex-col items-center justify-center gap-5 px-6 text-center bg-secondary/30">
+            <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20 shadow-inner">
+              <History className="w-8 h-8 text-emerald-500/60" />
+            </div>
+            <p className="text-sm font-medium text-muted-foreground max-w-[240px] leading-relaxed">
               Scans all <strong>Done</strong> tasks without an active invoice, then groups them by client and billing month.
             </p>
             <button onClick={fetchBatchGroups}
-              className="px-5 py-2.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-sm font-medium rounded-xl transition-colors">
+              className="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-sm hover:shadow-emerald-500/25">
               Scan Un-invoiced Tasks
             </button>
           </div>
         )}
 
         {batchLoading && (
-          <div className="flex-1 flex items-center justify-center gap-2 text-muted-foreground">
-            <RefreshCw className="w-4 h-4 animate-spin" />
-            <span className="text-sm">Scanning tasks…</span>
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground bg-secondary/30">
+            <RefreshCw className="w-6 h-6 animate-spin text-emerald-500/50" />
+            <span className="text-sm font-semibold">Scanning tasks…</span>
           </div>
         )}
 
         {!batchLoading && batchGroups.length > 0 && (
           <>
             {/* ── Filter bar ─────────────────────────────────────────────── */}
-            <div className="px-4 pt-3 pb-2 border-b border-border/30 space-y-2">
+            <div className="px-5 pt-4 pb-3 border-b border-border/50 space-y-3 bg-card shadow-sm z-10 relative">
 
               {/* Row 1: Client search + Sort */}
-              <div className="flex gap-2">
+              <div className="flex gap-3">
                 <div className="relative flex-1">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                   <input
                     type="text" placeholder="Filter by client…" value={batchFilterClient}
                     onChange={e => setBatchFilterClient(e.target.value)}
-                    className="w-full pl-7 pr-2 py-1.5 text-xs bg-background border border-border/40 rounded-lg focus:outline-none focus:border-emerald-500/50"
+                    className="w-full pl-9 pr-3 py-2 text-sm bg-background border border-border/50 rounded-xl focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 transition-all shadow-sm"
                   />
                 </div>
                 <select value={batchSortBy} onChange={e => setBatchSortBy(e.target.value as any)}
-                  className="text-xs bg-background border border-border/40 rounded-lg px-2 py-1.5 focus:outline-none focus:border-emerald-500/50 text-muted-foreground">
-                  <option value="month_asc">Month ↑ (oldest)</option>
-                  <option value="month_desc">Month ↓ (newest)</option>
+                  className="text-sm bg-background border border-border/50 rounded-xl px-3 py-2 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 text-foreground font-medium shadow-sm cursor-pointer">
+                  <option value="month_asc">Month ↑</option>
+                  <option value="month_desc">Month ↓</option>
                   <option value="client_asc">Client A→Z</option>
                   <option value="amount_desc">Amount ↓</option>
                 </select>
               </div>
 
               {/* Row 2: Month range */}
-              <div className="flex gap-2 items-center">
-                <Calendar className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                <div className="flex gap-1.5 flex-1">
+              <div className="flex gap-3 items-center">
+                <Calendar className="w-4 h-4 text-emerald-500/70 shrink-0" />
+                <div className="flex gap-2 flex-1">
                   <input type="month" value={batchFilterMonthFrom}
                     onChange={e => setBatchFilterMonthFrom(e.target.value)}
-                    className="flex-1 text-xs bg-background border border-border/40 rounded-lg px-2 py-1.5 focus:outline-none focus:border-emerald-500/50 text-muted-foreground"
+                    className="flex-1 text-sm font-medium bg-background border border-border/50 rounded-xl px-3 py-1.5 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 text-foreground transition-all shadow-sm"
                     title="From month"
                   />
-                  <span className="text-muted-foreground/50 text-xs self-center">→</span>
+                  <span className="text-muted-foreground/50 text-sm font-medium self-center">→</span>
                   <input type="month" value={batchFilterMonthTo}
                     onChange={e => setBatchFilterMonthTo(e.target.value)}
-                    className="flex-1 text-xs bg-background border border-border/40 rounded-lg px-2 py-1.5 focus:outline-none focus:border-emerald-500/50 text-muted-foreground"
+                    className="flex-1 text-sm font-medium bg-background border border-border/50 rounded-xl px-3 py-1.5 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 text-foreground transition-all shadow-sm"
                     title="To month"
                   />
                 </div>
                 <div className="relative">
-                  <IndianRupee className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                  <IndianRupee className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
                   <input type="number" placeholder="Min ₹" value={batchFilterMinAmount}
                     onChange={e => setBatchFilterMinAmount(e.target.value)}
-                    className="w-20 pl-5 pr-2 py-1.5 text-xs bg-background border border-border/40 rounded-lg focus:outline-none focus:border-emerald-500/50"
+                    className="w-24 pl-7 pr-3 py-1.5 text-sm font-medium bg-background border border-border/50 rounded-xl focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 transition-all shadow-sm"
                     title="Minimum invoice amount"
                   />
                 </div>
                 {hasFilters && (
-                  <button onClick={clearFilters} className="text-[10px] text-red-400 hover:text-red-300 whitespace-nowrap" title="Clear all filters">
-                    <X className="w-3 h-3" />
+                  <button onClick={clearFilters} className="p-1.5 text-red-500 hover:bg-red-500/10 rounded-lg transition-colors" title="Clear all filters">
+                    <X className="w-4 h-4" />
                   </button>
                 )}
               </div>
 
               {/* Quick month shortcuts */}
-              <div className="flex gap-1.5 flex-wrap">
+              <div className="flex gap-2 flex-wrap">
                 {[
                   { label: '2023', from: '2023-01', to: '2023-12' },
                   { label: '2024', from: '2024-01', to: '2024-12' },
@@ -4240,7 +4333,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                   return (
                     <button key={label}
                       onClick={() => { setBatchFilterMonthFrom(active ? '' : from); setBatchFilterMonthTo(active ? '' : to) }}
-                      className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${active ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300' : 'border-border/40 text-muted-foreground hover:border-emerald-500/30 hover:text-emerald-400'}`}>
+                      className={`text-xs font-bold px-2.5 py-1 rounded-lg border transition-all ${active ? 'bg-emerald-500 border-emerald-600 text-white shadow-emerald-500/20' : 'bg-background border-border/50 text-muted-foreground hover:bg-secondary hover:border-border hover:text-foreground shadow-sm'}`}>
                       {label}
                     </button>
                   )
@@ -4248,35 +4341,35 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               </div>
 
               {/* Summary + select controls */}
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] text-muted-foreground">
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                   {visibleGroups.length} / {batchGroups.length} groups
-                  {hasFilters && <span className="text-amber-400 ml-1">(filtered)</span>}
+                  {hasFilters && <span className="text-amber-500 ml-1.5">(filtered)</span>}
                 </span>
-                <div className="flex gap-2 text-[10px] text-emerald-400">
-                  <button onClick={() => {
+                <div className="flex gap-3 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                  <button className="hover:text-emerald-500 transition-colors" onClick={() => {
                     const next = new Set(batchSelected)
                     visibleGroups.forEach(g => next.add(g.key))
                     setBatchSelected(next)
                   }}>Select visible</button>
                   <span className="text-border">|</span>
-                  <button onClick={() => {
+                  <button className="hover:text-emerald-500 transition-colors" onClick={() => {
                     const next = new Set(batchSelected)
                     visibleGroups.forEach(g => next.delete(g.key))
                     setBatchSelected(next)
                   }}>Deselect visible</button>
                   <span className="text-border">|</span>
-                  <button onClick={fetchBatchGroups} className="flex items-center gap-0.5 text-muted-foreground hover:text-foreground">
-                    <RefreshCw className="w-2.5 h-2.5" />Rescan
+                  <button onClick={fetchBatchGroups} className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors ml-2 bg-secondary hover:bg-secondary/80 px-2 py-1 rounded-md border border-border/50">
+                    <RefreshCw className="w-3 h-3" />Rescan
                   </button>
                 </div>
               </div>
             </div>
 
             {/* ── Groups list ─────────────────────────────────────────────── */}
-            <div className="flex-1 overflow-y-auto px-4 py-2 space-y-1">
+            <div className="flex-1 overflow-y-auto px-5 py-3 space-y-2">
               {visibleGroups.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground text-sm">
+                <div className="text-center py-12 text-muted-foreground text-sm font-medium bg-secondary/30 rounded-2xl border border-dashed border-border/60">
                   No groups match the current filters
                 </div>
               ) : visibleGroups.map(group => {
@@ -4290,76 +4383,88 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 const groupTasks = group.tasks || []
                 return (
                   <div key={group.key}
-                    className={`rounded-lg border transition-colors ${checked ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-foreground/[0.02] border-border/30'}`}>
+                    className={`rounded-xl border transition-all shadow-sm ${checked ? 'bg-emerald-500/5 border-emerald-500/40 shadow-emerald-500/5' : 'bg-card border-border/50 hover:border-border/80'}`}>
 
                     {/* ── Group header row ── */}
-                    <div className="flex items-center gap-2 p-2.5">
+                    <div className="flex items-center gap-3 p-3">
                       <input type="checkbox" checked={checked}
                         onChange={e => {
                           const next = new Set(batchSelected)
                           if (e.target.checked) next.add(group.key); else next.delete(group.key)
                           setBatchSelected(next)
                         }}
-                        className="w-3.5 h-3.5 accent-emerald-500 shrink-0"
+                        className="w-4 h-4 accent-emerald-500 cursor-pointer shrink-0"
                       />
                       <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setBatchExpandedKey(expanded ? null : group.key)}>
-                        <div className="text-xs font-medium truncate">{group.client_name}</div>
-                        <div className="text-[10px] text-muted-foreground">{monthLabel} · {group.taskCount} task{group.taskCount !== 1 ? 's' : ''}{(group.expenses || []).length > 0 ? ` + ${group.expenses!.length} expense${group.expenses!.length > 1 ? 's' : ''}` : ''}</div>
+                        <div className="text-sm font-semibold truncate text-foreground">{group.client_name}</div>
+                        <div className="text-xs font-medium text-muted-foreground mt-0.5 flex items-center gap-1.5 flex-wrap">
+                          <span className="text-foreground/80 bg-secondary px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider">{monthLabel}</span>
+                          <span className="w-1 h-1 rounded-full bg-border"></span>
+                          <span>{group.taskCount} task{group.taskCount !== 1 ? 's' : ''}</span>
+                          {(group.expenses || []).length > 0 && (
+                            <>
+                              <span className="w-1 h-1 rounded-full bg-border"></span>
+                              <span className="text-amber-500 font-bold">{group.expenses!.length} expense{group.expenses!.length > 1 ? 's' : ''}</span>
+                            </>
+                          )}
+                        </div>
                       </div>
                       <div className="text-right shrink-0">
-                        <div className="text-xs font-semibold text-emerald-300">{fmt(group.total + (group.expenses || []).reduce((s, e) => s + e.amount_inr, 0), group.currency as any)}</div>
-                        <div className="text-[10px] text-muted-foreground font-mono">INV-{invoiceYYMM}-NNN</div>
+                        <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{fmt(group.total + (group.expenses || []).reduce((s, e) => s + e.amount_inr, 0), group.currency as any)}</div>
+                        <div className="text-[11px] font-mono font-medium text-muted-foreground mt-0.5">INV-{invoiceYYMM}-NNN</div>
                       </div>
                       {/* Expand toggle */}
                       <button
                         onClick={() => setBatchExpandedKey(expanded ? null : group.key)}
                         title={expanded ? 'Collapse tasks' : 'Preview tasks'}
-                        className={`shrink-0 p-1 rounded transition-colors ${expanded ? 'text-emerald-400 bg-emerald-500/10' : 'text-muted-foreground hover:text-foreground hover:bg-foreground/5'}`}>
-                        {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        className={`shrink-0 p-1.5 rounded-lg transition-colors ${expanded ? 'text-emerald-500 bg-emerald-500/10' : 'text-muted-foreground hover:text-foreground hover:bg-secondary'}`}>
+                        {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                       </button>
                     </div>
 
                     {/* ── Expanded task list ── */}
                     {expanded && (
-                      <div className="border-t border-border/30 mx-2 mb-2 pt-2 space-y-0.5">
+                      <div className="border-t border-border/50 mx-3 mb-3 pt-3 space-y-1">
                         {groupTasks.length === 0 ? (
-                          <p className="text-[11px] text-muted-foreground px-1 py-1">No task details available</p>
+                          <p className="text-xs font-medium text-muted-foreground px-2 py-2 bg-secondary/50 rounded-lg text-center">No task details available</p>
                         ) : groupTasks.map((t, i) => (
                           <div key={t.id}
-                            className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-foreground/[0.03] hover:bg-foreground/[0.06] transition-colors group">
-                            <span className="text-[9px] text-muted-foreground/50 font-mono w-4 text-right shrink-0">{i + 1}</span>
+                            className="flex items-center gap-3 px-3 py-2 rounded-lg bg-background hover:bg-secondary/50 transition-colors group border border-transparent hover:border-border/50">
+                            <span className="text-[10px] font-bold text-muted-foreground/50 font-mono w-4 text-right shrink-0">{i + 1}</span>
                             <div className="flex-1 min-w-0">
-                              <div className="text-[11px] text-foreground/90 truncate">{t.title}</div>
-                              <div className="text-[9px] text-muted-foreground">
+                              <div className="text-xs font-semibold text-foreground/90 truncate">{t.title}</div>
+                              <div className="text-[10px] font-medium text-muted-foreground mt-0.5 flex items-center gap-1">
+                                <Calendar className="w-3 h-3 text-muted-foreground/70" />
                                 {t.task_date ? new Date(t.task_date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}
                               </div>
                             </div>
-                            <div className="text-[11px] font-semibold text-foreground/80 shrink-0 tabular-nums">
+                            <div className="text-xs font-bold text-foreground/80 shrink-0 tabular-nums">
                               {t.billing_amount_inr > 0 ? fmt(t.billing_amount_inr, t.currency as any) : <span className="text-muted-foreground/40 font-normal">—</span>}
                             </div>
                           </div>
                         ))}
                         {/* Expense entries for this month */}
                         {(group.expenses || []).map(exp => (
-                          <div key={exp.id} className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-amber-500/[0.04] border border-amber-500/20">
-                            <span className="text-[9px] text-amber-400/50 font-mono w-4 text-right shrink-0">
-                              <ShoppingBag className="w-2.5 h-2.5" />
+                          <div key={exp.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-amber-500/5 border border-amber-500/20">
+                            <span className="text-[10px] font-bold text-amber-500/50 font-mono w-4 text-right shrink-0 flex justify-center">
+                              <ShoppingBag className="w-3 h-3" />
                             </span>
                             <div className="flex-1 min-w-0">
-                              <div className="text-[11px] text-amber-300/80 truncate">{exp.description || 'Expense'}</div>
-                              <div className="text-[9px] text-muted-foreground">
+                              <div className="text-xs font-bold text-amber-600 dark:text-amber-400 truncate">{exp.description || 'Expense'}</div>
+                              <div className="text-[10px] font-medium text-muted-foreground mt-0.5 flex items-center gap-1">
+                                <Calendar className="w-3 h-3 text-muted-foreground/70" />
                                 {exp.entry_date ? new Date(exp.entry_date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}
                               </div>
                             </div>
-                            <div className="text-[11px] font-semibold text-amber-300/80 shrink-0 tabular-nums">
+                            <div className="text-xs font-bold text-amber-600 dark:text-amber-400 shrink-0 tabular-nums">
                               {fmt(exp.amount_inr, 'INR')}
                             </div>
                           </div>
                         ))}
                         {/* Group total */}
-                        <div className="flex items-center justify-between px-2 pt-1.5 mt-0.5 border-t border-border/20">
-                          <span className="text-[10px] text-muted-foreground">{groupTasks.length} tasks{(group.expenses || []).length > 0 ? ` + ${group.expenses!.length} expense${group.expenses!.length > 1 ? 's' : ''}` : ''} · subtotal</span>
-                          <span className="text-[11px] font-bold text-emerald-400">{fmt(group.total + (group.expenses || []).reduce((s, e) => s + e.amount_inr, 0), group.currency as any)}</span>
+                        <div className="flex items-center justify-between px-3 pt-2.5 mt-2 border-t border-border/50">
+                          <span className="text-xs font-semibold text-muted-foreground">{groupTasks.length} tasks{(group.expenses || []).length > 0 ? ` + ${group.expenses!.length} expense${group.expenses!.length > 1 ? 's' : ''}` : ''} · subtotal</span>
+                          <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{fmt(group.total + (group.expenses || []).reduce((s, e) => s + e.amount_inr, 0), group.currency as any)}</span>
                         </div>
                       </div>
                     )}
@@ -4370,13 +4475,14 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
             {/* ── Progress bar (while generating) ────────────────────────── */}
             {batchGenerating && (
-              <div className="px-4 pb-2">
-                <div className="bg-foreground/[0.04] border border-border/40 rounded-xl p-3">
-                  <div className="flex items-center justify-between mb-2 text-xs text-muted-foreground">
-                    <span>Generating invoices…</span>
-                    <span>{batchDone} / {totalInvoices}</span>
+              <div className="px-5 pb-4 pt-2">
+                <div className="bg-card border border-border/50 rounded-xl p-4 shadow-sm relative overflow-hidden">
+                  <div className="absolute inset-0 bg-emerald-500/5 animate-pulse"></div>
+                  <div className="flex items-center justify-between mb-3 text-xs font-bold text-foreground relative z-10">
+                    <span className="flex items-center gap-1.5"><RefreshCw className="w-3.5 h-3.5 text-emerald-500 animate-spin" /> Generating invoices…</span>
+                    <span className="text-emerald-600 dark:text-emerald-400">{batchDone} / {totalInvoices}</span>
                   </div>
-                  <div className="h-1.5 bg-foreground/10 rounded-full overflow-hidden">
+                  <div className="h-2 bg-secondary rounded-full overflow-hidden relative z-10">
                     <div className="h-full bg-emerald-500 transition-all duration-300 rounded-full"
                       style={{ width: totalInvoices > 0 ? `${Math.round((batchDone / totalInvoices) * 100)}%` : '0%' }} />
                   </div>
@@ -4388,14 +4494,14 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
         {/* ── Footer ───────────────────────────────────────────────────────── */}
         {!batchLoading && batchGroups.length > 0 && (
-          <div className="px-4 py-3 border-t border-border/40 flex items-center justify-between gap-3">
-            <div className="text-[11px] text-muted-foreground">
-              <span className="font-semibold text-foreground">{totalInvoices}</span> selected
-              {totalInvoices > 0 && <span className="ml-1.5 text-emerald-400">{fmt(totalAmount)}</span>}
+          <div className="px-5 py-4 border-t border-border/50 flex items-center justify-between gap-4 bg-card">
+            <div className="text-xs font-medium text-muted-foreground">
+              <span className="font-bold text-foreground text-sm">{totalInvoices}</span> selected
+              {totalInvoices > 0 && <span className="ml-2 font-bold text-emerald-600 dark:text-emerald-400 text-sm">{fmt(totalAmount)}</span>}
             </div>
             <button onClick={runBatchGenerate} disabled={batchGenerating || totalInvoices === 0}
-              className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-              <Zap className="w-3.5 h-3.5" />
+              className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-xl transition-all shadow-sm hover:shadow-emerald-500/25 disabled:opacity-50 disabled:hover:shadow-none disabled:cursor-not-allowed">
+              <Zap className="w-4 h-4" />
               {batchGenerating ? `Creating… (${batchDone}/${totalInvoices})` : `Generate ${totalInvoices} Invoice${totalInvoices !== 1 ? 's' : ''}`}
             </button>
           </div>
@@ -4454,7 +4560,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     }
 
     return (
-      <div className="flex flex-col h-full">
+      <div className="flex flex-col h-full bg-background overflow-hidden relative">
 
         {/* ── Header ── */}
         <div className="px-4 py-3 border-b border-border/40 flex items-center justify-between shrink-0">
@@ -4474,11 +4580,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         <div className="flex-1 overflow-y-auto">
 
           {/* Filters */}
-          <div className="px-4 pt-4 pb-3 space-y-3">
+          <div className="mx-4 mt-4 mb-4 p-4 bg-foreground/[0.02] border border-border/40 rounded-xl space-y-4">
 
             {/* Client */}
             <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Client</label>
+              <label className="text-xs font-medium text-foreground mb-1.5 block">Select Client</label>
               <Combobox
                 options={[{ id: '', label: 'All Clients', sub: 'combined' }, ...clients.map(c => ({ id: c.id, label: c.name, sub: c.code }))]}
                 value={stmtForm.client_id}
@@ -4490,25 +4596,25 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
             {/* Period type */}
             <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Period</label>
-              <div className="grid grid-cols-2 gap-1.5">
+              <label className="text-xs font-medium text-foreground mb-1.5 block">Statement Period</label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 bg-foreground/[0.03] p-1 rounded-lg border border-border/20">
                 {([['month','📅 Month'],['year','📆 Year'],['range','🗓 Range'],['day','📌 Day']] as const).map(([m, lbl]) => (
                   <button type="button" key={m}
                     onClick={() => { setStmtForm(p => ({ ...p, mode: m })); setStmtExpandedIds(new Set()) }}
-                    className={`py-1.5 text-xs rounded-lg border transition-colors ${stmtForm.mode === m ? 'bg-blue-500/20 border-blue-500/50 text-blue-300' : 'border-border/40 text-muted-foreground hover:border-border/70'}`}>
+                    className={`py-1.5 text-xs rounded-md transition-all ${stmtForm.mode === m ? 'bg-background shadow-sm border border-border/50 text-foreground font-medium' : 'border border-transparent text-muted-foreground hover:text-foreground'}`}>
                     {lbl}
                   </button>
                 ))}
                 <button type="button"
                   onClick={() => { setStmtForm(p => ({ ...p, mode: 'all' })); setStmtExpandedIds(new Set()) }}
-                  className={`col-span-2 py-1.5 text-xs rounded-lg border transition-colors ${stmtForm.mode === 'all' ? 'bg-blue-500/20 border-blue-500/50 text-blue-300' : 'border-border/40 text-muted-foreground hover:border-border/70'}`}>
+                  className={`col-span-2 sm:col-span-4 mt-1 py-1.5 text-xs rounded-md transition-all ${stmtForm.mode === 'all' ? 'bg-background shadow-sm border border-border/50 text-foreground font-medium' : 'border border-transparent text-muted-foreground hover:text-foreground'}`}>
                   ♾️ All time (lifetime)
                 </button>
               </div>
             </div>
 
             {stmtForm.mode === 'all' && (
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-[11px] text-muted-foreground bg-blue-500/10 text-blue-500 p-2.5 rounded-lg border border-blue-500/20">
                 Includes every invoice for {stmtForm.client_id ? 'this client' : 'all clients'}, across all dates.
               </p>
             )}
@@ -4517,61 +4623,63 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             {stmtForm.mode === 'month' && (
               <input type="month" value={stmtForm.month}
                 onChange={e => setStmtForm(p => ({ ...p, month: e.target.value }))}
-                className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500/50" />
+                className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50 transition-all shadow-sm" />
             )}
             {stmtForm.mode === 'year' && (
               <input type="number" min="2020" max="2099" value={stmtForm.year}
                 onChange={e => setStmtForm(p => ({ ...p, year: e.target.value }))}
-                className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500/50" />
+                className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50 transition-all shadow-sm" />
             )}
             {stmtForm.mode === 'range' && (
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">From</label>
+                  <label className="text-xs text-muted-foreground mb-1 block font-medium">From</label>
                   <input type="date" value={stmtForm.date_from}
                     onChange={e => setStmtForm(p => ({ ...p, date_from: e.target.value }))}
-                    className="w-full bg-background border border-border/40 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-blue-500/50" />
+                    className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50 transition-all shadow-sm" />
                 </div>
                 <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">To</label>
+                  <label className="text-xs text-muted-foreground mb-1 block font-medium">To</label>
                   <input type="date" value={stmtForm.date_to}
                     onChange={e => setStmtForm(p => ({ ...p, date_to: e.target.value }))}
-                    className="w-full bg-background border border-border/40 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-blue-500/50" />
+                    className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50 transition-all shadow-sm" />
                 </div>
               </div>
             )}
             {stmtForm.mode === 'day' && (
               <input type="date" value={stmtForm.specific_date}
                 onChange={e => setStmtForm(p => ({ ...p, specific_date: e.target.value }))}
-                className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500/50" />
+                className="w-full bg-background border border-border/40 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50 transition-all shadow-sm" />
             )}
           </div>
 
           {/* ── No-results state ── */}
           {sInvoices.length === 0 ? (
-            <div className="mx-4 my-2 py-8 text-xs text-muted-foreground text-center bg-foreground/[0.02] rounded-xl border border-dashed border-border/40">
-              No invoices found in selected period
+            <div className="mx-4 my-2 py-12 flex flex-col items-center justify-center text-center bg-foreground/[0.02] rounded-2xl border border-dashed border-border/40">
+              <ScrollText className="w-8 h-8 text-muted-foreground/30 mb-3" />
+              <div className="text-sm font-medium text-foreground/80">No Invoices Found</div>
+              <div className="text-xs text-muted-foreground mt-1">Try selecting a different period or client.</div>
             </div>
           ) : (
             <>
               {/* ── Summary cards ── */}
-              <div className="mx-4 mb-4 grid grid-cols-3 gap-2">
-                <div className="rounded-xl bg-foreground/[0.04] border border-border/30 p-2.5 text-center">
-                  <div className="text-[9px] text-muted-foreground uppercase tracking-wide mb-1">Billed</div>
-                  <div className="text-sm font-bold">{fmt(sTotalBilled)}</div>
-                  <div className="text-[9px] text-muted-foreground mt-0.5">{sInvoices.length} inv · {sTotalTasks} tasks</div>
+              <div className="mx-4 mb-5 grid grid-cols-3 gap-3">
+                <div className="rounded-xl bg-background border border-border/40 p-3.5 flex flex-col justify-center shadow-sm">
+                  <div className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider mb-1.5">Billed</div>
+                  <div className="text-base font-bold text-foreground">{fmt(sTotalBilled)}</div>
+                  <div className="text-[10px] text-muted-foreground mt-1 font-medium">{sInvoices.length} inv · {sTotalTasks} tasks</div>
                 </div>
-                <div className="rounded-xl bg-emerald-500/[0.06] border border-emerald-500/20 p-2.5 text-center">
-                  <div className="text-[9px] text-emerald-400/70 uppercase tracking-wide mb-1">Received</div>
-                  <div className="text-sm font-bold text-emerald-400">{fmt(sTotalPaid)}</div>
-                  <div className="text-[9px] text-muted-foreground mt-0.5">
-                    {sTotalBilled > 0 ? Math.round(sTotalPaid / sTotalBilled * 100) : 0}%
+                <div className="rounded-xl bg-emerald-500/[0.04] border border-emerald-500/20 p-3.5 flex flex-col justify-center shadow-sm">
+                  <div className="text-[10px] text-emerald-500 font-medium uppercase tracking-wider mb-1.5">Received</div>
+                  <div className="text-base font-bold text-emerald-500">{fmt(sTotalPaid)}</div>
+                  <div className="text-[10px] text-emerald-500/70 mt-1 font-medium">
+                    {sTotalBilled > 0 ? Math.round(sTotalPaid / sTotalBilled * 100) : 0}% recovery
                   </div>
                 </div>
-                <div className={`rounded-xl p-2.5 text-center border ${sTotalBalance > 0 ? 'bg-red-500/[0.06] border-red-500/20' : 'bg-emerald-500/[0.06] border-emerald-500/20'}`}>
-                  <div className={`text-[9px] uppercase tracking-wide mb-1 ${sTotalBalance > 0 ? 'text-red-400/70' : 'text-emerald-400/70'}`}>Balance</div>
-                  <div className={`text-sm font-bold ${sTotalBalance > 0 ? 'text-red-400' : 'text-emerald-400'}`}>{fmt(Math.abs(sTotalBalance))}</div>
-                  <div className="text-[9px] text-muted-foreground mt-0.5">{sTotalBalance > 0 ? 'due' : 'settled ✓'}</div>
+                <div className={`rounded-xl p-3.5 flex flex-col justify-center shadow-sm border ${sTotalBalance > 0 ? 'bg-red-500/[0.04] border-red-500/20' : 'bg-emerald-500/[0.04] border-emerald-500/20'}`}>
+                  <div className={`text-[10px] font-medium uppercase tracking-wider mb-1.5 ${sTotalBalance > 0 ? 'text-red-500' : 'text-emerald-500'}`}>Balance</div>
+                  <div className={`text-base font-bold ${sTotalBalance > 0 ? 'text-red-500' : 'text-emerald-500'}`}>{fmt(Math.abs(sTotalBalance))}</div>
+                  <div className={`text-[10px] mt-1 font-medium ${sTotalBalance > 0 ? 'text-red-500/70' : 'text-emerald-500/70'}`}>{sTotalBalance > 0 ? 'Outstanding due' : 'Fully settled ✓'}</div>
                 </div>
               </div>
 
@@ -4620,7 +4728,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
                     return (
                       <div key={inv.id}
-                        className={`rounded-xl border transition-all ${isExpanded ? 'border-blue-500/40 bg-blue-500/[0.03]' : 'border-border/40 bg-foreground/[0.02] hover:border-border/60'}`}>
+                        className={`rounded-xl border transition-all ${isExpanded ? 'border-blue-500/40 bg-blue-500/[0.02] shadow-sm' : 'border-border/40 bg-foreground/[0.02] hover:border-border/60 hover:bg-foreground/[0.03]'}`}>
 
                         {/* ── Clickable header ── */}
                         <button
@@ -4800,21 +4908,21 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           )}
 
           {/* ── Print buttons ── */}
-          <div className="px-4 pt-3 pb-5 space-y-2 border-t border-border/20 mt-3">
+          <div className="p-4 space-y-2.5 border-t border-border/40 bg-background z-10 shrink-0 mt-3">
             <button type="button" onClick={() => printStatement()} disabled={sInvoices.length === 0}
-              className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2 transition-colors">
+              className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm hover:shadow-blue-500/25">
               <Printer className="w-4 h-4" />Print Statement
             </button>
-            <button type="button" onClick={printDetailedStatement} disabled={sInvoices.length === 0}
-              className="w-full py-2.5 px-4 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 disabled:opacity-40 disabled:cursor-not-allowed border border-blue-500/30 text-blue-300 text-sm font-medium transition-colors flex items-center justify-center gap-2">
-              <FileText className="w-4 h-4" />Print Detailed Statement
-              <span className="text-[10px] opacity-60">(tasks · payments)</span>
-            </button>
-            <button type="button" onClick={exportDetailedStatementCSV} disabled={sInvoices.length === 0}
-              className="w-full py-2.5 px-4 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 disabled:opacity-40 disabled:cursor-not-allowed border border-emerald-500/30 text-emerald-300 text-sm font-medium transition-colors flex items-center justify-center gap-2">
-              <Download className="w-4 h-4" />Export CSV
-              <span className="text-[10px] opacity-60">(ledger worksheet)</span>
-            </button>
+            <div className="grid grid-cols-2 gap-2.5">
+              <button type="button" onClick={printDetailedStatement} disabled={sInvoices.length === 0}
+                className="w-full py-2.5 px-3 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 disabled:opacity-40 disabled:cursor-not-allowed border border-blue-500/20 text-blue-500 text-sm font-medium transition-colors flex items-center justify-center gap-1.5">
+                <FileText className="w-4 h-4 shrink-0" />Detailed PDF
+              </button>
+              <button type="button" onClick={exportDetailedStatementCSV} disabled={sInvoices.length === 0}
+                className="w-full py-2.5 px-3 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed border border-emerald-500/20 text-emerald-500 text-sm font-medium transition-colors flex items-center justify-center gap-1.5">
+                <Download className="w-4 h-4 shrink-0" />CSV Ledger
+              </button>
+            </div>
           </div>
 
         </div>
@@ -4908,22 +5016,22 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     ]
 
     return (
-      <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex flex-col h-full bg-background overflow-hidden relative">
         {/* Header */}
-        <div className="px-4 py-3 border-b border-border/40 flex items-center justify-between">
+        <div className="px-5 py-4 border-b border-border/40 flex items-center justify-between shrink-0">
           <div>
-            <h3 className="font-semibold text-sm flex items-center gap-1.5">
-              <TrendingUp className="w-4 h-4 text-violet-400" />Financial Analytics
+            <h3 className="font-semibold text-base flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-violet-400" />Financial Analytics
             </h3>
-            <p className="text-[11px] text-muted-foreground">Discounts · Bad debts · Overdue aging · Advances</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Discounts · Bad debts · Overdue aging · Advances</p>
           </div>
-          <button onClick={() => setPanelMode('detail')} className="p-1.5 hover:bg-foreground/5 rounded-lg text-muted-foreground hover:text-foreground">
+          <button onClick={() => setPanelMode('detail')} className="p-2 hover:bg-foreground/5 rounded-full text-muted-foreground hover:text-foreground transition-colors">
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Tab bar */}
-        <div className="flex gap-1 px-4 pt-2 pb-0 border-b border-border/40">
+        <div className="flex gap-2 px-4 pt-3 pb-0 border-b border-border/40 bg-foreground/[0.01] overflow-x-auto hide-scrollbar shrink-0">
           {TABS.map(t => (
             <button key={t.id}
               onClick={() => {
@@ -4932,10 +5040,10 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 if (t.id === 'job_losses') loadJobLosses()
                 if (t.id === 'expenses')  loadExpenseReport()
               }}
-              className={`flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-medium rounded-t-lg border border-b-0 transition-colors ${analyticsTab === t.id ? t.active : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-t-lg border border-b-0 transition-all shrink-0 ${analyticsTab === t.id ? t.active : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-foreground/5'}`}>
               {t.label}
               {t.count > 0 && (
-                <span className={`text-[9px] px-1 py-0.5 rounded-full ${analyticsTab === t.id ? 'bg-foreground/20' : 'bg-foreground/[0.06]'}`}>{t.count}</span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${analyticsTab === t.id ? 'bg-background/20 shadow-sm' : 'bg-foreground/[0.06]'}`}>{t.count}</span>
               )}
             </button>
           ))}
