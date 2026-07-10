@@ -153,6 +153,18 @@
     outline: 2px solid var(--ring);
     outline-offset: 2px;
   }
+  /* ── Reduced motion ──
+     Users with vestibular disorders opt out at the OS level; honor it
+     globally. Durations clamp to near-zero (not 0 — transitionend/
+     animationend events must still fire for any JS that waits on them). */
+  @media (prefers-reduced-motion: reduce) {
+    *, ::before, ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
   body {
     @apply bg-background text-foreground;
   }
