@@ -124,10 +124,18 @@ export default async function DashboardLayout({ children }: { children: React.Re
               overscroll-none on main prevents iOS elastic-bounce into the
               background that's visible when page content is shorter than the viewport. */}
           <div className="flex h-dvh overflow-hidden">
+            {/* First tab stop on every dashboard page: lets keyboard users jump
+                past the full sidebar nav. Visually hidden until focused. */}
+            <a
+              href="#main-content"
+              className="fixed top-3 left-3 z-[100] -translate-y-[200%] focus:translate-y-0 bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium shadow-lg"
+            >
+              Skip to content
+            </a>
             <Sidebar />
             {/* pb-16 on mobile gives clearance above the employee bottom nav bar.
                 md:pb-0 restores normal layout on desktop where sidebar is visible. */}
-            <main className={`flex-1 overflow-y-auto overscroll-none bg-background w-full ${!user.isAdmin ? 'pb-16 md:pb-0' : ''}`}>
+            <main id="main-content" tabIndex={-1} className={`flex-1 overflow-y-auto overscroll-none bg-background w-full ${!user.isAdmin ? 'pb-16 md:pb-0' : ''}`}>
               {children}
             </main>
             <CommandPalette />
