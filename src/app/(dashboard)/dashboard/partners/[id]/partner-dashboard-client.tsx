@@ -174,7 +174,30 @@ export default function PartnerDashboardClient({ partner, dashboard, unlinkedCli
           {dashboard.clients.length === 0 ? (
             <p className="text-sm text-muted-foreground py-6 text-center">No clients linked yet.</p>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+              {/* Phones: card list — 5 columns (+ unlink) has no room below sm. */}
+              <div className="sm:hidden divide-y divide-border/50">
+                {dashboard.clients.map(c => (
+                  <div key={c.id} className="py-3">
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <span className="font-medium text-foreground text-sm truncate">{c.name}</span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="font-medium text-foreground text-sm">{fmtAmt(c.outstanding)}</span>
+                        {canEdit && (
+                          <button onClick={() => handleUnlink(c.id)} className="text-muted-foreground hover:text-destructive p-1">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {c.pendingInvoices} pending · last payment {fmtDate(c.lastPayment)} · last invoice {fmtDate(c.lastInvoice)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="hidden sm:block overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs text-muted-foreground border-b border-border">
@@ -205,7 +228,8 @@ export default function PartnerDashboardClient({ partner, dashboard, unlinkedCli
                   ))}
                 </tbody>
               </table>
-            </div>
+              </div>
+            </>
           )}
         </div>
       </div>
