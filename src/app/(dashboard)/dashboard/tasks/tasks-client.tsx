@@ -48,6 +48,7 @@ import {
   logTaskCreated,
   logTaskAssignment,
   serverInlineTaskUpdate,
+  checkPossibleDuplicateTask,
 } from './actions'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { BatchActionBar, type BatchAction } from '@/components/ui/batch-action-bar'
@@ -638,6 +639,13 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
   const [quickSet, setQuickSet] = useState<{ mode: 'default' | 'client'; price: string; currency: Currency } | null>(null)
   const [quickSaving, setQuickSaving] = useState(false)
 
+  // ── Possible-duplicate warning (same client + same title, created very
+  // recently) — surfaced live while filling the Add Task form. Catches the
+  // "two people create the same task within a minute of each other" collision
+  // (e.g. one teammate's task getting deleted as a "duplicate" of another's)
+  // without nagging on legitimately recurring same-title tasks from weeks ago.
+  const [dupWarning, setDupWarning] = useState<{ taskNumber: number | null; createdBy: string; minutesAgo: number } | null>(null)
+
   // Bulk selection state
   const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set())
   const [bulkMode, setBulkMode] = useState(false)
@@ -717,6 +725,33 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showForm, form.task_number])
+
+  // ── Possible-duplicate warning (same client + same title, created very
+  // recently) — surfaced live while filling the Add Task form. Catches the
+  // "two people create the same task within a minute of each other" collision
+  // (e.g. one teammate's task getting deleted as a "duplicate" of another's)
+  // without nagging on legitimately recurring same-title tasks from weeks ago.
+  useEffect(() => {
+    if (!showForm) { setDupWarning(null); return }
+    const title = form.title.trim()
+    if (title.length < 3) { setDupWarning(null); return }
+    const clientId = form.client_id === INTERNAL_CLIENT ? null : (form.client_id || null)
+
+    const timer = setTimeout(async () => {
+      // Server-side: activity_logs has no browser-readable RLS policy, so the
+      // creator of a matching task can only be resolved there.
+      const res = await checkPossibleDuplicateTask(title, clientId)
+      if (!res.ok || !res.data) { setDupWarning(null); return }
+      const { taskNumber, createdByEmployeeId, minutesAgo } = res.data
+      const creator = createdByEmployeeId ? employees.find(e => e.id === createdByEmployeeId) : undefined
+      setDupWarning({
+        taskNumber,
+        createdBy: creator ? dn(creator) : 'a teammate',
+        minutesAgo,
+      })
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [showForm, form.title, form.client_id, employees, dn])
 
   // Sort services by most recently used
   const sortedServices = useMemo(() => {
@@ -4219,6 +4254,18 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                   />
                 </div>
               </div>
+
+              {dupWarning && (
+                <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-500">
+                  <span className="mt-0.5">⚠</span>
+                  <span>
+                    {dupWarning.createdBy} created a task with this exact title for this client{' '}
+                    {dupWarning.minutesAgo === 0 ? 'just now' : `${dupWarning.minutesAgo} min ago`}
+                    {dupWarning.taskNumber != null && <> (Task #{dupWarning.taskNumber})</>}.
+                    {' '}Check it isn&apos;t already covered before adding another.
+                  </span>
+                </div>
+              )}
 
               {/* ── Variant linking (collapsed by default; opens when a parent is picked) ── */}
               <div className="rounded-xl border border-foreground/15 bg-foreground/[0.02]">

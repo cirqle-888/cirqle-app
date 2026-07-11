@@ -532,6 +532,61 @@ export async function logTaskCreated(
 }
 
 /**
+ * Possible-duplicate check for the Add Task form: is there already a task
+ * with this exact title for this client (or, for internal work, another
+ * internal task), created within the last `windowMinutes`? Surfaced as a
+ * non-blocking warning so two people creating the same task within a minute
+ * of each other notice before duplicating work.
+ *
+ * Server-side because activity_logs has no browser-readable RLS policy
+ * (service-role-only) — the actor of the original "created" event can only
+ * be resolved here. Returns the actor's employee id only; the caller
+ * resolves display name locally so the live reveal-names toggle is honoured.
+ */
+export async function checkPossibleDuplicateTask(
+  title: string,
+  clientId: string | null,
+  windowMinutes = 60,
+): Promise<ActionResult<{ taskNumber: number | null; createdByEmployeeId: string | null; minutesAgo: number } | null>> {
+  const guard = await requirePermission(PERMS.TASKS_CREATE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const trimmed = title.trim()
+  if (trimmed.length < 3) return { ok: true, data: null }
+
+  const admin = createAdminClient()
+  const cutoff = new Date(Date.now() - windowMinutes * 60_000).toISOString()
+
+  let q = admin
+    .from('tasks')
+    .select('id, task_number, created_at')
+    .ilike('title', trimmed)
+    .is('deleted_at', null)
+    .gte('created_at', cutoff)
+    .order('created_at', { ascending: false })
+    .limit(1)
+  q = clientId ? q.eq('client_id', clientId) : q.is('client_id', null)
+  const { data: task } = await q.maybeSingle()
+  if (!task) return { ok: true, data: null }
+
+  const { data: log } = await admin
+    .from('activity_logs')
+    .select('actor_id')
+    .eq('entity_type', 'task')
+    .eq('entity_id', task.id)
+    .eq('action', 'created')
+    .maybeSingle()
+
+  return {
+    ok: true,
+    data: {
+      taskNumber: task.task_number ?? null,
+      createdByEmployeeId: log?.actor_id ?? null,
+      minutesAgo: Math.max(0, Math.round((Date.now() - new Date(task.created_at).getTime()) / 60_000)),
+    },
+  }
+}
+
+/**
  * Record a team-assignment change on the task's activity timeline.
  * Called fire-and-forget from the client after assignments are saved.
  */
