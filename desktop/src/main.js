@@ -27,6 +27,7 @@ const menus = require('./main/menus')
 const notifications = require('./main/notifications')
 const updates = require('./main/updates')
 const tray = require('./main/tray')
+const deeplinks = require('./main/deeplinks')
 const { buildMenu, wireContextMenu, truncate, FILE_URL_RE } = menus
 
 menus.init({
@@ -441,6 +442,18 @@ ipcMain.on(CH.SPLITTER_END, () => {
 // the dock) rather than destroy it. Destroying leaves no window for the dock
 // click to reopen — the previous behavior forced a full quit + relaunch.
 let quitting = false
+
+deeplinks.init({
+  navigate: (r) => navigate(r),
+  showApp: () => {
+    if (!win) return
+    if (win.isMinimized && win.isMinimized()) win.restore?.()
+    win.show?.(); win.focus?.()
+  },
+})
+// Single-instance lock + protocol registration must precede ready — a
+// cirqle:// link can be the reason this process was launched.
+if (!deeplinks.register()) return
 
 app.whenReady().then(() => {
   // ── Microphone for chat voice notes ─────────────────────────────────────

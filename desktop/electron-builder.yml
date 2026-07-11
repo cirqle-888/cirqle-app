@@ -6,6 +6,17 @@ files:
   - src/**/*
   - assets/**/*
   - package.json
+protocols:
+  - name: Cirqle
+    schemes: [cirqle]
+# File associations: none today (web-shell app owns no file type). To add one
+# later: declare it here AND register a handler via
+# src/main/deeplinks.js registerFileHandler() — the open-file/argv lifecycle
+# is already wired through it.
+# fileAssociations:
+#   - ext: cirqle
+#     name: Cirqle Document
+
 mac:
   category: public.app-category.business
   icon: assets/icon.icns
