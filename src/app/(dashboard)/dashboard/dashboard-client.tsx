@@ -337,8 +337,14 @@ function AdminDashboard({
               </button>
             )}
           </div>
-          {/* Row 2: granularity + period label + FX toggle */}
-          <div className="flex items-center justify-between gap-2">
+          {/* Row 2: granularity + period label + FX toggle.
+              flex-wrap: three button-groups (4 + 2 + 2 buttons) don't fit a
+              375px viewport in one row — without wrap the FX Booked/Live
+              toggle was clipped off-screen with no scroll container to reach
+              it (genuinely inaccessible, not just cramped). Wrapping lets the
+              FX group drop to its own line on phones; unchanged on wider
+              screens where everything already fit on one line. */}
+          <div className="flex items-center justify-between gap-2 flex-wrap">
             <div className="flex items-center bg-secondary rounded-lg p-0.5 gap-0.5">
               {(['daily','monthly','quarterly','yearly'] as Granularity[]).map(g => (
                 <button key={g} onClick={() => setGranularity(g)}

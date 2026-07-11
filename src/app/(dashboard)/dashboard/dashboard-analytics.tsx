@@ -409,10 +409,29 @@ export default function DashboardAnalytics({
               <JobsDoneBar data={trendData} fmt={f} />
             </div>
 
-            {/* Trend data table */}
+            {/* Trend data — cards on phones (no horizontal scroll needed to read
+                6 numeric columns), the original table preserved from md: up. */}
             <div className="bg-card border border-border rounded-xl overflow-hidden">
               <div className="px-4 py-3 border-b border-border"><p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Period Summary</p></div>
-              <div className="overflow-x-auto">
+
+              <div className="md:hidden divide-y divide-border/50">
+                {[...trendData].reverse().map((row, i) => (
+                  <div key={i} className="px-4 py-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-medium text-foreground text-sm">{row.period}</span>
+                      <span className={`font-semibold text-sm ${row.net >= 0 ? 'text-green-500' : 'text-red-500'}`}>{f(row.net)}</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                      <div className="flex justify-between"><span className="text-muted-foreground">Income</span><span className="text-green-500 font-medium">{f(row.inflow)}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Outflow</span><span className="text-red-500 font-medium">{f(row.outflow)}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Job Value</span><span className="text-foreground font-medium">{f(row.taskValue)}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Count</span><span className="text-muted-foreground">{row.taskCount}</span></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead><tr className="border-b border-border bg-secondary/40">
                     <th className="text-left px-4 py-2 text-muted-foreground font-medium">Period</th>
@@ -757,7 +776,31 @@ function InvoiceTable({ title, color, invoices, showDaysLate, showDaysToGo }: { 
       {invoices.length === 0 ? (
         <p className="px-4 py-5 text-center text-sm text-muted-foreground">None</p>
       ) : (
-        <div className="overflow-x-auto">
+        <>
+          <div className="md:hidden divide-y divide-border/40">
+            {invoices.map((inv, i) => {
+              const owed = (inv.total_amount||0) - (inv.paid_amount||0)
+              const days = inv.due_date ? (showDaysLate ? daysLate(inv.due_date) : -daysToGo(inv.due_date)) : null
+              return (
+                <div key={i} className="px-4 py-3">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="font-mono font-medium text-foreground text-sm truncate">{inv.invoice_number || `#${inv.id?.slice(0,6)}`}</span>
+                    {days != null && (
+                      <span className={`shrink-0 px-2.5 py-1 rounded-full text-[10px] font-semibold ${showDaysLate ? 'bg-red-500/15 text-red-500' : 'bg-yellow-500/15 text-yellow-500'}`}>
+                        {showDaysLate ? `${days}d late` : `${Math.abs(days)}d to go`}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-foreground font-medium mb-1.5 truncate">{inv.client?.name || '—'}</p>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Invoiced {fmtFull(inv.total_amount||0)}</span>
+                    <span className={`font-semibold ${color==='red' ? 'text-red-500' : 'text-yellow-500'}`}>{fmtFull(owed)} due</span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-xs min-w-[500px]">
             <thead><tr className="border-b border-border bg-secondary/30">
               <th className="text-left px-4 py-2 text-muted-foreground font-medium">Invoice #</th>
@@ -788,7 +831,8 @@ function InvoiceTable({ title, color, invoices, showDaysLate, showDaysToGo }: { 
               })}
             </tbody>
           </table>
-        </div>
+          </div>
+        </>
       )}
     </div>
   )
@@ -808,7 +852,19 @@ function TaskInvoiceTable({ title, tasks }: { title: string; tasks: any[] }) {
       {tasks.length === 0 ? (
         <p className="px-4 py-5 text-center text-sm text-muted-foreground">None</p>
       ) : (
-        <div className="overflow-x-auto">
+        <>
+          <div className="md:hidden divide-y divide-border/40">
+            {tasks.map((t, i) => (
+              <div key={i} className="px-4 py-3">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="font-medium text-foreground text-sm truncate">{t.title || '—'}</span>
+                  <span className="shrink-0 font-semibold text-blue-500 text-sm">{fmtFull(t.billing_amount_inr||0)}</span>
+                </div>
+                <p className="text-xs text-muted-foreground truncate">{t.client?.name || '—'} · {t.task_date ? fmtDate(t.task_date) : '—'}</p>
+              </div>
+            ))}
+          </div>
+          <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-xs min-w-[400px]">
             <thead><tr className="border-b border-border bg-secondary/30">
               <th className="text-left px-4 py-2 text-muted-foreground font-medium">Task</th>
@@ -827,7 +883,8 @@ function TaskInvoiceTable({ title, tasks }: { title: string; tasks: any[] }) {
               ))}
             </tbody>
           </table>
-        </div>
+          </div>
+        </>
       )}
     </div>
   )
