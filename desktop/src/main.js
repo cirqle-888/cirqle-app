@@ -26,6 +26,7 @@ const layoutMod = require('./main/layout')
 const menus = require('./main/menus')
 const notifications = require('./main/notifications')
 const updates = require('./main/updates')
+const tray = require('./main/tray')
 const { buildMenu, wireContextMenu, truncate, FILE_URL_RE } = menus
 
 menus.init({
@@ -488,6 +489,12 @@ app.whenReady().then(() => {
   globalShortcut.register('CommandOrControl+Shift+N', sendClipboardToCirqle)
   setInterval(pollClipboard, 1500)
   updates.startPeriodicChecks()
+  tray.init({
+    getWin: () => win,
+    sendClipboardToCirqle: () => sendClipboardToCirqle(),
+    navigate: (r) => navigate(r),
+  })
+  tray.create()
 })
 
 app.on('activate', () => { if (win && !win.isDestroyed()) win.show() })
