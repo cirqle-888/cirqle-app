@@ -20,6 +20,16 @@ const { spawn } = require('child_process')
 
 const CH = require('./shared/ipc-channels')
 const { state, saveSettings } = require('./main/settings')
+const dl = require('./main/downloads')
+
+dl.init({
+  getWin: () => win,
+  getChrome: () => chrome,
+  buildMenu: () => buildMenu(),
+  shareFileToWhatsApp: (p, o) => shareFileToWhatsApp(p, o),
+  closeOtherPopups: () => closeOtherPopups(),
+  truncate: (x, n) => truncate(x, n),
+})
 
 const CIRQLE_URL = (process.env.CIRQLE_URL || 'https://app.cirqle.work').replace(/\/$/, '')
 const WHATSAPP_URL = 'https://web.whatsapp.com/'
@@ -43,12 +53,8 @@ const QUICK_ACTIONS = [
 ]
 
 
-let win, chrome, cirqle, cirqle2, splitter, overlay, downloadsPanel, dlCatcher, fxOverlay
+let win, chrome, cirqle, cirqle2, splitter, overlay
 const whatsapps = {} // keyed by id
-
-// Download "flying to the shelf" animation state.
-let fxInFlight = 0        // number of icons currently animating; overlay removed at 0
-let dlBtnRect = null      // ⬇ button rect (window coords), reported by host.html
 
 const DL_PANEL_W = 380
 const DL_PANEL_H = 460
@@ -56,163 +62,6 @@ const DL_PANEL_H = 460
 // Recent clipboard items (newest first), surfaced in the Capture menu.
 const clipHistory = []
 let lastClip = ''
-
-// ── Common Downloads ──────────────────────────────────────────────────────────
-// Every file saved from EITHER pane (Cirqle reports/invoices/receipts, or images
-// & files saved from WhatsApp Web) lands in one shared list — a Chrome/Safari-style
-// downloads shelf surfaced as a floating panel (⬇ toolbar button). The list is
-// persisted across restarts (metadata only) so history survives like a browser's.
-const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|svg|heic)(\?|#|$)/i
-const downloads = [] // { id, name, path, at, size, source, done, received, total }
-const downloadsDir = () => path.join(app.getPath('downloads'), 'Cirqle')
-const downloadsStore = () => path.join(app.getPath('userData'), 'downloads.json')
-let dlSeq = 0
-
-function loadDownloads() {
-  try {
-    const raw = JSON.parse(fs.readFileSync(downloadsStore(), 'utf8'))
-    if (Array.isArray(raw)) {
-      // Drop entries whose file no longer exists on disk (like a browser prunes).
-      for (const d of raw) {
-        if (d && d.path && fs.existsSync(d.path)) {
-          downloads.push({ ...d, id: ++dlSeq, done: true })
-        }
-      }
-    }
-  } catch { /* first run / corrupt — start empty */ }
-}
-function saveDownloads() {
-  try {
-    const slim = downloads
-      .filter((d) => d.done)
-      .slice(0, 60)
-      .map(({ name, path: p, at, size, source }) => ({ name, path: p, at, size, source }))
-    fs.writeFileSync(downloadsStore(), JSON.stringify(slim))
-  } catch { /* best effort */ }
-}
-function isImageFile(nameOrPath) { return IMAGE_EXT_RE.test(nameOrPath || '') }
-function pushDownloadsUpdate() {
-  if (chrome) chrome.webContents.send(CH.DOWNLOADS, { count: downloads.filter((d) => d.done).length })
-  if (downloadsPanel) downloadsPanel.webContents.send(CH.DOWNLOADS_LIST, downloadsForPanel())
-}
-function downloadsForPanel() {
-  return downloads.map((d) => ({
-    id: d.id,
-    name: d.name,
-    at: d.at,
-    size: d.size || 0,
-    source: d.source || 'cirqle',
-    done: !!d.done,
-    received: d.received || 0,
-    total: d.total || 0,
-    isImage: isImageFile(d.path || d.name),
-    // Local file preview for images — file:// path the panel can render as a thumbnail.
-    thumb: d.done && isImageFile(d.path || d.name) ? 'file://' + encodeURI(d.path) : null,
-  }))
-}
-function uniquePath(dir, name) {
-  let p = path.join(dir, name)
-  const ext = path.extname(name)
-  const base = path.basename(name, ext)
-  let i = 1
-  while (fs.existsSync(p)) { p = path.join(dir, `${base} (${i++})${ext}`) }
-  return p
-}
-function wireDownloads(sess, source) {
-  if (!sess || sess.__cirqleDownloadsWired) return
-  sess.__cirqleDownloadsWired = true
-  sess.on('will-download', (_event, item) => {
-    try {
-      const dir = downloadsDir()
-      fs.mkdirSync(dir, { recursive: true })
-      const savePath = uniquePath(dir, item.getFilename() || 'download')
-      item.setSavePath(savePath)
-      const rec = {
-        id: ++dlSeq,
-        name: path.basename(savePath),
-        path: savePath,
-        at: Date.now(),
-        size: 0,
-        source: source || 'cirqle',
-        done: false,
-        received: 0,
-        total: item.getTotalBytes() || 0,
-      }
-      downloads.unshift(rec)
-      while (downloads.length > 60) downloads.pop()
-      pushDownloadsUpdate()
-      flyDownloadFx(source) // animate an icon flying to the ⬇ shelf button
-      item.on('updated', (_e, st) => {
-        if (st === 'progressing') {
-          rec.received = item.getReceivedBytes()
-          rec.total = item.getTotalBytes() || rec.total
-          pushDownloadsUpdate()
-        }
-      })
-      item.once('done', (_e, st) => {
-        if (st === 'completed') {
-          rec.done = true
-          try { rec.size = fs.statSync(savePath).size } catch { /* ignore */ }
-          pushDownloadsUpdate()
-          saveDownloads()
-          buildMenu()
-        } else {
-          // interrupted / cancelled — drop it from the list
-          const i = downloads.indexOf(rec)
-          if (i >= 0) downloads.splice(i, 1)
-          pushDownloadsUpdate()
-        }
-      })
-    } catch { /* fall back to Electron's default download handling */ }
-  })
-}
-function removeDownload(id) {
-  const i = downloads.findIndex((d) => d.id === id)
-  if (i >= 0) { downloads.splice(i, 1); pushDownloadsUpdate(); saveDownloads(); buildMenu() }
-}
-function clearDownloads() {
-  downloads.length = 0
-  pushDownloadsUpdate(); saveDownloads(); buildMenu()
-}
-
-// ── Quick Look (macOS) ──────────────────────────────────────────────────────
-// Electron has no native Quick Look API, but every Mac ships `qlmanage` (the
-// same CLI the OS uses internally) — `qlmanage -p <file>` pops the real,
-// native Quick Look panel (spacebar-to-close, resizable, full codec/preview
-// support for images/PDFs/docs). Track the one running instance and kill it
-// before starting another so re-triggering Quick Look on a new file swaps the
-// panel's content instead of stacking duplicate windows.
-let qlProcess = null
-function quickLookFile(filePath) {
-  if (process.platform !== 'darwin') return
-  if (qlProcess) { try { qlProcess.kill() } catch { /* already exited */ } }
-  qlProcess = spawn('qlmanage', ['-p', filePath], { stdio: 'ignore' })
-  qlProcess.on('exit', () => { qlProcess = null })
-  qlProcess.on('error', () => { qlProcess = null })
-}
-
-// The compact native "Downloads" submenu still lives in the menu bar (unclipped);
-// the rich actions live in the floating panel.
-function downloadsMenuTemplate() {
-  const done = downloads.filter((d) => d.done)
-  const items = done.length
-    ? done.slice(0, 15).map((d) => ({
-        label: truncate(d.name, 48),
-        submenu: [
-          { label: 'Quick Look', accelerator: 'Space', click: () => quickLookFile(d.path) },
-          { label: 'Open', click: () => shell.openPath(d.path) },
-          { label: 'Show in Folder', click: () => shell.showItemInFolder(d.path) },
-          { label: 'Share to Linked WhatsApp', click: () => shareFileToWhatsApp(d.path) },
-        ],
-      }))
-    : [{ label: '(no downloads yet)', enabled: false }]
-  return [
-    ...items,
-    { type: 'separator' },
-    { label: 'Open Downloads Folder', click: () => shell.openPath(downloadsDir()) },
-    { label: 'Clear List', enabled: done.length > 0, click: clearDownloads },
-  ]
-}
 
 // New-window (target=_blank / window.open) links from the Cirqle pane: if they
 // point at a file (report / invoice PDF, Excel, CSV, image) download it into the
@@ -320,7 +169,7 @@ async function dropFileIntoWhatsApp(wa, filePath) {
 
 function shareFileToWhatsApp(filePath, opts) {
   try {
-    if (isImageFile(filePath)) {
+    if (dl.isImageFile(filePath)) {
       const img = nativeImage.createFromPath(filePath)
       if (!img.isEmpty()) return shareImageToWhatsApp(img, opts)
     }
@@ -336,208 +185,18 @@ function shareFileToWhatsApp(filePath, opts) {
 function dataUrlToImage(dataUrl) {
   try { return nativeImage.createFromDataURL(dataUrl) } catch { return null }
 }
-// Save a data URL (e.g. a canvas-rendered receipt PNG) into the common downloads.
-function saveDataUrlToDownloads(dataUrl, filename) {
-  try {
-    const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl)
-    if (!m) return null
-    const dir = downloadsDir()
-    fs.mkdirSync(dir, { recursive: true })
-    const savePath = uniquePath(dir, filename || 'download.png')
-    fs.writeFileSync(savePath, Buffer.from(m[2], 'base64'))
-    const rec = {
-      id: ++dlSeq, name: path.basename(savePath), path: savePath, at: Date.now(),
-      size: fs.statSync(savePath).size, source: 'cirqle', done: true, received: 0, total: 0,
-    }
-    downloads.unshift(rec)
-    while (downloads.length > 60) downloads.pop()
-    pushDownloadsUpdate(); saveDownloads(); buildMenu()
-    flyDownloadFx('cirqle') // receipt/canvas saves get the flying animation too
-    return savePath
-  } catch { return null }
-}
-
-// ── Downloads panel (floating Chrome/Safari-style shelf) ──────────────────────
-// The 48px toolbar view clips its own content, so the panel is its own
-// WebContentsView floated on top, anchored under the ⬇ button.
-function positionDownloadsPanel() {
-  if (!win) return
-  const b = win.getContentBounds()
-  // The catch layer spans the whole window so a click ANYWHERE outside the panel
-  // (either pane or the toolbar) dismisses it — exactly like a browser scrim.
-  if (dlCatcher) dlCatcher.setBounds({ x: 0, y: 0, width: b.width, height: b.height })
-  if (!downloadsPanel) return
-  const w = Math.min(DL_PANEL_W, b.width - 16)
-  const h = Math.min(DL_PANEL_H, b.height - TOOLBAR_H - 16)
-  downloadsPanel.setBounds({ x: Math.max(8, b.width - w - 10), y: (state.showToolbar ? TOOLBAR_H : 0) + 4, width: w, height: h })
-}
-function openDownloadsPanel() {
-  if (downloadsPanel) return
-  closeOtherPopups() // only one floating panel at a time
-  // 1) Transparent full-window catch layer, UNDER the panel. A transparent
-  //    WebContentsView still receives mouse events (same trick the splitter drag
-  //    overlay uses), so a click anywhere on it = a click outside the panel →
-  //    dismiss. This is far more reliable than blur/focus events across the
-  //    separate WebContentsViews of the Cirqle / WhatsApp panes.
-  dlCatcher = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-ui.js') } })
-  dlCatcher.setBackgroundColor('#00000000')
-  win.contentView.addChildView(dlCatcher)
-  dlCatcher.webContents.loadFile(path.join(__dirname, 'dl-catcher.html'))
-  // 2) The panel itself, stacked ON TOP of the catcher — clicks inside it hit the
-  //    panel (its own WebContentsView), so they never reach the catcher.
-  downloadsPanel = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-ui.js') } })
-  downloadsPanel.setBackgroundColor('#00000000')
-  win.contentView.addChildView(downloadsPanel)
-  downloadsPanel.webContents.loadFile(path.join(__dirname, 'downloads.html'))
-  downloadsPanel.webContents.once('did-finish-load', () => {
-    downloadsPanel.webContents.send(CH.DOWNLOADS_LIST, downloadsForPanel())
-    downloadsPanel.webContents.focus() // keyboard (Esc) goes to the panel
-  })
-  positionDownloadsPanel()
-}
-function closeDownloadsPanel() {
-  if (downloadsPanel) { win.contentView.removeChildView(downloadsPanel); downloadsPanel = null }
-  if (dlCatcher) { win.contentView.removeChildView(dlCatcher); dlCatcher = null }
-}
-function toggleDownloadsPanel() {
-  if (downloadsPanel) closeDownloadsPanel()
-  else openDownloadsPanel()
-}
-// Keep the catcher + panel on top after another view is (re)added to the window.
-function raiseDownloadsPanel() {
-  if (!downloadsPanel || !win) return
-  if (dlCatcher) { win.contentView.removeChildView(dlCatcher); win.contentView.addChildView(dlCatcher) }
-  win.contentView.removeChildView(downloadsPanel); win.contentView.addChildView(downloadsPanel)
-}
 // Dismiss any other transient floating layer so only one is ever open.
 function closeOtherPopups() {
   if (overlay) { win.contentView.removeChildView(overlay); overlay = null }
 }
-// Esc closes the panel no matter which pane holds keyboard focus. Harmless when
-// the panel is closed (does nothing, doesn't preventDefault → panes keep their Esc).
-function wireEscToCloseDownloads(view) {
-  view.webContents.on('before-input-event', (_e, input) => {
-    if (downloadsPanel && input.type === 'keyDown' && input.key === 'Escape') closeDownloadsPanel()
-  })
-}
 
-// ── Download "flying to the shelf" animation (Chrome/Safari style) ─────────────
-// A transient, full-window transparent overlay flies a little download icon from
-// the pane that triggered the download to the ⬇ toolbar button, then the button
-// pulses. Like the downloads panel/catcher, a transparent WebContentsView still
-// captures mouse events, so the overlay exists ONLY while an icon is in flight
-// (~0.6s) and is removed the instant the last one lands — a click the user is
-// very unlikely to make right after clicking "download".
-function paneCenter(source) {
-  const b = win.getContentBounds()
-  const toolbarH = state.showToolbar ? TOOLBAR_H : 0
-  const bodyH = b.height - toolbarH
-  const both = state.showCirqle && state.showWhatsapp
-  if (source === 'whatsapp') {
-    const splitX = both ? Math.round(b.width * state.ratio) : 0
-    const w = both ? (b.width - splitX) : b.width
-    return { x: splitX + w / 2, y: toolbarH + bodyH / 2 }
-  }
-  const w = both ? Math.round(b.width * state.ratio) : b.width
-  return { x: w / 2, y: toolbarH + bodyH / 2 }
-}
-function dlBtnCenter() {
-  const b = win.getContentBounds()
-  if (dlBtnRect && state.showToolbar) return { x: dlBtnRect.x + dlBtnRect.w / 2, y: dlBtnRect.y + dlBtnRect.h / 2 }
-  return { x: b.width - 40, y: state.showToolbar ? TOOLBAR_H / 2 : 12 }
-}
-// Pending safety-net timers, one per in-flight icon — see flyDownloadFx().
-const fxTimeouts = []
-// Well past the ~560ms CSS animation in download-fx.html; only fires if the
-// real onfinish → fx:done round-trip never arrives.
-const FX_SAFETY_MS = 1500
-
-function ensureFxOverlay() {
-  if (fxOverlay) return
-  fxOverlay = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-ui.js') } })
-  fxOverlay.setBackgroundColor('#00000000')
-  win.contentView.addChildView(fxOverlay) // topmost while it lives
-  fxOverlay.webContents.loadFile(path.join(__dirname, 'download-fx.html'))
-  const b = win.getContentBounds()
-  fxOverlay.setBounds({ x: 0, y: 0, width: b.width, height: b.height })
-  console.log('[fx] overlay created')
-}
-// Lands exactly one in-flight icon: decrements the counter, tears down the
-// overlay once nothing is left in flight, and pulses the ⬇ button. Called
-// either by the real 'fx:done' IPC (renderer confirms its animation finished)
-// or by the safety-net timeout below — never both, for the same flight.
-function landOneFlight() {
-  fxInFlight = Math.max(0, fxInFlight - 1)
-  if (fxInFlight === 0 && fxOverlay) {
-    win.contentView.removeChildView(fxOverlay)
-    fxOverlay = null
-    console.log('[fx] overlay removed, all flights landed')
-  }
-  if (chrome) chrome.webContents.send(CH.DOWNLOADS_PULSE) // land → pulse the ⬇ button
-}
-function flyDownloadFx(source) {
-  if (!win) return
-  const payload = { from: paneCenter(source), to: dlBtnCenter() }
-  ensureFxOverlay()
-  fxInFlight++
-  console.log('[fx] flight started, in-flight =', fxInFlight)
-  const send = () => { if (fxOverlay) fxOverlay.webContents.send(CH.FX_FLY, payload) }
-  if (fxOverlay.webContents.isLoadingMainFrame()) fxOverlay.webContents.once('did-finish-load', send)
-  else send()
-
-  // Safety net: a transparent WebContentsView still captures mouse events
-  // (see comment above paneCenter), so if the renderer's onfinish → fx:done
-  // round-trip is ever dropped (failed IPC, overlay never finishing load,
-  // etc.) the overlay would otherwise sit on top of the whole window
-  // FOREVER, silently blocking every click and drag underneath it. Force-land
-  // this flight if that round-trip doesn't arrive in time.
-  const timer = setTimeout(() => {
-    const i = fxTimeouts.indexOf(timer)
-    if (i >= 0) fxTimeouts.splice(i, 1)
-    console.warn('[fx] safety-net timeout fired — fx:done never arrived, force-removing overlay')
-    landOneFlight()
-  }, FX_SAFETY_MS)
-  fxTimeouts.push(timer)
-}
-
-// ── Native drag-out of a downloaded file (to WhatsApp, Finder, anywhere) ───────
-// A 1×1 transparent PNG — startDrag REQUIRES a non-empty icon or it throws, so
-// this is the guaranteed fallback when a file has no usable thumbnail.
-const FALLBACK_DRAG_ICON = nativeImage.createFromDataURL(
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
-)
-async function dragIconFor(filePath) {
-  try {
-    if (isImageFile(filePath)) {
-      const img = nativeImage.createFromPath(filePath)
-      if (!img.isEmpty()) return img.resize({ width: 64, quality: 'good' })
-    }
-  } catch { /* fall through */ }
-  // Real OS file icon (what Finder shows) — covers PDF and every other type.
-  // The old fallback chain ended at a 1×1 TRANSPARENT png whenever assets/
-  // wasn't packaged (electron-builder only shipped src/**), so PDF drags
-  // started with an invisible ghost — indistinguishable from "drag is broken".
-  try {
-    const icon = await app.getFileIcon(filePath, { size: 'normal' })
-    if (icon && !icon.isEmpty()) return icon
-  } catch { /* fall through */ }
-  try {
-    const appIcon = nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'icon.png'))
-    if (!appIcon.isEmpty()) return appIcon.resize({ width: 48 })
-  } catch { /* fall through */ }
-  return FALLBACK_DRAG_ICON
-}
-
-// ── Second Cirqle pane — "duplicate / compare two Cirqle pages side-by-side" ────
-// Shares the DEFAULT session with the main Cirqle view (same login/cookies), so
-// wireDownloads is a no-op here (already wired once on that session).
 function createCirqle2() {
   if (cirqle2) return
   cirqle2 = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-cirqle.js') } })
   cirqle2.webContents.loadURL(cirqle.webContents.getURL() || CIRQLE_URL)
-  wireDownloads(cirqle2.webContents.session, 'cirqle')
+  dl.wireDownloads(cirqle2.webContents.session, 'cirqle')
   wireContextMenu(cirqle2, true)
-  wireEscToCloseDownloads(cirqle2)
+  dl.wireEscToCloseDownloads(cirqle2)
   cirqle2.webContents.setWindowOpenHandler(makeWindowOpenHandler(() => cirqle2))
   cirqle2.webContents.on('did-fail-load', (_e, code, _desc, _url, isMainFrame) => {
     if (isMainFrame && code !== -3) loadError(cirqle2, CIRQLE_URL, 'cirqle')
@@ -546,13 +205,13 @@ function createCirqle2() {
   // Keep splitter + toolbar (and any floating panel) above the new pane.
   win.contentView.removeChildView(splitter); win.contentView.addChildView(splitter)
   win.contentView.removeChildView(chrome); win.contentView.addChildView(chrome)
-  raiseDownloadsPanel()
+  dl.raiseDownloadsPanel()
 }
 
 // ── Context menu (both panes, context-aware — Chrome/Safari style) ─────────────
 function wireContextMenu(view, isCirqle) {
   view.webContents.on('context-menu', (_e, params) => {
-    closeDownloadsPanel() // opening a menu dismisses the downloads panel
+    dl.closeDownloadsPanel() // opening a menu dismisses the downloads panel
     const wc = view.webContents
     const items = []
     const isImage = params.mediaType === 'image' && !!params.srcURL
@@ -644,8 +303,7 @@ function layout() {
   cirqle.setVisible(state.showCirqle)
   if (state.showWhatsapp && activeRight) activeRight.setVisible(true)
   if (overlay) overlay.setBounds({ x: 0, y: bodyY, width: b.width, height: bodyH })
-  if (fxOverlay) fxOverlay.setBounds({ x: 0, y: 0, width: b.width, height: b.height })
-  if (downloadsPanel) positionDownloadsPanel()
+  dl.onLayout()
 }
 
 function applyPreset(p) {
@@ -699,13 +357,13 @@ function createViews() {
   chrome.webContents.loadFile(path.join(__dirname, 'host.html'))
   chrome.webContents.once('did-finish-load', () => chrome.webContents.send(CH.STATE, state))
 
-  wireEscToCloseDownloads(chrome) // Esc from the toolbar view closes the panel too
+  dl.wireEscToCloseDownloads(chrome) // Esc from the toolbar view closes the panel too
 
   cirqle = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-cirqle.js') } })
   cirqle.webContents.loadURL(CIRQLE_URL)
-  wireDownloads(cirqle.webContents.session, 'cirqle') // capture report / invoice / receipt downloads
+  dl.wireDownloads(cirqle.webContents.session, 'cirqle') // capture report / invoice / receipt downloads
   wireContextMenu(cirqle, true)                       // Chrome-style right-click menu
-  wireEscToCloseDownloads(cirqle)                     // Esc closes the downloads panel
+  dl.wireEscToCloseDownloads(cirqle)                     // Esc closes the downloads panel
   cirqle.webContents.on('did-fail-load', (_e, code, _desc, _url, isMainFrame) => {
     if (isMainFrame && code !== -3) loadError(cirqle, CIRQLE_URL, 'cirqle')
   })
@@ -740,9 +398,9 @@ function createWhatsappView(id) {
   const wa = new WebContentsView({ webPreferences: { partition: `persist:whatsapp:${id}`, preload: path.join(__dirname, 'preload-ui.js') } })
   wa.webContents.setUserAgent(CHROME_UA)
   wa.webContents.loadURL(WHATSAPP_URL, { userAgent: CHROME_UA })
-  wireDownloads(wa.webContents.session, 'whatsapp') // images/files saved from WhatsApp land in the common list too
+  dl.wireDownloads(wa.webContents.session, 'whatsapp') // images/files saved from WhatsApp land in the common list too
   wireContextMenu(wa, false)                        // Chrome-style right-click menu (Copy Image, etc.)
-  wireEscToCloseDownloads(wa)                        // Esc closes the downloads panel
+  dl.wireEscToCloseDownloads(wa)                        // Esc closes the downloads panel
   wa.webContents.on('did-fail-load', (_e, code, _desc, _url, isMainFrame) => {
     if (isMainFrame && code !== -3) loadError(wa, WHATSAPP_URL, 'whatsapp')
   })
@@ -750,7 +408,7 @@ function createWhatsappView(id) {
   whatsapps[id] = wa
   if (win) win.contentView.addChildView(wa)
   // Keep the downloads catcher + panel on top if they're open when a WA view is added.
-  raiseDownloadsPanel()
+  dl.raiseDownloadsPanel()
 }
 
 // Native menu — unclipped, so clipboard history + New-record shortcuts live here
@@ -774,7 +432,7 @@ function buildMenu() {
     // REQUIRED on macOS: without the Edit menu's roles, Cmd+C / Cmd+V don't work
     // in the web views — which would break the entire copy-paste workflow.
     { role: 'editMenu' },
-    { label: 'Downloads', submenu: downloadsMenuTemplate() },
+    { label: 'Downloads', submenu: dl.downloadsMenuTemplate() },
     {
       label: 'View',
       submenu: [
@@ -897,24 +555,24 @@ ipcMain.on(CH.GO_BACK, () => { if (cirqle && cirqle.webContents.canGoBack()) cir
 ipcMain.on(CH.GO_FORWARD, () => { if (cirqle && cirqle.webContents.canGoForward()) cirqle.webContents.goForward() })
 ipcMain.on(CH.TOGGLE_FULLSCREEN, () => { if (win) win.setFullScreen(!win.isFullScreen()) })
 // ── Downloads panel ───────────────────────────────────────────────────────────
-ipcMain.on(CH.DOWNLOADS_TOGGLE, toggleDownloadsPanel)
-ipcMain.on(CH.DOWNLOADS_CLOSE, closeDownloadsPanel)
-ipcMain.on(CH.DOWNLOADS_OPEN, (_e, id) => { const d = downloads.find((x) => x.id === id); if (d) shell.openPath(d.path) })
-ipcMain.on(CH.DOWNLOADS_REVEAL, (_e, id) => { const d = downloads.find((x) => x.id === id); if (d) shell.showItemInFolder(d.path) })
-ipcMain.on(CH.DOWNLOADS_REMOVE, (_e, id) => removeDownload(id))
-ipcMain.on(CH.DOWNLOADS_CLEAR, clearDownloads)
-ipcMain.on(CH.DOWNLOADS_OPEN_FOLDER, () => shell.openPath(downloadsDir()))
+ipcMain.on(CH.DOWNLOADS_TOGGLE, dl.toggleDownloadsPanel)
+ipcMain.on(CH.DOWNLOADS_CLOSE, dl.closeDownloadsPanel)
+ipcMain.on(CH.DOWNLOADS_OPEN, (_e, id) => { const d = dl.findDownload(id); if (d) shell.openPath(d.path) })
+ipcMain.on(CH.DOWNLOADS_REVEAL, (_e, id) => { const d = dl.findDownload(id); if (d) shell.showItemInFolder(d.path) })
+ipcMain.on(CH.DOWNLOADS_REMOVE, (_e, id) => dl.removeDownload(id))
+ipcMain.on(CH.DOWNLOADS_CLEAR, dl.clearDownloads)
+ipcMain.on(CH.DOWNLOADS_OPEN_FOLDER, () => shell.openPath(dl.downloadsDir()))
 ipcMain.on(CH.DOWNLOADS_COPY, (_e, id) => {
-  const d = downloads.find((x) => x.id === id)
+  const d = dl.findDownload(id)
   if (!d) return
-  if (isImageFile(d.path)) { const img = nativeImage.createFromPath(d.path); if (!img.isEmpty()) clipboard.writeImage(img); else clipboard.writeText(d.path) }
+  if (dl.isImageFile(d.path)) { const img = nativeImage.createFromPath(d.path); if (!img.isEmpty()) clipboard.writeImage(img); else clipboard.writeText(d.path) }
   else clipboard.writeText(d.path)
 })
-ipcMain.on(CH.DOWNLOADS_SHARE_WA, (_e, id) => { const d = downloads.find((x) => x.id === id); if (d) shareFileToWhatsApp(d.path) })
-ipcMain.on(CH.DOWNLOADS_QUICKLOOK, (_e, id) => { const d = downloads.find((x) => x.id === id); if (d && fs.existsSync(d.path)) quickLookFile(d.path) })
+ipcMain.on(CH.DOWNLOADS_SHARE_WA, (_e, id) => { const d = dl.findDownload(id); if (d) shareFileToWhatsApp(d.path) })
+ipcMain.on(CH.DOWNLOADS_QUICKLOOK, (_e, id) => { const d = dl.findDownload(id); if (d && fs.existsSync(d.path)) dl.quickLookFile(d.path) })
 // Native OS file drag from a shelf item → drop onto WhatsApp, Finder, anywhere.
 ipcMain.on(CH.DOWNLOADS_START_DRAG, async (e, id) => {
-  const d = downloads.find((x) => x.id === id)
+  const d = dl.findDownload(id)
   if (!d) { console.warn('[drag] startDrag: no download record for id', id); return }
   if (!fs.existsSync(d.path)) { console.warn('[drag] startDrag: file no longer exists at', d.path); return }
   // dlCatcher is a full-window transparent scrim that sits ABOVE the WhatsApp/
@@ -930,9 +588,9 @@ ipcMain.on(CH.DOWNLOADS_START_DRAG, async (e, id) => {
   // returns), so a finally{ show() } re-covers the panes mid-drag and defeats
   // the fix. Instead: hide the catcher now and re-show it once the drag is
   // over — detected by polling the cursor from the drag origin (see below).
-  if (dlCatcher) dlCatcher.setVisible(false)
+  dl.setCatcherVisible(false)
   try {
-    e.sender.startDrag({ file: d.path, icon: await dragIconFor(d.path) })
+    e.sender.startDrag({ file: d.path, icon: await dl.dragIconFor(d.path) })
     console.log('[drag] startDrag issued for', d.name)
   } catch (err) {
     console.error('[drag] startDrag failed with resolved icon, retrying with fallback icon:', err)
@@ -940,7 +598,7 @@ ipcMain.on(CH.DOWNLOADS_START_DRAG, async (e, id) => {
       e.sender.startDrag({ file: d.path, icon: FALLBACK_DRAG_ICON })
     } catch (err2) {
       console.error('[drag] startDrag failed even with fallback icon — giving up:', err2)
-      if (dlCatcher) dlCatcher.setVisible(true)
+      dl.setCatcherVisible(true)
       return
     }
   }
@@ -966,21 +624,21 @@ ipcMain.on(CH.DOWNLOADS_START_DRAG, async (e, id) => {
     // 20s cap: give up and just restore the catcher.
     if (stillFor >= 3 || ticks > 130) {
       clearInterval(timer)
-      if (dlCatcher) dlCatcher.setVisible(true)
+      dl.setCatcherVisible(true)
       if (ticks > 130) return
       try {
         const wa = whatsapps[state.activeWa]
         if (!wa || state.rightPane === 'cirqle2' || !state.showWhatsapp) return
         const x = pt.x - cb0.x, y = pt.y - cb0.y
         const wb = wa.getBounds()
-        const pb = downloadsPanel ? downloadsPanel.getBounds() : null
+        const pb = dl.getPanelBounds()
         const inWa = x >= wb.x && x <= wb.x + wb.width && y >= wb.y && y <= wb.y + wb.height
         const inPanel = pb && x >= pb.x && x <= pb.x + pb.width && y >= pb.y && y <= pb.y + pb.height
         console.log('[drag] drop-end hit test:', JSON.stringify({ cursor: { x, y }, waBounds: wb, inWa, inPanel }))
         if (inWa && !inPanel) {
           const r = await dropFileIntoWhatsApp(wa, d.path)
           console.log('[drag] synthetic drop result:', JSON.stringify(r))
-          if (r.ok) closeDownloadsPanel() // get the shelf out of the way of WhatsApp's attach preview
+          if (r.ok) dl.closeDownloadsPanel() // get the shelf out of the way of WhatsApp's attach preview
         }
       } catch (err) {
         console.error('[drag] post-drag WhatsApp handoff failed:', err)
@@ -990,14 +648,8 @@ ipcMain.on(CH.DOWNLOADS_START_DRAG, async (e, id) => {
 })
 
 // ── Download flying-animation callbacks ───────────────────────────────────────
-ipcMain.on(CH.FX_REPORT_BTN, (_e, rect) => { dlBtnRect = rect })
-ipcMain.on(CH.FX_DONE, () => {
-  // This flight landed for real — cancel its safety-net timeout so it doesn't
-  // double-decrement fxInFlight later.
-  const timer = fxTimeouts.shift()
-  if (timer) clearTimeout(timer)
-  landOneFlight()
-})
+ipcMain.on(CH.FX_REPORT_BTN, (_e, rect) => dl.setDlBtnRect(rect))
+ipcMain.on(CH.FX_DONE, () => dl.fxDone())
 
 // ── Duplicate / compare: toggle a 2nd Cirqle page in the right pane ───────────
 ipcMain.on(CH.CIRQLE_COMPARE_TOGGLE, () => {
@@ -1020,7 +672,7 @@ ipcMain.on(CH.CIRQLE_COMPARE_TOGGLE, () => {
 // 'download' (save into common downloads + reveal in Finder to drag in).
 ipcMain.handle(CH.SHARE_RECEIPT, (_e, { dataUrl, filename, action } = {}) => {
   if (action === 'download') {
-    const p = saveDataUrlToDownloads(dataUrl, filename)
+    const p = dl.saveDataUrlToDownloads(dataUrl, filename)
     if (p) { focusWhatsapp(); shell.showItemInFolder(p) }
     return { ok: !!p, action: 'download', path: p }
   }
@@ -1093,7 +745,7 @@ ipcMain.on(CH.CIRQLE_LOGO, (_e, url) => {
 // Draggable splitter: on drag start we float a full-body overlay view that keeps
 // receiving mouse events even as the pointer passes over the two web views.
 ipcMain.on(CH.SPLITTER_START, () => {
-  closeDownloadsPanel() // only one floating layer at a time
+  dl.closeDownloadsPanel() // only one floating layer at a time
   if (overlay) return
   overlay = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-ui.js') } })
   overlay.setBackgroundColor('#00000000')
@@ -1141,7 +793,7 @@ app.whenReady().then(() => {
     callback(false)
   })
 
-  loadDownloads() // restore the downloads history (files that still exist on disk)
+  dl.loadDownloads() // restore the downloads history (files that still exist on disk)
   win = new BaseWindow({ width: 1440, height: 900, minWidth: 900, minHeight: 600, title: 'Cirqle Desktop' })
   createViews()
   buildMenu()
