@@ -23,6 +23,17 @@ const { state, saveSettings } = require('./main/settings')
 const dl = require('./main/downloads')
 const wa = require('./main/whatsapp')
 const layoutMod = require('./main/layout')
+const menus = require('./main/menus')
+const { buildMenu, wireContextMenu, truncate, FILE_URL_RE } = menus
+
+menus.init({
+  getWin: () => win,
+  reloadCirqle: () => { if (cirqle) cirqle.webContents.loadURL(CIRQLE_URL) },
+  sendTextToCirqle: (t) => sendTextToCirqle(t),
+  sendClipboardToCirqle: () => sendClipboardToCirqle(),
+  navigate: (r) => navigate(r),
+  getClipHistory: () => clipHistory,
+})
 const { layout, applyPreset, TOOLBAR_H, SPLITTER_W, MIN_RATIO, MAX_RATIO } = layoutMod
 
 layoutMod.init({
@@ -54,16 +65,6 @@ dl.init({
 })
 
 const CIRQLE_URL = (process.env.CIRQLE_URL || 'https://app.cirqle.work').replace(/\/$/, '')
-const QUICK_ACTIONS = [
-  { label: 'Request / Quick Capture', route: '/dashboard/capture' },
-  { label: 'Client', route: '/dashboard/clients' },
-  { label: 'Task', route: '/dashboard/tasks' },
-  { label: 'Offer', route: '/dashboard/apps/offer-intake' },
-  { label: 'Invoice', route: '/dashboard/invoices' },
-  { label: 'Quotation', route: '/dashboard/quotations' },
-]
-
-
 let win, chrome, cirqle, cirqle2, splitter, overlay
 
 const DL_PANEL_W = 380
@@ -76,7 +77,6 @@ let lastClip = ''
 // New-window (target=_blank / window.open) links from the Cirqle pane: if they
 // point at a file (report / invoice PDF, Excel, CSV, image) download it into the
 // Cirqle folder so it lands in the tray; otherwise open in the system browser.
-const FILE_URL_RE = /\.(pdf|xlsx?|csv|docx?|pptx?|png|jpe?g|zip)(\?|#|$)/i
 function makeWindowOpenHandler(getView) {
   return ({ url }) => {
     if (FILE_URL_RE.test(url) || url.includes('/storage/v1/object/')) {
@@ -86,7 +86,6 @@ function makeWindowOpenHandler(getView) {
     return { action: 'deny' }
   }
 }
-const truncate = (s, n = 60) => { const one = String(s).replace(/\s+/g, ' ').trim(); return one.length > n ? one.slice(0, n) + '…' : one }
 
 function dataUrlToImage(dataUrl) {
   try { return nativeImage.createFromDataURL(dataUrl) } catch { return null }
@@ -112,59 +111,6 @@ function createCirqle2() {
   win.contentView.removeChildView(splitter); win.contentView.addChildView(splitter)
   win.contentView.removeChildView(chrome); win.contentView.addChildView(chrome)
   dl.raiseDownloadsPanel()
-}
-
-// ── Context menu (both panes, context-aware — Chrome/Safari style) ─────────────
-function wireContextMenu(view, isCirqle) {
-  view.webContents.on('context-menu', (_e, params) => {
-    dl.closeDownloadsPanel() // opening a menu dismisses the downloads panel
-    const wc = view.webContents
-    const items = []
-    const isImage = params.mediaType === 'image' && !!params.srcURL
-    const link = params.linkURL
-    const flags = params.editFlags || {}
-
-    if (isImage) {
-      items.push({ label: 'Copy Image', click: () => wc.copyImageAt(params.x, params.y) })
-      items.push({ label: 'Copy Image Address', click: () => clipboard.writeText(params.srcURL) })
-      items.push({ label: 'Save Image to Downloads', click: () => { try { wc.downloadURL(params.srcURL) } catch { /* ignore */ } } })
-      if (isCirqle) {
-        // From Cirqle → push straight into the WhatsApp pane.
-        items.push({ type: 'separator' })
-        items.push({
-          label: 'Share Image to Linked WhatsApp',
-          click: () => { wc.copyImageAt(params.x, params.y); setTimeout(() => { const wa = focusWhatsapp(); pasteIntoWhatsappComposer(wa) }, 120) },
-        })
-      }
-      items.push({ type: 'separator' })
-    }
-
-    if (link) {
-      items.push({ label: 'Open Link', click: () => view.webContents.loadURL(link) })
-      items.push({ label: 'Open Link in Browser', click: () => shell.openExternal(link) })
-      items.push({ label: 'Copy Link', click: () => clipboard.writeText(link) })
-      if (FILE_URL_RE.test(link) || link.includes('/storage/v1/object/')) {
-        items.push({ label: 'Download to Common Downloads', click: () => { try { wc.downloadURL(link) } catch { /* ignore */ } } })
-      }
-      items.push({ type: 'separator' })
-    }
-
-    // Editing / selection actions, gated on Chromium's own edit flags.
-    if (params.isEditable) {
-      items.push({ role: 'cut', enabled: flags.canCut })
-      items.push({ role: 'copy', enabled: flags.canCopy })
-      items.push({ role: 'paste', enabled: flags.canPaste })
-      items.push({ role: 'selectAll' })
-    } else if (params.selectionText && params.selectionText.trim()) {
-      items.push({ role: 'copy' })
-      items.push({ role: 'selectAll' })
-    }
-
-    if (!items.length) return
-    // Trim a trailing separator if one ended the list.
-    while (items.length && items[items.length - 1].type === 'separator') items.pop()
-    Menu.buildFromTemplate(items).popup({ window: win })
-  })
 }
 
 // ── Drive Cirqle's Quick Capture ──────────────────────────────────────────────
@@ -241,51 +187,6 @@ function createViews() {
   Object.values(whatsapps).forEach(waView => win.contentView.addChildView(waView))
   win.contentView.addChildView(splitter)
   win.contentView.addChildView(chrome) // toolbar on top
-}
-
-// Native menu — unclipped, so clipboard history + New-record shortcuts live here
-// (a dropdown inside the 48px toolbar view would be clipped to its bounds).
-function buildMenu() {
-  const recent = clipHistory.length
-    ? clipHistory.map((h) => ({ label: truncate(h), click: () => sendTextToCirqle(h) }))
-    : [{ label: '(clipboard history is empty)', enabled: false }]
-
-  const menu = Menu.buildFromTemplate([
-    ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
-    {
-      label: 'Capture',
-      submenu: [
-        { label: 'New Request from Clipboard', accelerator: 'CmdOrCtrl+Shift+N', click: sendClipboardToCirqle },
-        { label: 'Recent Clipboard', submenu: recent },
-        { type: 'separator' },
-        { label: 'New', submenu: QUICK_ACTIONS.map((a) => ({ label: a.label, click: () => navigate(a.route) })) },
-      ],
-    },
-    // REQUIRED on macOS: without the Edit menu's roles, Cmd+C / Cmd+V don't work
-    // in the web views — which would break the entire copy-paste workflow.
-    { role: 'editMenu' },
-    { label: 'Downloads', submenu: dl.downloadsMenuTemplate() },
-    {
-      label: 'View',
-      submenu: [
-        { label: 'Reload Cirqle', accelerator: 'CmdOrCtrl+R', click: () => cirqle && cirqle.webContents.loadURL(CIRQLE_URL) },
-        { label: 'Reload WhatsApp', click: () => whatsapps[state.activeWa] && whatsapps[state.activeWa].webContents.reload() },
-        { type: 'separator' },
-        { label: 'Split 50 / 50', click: () => applyPreset('50') },
-        { label: 'Cirqle 75 / WhatsApp 25', click: () => applyPreset('75') },
-        { label: 'Cirqle 25 / WhatsApp 75', click: () => applyPreset('25') },
-        { label: 'Hide WhatsApp', click: () => applyPreset('hideWA') },
-        { label: 'Hide Cirqle', click: () => applyPreset('hideCirqle') },
-        { type: 'separator' },
-        { label: 'Toggle Toolbar', accelerator: 'CmdOrCtrl+T', click: () => applyPreset('toggleToolbar') },
-        { role: 'togglefullscreen' },
-        { type: 'separator' },
-        { role: 'toggleDevTools' },
-      ],
-    },
-    { role: 'windowMenu' },
-  ])
-  Menu.setApplicationMenu(menu)
 }
 
 function pollClipboard() {
