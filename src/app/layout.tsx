@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Inter, Geist_Mono } from 'next/font/google'
 import './globals.css'
 import { ThemeProvider } from '@/contexts/theme-context'
@@ -18,6 +18,21 @@ export const metadata: Metadata = {
     shortcut: '/icon.svg',
     apple: '/icon.svg',
   },
+}
+
+// viewport-fit=cover is what makes env(safe-area-inset-*) resolve to real
+// values on notched phones (the native Capacitor shell + iOS/Android Safari);
+// on web and Electron there are no insets, so this is a no-op there.
+// initialScale=1 with NO maximumScale/userScalable — pinch-zoom stays enabled
+// (WCAG 1.4.4). themeColor tints the mobile browser/status-bar chrome per theme.
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
+    { media: '(prefers-color-scheme: dark)', color: '#0b0f1a' },
+  ],
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
