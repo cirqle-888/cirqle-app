@@ -2283,8 +2283,14 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 </div>
               </div>
 
-              {/* Table */}
-              <table className="w-full text-xs">
+              {/* Table — expand/collapse with nested multi-line detail rows,
+                  not converted to mobile cards (deep admin report, not a
+                  primary workflow; the interaction is riskier to replicate
+                  than a plain data table). overflow-x-auto confines any
+                  needed scroll to the table itself instead of it forcing the
+                  whole modal to overflow horizontally. */}
+              <div className="overflow-x-auto">
+              <table className="w-full text-xs min-w-[420px]">
                 <thead>
                   <tr className="text-muted-foreground border-b border-border">
                     <th className="text-left pb-2 font-medium w-8"></th>
@@ -2349,6 +2355,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                   </tr>
                 </tfoot>
               </table>
+              </div>
             </div>
           </div>
         </ModalOverlay>
