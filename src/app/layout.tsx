@@ -3,6 +3,7 @@ import { Inter, Geist_Mono } from 'next/font/google'
 import './globals.css'
 import { ThemeProvider } from '@/contexts/theme-context'
 import { DynamicFavicon } from '@/components/ui/dynamic-favicon'
+import { MobileShell } from '@/components/mobile/mobile-shell'
 
 // Inter — the professional SaaS standard. `display: swap` avoids invisible text
 // while the font loads. Exposed as --font-inter; globals.css maps --font-sans
@@ -53,7 +54,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           ensures body never exceeds the layout wrapper. */}
       <body className="bg-background text-foreground">
         <DynamicFavicon />
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          <MobileShell />
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   )

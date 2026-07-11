@@ -16,6 +16,7 @@ export type NativePlatform = 'ios' | 'android' | 'web'
 interface CapacitorGlobal {
   isNativePlatform?: () => boolean
   getPlatform?: () => string
+  Plugins?: Record<string, unknown>
 }
 
 function cap(): CapacitorGlobal | null {
@@ -40,4 +41,17 @@ export function isIOS(): boolean {
 
 export function isAndroid(): boolean {
   return getPlatform() === 'android'
+}
+
+/**
+ * Access a Capacitor native plugin (StatusBar, SplashScreen, Camera…) from the
+ * runtime-injected `window.Capacitor.Plugins`. Returns null off-native, so no
+ * `@capacitor/*` package is bundled into the web/desktop build. Callers guard
+ * with isNative() and null-check each method (a plugin may not be installed).
+ */
+export function capPlugin<T = Record<string, (...args: never[]) => Promise<unknown>>>(
+  name: string,
+): T | null {
+  const p = cap()?.Plugins?.[name]
+  return (p as T | undefined) ?? null
 }
