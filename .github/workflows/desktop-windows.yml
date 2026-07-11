@@ -1,0 +1,44 @@
+name: Desktop Windows build
+
+# Windows targets can't be cross-built on the Apple Silicon dev machine
+# (rcedit needs Wine). This runner produces both installers natively.
+# Trigger manually (Actions tab) or by pushing a desktop-v* tag.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['desktop-v*']
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: IPC channel gate
+        run: npm run check:ipc
+
+      - name: Build NSIS installer (EXE) + MSI
+        run: npx electron-builder --win nsis msi
+        env:
+          # Unsigned build — same policy as the macOS DMG until certs exist.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cirqle-desktop-windows
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.msi
+          if-no-files-found: error

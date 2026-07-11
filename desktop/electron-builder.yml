@@ -44,3 +44,10 @@ dmg:
       y: 340
       type: link
       path: /Applications
+
+win:
+  target: nsis
+  icon: assets/icon.png
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
