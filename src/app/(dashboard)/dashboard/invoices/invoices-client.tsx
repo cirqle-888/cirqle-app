@@ -2887,17 +2887,28 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
     return (
       <div className="flex flex-col h-full overflow-hidden">
-        {/* Header */}
-        <div className="px-5 py-5 border-b border-border/40 bg-card flex items-start justify-between gap-4 shrink-0">
-          <div className="min-w-0">
+        {/* Header.
+            flex-wrap + min-w-[160px] on the info block: same fix as the
+            shared <Header> component — a shrink-0 icon cluster (6 buttons)
+            claiming more width than was left made the invoice-number/badge
+            row's min-w-0 squeeze to a literal 0px box (number invisible)
+            instead of just truncating. The floor stops the squeeze; wrap
+            drops the icon cluster to its own row on phones once the info
+            block has claimed a sane minimum. */}
+        <div className="px-5 py-5 border-b border-border/40 bg-card flex flex-wrap items-start justify-between gap-x-4 gap-y-2 shrink-0">
+          <div className="min-w-[160px] flex-1">
             <div className="flex items-center gap-3 mb-1.5">
               <button
                 type="button"
                 onClick={() => copyInvNum(inv.invoice_number)}
                 title="Copy invoice number"
-                className="flex items-center gap-1.5 font-mono text-sm font-medium text-muted-foreground hover:text-foreground transition-colors group"
+                className="flex items-center gap-1.5 font-mono text-sm font-medium text-muted-foreground hover:text-foreground transition-colors group min-w-0"
               >
-                <span>{inv.invoice_number}</span>
+                {/* truncate (not implicit wrap): the icon cluster on the right
+                    (shrink-0) can leave this row very little space on phones —
+                    without truncate the number's hyphens gave the browser line-
+                    break points and it wrapped "INV-2607-053-2" across 3 lines. */}
+                <span className="truncate">{inv.invoice_number}</span>
                 <Copy className={`w-3.5 h-3.5 shrink-0 transition-colors ${copiedInvNum ? 'text-green-500' : 'opacity-0 group-hover:opacity-60'}`} />
               </button>
               <StatusBadge status={overdue && inv.status !== 'paid' ? 'overdue' : inv.status} className="h-6 px-2.5 text-[11px]" />
