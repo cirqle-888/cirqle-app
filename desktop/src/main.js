@@ -18,6 +18,8 @@ const path = require('path')
 const fs = require('fs')
 const { spawn } = require('child_process')
 
+const CH = require('./shared/ipc-channels')
+
 const CIRQLE_URL = (process.env.CIRQLE_URL || 'https://app.cirqle.work').replace(/\/$/, '')
 const WHATSAPP_URL = 'https://web.whatsapp.com/'
 // A current desktop Chrome UA — WhatsApp Web rejects Electron's default UA
@@ -102,8 +104,8 @@ function saveDownloads() {
 }
 function isImageFile(nameOrPath) { return IMAGE_EXT_RE.test(nameOrPath || '') }
 function pushDownloadsUpdate() {
-  if (chrome) chrome.webContents.send('downloads', { count: downloads.filter((d) => d.done).length })
-  if (downloadsPanel) downloadsPanel.webContents.send('downloads:list', downloadsForPanel())
+  if (chrome) chrome.webContents.send(CH.DOWNLOADS, { count: downloads.filter((d) => d.done).length })
+  if (downloadsPanel) downloadsPanel.webContents.send(CH.DOWNLOADS_LIST, downloadsForPanel())
 }
 function downloadsForPanel() {
   return downloads.map((d) => ({
@@ -250,7 +252,7 @@ function focusWhatsapp() {
   const wasComparing = state.rightPane === 'cirqle2'
   state.rightPane = 'whatsapp'
   if (!state.showWhatsapp) applyPreset(state.showCirqle ? '50' : 'hideCirqle')
-  else if (wasComparing) { layout(); saveSettings(); if (chrome) chrome.webContents.send('state', state) }
+  else if (wasComparing) { layout(); saveSettings(); if (chrome) chrome.webContents.send(CH.STATE, state) }
   const wa = whatsapps[state.activeWa]
   if (wa) { wa.webContents.focus() }
   return wa
@@ -400,7 +402,7 @@ function openDownloadsPanel() {
   win.contentView.addChildView(downloadsPanel)
   downloadsPanel.webContents.loadFile(path.join(__dirname, 'downloads.html'))
   downloadsPanel.webContents.once('did-finish-load', () => {
-    downloadsPanel.webContents.send('downloads:list', downloadsForPanel())
+    downloadsPanel.webContents.send(CH.DOWNLOADS_LIST, downloadsForPanel())
     downloadsPanel.webContents.focus() // keyboard (Esc) goes to the panel
   })
   positionDownloadsPanel()
@@ -483,7 +485,7 @@ function landOneFlight() {
     fxOverlay = null
     console.log('[fx] overlay removed, all flights landed')
   }
-  if (chrome) chrome.webContents.send('downloads:pulse') // land → pulse the ⬇ button
+  if (chrome) chrome.webContents.send(CH.DOWNLOADS_PULSE) // land → pulse the ⬇ button
 }
 function flyDownloadFx(source) {
   if (!win) return
@@ -491,7 +493,7 @@ function flyDownloadFx(source) {
   ensureFxOverlay()
   fxInFlight++
   console.log('[fx] flight started, in-flight =', fxInFlight)
-  const send = () => { if (fxOverlay) fxOverlay.webContents.send('fx:fly', payload) }
+  const send = () => { if (fxOverlay) fxOverlay.webContents.send(CH.FX_FLY, payload) }
   if (fxOverlay.webContents.isLoadingMainFrame()) fxOverlay.webContents.once('did-finish-load', send)
   else send()
 
@@ -666,7 +668,7 @@ function applyPreset(p) {
   else if (p === 'hideCirqle') Object.assign(state, { showCirqle: false, showWhatsapp: true })
   else if (p === 'toggleToolbar') Object.assign(state, { showToolbar: !state.showToolbar })
   layout(); saveSettings()
-  if (chrome) chrome.webContents.send('state', state)
+  if (chrome) chrome.webContents.send(CH.STATE, state)
 }
 
 // ── Drive Cirqle's Quick Capture ──────────────────────────────────────────────
@@ -678,7 +680,7 @@ function sendTextToCirqle(text) {
   if (!text || !text.trim()) return
   ensureCirqleVisible()
   const target = CIRQLE_URL + '/dashboard/capture'
-  const send = () => cirqle.webContents.send('cirqle:capture', { text })
+  const send = () => cirqle.webContents.send(CH.CIRQLE_CAPTURE, { text })
   if (!(cirqle.webContents.getURL() || '').includes('/dashboard/capture')) {
     cirqle.webContents.loadURL(target)
     cirqle.webContents.once('did-finish-load', () => setTimeout(send, 400)) // let React mount the listener
@@ -707,7 +709,7 @@ function createViews() {
 
   chrome = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-ui.js') } })
   chrome.webContents.loadFile(path.join(__dirname, 'host.html'))
-  chrome.webContents.once('did-finish-load', () => chrome.webContents.send('state', state))
+  chrome.webContents.once('did-finish-load', () => chrome.webContents.send(CH.STATE, state))
 
   wireEscToCloseDownloads(chrome) // Esc from the toolbar view closes the panel too
 
@@ -826,7 +828,7 @@ function pollClipboard() {
 // arrives while the user is in the WhatsApp pane still alerts them). Clicking
 // focuses the window, reveals the Cirqle pane, and navigates to the source.
 let lastNotifyAt = 0
-ipcMain.on('cirqle:notify', (_e, payload) => {
+ipcMain.on(CH.CIRQLE_NOTIFY, (_e, payload) => {
   try {
     if (!Notification.isSupported()) return
     const now = Date.now()
@@ -869,9 +871,9 @@ ipcMain.on('cirqle:notify', (_e, payload) => {
 })
 
 // ── Unread badge relay (Cirqle web view → toolbar bell + dock) ────────────────
-ipcMain.on('cirqle:badge', (_e, count) => {
+ipcMain.on(CH.CIRQLE_BADGE, (_e, count) => {
   const n = Math.max(0, parseInt(count, 10) || 0)
-  if (chrome) chrome.webContents.send('notif-badge', n)
+  if (chrome) chrome.webContents.send(CH.NOTIF_BADGE, n)
   try {
     // macOS: numeric dock badge. Others: taskbar overlay isn't per-count, so
     // just use the app badge count where supported.
@@ -885,17 +887,17 @@ ipcMain.on('cirqle:badge', (_e, count) => {
 // mounted globally) — NOT a navigation. The old behavior forced a jump to
 // /dashboard/chat, which lands on the full chat page rather than showing
 // notifications at all.
-ipcMain.on('cirqle:openNotifications', () => {
+ipcMain.on(CH.CIRQLE_OPEN_NOTIFICATIONS, () => {
   ensureCirqleVisible()
   if (cirqle) {
-    cirqle.webContents.send('cirqle:openNotifications')
+    cirqle.webContents.send(CH.CIRQLE_OPEN_NOTIFICATIONS)
     cirqle.webContents.focus()
   }
 })
 
 // ── IPC from the toolbar / splitter / overlay / error page ────────────────────
-ipcMain.on('layout:preset', (_e, p) => applyPreset(p))
-ipcMain.on('reload', (_e, which) => {
+ipcMain.on(CH.LAYOUT_PRESET, (_e, p) => applyPreset(p))
+ipcMain.on(CH.RELOAD, (_e, which) => {
   if (which === 'cirqle' && cirqle) cirqle.webContents.loadURL(CIRQLE_URL)
   if (which === 'whatsapp') {
     // The right-pane reload button reloads whatever occupies the right slot.
@@ -903,27 +905,27 @@ ipcMain.on('reload', (_e, which) => {
     else if (whatsapps[state.activeWa]) whatsapps[state.activeWa].webContents.reload()
   }
 })
-ipcMain.on('goBack', () => { if (cirqle && cirqle.webContents.canGoBack()) cirqle.webContents.goBack() })
-ipcMain.on('goForward', () => { if (cirqle && cirqle.webContents.canGoForward()) cirqle.webContents.goForward() })
-ipcMain.on('toggleFullscreen', () => { if (win) win.setFullScreen(!win.isFullScreen()) })
+ipcMain.on(CH.GO_BACK, () => { if (cirqle && cirqle.webContents.canGoBack()) cirqle.webContents.goBack() })
+ipcMain.on(CH.GO_FORWARD, () => { if (cirqle && cirqle.webContents.canGoForward()) cirqle.webContents.goForward() })
+ipcMain.on(CH.TOGGLE_FULLSCREEN, () => { if (win) win.setFullScreen(!win.isFullScreen()) })
 // ── Downloads panel ───────────────────────────────────────────────────────────
-ipcMain.on('downloads:toggle', toggleDownloadsPanel)
-ipcMain.on('downloads:close', closeDownloadsPanel)
-ipcMain.on('downloads:open', (_e, id) => { const d = downloads.find((x) => x.id === id); if (d) shell.openPath(d.path) })
-ipcMain.on('downloads:reveal', (_e, id) => { const d = downloads.find((x) => x.id === id); if (d) shell.showItemInFolder(d.path) })
-ipcMain.on('downloads:remove', (_e, id) => removeDownload(id))
-ipcMain.on('downloads:clear', clearDownloads)
-ipcMain.on('downloads:openFolder', () => shell.openPath(downloadsDir()))
-ipcMain.on('downloads:copy', (_e, id) => {
+ipcMain.on(CH.DOWNLOADS_TOGGLE, toggleDownloadsPanel)
+ipcMain.on(CH.DOWNLOADS_CLOSE, closeDownloadsPanel)
+ipcMain.on(CH.DOWNLOADS_OPEN, (_e, id) => { const d = downloads.find((x) => x.id === id); if (d) shell.openPath(d.path) })
+ipcMain.on(CH.DOWNLOADS_REVEAL, (_e, id) => { const d = downloads.find((x) => x.id === id); if (d) shell.showItemInFolder(d.path) })
+ipcMain.on(CH.DOWNLOADS_REMOVE, (_e, id) => removeDownload(id))
+ipcMain.on(CH.DOWNLOADS_CLEAR, clearDownloads)
+ipcMain.on(CH.DOWNLOADS_OPEN_FOLDER, () => shell.openPath(downloadsDir()))
+ipcMain.on(CH.DOWNLOADS_COPY, (_e, id) => {
   const d = downloads.find((x) => x.id === id)
   if (!d) return
   if (isImageFile(d.path)) { const img = nativeImage.createFromPath(d.path); if (!img.isEmpty()) clipboard.writeImage(img); else clipboard.writeText(d.path) }
   else clipboard.writeText(d.path)
 })
-ipcMain.on('downloads:shareWA', (_e, id) => { const d = downloads.find((x) => x.id === id); if (d) shareFileToWhatsApp(d.path) })
-ipcMain.on('downloads:quicklook', (_e, id) => { const d = downloads.find((x) => x.id === id); if (d && fs.existsSync(d.path)) quickLookFile(d.path) })
+ipcMain.on(CH.DOWNLOADS_SHARE_WA, (_e, id) => { const d = downloads.find((x) => x.id === id); if (d) shareFileToWhatsApp(d.path) })
+ipcMain.on(CH.DOWNLOADS_QUICKLOOK, (_e, id) => { const d = downloads.find((x) => x.id === id); if (d && fs.existsSync(d.path)) quickLookFile(d.path) })
 // Native OS file drag from a shelf item → drop onto WhatsApp, Finder, anywhere.
-ipcMain.on('downloads:startDrag', async (e, id) => {
+ipcMain.on(CH.DOWNLOADS_START_DRAG, async (e, id) => {
   const d = downloads.find((x) => x.id === id)
   if (!d) { console.warn('[drag] startDrag: no download record for id', id); return }
   if (!fs.existsSync(d.path)) { console.warn('[drag] startDrag: file no longer exists at', d.path); return }
@@ -1000,8 +1002,8 @@ ipcMain.on('downloads:startDrag', async (e, id) => {
 })
 
 // ── Download flying-animation callbacks ───────────────────────────────────────
-ipcMain.on('fx:report-btn', (_e, rect) => { dlBtnRect = rect })
-ipcMain.on('fx:done', () => {
+ipcMain.on(CH.FX_REPORT_BTN, (_e, rect) => { dlBtnRect = rect })
+ipcMain.on(CH.FX_DONE, () => {
   // This flight landed for real — cancel its safety-net timeout so it doesn't
   // double-decrement fxInFlight later.
   const timer = fxTimeouts.shift()
@@ -1010,7 +1012,7 @@ ipcMain.on('fx:done', () => {
 })
 
 // ── Duplicate / compare: toggle a 2nd Cirqle page in the right pane ───────────
-ipcMain.on('cirqle:compareToggle', () => {
+ipcMain.on(CH.CIRQLE_COMPARE_TOGGLE, () => {
   if (state.rightPane === 'cirqle2') {
     state.rightPane = 'whatsapp' // back to WhatsApp
   } else {
@@ -1022,13 +1024,13 @@ ipcMain.on('cirqle:compareToggle', () => {
     if (state.ratio < 0.3 || state.ratio > 0.7) state.ratio = 0.5
   }
   layout(); saveSettings()
-  if (chrome) chrome.webContents.send('state', state)
+  if (chrome) chrome.webContents.send(CH.STATE, state)
 })
 
 // ── Share (from the Cirqle pane → the linked WhatsApp pane) ────────────────────
 // action: 'copy' (copy image + focus WA), 'paste' (auto-paste into open chat),
 // 'download' (save into common downloads + reveal in Finder to drag in).
-ipcMain.handle('share:receipt', (_e, { dataUrl, filename, action } = {}) => {
+ipcMain.handle(CH.SHARE_RECEIPT, (_e, { dataUrl, filename, action } = {}) => {
   if (action === 'download') {
     const p = saveDataUrlToDownloads(dataUrl, filename)
     if (p) { focusWhatsapp(); shell.showItemInFolder(p) }
@@ -1039,24 +1041,24 @@ ipcMain.handle('share:receipt', (_e, { dataUrl, filename, action } = {}) => {
   const r = shareImageToWhatsApp(img, { autoPaste: action === 'paste' })
   return { ...r, action }
 })
-ipcMain.on('capture:clipboard', sendClipboardToCirqle)
-ipcMain.on('retry', (_e, pane) => {
+ipcMain.on(CH.CAPTURE_CLIPBOARD, sendClipboardToCirqle)
+ipcMain.on(CH.RETRY, (_e, pane) => {
   if (pane === 'whatsapp' && whatsapps[state.activeWa]) whatsapps[state.activeWa].webContents.loadURL(WHATSAPP_URL, { userAgent: CHROME_UA })
   else if (cirqle) cirqle.webContents.loadURL(CIRQLE_URL)
 })
-ipcMain.handle('app:version', () => app.getVersion())
+ipcMain.handle(CH.APP_VERSION, () => app.getVersion())
 
-ipcMain.on('wa:add', () => {
+ipcMain.on(CH.WA_ADD, () => {
   const newId = Date.now().toString()
   state.waAccounts.push({ id: newId, label: `WA ${state.waAccounts.length + 1}` })
   state.activeWa = newId
   createWhatsappView(newId)
   layout()
   saveSettings()
-  if (chrome) chrome.webContents.send('state', state)
+  if (chrome) chrome.webContents.send(CH.STATE, state)
 })
 
-ipcMain.on('wa:switch', (_e, id) => {
+ipcMain.on(CH.WA_SWITCH, (_e, id) => {
   // Clicking a WhatsApp tab always brings WhatsApp back into the right pane,
   // even if it was showing a 2nd Cirqle page.
   state.rightPane = 'whatsapp'
@@ -1064,10 +1066,10 @@ ipcMain.on('wa:switch', (_e, id) => {
   state.showWhatsapp = true
   layout()
   saveSettings()
-  if (chrome) chrome.webContents.send('state', state)
+  if (chrome) chrome.webContents.send(CH.STATE, state)
 })
 
-ipcMain.on('wa:remove', (_e, id) => {
+ipcMain.on(CH.WA_REMOVE, (_e, id) => {
   if (state.waAccounts.length <= 1) return // Keep at least one
   state.waAccounts = state.waAccounts.filter(a => a.id !== id)
   if (state.activeWa === id) {
@@ -1081,28 +1083,28 @@ ipcMain.on('wa:remove', (_e, id) => {
   }
   layout()
   saveSettings()
-  if (chrome) chrome.webContents.send('state', state)
+  if (chrome) chrome.webContents.send(CH.STATE, state)
 })
 
-ipcMain.on('wa:rename', (_e, { id, label }) => {
+ipcMain.on(CH.WA_RENAME, (_e, { id, label }) => {
   const account = state.waAccounts.find(a => a.id === id)
   if (account) {
     account.label = label || account.label
     saveSettings()
-    if (chrome) chrome.webContents.send('state', state)
+    if (chrome) chrome.webContents.send(CH.STATE, state)
   }
 })
 
-ipcMain.on('cirqle:logo', (_e, url) => {
+ipcMain.on(CH.CIRQLE_LOGO, (_e, url) => {
   if (state.logoUrl !== url) {
     state.logoUrl = url
-    if (chrome) chrome.webContents.send('state', state)
+    if (chrome) chrome.webContents.send(CH.STATE, state)
   }
 })
 
 // Draggable splitter: on drag start we float a full-body overlay view that keeps
 // receiving mouse events even as the pointer passes over the two web views.
-ipcMain.on('splitter:start', () => {
+ipcMain.on(CH.SPLITTER_START, () => {
   closeDownloadsPanel() // only one floating layer at a time
   if (overlay) return
   overlay = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-ui.js') } })
@@ -1111,15 +1113,15 @@ ipcMain.on('splitter:start', () => {
   layout()
   overlay.webContents.loadFile(path.join(__dirname, 'overlay.html'))
 })
-ipcMain.on('splitter:drag', (_e, screenX) => {
+ipcMain.on(CH.SPLITTER_DRAG, (_e, screenX) => {
   const b = win.getContentBounds()
   state.ratio = Math.max(MIN_RATIO, Math.min(MAX_RATIO, (screenX - b.x) / b.width))
   layout()
 })
-ipcMain.on('splitter:end', () => {
+ipcMain.on(CH.SPLITTER_END, () => {
   if (overlay) { win.contentView.removeChildView(overlay); overlay = null }
   saveSettings()
-  if (chrome) chrome.webContents.send('state', state)
+  if (chrome) chrome.webContents.send(CH.STATE, state)
 })
 
 // macOS: closing the window should hide it (keep the app + all views alive in
