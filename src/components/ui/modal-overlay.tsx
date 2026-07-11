@@ -43,6 +43,20 @@ export function ModalOverlay({
     }
   }, [fallbackTitleId])
 
+  // onClose/isConfirmation are read through refs inside the mount effect below
+  // so that effect can have an EMPTY dependency array and run exactly once per
+  // modal open. Almost every caller passes an inline `onClose={() => ...}`, a
+  // fresh function reference on every parent render — with onClose in the
+  // deps array, typing into any field (setState → parent re-render → new
+  // onClose) tore the effect down and rebuilt it on every keystroke: teardown
+  // refocused whatever opened the modal, then setup refocused the "first
+  // focusable" element, which is usually the header's close (X) button — so
+  // focus visibly jumped to the X after every character typed.
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+  const isConfirmationRef = useRef(isConfirmation)
+  isConfirmationRef.current = isConfirmation
+
   useEffect(() => {
     // Lock body scroll when mounted
     const originalStyle = window.getComputedStyle(document.body).overflow
@@ -56,7 +70,7 @@ export function ModalOverlay({
       'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !isConfirmation) onClose()
+      if (e.key === 'Escape' && !isConfirmationRef.current) onCloseRef.current()
 
       // Focus trap: keep Tab / Shift+Tab cycling inside the dialog. Applies to
       // confirmations too — Escape is what's deliberately disabled there.
@@ -84,14 +98,17 @@ export function ModalOverlay({
     }
     document.addEventListener('keydown', onKey)
 
-    // Move focus into the dialog when it opens. Confirmations focus the
-    // container (not a button) so a held Enter key can't accidentally
-    // trigger a destructive action.
+    // Move focus into the dialog when it opens. Only real form controls are
+    // candidates — NOT plain <button>, since the header's close (X) button
+    // is a <button> that sits before the form fields in the DOM and would
+    // otherwise win the query every time. Confirmations focus the container
+    // (not a control) so a held Enter key can't accidentally trigger a
+    // destructive action.
     setTimeout(() => {
       if (contentRef.current && !contentRef.current.contains(document.activeElement)) {
-        const firstInput = isConfirmation
+        const firstInput = isConfirmationRef.current
           ? null
-          : contentRef.current.querySelector('input, button, select, textarea') as HTMLElement | null
+          : contentRef.current.querySelector('input:not([type="hidden"]), textarea, select, [contenteditable="true"]') as HTMLElement | null
         if (firstInput) {
           firstInput.focus()
         } else {
@@ -108,7 +125,11 @@ export function ModalOverlay({
         previouslyFocused.focus()
       }
     }
-  }, [onClose, isConfirmation])
+    // Intentionally empty: onClose/isConfirmation are read via refs above so
+    // this setup (body-scroll lock, keydown listener, initial focus) runs
+    // exactly once when the modal mounts, not on every parent re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Alignment: centered dialog by default; bottom-anchored sheet on mobile when opted in.
   // Padding: zero on mobile sheet (so the sheet hugs the viewport), p-4 on desktop.
