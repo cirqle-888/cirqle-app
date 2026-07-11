@@ -707,7 +707,23 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
 
                     {quo.items && quo.items.length > 0 && (
                       <div className="mx-4 md:mx-0 overflow-hidden border border-border/50 rounded-xl bg-card">
-                        <div className="overflow-x-auto">
+                        {/* Phones: card list — 4 numeric columns needed horizontal
+                            scroll to read at min-w-[500px]. */}
+                        <div className="md:hidden divide-y divide-border/30">
+                          {quo.items.map((item, i) => (
+                            <div key={i} className="px-4 py-3">
+                              <div className="flex items-center justify-between gap-2 mb-1">
+                                <span className="font-medium text-foreground text-sm truncate">{item.description}</span>
+                                <span className="shrink-0 font-medium text-foreground text-sm">{formatCurrency(item.total, quo.currency)}</span>
+                              </div>
+                              <p className="text-xs text-muted-foreground">
+                                Qty {item.quantity} × {formatCurrency(item.unit_price, quo.currency)}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="hidden md:block overflow-x-auto">
                           <table className="w-full text-sm min-w-[500px]">
                             <thead>
                               <tr className="bg-secondary/40 border-b border-border/50">
