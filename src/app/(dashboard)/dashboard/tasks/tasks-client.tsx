@@ -1933,7 +1933,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
 
       {/* ── Trash View ── */}
       {showTrash && (
-        <div className="p-6 space-y-4">
+        <div className="p-4 sm:p-6 space-y-4">
           <div className="flex items-center gap-2 text-sm text-muted-foreground bg-red-500/5 border border-red-500/15 rounded-xl px-4 py-3">
             <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
             Items in Trash are automatically deleted after <strong className="text-foreground mx-1">45 days</strong>. Restore within this window to recover.
@@ -1945,7 +1945,49 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
             </div>
           ) : (
             <div className="bg-card border border-border rounded-xl overflow-hidden">
-              <table className="w-full text-sm">
+              {/* Phones: card list — the 6-column table (incl. two action
+                  buttons) has no room to breathe below sm, and Restore/Delete
+                  Forever are exactly the kind of destructive actions that need
+                  full-width thumb targets, not a cramped trailing cell. */}
+              <div className="sm:hidden divide-y divide-border">
+                {trash.map(task => {
+                  const deletedDate = new Date(task.deleted_at)
+                  const expiresDate = new Date(deletedDate.getTime() + 45 * 24 * 60 * 60 * 1000)
+                  const daysLeft = Math.ceil((expiresDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+                  return (
+                    <div key={task.id} className="p-4 opacity-70">
+                      <div className="flex items-start justify-between gap-2 mb-1">
+                        <p className="font-medium text-foreground line-through decoration-muted-foreground text-sm">{task.title}</p>
+                        <span className={`shrink-0 text-xs font-medium ${daysLeft <= 7 ? 'text-red-400' : daysLeft <= 14 ? 'text-amber-400' : 'text-muted-foreground'}`}>
+                          {daysLeft}d left
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mb-3">
+                        {task.client ? (
+                          <>
+                            {task.client.name}
+                            {task.client.code && <span className="ml-1 font-mono text-muted-foreground/50">{task.client.code}</span>}
+                          </>
+                        ) : 'Internal'}
+                        {task.service?.name && ` · ${task.service.name}`}
+                        {` · deleted ${deletedDate.toLocaleDateString('en-GB')}`}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => handleRestore(task.id)}
+                          className="flex-1 text-xs px-3 py-2 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 font-medium transition-colors">
+                          Restore
+                        </button>
+                        <button onClick={() => initiateDelete(task.id)}
+                          className="flex-1 text-xs px-3 py-2 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 font-medium transition-colors">
+                          Delete Forever
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              <table className="hidden sm:table w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-secondary/50">
                     <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Task</th>
