@@ -639,11 +639,12 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
   const [quickSet, setQuickSet] = useState<{ mode: 'default' | 'client'; price: string; currency: Currency } | null>(null)
   const [quickSaving, setQuickSaving] = useState(false)
 
-  // ── Possible-duplicate warning (same client + same title, created very
-  // recently) — surfaced live while filling the Add Task form. Catches the
-  // "two people create the same task within a minute of each other" collision
-  // (e.g. one teammate's task getting deleted as a "duplicate" of another's)
-  // without nagging on legitimately recurring same-title tasks from weeks ago.
+  // ── Possible-duplicate warning (same client + same title, created within
+  // the last 24h) — surfaced live while filling the Add Task form. Catches
+  // two people creating the same task without knowing about each other,
+  // whether a minute apart or later the same day (e.g. one teammate's task
+  // getting deleted as a "duplicate" of another's), without nagging on
+  // legitimately recurring same-title tasks from weeks/months ago.
   const [dupWarning, setDupWarning] = useState<{ taskNumber: number | null; createdBy: string; minutesAgo: number } | null>(null)
 
   // Bulk selection state
@@ -726,11 +727,12 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showForm, form.task_number])
 
-  // ── Possible-duplicate warning (same client + same title, created very
-  // recently) — surfaced live while filling the Add Task form. Catches the
-  // "two people create the same task within a minute of each other" collision
-  // (e.g. one teammate's task getting deleted as a "duplicate" of another's)
-  // without nagging on legitimately recurring same-title tasks from weeks ago.
+  // ── Possible-duplicate warning (same client + same title, created within
+  // the last 24h) — surfaced live while filling the Add Task form. Catches
+  // two people creating the same task without knowing about each other,
+  // whether a minute apart or later the same day (e.g. one teammate's task
+  // getting deleted as a "duplicate" of another's), without nagging on
+  // legitimately recurring same-title tasks from weeks/months ago.
   useEffect(() => {
     if (!showForm) { setDupWarning(null); return }
     const title = form.title.trim()
@@ -4260,7 +4262,9 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                   <span className="mt-0.5">⚠</span>
                   <span>
                     {dupWarning.createdBy} created a task with this exact title for this client{' '}
-                    {dupWarning.minutesAgo === 0 ? 'just now' : `${dupWarning.minutesAgo} min ago`}
+                    {dupWarning.minutesAgo === 0 ? 'just now'
+                      : dupWarning.minutesAgo < 60 ? `${dupWarning.minutesAgo} min ago`
+                      : (() => { const h = Math.round(dupWarning.minutesAgo / 60); return `${h} hour${h === 1 ? '' : 's'} ago` })()}
                     {dupWarning.taskNumber != null && <> (Task #{dupWarning.taskNumber})</>}.
                     {' '}Check it isn&apos;t already covered before adding another.
                   </span>

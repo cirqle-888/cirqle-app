@@ -534,9 +534,10 @@ export async function logTaskCreated(
 /**
  * Possible-duplicate check for the Add Task form: is there already a task
  * with this exact title for this client (or, for internal work, another
- * internal task), created within the last `windowMinutes`? Surfaced as a
- * non-blocking warning so two people creating the same task within a minute
- * of each other notice before duplicating work.
+ * internal task), created within the last `windowHours`? Surfaced as a
+ * non-blocking warning so two people creating the same task without knowing
+ * about each other — whether a minute apart or later the same day — notice
+ * before duplicating work.
  *
  * Server-side because activity_logs has no browser-readable RLS policy
  * (service-role-only) — the actor of the original "created" event can only
@@ -546,7 +547,7 @@ export async function logTaskCreated(
 export async function checkPossibleDuplicateTask(
   title: string,
   clientId: string | null,
-  windowMinutes = 60,
+  windowHours = 24,
 ): Promise<ActionResult<{ taskNumber: number | null; createdByEmployeeId: string | null; minutesAgo: number } | null>> {
   const guard = await requirePermission(PERMS.TASKS_CREATE)
   if (!guard.ok) return { ok: false, error: guard.error }
@@ -554,7 +555,7 @@ export async function checkPossibleDuplicateTask(
   if (trimmed.length < 3) return { ok: true, data: null }
 
   const admin = createAdminClient()
-  const cutoff = new Date(Date.now() - windowMinutes * 60_000).toISOString()
+  const cutoff = new Date(Date.now() - windowHours * 60 * 60_000).toISOString()
 
   let q = admin
     .from('tasks')
