@@ -22,6 +22,17 @@ const CH = require('./shared/ipc-channels')
 const { state, saveSettings } = require('./main/settings')
 const dl = require('./main/downloads')
 const wa = require('./main/whatsapp')
+const layoutMod = require('./main/layout')
+const { layout, applyPreset, TOOLBAR_H, SPLITTER_W, MIN_RATIO, MAX_RATIO } = layoutMod
+
+layoutMod.init({
+  getWin: () => win,
+  getChrome: () => chrome,
+  getCirqle: () => cirqle,
+  getCirqle2: () => cirqle2,
+  getSplitter: () => splitter,
+  getOverlay: () => overlay,
+})
 const { whatsapps, WHATSAPP_URL, CHROME_UA, focusWhatsapp, pasteIntoWhatsappComposer, shareImageToWhatsApp, shareFileToWhatsApp, dropFileIntoWhatsApp, createWhatsappView } = wa
 
 wa.init({
@@ -43,11 +54,6 @@ dl.init({
 })
 
 const CIRQLE_URL = (process.env.CIRQLE_URL || 'https://app.cirqle.work').replace(/\/$/, '')
-const TOOLBAR_H = 48
-const SPLITTER_W = 6
-const MIN_RATIO = 0.2
-const MAX_RATIO = 0.8
-
 const QUICK_ACTIONS = [
   { label: 'Request / Quick Capture', route: '/dashboard/capture' },
   { label: 'Client', route: '/dashboard/clients' },
@@ -159,62 +165,6 @@ function wireContextMenu(view, isCirqle) {
     while (items.length && items[items.length - 1].type === 'separator') items.pop()
     Menu.buildFromTemplate(items).popup({ window: win })
   })
-}
-
-// ── Layout: position each view from the window size + ratio + visibility ──────
-function layout() {
-  if (!win) return
-  const b = win.getContentBounds()
-  const currentToolbarH = state.showToolbar ? TOOLBAR_H : 0
-  const bodyY = currentToolbarH
-  const bodyH = b.height - currentToolbarH
-  
-  if (state.showToolbar) {
-    chrome.setBounds({ x: 0, y: 0, width: b.width, height: currentToolbarH })
-    chrome.setVisible(true)
-  } else {
-    chrome.setVisible(false)
-  }
-
-  const both = state.showCirqle && state.showWhatsapp
-
-  // Hide every right-slot candidate first (all WhatsApp views + the 2nd Cirqle),
-  // then show only the one the user has selected for the right pane.
-  for (const id in whatsapps) whatsapps[id].setVisible(false)
-  if (cirqle2) cirqle2.setVisible(false)
-
-  const activeRight = (state.rightPane === 'cirqle2' && cirqle2) ? cirqle2 : whatsapps[state.activeWa]
-
-  if (both) {
-    const splitX = Math.round(b.width * state.ratio)
-    cirqle.setBounds({ x: 0, y: bodyY, width: splitX - SPLITTER_W / 2, height: bodyH })
-    splitter.setBounds({ x: splitX - SPLITTER_W / 2, y: bodyY, width: SPLITTER_W, height: bodyH })
-    if (activeRight) activeRight.setBounds({ x: splitX + SPLITTER_W / 2, y: bodyY, width: b.width - splitX - SPLITTER_W / 2, height: bodyH })
-    splitter.setVisible(true)
-  } else {
-    splitter.setVisible(false)
-    if (state.showCirqle) {
-      cirqle.setBounds({ x: 0, y: bodyY, width: b.width, height: bodyH })
-    } else if (state.showWhatsapp && activeRight) {
-      activeRight.setBounds({ x: 0, y: bodyY, width: b.width, height: bodyH })
-    }
-  }
-
-  cirqle.setVisible(state.showCirqle)
-  if (state.showWhatsapp && activeRight) activeRight.setVisible(true)
-  if (overlay) overlay.setBounds({ x: 0, y: bodyY, width: b.width, height: bodyH })
-  dl.onLayout()
-}
-
-function applyPreset(p) {
-  if (p === '50') Object.assign(state, { ratio: 0.5, showCirqle: true, showWhatsapp: true })
-  else if (p === '75') Object.assign(state, { ratio: 0.75, showCirqle: true, showWhatsapp: true })
-  else if (p === '25') Object.assign(state, { ratio: 0.25, showCirqle: true, showWhatsapp: true })
-  else if (p === 'hideWA') Object.assign(state, { showWhatsapp: false, showCirqle: true })
-  else if (p === 'hideCirqle') Object.assign(state, { showCirqle: false, showWhatsapp: true })
-  else if (p === 'toggleToolbar') Object.assign(state, { showToolbar: !state.showToolbar })
-  layout(); saveSettings()
-  if (chrome) chrome.webContents.send(CH.STATE, state)
 }
 
 // ── Drive Cirqle's Quick Capture ──────────────────────────────────────────────
