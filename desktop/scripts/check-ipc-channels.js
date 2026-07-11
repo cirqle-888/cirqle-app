@@ -16,6 +16,7 @@ const registry = require(path.join(ROOT, 'src', 'shared', 'ipc-channels.js'))
 const known = new Set(Object.values(registry))
 
 const FILES = ['src/main.js', 'src/preload-cirqle.js', 'src/preload-ui.js']
+const MODULE_FILES = require('fs').readdirSync(path.join(ROOT, 'src', 'main')).filter((f) => f.endsWith('.js')).map((f) => 'src/main/' + f)
 const CALL_RE = /(?:ipcMain\.(?:on|handle)|ipcRenderer\.(?:send|invoke|on)|webContents\.send)\(\s*'([^']+)'/g
 
 const used = new Set()
@@ -28,9 +29,9 @@ for (const rel of FILES) {
   }
 }
 
-// main.js consumes the registry via CH.<KEY> — count those as usage too
-const mainSrc = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8')
-for (const m of mainSrc.matchAll(/\bCH\.([A-Z0-9_]+)\b/g)) {
+// main.js + its modules consume the registry via CH.<KEY> — count as usage
+const chSrc = ['src/main.js', ...MODULE_FILES].map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n')
+for (const m of chSrc.matchAll(/\bCH\.([A-Z0-9_]+)\b/g)) {
   const val = registry[m[1]]
   if (val) used.add(val)
   else unknown.push(`src/main.js: CH.${m[1]} (no such registry key)`)
