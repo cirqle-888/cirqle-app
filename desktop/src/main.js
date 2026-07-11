@@ -25,6 +25,7 @@ const wa = require('./main/whatsapp')
 const layoutMod = require('./main/layout')
 const menus = require('./main/menus')
 const notifications = require('./main/notifications')
+const updates = require('./main/updates')
 const { buildMenu, wireContextMenu, truncate, FILE_URL_RE } = menus
 
 menus.init({
@@ -486,6 +487,7 @@ app.whenReady().then(() => {
   })
   globalShortcut.register('CommandOrControl+Shift+N', sendClipboardToCirqle)
   setInterval(pollClipboard, 1500)
+  updates.startPeriodicChecks()
 })
 
 app.on('activate', () => { if (win && !win.isDestroyed()) win.show() })
