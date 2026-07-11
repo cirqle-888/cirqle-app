@@ -19,6 +19,7 @@ const fs = require('fs')
 const { spawn } = require('child_process')
 
 const CH = require('./shared/ipc-channels')
+const { state, saveSettings } = require('./main/settings')
 
 const CIRQLE_URL = (process.env.CIRQLE_URL || 'https://app.cirqle.work').replace(/\/$/, '')
 const WHATSAPP_URL = 'https://web.whatsapp.com/'
@@ -41,10 +42,6 @@ const QUICK_ACTIONS = [
   { label: 'Quotation', route: '/dashboard/quotations' },
 ]
 
-// ── Persisted layout (a tiny JSON file; avoids an ESM-only dependency) ────────
-const settingsFile = () => path.join(app.getPath('userData'), 'layout.json')
-const loadSettings = () => { try { return JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) } catch { return {} } }
-const saveSettings = () => { try { fs.writeFileSync(settingsFile(), JSON.stringify(state)) } catch { /* best effort */ } }
 
 let win, chrome, cirqle, cirqle2, splitter, overlay, downloadsPanel, dlCatcher, fxOverlay
 const whatsapps = {} // keyed by id
@@ -55,15 +52,6 @@ let dlBtnRect = null      // ⬇ button rect (window coords), reported by host.h
 
 const DL_PANEL_W = 380
 const DL_PANEL_H = 460
-const state = Object.assign({
-  ratio: 0.5,
-  showCirqle: true,
-  showWhatsapp: true,   // structurally: "show the RIGHT pane" (WhatsApp or 2nd Cirqle)
-  showToolbar: true,
-  rightPane: 'whatsapp', // 'whatsapp' | 'cirqle2' — what occupies the right slot
-  waAccounts: [{ id: 'default', label: 'WA 1' }],
-  activeWa: 'default'
-}, loadSettings())
 
 // Recent clipboard items (newest first), surfaced in the Capture menu.
 const clipHistory = []
