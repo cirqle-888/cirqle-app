@@ -83,7 +83,7 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
   return (
     <div
       ref={ref}
-      className={`flex flex-row items-center justify-between gap-3 pr-3 md:px-5 border-b border-border/80 bg-background/95 supports-[backdrop-filter]:bg-background/60 backdrop-blur-md sticky top-0 z-30 transition-all ${isEmployee ? 'pl-3 py-2 sm:pl-16 sm:py-3.5' : 'pl-14 sm:pl-16 py-3 sm:py-3.5'}`}
+      className={`flex flex-row flex-wrap items-center justify-between gap-x-3 gap-y-2 pr-3 md:px-5 border-b border-border/80 bg-background/95 supports-[backdrop-filter]:bg-background/60 backdrop-blur-md sticky top-0 z-30 transition-all ${isEmployee ? 'pl-3 py-2 sm:pl-16 sm:py-3.5' : 'pl-14 sm:pl-16 py-3 sm:py-3.5'}`}
     >
       {/* Employee mobile: compact left branding strip (hidden on sm+) */}
       {isEmployee && (
@@ -95,8 +95,15 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
         </div>
       )}
 
-      {/* Title + breadcrumb — full display on sm+ (and always for admin) */}
-      <div className={`min-w-0 flex-1 ${isEmployee ? 'hidden sm:flex flex-col justify-center' : 'flex flex-col justify-center'}`}>
+      {/* Title + breadcrumb — full display on sm+ (and always for admin).
+          min-w-[110px] (not min-w-0): a shrink-0 actions cluster (page action
+          button + global icons) claiming more space than the container leaves
+          for this flex-1 sibling used to squeeze it to a literal 0px box —
+          title invisible, actions button rendered on top of where it should
+          be. The floor stops the squeeze; flex-wrap on the parent (above)
+          then drops actions to their own row instead of forcing an overflow
+          once title has claimed its minimum. */}
+      <div className={`min-w-[110px] flex-1 ${isEmployee ? 'hidden sm:flex flex-col justify-center' : 'flex flex-col justify-center'}`}>
         <Breadcrumbs isEmployee={isEmployee} />
         <div className="flex items-baseline gap-3 min-w-0">
           <h1 className="text-lg md:text-xl font-semibold text-foreground truncate tracking-tight">{title}</h1>
