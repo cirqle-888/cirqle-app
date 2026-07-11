@@ -2,7 +2,7 @@
   "name": "cirqle-desktop",
   "version": "0.5.1",
   "private": true,
-  "description": "Cirqle + WhatsApp Web, side by side, with one-tap clipboard → Quick Capture.",
+  "description": "Cirqle + WhatsApp Web, side by side, with one-tap clipboard \u2192 Quick Capture.",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -12,9 +12,7 @@
   },
   "devDependencies": {
     "electron": "^33.3.0",
-    "electron-builder": "^25.1.8"
-  },
-  "dependencies": {
+    "electron-builder": "^25.1.8",
     "puppeteer": "^25.2.1"
   }
 }
