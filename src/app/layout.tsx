@@ -14,10 +14,18 @@ const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin']
 export const metadata: Metadata = {
   title: 'Cirqle — Business Management',
   description: 'Cirqle Design agency business management system',
-  icons: {
-    icon: '/icon.svg',
-    shortcut: '/icon.svg',
-    apple: '/icon.svg',
+  // Icons come from the app/ file conventions: icon.svg → <link rel="icon">
+  // (favicon) and apple-icon.png → <link rel="apple-touch-icon"> (iOS home
+  // screen — iOS ignores SVG icons, so a real 180² PNG is required). A manual
+  // `icons` block here would suppress the apple-icon convention, so it's omitted.
+  //
+  // Standalone "Add to Home Screen" behaviour on iOS/iPadOS: chromeless launch,
+  // app title, and a status bar that follows the page. Emits the
+  // apple-mobile-web-app-* + mobile-web-app-capable meta tags.
+  appleWebApp: {
+    capable: true,
+    title: 'Cirqle',
+    statusBarStyle: 'default',
   },
 }
 
