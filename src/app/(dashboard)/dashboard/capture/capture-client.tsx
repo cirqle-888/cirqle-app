@@ -114,7 +114,8 @@ export default function CaptureClient() {
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8 space-y-6">
-      <div>
+      {/* pl-12 on mobile clears the fixed global sidebar hamburger. */}
+      <div className="pl-12 md:pl-0">
         <h1 className="text-xl font-semibold flex items-center gap-2">
           <Sparkles className="h-5 w-5 text-violet-500" /> Quick Capture
         </h1>

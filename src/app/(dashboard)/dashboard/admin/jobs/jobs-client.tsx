@@ -55,8 +55,12 @@ export function JobsClient({ initialSummary, initialJobs }: { initialSummary: an
         </div>
       </div>
 
-      <div className="rounded-md border bg-card text-card-foreground shadow-sm">
-        <table className="w-full text-sm text-left">
+      <div className="rounded-md border bg-card text-card-foreground shadow-sm overflow-hidden">
+        {/* overflow-x-auto: background-jobs monitor (admin) — 5 columns incl.
+            timestamps + action buttons don't fit a phone; scroll within the
+            card rather than break the page. */}
+        <div className="overflow-x-auto">
+        <table className="w-full text-sm text-left min-w-[560px]">
           <thead className="border-b bg-muted/50 font-medium">
             <tr>
               <th className="h-12 px-4 text-muted-foreground">Type</th>
@@ -100,6 +104,7 @@ export function JobsClient({ initialSummary, initialJobs }: { initialSummary: an
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   )

@@ -48,7 +48,8 @@ export function ApprovalsClient({ meId }: { meId: string }) {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
-      <div className="mb-6 flex items-center justify-between">
+      {/* pl-12 on mobile clears the fixed global sidebar hamburger. */}
+      <div className="mb-6 flex items-center justify-between pl-12 md:pl-0">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Approvals</h1>
           <p className="mt-1 text-sm text-muted-foreground">Sign-offs for designs, invoices, tasks, expenses and more.</p>

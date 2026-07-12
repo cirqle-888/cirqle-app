@@ -686,7 +686,9 @@ export default function RequestsClient({
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
-      <div className="flex items-center gap-2.5 mb-1 flex-wrap">
+      {/* pl-12 on mobile clears the fixed global sidebar hamburger that would
+          otherwise cover the Inbox icon / 'Requests' heading. */}
+      <div className="flex items-center gap-2.5 mb-1 flex-wrap pl-12 md:pl-0">
         <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center"><Inbox className="w-4.5 h-4.5 text-primary" /></div>
         <div className="flex-1 min-w-0">
           <h1 className="text-lg font-bold">Requests</h1>

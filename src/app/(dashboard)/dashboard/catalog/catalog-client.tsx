@@ -453,7 +453,8 @@ export default function CatalogClient({
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="px-6 pt-6 pb-4 border-b border-border">
-        <div className="flex items-start justify-between gap-4 mb-4">
+        {/* pl-12 on mobile clears the fixed global sidebar hamburger. */}
+        <div className="flex items-start justify-between gap-4 mb-4 pl-12 md:pl-0">
           <div>
             <h1 className="text-xl font-bold flex items-center gap-2">
               <Package className="w-5 h-5 text-violet-400" /> Product Catalog

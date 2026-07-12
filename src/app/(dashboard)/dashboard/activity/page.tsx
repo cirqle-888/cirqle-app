@@ -14,7 +14,8 @@ export default async function ActivityPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
-      <div className="mb-6">
+      {/* pl-12 on mobile clears the fixed global sidebar hamburger. */}
+      <div className="mb-6 pl-12 md:pl-0">
         <h1 className="text-2xl font-semibold tracking-tight">Activity</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Everything happening across the workspace — tasks, billing, clients, campaigns and more.

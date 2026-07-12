@@ -34,7 +34,8 @@ export default function OffersClient({ canEdit }: { canEdit: boolean }) {
 
   return (
     <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-4">
-      <div>
+      {/* pl-12 on mobile clears the fixed global sidebar hamburger. */}
+      <div className="pl-12 md:pl-0">
         <h1 className="text-xl font-semibold text-foreground">Offers</h1>
         <p className="text-sm text-muted-foreground">All offers issued across every application.</p>
       </div>
