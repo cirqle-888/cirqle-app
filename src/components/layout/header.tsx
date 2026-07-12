@@ -113,10 +113,10 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
         </div>
       </div>
 
-      <div className="flex items-center shrink-0 gap-3">
+      <div className="flex items-center shrink min-w-0 gap-1 sm:gap-3 justify-end flex-1">
         {/* Local Page Actions */}
         {actions && (
-          <div className="flex items-center gap-2 overflow-x-auto shrink-0 hide-scrollbar mr-1">
+          <div className="flex items-center gap-2 overflow-x-auto min-w-0 hide-scrollbar mr-1 [&>*]:shrink-0">
             {actions}
           </div>
         )}
