@@ -514,3 +514,8 @@ async function mirrorProductToGlobalCatalog(
     .from('client_product_assignments')
     .upsert({ client_id: clientId, product_id: productId, is_active: true }, { onConflict: 'client_id,product_id' })
 }
+
+export async function cancelCampaign(campaignId: string) {
+  const admin = createAdminClient()
+  await admin.from('offer_campaigns').update({ status: 'cancelled' }).eq('id', campaignId)
+}

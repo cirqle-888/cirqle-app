@@ -118,6 +118,7 @@ export interface AdProjectRow {
   created_at: string
   updated_at: string
   deleted_at: string | null
+  archived_at?: string | null
 
   // --- Phase 2: ERP Architecture ---
   ad_account_id?: string | null

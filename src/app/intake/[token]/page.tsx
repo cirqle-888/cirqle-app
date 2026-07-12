@@ -123,6 +123,7 @@ export default async function IntakePage({ params, searchParams }: {
       lastTaskTitle={lastTaskTitle}
       driveFolderLink={driveFolderLink}
       switcher={switcher}
+      hub={hub}
     />
   )
 }

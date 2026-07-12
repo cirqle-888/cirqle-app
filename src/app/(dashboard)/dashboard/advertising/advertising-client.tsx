@@ -15,7 +15,7 @@ import { useRouter } from 'next/navigation'
 import {
   Megaphone, Plus, TrendingUp, Target, Wallet, ArrowRight, Inbox, Play,
   Loader2, Link2, BarChart3, MousePointerClick, Users, Zap, AlertTriangle,
-  Clock, ChevronRight, ChevronDown, History, Trash2, ArrowDownLeft, ArrowUpRight,
+  Clock, ChevronRight, ChevronDown, History, Trash2, ArrowDownLeft, ArrowUpRight, ArrowLeft,
 } from 'lucide-react'
 import {
   AD_STATUS_CHIP, STATUS_LABEL, PLATFORM_LABEL, CAMPAIGN_TYPE_LABEL, STATUSES, type AdProjectRow,
@@ -186,6 +186,7 @@ export default function AdvertisingClient({
   const [fPlatform, setFPlatform] = useState('')
   const [fMonth, setFMonth] = useState('')
   const [fBalance, setFBalance] = useState<BalanceFilter>('all')
+  const [fArchived, setFArchived] = useState(false)
 
   // Σ campaign-allocation debits per project.
   const allocatedByProject = useMemo(() => {
@@ -241,6 +242,7 @@ export default function AdvertisingClient({
     if (fStatus && c.p.status !== fStatus) return false
     if (fPlatform && c.p.platform !== fPlatform) return false
     if (fClient && c.p.client?.id !== fClient) return false
+    if (fArchived ? !c.p.archived_at : c.p.archived_at) return false
     if (fMonth) {
       const d = c.p.start_date || c.p.created_at
       if (!d || String(d).slice(0, 7) !== fMonth) return false
@@ -311,6 +313,10 @@ export default function AdvertisingClient({
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 space-y-6">
+
+      <Link href="/dashboard/apps" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-2">
+        <ArrowLeft className="w-4 h-4" /> Back to Apps Directory
+      </Link>
 
       {/* ── Header ── */}
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -444,9 +450,19 @@ export default function AdvertisingClient({
               <option value="negative">Negative balance</option>
             </select>
           )}
-          {(fClient || fStatus || fPlatform || fMonth || fBalance !== 'all') && (
+          <button
+            onClick={() => setFArchived(!fArchived)}
+            className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+              fArchived 
+                ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400' 
+                : 'border-border bg-card text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {fArchived ? 'Viewing Archived' : 'Show Archived'}
+          </button>
+          {(fClient || fStatus || fPlatform || fMonth || fBalance !== 'all' || fArchived) && (
             <button
-              onClick={() => { setFClient(''); setFStatus(''); setFPlatform(''); setFMonth(''); setFBalance('all') }}
+              onClick={() => { setFClient(''); setFStatus(''); setFPlatform(''); setFMonth(''); setFBalance('all'); setFArchived(false) }}
               className="text-xs text-muted-foreground hover:text-foreground underline"
             >
               Clear filters

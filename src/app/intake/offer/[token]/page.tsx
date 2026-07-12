@@ -61,6 +61,7 @@ export default async function OfferIntakePage({ params, searchParams }: {
       badges={badges}
       logoUrl={logoDarkUrl || logoUrl}
       switcher={switcher}
+      hub={hub}
     />
   )
 }

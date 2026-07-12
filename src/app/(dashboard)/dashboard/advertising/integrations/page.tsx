@@ -2,6 +2,8 @@ import { Suspense } from 'react'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { redirect } from 'next/navigation'
+import Link from 'next/link'
+import { ArrowLeft } from 'lucide-react'
 import { IntegrationsClient } from './integrations-client'
 import { fetchProviderConnections } from './actions'
 
@@ -24,8 +26,11 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
   const params = await searchParams
 
   return (
-    <div className="flex flex-col gap-6 w-full p-6">
+    <div className="flex flex-col gap-6 w-full p-6 max-w-7xl mx-auto">
       <div>
+        <Link href="/dashboard/advertising" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-4">
+          <ArrowLeft className="w-4 h-4" /> Back to Advertising
+        </Link>
         <h1 className="text-3xl font-bold tracking-tight">Advertising Integrations</h1>
         <p className="text-muted-foreground mt-2">
           Manage connections to external advertising platforms like Meta Ads and Google Ads.

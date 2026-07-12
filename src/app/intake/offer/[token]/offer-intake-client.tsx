@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Plus, Loader2, CheckCircle2, Check, X, ChevronDown, ChevronUp,
   Upload, Search, Calendar, MessageSquare, RefreshCw,
@@ -8,10 +8,18 @@ import {
   ArrowUp, ArrowDown, Shuffle, Sparkles, ClipboardPaste,
   ArrowLeft, AlertTriangle, FileSpreadsheet, Pencil, SlidersHorizontal,
 } from 'lucide-react'
-import { saveCampaign, getImageUploadUrl, aiParseProductList, type ProductInput, type ProductBadgeInput, type CampaignInput } from './actions'
+import { saveCampaign, getImageUploadUrl, aiParseProductList, cancelCampaign, type ProductInput, type ProductBadgeInput, type CampaignInput } from './actions'
 import type { ParsedOfferProduct } from '@/lib/ai/offer-capture'
 import { ImageLightbox } from '@/components/ui/image-lightbox'
 import { IntakeAppSwitcher } from '@/components/intake/app-switcher'
+import Link from 'next/link'
+
+import { useValidationEngine } from './components/useValidationEngine'
+import { ValidationPanel } from './components/ValidationPanel'
+import { useKeyboardShortcuts } from './components/useKeyboardShortcuts'
+import { AiAssistantPanel } from './components/AiAssistantPanel'
+import { CollaborationProvider } from './components/useCollaborationContext'
+import { CollaborationStatus } from './components/CollaborationStatus'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -82,7 +90,7 @@ function emptyProduct(order: number): ProductInput & { _key: string } {
 
 function ProductRow({
   product, badges, catalog, catalogImages, onUpdate, onRemove, onUploadImage, uploading,
-  onDuplicate, onAddNext
+  onDuplicate, onAddNext, selected, onToggleSelect
 }: {
   product: (ProductInput & { _key: string; id?: string })
   badges: Badge[]
@@ -94,6 +102,8 @@ function ProductRow({
   uploading: boolean
   onDuplicate: () => void
   onAddNext: () => void
+  selected?: boolean
+  onToggleSelect?: () => void
 }) {
   const [imgUploading, setImgUploading] = useState(false)
   const [showGallery, setShowGallery] = useState(false)
@@ -142,10 +152,19 @@ function ProductRow({
   const offerType = product.offer_type
 
   return (
-    <div className={`bg-white/5 border ${isExpanded ? 'border-white/20 shadow-xl' : 'border-white/10 hover:border-white/15'} rounded-2xl transition-all relative ${showAutocomplete ? 'z-20' : 'z-10'}`}>
+    <div id={`product-row-${product._key}`} className={`bg-white/5 border ${isExpanded ? 'border-white/20 shadow-xl' : 'border-white/10 hover:border-white/15'} ${selected ? 'border-violet-500/50 bg-violet-500/5' : ''} rounded-2xl transition-all relative ${showAutocomplete ? 'z-20' : 'z-10'}`}>
       {/* ── Collapsed / Header ── */}
       <div className="flex items-center gap-2 p-3">
         <GripVertical className="w-4 h-4 text-white/20 shrink-0 cursor-grab" />
+        
+        {onToggleSelect && (
+          <input 
+            type="checkbox" 
+            checked={!!selected}
+            onChange={onToggleSelect}
+            className="w-4 h-4 shrink-0 rounded border-white/20 bg-black/20 accent-violet-500 focus:ring-violet-500/30 cursor-pointer"
+          />
+        )}
         
         <div className="flex-1 grid grid-cols-[3fr_2fr] gap-2 items-center">
           <div className="relative">
@@ -275,7 +294,7 @@ function ProductRow({
       {/* ── Expanded Form ── */}
       {isExpanded && (
         <div className="p-4 pt-2 border-t border-white/5 space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <div>
               <label className={labelCls}>Page</label>
               <input
@@ -283,6 +302,16 @@ function ProductRow({
                 value={product.page ?? 1}
                 onChange={e => onUpdate({ page: Math.max(1, parseInt(e.target.value) || 1) })}
                 className={inputCls}
+              />
+            </div>
+            <div className="col-span-2">
+              <label className={labelCls}>Weight/Unit <span className="text-white/30">(optional)</span></label>
+              <input
+                type="text"
+                value={product.weight ?? ''}
+                onChange={e => onUpdate({ weight: e.target.value })}
+                className={inputCls}
+                placeholder="e.g. 500gm, 1kg, 2L"
               />
             </div>
           </div>
@@ -451,7 +480,7 @@ function ProductRow({
 }
 
 function ProductGridCard({
-  product, badges, catalogImages, onUpdate, onRemove, onUploadImage, uploading
+  product, badges, catalogImages, onUpdate, onRemove, onUploadImage, uploading, selected, onToggleSelect
 }: {
   product: any
   badges: Badge[]
@@ -460,6 +489,8 @@ function ProductGridCard({
   onRemove: () => void
   onUploadImage: (file: File) => Promise<string | null>
   uploading: boolean
+  selected?: boolean
+  onToggleSelect?: () => void
 }) {
   const [lightbox, setLightbox] = useState<string | null>(null)
   const [imgUploading, setImgUploading] = useState(false)
@@ -478,8 +509,16 @@ function ProductGridCard({
 
   return (
     <>
-      <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden shadow-lg flex flex-col hover:border-white/20 transition-all relative">
-        <div className="absolute top-2 left-2 z-30 flex gap-1">
+      <div id={`product-grid-${product._key}`} className={`bg-white/5 border ${selected ? 'border-violet-500/50 bg-violet-500/5' : 'border-white/10 hover:border-white/20'} rounded-2xl overflow-hidden shadow-lg flex flex-col transition-all relative`}>
+        <div className="absolute top-2 left-2 z-30 flex gap-1 items-center">
+          {onToggleSelect && (
+            <input 
+              type="checkbox" 
+              checked={!!selected}
+              onChange={onToggleSelect}
+              className="w-4 h-4 shrink-0 rounded border-white/20 bg-black/20 accent-violet-500 focus:ring-violet-500/30 cursor-pointer ml-1"
+            />
+          )}
           <button onClick={onRemove} className="p-1.5 bg-black/40 hover:bg-red-500/80 rounded text-white/50 hover:text-white backdrop-blur-md transition-colors" title="Remove">
             <Trash2 className="w-3.5 h-3.5" />
           </button>
@@ -544,7 +583,13 @@ function ProductGridCard({
             value={product.name}
             onChange={e => onUpdate({ name: e.target.value })}
             className="bg-transparent font-medium text-white/90 text-[13px] leading-snug w-full focus:outline-none focus:bg-white/10 hover:bg-white/5 rounded px-1 -mx-1 transition-colors"
-            placeholder="Product name (include weight, e.g. Rice 5kg)"
+            placeholder="Product name"
+          />
+          <input
+            value={product.weight ?? ''}
+            onChange={e => onUpdate({ weight: e.target.value })}
+            className="bg-transparent text-white/50 text-[11px] leading-snug w-full focus:outline-none focus:bg-white/10 hover:bg-white/5 rounded px-1 -mx-1 mt-1 transition-colors"
+            placeholder="Weight/Unit (e.g. 500gm)"
           />
           <div className="mt-auto pt-3 flex items-end justify-between gap-2">
              <div className="shrink-0 flex items-center gap-0.5">
@@ -656,17 +701,20 @@ const getTomorrowStr = () => {
   return `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`
 }
 
-export default function OfferIntakeClient({
-  token, client, campaign: initialCampaign, catalog, badges, logoUrl, switcher,
+function OfferIntakeClientInner({
+  token, client, campaign: initialCampaign, catalog, badges, logoUrl, logoDarkUrl, switcher, hub,
 }: {
   token: string
   client: { id: string; name: string }
   campaign: Campaign | null
   catalog: CatalogItem[]
   badges: Badge[]
-  logoUrl: string | null
+  logoUrl?: string | null
+  logoDarkUrl?: string | null
   switcher?: { kind: string; label: string; href: string }[]
+  hub?: string
 }) {
+  useKeyboardShortcuts({})
   // ── Header state ────────────────────────────────────────────────────────────
   const [title, setTitle] = useState(initialCampaign?.title || '')
   const [dateType, setDateType] = useState<'single' | 'range'>(initialCampaign?.date_type || 'single')
@@ -689,6 +737,27 @@ export default function OfferIntakeClient({
       : []
   )
 
+  const validation = useValidationEngine(products)
+
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
+
+  const toggleSelect = useCallback((key: string) => {
+    setSelectedKeys(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
+
+  const selectAll = useCallback((keysToSelect: string[]) => {
+    setSelectedKeys(new Set(keysToSelect))
+  }, [])
+
+  const clearSelection = useCallback(() => {
+    setSelectedKeys(new Set())
+  }, [])
+
   // ── UI state ────────────────────────────────────────────────────────────────
   const [showCatalog, setShowCatalog] = useState(false)
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list')
@@ -696,6 +765,7 @@ export default function OfferIntakeClient({
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
   const [campaignId, setCampaignId] = useState<string | undefined>(initialCampaign?.id)
+  const [cancelling, setCancelling] = useState(false)
 
   const [catalogPageTarget, setCatalogPageTarget] = useState<number>(1)
 
@@ -989,6 +1059,11 @@ export default function OfferIntakeClient({
       {/* Brand header — stays a comfortable reading width even on wide screens; a
           centered logo/title stretched edge-to-edge on a desktop monitor looks broken. */}
       <div className="max-w-2xl mx-auto px-4 pt-8 sm:pt-12">
+        {hub && (
+          <Link href={`/start/${hub}`} className="inline-flex items-center gap-1.5 text-sm font-medium text-white/50 hover:text-white transition-colors mb-6 group">
+            <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" /> Back to Hub
+          </Link>
+        )}
         <div className="text-center mb-8">
           {logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -1292,9 +1367,19 @@ export default function OfferIntakeClient({
         ) : (
         <div className="mb-8">
           <div className="flex items-center justify-between mb-3 px-1">
-             <h2 className="text-sm font-semibold text-white/70">
-               Products <span className="text-white/30">({products.length})</span>
-             </h2>
+             <div className="flex items-center gap-3">
+               <h2 className="text-sm font-semibold text-white/70">
+                 Products <span className="text-white/30">({products.length})</span>
+               </h2>
+               {products.length > 0 && (
+                 <button onClick={() => {
+                   if (selectedKeys.size === products.length) clearSelection()
+                   else selectAll(products.map(p => p._key))
+                 }} className="text-xs text-white/40 hover:text-white/80 transition-colors">
+                   {selectedKeys.size === products.length ? 'Deselect All' : 'Select All'}
+                 </button>
+               )}
+             </div>
              <div className="flex items-center gap-2">
              <button
                onClick={openBulkPaste}
@@ -1322,6 +1407,36 @@ export default function OfferIntakeClient({
              </div>
           </div>
 
+          {selectedKeys.size > 0 && (
+            <div className="bg-indigo-600 border border-indigo-500 rounded-xl p-3 mb-6 flex items-center justify-between shadow-lg shadow-indigo-900/20 text-white sticky top-4 z-50">
+              <div className="flex items-center gap-3">
+                <span className="font-semibold text-sm bg-indigo-500/50 px-2.5 py-1 rounded-lg shadow-inner">{selectedKeys.size} selected</span>
+                <button onClick={clearSelection} className="text-xs text-indigo-200 hover:text-white transition-colors font-medium">Clear</button>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => {
+                  const wt = prompt('Enter bulk weight/unit for selected items (e.g. 500gm, 1kg):')
+                  if (wt !== null) {
+                    selectedKeys.forEach(key => {
+                      const idx = products.findIndex(p => p._key === key)
+                      if (idx >= 0) updateProduct(key, { weight: wt })
+                    })
+                  }
+                }} className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-xs font-medium transition-colors shadow-sm">
+                  Set Bulk Weight
+                </button>
+                <button onClick={() => {
+                  if (confirm(`Are you sure you want to delete ${selectedKeys.size} selected items?`)) {
+                    selectedKeys.forEach(key => removeProduct(key))
+                    clearSelection()
+                  }
+                }} className="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/40 border border-red-500/30 text-red-100 rounded-lg text-xs font-medium transition-colors shadow-sm">
+                  Delete Selected
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-6">
             {Array.from(new Set(products.map(p => p.page || 1))).sort((a, b) => a - b).map(pageNum => {
                const pageProducts = products.filter(p => (p.page || 1) === pageNum)
@@ -1333,6 +1448,23 @@ export default function OfferIntakeClient({
                         Page {pageNum}
                      </h3>
                      <div className="flex items-center gap-2">
+                       {pageProducts.length > 0 && (
+                         <button onClick={() => {
+                           const pageKeys = pageProducts.map(p => p._key)
+                           const allSelected = pageKeys.every(k => selectedKeys.has(k))
+                           if (allSelected) {
+                             const next = new Set(selectedKeys)
+                             pageKeys.forEach(k => next.delete(k))
+                             setSelectedKeys(next)
+                           } else {
+                             const next = new Set(selectedKeys)
+                             pageKeys.forEach(k => next.add(k))
+                             setSelectedKeys(next)
+                           }
+                         }} className="text-[11px] text-white/40 hover:text-white transition-colors mr-2">
+                           {pageProducts.every(p => selectedKeys.has(p._key)) ? 'Deselect Page' : 'Select Page'}
+                         </button>
+                       )}
                        {pageProducts.length > 1 && (
                          <div className="flex items-center bg-white/5 border border-white/10 rounded-lg p-0.5 mr-1">
                            <button onClick={() => sortPageProducts(pageNum, 'price_asc')} title="Sort by price: low to high"
@@ -1351,6 +1483,9 @@ export default function OfferIntakeClient({
                        )}
                        <button onClick={() => { setCatalogPageTarget(pageNum); setShowCatalog(true) }} className="text-xs font-medium text-white/50 hover:text-white transition-colors flex items-center gap-1">
                          <Search className="w-3 h-3" /> Search past
+                       </button>
+                       <button onClick={() => { setBulkPasteTargetPage(pageNum); openBulkPaste() }} className="text-xs font-medium text-violet-400 hover:text-violet-300 transition-colors flex items-center gap-1 bg-violet-500/10 hover:bg-violet-500/20 px-2 py-1 rounded ml-2">
+                         <Sparkles className="w-3 h-3" /> AI Capture
                        </button>
                      </div>
                    </div>
@@ -1451,6 +1586,26 @@ export default function OfferIntakeClient({
           </div>
         )}
 
+        {/* ── Cancel Button ── */}
+        {!inPasteFlow && campaignId && (
+          <div className="mb-4">
+            <button
+              onClick={async () => {
+                if (confirm('Cancel this request? You will be able to start a new one.')) {
+                  setCancelling(true)
+                  await cancelCampaign(campaignId)
+                  window.location.reload()
+                }
+              }}
+              disabled={cancelling}
+              className="w-full py-3.5 text-sm font-semibold rounded-2xl border border-red-500/20 text-red-400 hover:bg-red-500/10 disabled:opacity-40 transition-all flex items-center justify-center gap-2"
+            >
+              {cancelling ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+              Cancel Request & Start Over
+            </button>
+          </div>
+        )}
+
         {/* ── Save button ── */}
         {!inPasteFlow && (
         <>
@@ -1489,6 +1644,27 @@ export default function OfferIntakeClient({
           onClose={() => setShowCatalog(false)}
         />
       )}
+
+      {/* Enterprise Add-ons */}
+      <ValidationPanel 
+        products={products} 
+        issues={validation.issues}
+        errors={validation.errors}
+        warnings={validation.warnings}
+      />
+      <AiAssistantPanel 
+        products={products} 
+        onApplySuggestion={(key, updates) => updateProduct(key, updates)} 
+      />
     </div>
+  )
+}
+
+export default function OfferIntakeClient(props: any) {
+  return (
+    <CollaborationProvider>
+      <CollaborationStatus />
+      <OfferIntakeClientInner {...props} />
+    </CollaborationProvider>
   )
 }

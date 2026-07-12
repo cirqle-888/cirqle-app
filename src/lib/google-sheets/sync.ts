@@ -111,8 +111,12 @@ export async function syncCampaignToSheet(
       .map(b => b.custom_label || (Array.isArray(b.badge) ? b.badge[0] : b.badge)?.label)
       .filter(Boolean)
       .join(', ')
+    let productName = p.name || ''
+    if (p.weight) {
+      productName = `${productName} ${p.weight}`.trim()
+    }
     return [
-      p.name || '',
+      productName,
       price1,
       price2,
       p.mrp ? String(p.mrp) : '',

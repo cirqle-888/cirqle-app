@@ -13,8 +13,9 @@ import { CSS } from '@dnd-kit/utilities'
 import {
   Send, Loader2, CheckCircle2, Plus, X, Link2, ChevronDown, ChevronUp,
   Clock, RefreshCw, MessageSquarePlus, CalendarDays, FolderOpen,
-  Pencil, Ban, GripVertical, Eye, AlertCircle,
+  Pencil, Ban, GripVertical, Eye, AlertCircle, ArrowLeft,
 } from 'lucide-react'
+import Link from 'next/link'
 import { CLIENT_STATUS_LABEL } from '@/lib/requests/core'
 import { IntakeAppSwitcher } from '@/components/intake/app-switcher'
 import {
@@ -110,7 +111,7 @@ function autoGrow(e: React.FormEvent<HTMLTextAreaElement>) {
 
 export default function IntakeClient({
   token, linkType, requesterName, services, initialRequests,
-  logoUrl, lastTaskTitle, driveFolderLink, switcher,
+  logoUrl, lastTaskTitle, driveFolderLink, switcher, hub,
 }: {
   token: string
   linkType: 'client' | 'agency' | 'generic'
@@ -121,6 +122,7 @@ export default function IntakeClient({
   lastTaskTitle?: string | null
   driveFolderLink?: string | null
   switcher?: { kind: string; label: string; href: string }[]
+  hub?: string
 }) {
   // Single-window layout: collapsible submit form on top, requests list below.
   // The form starts open for first-time visitors (no requests yet).
@@ -241,6 +243,11 @@ export default function IntakeClient({
 
   return (
     <div className="max-w-3xl lg:max-w-6xl mx-auto px-4 py-8 sm:py-12">
+      {hub && (
+        <Link href={`/start/${hub}`} className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors mb-6 group">
+          <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" /> Back to Hub
+        </Link>
+      )}
       {/* Brand header — workspace logo with wordmark fallback */}
       <div className="text-center mb-8">
         {logoUrl ? (

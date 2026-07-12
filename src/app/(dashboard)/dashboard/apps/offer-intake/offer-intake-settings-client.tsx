@@ -437,20 +437,25 @@ export default function OfferIntakeSettingsClient({
   const [q, setQ] = useState('')
 
   const serviceClients = clients.filter(c => c.has_offer_flyer_service)
-  const filtered = clients.filter(c =>
+  const filtered = [...clients].filter(c =>
     c.name.toLowerCase().includes(q.toLowerCase()) ||
     (c.code || '').toLowerCase().includes(q.toLowerCase())
-  )
+  ).sort((a, b) => {
+    const aSetup = a.has_offer_flyer_service && a.offer_intake_token && a.offer_sheet_webhook_url ? 1 : 0
+    const bSetup = b.has_offer_flyer_service && b.offer_intake_token && b.offer_sheet_webhook_url ? 1 : 0
+    if (aSetup !== bSetup) return bSetup - aSetup
+    return a.name.localeCompare(b.name)
+  })
 
   const readyCount = serviceClients.filter(c => c.offer_intake_token && c.offer_sheet_webhook_url).length
 
   return (
-    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6">
-      <Link href="/dashboard/apps" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-4">
+    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
+      <Link href="/dashboard/apps" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-3">
         <ArrowLeft className="w-4 h-4" /> Back to Apps Directory
       </Link>
 
-      <div className="flex items-center gap-3 mb-1">
+      <div className="flex items-center gap-3 mb-6">
         <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
           <Tag className="w-4.5 h-4.5 text-primary" />
         </div>
