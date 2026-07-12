@@ -1710,7 +1710,12 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
               </button>
             </div>
             <div className="p-5">
-              <table className="w-full text-sm mb-4">
+              {/* Generate-payroll preview — 5 numeric columns in a
+                  sheetOnMobile modal with no prior overflow containment;
+                  wrapped so any overflow scrolls within the table instead of
+                  the whole confirm sheet. */}
+              <div className="overflow-x-auto">
+              <table className="w-full text-sm mb-4 min-w-[440px]">
                 <thead>
                   <tr className="text-xs text-muted-foreground border-b border-foreground/15">
                     <th className="text-left pb-2.5">Employee</th>
@@ -1746,6 +1751,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                   </tr>
                 </tfoot>
               </table>
+              </div>
               <p className="text-xs text-muted-foreground mb-4">
                 Commission from contribution scores · Advances auto-deducted from pending salary advances · All records created as <span className="text-amber-400">Pending</span>
               </p>
