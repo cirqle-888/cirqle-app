@@ -942,11 +942,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               <ShieldAlert className="h-4 w-4 shrink-0" />
               <span className="hidden sm:inline">Reconciliation</span>
             </Link>
-            <Link href="/dashboard/import?tab=cashbook_entries"
-              className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap">
-              <Upload className="w-4 h-4 shrink-0" />
-              <span className="hidden sm:inline">Import</span>
-            </Link>
+
             <button onClick={() => setShowTransfer(true)}
               className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap">
               <ArrowLeftRight className="w-4 h-4 shrink-0" />
