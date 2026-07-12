@@ -16,6 +16,10 @@ on:
         description: 'versionName for this build (e.g. 0.6.0)'
         required: false
         default: '0.6.0'
+      apkUrl:
+        description: 'Public direct-download URL where you will host this APK (for the auto-update manifest)'
+        required: false
+        default: ''
   push:
     tags: ['mobile-v*']
 
@@ -102,6 +106,21 @@ jobs:
         working-directory: mobile/android
         run: ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace
 
+      - name: Write auto-update manifest (latest.json)
+        # Host this alongside the APK; the in-app checker (src/lib/native-update.ts)
+        # polls it and prompts when versionCode increases. Fill apkUrl to point at
+        # wherever you host the APK (website / Drive / OneDrive direct link).
+        run: |
+          cat > mobile/latest.json <<JSON
+          {
+            "versionCode": ${{ github.run_number }},
+            "versionName": "${VERSION_NAME}",
+            "url": "${{ github.event.inputs.apkUrl }}",
+            "notes": "Cirqle ${VERSION_NAME}"
+          }
+          JSON
+          cat mobile/latest.json
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -111,3 +130,4 @@ jobs:
             mobile/android/app/build/outputs/apk/debug/*.apk
             mobile/android/app/build/outputs/apk/release/*.apk
             mobile/android/app/build/outputs/bundle/release/*.aab
+            mobile/latest.json
