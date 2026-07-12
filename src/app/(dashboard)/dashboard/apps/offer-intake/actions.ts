@@ -14,11 +14,30 @@ export async function getOfferClients(): Promise<ActionResult<{ clients: any[] }
   const admin = createAdminClient()
   const { data, error } = await admin
     .from('clients')
-    .select('id, name, code, is_active, offer_intake_token, offer_sheet_webhook_url')
+    .select('id, name, code, is_active, offer_intake_token, offer_sheet_webhook_url, offer_sheet_url')
     .eq('is_active', true)
     .order('name')
   if (error) return { ok: false, error: error.message }
   return { ok: true, data: { clients: data || [] } }
+}
+
+// ── Save / update offer sheet URL ────────────────────────────────────────────
+
+export async function saveOfferSheetUrl(
+  clientId: string,
+  url: string,
+): Promise<ActionResult> {
+  const _guard = await requireAdmin(); if (!_guard.ok) return { ok: false, error: _guard.error }
+  const admin = createAdminClient()
+  
+  const { error } = await admin
+    .from('clients')
+    .update({ offer_sheet_url: url.trim() || null })
+    .eq('id', clientId)
+
+  if (error) return { ok: false, error: error.message }
+  revalidatePath('/dashboard/apps/offer-intake')
+  return { ok: true }
 }
 
 // ── Save / update webhook URL ────────────────────────────────────────────────
@@ -66,7 +85,7 @@ export async function resetOfferToken(clientId: string): Promise<ActionResult<{ 
 
 // ── Test sheet sync (uses most recent active campaign) ───────────────────────
 
-export async function testSheetSync(clientId: string): Promise<ActionResult<{ message: string }>> {
+export async function testSheetSync(clientId: string): Promise<ActionResult<{ message: string; sheetUrl?: string }>> {
   const _guard = await requireAdmin(); if (!_guard.ok) return { ok: false, error: _guard.error }
   const admin = createAdminClient()
 
@@ -89,7 +108,7 @@ export async function testSheetSync(clientId: string): Promise<ActionResult<{ me
 
   const result = await syncCampaignToSheet(admin, campaign.id, clientId)
   if (!result.ok) return { ok: false, error: result.error }
-  return { ok: true, data: { message: 'Sheet synced successfully ✓' } }
+  return { ok: true, data: { message: 'Sheet synced successfully ✓', sheetUrl: result.sheetUrl } }
 }
 
 // ── Toggle offer flyer service for a client ───────────────────────────────────

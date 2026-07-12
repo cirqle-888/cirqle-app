@@ -9,7 +9,7 @@ import {
   Package, Store, Upload,
 } from 'lucide-react'
 import {
-  saveWebhookUrl, resetOfferToken, testSheetSync, ensureOfferToken,
+  saveWebhookUrl, saveOfferSheetUrl, resetOfferToken, testSheetSync, ensureOfferToken,
   toggleOfferFlyerService,
 } from './actions'
 
@@ -68,6 +68,7 @@ function ClientCard({
     id: string; name: string; code?: string
     offer_intake_token: string | null
     offer_sheet_webhook_url: string | null
+    offer_sheet_url: string | null
     has_offer_flyer_service: boolean
   }
   appUrl: string
@@ -75,8 +76,10 @@ function ClientCard({
   const [client, setClient] = useState(initialClient)
   const [expanded, setExpanded] = useState(false)
   const [webhookDraft, setWebhookDraft] = useState(client.offer_sheet_webhook_url || '')
+  const [sheetUrlDraft, setSheetUrlDraft] = useState(client.offer_sheet_url || '')
   const [token, setToken] = useState(client.offer_intake_token || '')
   const [webhookSaving, setWebhookSaving] = useState(false)
+  const [sheetUrlSaving, setSheetUrlSaving] = useState(false)
   const [resetting, setResetting] = useState(false)
   const [testing, setTesting] = useState(false)
   const [generating, setGenerating] = useState(false)
@@ -110,6 +113,14 @@ function ClientCard({
     else flash('err', res.error || 'Could not save')
   }
 
+  async function handleSaveSheetUrl() {
+    setSheetUrlSaving(true)
+    const res = await saveOfferSheetUrl(client.id, sheetUrlDraft)
+    setSheetUrlSaving(false)
+    if (res.ok) flash('ok', 'Google Sheet URL saved ✓')
+    else flash('err', res.error || 'Could not save')
+  }
+
   async function handleResetToken() {
     if (!confirm('Reset token? The old intake link will stop working immediately.')) return
     setResetting(true)
@@ -131,8 +142,15 @@ function ClientCard({
     setTesting(true)
     const res = await testSheetSync(client.id)
     setTesting(false)
-    if (res.ok) flash('ok', res.data?.message || 'Sync successful ✓')
-    else flash('err', res.error || 'Sync failed')
+    if (res.ok) {
+      flash('ok', res.data?.message || 'Sync successful ✓')
+      if (res.data?.sheetUrl) {
+        setSheetUrlDraft(res.data.sheetUrl)
+        setClient(c => ({ ...c, offer_sheet_url: res.data?.sheetUrl || null }))
+      }
+    } else {
+      flash('err', res.error || 'Sync failed')
+    }
   }
 
   return (
@@ -284,44 +302,79 @@ function ClientCard({
                 )}
               </div>
 
-              {/* ── Section 2: Webhook URL ── */}
+              {/* ── Section 2: Webhook URL & Sheet Link ── */}
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/60 mb-3 flex items-center gap-1.5">
-                  <Webhook className="w-3.5 h-3.5" /> Google Sheet Webhook
+                  <Webhook className="w-3.5 h-3.5" /> Google Sheet Sync
                 </p>
-                <div className="space-y-2">
-                  <div>
-                    <label className={labelCls}>Apps Script Web App URL</label>
-                    <input
-                      value={webhookDraft}
-                      onChange={e => setWebhookDraft(e.target.value)}
-                      className={inputCls}
-                      placeholder="https://script.google.com/macros/s/…/exec"
-                    />
-                  </div>
-                  {webhookDraft && !webhookDraft.startsWith('https://script.google.com/macros/s/') && (
-                    <p className="text-xs text-red-400 flex items-center gap-1.5">
-                      <AlertTriangle className="w-3 h-3" /> Must be a Google Apps Script Web App URL
-                    </p>
-                  )}
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={handleSaveWebhook}
-                      disabled={webhookSaving || webhookDraft === (client.offer_sheet_webhook_url || '')}
-                      className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg gradient-bg text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
-                    >
-                      {webhookSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-                      Save URL
-                    </button>
-                    {!hasWebhook && (
-                      <a
-                        href="https://script.google.com"
-                        target="_blank" rel="noopener noreferrer"
-                        className="text-xs text-violet-400 hover:underline flex items-center gap-1"
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <div>
+                      <label className={labelCls}>Google Sheet URL (Anyone can view)</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          value={sheetUrlDraft}
+                          onChange={e => setSheetUrlDraft(e.target.value)}
+                          className={inputCls}
+                          placeholder="https://docs.google.com/spreadsheets/d/…/edit"
+                        />
+                        {client.offer_sheet_url && (
+                          <>
+                            <CopyBtn text={client.offer_sheet_url} />
+                            <a href={client.offer_sheet_url} target="_blank" rel="noopener noreferrer"
+                              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors shrink-0" title="Open sheet">
+                              <ExternalLink className="w-4 h-4" />
+                            </a>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleSaveSheetUrl}
+                        disabled={sheetUrlSaving || sheetUrlDraft === (client.offer_sheet_url || '')}
+                        className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg gradient-bg text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
                       >
-                        Open Apps Script <ExternalLink className="w-3 h-3" />
-                      </a>
+                        {sheetUrlSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                        Save Link
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div>
+                      <label className={labelCls}>Apps Script Web App URL</label>
+                      <input
+                        value={webhookDraft}
+                        onChange={e => setWebhookDraft(e.target.value)}
+                        className={inputCls}
+                        placeholder="https://script.google.com/macros/s/…/exec"
+                      />
+                    </div>
+                    {webhookDraft && !webhookDraft.startsWith('https://script.google.com/macros/s/') && (
+                      <p className="text-xs text-red-400 flex items-center gap-1.5">
+                        <AlertTriangle className="w-3 h-3" /> Must be a Google Apps Script Web App URL
+                      </p>
                     )}
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleSaveWebhook}
+                        disabled={webhookSaving || webhookDraft === (client.offer_sheet_webhook_url || '')}
+                        className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg gradient-bg text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+                      >
+                        {webhookSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                        Save URL
+                      </button>
+                      {!hasWebhook && (
+                        <a
+                          href="https://script.google.com"
+                          target="_blank" rel="noopener noreferrer"
+                          className="text-xs text-violet-400 hover:underline flex items-center gap-1"
+                        >
+                          Open Apps Script <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -452,7 +505,8 @@ export default function OfferIntakeSettingsClient({
           </div>
         )}
         {[
-          ...filtered.filter(c => c.has_offer_flyer_service),
+          ...filtered.filter(c => c.has_offer_flyer_service && c.offer_intake_token && c.offer_sheet_webhook_url),
+          ...filtered.filter(c => c.has_offer_flyer_service && !(c.offer_intake_token && c.offer_sheet_webhook_url)),
           ...filtered.filter(c => !c.has_offer_flyer_service),
         ].map(client => (
           <ClientCard key={client.id} client={client} appUrl={appUrl} />

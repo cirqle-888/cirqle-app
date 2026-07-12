@@ -123,10 +123,13 @@ function ensureCirqleVisible() {
 }
 
 function sendTextToCirqle(text) {
-  if (!text || !text.trim()) return
   ensureCirqleVisible()
   const target = CIRQLE_URL + '/dashboard/capture'
-  const send = () => cirqle.webContents.send(CH.CIRQLE_CAPTURE, { text })
+  const send = () => {
+    if (text && text.trim()) {
+      cirqle.webContents.send(CH.CIRQLE_CAPTURE, { text })
+    }
+  }
   if (!(cirqle.webContents.getURL() || '').includes('/dashboard/capture')) {
     cirqle.webContents.loadURL(target)
     cirqle.webContents.once('did-finish-load', () => setTimeout(send, 400)) // let React mount the listener

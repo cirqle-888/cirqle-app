@@ -2595,6 +2595,7 @@ export type Database = {
           name: string
           offer_intake_token: string | null
           offer_sheet_webhook_url: string | null
+          offer_sheet_url: string | null
           phone: string | null
           pricing_pending: boolean
           updated_at: string | null

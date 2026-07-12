@@ -43,6 +43,7 @@ contextBridge.exposeInMainWorld('__CIRQLE_DESKTOP__', {
 
 ipcRenderer.on('cirqle:capture', (_e, payload) => {
   try {
+    window.__pendingCirqleCapture = payload
     window.dispatchEvent(new CustomEvent('cirqle:capture', { detail: payload }))
   } catch { /* page not ready */ }
 })

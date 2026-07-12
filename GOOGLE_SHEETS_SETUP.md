@@ -62,7 +62,7 @@ function doPost(e) {
     tab.autoResizeColumns(1, data.headers.length);
 
     return ContentService
-      .createTextOutput(JSON.stringify({ ok: true, rows: data.rows.length }))
+      .createTextOutput(JSON.stringify({ ok: true, rows: data.rows.length, sheetUrl: sheet.getUrl() }))
       .setMimeType(ContentService.MimeType.JSON);
 
   } catch (err) {

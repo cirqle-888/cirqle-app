@@ -512,6 +512,19 @@ export default function RequestsClient({
   }
 
   // ── AI Capture ──────────────────────────────────────────────────────────
+  async function handleAiCaptureClick() {
+    try {
+      const text = await navigator.clipboard.readText()
+      if (text) {
+        // @ts-ignore
+        window.__pendingCirqleCapture = { text }
+      }
+    } catch {
+      // Ignore clipboard errors
+    }
+    router.push('/dashboard/capture')
+  }
+
   async function runAiCapture() {
     if (!aiCaptureText.trim()) return
     setAiCaptureBusy(true)
@@ -742,7 +755,7 @@ export default function RequestsClient({
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap bg-secondary border border-border hover:text-foreground text-muted-foreground transition-colors">
               <Share2 className="w-3.5 h-3.5" /> Share
             </button>
-            <button onClick={() => { setAiCaptureText(''); setAiCaptureOpen(true) }}
+            <button onClick={handleAiCaptureClick}
               title="Paste a WhatsApp message, email, or note — AI fills in the New Request form for you to review"
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap bg-secondary border border-border hover:text-foreground text-muted-foreground transition-colors">
               <Sparkles className="w-3.5 h-3.5" /> AI Capture

@@ -37,6 +37,12 @@ export default async function OfferPreparePage() {
       hasToken: !!c.offer_intake_token,
       hasWebhook: !!c.offer_sheet_webhook_url,
     }))
+    .sort((a, b) => {
+      const aSetup = a.hasToken && a.hasWebhook ? 1 : 0
+      const bSetup = b.hasToken && b.hasWebhook ? 1 : 0
+      if (aSetup !== bSetup) return bSetup - aSetup
+      return a.name.localeCompare(b.name)
+    })
 
   return <OfferPrepareClientPicker clients={clients} />
 }

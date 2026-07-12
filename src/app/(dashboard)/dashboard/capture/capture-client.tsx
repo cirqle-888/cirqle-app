@@ -105,6 +105,16 @@ export default function CaptureClient() {
       if (typeof detail.text === 'string') setText(detail.text)
       if (typeof detail.phone === 'string') setPhone(detail.phone)
     }
+    
+    // Check if the event fired before we mounted
+    // @ts-ignore
+    const pending = window.__pendingCirqleCapture
+    if (pending) {
+      if (typeof pending.text === 'string') setText(pending.text)
+      if (typeof pending.phone === 'string') setPhone(pending.phone)
+      // @ts-ignore
+      window.__pendingCirqleCapture = null
+    }
     window.addEventListener('cirqle:capture', onCapture as EventListener)
     return () => window.removeEventListener('cirqle:capture', onCapture as EventListener)
   }, [])

@@ -16,7 +16,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { notifyAdmins } from '@/lib/notifications/create'
 
-interface SyncResult { ok: boolean; error?: string }
+interface SyncResult { ok: boolean; error?: string; sheetUrl?: string }
 
 function formatDate(campaign: {
   date_type: string
@@ -150,12 +150,25 @@ export async function syncCampaignToSheet(
       return { ok: false, error: errMsg }
     }
 
+    let returnedSheetUrl: string | undefined
+    try {
+      const responseData = await res.json()
+      if (responseData?.sheetUrl) {
+        returnedSheetUrl = responseData.sheetUrl
+        await admin.from('clients')
+          .update({ offer_sheet_url: responseData.sheetUrl })
+          .eq('id', clientId)
+      }
+    } catch (e) {
+      // Ignore parse errors if the response isn't JSON
+    }
+
     // 5. Update sync timestamp
     await admin.from('offer_campaigns')
       .update({ sheet_last_synced_at: new Date().toISOString(), sheet_sync_error: null })
       .eq('id', campaignId)
 
-    return { ok: true }
+    return { ok: true, sheetUrl: returnedSheetUrl }
 
   } catch (err: any) {
     const errMsg = err?.name === 'TimeoutError'
