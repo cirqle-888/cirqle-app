@@ -1,200 +1,325 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
-import { Inbox, Tag, Settings as SettingsIcon, ArrowRight, Sparkles, Link2, Copy, Check, MessageCircle, Users, ExternalLink, Megaphone } from 'lucide-react'
+import {
+  Inbox, Tag, Settings as SettingsIcon, ArrowRight,
+  Sparkles, Link2, Copy, Check, MessageCircle, Users, ExternalLink,
+  Megaphone, Shield, ArrowUpRight, BarChart3, CreditCard,
+  CheckCircle, Paintbrush, FileText, Image as ImageIcon, Briefcase
+} from 'lucide-react'
 import { INTAKE_KIND_META } from '@/lib/services/intake'
-import { whatsappShareUrl } from '@/lib/invoices/share'
+import { createTypedClient } from '@/lib/supabase/client'
+import AppSelect from '@/components/ui/app-select'
 
-// Intake apps available today, in display order, with their config route.
-const APPS: { kind: string; configHref: string; icon: typeof Inbox }[] = [
-  { kind: 'request_portal', configHref: '/dashboard/apps/standard-request', icon: Inbox },
-  { kind: 'offer_intake',   configHref: '/dashboard/apps/offer-intake',  icon: Tag },
-]
-
-// Planned modules (no portal yet) — surfaced so the roadmap is visible and the
-// "add-on" model is obvious.
-const COMING: { label: string; description: string }[] = [
-  { label: 'Website Requests',   description: 'Website change / build request intake.' },
-  { label: 'SEO',                description: 'SEO task and report intake.' },
-]
-
+// Data models
 interface MultiServiceClient {
   id: string; name: string; phone: string | null; hub_token: string; kinds: string[]
   lastActivity: string | null; requestCount: number
 }
 
-function relativeTime(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime()
-  const days = Math.floor(ms / 86400000)
-  if (days <= 0) return 'today'
-  if (days === 1) return 'yesterday'
-  if (days < 30) return `${days}d ago`
-  const months = Math.floor(days / 30)
-  if (months < 12) return `${months}mo ago`
-  return `${Math.floor(months / 12)}y ago`
-}
+// ─── 1. Client Hub (Hero Section) ─────────────────────────────────────────────
 
-function HubLinkRow({ client }: { client: MultiServiceClient }) {
+function ClientHubHero({ clients }: { clients: MultiServiceClient[] }) {
+  const [selectedId, setSelectedId] = useState<string>(clients[0]?.id || '')
   const [copied, setCopied] = useState(false)
+  const [branding, setBranding] = useState<{ logo_url: string | null; primary_color: string | null } | null>(null)
+  
+  useEffect(() => {
+    if (!selectedId) {
+      setBranding(null)
+      return
+    }
+    let isMounted = true
+    const fetchBranding = async () => {
+      const supabase = createTypedClient()
+      const { data } = await supabase.from('client_branding').select('logo_url, primary_color').eq('client_id', selectedId).single()
+      if (isMounted) {
+        setBranding(data || null)
+      }
+    }
+    fetchBranding()
+    return () => { isMounted = false }
+  }, [selectedId])
 
-  function hubUrl() {
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.cirqle.work'
-    return `${origin}/start/${client.hub_token}`
-  }
-  async function handleCopy() {
-    await navigator.clipboard.writeText(hubUrl())
+  const selectedClient = clients.find(c => c.id === selectedId)
+  const hubUrl = selectedClient ? `${typeof window !== 'undefined' ? window.location.origin : 'https://app.cirqle.work'}/start/${selectedClient.hub_token}` : '#'
+
+  const handleCopy = async () => {
+    if (!selectedClient) return
+    await navigator.clipboard.writeText(hubUrl)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
-  function handleShare() {
-    const text = `Hi ${client.name},\n\nHere's your Cirqle link — use it to submit ${client.kinds.map(k => INTAKE_KIND_META[k]?.label.toLowerCase() || k).join(' or ')}:\n${hubUrl()}`
-    window.open(whatsappShareUrl(text, client.phone), '_blank', 'noopener,noreferrer')
-  }
-  function handleOpen() {
-    window.open(hubUrl(), '_blank', 'noopener,noreferrer')
+
+  const handleOpen = () => {
+    if (selectedClient) window.open(hubUrl, '_blank', 'noopener,noreferrer')
   }
 
   return (
-    <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-secondary/40 border border-border/60">
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-foreground truncate">{client.name}</p>
-        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-          {client.kinds.map(k => (
-            <span key={k} className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20">
-              {INTAKE_KIND_META[k]?.label || k}
-            </span>
-          ))}
-          {client.lastActivity && (
-            <span className="text-[10px] text-muted-foreground">
-              {relativeTime(client.lastActivity)} · {client.requestCount} request{client.requestCount === 1 ? '' : 's'}
-            </span>
-          )}
+    <div className="relative overflow-hidden rounded-2xl border border-border/80 bg-card shadow-sm">
+      {/* Background decoration */}
+      <div className="absolute top-0 right-0 p-12 opacity-5 pointer-events-none">
+         <Users className="w-64 h-64" />
+      </div>
+
+      <div className="p-8 sm:p-10 flex flex-col md:flex-row gap-10 relative z-10">
+        <div className="flex-1 space-y-6">
+           <div>
+             <h2 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
+               Client Hub <Sparkles className="w-5 h-5 text-violet-500" />
+             </h2>
+             <p className="text-base text-muted-foreground mt-2 max-w-lg">
+               One secure branded portal for your clients to access every service.
+             </p>
+           </div>
+           
+           <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-3 gap-x-6">
+             <div className="flex items-center gap-2 text-sm text-foreground/80"><Check className="w-4 h-4 text-emerald-500" /> Offer Campaigns</div>
+             <div className="flex items-center gap-2 text-sm text-foreground/80"><Check className="w-4 h-4 text-emerald-500" /> Design Requests</div>
+             <div className="flex items-center gap-2 text-sm text-foreground/80"><Check className="w-4 h-4 text-emerald-500" /> Advertising</div>
+             <div className="flex items-center gap-2 text-sm text-muted-foreground/60"><ArrowRight className="w-4 h-4" /> Future Reports</div>
+             <div className="flex items-center gap-2 text-sm text-muted-foreground/60"><ArrowRight className="w-4 h-4" /> Future Billing</div>
+             <div className="flex items-center gap-2 text-sm text-muted-foreground/60"><ArrowRight className="w-4 h-4" /> Future Approvals</div>
+           </div>
+
+           <div className="flex flex-wrap items-center gap-3 pt-4">
+             <button onClick={handleOpen} disabled={!selectedClient} className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-violet-700 transition-colors shadow-sm disabled:opacity-50">
+               <ExternalLink className="w-4 h-4" /> Open Client Hub
+             </button>
+             <button onClick={handleCopy} disabled={!selectedClient} className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-foreground hover:bg-secondary transition-colors disabled:opacity-50">
+               {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />} Copy Hub Link
+             </button>
+             <Link href="/dashboard/settings/workspaces" className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-foreground hover:bg-secondary transition-colors">
+               <Paintbrush className="w-4 h-4" /> Manage Branding
+             </Link>
+           </div>
+        </div>
+
+        <div className="w-full md:w-80 shrink-0 flex flex-col gap-4">
+          <div className="rounded-xl border border-border/60 bg-secondary/30 p-5 h-full flex flex-col">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">
+              Preview Client Hub
+            </h3>
+            
+            {clients.length > 0 ? (
+              <div className="space-y-4 flex-1">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-foreground">Select Client</label>
+                  <AppSelect value={selectedId} onChange={e => setSelectedId(e.target.value)} className="w-full text-sm">
+                    {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </AppSelect>
+                </div>
+
+                <div className="pt-4 border-t border-border/50">
+                  <div className="text-xs font-medium text-muted-foreground mb-3">Branding Status</div>
+                  {branding ? (
+                    <div className="flex items-center gap-3 p-3 rounded-lg bg-card border border-border shadow-sm">
+                      {branding.logo_url ? (
+                        <div className="w-10 h-10 rounded-md bg-secondary/50 flex items-center justify-center overflow-hidden border border-border/50 shrink-0">
+                          <img src={branding.logo_url} alt="Logo" className="w-full h-full object-contain" />
+                        </div>
+                      ) : (
+                        <div className="w-10 h-10 rounded-md bg-secondary flex items-center justify-center border border-border/50 shrink-0">
+                          <ImageIcon className="w-4 h-4 text-muted-foreground" />
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium truncate">{selectedClient?.name}</div>
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <div className="w-3 h-3 rounded-full border border-border/50 shrink-0" style={{ backgroundColor: branding.primary_color || '#000' }} />
+                          <span className="text-[10px] text-muted-foreground font-mono truncate">{branding.primary_color || 'Default'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-center p-4 rounded-lg border border-dashed border-border/80 bg-card text-xs text-muted-foreground text-center">
+                      No branding configured
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="py-8 flex-1 flex items-center justify-center text-center text-sm text-muted-foreground">
+                No clients currently assigned to Client Hub.
+              </div>
+            )}
+          </div>
         </div>
       </div>
-      <button onClick={handleOpen} title="Open link"
-        className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors shrink-0">
-        <ExternalLink className="w-3.5 h-3.5" />
-      </button>
-      <button onClick={handleCopy} title="Copy hub link"
-        className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors shrink-0">
-        {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-      </button>
-      <button onClick={handleShare} title="Share via WhatsApp"
-        className="p-1.5 rounded-lg text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors shrink-0">
-        <MessageCircle className="w-3.5 h-3.5" />
-      </button>
     </div>
   )
 }
 
+// ─── 2. Client Portals ────────────────────────────────────────────────────────
+
+function ClientPortalCard({ 
+  title, description, icon: Icon, configHref, count, isMock 
+}: { 
+  title: string, description: string, icon: any, configHref: string, count: number, isMock?: boolean 
+}) {
+  return (
+    <div className="rounded-2xl border border-border/80 bg-card p-6 flex flex-col shadow-sm transition-shadow hover:shadow-md">
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center shrink-0">
+            <Icon className="w-5 h-5 text-violet-600 dark:text-violet-400" />
+          </div>
+          <div>
+            <h3 className="text-base font-semibold text-foreground tracking-tight">{title}</h3>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                Active
+              </span>
+              <span className="text-[11px] text-muted-foreground">{count} client{count !== 1 ? 's' : ''} enabled</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p className="text-sm text-muted-foreground flex-1 mb-6 leading-relaxed">
+        {description}
+      </p>
+      
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-2">
+          <button disabled={isMock} className="inline-flex justify-center items-center gap-1.5 rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground hover:bg-secondary transition-colors disabled:opacity-50">
+            <Link2 className="w-3.5 h-3.5" /> Generate Link
+          </button>
+          <button disabled={isMock} className="inline-flex justify-center items-center gap-1.5 rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground hover:bg-secondary transition-colors disabled:opacity-50">
+            <Copy className="w-3.5 h-3.5" /> Copy Link
+          </button>
+        </div>
+        <div className="flex items-center justify-between pt-3 border-t border-border/50">
+           <button disabled={isMock} className="text-xs font-medium text-muted-foreground hover:text-foreground inline-flex items-center gap-1 transition-colors disabled:opacity-50">
+             Open Portal <ArrowUpRight className="w-3 h-3" />
+           </button>
+           <Link href={configHref} className="text-xs font-medium text-violet-600 dark:text-violet-400 hover:text-violet-700 inline-flex items-center gap-1 transition-colors">
+             <SettingsIcon className="w-3 h-3" /> Configuration
+           </Link>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── 3. Internal Modules ──────────────────────────────────────────────────────
+
+const INTERNAL_MODULES = [
+  { label: 'Advertising ERP', description: 'Internal campaign management, budget tracking, and meta integration.', href: '/dashboard/advertising', icon: BarChart3 },
+  { label: 'Internal Operations', description: 'Task routing, billing, and internal project state.', href: '/dashboard/tasks', icon: Briefcase },
+  { label: 'Admin Modules', description: 'User management, permissions, and internal configuration.', href: '/dashboard/settings', icon: Shield },
+]
+
+function InternalModules() {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+      {INTERNAL_MODULES.map(mod => (
+        <Link key={mod.label} href={mod.href} className="group rounded-xl border border-border/60 bg-secondary/20 p-5 hover:bg-secondary/40 transition-colors">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="p-2.5 rounded-lg bg-foreground/5 text-foreground group-hover:bg-foreground/10 transition-colors">
+              <mod.icon className="w-4 h-4" />
+            </div>
+            <h4 className="text-sm font-semibold text-foreground">{mod.label}</h4>
+          </div>
+          <p className="text-xs text-muted-foreground leading-relaxed">{mod.description}</p>
+        </Link>
+      ))}
+    </div>
+  )
+}
+
+// ─── 4. Coming Soon ───────────────────────────────────────────────────────────
+
+const COMING_SOON = [
+  { label: 'Client Reports', icon: FileText },
+  { label: 'Approvals', icon: CheckCircle },
+  { label: 'Billing Portal', icon: CreditCard },
+  { label: 'Brand Guidelines', icon: Paintbrush },
+  { label: 'Campaign Dashboard', icon: BarChart3 },
+  { label: 'Feedback Center', icon: MessageCircle },
+]
+
+function ComingSoon() {
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
+      {COMING_SOON.map(mod => (
+        <div key={mod.label} className="rounded-xl border border-dashed border-border/50 bg-secondary/10 p-5 opacity-70 flex flex-col items-center text-center select-none">
+          <mod.icon className="w-5 h-5 text-muted-foreground mb-3" />
+          <h4 className="text-xs font-medium text-foreground mb-1.5">{mod.label}</h4>
+          <span className="text-[9px] uppercase tracking-wider font-semibold text-muted-foreground px-2 py-0.5 rounded-full bg-secondary border border-border/50">Coming Soon</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
 export default function AppsClient({ clientCounts, multiServiceClients = [] }: { clientCounts: Record<string, number>; multiServiceClients?: MultiServiceClient[] }) {
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen pb-20">
       <Header
-        title="Apps Directory"
-        subtitle="Client-facing intake add-ons — each feeds submissions into the Requests inbox"
+        title="Portals & Apps"
+        subtitle="Manage client-facing touchpoints, internal operations, and enterprise intake flows."
       />
-      <div className="px-4 sm:px-6 lg:px-8 pb-16 max-w-4xl mx-auto mt-2 space-y-6">
-        <p className="text-sm text-muted-foreground">
-          Each app is a tokenised portal a client uses to submit work. Which app a client sees is decided by the
-          services assigned to them (<span className="text-foreground">Settings → Services → Intake Form</span>).
-          Submissions from every app land in one place — the <span className="text-foreground">Requests</span> inbox.
-        </p>
+      <div className="px-4 sm:px-6 lg:px-8 max-w-[1400px] mx-auto mt-6 space-y-14">
+        
+        {/* 1. Client Hub (Hero Section) */}
+        <section>
+          <ClientHubHero clients={multiServiceClients} />
+        </section>
 
-        {/* Active apps */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* Advertising — a full management module (not a tokenised intake form),
-              but it's an "app" that handles client ad requests through the same
-              Requests inbox, so it lives here too. */}
-          <Link
-            href="/dashboard/advertising"
-            className="rounded-xl border border-border bg-card p-5 flex flex-col hover:border-pink-500/40 transition-colors"
-          >
-            <div className="flex items-center gap-2.5 mb-2">
-              <div className="w-9 h-9 rounded-lg bg-pink-500/10 border border-pink-500/20 flex items-center justify-center shrink-0">
-                <Megaphone className="w-4 h-4 text-pink-600 dark:text-pink-400" />
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold text-foreground">Advertising</h3>
-                <p className="text-[11px] text-muted-foreground">Paid-ads campaigns</p>
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground flex-1">
-              Run Meta / Google / etc. campaigns. Client ad requests land in the Requests inbox; start one to
-              create a campaign + a single task, with daily performance, budgets and billing.
-            </p>
-            <span className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-pink-600 dark:text-pink-400">
-              <ArrowRight className="w-3.5 h-3.5" /> Open module
-            </span>
-          </Link>
-
-          {APPS.map(({ kind, configHref, icon: Icon }) => {
-            const meta = INTAKE_KIND_META[kind]
-            const count = clientCounts[kind] || 0
-            return (
-              <div key={kind} className="rounded-xl border border-border bg-card p-5 flex flex-col">
-                <div className="flex items-center gap-2.5 mb-2">
-                  <div className="w-9 h-9 rounded-lg bg-violet-500/10 border border-violet-500/20 flex items-center justify-center shrink-0">
-                    <Icon className="w-4 h-4 text-violet-600 dark:text-violet-400" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-semibold text-foreground">{meta?.label || kind}</h3>
-                    <p className="text-[11px] text-muted-foreground">{count} client{count === 1 ? '' : 's'} enabled</p>
-                  </div>
-                </div>
-                <p className="text-xs text-muted-foreground flex-1">{meta?.description}</p>
-                <Link
-                  href={configHref}
-                  className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-violet-600 dark:text-violet-400 hover:underline"
-                >
-                  <SettingsIcon className="w-3.5 h-3.5" /> Configure &amp; manage links <ArrowRight className="w-3 h-3" />
-                </Link>
-              </div>
-            )
-          })}
-        </div>
-
-        {/* Multi-service clients — these are the ones who need the single
-            Client Hub link (/start/<token>) instead of one app's direct link,
-            since they have more than one intake app enabled. */}
-        {multiServiceClients.length > 0 && (
+        {/* 2. Client Portals */}
+        <section className="space-y-5">
           <div>
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1 flex items-center gap-1.5">
-              <Link2 className="w-3.5 h-3.5" /> Client Hub Links
-            </h3>
-            <p className="text-xs text-muted-foreground mb-3 flex items-start gap-1.5">
-              <Users className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-              These {multiServiceClients.length} client{multiServiceClients.length === 1 ? '' : 's'} have more than one app enabled — share this ONE link
-              instead of separate app links; it shows them only the form(s) they need.
-            </p>
-            <div className="space-y-2">
-              {multiServiceClients.map(c => <HubLinkRow key={c.id} client={c} />)}
-            </div>
+             <h2 className="text-lg font-semibold text-foreground tracking-tight">Client Portals</h2>
+             <p className="text-sm text-muted-foreground mt-1">Individual secure intake links shared directly with clients.</p>
           </div>
-        )}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <ClientPortalCard
+               title="Offer Campaign Intake"
+               description={INTAKE_KIND_META['offer_intake']?.description || 'Supermarket / retail clients submit their offer lists securely.'}
+               icon={Tag}
+               configHref="/dashboard/apps/offer-intake"
+               count={clientCounts['offer_intake'] || 0}
+            />
+            <ClientPortalCard
+               title="Design / Task Request"
+               description={INTAKE_KIND_META['request_portal']?.description || 'Clients submit design and standard tasks through the portal.'}
+               icon={Inbox}
+               configHref="/dashboard/apps/standard-request"
+               count={clientCounts['request_portal'] || 0}
+            />
+            <ClientPortalCard
+               title="Advertising Request"
+               description="Clients submit new paid media and advertising campaign requests."
+               icon={Megaphone}
+               configHref="/dashboard/advertising"
+               count={clientCounts['advertising_req'] || 0}
+               isMock={true}
+            />
+          </div>
+        </section>
 
-        {/* Roadmap */}
-        <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5" /> Planned modules
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {COMING.map(c => (
-              <div key={c.label} className="rounded-xl border border-dashed border-border/60 bg-card/40 p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <h4 className="text-sm font-medium text-foreground/70">{c.label}</h4>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border shrink-0">Coming soon</span>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">{c.description}</p>
-              </div>
-            ))}
+        {/* 3. Internal Modules */}
+        <section className="space-y-5">
+          <div>
+             <h2 className="text-lg font-semibold text-foreground tracking-tight">Internal Modules</h2>
+             <p className="text-sm text-muted-foreground mt-1">Tools and dashboards for your internal operations team.</p>
           </div>
-          <p className="text-[11px] text-muted-foreground/70 mt-3">
-            New modules plug in the same way: add the intake kind, build its portal, and tag the relevant services — no schema change.
-          </p>
-        </div>
+          <InternalModules />
+        </section>
+
+        {/* 4. Coming Soon */}
+        <section className="space-y-5 pt-2">
+          <div>
+             <h2 className="text-lg font-semibold text-foreground tracking-tight">Coming Soon</h2>
+             <p className="text-sm text-muted-foreground mt-1">Future modules planned for the Client Hub ecosystem.</p>
+          </div>
+          <ComingSoon />
+        </section>
+
       </div>
     </div>
   )
