@@ -635,6 +635,10 @@ function TotalsComparison({ scenarios, comparisons, divisor, baseSalaries }: {
   const fmt = (v: number, money: boolean) => (money ? inr(v / divisor) : pct1(v))
   return (
     <div className="bg-secondary/40 border border-border rounded-xl overflow-hidden">
+      {/* overflow-x-auto: column count is dynamic (one per scenario) — the
+          outer overflow-hidden alone would silently clip scenarios beyond
+          the visible width with no way to reach them. */}
+      <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-muted-foreground border-b border-border">
@@ -665,6 +669,7 @@ function TotalsComparison({ scenarios, comparisons, divisor, baseSalaries }: {
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   )
 }

@@ -905,7 +905,8 @@ export default function ReportsClient({
                     <h3 className="text-sm font-semibold">Team Overview</h3>
                     {dateFilter && <p className="text-xs text-muted-foreground mt-0.5">{getDateFilterLabel(dateFilter)}</p>}
                   </div>
-                  <table className="w-full text-sm">
+                  <div className="overflow-x-auto">
+                  <table className="w-full text-sm min-w-[420px]">
                     <thead>
                       <tr className="border-b border-border bg-secondary/40">
                         <th className="text-left px-5 py-3 text-xs font-medium text-muted-foreground">Employee</th>
@@ -953,6 +954,7 @@ export default function ReportsClient({
                       </tr>
                     </tfoot>
                   </table>
+                  </div>
                 </div>
 
                 {/* Team earnings bar chart */}
