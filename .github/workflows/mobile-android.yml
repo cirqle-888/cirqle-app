@@ -57,6 +57,12 @@ jobs:
           npx cap add android
           npx cap sync android
 
+      - name: Apply app icon + splash
+        working-directory: mobile
+        # Fans mobile/assets/* into android/res (all densities + adaptive icons
+        # + light/dark splash). Persists branding across the fresh cap add.
+        run: npx @capacitor/assets generate --android
+
       - name: Set versionCode / versionName
         working-directory: mobile/android
         # versionCode must strictly increase per Play upload — the run number
@@ -77,22 +83,24 @@ jobs:
         if: env.HAS_KEYSTORE == 'true'
         run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/upload.keystore"
 
-      - name: Build signed release AAB
+      - name: Build signed release APK + AAB
         if: env.HAS_KEYSTORE == 'true'
         working-directory: mobile/android
-        # android.injected.signing.* signs without editing the generated
-        # build.gradle (the same path Android Studio's signed-bundle wizard uses).
+        # assembleRelease → sideloadable APK (the primary private-distribution
+        # artifact); bundleRelease → AAB. android.injected.signing.* signs both
+        # without editing the generated build.gradle (same path Android Studio's
+        # signed-bundle wizard uses).
         run: |
-          ./gradlew bundleRelease --no-daemon --stacktrace \
+          ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace \
             -Pandroid.injected.signing.store.file="$RUNNER_TEMP/upload.keystore" \
             -Pandroid.injected.signing.store.password="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
             -Pandroid.injected.signing.key.alias="${{ secrets.ANDROID_KEY_ALIAS }}" \
             -Pandroid.injected.signing.key.password="${{ secrets.ANDROID_KEY_PASSWORD }}"
 
-      - name: Build unsigned release AAB (no keystore configured)
+      - name: Build unsigned release APK + AAB (no keystore configured)
         if: env.HAS_KEYSTORE != 'true'
         working-directory: mobile/android
-        run: ./gradlew bundleRelease --no-daemon --stacktrace
+        run: ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -101,4 +109,5 @@ jobs:
           if-no-files-found: warn
           path: |
             mobile/android/app/build/outputs/apk/debug/*.apk
+            mobile/android/app/build/outputs/apk/release/*.apk
             mobile/android/app/build/outputs/bundle/release/*.aab
