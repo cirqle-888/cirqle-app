@@ -203,7 +203,10 @@ export default function DesignationsClient(props: Props) {
           (mobileView === 'list' ? 'flex flex-col' : 'hidden md:flex')
         }
       >
-        <div className="px-4 py-4 border-b border-border flex items-center justify-between">
+        {/* pl-14 on mobile clears the global sidebar hamburger (fixed top-left,
+            16-52px) that was covering the 'Designations' heading; md:px-4
+            restores desktop padding where the hamburger is md:hidden. */}
+        <div className="pl-14 pr-4 md:px-4 py-4 border-b border-border flex items-center justify-between">
           <h2 className="font-semibold text-foreground">Designations</h2>
           {canManage && (
             <button
@@ -268,10 +271,13 @@ export default function DesignationsClient(props: Props) {
           (mobileView === 'detail' ? 'block' : 'hidden md:block')
         }
       >
-        {/* Mobile-only back button to return to the list pane. */}
+        {/* Mobile-only back button to return to the list pane. pl-14 clears
+            the fixed global sidebar hamburger so the 'Back' label isn't
+            partly hidden under it (the button is full-width so it was
+            tappable regardless, but the leading text was occluded). */}
         <button
           onClick={() => setMobileView('list')}
-          className="md:hidden w-full flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium text-primary border-b border-border bg-sidebar/40"
+          className="md:hidden w-full flex items-center gap-1.5 pl-14 pr-4 py-2.5 text-sm font-medium text-primary border-b border-border bg-sidebar/40"
         >
           <ChevronLeft className="w-4 h-4" /> Back to designations
         </button>

@@ -2483,7 +2483,12 @@ export default function SettingsClient(props: Props) {
                     Recalculate Task Billing
                   </button>
                 </div>
-                <div className="flex items-center gap-2 mb-3">
+                {/* flex-col on phones: the two filter inputs can't shrink below
+                    their intrinsic min-width, so side-by-side the second
+                    ('Filter services') was pushed off-screen and clipped (no
+                    scroll container). Stacked full-width on mobile, restored
+                    to a shared row (flex-1 each) from sm: up. */}
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-3">
                   <SearchBar value={matrixClientSearch} onChange={setMatrixClientSearch} placeholder="Filter clients…" className="flex-1" />
                   <SearchBar value={matrixServiceSearch} onChange={setMatrixServiceSearch} placeholder="Filter services…" className="flex-1" />
                   {(matrixClientSearch || matrixServiceSearch) && (
