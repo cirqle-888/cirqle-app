@@ -77,7 +77,7 @@ export function AppLauncherTrigger() {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="p-5 max-h-[70vh] overflow-y-auto">
+            <div className="p-5 max-h-[70dvh] overflow-y-auto">
               {favorites.length > 0 && (
                 <>
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/40 mb-3">Favorites</p>

@@ -423,7 +423,7 @@ export default function ReceiptModal({ input, onClose }: Props) {
 
   return (
     <ModalOverlay onClose={onClose} sheetOnMobile>
-      <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+      <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[92dvh]">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-secondary/30 shrink-0">
           <div>

@@ -180,10 +180,10 @@ export function TaskEditModal({
         className="w-full sm:max-w-lg"
         style={kbOffset > 0 ? { marginBottom: kbOffset } : undefined}
       >
-        {/* Mobile: h-[100dvh] fills exactly the visual viewport (shrinks when keyboard
+        {/* Mobile: h-full fills exactly the visual viewport (shrinks when keyboard
             opens). Desktop: auto height capped at 90dvh. overflow-hidden so the
             internal scroll container handles scrolling, not the modal shell. */}
-        <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full shadow-2xl h-[100dvh] sm:h-auto sm:max-h-[90dvh] flex flex-col overflow-hidden">
+        <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full shadow-2xl h-full sm:h-auto sm:max-h-[90dvh] flex flex-col overflow-hidden">
           {/* Header — always visible, never scrolls */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-card rounded-t-2xl shrink-0">
             <div>

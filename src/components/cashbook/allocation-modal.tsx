@@ -277,7 +277,7 @@ export default function AllocationModal({ entryId, entryDate, entryClientId, amo
 
   return (
     <ModalOverlay onClose={onClose}>
-      <div className="bg-card border border-border rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+      <div className="bg-card border border-border rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85dvh]">
         <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-secondary/30">
           <div>
             <h2 className="font-semibold">Manage Invoice Allocations</h2>

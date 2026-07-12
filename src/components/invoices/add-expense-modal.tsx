@@ -195,7 +195,7 @@ export default function AddExpenseModal({
 
   return (
     <ModalOverlay onClose={onClose}>
-      <div className="bg-card border border-border rounded-2xl shadow-2xl flex flex-col h-full max-h-[90vh] w-full max-w-xl overflow-hidden">
+      <div className="bg-card border border-border rounded-2xl shadow-2xl flex flex-col h-full max-h-[90dvh] w-full max-w-xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-border/40 shrink-0">
           <div>

@@ -150,7 +150,7 @@ export function NotificationBell({ isCollapsed = false }: { isCollapsed?: boolea
           ref={panelRef}
           onMouseDown={e => e.stopPropagation()}
           style={{ position: 'fixed', top: panelPos.top, left: panelPos.left, width: PANEL_WIDTH, zIndex: 1000 }}
-          className="max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-card shadow-2xl shadow-black/30 animate-in fade-in slide-in-from-top-1 duration-100"
+          className="max-h-[70dvh] overflow-y-auto rounded-xl border border-border bg-card shadow-2xl shadow-black/30 animate-in fade-in slide-in-from-top-1 duration-100"
         >
           <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-border sticky top-0 bg-card">
             <h3 className="text-xs font-semibold text-foreground">Notifications</h3>

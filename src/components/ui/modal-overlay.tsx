@@ -152,7 +152,7 @@ export function ModalOverlay({
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
-        className={sheetOnMobile ? "w-full max-h-[90vh] sm:max-h-[85vh] sm:w-auto flex flex-col focus:outline-none" : "w-full max-h-[90vh] flex flex-col focus:outline-none max-w-fit"}
+        className={sheetOnMobile ? "w-full max-h-[90dvh] sm:max-h-[85dvh] sm:w-auto flex flex-col focus:outline-none" : "w-full max-h-[90dvh] flex flex-col focus:outline-none max-w-fit"}
         tabIndex={-1}
       >
         {children}

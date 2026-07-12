@@ -274,7 +274,7 @@ export default function AllocateFromCashbookModal({
 
   return (
     <ModalOverlay onClose={onClose}>
-      <div className="bg-card border border-border rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[88vh]">
+      <div className="bg-card border border-border rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[88dvh]">
         {/* Header */}
         <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-border bg-secondary/30">
           <div className="min-w-0">
