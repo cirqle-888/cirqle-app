@@ -109,7 +109,7 @@ export function IntegrationsTab({ project, canEdit, onChange }: { project: any, 
           <p className="text-sm text-muted-foreground mt-1">Link this project to an external advertising campaign to enable automatic synchronization.</p>
         </div>
         <div className="p-6 pt-0 space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <label className="text-sm font-medium">Provider Connection</label>
               <select 

@@ -369,7 +369,13 @@ export default function AdvertisingClient({
 
       {/* ── KPI Summary ── */}
       {migrated && cards.length > 0 && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+        /* grid-cols-1 explicit at base: without it, CSS Grid's implicit
+           column has no minmax(0,1fr) constraint below sm, so it sizes to
+           the max-content width of the widest KPI card instead of the
+           viewport — the whole row (and every child in it) silently grew
+           past the screen edge on phones. Same root cause as the campaign-
+           card grid below. */
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
           <KpiCard icon={Zap} label="Active" value={totals.active} sub={`of ${cards.length} campaigns`} accent />
           {walletSupported
             ? <KpiCard icon={Wallet} label="Wallet Balance" value={inr(totals.walletBalance)} sub="across all clients" />
@@ -465,7 +471,7 @@ export default function AdvertisingClient({
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
             Unassigned ({unassigned.length})
           </h2>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {unassigned.map(c => <CampaignCard key={c.p.id} card={c} walletOn={walletSupported} />)}
           </div>
         </div>
@@ -480,7 +486,7 @@ export default function AdvertisingClient({
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
             Campaigns ({filteredCards.length})
           </h2>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {filteredCards.map(c => <CampaignCard key={c.p.id} card={c} walletOn={walletSupported} />)}
             <Link
               href="/dashboard/advertising/integrations"
@@ -572,9 +578,15 @@ function ClientSection({ group, history, candidates, walletSupported, canManage 
         )}
       </div>
 
-      {/* Campaign cards */}
+      {/* Campaign cards.
+          grid-cols-1 explicit: confirmed live at 375px via getComputedStyle
+          — without it this grid's implicit base-breakpoint column sized to
+          437px (max-content of the card) instead of the 335px container,
+          so the whole card silently rendered wider than the viewport
+          (KPI grid's 4th column and the Billing row both "cut off" were
+          symptoms of THIS, not independent bugs). */}
       {group.cards.length > 0 ? (
-        <div className="grid gap-4 p-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2 xl:grid-cols-3">
           {group.cards.map(c => <CampaignCard key={c.p.id} card={c} walletOn={walletSupported} />)}
         </div>
       ) : (
@@ -750,7 +762,12 @@ function CampaignCard({ card, walletOn }: { card: CardData; walletOn: boolean })
         {/* Financial progress uses actual money consumed = reported spend + 18% GST */}
         <BudgetBar spent={spendWithGst(agg.spend || 0)} total={walletOn && allocated > 0 ? allocated : (p.ad_budget_amount || 0)} />
         {walletOn && (
-          <div className="mt-1.5 flex items-center justify-between text-[10px] text-muted-foreground">
+          // flex-wrap: on phones "Billing: ₹X (Y%)" + "Remaining alloc: ₹Z"
+          // together don't fit one line — unwrapped, the row had no way to
+          // shrink and forced the ENTIRE campaign card wider than the
+          // viewport (the KPI grid below inherited the overflow as a
+          // symptom, not a cause).
+          <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground">
             <span>Billing: <span className="font-semibold text-foreground">{inr(billing, 2)}</span>
               {p.service_charge_type === 'percent' ? ` (${p.service_charge_value}%)` : ''}
             </span>
@@ -814,7 +831,7 @@ function EmptyState({ canCreate }: { canCreate: boolean }) {
       </div>
 
       {/* How it works */}
-      <div className="border-t border-border bg-muted/30 px-8 py-6 grid gap-6 sm:grid-cols-3 text-center">
+      <div className="border-t border-border bg-muted/30 px-8 py-6 grid grid-cols-1 gap-6 sm:grid-cols-3 text-center">
         {[
           { icon: Link2, step: '1', title: 'Connect Ad Account', desc: 'OAuth with Meta or Google — takes 30 seconds.' },
           { icon: Zap, step: '2', title: 'Auto-sync Campaigns', desc: 'Daily metrics pull into your dashboard automatically.' },

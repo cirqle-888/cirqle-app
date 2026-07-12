@@ -146,7 +146,7 @@ export function IntegrationsClient({
           <Link2 className="h-5 w-5 text-pink-500" />
           <h2 className="font-semibold">Connect an Ad Platform</h2>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {/* Meta */}
           <button
             onClick={() => openClientSelector('meta')}
@@ -191,7 +191,7 @@ export function IntegrationsClient({
       {connections.length > 0 && (
         <div className="space-y-3">
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Connected Providers</h2>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {connections.map(conn => {
               const isExpired = new Date(conn.token_expires_at) < new Date()
 
@@ -277,7 +277,7 @@ export function IntegrationsClient({
             <Zap className="h-4 w-4 text-pink-500" />
             <h2 className="font-semibold">Discovered Ad Accounts</h2>
           </div>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {connections.flatMap(c =>
               (c.ad_accounts || []).map(acc => (
                 <div key={acc.id} className="rounded-xl border border-border bg-card p-5 flex flex-col justify-between">

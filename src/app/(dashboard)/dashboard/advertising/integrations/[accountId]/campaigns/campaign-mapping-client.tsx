@@ -240,9 +240,13 @@ export function CampaignMappingClient({
         </div>
       )}
 
-      {/* Table */}
+      {/* Table — bulk-select + per-row mapping controls (admin/integrations
+          setup flow, not a daily workflow). overflow-x-auto contains any
+          overflow to the table instead of it breaking the page layout on
+          phones; min-w gives the 6 columns + checkbox room to stay legible. */}
       <div className="rounded-xl border border-border overflow-hidden">
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[640px]">
           <thead className="bg-muted/50 text-muted-foreground">
             <tr>
               <th className="w-9 p-3">
@@ -355,6 +359,7 @@ export function CampaignMappingClient({
             })}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   )

@@ -58,7 +58,7 @@ async function IntegrationsLoader({
 
 function IntegrationsSkeleton() {
   return (
-    <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+    <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
       {[1, 2, 3].map(i => (
         <div key={i} className="rounded-xl border border-border bg-card">
           <div className="p-6">

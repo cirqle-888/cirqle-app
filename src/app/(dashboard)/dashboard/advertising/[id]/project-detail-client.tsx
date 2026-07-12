@@ -367,7 +367,7 @@ function OverviewTab({ project, agg, remaining, health, allocations = [], wallet
       </div>
 
       {/* Work + billing status */}
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {campaignTask ? (
           <Link href={`/dashboard/tasks?focus=${campaignTask.id}`}
             className="flex items-center justify-between rounded-lg border border-border bg-card p-3 hover:bg-secondary/50">
@@ -922,7 +922,7 @@ function NotesTab({ projectId, notes, events, canEdit, onChange }: {
     setBusy(false); setBody(''); onChange()
   }
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <div className="space-y-3">
         <div className="text-sm font-semibold">Notes</div>
         {canEdit && (
