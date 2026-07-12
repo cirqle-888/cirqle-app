@@ -533,7 +533,9 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
     <div className="flex h-full">
       {/* ── Pane 1: list + search ── */}
       <aside className={`${activeId ? 'hidden md:flex' : 'flex'} w-full md:w-72 shrink-0 flex-col border-r border-border bg-background`}>
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+        {/* pl-14 on mobile clears the fixed global sidebar hamburger (see the
+            thread header below); md:px-4 restores normal desktop padding. */}
+        <div className="flex items-center justify-between pl-14 pr-4 md:px-4 py-3 border-b border-border">
           <h1 className="text-base font-semibold">Chat</h1>
           <div className="flex items-center gap-1">
             <button onClick={() => refreshList()} className="rounded p-1.5 text-muted-foreground hover:text-foreground" aria-label="Refresh">
@@ -632,7 +634,13 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
           </div>
         ) : (
           <>
-            <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+            {/* pl-14 on mobile: the app's global sidebar hamburger is fixed at
+                the top-left corner (16–52px), which sat directly on top of this
+                Back button — a mobile user literally could not tap 'back' to
+                return to the conversation list. Padding shifts the header
+                content clear of it. md:px-4 restores normal padding on desktop
+                where the hamburger is md:hidden. */}
+            <div className="flex items-center gap-2 border-b border-border pl-14 pr-4 md:px-4 py-3">
               <button onClick={() => setActiveId(null)} className="md:hidden rounded p-1 text-muted-foreground" aria-label="Back">
                 <ArrowLeft className="h-4 w-4" />
               </button>
