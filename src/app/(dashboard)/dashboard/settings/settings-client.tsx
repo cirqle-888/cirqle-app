@@ -39,6 +39,19 @@ import { isDesktop, getReceiptSharePref, setReceiptSharePref, RECEIPT_SHARE_LABE
 import { buildInvoiceShareText } from '@/lib/invoices/share'
 import { buildReminderText } from '@/lib/followups/grouping'
 
+const AllocationRebuildPanel = dynamic(
+  () => import('@/components/cashbook/allocation-rebuild-panel'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+        <span className="w-4 h-4 border-2 border-foreground/20 border-t-primary rounded-full animate-spin" />
+        Loading rebuild wizard…
+      </div>
+    ),
+  },
+)
+
 // ── Module-level search bar (stable reference — never defined inside a component) ──
 function SearchBar({ value, onChange, placeholder = 'Search…', className = '' }: {
   value: string; onChange: (v: string) => void; placeholder?: string; className?: string
@@ -64,7 +77,7 @@ function SearchBar({ value, onChange, placeholder = 'Search…', className = '' 
 const SETTINGS_TABS = [
   'Company', 'Employees', 'Clients', 'Services',
   'Groups & Params', 'Tools', 'Bank Accounts', 'Cash Categories', 'Exchange Rates',
-  'Pricing Matrix', 'Privacy & Security', 'Message Templates'
+  'Pricing Matrix', 'Privacy & Security', 'Message Templates', 'Matching'
 ] as const
 type SettingsTab = typeof SETTINGS_TABS[number]
 
@@ -74,7 +87,7 @@ const SETTINGS_GROUPS: { label: string; emoji: string; tabs: SettingsTab[] }[] =
   { label: 'People',          emoji: '👥', tabs: ['Employees'] },
   { label: 'Clients & Pricing', emoji: '🤝', tabs: ['Clients', 'Pricing Matrix'] },
   { label: 'Service Catalog', emoji: '📦', tabs: ['Services', 'Groups & Params', 'Tools'] },
-  { label: 'Finance',         emoji: '💸', tabs: ['Bank Accounts', 'Cash Categories', 'Exchange Rates'] },
+  { label: 'Finance',         emoji: '💸', tabs: ['Bank Accounts', 'Cash Categories', 'Exchange Rates', 'Matching'] },
   { label: 'Communication',   emoji: '💬', tabs: ['Message Templates'] },
 ]
 
@@ -2734,6 +2747,22 @@ export default function SettingsClient(props: Props) {
               saveCompanySettings={saveCompanySettings}
               saving={saving}
             />
+          )}
+          {tab === 'Matching' && (
+            <div className="max-w-4xl space-y-6 animate-in fade-in zoom-in-95 duration-200">
+              <div className="flex flex-col gap-1 border-b border-border/50 pb-4 mb-4">
+                <h2 className="text-lg font-semibold tracking-tight flex items-center gap-2">
+                  <RefreshCw className="w-5 h-5 text-amber-500" />
+                  Allocation Rebuild
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Preview, approve, and commit a full per-client FIFO rebuild for invoice allocations.
+                </p>
+              </div>
+              <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
+                <AllocationRebuildPanel />
+              </div>
+            </div>
           )}
         </div>
       </div>

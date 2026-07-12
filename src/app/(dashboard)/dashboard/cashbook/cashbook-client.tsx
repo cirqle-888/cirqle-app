@@ -36,18 +36,6 @@ const PayrollAllocationModal = dynamic(
 )
 // Receipt generator only mounts when the user clicks the receipt icon on an
 // inflow entry. Lazy-loaded so jspdf stays out of the main bundle.
-const AllocationRebuildPanel = dynamic(
-  () => import('@/components/cashbook/allocation-rebuild-panel'),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
-        <span className="w-4 h-4 border-2 border-foreground/20 border-t-primary rounded-full animate-spin" />
-        Loading rebuild wizard…
-      </div>
-    ),
-  },
-)
 const ReceiptModal = dynamic(
   () => import('@/components/cashbook/receipt-modal'),
   { ssr: false },
@@ -201,47 +189,10 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   const [showForm, setShowForm] = useState(false)
   const [showTransfer, setShowTransfer] = useState(false)
   const [formEditingId, setFormEditingId] = useState<string | null>(null)   // non-null = editing existing
-  const [showRebuildPanel, setShowRebuildPanel] = useState(false)
   const [saving, setSaving] = useState(false)
-  // Unallocate-all-invoices flow: idle → confirm → working → done(count)
-  const [unallocate, setUnallocate] = useState<'closed' | 'confirm' | 'working' | { done: number }>('closed')
-  // Bulk-select unallocate
-  const [bulkSelectMode, setBulkSelectMode] = useState(false)
-  const [selectedEntryIds, setSelectedEntryIds] = useState<Set<string>>(new Set())
-  const [bulkWorking, setBulkWorking] = useState(false)
   const router = useRouter()
   const pathname = usePathname()
 
-  function toggleBulkEntry(id: string) {
-    setSelectedEntryIds(prev => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
-  }
-
-  async function runBulkUnallocate() {
-    if (selectedEntryIds.size === 0) return
-    setBulkWorking(true)
-    const supabase = createClient()
-    const { error } = await supabase
-      .from('cashbook_invoice_allocations')
-      .update({ deleted_at: new Date().toISOString() })
-      .in('cashbook_entry_id', Array.from(selectedEntryIds))
-      .is('deleted_at', null)
-    setBulkWorking(false)
-    if (error) { alert(error.message); return }
-    setSelectedEntryIds(new Set())
-    setBulkSelectMode(false)
-    router.refresh()
-  }
-
-  async function runUnallocateAll() {
-    setUnallocate('working')
-    const res = await backupAndResetAllocations()
-    if (res.ok) { setUnallocate({ done: res.data?.backed_up ?? 0 }); router.refresh() }
-    else { alert(res.error || 'Failed to unallocate'); setUnallocate('closed') }
-  }
   const searchParams = useSearchParams()
 
   const [filterType, setFilterType] = useState(searchParams.get('type') || '')
@@ -991,30 +942,6 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               <ShieldAlert className="h-4 w-4 shrink-0" />
               <span className="hidden sm:inline">Reconciliation</span>
             </Link>
-            {isAdmin && (
-              <button onClick={() => setShowRebuildPanel(true)}
-                className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap border border-amber-500/30 text-amber-300"
-                title="Rebuild all invoice allocations (admin only)">
-                <RefreshCw className="w-4 h-4 shrink-0" />
-                <span className="hidden sm:inline">Rebuild Allocations</span>
-              </button>
-            )}
-            {isAdmin && (
-              <button onClick={() => setUnallocate('confirm')}
-                className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap border border-red-500/30 text-red-300"
-                title="Remove ALL invoice allocations (payroll untouched, reversible)">
-                <ShieldAlert className="w-4 h-4 shrink-0" />
-                <span className="hidden sm:inline">Unallocate All</span>
-              </button>
-            )}
-            {isAdmin && (
-              <button onClick={() => { setBulkSelectMode(p => !p); setSelectedEntryIds(new Set()) }}
-                className={`flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg transition-colors whitespace-nowrap border ${bulkSelectMode ? 'bg-violet-500/20 border-violet-500/40 text-violet-300' : 'bg-secondary border-violet-500/20 text-violet-400 hover:bg-secondary/80'}`}
-                title="Select entries to bulk-unallocate">
-                <CheckCircle className="w-4 h-4 shrink-0" />
-                <span className="hidden sm:inline">{bulkSelectMode ? 'Cancel Select' : 'Bulk Select'}</span>
-              </button>
-            )}
             <Link href="/dashboard/import?tab=cashbook_entries"
               className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap">
               <Upload className="w-4 h-4 shrink-0" />
@@ -1206,25 +1133,6 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
           onClearAll={() => { setFilterType(''); setFilterMonth(''); setFilterCategory(''); setSearchFacets([]); setSearchDraft(''); setFilterAllocStatus(''); setFilterMinAmount(''); setFilterMaxAmount(''); setFilterClient('') }}
         />
 
-        {/* Bulk-select action banner */}
-        {bulkSelectMode && (
-          <div className="sticky top-0 z-20 flex items-center justify-between gap-3 px-4 py-2.5 bg-violet-600/90 backdrop-blur rounded-xl border border-violet-500/40 text-white text-sm">
-            <span>{selectedEntryIds.size > 0 ? `${selectedEntryIds.size} entr${selectedEntryIds.size === 1 ? 'y' : 'ies'} selected` : 'Select allocated invoice entries to unallocate'}</span>
-            <div className="flex items-center gap-2">
-              {selectedEntryIds.size > 0 && (
-                <button onClick={() => setSelectedEntryIds(new Set())} className="text-violet-200 hover:text-white text-xs px-2 py-1 rounded hover:bg-violet-500/30 transition-colors">Clear</button>
-              )}
-              <button
-                onClick={runBulkUnallocate}
-                disabled={selectedEntryIds.size === 0 || bulkWorking}
-                className="flex items-center gap-1.5 bg-white text-violet-700 font-semibold text-xs px-3 py-1.5 rounded-lg hover:bg-violet-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-                <ShieldAlert className="w-3.5 h-3.5" />
-                {bulkWorking ? 'Unallocating…' : `Unallocate ${selectedEntryIds.size > 0 ? selectedEntryIds.size : ''}`}
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* Entries */}
         <div className="bg-card border border-border rounded-xl overflow-hidden">
           {/* Mobile / Tablet Card View */}
@@ -1245,13 +1153,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               const isEditing = editingRow === entry.id
 
               return (
-                <div key={entry.id} data-entry-id={entry.id} className={`hover-gradient-row flex flex-col ${bulkSelectMode && isInvoice && totalAlloc > 0 && selectedEntryIds.has(entry.id) ? 'ring-2 ring-inset ring-violet-500/40 bg-violet-500/5' : ''}`}>
-                  {bulkSelectMode && isInvoice && totalAlloc > 0 && (
-                    <label className="flex items-center gap-2 px-4 pt-3 cursor-pointer select-none">
-                      <input type="checkbox" checked={selectedEntryIds.has(entry.id)} onChange={() => toggleBulkEntry(entry.id)} className="accent-violet-500 w-3.5 h-3.5" />
-                      <span className="text-xs text-violet-400">{selectedEntryIds.has(entry.id) ? 'Selected' : 'Select for unallocate'}</span>
-                    </label>
-                  )}
+                <div key={entry.id} data-entry-id={entry.id} className={`hover-gradient-row flex flex-col`}>
                   <div className="p-4 flex justify-between items-start gap-4">
                     <div className="flex items-center gap-2">
                       <div className={`w-1.5 h-1.5 rounded-full ${entry.type === 'inflow' ? 'bg-green-400' : 'bg-red-400'}`} />
@@ -1404,7 +1306,6 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             <table className="w-full text-sm min-w-[600px]">
             <thead>
               <tr className="border-b border-border bg-secondary/50">
-                {bulkSelectMode && <th className="pl-4 py-3 w-8" />}
                 <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Date</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Category</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Description</th>
@@ -1430,15 +1331,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 const isEditing = editingRow === entry.id
 
                 return (
-                  <tr key={entry.id} data-entry-id={entry.id} className={`hover-gradient-row group ${isEditing ? 'ring-2 ring-inset ring-primary/30 bg-primary/3' : ''} ${bulkSelectMode && isInvoice && totalAlloc > 0 && selectedEntryIds.has(entry.id) ? 'ring-2 ring-inset ring-violet-500/40 bg-violet-500/5' : ''}`}>
-                    {/* ── Bulk checkbox ───────────────────────────────────── */}
-                    {bulkSelectMode && (
-                      <td className="pl-4 py-3 w-8">
-                        {isInvoice && totalAlloc > 0 && (
-                          <input type="checkbox" checked={selectedEntryIds.has(entry.id)} onChange={() => toggleBulkEntry(entry.id)} className="accent-violet-500 w-3.5 h-3.5 cursor-pointer" />
-                        )}
-                      </td>
-                    )}
+                  <tr key={entry.id} data-entry-id={entry.id} className={`hover-gradient-row group ${isEditing ? 'ring-2 ring-inset ring-primary/30 bg-primary/3' : ''}`}>
                     {/* ── Date ────────────────────────────────────────────── */}
                     <td className="px-4 py-3 text-muted-foreground text-xs">
                       {isEditing ? (
@@ -2128,8 +2021,6 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
           input={((): ReceiptInput => {
             const allocs = (receiptEntry.allocations || []).filter(a => !a.deleted_at)
             
-            console.log("RECEIPT ENTRY:", JSON.stringify(receiptEntry, null, 2))
-            
             // Helper to handle Supabase returning an array or object for a relation
             const unwrap = (obj: any) => (Array.isArray(obj) ? obj[0] : obj)
             
@@ -2182,71 +2073,6 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         />
       )}
 
-      {/* Allocation Rebuild Panel (admin only) */}
-      {showRebuildPanel && (
-        <ModalOverlay onClose={() => setShowRebuildPanel(false)}>
-          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-3xl shadow-2xl max-h-[90dvh] flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-3.5 border-b border-border shrink-0">
-              <div>
-                <h2 className="font-semibold text-sm">Allocation Rebuild</h2>
-                <p className="text-[11px] text-muted-foreground mt-0.5">Preview, approve and commit a full per-client FIFO rebuild</p>
-              </div>
-              <button onClick={() => setShowRebuildPanel(false)} className="text-muted-foreground hover:text-foreground">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="overflow-y-auto p-5 flex-1">
-              <AllocationRebuildPanel />
-            </div>
-          </div>
-        </ModalOverlay>
-      )}
-
-      {/* Unallocate All Invoices (admin only) */}
-      {unallocate !== 'closed' && (
-        <ModalOverlay onClose={() => { if (unallocate !== 'working') setUnallocate('closed') }}>
-          <div className="bg-card border border-border rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4">
-            {typeof unallocate === 'object' ? (
-              <>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-green-500/10 flex items-center justify-center shrink-0">
-                    <CheckCircle className="w-5 h-5 text-green-400" />
-                  </div>
-                  <div>
-                    <p className="font-semibold">Invoices unallocated</p>
-                    <p className="text-sm text-muted-foreground">
-                      Removed <strong className="text-foreground">{unallocate.done}</strong> invoice allocation{unallocate.done !== 1 ? 's' : ''}. Invoice paid amounts &amp; statuses were recalculated.
-                    </p>
-                  </div>
-                </div>
-                <button onClick={() => setUnallocate('closed')} className="w-full bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80 transition-colors">Done</button>
-              </>
-            ) : (
-              <>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center shrink-0">
-                    <ShieldAlert className="w-5 h-5 text-red-400" />
-                  </div>
-                  <div>
-                    <p className="font-semibold">Unallocate all invoices?</p>
-                    <p className="text-sm text-muted-foreground">
-                      Removes <b>every</b> invoice allocation and resets all invoices to unpaid/partial. <b>Payroll allocations are not touched.</b> Reversible from the Reconciliation toolkit.
-                    </p>
-                  </div>
-                </div>
-                <div className="flex gap-3">
-                  <button onClick={() => setUnallocate('closed')} disabled={unallocate === 'working'}
-                    className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80 transition-colors disabled:opacity-50">Cancel</button>
-                  <button onClick={runUnallocateAll} disabled={unallocate === 'working'}
-                    className="flex-1 bg-red-500 hover:bg-red-600 text-white text-sm font-medium py-2.5 rounded-lg disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
-                    {unallocate === 'working' ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Unallocating…</> : 'Unallocate all'}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </ModalOverlay>
-      )}
 
       {/* FX Gain/Loss Report Modal (opt-in) */}
       {showFxReportModal && (
