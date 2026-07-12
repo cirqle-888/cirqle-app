@@ -2631,8 +2631,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               { key: 'amount', label: 'Amount ₹', type: 'number' },
             ]}
           />
-          <div className="flex gap-2 flex-wrap items-center justify-between w-full">
-            <div className="flex gap-1.5 flex-wrap">
+          <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center justify-between w-full">
+            <div className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar w-full sm:w-auto shrink-0 pb-1 sm:pb-0 [&>*]:shrink-0">
               {['', 'draft', 'reviewed', 'sent', 'partial', 'overdue'].map(s => (
                 <button key={s}
                   onClick={() => setFilterStatus(s)}
@@ -2645,7 +2645,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 >{s ? getStatusLabel(s) : 'All'}</button>
               ))}
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 shrink-0">
               <button
                 type="button"
                 onClick={() => setGroupByClient(g => !g)}

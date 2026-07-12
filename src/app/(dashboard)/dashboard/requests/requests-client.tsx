@@ -756,9 +756,11 @@ export default function RequestsClient({
       </div>
 
       {/* Search + client filter + view toggle */}
-      <div className="flex flex-col sm:flex-row gap-2 mb-4">
-        <TokenizedSearch
-          className="flex-1"
+      <div className="flex flex-col gap-2 mb-4">
+        {/* Row 1: Search */}
+        <div className="w-full">
+          <TokenizedSearch
+            className="w-full"
           facets={searchFacets}
           onFacetsChange={setSearchFacets}
           draft={searchDraft}
@@ -773,8 +775,12 @@ export default function RequestsClient({
             { key: 'ref', label: 'REQ #', type: 'text' },
           ]}
         />
-        <select value={clientFilter} onChange={e => setClientFilter(e.target.value)}
-          className="bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 sm:w-56">
+        </div>
+        
+        {/* Row 2: Filters & Actions */}
+        <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar w-full pb-1 sm:pb-0 [&>*]:shrink-0">
+          <select value={clientFilter} onChange={e => setClientFilter(e.target.value)}
+            className="bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 sm:w-56">
           <option value="">All clients</option>
           {filterClients.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select>
@@ -803,6 +809,7 @@ export default function RequestsClient({
             {batchSel.mode ? 'Exit Select' : 'Select'}
           </button>
         )}
+        </div>
       </div>
 
       {/* Tokenized active filters (client dropdown chip; search shows in the bar) */}

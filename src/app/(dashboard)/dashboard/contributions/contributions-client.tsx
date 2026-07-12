@@ -1282,35 +1282,32 @@ export default function ContributionsClient({
               </div>
             )}
 
-            {/* Search — Odoo-style tokenized search. Typing offers
-                "Search for / Search Client for / Search Service for: <text>".
-                Same field ORs (Client: a OR Client: b); generic text narrows
-                (AND); across fields AND. */}
-            <TokenizedSearch
-              className="order-1 sm:order-none w-full sm:w-auto shrink-0 sm:shrink sm:flex-1 sm:min-w-0"
-              facets={searchFacets}
-              onFacetsChange={setSearchFacets}
-              draft={searchDraft}
-              onDraftChange={setSearchDraft}
-              placeholder="Search tasks, clients, services, code…"
-              resultCount={filteredTasks.length}
-              resultNoun="task"
-              fields={[
-                { key: 'title', label: 'Title', type: 'text' },
-                { key: 'client', label: 'Client', type: 'text' },
-                { key: 'service', label: 'Service', type: 'text' },
-                { key: 'task', label: 'Task #', type: 'number' },
-                // Amount only when this user is allowed to see pricing.
-                ...(showBilling ? [{ key: 'amount', label: 'Amount ₹', type: 'number' as const }] : []),
-              ]}
-            />
+            <div className="w-full sm:w-auto sm:flex-1 shrink-0">
+              <TokenizedSearch
+                className="w-full"
+                facets={searchFacets}
+                onFacetsChange={setSearchFacets}
+                draft={searchDraft}
+                onDraftChange={setSearchDraft}
+                placeholder="Search tasks, clients, services, code…"
+                resultCount={filteredTasks.length}
+                resultNoun="task"
+                fields={[
+                  { key: 'title', label: 'Title', type: 'text' },
+                  { key: 'client', label: 'Client', type: 'text' },
+                  { key: 'service', label: 'Service', type: 'text' },
+                  { key: 'task', label: 'Task #', type: 'number' },
+                  ...(showBilling ? [{ key: 'amount', label: 'Amount ₹', type: 'number' as const }] : []),
+                ]}
+              />
+            </div>
 
-            {/* Top Row My Tasks & Filters (Mobile focused) */}
-            <div className="order-2 flex items-center gap-1.5 shrink-0">
+            {/* Filters Row (Mobile focused horizontally scrollable) */}
+            <div className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar w-full sm:w-auto shrink-0 pb-1 sm:pb-0 [&>*]:shrink-0">
               {/* My Tasks / Not Assigned to Me — available to anyone with an employee
                   record (admins can be assignees/contributors too, not just employees). */}
               {currentEmployee && (
-                <div className="flex items-center gap-1 shrink-0">
+                <>
                   <button
                     onClick={() => setMyScope(s => s === 'mine' ? null : 'mine')}
                     title="Tasks assigned to or contributed by me"
@@ -1333,7 +1330,7 @@ export default function ContributionsClient({
                   >
                     Not Assigned to Me
                   </button>
-                </div>
+                </>
               )}
 
               {/* Mobile Filters Toggle */}

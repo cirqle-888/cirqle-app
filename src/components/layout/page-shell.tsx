@@ -92,8 +92,9 @@ function StickyToolbar({ children }: { children: ReactNode }) {
  * Filters/chips rows can still wrap via flex-wrap inside their own row.
  */
 function StickyToolbarRow({ children, className = '' }: { children: ReactNode; className?: string }) {
-  // Tighter gaps on mobile so wrapped buttons sit closer together.
-  return <div className={`flex items-center gap-1.5 sm:gap-2 w-full ${className}`}>{children}</div>
+  // Mobile: Stack items vertically (Search on top, Filters row, Actions row).
+  // Desktop: Single horizontal row.
+  return <div className={`flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 w-full ${className}`}>{children}</div>
 }
 
 // Compound component API: <StickyToolbar.Row>

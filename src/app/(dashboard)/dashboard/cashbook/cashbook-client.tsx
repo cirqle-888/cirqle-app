@@ -1087,102 +1087,108 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
 
 
         {/* Filters */}
-        <div className="flex gap-3 flex-wrap items-center bg-secondary/20 p-3 rounded-xl border border-border">
-          <div className="flex gap-1.5">
-            {['', 'inflow', 'outflow'].map(t => (
-              <button key={t} onClick={() => setFilterType(t)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filterType === t ? 'gradient-bg text-white' : 'bg-background text-muted-foreground border hover:text-foreground'}`}>
-                {t ? (t === 'inflow' ? 'Income' : 'Expense') : 'All'}
-              </button>
-            ))}
-          </div>
-          
-          <div className="h-5 w-px bg-border hidden sm:block"></div>
-
-          <input
-            type="month"
-            value={filterMonth}
-            onChange={e => setFilterMonth(e.target.value)}
-            className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50"
-          />
-          
-          <select 
-            value={filterCategory} 
-            onChange={e => setFilterCategory(e.target.value)}
-            className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 max-w-[150px]"
-          >
-            <option value="">All Categories</option>
-            {scopedFilterCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-
-          <select
-            value={filterAllocStatus}
-            onChange={e => setFilterAllocStatus(e.target.value)}
-            className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50"
-          >
-            <option value="">All Allocations</option>
-            <option value="unallocated">Unallocated</option>
-            <option value="partial">Partially Allocated</option>
-            <option value="fully">Fully Allocated</option>
-            <option value="over">Over-allocated</option>
-          </select>
-
-          <select
-            value={filterClient}
-            onChange={e => setFilterClient(e.target.value)}
-            className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 max-w-[170px]"
-          >
-            <option value="">All Clients</option>
-            {scopedFilterClients.map(c => <option key={c.id} value={c.id}>{c.code ? `${c.name} · ${c.code}` : c.name}</option>)}
-          </select>
-
-          <button
-            type="button"
-            onClick={() => setSortDir(d => d === 'desc' ? 'asc' : 'desc')}
-            title={sortDir === 'desc' ? 'Date: newest first (click for oldest first)' : 'Date: oldest first (click for newest first)'}
-            className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 hover:bg-secondary/50 transition-colors flex items-center gap-1.5 whitespace-nowrap"
-          >
-            Date {sortDir === 'desc' ? '↓ Newest' : '↑ Oldest'}
-          </button>
-
-          <TokenizedSearch
-            className="w-full sm:w-auto flex-1 min-w-[200px]"
-            facets={searchFacets}
-            onFacetsChange={setSearchFacets}
-            draft={searchDraft}
-            onDraftChange={setSearchDraft}
-            placeholder="Search descriptions, clients..."
-            resultCount={filteredEntries.length}
-            resultNoun="entry"
-            fields={[
-              { key: 'description', label: 'Description', type: 'text' },
-              { key: 'reference', label: 'Reference', type: 'text' },
-              { key: 'category', label: 'Category', type: 'text' },
-              ...(showAmounts ? [{ key: 'amount', label: 'Amount ₹', type: 'number' as const }] : []),
-            ]}
-          />
-
-          {/* Amount range */}
-          <div className="flex items-center gap-1">
-            <input
-              type="number"
-              placeholder="Min ₹"
-              value={filterMinAmount}
-              onChange={e => setFilterMinAmount(e.target.value)}
-              className="bg-background border border-border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 w-24"
-            />
-            <span className="text-muted-foreground text-xs">–</span>
-            <input
-              type="number"
-              placeholder="Max ₹"
-              value={filterMaxAmount}
-              onChange={e => setFilterMaxAmount(e.target.value)}
-              className="bg-background border border-border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 w-24"
+        <div className="flex flex-col gap-3 bg-secondary/20 p-3 rounded-xl border border-border">
+          {/* Row 1: Search */}
+          <div className="w-full shrink-0">
+            <TokenizedSearch
+              className="w-full"
+              facets={searchFacets}
+              onFacetsChange={setSearchFacets}
+              draft={searchDraft}
+              onDraftChange={setSearchDraft}
+              placeholder="Search descriptions, clients..."
+              resultCount={filteredEntries.length}
+              resultNoun="entry"
+              fields={[
+                { key: 'description', label: 'Description', type: 'text' },
+                { key: 'reference', label: 'Reference', type: 'text' },
+                { key: 'category', label: 'Category', type: 'text' },
+                ...(showAmounts ? [{ key: 'amount', label: 'Amount ₹', type: 'number' as const }] : []),
+              ]}
             />
           </div>
 
-          {(filterType || filterMonth || filterCategory || searchFacets.length || filterAllocStatus || filterMinAmount || filterMaxAmount) && (
-            <button onClick={() => { setFilterType(''); setFilterMonth(''); setFilterCategory(''); setSearchFacets([]); setSearchDraft(''); setFilterAllocStatus(''); setFilterMinAmount(''); setFilterMaxAmount('') }} className="text-xs text-muted-foreground hover:text-foreground px-2">Clear</button>
-          )}
+          {/* Row 2: Filters */}
+          <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar w-full shrink-0 pb-1 sm:pb-0 [&>*]:shrink-0">
+            <div className="flex gap-1.5">
+              {['', 'inflow', 'outflow'].map(t => (
+                <button key={t} onClick={() => setFilterType(t)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filterType === t ? 'gradient-bg text-white' : 'bg-background text-muted-foreground border hover:text-foreground'}`}>
+                  {t ? (t === 'inflow' ? 'Income' : 'Expense') : 'All'}
+                </button>
+              ))}
+            </div>
+            
+            <div className="h-5 w-px bg-border hidden sm:block"></div>
+
+            <input
+              type="month"
+              value={filterMonth}
+              onChange={e => setFilterMonth(e.target.value)}
+              className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+            
+            <select 
+              value={filterCategory} 
+              onChange={e => setFilterCategory(e.target.value)}
+              className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 max-w-[150px]"
+            >
+              <option value="">All Categories</option>
+              {scopedFilterCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+
+            <select
+              value={filterAllocStatus}
+              onChange={e => setFilterAllocStatus(e.target.value)}
+              className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50"
+            >
+              <option value="">All Allocations</option>
+              <option value="unallocated">Unallocated</option>
+              <option value="partial">Partially Allocated</option>
+              <option value="fully">Fully Allocated</option>
+              <option value="over">Over-allocated</option>
+            </select>
+
+            <select
+              value={filterClient}
+              onChange={e => setFilterClient(e.target.value)}
+              className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 max-w-[170px]"
+            >
+              <option value="">All Clients</option>
+              {scopedFilterClients.map(c => <option key={c.id} value={c.id}>{c.code ? `${c.name} · ${c.code}` : c.name}</option>)}
+            </select>
+
+            <button
+              type="button"
+              onClick={() => setSortDir(d => d === 'desc' ? 'asc' : 'desc')}
+              title={sortDir === 'desc' ? 'Date: newest first (click for oldest first)' : 'Date: oldest first (click for newest first)'}
+              className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 hover:bg-secondary/50 transition-colors flex items-center gap-1.5 whitespace-nowrap"
+            >
+              Date {sortDir === 'desc' ? '↓ Newest' : '↑ Oldest'}
+            </button>
+
+            {/* Amount range */}
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                placeholder="Min ₹"
+                value={filterMinAmount}
+                onChange={e => setFilterMinAmount(e.target.value)}
+                className="bg-background border border-border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 w-24"
+              />
+              <span className="text-muted-foreground text-xs">–</span>
+              <input
+                type="number"
+                placeholder="Max ₹"
+                value={filterMaxAmount}
+                onChange={e => setFilterMaxAmount(e.target.value)}
+                className="bg-background border border-border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 w-24"
+              />
+            </div>
+
+            {(filterType || filterMonth || filterCategory || searchFacets.length || filterAllocStatus || filterMinAmount || filterMaxAmount) && (
+              <button onClick={() => { setFilterType(''); setFilterMonth(''); setFilterCategory(''); setSearchFacets([]); setSearchDraft(''); setFilterAllocStatus(''); setFilterMinAmount(''); setFilterMaxAmount('') }} className="text-xs text-muted-foreground hover:text-foreground px-2 whitespace-nowrap">Clear</button>
+            )}
+          </div>
         </div>
 
         {/* Tokenized active filters (ERPNext-style chips) */}

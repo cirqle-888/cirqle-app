@@ -80,90 +80,90 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
   const [profileOpen, setProfileOpen] = useState(false)
   const [showPwdModal, setShowPwdModal] = useState(false)
 
+  const globalActions = (
+    <>
+      <CommandPaletteTrigger className="hidden md:flex w-52 lg:w-64" />
+      <CommandPaletteTrigger className="md:hidden" isCollapsed={true} />
+      
+      <AppLauncherTrigger />
+      <NotificationBell />
+
+      {/* Profile Dropdown */}
+      <div className="relative ml-1">
+        <button 
+          onClick={() => setProfileOpen(!profileOpen)}
+          className="flex items-center gap-2 rounded-full hover:bg-secondary/80 p-1 pr-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary group"
+          title="Account Settings"
+        >
+          {user.cqid ? (
+            <EmployeeAvatar avatarUrl={null} name={user.cqid} cqid={user.cqid} size={28} rounded="full" className="shrink-0 ring-1 ring-border/50 shadow-sm transition-transform group-hover:scale-105" />
+          ) : (
+            <UserCircle className="w-7 h-7 text-muted-foreground shrink-0 transition-transform group-hover:scale-105" />
+          )}
+          <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground shrink-0 transition-transform hidden sm:block ${profileOpen ? 'rotate-180' : ''}`} />
+        </button>
+
+        {profileOpen && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setProfileOpen(false)} />
+            <div className="absolute right-0 top-full mt-2 w-64 bg-card border border-border shadow-xl shadow-black/5 rounded-xl p-2 z-50 animate-in fade-in zoom-in-95 duration-200">
+              <div className="px-2 py-2 mb-2 border-b border-border/50">
+                <div className="font-semibold text-foreground text-sm truncate tracking-tight">{user.cqid ?? 'Account'}</div>
+                {isUnlocked && user.name && <div className="text-xs text-muted-foreground truncate">{user.name}</div>}
+                {user.designationName && (
+                  <span className="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border/50 whitespace-nowrap mt-1.5">
+                    {user.designationName}
+                  </span>
+                )}
+              </div>
+              <ProfileActions onChangePassword={() => { setShowPwdModal(true); setProfileOpen(false) }} compact />
+            </div>
+          </>
+        )}
+      </div>
+    </>
+  )
+
   return (
     <div
       ref={ref}
-      className={`flex flex-row flex-wrap items-center justify-between gap-x-3 gap-y-2 pr-3 md:px-5 border-b border-border/80 bg-background/95 supports-[backdrop-filter]:bg-background/60 backdrop-blur-md sticky top-0 z-30 transition-all ${isEmployee ? 'pl-3 py-2 sm:pl-16 sm:py-3.5' : 'pl-14 sm:pl-16 py-3 sm:py-3.5'}`}
+      className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 pr-3 md:px-5 border-b border-border/80 bg-background/95 supports-[backdrop-filter]:bg-background/60 backdrop-blur-md sticky top-0 z-30 transition-all ${isEmployee ? 'pl-3 py-2 sm:pl-16 sm:py-3.5' : 'pl-14 sm:pl-16 py-2.5 sm:py-3.5'}`}
     >
-      {/* Employee mobile: compact left branding strip (hidden on sm+) */}
-      {isEmployee && (
-        <div className="flex items-center gap-2 shrink-0 sm:hidden">
-          <div className="w-7 h-7 rounded-lg gradient-bg flex items-center justify-center shrink-0 shadow-sm">
-            <span className="text-white font-bold text-xs">C</span>
-          </div>
-          <span className="text-sm font-semibold text-foreground leading-none truncate max-w-[140px] tracking-tight">{title}</span>
-        </div>
-      )}
-
-      {/* Title + breadcrumb — full display on sm+ (and always for admin).
-          min-w-[110px] (not min-w-0): a shrink-0 actions cluster (page action
-          button + global icons) claiming more space than the container leaves
-          for this flex-1 sibling used to squeeze it to a literal 0px box —
-          title invisible, actions button rendered on top of where it should
-          be. The floor stops the squeeze; flex-wrap on the parent (above)
-          then drops actions to their own row instead of forcing an overflow
-          once title has claimed its minimum. */}
-      <div className={`min-w-[110px] flex-1 ${isEmployee ? 'hidden sm:flex flex-col justify-center' : 'flex flex-col justify-center'}`}>
-        <Breadcrumbs isEmployee={isEmployee} />
-        <div className="flex items-baseline gap-3 min-w-0">
-          <h1 className="text-lg md:text-xl font-semibold text-foreground truncate tracking-tight">{title}</h1>
-          {subtitle && (
-            <div className="text-sm text-muted-foreground truncate hidden lg:block tracking-tight">{subtitle}</div>
-          )}
-        </div>
-      </div>
-
-      <div className="flex items-center shrink min-w-0 gap-1 sm:gap-3 justify-end flex-1">
-        {/* Local Page Actions */}
-        {actions && (
-          <div className="flex items-center gap-2 overflow-x-auto min-w-0 hide-scrollbar mr-1 [&>*]:shrink-0">
-            {actions}
-          </div>
-        )}
-
-        {/* Global Actions */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 border-l border-border/60 pl-2 sm:pl-4">
-          <CommandPaletteTrigger className="hidden md:flex w-52 lg:w-64" />
-          <CommandPaletteTrigger className="md:hidden" isCollapsed={true} />
-          
-          <AppLauncherTrigger />
-          <NotificationBell />
-
-          {/* Profile Dropdown */}
-          <div className="relative ml-1">
-            <button 
-              onClick={() => setProfileOpen(!profileOpen)}
-              className="flex items-center gap-2 rounded-full hover:bg-secondary/80 p-1 pr-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary group"
-              title="Account Settings"
-            >
-              {user.cqid ? (
-                <EmployeeAvatar avatarUrl={null} name={user.cqid} cqid={user.cqid} size={28} rounded="full" className="shrink-0 ring-1 ring-border/50 shadow-sm transition-transform group-hover:scale-105" />
-              ) : (
-                <UserCircle className="w-7 h-7 text-muted-foreground shrink-0 transition-transform group-hover:scale-105" />
-              )}
-              <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground shrink-0 transition-transform hidden sm:block ${profileOpen ? 'rotate-180' : ''}`} />
-            </button>
-
-            {profileOpen && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setProfileOpen(false)} />
-                <div className="absolute right-0 top-full mt-2 w-64 bg-card border border-border shadow-xl shadow-black/5 rounded-xl p-2 z-50 animate-in fade-in zoom-in-95 duration-200">
-                  <div className="px-2 py-2 mb-2 border-b border-border/50">
-                    <div className="font-semibold text-foreground text-sm truncate tracking-tight">{user.cqid ?? 'Account'}</div>
-                    {isUnlocked && user.name && <div className="text-xs text-muted-foreground truncate">{user.name}</div>}
-                    {user.designationName && (
-                      <span className="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border/50 whitespace-nowrap mt-1.5">
-                        {user.designationName}
-                      </span>
-                    )}
-                  </div>
-                  <ProfileActions onChangePassword={() => { setShowPwdModal(true); setProfileOpen(false) }} compact />
-                </div>
-              </>
+      <div className="flex items-center justify-between w-full sm:w-auto sm:flex-1 min-w-0 gap-2">
+        {/* Left: Branding & Title */}
+        <div className="flex flex-col min-w-0 flex-1 justify-center">
+          <Breadcrumbs isEmployee={isEmployee} />
+          <div className="flex items-center gap-2 min-w-0">
+            {isEmployee && (
+              <div className="w-7 h-7 rounded-lg gradient-bg flex items-center justify-center shrink-0 shadow-sm sm:hidden">
+                <span className="text-white font-bold text-xs">C</span>
+              </div>
+            )}
+            <h1 className="text-lg md:text-xl font-semibold text-foreground truncate tracking-tight">{title}</h1>
+            {subtitle && (
+              <div className="text-sm text-muted-foreground truncate hidden lg:block tracking-tight">{subtitle}</div>
             )}
           </div>
         </div>
+
+        {/* Mobile Global Actions (Hidden on Desktop) */}
+        <div className="flex sm:hidden items-center gap-1.5 shrink-0">
+          {globalActions}
+        </div>
       </div>
+
+      {/* Local Actions (Bottom Row on Mobile, Middle on Desktop) */}
+      {actions && (
+        <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar w-full sm:w-auto shrink-0 [&>*]:shrink-0 pb-1 sm:pb-0">
+          {actions}
+        </div>
+      )}
+
+      {/* Desktop Global Actions (Hidden on Mobile) */}
+      <div className="hidden sm:flex items-center gap-1.5 sm:gap-2 shrink-0 border-l border-border/60 pl-2 sm:pl-4">
+        {globalActions}
+      </div>
+
       {showPwdModal && <ChangePasswordModal onClose={() => setShowPwdModal(false)} />}
     </div>
   )
