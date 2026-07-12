@@ -2099,7 +2099,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                 min-w-0 it would rather shrink than wrap, leaving an unusably narrow search box.
                 h-[34px] matches the other toolbar buttons for visual rhythm. */}
             <TokenizedSearch
-              className="order-1 sm:order-none w-full sm:w-auto sm:flex-1 sm:min-w-[220px]"
+              className="order-1 sm:order-none w-full sm:w-auto shrink-0 sm:shrink sm:flex-1 sm:min-w-[220px]"
               facets={searchFacets}
               onFacetsChange={setSearchFacets}
               draft={searchDraft}

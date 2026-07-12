@@ -1287,7 +1287,7 @@ export default function ContributionsClient({
                 Same field ORs (Client: a OR Client: b); generic text narrows
                 (AND); across fields AND. */}
             <TokenizedSearch
-              className="order-1 sm:order-none w-full sm:w-auto sm:flex-1 min-w-0"
+              className="order-1 sm:order-none w-full sm:w-auto shrink-0 sm:shrink sm:flex-1 sm:min-w-0"
               facets={searchFacets}
               onFacetsChange={setSearchFacets}
               draft={searchDraft}
