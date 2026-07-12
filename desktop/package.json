@@ -9,6 +9,7 @@
     "dev": "CIRQLE_URL=http://localhost:3000 electron .",
     "pack": "npm run check:ipc && electron-builder --mac --dir",
     "dmg": "npm run check:ipc && electron-builder --mac dmg",
+    "dmg:universal": "npm run check:ipc && electron-builder --mac dmg --universal",
     "check:ipc": "node scripts/check-ipc-channels.js"
   },
   "devDependencies": {

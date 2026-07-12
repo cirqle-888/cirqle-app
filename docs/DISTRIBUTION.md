@@ -148,6 +148,40 @@ with the trade-offs that matter for a small team.
 
 ---
 
+## Mac & Windows desktop (Electron — same tech as Slack)
+
+Cirqle already ships a **native desktop app** built with Electron (exactly what
+Slack, Notion, and VS Code use). It's a real `.app` / `.exe`, not a browser tab,
+with a tray icon, `cirqle://` deep links, and an update notifier.
+
+| | State |
+|---|---|
+| macOS | `Cirqle Desktop-0.6.0-arm64.dmg` built. `npm run dmg:universal` (or the **Desktop macOS build** workflow) makes a **universal** DMG covering Apple Silicon **and** Intel. |
+| Windows | EXE (NSIS) + MSI via the **Desktop Windows build** workflow. |
+
+### Signing on macOS — the one gap
+
+The DMG is currently **unsigned** (no Apple account). It runs fine, but on first
+launch macOS Gatekeeper warns *"Apple could not verify…"*. Two ways to handle it:
+
+- **Free (unsigned):** employees install it once with a right-click:
+  **right-click the app → Open → Open**, or run `xattr -cr "/Applications/Cirqle Desktop.app"`.
+  After that first launch it opens normally forever.
+- **Clean (signed + notarized), like Slack:** needs the **same $99/yr Apple
+  Developer account** (a "Developer ID Application" certificate). Add the
+  `MAC_CSC_LINK` / `MAC_CSC_KEY_PASSWORD` / `APPLE_ID` /
+  `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` secrets and uncomment the
+  signing env in `.github/workflows/desktop-mac.yml`. The DMG then double-clicks
+  to install with no warning.
+
+### Distribute it
+Same channels as Android — host the `.dmg` (macOS) / `.exe` (Windows) on your
+site, Drive, or OneDrive; share a link or QR. Like mobile, **content updates are
+instant** (the desktop app loads the live site); only shell changes need a new
+build.
+
+---
+
 ## Who does what
 
 **You (admin), one time:**

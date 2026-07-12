@@ -1,0 +1,56 @@
+name: Desktop macOS build
+
+# Produces a UNIVERSAL Cirqle Desktop DMG (Apple Silicon + Intel) on a macOS
+# runner. Unsigned by default (no Apple account needed) — Gatekeeper shows a
+# one-time warning; see docs/DISTRIBUTION.md for the right-click → Open step.
+#
+# To ship a SIGNED + NOTARIZED DMG (clean double-click install, like Slack),
+# add the Developer-ID secrets below and uncomment the signing env — that path
+# needs a paid Apple Developer account.
+#
+# Trigger from the Actions tab or by pushing a desktop-v* tag.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['desktop-v*']
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: IPC channel gate
+        run: npm run check:ipc
+
+      - name: Build universal DMG (Apple Silicon + Intel)
+        run: npx electron-builder --mac dmg --universal
+        env:
+          # Unsigned free build. Remove this and add the Developer-ID cert +
+          # notarization secrets below to produce a signed, notarized DMG.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # --- Signing + notarization (Apple Developer account required) ---
+          # CSC_LINK: ${{ secrets.MAC_CSC_LINK }}                 # base64 .p12 (Developer ID Application)
+          # CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cirqle-desktop-macos
+          path: |
+            desktop/dist/*.dmg
+          if-no-files-found: error
