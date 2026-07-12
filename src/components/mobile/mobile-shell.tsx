@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { isNative, capPlugin } from '@/lib/native'
 import { routeForDeepLink } from '@/lib/deep-link'
+import { OfflineIndicator } from '@/components/mobile/offline-indicator'
 
 interface StatusBarPlugin {
   setStyle?: (o: { style: 'DARK' | 'LIGHT' }) => Promise<void>
@@ -97,5 +98,6 @@ export function MobileShell() {
     return () => { handles.forEach(h => { void h.remove().catch(() => {}) }) }
   }, [router])
 
-  return null
+  // Renders null off-native; shows offline/sync status inside the shell.
+  return <OfflineIndicator />
 }

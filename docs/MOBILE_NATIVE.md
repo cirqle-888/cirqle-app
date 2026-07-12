@@ -47,6 +47,44 @@ Until these are set, `registerNativePush()` still runs and stores tokens; no pus
 is delivered. Nothing crashes — the table write is graceful pre-migration and the
 whole path no-ops on web.
 
+## Offline queue & sync (`src/lib/offline`)
+
+A persistent mutation queue that replays Server Actions when connectivity
+returns — **without modifying any action or business logic**.
+
+| File | Role |
+|---|---|
+| `engine.ts` | Pure, dependency-injected queue + sync core (unit-tested, `engine.test.ts`) |
+| `storage.ts` | Durable K/V — Preferences (native) / localStorage (web) |
+| `network.ts` | Connectivity — Network plugin (native) / `navigator.onLine` (web) |
+| `index.ts` | Public API: `registerOfflineOp`, `runOrQueue`, `enqueueMutation`, `flushQueue`, `subscribeQueue`, `subscribeOnline` |
+| `../components/mobile/offline-indicator.tsx` | Offline/sync status pill (native-only; null on web) |
+
+**Retry contract.** A handler that *resolves* means the server responded
+(success or a business rejection) → the op is dequeued, never retried. A handler
+that *throws a transport error* → the op stays queued, `attempts` increments, and
+a backoff retry is scheduled up to `maxAttempts` (8) before it is dead-lettered.
+Ops sharing a `dedupeKey` collapse to the newest.
+
+**Adoption recipe** (opt-in, per mutation — the action itself is untouched):
+
+```ts
+// boot (client): register once
+import { registerOfflineOp } from '@/lib/offline'
+import { createCashbookEntry } from '@/app/(dashboard)/dashboard/cashbook/actions'
+registerOfflineOp('cashbook.create', createCashbookEntry)
+
+// call site: replace a bare `await createCashbookEntry(args)` with
+import { runOrQueue } from '@/lib/offline'
+const { queued } = await runOrQueue('cashbook.create', args, { optimistic: draftRow })
+if (queued) toast('Saved offline — will sync when back online')
+```
+
+Call-site adoption is intentionally left per-flow: each mutation whose result the
+UI consumes needs an optimistic-state decision, so wiring is done deliberately
+rather than globally. The engine, adapters, indicator, and API are production-
+ready and fully tested; nothing changes behavior until a call site opts in.
+
 ## Applying migration 025
 
 `migrations/025_native_push_tokens.sql` follows the `push_subscriptions` (021)
