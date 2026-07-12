@@ -392,17 +392,17 @@ export function TaskEditModal({
               {saveError && (
                 <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{saveError}</p>
               )}
-            </div>
-            {/* Sticky footer — pinned to bottom of scroll area */}
-            <div
-              className="sticky bottom-0 -mx-6 -mb-6 px-6 pt-4 bg-card/95 backdrop-blur border-t border-border flex gap-3 sm:rounded-b-2xl"
-              style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 24px)' }}
-            >
-              <Button type="button" variant="outline" onClick={onClose} className="flex-1" size="lg">Cancel</Button>
-              <Button type="submit" loading={saving} className="flex-1 bg-gradient-to-r from-primary to-violet-600 hover:from-primary/90 hover:to-violet-600/90 text-primary-foreground" size="lg">
-                Save Changes
-              </Button>
-            </div>
+
+              {/* Sticky footer — pinned to bottom of scroll area */}
+              <div
+                className="sticky bottom-0 -mx-6 -mb-6 px-6 pt-4 bg-card/95 backdrop-blur border-t border-border flex gap-3 sm:rounded-b-2xl mt-4"
+                style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 24px)' }}
+              >
+                <Button type="button" variant="outline" onClick={onClose} className="flex-1" size="lg">Cancel</Button>
+                <Button type="submit" loading={saving} className="flex-1 bg-gradient-to-r from-primary to-violet-600 hover:from-primary/90 hover:to-violet-600/90 text-primary-foreground" size="lg">
+                  Save Changes
+                </Button>
+              </div>
             </div>
           </form>
           )}
