@@ -37,6 +37,8 @@ interface AppPlugin {
  * is added to the web bundle. Every call is null-checked and wrapped.
  */
 export function MobileShell() {
+  const router = useRouter()
+
   useEffect(() => {
     if (!isNative()) return
 
@@ -60,6 +62,40 @@ export function MobileShell() {
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
     return () => obs.disconnect()
   }, [])
+
+  // Native app lifecycle: Android hardware back button, cirqle:// deep links,
+  // and data refresh on resume. Off-native this whole effect no-ops.
+  useEffect(() => {
+    if (!isNative()) return
+    const App = capPlugin<AppPlugin>('App')
+    if (!App?.addListener) return
+
+    const handles: PluginListenerHandle[] = []
+    const track = (h: Promise<PluginListenerHandle> | PluginListenerHandle) => {
+      Promise.resolve(h).then(handle => handles.push(handle)).catch(() => {})
+    }
+
+    // Android hardware back: walk WebView history; at the root, exit the app.
+    // (Open modals close on their own Escape handler before back reaches root.)
+    track(App.addListener('backButton', ({ canGoBack }) => {
+      if (canGoBack ?? window.history.length > 1) window.history.back()
+      else App.exitApp?.().catch(() => {})
+    }))
+
+    // cirqle:// deep links opened while the app is running (or cold-started).
+    track(App.addListener('appUrlOpen', ({ url }) => {
+      const route = url ? routeForDeepLink(url) : null
+      if (route) router.push(route)
+    }))
+
+    // Revalidate server data when the app returns to the foreground. React
+    // client state (open forms, scroll) is preserved by router.refresh().
+    track(App.addListener('appStateChange', ({ isActive }) => {
+      if (isActive) router.refresh()
+    }))
+
+    return () => { handles.forEach(h => { void h.remove().catch(() => {}) }) }
+  }, [router])
 
   return null
 }
