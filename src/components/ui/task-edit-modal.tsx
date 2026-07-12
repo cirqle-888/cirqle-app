@@ -393,17 +393,16 @@ export function TaskEditModal({
                 <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{saveError}</p>
               )}
             </div>
-
-            {/* Sticky footer — shrink-0 keeps it pinned. env(safe-area-inset-bottom)
-                adds padding for iPhones with a home indicator bar. */}
+            {/* Sticky footer — pinned to bottom of scroll area */}
             <div
-              className="flex gap-3 px-6 pt-3 border-t border-border bg-card sm:rounded-b-2xl shrink-0"
-              style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 12px)' }}
+              className="sticky bottom-0 -mx-6 -mb-6 px-6 pt-4 bg-card/95 backdrop-blur border-t border-border flex gap-3 sm:rounded-b-2xl"
+              style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 24px)' }}
             >
               <Button type="button" variant="outline" onClick={onClose} className="flex-1" size="lg">Cancel</Button>
               <Button type="submit" loading={saving} className="flex-1 bg-gradient-to-r from-primary to-violet-600 hover:from-primary/90 hover:to-violet-600/90 text-primary-foreground" size="lg">
                 Save Changes
               </Button>
+            </div>
             </div>
           </form>
           )}
@@ -411,7 +410,7 @@ export function TaskEditModal({
           {/* ── Contributions tab ── */}
           {activeTab === 'contributions' && canViewContributions && (
             <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-              <div className="overflow-y-auto flex-1">
+              <div className="overflow-y-auto flex-1 relative">
                 <ContributionEntryPanel
                   task={task}
                   employees={employees}
@@ -424,18 +423,18 @@ export function TaskEditModal({
                   currentEmployeeId={currentEmployeeId}
                   onSaved={() => onSaved(task)}
                 />
-              </div>
-              <div
-                className="flex gap-3 px-6 pt-3 border-t border-border bg-card sm:rounded-b-2xl shrink-0"
-                style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 12px)' }}
-              >
-                <Button type="button" variant="outline" onClick={onClose} className="flex-1" size="lg">Close</Button>
-                <a
-                  href={`/dashboard/contributions?highlight=${task.id}`}
-                  className="flex-1 flex items-center justify-center gap-2 text-sm font-medium py-2 rounded-lg border border-input shadow-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+                <div
+                  className="sticky bottom-0 bg-card/95 backdrop-blur border-t border-border flex gap-3 px-6 pt-4 pb-6 sm:rounded-b-2xl"
+                  style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 24px)' }}
                 >
-                  <BarChart2 className="w-4 h-4" /> Full report
-                </a>
+                  <Button type="button" variant="outline" onClick={onClose} className="flex-1" size="lg">Close</Button>
+                  <a
+                    href={`/dashboard/contributions?highlight=${task.id}`}
+                    className="flex-1 flex items-center justify-center gap-2 text-sm font-medium py-2 rounded-lg border border-input shadow-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+                  >
+                    <BarChart2 className="w-4 h-4" /> Full report
+                  </a>
+                </div>
               </div>
             </div>
           )}
