@@ -1,7 +1,9 @@
 'use client'
 
 import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { isNative, capPlugin } from '@/lib/native'
+import { routeForDeepLink } from '@/lib/deep-link'
 
 interface StatusBarPlugin {
   setStyle?: (o: { style: 'DARK' | 'LIGHT' }) => Promise<void>
@@ -10,6 +12,15 @@ interface StatusBarPlugin {
 }
 interface SplashScreenPlugin {
   hide?: () => Promise<void>
+}
+
+interface PluginListenerHandle { remove: () => Promise<void> }
+interface AppPlugin {
+  addListener: (
+    event: 'backButton' | 'appUrlOpen' | 'appStateChange',
+    cb: (data: { canGoBack?: boolean; url?: string; isActive?: boolean }) => void,
+  ) => Promise<PluginListenerHandle> | PluginListenerHandle
+  exitApp?: () => Promise<void>
 }
 
 /**

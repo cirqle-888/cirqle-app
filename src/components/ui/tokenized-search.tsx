@@ -185,7 +185,7 @@ export function TokenizedSearch({
           onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
           placeholder={facets.length === 0 ? placeholder : 'Add another filter…'}
-          className="flex-1 min-w-[120px] bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60 py-0.5"
+          className="flex-1 min-w-[60px] bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60 py-0.5"
         />
 
         {hasContent && (

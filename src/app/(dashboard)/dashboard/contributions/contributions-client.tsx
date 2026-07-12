@@ -1287,7 +1287,7 @@ export default function ContributionsClient({
                 Same field ORs (Client: a OR Client: b); generic text narrows
                 (AND); across fields AND. */}
             <TokenizedSearch
-              className="order-1 sm:order-none w-full sm:w-auto flex-1 min-w-0"
+              className="order-1 sm:order-none w-full sm:w-auto sm:flex-1 min-w-0"
               facets={searchFacets}
               onFacetsChange={setSearchFacets}
               draft={searchDraft}
@@ -1555,7 +1555,7 @@ export default function ContributionsClient({
               darker/more saturated base shades for light mode, original pale
               shades kept under dark: for the dark theme. */}
           {missingCount > 0 && listViewMode === 'list' && showMissingBanner && (
-            <div className="fixed bottom-6 right-6 z-40 bg-orange-500/20 border border-orange-500/40 rounded-lg px-4 py-3 flex items-center gap-3 max-w-sm shadow-2xl">
+            <div className="fixed bottom-6 right-6 z-40 bg-orange-50 dark:bg-orange-950/90 backdrop-blur-md border border-orange-500/40 rounded-lg px-4 py-3 flex items-center gap-3 max-w-sm shadow-2xl">
               <AlertCircle className="w-4 h-4 text-orange-700 dark:text-orange-400 shrink-0" />
               <p className="text-xs text-orange-900 dark:text-orange-300 leading-relaxed flex-1">
                 <span className="font-semibold">{missingCount} task{missingCount === 1 ? '' : 's'}</span> need scoring.{' '}
