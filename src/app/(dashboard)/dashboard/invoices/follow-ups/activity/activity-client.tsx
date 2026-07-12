@@ -139,7 +139,7 @@ export default function ActivityClient({ rows, setupNeeded }: { rows: ActivityRo
         </div>
 
         {/* Breakdown panels */}
-        <div className="grid sm:grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
           <div className="rounded-xl border border-border bg-card p-4">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-1.5">
               <BarChart3 className="w-3.5 h-3.5" /> By Outcome

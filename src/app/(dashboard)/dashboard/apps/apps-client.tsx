@@ -104,7 +104,7 @@ export default function AppsClient({ clientCounts, multiServiceClients = [] }: {
         </p>
 
         {/* Active apps */}
-        <div className="grid sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {/* Advertising — a full management module (not a tokenised intake form),
               but it's an "app" that handles client ad requests through the same
               Requests inbox, so it lives here too. */}
@@ -180,7 +180,7 @@ export default function AppsClient({ clientCounts, multiServiceClients = [] }: {
           <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
             <Sparkles className="w-3.5 h-3.5" /> Planned modules
           </h3>
-          <div className="grid sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {COMING.map(c => (
               <div key={c.label} className="rounded-xl border border-dashed border-border/60 bg-card/40 p-4">
                 <div className="flex items-center justify-between gap-2">

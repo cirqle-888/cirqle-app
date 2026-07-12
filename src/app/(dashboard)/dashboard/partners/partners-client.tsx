@@ -120,7 +120,7 @@ export default function PartnersClient({ initialPartners, allClients, canCreate,
             <p className="text-sm">No business partners yet.</p>
           </div>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {partners.map(p => (
               <div key={p.id} className="bg-secondary border border-border rounded-xl p-4 hover:border-primary/40 transition-colors">
                 <div className="flex items-start justify-between">
