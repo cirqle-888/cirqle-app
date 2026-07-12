@@ -31,7 +31,7 @@ import {
   setRequestStatusAction, markRequestViewed, getRequestTimeline,
   postExternalUpdate, updateInternalNotes, markRevisionAddressed, postRequestNote,
   assignRequestEmployee, createManualRequest, searchTasksForLink, linkRequestToTask,
-  reorderStaffPriority, bulkSetRequestStatus, bulkAssignRequestEmployee, aiCaptureRequest,
+  reorderStaffPriority, bulkSetRequestStatus, bulkAssignRequestEmployee,
 } from './actions'
 import { DiscussButton } from '@/components/chat/discuss-button'
 import { CampaignCard } from '@/components/campaigns/campaign-card'
@@ -251,13 +251,6 @@ export default function RequestsClient({
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkAssignOpen, setBulkAssignOpen] = useState(false)
   const [bulkAssignEmpId, setBulkAssignEmpId] = useState<string>('')
-
-  // AI Capture — paste free text (WhatsApp/email/dictation), parse into
-  // fields, then hand off to the existing New Request modal for review.
-  const [aiCaptureOpen, setAiCaptureOpen] = useState(false)
-  const [aiCaptureText, setAiCaptureText] = useState('')
-  const [aiCaptureBusy, setAiCaptureBusy] = useState(false)
-  const [aiCaptureNote, setAiCaptureNote] = useState<{ clientMatched: boolean; clientName: string | null; serviceName: string | null } | null>(null)
 
   // Priority drag + manual rank override
   const [editRank, setEditRank] = useState<{ id: string; val: string } | null>(null)
@@ -525,30 +518,6 @@ export default function RequestsClient({
     router.push('/dashboard/capture')
   }
 
-  async function runAiCapture() {
-    if (!aiCaptureText.trim()) return
-    setAiCaptureBusy(true)
-    const res = await aiCaptureRequest(aiCaptureText)
-    setAiCaptureBusy(false)
-    if (res.ok && res.data) {
-      const d = res.data
-      setNewForm(f => ({
-        ...f,
-        title: d.title,
-        description: d.description,
-        clientId: d.clientId || f.clientId,
-        serviceId: d.serviceId || f.serviceId,
-        dueDate: d.dueDate || f.dueDate,
-      }))
-      setAiCaptureNote({ clientMatched: d.clientMatched, clientName: d.clientName, serviceName: d.serviceName })
-      setAiCaptureOpen(false)
-      setAiCaptureText('')
-      setShowNew(true)
-    } else {
-      toastError('AI Capture failed', res.error)
-    }
-  }
-
   async function doCreate() {
     if (creating) return
     setCreating(true)
@@ -573,7 +542,6 @@ export default function RequestsClient({
       setRequests(prev => [res.data, ...prev])
       setShowNew(false)
       setNewForm(EMPTY_NEW)
-      setAiCaptureNote(null)
       setTab('new')
       success(`${refLabel(res.data.ref_no)} created`, 'Visible on the client’s intake portal — press Start when work begins')
     } else toastError('Could not create the request', res.error)
@@ -756,7 +724,7 @@ export default function RequestsClient({
               <Share2 className="w-3.5 h-3.5" /> Share
             </button>
             <button onClick={handleAiCaptureClick}
-              title="Paste a WhatsApp message, email, or note — AI fills in the New Request form for you to review"
+              title="Create a new request from clipboard — same as the Cirqle Desktop toolbar's New Request button"
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap bg-secondary border border-border hover:text-foreground text-muted-foreground transition-colors">
               <Sparkles className="w-3.5 h-3.5" /> AI Capture
             </button>
@@ -1305,47 +1273,9 @@ export default function RequestsClient({
         </ModalOverlay>
       )}
 
-      {/* ── AI Capture ── */}
-      {aiCaptureOpen && (
-        <ModalOverlay onClose={() => setAiCaptureOpen(false)}>
-          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-lg shadow-2xl max-h-[92dvh] flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
-              <div>
-                <h2 className="font-bold text-base flex items-center gap-1.5"><Sparkles className="w-4 h-4 text-violet-400" /> AI Capture</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Paste a WhatsApp message, email, or note — AI pre-fills the New Request form for you to review before it's submitted.
-                </p>
-              </div>
-              <button onClick={() => setAiCaptureOpen(false)} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground"><X className="w-4 h-4" /></button>
-            </div>
-            <div className="p-5 space-y-3">
-              <textarea
-                value={aiCaptureText}
-                onChange={e => setAiCaptureText(e.target.value)}
-                placeholder="e.g. Hi this is Sea Star, we need a new offer flyer for next Friday's weekend sale…"
-                rows={6}
-                autoFocus
-                className="w-full bg-secondary border border-border rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-violet-500/50 resize-none"
-              />
-              <p className="text-[11px] text-muted-foreground/70">Nothing is created yet — you'll review the parsed details next.</p>
-            </div>
-            <div className="px-5 py-4 border-t border-border flex justify-end gap-2 shrink-0">
-              <button onClick={() => setAiCaptureOpen(false)} className="px-4 py-2 text-sm rounded-xl bg-secondary border border-border hover:bg-secondary/70 transition-colors">Cancel</button>
-              <button
-                onClick={runAiCapture}
-                disabled={!aiCaptureText.trim() || aiCaptureBusy}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-xl gradient-bg text-white hover:opacity-90 disabled:opacity-50 transition-opacity">
-                {aiCaptureBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                {aiCaptureBusy ? 'Parsing…' : 'Parse with AI'}
-              </button>
-            </div>
-          </div>
-        </ModalOverlay>
-      )}
-
       {/* ── New Request (staff-created opportunity) ── */}
       {showNew && (
-        <ModalOverlay onClose={() => { setShowNew(false); setAiCaptureNote(null) }}>
+        <ModalOverlay onClose={() => setShowNew(false)}>
           <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-lg shadow-2xl max-h-[92dvh] flex flex-col overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
               <div>
@@ -1354,23 +1284,9 @@ export default function RequestsClient({
                   Lands in the inbox as New and shows on the client’s intake portal. No task number until you press Start.
                 </p>
               </div>
-              <button onClick={() => { setShowNew(false); setAiCaptureNote(null) }} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground"><X className="w-4 h-4" /></button>
+              <button onClick={() => setShowNew(false)} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground"><X className="w-4 h-4" /></button>
             </div>
             <div className="overflow-y-auto flex-1 p-5 space-y-3.5">
-              {aiCaptureNote && (
-                <div className="flex items-start gap-2 bg-violet-500/10 border border-violet-500/20 rounded-xl px-3 py-2.5 text-xs">
-                  <Sparkles className="w-3.5 h-3.5 text-violet-400 shrink-0 mt-0.5" />
-                  <div className="text-violet-200/90">
-                    AI-filled from your pasted text — please review before submitting.
-                    {!aiCaptureNote.clientMatched && aiCaptureNote.clientName && (
-                      <p className="mt-1 text-amber-300">Couldn't match client "{aiCaptureNote.clientName}" — pick the right one below.</p>
-                    )}
-                    {!aiCaptureNote.serviceName && (
-                      <p className="mt-1 text-muted-foreground">No service detected — set it manually if needed.</p>
-                    )}
-                  </div>
-                </div>
-              )}
               <div>
                 <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Client *</label>
                 <select value={newForm.clientId} onChange={e => setNewForm(f => ({ ...f, clientId: e.target.value }))}
