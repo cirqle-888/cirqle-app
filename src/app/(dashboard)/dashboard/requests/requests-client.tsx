@@ -756,9 +756,9 @@ export default function RequestsClient({
       </div>
 
       {/* Search + client filter + view toggle */}
-      <div className="flex flex-col gap-2 mb-4">
+      <div className="flex flex-col lg:flex-row gap-2 mb-4">
         {/* Row 1: Search */}
-        <div className="w-full">
+        <div className="w-full lg:flex-1 shrink-0">
           <TokenizedSearch
             className="w-full"
           facets={searchFacets}
@@ -778,7 +778,7 @@ export default function RequestsClient({
         </div>
         
         {/* Row 2: Filters & Actions */}
-        <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar w-full pb-1 sm:pb-0 [&>*]:shrink-0">
+        <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar pb-1 lg:pb-0 w-full lg:w-auto [&>*]:shrink-0">
           <select value={clientFilter} onChange={e => setClientFilter(e.target.value)}
             className="bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 sm:w-56">
           <option value="">All clients</option>

@@ -1246,7 +1246,7 @@ export default function ContributionsClient({
 
           <StickyToolbar>
           {/* Row 1: [Select] · [Search flex-1] · [List|Board|Calendar] · [⚙ board-only] */}
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 w-full">
+          <div className="flex flex-col lg:flex-row lg:items-center gap-1.5 lg:gap-2 w-full">
             {/* Left group: Select */}
             {canSeeFinancials && (
               <div className="flex items-center gap-1.5 shrink-0 order-2 sm:order-none hidden sm:flex">
@@ -1282,7 +1282,7 @@ export default function ContributionsClient({
               </div>
             )}
 
-            <div className="w-full sm:w-auto sm:flex-1 shrink-0">
+            <div className="w-full lg:w-auto lg:flex-1 shrink-0">
               <TokenizedSearch
                 className="w-full"
                 facets={searchFacets}
@@ -1303,7 +1303,7 @@ export default function ContributionsClient({
             </div>
 
             {/* Filters Row (Mobile focused horizontally scrollable) */}
-            <div className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar w-full sm:w-auto shrink-0 pb-1 sm:pb-0 [&>*]:shrink-0">
+            <div className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar w-full lg:w-auto shrink-0 pb-1 lg:pb-0 [&>*]:shrink-0">
               {/* My Tasks / Not Assigned to Me — available to anyone with an employee
                   record (admins can be assignees/contributors too, not just employees). */}
               {currentEmployee && (

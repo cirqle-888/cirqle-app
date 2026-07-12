@@ -1010,9 +1010,9 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
 
 
         {/* Filters */}
-        <div className="flex flex-col gap-3 bg-secondary/20 p-3 rounded-xl border border-border">
+        <div className="flex flex-col lg:flex-row gap-3 bg-secondary/20 p-3 rounded-xl border border-border">
           {/* Row 1: Search */}
-          <div className="w-full shrink-0">
+          <div className="w-full lg:flex-1 shrink-0">
             <TokenizedSearch
               className="w-full"
               facets={searchFacets}
@@ -1032,7 +1032,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
           </div>
 
           {/* Row 2: Filters */}
-          <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar w-full shrink-0 pb-1 sm:pb-0 [&>*]:shrink-0">
+          <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar w-full lg:w-auto shrink-0 pb-1 lg:pb-0 [&>*]:shrink-0">
             <div className="flex gap-1.5">
               {['', 'inflow', 'outflow'].map(t => (
                 <button key={t} onClick={() => setFilterType(t)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filterType === t ? 'gradient-bg text-white' : 'bg-background text-muted-foreground border hover:text-foreground'}`}>
