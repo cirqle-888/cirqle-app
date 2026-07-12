@@ -3,12 +3,12 @@
 
 -- 1. Add new columns
 ALTER TABLE system_jobs 
-ADD COLUMN locked_by UUID, -- ID of the worker processing this job
-ADD COLUMN locked_at TIMESTAMPTZ, -- Heartbeat timestamp
-ADD COLUMN parent_job_id UUID REFERENCES system_jobs(id) ON DELETE SET NULL, -- DAG Parent
-ADD COLUMN depends_on_job_id UUID REFERENCES system_jobs(id) ON DELETE SET NULL, -- Must complete before this runs
-ADD COLUMN retry_delay_seconds INTEGER DEFAULT 60, -- Exponential backoff base
-ADD COLUMN metadata JSONB DEFAULT '{}'::jsonb; -- Worker-specific metadata/state
+ADD COLUMN IF NOT EXISTS locked_by UUID, -- ID of the worker processing this job
+ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ, -- Heartbeat timestamp
+ADD COLUMN IF NOT EXISTS parent_job_id UUID REFERENCES system_jobs(id) ON DELETE SET NULL, -- DAG Parent
+ADD COLUMN IF NOT EXISTS depends_on_job_id UUID REFERENCES system_jobs(id) ON DELETE SET NULL, -- Must complete before this runs
+ADD COLUMN IF NOT EXISTS retry_delay_seconds INTEGER DEFAULT 60, -- Exponential backoff base
+ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb; -- Worker-specific metadata/state
 
 -- 2. Expand status constraints
 -- Re-create the status constraint if it existed, otherwise just add it or rely on application logic.

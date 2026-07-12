@@ -10,7 +10,7 @@
 BEGIN;
 
 CREATE TABLE IF NOT EXISTS public.employee_favorites (
-  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   employee_id   UUID NOT NULL REFERENCES public.employees(id) ON DELETE CASCADE,
   entity_type   TEXT NOT NULL,   -- 'nav_page' | 'business_partner' | 'campaign' | 'employee' | ... (open-ended)
   entity_id     TEXT,            -- null for nav_page; the record's id otherwise

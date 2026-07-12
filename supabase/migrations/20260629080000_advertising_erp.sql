@@ -3,7 +3,7 @@
 -- =====================================================================================
 
 -- 1. Authentication Layer (Provider Connections)
-CREATE TABLE provider_connections (
+CREATE TABLE IF NOT EXISTS provider_connections (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
     provider TEXT NOT NULL, -- e.g., 'meta', 'google', 'tiktok'
@@ -19,12 +19,12 @@ CREATE TABLE provider_connections (
     UNIQUE(client_id, provider)
 );
 
-CREATE TRIGGER update_provider_connections_modtime
+CREATE OR REPLACE TRIGGER update_provider_connections_modtime
 BEFORE UPDATE ON provider_connections FOR EACH ROW
 EXECUTE FUNCTION update_updated_at();
 
 -- 2. Business Managers
-CREATE TABLE ad_businesses (
+CREATE TABLE IF NOT EXISTS ad_businesses (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     connection_id UUID NOT NULL REFERENCES provider_connections(id) ON DELETE CASCADE,
     client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -35,12 +35,12 @@ CREATE TABLE ad_businesses (
     UNIQUE(connection_id, business_id)
 );
 
-CREATE TRIGGER update_ad_businesses_modtime
+CREATE OR REPLACE TRIGGER update_ad_businesses_modtime
 BEFORE UPDATE ON ad_businesses FOR EACH ROW
 EXECUTE FUNCTION update_updated_at();
 
 -- 3. Advertising Accounts
-CREATE TABLE ad_accounts (
+CREATE TABLE IF NOT EXISTS ad_accounts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     connection_id UUID NOT NULL REFERENCES provider_connections(id) ON DELETE CASCADE,
     business_id UUID REFERENCES ad_businesses(id) ON DELETE CASCADE,
@@ -56,12 +56,12 @@ CREATE TABLE ad_accounts (
     UNIQUE(provider, account_id)
 );
 
-CREATE TRIGGER update_ad_accounts_modtime
+CREATE OR REPLACE TRIGGER update_ad_accounts_modtime
 BEFORE UPDATE ON ad_accounts FOR EACH ROW
 EXECUTE FUNCTION update_updated_at();
 
 -- 4. Generic Background Jobs Engine
-CREATE TABLE system_jobs (
+CREATE TABLE IF NOT EXISTS system_jobs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     job_type TEXT NOT NULL, -- e.g., 'advertising_sync_project', 'email_send'
     priority TEXT NOT NULL DEFAULT 'normal', -- 'high', 'normal', 'low'
@@ -77,13 +77,13 @@ CREATE TABLE system_jobs (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TRIGGER update_system_jobs_modtime
+CREATE OR REPLACE TRIGGER update_system_jobs_modtime
 BEFORE UPDATE ON system_jobs FOR EACH ROW
 EXECUTE FUNCTION update_updated_at();
-CREATE INDEX idx_system_jobs_status_priority ON system_jobs (status, priority);
+CREATE INDEX IF NOT EXISTS idx_system_jobs_status_priority ON system_jobs (status, priority);
 
 -- 5. Sync Logs
-CREATE TABLE ad_sync_logs (
+CREATE TABLE IF NOT EXISTS ad_sync_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     provider TEXT NOT NULL,
     client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
@@ -105,29 +105,29 @@ CREATE TABLE ad_sync_logs (
 
 -- 6. Modify existing ad_projects
 ALTER TABLE ad_projects 
-ADD COLUMN ad_account_id UUID REFERENCES ad_accounts(id) ON DELETE SET NULL,
-ADD COLUMN external_campaign_id TEXT, -- Promoted from provider_metadata for indexing
-ADD COLUMN provider_metadata JSONB, -- { "adset_id": "...", "campaign_objective": "..." }
-ADD COLUMN tracking_config JSONB, -- { "pixel_id": "...", "utm_source": "..." }
-ADD COLUMN sync_enabled BOOLEAN NOT NULL DEFAULT true,
-ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'idle', -- 'idle', 'queued', 'running', 'error'
-ADD COLUMN last_sync_at TIMESTAMPTZ,
-ADD COLUMN last_sync_error TEXT;
+ADD COLUMN IF NOT EXISTS ad_account_id UUID REFERENCES ad_accounts(id) ON DELETE SET NULL,
+ADD COLUMN IF NOT EXISTS external_campaign_id TEXT, -- Promoted from provider_metadata for indexing
+ADD COLUMN IF NOT EXISTS provider_metadata JSONB, -- { "adset_id": "...", "campaign_objective": "..." }
+ADD COLUMN IF NOT EXISTS tracking_config JSONB, -- { "pixel_id": "...", "utm_source": "..." }
+ADD COLUMN IF NOT EXISTS sync_enabled BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN IF NOT EXISTS sync_status TEXT NOT NULL DEFAULT 'idle', -- 'idle', 'queued', 'running', 'error'
+ADD COLUMN IF NOT EXISTS last_sync_at TIMESTAMPTZ,
+ADD COLUMN IF NOT EXISTS last_sync_error TEXT;
 
-CREATE INDEX idx_ad_projects_external_campaign ON ad_projects(external_campaign_id);
+CREATE INDEX IF NOT EXISTS idx_ad_projects_external_campaign ON ad_projects(external_campaign_id);
 
 -- 7. Modify existing ad_daily_metrics
 ALTER TABLE ad_daily_metrics
-ADD COLUMN source TEXT NOT NULL DEFAULT 'Manual',
-ADD COLUMN sync_state TEXT NOT NULL DEFAULT 'manual', -- 'imported', 'manual', 'locked'
-ADD COLUMN version INTEGER NOT NULL DEFAULT 1,
-ADD COLUMN base_currency TEXT DEFAULT 'INR',
-ADD COLUMN ad_currency TEXT,
-ADD COLUMN billing_currency TEXT,
-ADD COLUMN exchange_rate_ad_to_base NUMERIC,
-ADD COLUMN exchange_rate_ad_to_billing NUMERIC;
+ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'Manual',
+ADD COLUMN IF NOT EXISTS sync_state TEXT NOT NULL DEFAULT 'manual', -- 'imported', 'manual', 'locked'
+ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1,
+ADD COLUMN IF NOT EXISTS base_currency TEXT DEFAULT 'INR',
+ADD COLUMN IF NOT EXISTS ad_currency TEXT,
+ADD COLUMN IF NOT EXISTS billing_currency TEXT,
+ADD COLUMN IF NOT EXISTS exchange_rate_ad_to_base NUMERIC,
+ADD COLUMN IF NOT EXISTS exchange_rate_ad_to_billing NUMERIC;
 
-CREATE INDEX idx_ad_daily_metrics_sync_state ON ad_daily_metrics (sync_state);
+CREATE INDEX IF NOT EXISTS idx_ad_daily_metrics_sync_state ON ad_daily_metrics (sync_state);
 
 -- 8. Seed Centralized Settings
 INSERT INTO company_settings (key, value) VALUES

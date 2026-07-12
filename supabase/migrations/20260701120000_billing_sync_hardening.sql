@@ -363,7 +363,7 @@ END;
 $$;
 
 DROP TRIGGER IF EXISTS trg_auto_attach_expense ON cashbook_entries;
-CREATE TRIGGER trg_auto_attach_expense
+CREATE OR REPLACE TRIGGER trg_auto_attach_expense
   AFTER INSERT OR UPDATE OR DELETE ON cashbook_entries
   FOR EACH ROW EXECUTE FUNCTION auto_attach_expense_to_invoice();
 

@@ -49,7 +49,7 @@ CREATE INDEX IF NOT EXISTS ad_campaigns_client_idx
   ON public.ad_campaigns (client_id) WHERE client_id IS NOT NULL;
 
 DROP TRIGGER IF EXISTS update_ad_campaigns_modtime ON public.ad_campaigns;
-CREATE TRIGGER update_ad_campaigns_modtime
+CREATE OR REPLACE TRIGGER update_ad_campaigns_modtime
   BEFORE UPDATE ON public.ad_campaigns FOR EACH ROW
   EXECUTE FUNCTION update_updated_at();
 

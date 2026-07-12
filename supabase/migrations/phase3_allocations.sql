@@ -29,7 +29,7 @@ END;
 $$ language 'plpgsql';
 
 DROP TRIGGER IF EXISTS update_cashbook_invoice_allocations_modtime ON cashbook_invoice_allocations;
-CREATE TRIGGER update_cashbook_invoice_allocations_modtime
+CREATE OR REPLACE TRIGGER update_cashbook_invoice_allocations_modtime
     BEFORE UPDATE ON cashbook_invoice_allocations
     FOR EACH ROW
     EXECUTE FUNCTION update_allocations_updated_at_column();

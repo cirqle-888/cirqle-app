@@ -101,7 +101,7 @@ $$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS trigger_sync_invoice_payments ON cashbook_entries;
 
-CREATE TRIGGER trigger_sync_invoice_payments
+CREATE OR REPLACE TRIGGER trigger_sync_invoice_payments
 AFTER INSERT OR UPDATE OR DELETE ON cashbook_entries
 FOR EACH ROW
 EXECUTE FUNCTION sync_invoice_payments();

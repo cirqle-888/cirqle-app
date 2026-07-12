@@ -6,10 +6,12 @@ CREATE TABLE IF NOT EXISTS public.group_services (
 
 ALTER TABLE public.group_services ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Enable read access for all users" ON public.group_services;
 CREATE POLICY "Enable read access for all users" 
 ON public.group_services FOR SELECT 
 USING (true);
 
+DROP POLICY IF EXISTS "Enable all access for admin users" ON public.group_services;
 CREATE POLICY "Enable all access for admin users" 
 ON public.group_services FOR ALL 
 USING (true) 

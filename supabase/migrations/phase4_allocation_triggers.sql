@@ -42,7 +42,7 @@ END;
 $$;
 
 DROP TRIGGER IF EXISTS trigger_validate_cashbook_allocation ON cashbook_invoice_allocations;
-CREATE TRIGGER trigger_validate_cashbook_allocation
+CREATE OR REPLACE TRIGGER trigger_validate_cashbook_allocation
 BEFORE INSERT OR UPDATE ON cashbook_invoice_allocations
 FOR EACH ROW
 EXECUTE FUNCTION validate_cashbook_allocation();
@@ -144,7 +144,7 @@ END;
 $$;
 
 DROP TRIGGER IF EXISTS trigger_sync_allocations_to_invoices ON cashbook_invoice_allocations;
-CREATE TRIGGER trigger_sync_allocations_to_invoices
+CREATE OR REPLACE TRIGGER trigger_sync_allocations_to_invoices
 AFTER INSERT OR UPDATE OR DELETE ON cashbook_invoice_allocations
 FOR EACH ROW
 EXECUTE FUNCTION sync_allocations_to_invoices();
@@ -181,7 +181,7 @@ $$;
 DROP TRIGGER IF EXISTS trigger_sync_invoice_payments ON cashbook_entries;
 
 DROP TRIGGER IF EXISTS trigger_cascade_cashbook_entry_soft_delete ON cashbook_entries;
-CREATE TRIGGER trigger_cascade_cashbook_entry_soft_delete
+CREATE OR REPLACE TRIGGER trigger_cascade_cashbook_entry_soft_delete
 AFTER UPDATE ON cashbook_entries
 FOR EACH ROW
 EXECUTE FUNCTION cascade_cashbook_entry_soft_delete();
@@ -217,7 +217,7 @@ END;
 $$;
 
 DROP TRIGGER IF EXISTS trigger_log_allocation_audit ON cashbook_invoice_allocations;
-CREATE TRIGGER trigger_log_allocation_audit
+CREATE OR REPLACE TRIGGER trigger_log_allocation_audit
 AFTER INSERT OR UPDATE OR DELETE ON cashbook_invoice_allocations
 FOR EACH ROW
 EXECUTE FUNCTION log_allocation_audit();

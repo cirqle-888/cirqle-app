@@ -18,7 +18,7 @@ ADD COLUMN IF NOT EXISTS output_schema JSONB;
 ALTER TABLE public.ai_prompts RENAME COLUMN version TO prompt_version;
 ALTER TABLE public.ai_prompts RENAME COLUMN status TO prompt_status;
 
--- Recreate index since we renamed columns
+-- ReCREATE INDEX IF NOT EXISTS since we renamed columns
 DROP INDEX IF EXISTS idx_active_ai_prompts;
 CREATE UNIQUE INDEX idx_active_ai_prompts ON public.ai_prompts (provider, prompt_type) WHERE prompt_status = 'active';
 

@@ -12,7 +12,7 @@
 BEGIN;
 
 CREATE TABLE IF NOT EXISTS public.scenario_snapshots (
-  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   scenario_name TEXT NOT NULL,
   notes         TEXT,                    -- reason for the change (from the review modal)
   scenario_json JSONB NOT NULL,          -- the full Scenario object (enables "duplicate as new scenario" later)
@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS public.scenario_snapshots (
 );
 
 CREATE TABLE IF NOT EXISTS public.scenario_snapshot_records (
-  id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   snapshot_id UUID NOT NULL REFERENCES public.scenario_snapshots(id) ON DELETE CASCADE,
   table_name  TEXT NOT NULL,             -- 'employees' | 'client_service_pricing' | 'employee_commission_agreements' | future modules
   record_id   TEXT NOT NULL,

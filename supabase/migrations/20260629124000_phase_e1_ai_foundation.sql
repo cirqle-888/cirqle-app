@@ -4,7 +4,7 @@
 
 -- 1. Prompt Management
 CREATE TABLE IF NOT EXISTS public.ai_prompts (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   provider TEXT NOT NULL, -- e.g. 'openai', 'gemini'
   prompt_type TEXT NOT NULL, -- e.g. 'health_score', 'recommendation'
   version TEXT NOT NULL, -- e.g. '1.0.0'
@@ -20,8 +20,8 @@ CREATE UNIQUE INDEX idx_active_ai_prompts ON public.ai_prompts (provider, prompt
 
 -- 2. AI Cache
 CREATE TABLE IF NOT EXISTS public.ad_ai_cache (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  client_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id UUID NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
   project_id UUID REFERENCES public.ad_projects(id) ON DELETE CASCADE,
   analysis_type TEXT NOT NULL,
   payload_hash TEXT NOT NULL,
@@ -34,12 +34,12 @@ CREATE TABLE IF NOT EXISTS public.ad_ai_cache (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_ai_cache_lookup ON public.ad_ai_cache (client_id, project_id, analysis_type, payload_hash) WHERE expires_at > NOW();
+CREATE INDEX IF NOT EXISTS idx_ai_cache_lookup ON public.ad_ai_cache (client_id, project_id, analysis_type, payload_hash);
 
 -- 3. AI Insights & Recommendations
 CREATE TABLE IF NOT EXISTS public.ad_ai_insights (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  client_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id UUID NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
   project_id UUID REFERENCES public.ad_projects(id) ON DELETE CASCADE,
   insight_type TEXT NOT NULL, -- 'recommendation', 'alert', 'opportunity'
   title TEXT NOT NULL,
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS public.ad_ai_insights (
 
 -- 4. Forecast Accuracy
 CREATE TABLE IF NOT EXISTS public.ad_forecast_accuracy (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   prediction_date DATE NOT NULL,
   metric TEXT NOT NULL, -- e.g. 'spend', 'roas'
   predicted_value NUMERIC(15, 6),
@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS public.ad_forecast_accuracy (
 
 -- 5. Benchmarks
 CREATE TABLE IF NOT EXISTS public.ad_benchmarks (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   benchmark_type TEXT NOT NULL, -- 'campaign', 'client', 'agency', 'industry', 'region', 'country', 'objective'
   entity_id UUID, -- References the client/campaign if applicable
   metric_name TEXT NOT NULL,
@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS public.ad_benchmarks (
   metadata JSONB DEFAULT '{}'::jsonb
 );
 
-CREATE INDEX idx_ad_benchmarks_lookup ON public.ad_benchmarks (benchmark_type, entity_id, metric_name);
+CREATE INDEX IF NOT EXISTS idx_ad_benchmarks_lookup ON public.ad_benchmarks (benchmark_type, entity_id, metric_name);
 
 -- 6. Materialized Views
 -- Note: These depend on ad_daily_metrics which exists from previous phases.

@@ -2,7 +2,7 @@
 
 -- 1. Create table
 CREATE TABLE public.cashbook_payroll_allocations (
-    id uuid NOT NULL DEFAULT extensions.uuid_generate_v4(),
+    id uuid NOT NULL DEFAULT extensions.gen_random_uuid(),
     cashbook_entry_id uuid NOT NULL,
     payroll_id uuid NOT NULL,
     allocated_amount numeric(15,2) NOT NULL DEFAULT 0.00,

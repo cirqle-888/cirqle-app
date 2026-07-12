@@ -1,6 +1,6 @@
 -- Create employee_performance_history table
 CREATE TABLE IF NOT EXISTS employee_performance_history (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,
   performance_rating DECIMAL(5,2) NOT NULL,
   effective_from DATE NOT NULL,

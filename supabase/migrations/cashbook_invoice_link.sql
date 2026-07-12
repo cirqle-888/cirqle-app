@@ -2,7 +2,7 @@
 ALTER TABLE cashbook_entries 
 ADD COLUMN IF NOT EXISTS invoice_id UUID REFERENCES invoices(id) ON DELETE SET NULL;
 
--- 2. Create index for fast lookups
+-- 2. CREATE INDEX IF NOT EXISTS for fast lookups
 CREATE INDEX IF NOT EXISTS idx_cashbook_invoice_id ON cashbook_entries(invoice_id);
 
 -- 3. Backfill historical data (Map plain text references to strict IDs)
@@ -111,7 +111,7 @@ $$ LANGUAGE plpgsql;
 
 -- 5. Attach the trigger to cashbook_entries
 DROP TRIGGER IF EXISTS trigger_sync_invoice_payments ON cashbook_entries;
-CREATE TRIGGER trigger_sync_invoice_payments
+CREATE OR REPLACE TRIGGER trigger_sync_invoice_payments
 AFTER INSERT OR UPDATE OR DELETE ON cashbook_entries
 FOR EACH ROW
 EXECUTE FUNCTION sync_invoice_payments();

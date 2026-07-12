@@ -1,1 +1,1 @@
-ALTER TABLE cashbook_entries ADD COLUMN is_reviewed BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE cashbook_entries ADD COLUMN IF NOT EXISTS is_reviewed BOOLEAN NOT NULL DEFAULT false;

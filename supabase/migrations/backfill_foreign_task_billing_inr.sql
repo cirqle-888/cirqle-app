@@ -63,7 +63,7 @@ $$ LANGUAGE plpgsql;
 -- Fires only when the foreign amount or currency is written, so direct
 -- billing_amount_inr / billing_exchange_rate updates do not re-trigger it.
 DROP TRIGGER IF EXISTS trg_task_billing_inr ON tasks;
-CREATE TRIGGER trg_task_billing_inr
+CREATE OR REPLACE TRIGGER trg_task_billing_inr
   BEFORE INSERT OR UPDATE OF billing_amount, currency ON tasks
   FOR EACH ROW
   EXECUTE FUNCTION set_task_billing_inr();

@@ -28,7 +28,7 @@ END;
 $$;
 
 DROP TRIGGER IF EXISTS trigger_auto_create_allocation_on_entry ON cashbook_entries;
-CREATE TRIGGER trigger_auto_create_allocation_on_entry
+CREATE OR REPLACE TRIGGER trigger_auto_create_allocation_on_entry
 AFTER INSERT ON cashbook_entries
 FOR EACH ROW
 EXECUTE FUNCTION auto_create_allocation_on_entry();

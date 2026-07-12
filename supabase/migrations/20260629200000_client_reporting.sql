@@ -12,7 +12,7 @@
 -- Conventions followed:
 --   • FK: uses clients(id) — consistent with all existing ad_* tables
 --   • RLS: DROP POLICY IF EXISTS before CREATE POLICY (idempotent)
---   • Triggers: DROP TRIGGER IF EXISTS before CREATE TRIGGER (idempotent)
+--   • Triggers: DROP TRIGGER IF EXISTS before CREATE OR REPLACE TRIGGER (idempotent)
 --   • FK schedule_id inline in ad_reports (no ALTER TABLE needed)
 --   • Storage bucket: (id, name, public) only — matches product-images pattern
 --   • No storage.objects RLS — admin client bypasses RLS (same as product-images)
@@ -317,12 +317,12 @@ CREATE POLICY "ad_report_analytics_authenticated_insert"
 -- ---------------------------------------------------------------------------
 
 DROP TRIGGER IF EXISTS update_client_branding_modtime ON public.client_branding;
-CREATE TRIGGER update_client_branding_modtime
+CREATE OR REPLACE TRIGGER update_client_branding_modtime
   BEFORE UPDATE ON public.client_branding
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 DROP TRIGGER IF EXISTS update_ad_report_schedules_modtime ON public.ad_report_schedules;
-CREATE TRIGGER update_ad_report_schedules_modtime
+CREATE OR REPLACE TRIGGER update_ad_report_schedules_modtime
   BEFORE UPDATE ON public.ad_report_schedules
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
