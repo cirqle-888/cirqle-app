@@ -1,0 +1,104 @@
+name: Mobile Android build
+
+# The Android app is a Capacitor shell around the live web app. The native
+# project is NOT committed (see mobile/README.md) — it is generated fresh here
+# from capacitor.config.json so the scaffold can never drift.
+#
+# Always builds an installable debug APK. Builds a release AAB too: signed when
+# an upload keystore is configured in repo secrets, otherwise an unsigned bundle
+# purely to validate that the release build succeeds.
+#
+# Trigger from the Actions tab (workflow_dispatch) or by pushing a mobile-v* tag.
+on:
+  workflow_dispatch:
+    inputs:
+      versionName:
+        description: 'versionName for this build (e.g. 0.6.0)'
+        required: false
+        default: '0.6.0'
+  push:
+    tags: ['mobile-v*']
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    env:
+      # Non-empty only when the upload keystore secret is set — gates signing.
+      HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+      VERSION_NAME: ${{ github.event.inputs.versionName || '0.6.0' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Capacitor tooling
+        working-directory: mobile
+        # npm install (not ci): package-lock may trail package.json between
+        # native-plugin additions, and node_modules is not committed.
+        run: npm install
+
+      - name: Generate native Android project
+        working-directory: mobile
+        run: |
+          npx cap add android
+          npx cap sync android
+
+      - name: Set versionCode / versionName
+        working-directory: mobile/android
+        # versionCode must strictly increase per Play upload — the run number
+        # guarantees that. versionName is the human-facing string.
+        run: |
+          sed -i "s/versionCode 1/versionCode ${{ github.run_number }}/" app/build.gradle
+          sed -i "s/versionName \"1.0\"/versionName \"${VERSION_NAME}\"/" app/build.gradle
+          echo "versionCode/versionName after patch:"
+          grep -E "versionCode|versionName" app/build.gradle
+
+      - name: Build debug APK
+        working-directory: mobile/android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Decode upload keystore
+        if: env.HAS_KEYSTORE == 'true'
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/upload.keystore"
+
+      - name: Build signed release AAB
+        if: env.HAS_KEYSTORE == 'true'
+        working-directory: mobile/android
+        # android.injected.signing.* signs without editing the generated
+        # build.gradle (the same path Android Studio's signed-bundle wizard uses).
+        run: |
+          ./gradlew bundleRelease --no-daemon --stacktrace \
+            -Pandroid.injected.signing.store.file="$RUNNER_TEMP/upload.keystore" \
+            -Pandroid.injected.signing.store.password="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
+            -Pandroid.injected.signing.key.alias="${{ secrets.ANDROID_KEY_ALIAS }}" \
+            -Pandroid.injected.signing.key.password="${{ secrets.ANDROID_KEY_PASSWORD }}"
+
+      - name: Build unsigned release AAB (no keystore configured)
+        if: env.HAS_KEYSTORE != 'true'
+        working-directory: mobile/android
+        run: ./gradlew bundleRelease --no-daemon --stacktrace
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cirqle-android
+          if-no-files-found: warn
+          path: |
+            mobile/android/app/build/outputs/apk/debug/*.apk
+            mobile/android/app/build/outputs/bundle/release/*.aab
