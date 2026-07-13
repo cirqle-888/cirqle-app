@@ -177,13 +177,10 @@ export function TaskEditModal({
     // On desktop it stays a centered dialog (items-center, p-4, rounded-2xl).
     <ModalOverlay onClose={onClose} sheetOnMobile>
       <div
-        className="w-full sm:max-w-lg flex flex-col min-h-0"
+        className="w-full sm:max-w-lg bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col max-h-[90dvh] sm:max-h-[85dvh] overflow-hidden"
         style={kbOffset > 0 ? { marginBottom: kbOffset } : undefined}
       >
-        {/* Mobile: min-h-0 and flex-1 allows the container to shrink to fit the screen 
-            instead of overflowing when content is very long. */}
-        <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full shadow-2xl flex flex-col flex-1 min-h-0 overflow-hidden">
-          {/* Header — always visible, never scrolls */}
+        {/* Header — always visible, never scrolls */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-card rounded-t-2xl shrink-0">
             <div>
               <h2 className="font-semibold">Edit Task</h2>
@@ -455,7 +452,6 @@ export function TaskEditModal({
               </div>
             </div>
           )}
-        </div>
       </div>
     </ModalOverlay>
   )

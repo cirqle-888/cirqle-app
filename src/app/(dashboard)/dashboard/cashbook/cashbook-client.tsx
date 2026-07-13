@@ -969,7 +969,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         {/* Summary — only rendered when the viewer can see ₹ amounts. Without
             cashbook.view_amounts the totals would collapse to ₹0 and mislead. */}
         {showAmounts && (
-          <div className={`grid gap-4 ${realisedFxGainLoss !== 0 ? 'grid-cols-4' : 'grid-cols-3'}`}>
+          <div className={`grid gap-4 ${realisedFxGainLoss !== 0 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2 sm:grid-cols-3'}`}>
             <div className="bg-card border border-border rounded-xl p-4">
               <div className="flex items-center gap-2 mb-1">
                 <TrendingUp className="w-4 h-4 text-green-400" />
