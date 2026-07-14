@@ -338,8 +338,31 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
     void doMarkSent(inv.id)
   }
   const copyText = async (text: string) => {
-    try { await navigator.clipboard.writeText(text); success('Copied', 'Reminder text copied') }
-    catch { toastError('Copy failed', 'Select the text and copy manually') }
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text)
+      } else {
+        const textArea = document.createElement("textarea")
+        textArea.value = text
+        textArea.style.position = "absolute"
+        textArea.style.left = "-999999px"
+        document.body.prepend(textArea)
+        textArea.select()
+        try {
+          document.execCommand('copy')
+        } catch (error) {
+          console.error(error)
+          toastError('Copy failed', 'Select the text and copy manually')
+          return
+        } finally {
+          textArea.remove()
+        }
+      }
+      success('Copied', 'Reminder text copied')
+    } catch (err) {
+      console.error(err)
+      toastError('Copy failed', 'Select the text and copy manually')
+    }
   }
   const sendWhatsApp = (phone: string | null, text: string) => {
     let digits = (phone || '').replace(/\D/g, '')
