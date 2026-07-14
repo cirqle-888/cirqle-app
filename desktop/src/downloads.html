@@ -166,7 +166,11 @@
     $('#open-folder').onclick = () => window.desk.dlOpenFolder()
     $('#clear').onclick = () => window.desk.dlClear()
     $('#close').onclick = () => window.desk.closeDownloads()
+    // Never let a keyboard shortcut fire while focus is in an editable field —
+    // there typing must always win (Space = space, not a shortcut).
+    const isEditable = (t) => t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
     document.addEventListener('keydown', (e) => {
+      if (isEditable(e.target)) return
       if (e.key === 'Escape') window.desk.closeDownloads()
       // Finder's real shortcut: Space previews whatever's under the cursor.
       if (e.code === 'Space' && hoveredId != null) { e.preventDefault(); window.desk.dlQuickLook(hoveredId) }

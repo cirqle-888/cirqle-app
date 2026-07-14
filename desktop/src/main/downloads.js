@@ -180,7 +180,7 @@ function downloadsMenuTemplate() {
     ? done.slice(0, 15).map((d) => ({
         label: deps.truncate(d.name, 48),
         submenu: [
-          { label: 'Quick Look', accelerator: 'Space', click: () => quickLookFile(d.path) },
+          { label: 'Quick Look', click: () => quickLookFile(d.path) },
           { label: 'Open', click: () => shell.openPath(d.path) },
           { label: 'Show in Folder', click: () => shell.showItemInFolder(d.path) },
           { label: 'Share to Linked WhatsApp', click: () => deps.shareFileToWhatsApp(d.path) },
