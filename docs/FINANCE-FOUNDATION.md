@@ -120,9 +120,9 @@ where ambiguity exists (cashbook).
 localized (save payload + label).
 **Rollback:** revert the code deploy; trigger shim keeps deriving scope.
 
-### Phase 3 — Finance Engine, Company Ops report, company wallet
+### Phase 3 — Finance Engine, Company Ops report, company wallet ✅
 - `src/lib/finance/` + unit tests
-- Migration `20260714091000_finance_views_company_wallet.sql`:
+- Migration `20260714093000_finance_views_company_wallet.sql`:
   `v_finance_journal`, `v_company_pnl_monthly` (security_invoker),
   `ad_wallet_ledger.client_id` nullable + shape check update,
   `ad_reports.client_id` nullable.
@@ -141,15 +141,47 @@ occur.
 CHECK (only safe when no company-wallet rows exist yet; the down script
 guards on that).
 
-### Phase 4 — Consolidation + hardening
-- Dashboard monthly profitability + KPI math moves onto the engine.
-- Wallet credit RPC with row-lock (fixes the TOCTOU over-credit window);
-  app falls back to the TS path if the RPC isn't applied yet.
-- `client-fifo.ts`: remove dangling `payroll.paid_salary` read (latent
-  double-allocation).
-- `markPayrollUnpaid`: soft-delete the salary cashbook entry (was hard delete).
-- `serverCancelTask`: `[JOB LOSS]` entry gets `client_id` + scope.
+### Phase 4 — Consolidation + hardening ✅
+- **Client Profitability report** (`/dashboard/reports/client-profitability`):
+  per-client contribution margin from the engine (invoiced − direct costs −
+  attributed labor + markup), plus the internal-initiatives labor card.
+- **Wallet credit RPC** (`20260714095000_wallet_credit_rpc.sql` + rollback):
+  `credit_ad_wallet()` row-locks the funding entry — over-crediting is now
+  impossible to race. App prefers the RPC and falls back to the TS path when
+  it isn't applied.
+- **`client-fifo.ts`**: `payrollToItem` no longer reads the phantom
+  `payroll.paid_salary` column; outstanding comes from an explicit
+  `allocatedInr` parameter (Σ active `cashbook_payroll_allocations`).
+- **`markPayrollUnpaid`**: soft-deletes the salary entry + its allocations
+  (was a hard delete — the one break in the soft-delete convention). The
+  phase-9 trigger re-derives payroll status from surviving active rows.
+- **`serverCancelTask`**: `[JOB LOSS]` entries are `scope='company'`;
+  deliberately NO `client_id` (the rebilling trigger would bill the client
+  for our own written-off work).
+- Verify after applying both migrations: `scripts/verify-finance-phase3-4.sql`.
 
 **Verification at every phase:** `npx tsc --noEmit`, `npm run build`,
 `npm test`, plus the phase's SQL verify script and a manual smoke of the
 affected screens.
+
+## Engine boundary + remaining consolidation
+
+The engine v1 deliberately models the **cash ledger** (cashbook + categories)
+plus **attribution inputs** (contribution scores, expense items, wallet
+debits). Invoice-side AR metrics (Total Billed / Outstanding / Overdue on the
+dashboard) are receivables, not cash — they stay single-sourced in
+`dashboard/page.tsx` until the GL step promotes invoices into the journal.
+
+**Rule for all future work: any new or modified financial surface must
+consume `src/lib/finance` — no hand-rolled aggregation.** Known legacy
+surfaces still on their own math (consolidate opportunistically when next
+touched):
+- `dashboard-analytics.tsx` monthly jobs−payroll table (accrual management
+  metric; distinct from the engine's cash P&L — label it or migrate it)
+- `lib/reports/contribution-analysis.ts` task-profit column (feeds What-If;
+  shares inputs with `client-profitability.ts` — unify on the engine)
+- `lib/partners/queries.ts` statement math (uses raw `total_amount`, not the
+  INR snapshots — known FX inconsistency)
+- Internal-campaign PDF reports: DB-ready (`ad_reports.client_id` nullable);
+  the `lib/reporting` wiring is pending (that module was under concurrent
+  active development when Phase 3/4 shipped).

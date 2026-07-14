@@ -399,7 +399,27 @@ export async function markPayrollUnpaid(id: string): Promise<ActionResult> {
     .eq('id', id)
   if (error) return { ok: false, error: error.message }
 
-  await admin.from('cashbook_entries').delete().eq('reference', `payroll:${id}`)
+  // Soft-delete the auto-created salary entry (+ its allocations) instead of
+  // hard-deleting: financial history stays auditable, matching the soft-delete
+  // convention everywhere else. Hard delete relied on the FK cascade to remove
+  // allocations; here we retire them explicitly, and the sync_payroll_payments
+  // trigger re-derives the payroll status from the surviving active rows.
+  const now = new Date().toISOString()
+  const { data: salaryEntries } = await admin
+    .from('cashbook_entries')
+    .select('id')
+    .eq('reference', `payroll:${id}`)
+    .is('deleted_at', null)
+  const entryIds = (salaryEntries || []).map((e: any) => e.id as string)
+  if (entryIds.length > 0) {
+    await admin.from('cashbook_payroll_allocations')
+      .update({ deleted_at: now })
+      .in('cashbook_entry_id', entryIds)
+      .is('deleted_at', null)
+    await admin.from('cashbook_entries')
+      .update({ deleted_at: now })
+      .in('id', entryIds)
+  }
 
   // Log: payroll reverted to unpaid (fire-and-forget)
   void logActivity({

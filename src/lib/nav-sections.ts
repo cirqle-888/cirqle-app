@@ -65,6 +65,9 @@ export const navSections: NavSection[] = [
       // internal marketing…) + burn rate / runway + scope triage queue.
       // Powered by the Finance Engine (src/lib/finance).
       { label: 'Company Operations', href: '/dashboard/reports/company-ops', icon: Building2, requiredPerm: 'reports.view' },
+      // Client Profitability: per-client contribution margin (revenue − direct
+      // costs − attributed labor + markup). Same Finance Engine.
+      { label: 'Client Profitability', href: '/dashboard/reports/client-profitability', icon: TrendingUp, requiredPerm: 'reports.view' },
       // Client Ranking: payment reliability + business value scoring per client.
       { label: 'Client Ranking', href: '/dashboard/clients/ranking', icon: Award, requiredPerm: 'reports.view' },
       // Business Health Center: cash/collections, overdue aging, client risk

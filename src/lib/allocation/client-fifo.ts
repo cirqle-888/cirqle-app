@@ -250,18 +250,24 @@ export function invoiceToItem(inv: {
   }
 }
 
-/** Convert a payroll row into an AllocatableItem. */
+/**
+ * Convert a payroll row into an AllocatableItem.
+ *
+ * `allocatedInr` is the Σ of the payslip's ACTIVE cashbook_payroll_allocations
+ * (deleted_at IS NULL) — payment state lives in that table, NOT on the payroll
+ * row. (An earlier version read a phantom `payroll.paid_salary` column that
+ * never existed, so every payslip looked fully outstanding — a latent
+ * double-allocation. The explicit parameter makes that mistake impossible.)
+ */
 export function payrollToItem(p: {
   id: string
   employee_id: string
   month: number
   year: number
   net_salary: number
-  paid_salary?: number
   payslip_number?: string
   employee?: { name?: string; cqid?: string }
-}): AllocatableItem {
-  const paid = p.paid_salary ?? 0
+}, allocatedInr: number = 0): AllocatableItem {
   const date = `${p.year}-${String(p.month).padStart(2, '0')}-01`
   return {
     id: p.id,
@@ -269,7 +275,7 @@ export function payrollToItem(p: {
     item_date: date,
     label: p.payslip_number || `Salary ${p.month}/${p.year}`,
     sub: p.employee?.name || p.employee?.cqid || '',
-    outstanding_inr: Math.max(0, Math.round((p.net_salary - paid) * 100) / 100),
+    outstanding_inr: Math.max(0, Math.round((p.net_salary - (allocatedInr || 0)) * 100) / 100),
   }
 }
 

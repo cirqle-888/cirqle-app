@@ -425,6 +425,29 @@ async function creditWallet(
   if (amount <= 0) return { ok: false, error: 'Amount must be greater than zero.' }
 
   const admin = createAdminClient()
+
+  // Preferred path: atomic DB credit (migration 20260714095000). The function
+  // row-locks the funding entry, so concurrent credits can never over-credit
+  // it — the TS path below has an unavoidable check-then-insert window.
+  const rpc = await (admin as any).rpc('credit_ad_wallet', {
+    p_client_id: clientId,
+    p_entry_id: input.cashbookEntryId,
+    p_amount: amount,
+    p_notes: input.notes?.trim() || null,
+    p_created_by: guard.employeeId,
+  })
+  if (!rpc.error) {
+    revalidatePath(REVALIDATE)
+    return { ok: true }
+  }
+  const fnMissing = rpc.error.code === 'PGRST202' || rpc.error.code === '42883'
+    || /could not find the function|function .* does not exist/i.test(rpc.error.message ?? '')
+  if (!fnMissing) {
+    // Real validation failure raised by the DB — its message is user-facing.
+    return { ok: false, error: rpc.error.message }
+  }
+
+  // Legacy fallback (RPC not applied yet): app-side validation + insert.
   const { data: entry, error: entryErr } = await admin
     .from('cashbook_entries')
     .select('id, type, amount, amount_inr, currency, deleted_at')
