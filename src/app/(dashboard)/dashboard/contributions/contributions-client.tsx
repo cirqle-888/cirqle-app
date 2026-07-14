@@ -2911,7 +2911,9 @@ export default function ContributionsClient({
       {/* ── Fixed bottom action bar ──
           On mobile: spans full width (sidebar is hidden behind hamburger).
           On md+: clears the 240px desktop sidebar via left-60. */}
-      <div className="fixed bottom-0 left-0 md:left-60 right-0 z-20 bg-card/95 backdrop-blur-md border-t border-border px-4 sm:px-6 py-3 sm:py-3.5 flex items-center gap-2 sm:gap-3 flex-wrap pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+      {/* pr-20 reserves the bottom-right corner so the floating chat launcher
+          (fixed bottom-right, ~4.25rem) never overlaps the last action button. */}
+      <div className="fixed bottom-0 left-0 md:left-60 right-0 z-20 bg-card/95 backdrop-blur-md border-t border-border pl-4 sm:pl-6 pr-20 py-3 sm:py-3.5 flex items-center gap-2 sm:gap-3 flex-wrap pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <button onClick={handleSave} disabled={saving}
           className="flex-1 sm:flex-initial flex items-center justify-center gap-2 gradient-bg text-white text-sm font-semibold px-4 sm:px-6 py-3 sm:py-2.5 rounded-xl hover:opacity-90 disabled:opacity-40 transition-opacity shadow-md shadow-primary/20">
           {saving

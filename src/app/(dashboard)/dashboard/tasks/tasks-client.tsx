@@ -4222,7 +4222,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       {/* Add Task Modal — full-screen bottom-sheet on mobile, centered dialog on desktop */}
       {showForm && (
         <ModalOverlay onClose={() => setShowForm(false)} sheetOnMobile>
-          <div className="bg-card border border-border w-full h-full sm:h-auto sm:max-w-lg sm:max-h-[90vh] shadow-2xl rounded-t-2xl sm:rounded-2xl flex flex-col">
+          <div className="bg-card border border-border w-full max-h-[90dvh] sm:h-auto sm:max-w-lg sm:max-h-[90vh] shadow-2xl rounded-t-2xl sm:rounded-2xl flex flex-col">
             {/* Mobile drag-handle hint */}
             <div className="sm:hidden flex justify-center pt-2 pb-1 shrink-0">
               <div className="w-10 h-1 rounded-full bg-foreground/20" />
@@ -4231,7 +4231,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
               <h2 className="font-semibold text-base">Add Task</h2>
               <button onClick={() => setShowForm(false)} className="text-muted-foreground hover:text-foreground p-1 -m-1"><X className="w-5 h-5" /></button>
             </div>
-            <form ref={addFormRef} onSubmit={handleSubmit} className="px-5 sm:px-6 pt-4 pb-4 space-y-4 overflow-y-auto flex-1">
+            <form ref={addFormRef} onSubmit={handleSubmit} className="px-5 sm:px-6 pt-4 pb-4 space-y-4 overflow-y-auto flex-1 min-h-0">
 
               {/* Task number + Title */}
               <div className="grid grid-cols-[88px_1fr] sm:grid-cols-[110px_1fr] gap-3">
@@ -4955,7 +4955,10 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
               {addError && (
                 <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 -mb-1">{addError}</p>
               )}
-              <div className="sticky bottom-0 -mx-5 sm:-mx-6 px-5 sm:px-6 -mb-4 pb-4 pt-3 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/85 border-t border-border flex gap-3">
+              {/* pr-20 on mobile keeps the last button clear of the floating chat
+                  launcher (fixed bottom-right, ~4.25rem corner); safe-area inset
+                  lifts the buttons above the home indicator on notched phones. */}
+              <div className="sticky bottom-0 -mx-5 sm:-mx-6 pl-5 pr-20 sm:px-6 -mb-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/85 border-t border-border flex gap-3">
                 <Button type="button" variant="outline" onClick={() => { setShowForm(false); setAddError(null) }} className="flex-1" size="lg">Cancel</Button>
                 <Button type="submit" disabled={!selectedService} loading={saving} className="flex-1 bg-gradient-to-r from-primary to-violet-600 hover:from-primary/90 hover:to-violet-600/90 text-primary-foreground" size="lg">
                   Add Task {previewTaskNumber != null && <span className="opacity-70 ml-1">#{previewTaskNumber}</span>}

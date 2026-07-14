@@ -3704,13 +3704,22 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                           )}
                         </div>
                       </div>
-                      <button
-                        onClick={() => deletePayment(inv.id, p.id)}
-                        title="Remove this payment"
-                        className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-all ml-2 shrink-0"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-1 ml-2 shrink-0">
+                        <button
+                          onClick={() => setReceiptPayment({ pmt: p, invoice: inv })}
+                          title="Get / share receipt"
+                          className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-muted-foreground hover:text-emerald-500 transition-all"
+                        >
+                          <Receipt className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => deletePayment(inv.id, p.id)}
+                          title="Remove this payment"
+                          className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-all"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   ))}
 
