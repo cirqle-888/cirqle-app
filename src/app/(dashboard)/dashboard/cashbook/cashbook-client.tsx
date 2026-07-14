@@ -9,7 +9,7 @@ import { insertCashbookEntries, updateCashbookEntry, softDeleteCashbookEntry, fe
 import { SCOPE_FILTER_OPTIONS, matchesScopeFilter, getScopeFilterLabel, type ScopeFilterValue } from '@/components/ui/scope-filter'
 import { formatCompact, round2 } from '@/lib/calculations/currency'
 import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
-import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, RefreshCw, Landmark, CheckCircle, ArrowLeftRight, Copy } from 'lucide-react'
+import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, RefreshCw, Landmark, CheckCircle, ArrowLeftRight, Copy, Users } from 'lucide-react'
 import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
 import { ActiveFilterChips } from '@/components/ui/active-filter-chips'
 import { TokenizedSearch, type SearchFacet } from '@/components/ui/tokenized-search'
@@ -18,6 +18,9 @@ import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECT
 import type { DateFilterValue } from '@/components/ui/date-filter'
 import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
+import TagPicker from '@/components/ui/tag-picker'
+import { FilterDropdown } from '@/components/ui/filter-dropdown'
+import { computeEqualSplit } from '@/lib/finance/splits'
 import type { Currency } from '@/types'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { useRole } from '@/contexts/role-context'
@@ -107,6 +110,18 @@ interface Entry {
     invoice_id: string;
     invoice?: { invoice_number: string; status: string } | null
   }[]
+  // Free-form spend tags (e.g. "Photoshop", "Design") — absent entirely on a
+  // pre-migration DB (20260714160000).
+  tags?: { tag: { id: string; name: string } }[]
+  // Employees sharing this expense, split equally. Amount fields stripped
+  // server-side for viewers without cashbook.view_amounts.
+  employee_splits?: {
+    id: string;
+    employee_id: string;
+    amount?: number;
+    amount_inr?: number;
+    employee?: { id: string; name: string; cqid: string }
+  }[]
 }
 
 interface DueInvoice {
@@ -181,11 +196,13 @@ interface Props {
    * inflow/outflow KPI cards, and the entry-row amount column.
    */
   showAmounts: boolean
+  /** All known tag names, for the TagPicker's autocomplete. */
+  allTags: string[]
 }
 
 const CURRENCIES: Currency[] = ['INR', 'AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
 
-export default function CashBookClient({ initialEntries, categories, bankAccounts, exchangeRates, dueInvoices, employees, clients, outstandingCredits, pendingPayrolls, companySettings, showAmounts }: Props) {
+export default function CashBookClient({ initialEntries, categories, bankAccounts, exchangeRates, dueInvoices, employees, clients, outstandingCredits, pendingPayrolls, companySettings, showAmounts, allTags }: Props) {
   const { role } = useRole()
   const isAdmin = role === 'super_admin'
   const [entries, setEntries] = useState<Entry[]>(initialEntries)
@@ -214,6 +231,9 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   )
   const [filterAllocStatus, setFilterAllocStatus] = useState(searchParams.get('alloc') || '')
   const [filterClient, setFilterClient] = useState(searchParams.get('client') || '')
+  const [filterTags, setFilterTags] = useState<string[]>(() => {
+    try { const raw = searchParams.get('tags'); return raw ? JSON.parse(raw) : [] } catch { return [] }
+  })
   const [sortDir, setSortDir] = useState(searchParams.get('sort') || 'desc') // date: desc = newest first
   const [filterMinAmount, setFilterMinAmount] = useState(searchParams.get('min') || '')
   const [filterMaxAmount, setFilterMaxAmount] = useState(searchParams.get('max') || '')
@@ -231,6 +251,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     if (filterScope) params.set('scope', filterScope); else params.delete('scope')
     if (filterAllocStatus) params.set('alloc', filterAllocStatus); else params.delete('alloc')
     if (filterClient) params.set('client', filterClient); else params.delete('client')
+    if (filterTags.length) params.set('tags', JSON.stringify(filterTags)); else params.delete('tags')
     if (sortDir && sortDir !== 'desc') params.set('sort', sortDir); else params.delete('sort')
     if (filterMinAmount) params.set('min', filterMinAmount); else params.delete('min')
     if (filterMaxAmount) params.set('max', filterMaxAmount); else params.delete('max')
@@ -239,7 +260,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     if (newQueryString !== searchParams.toString()) {
       router.replace(`${pathname}?${newQueryString}`, { scroll: false })
     }
-  }, [filterType, filterMonth, searchFacets, filterCategory, filterScope, filterAllocStatus, filterClient, sortDir, filterMinAmount, filterMaxAmount, pathname, router, searchParams])
+  }, [filterType, filterMonth, searchFacets, filterCategory, filterScope, filterAllocStatus, filterClient, filterTags, sortDir, filterMinAmount, filterMaxAmount, pathname, router, searchParams])
 
   // Deep-link focus: when arriving via `?focus=<entryId>` (e.g. from an invoice's
   // linked-payments list), scroll that row into view and flash a highlight once.
@@ -297,6 +318,10 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     // (feeds the Company P&L), '' = leave untriaged (client money, tag later).
     // When a client is tagged the entry is 'client'-scoped regardless.
     scope: '' as '' | 'company',
+    // Free-form spend tags (e.g. "Photoshop", "Design") for ad-hoc reporting.
+    tags: [] as string[],
+    // Employees sharing this expense — split equally on save.
+    splitEmployeeIds: [] as string[],
   })
 
   const supabase = createClient()
@@ -388,6 +413,11 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       client_filter_id:  entry.client_id ?? '',
       fully_paid:      false,
       scope:           entry.scope === 'company' ? 'company' : '',
+      tags:            (entry.tags ?? []).map(t => t.tag.name),
+      // Splits aren't carried over on duplicate — a copied entry needs the
+      // split re-decided (recomputing from the same employee set still works
+      // via the form if the user re-adds them).
+      splitEmployeeIds: [],
     })
     setFormEditingId(null)
     setRecurringMonths(0)
@@ -417,6 +447,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       client_filter_id:  entry.client_id  ?? '',
       fully_paid:      false,
       scope:           entry.scope === 'company' ? 'company' : '',
+      tags:            (entry.tags ?? []).map(t => t.tag.name),
+      splitEmployeeIds: (entry.employee_splits ?? []).map(s => s.employee_id),
     })
     setSmartExtra(entry.client_id ? { client_id: entry.client_id } : {})
     setFormEditingId(entry.id)
@@ -462,8 +494,13 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         reference:       form.reference,
         client_id:       savedClientId,
         scope:           savedScope,
+        tags:            form.tags,
+        employee_split_ids: form.type === 'outflow' ? form.splitEmployeeIds : [],
       })
       if (result.ok) {
+        const savedSplitIds = form.type === 'outflow' ? form.splitEmployeeIds : []
+        const splitShares = computeEqualSplit(amountInr, savedSplitIds)
+        const nativeShares = computeEqualSplit(amount, savedSplitIds)
         setEntries(prev => prev.map(e =>
           e.id === formEditingId
             ? {
@@ -481,12 +518,20 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 reference:       form.reference,
                 client_id:       savedClientId || undefined,
                 scope:           savedScope,
+                tags:            form.tags.map(name => ({ tag: { id: name, name } })),
+                employee_splits: splitShares.map(s => ({
+                  id: s.employeeId,
+                  employee_id: s.employeeId,
+                  amount: nativeShares.find(n => n.employeeId === s.employeeId)?.amount ?? s.amount,
+                  amount_inr: s.amount,
+                  employee: employees.find((emp: any) => emp.id === s.employeeId),
+                })),
               }
             : e,
         ))
         setShowForm(false)
         setFormEditingId(null)
-        setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: new Date().toISOString().split('T')[0], description: '', reference: '', linked_invoice_id: '', client_filter_id: '', fully_paid: false, scope: '' })
+        setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: new Date().toISOString().split('T')[0], description: '', reference: '', linked_invoice_id: '', client_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [] })
       }
       setSaving(false)
       return
@@ -542,6 +587,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         // Persist the client tag so auto-allocation only considers this client's invoices.
         client_id: insertClientId,
         scope: insertClientId ? 'client' : (form.scope || null),
+        tags: form.tags,
+        employee_split_ids: form.type === 'outflow' ? form.splitEmployeeIds : [],
       },
       form.description,
       {
@@ -554,12 +601,26 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     )
 
     if (result.ok && result.data) {
-      const allInserted = result.data.entries
+      // The insert response doesn't echo tags/splits (they're saved in a
+      // follow-up call server-side) — attach what we know we just submitted
+      // so the new row(s) show them without a refresh.
+      const insertSplitIds = form.type === 'outflow' ? form.splitEmployeeIds : []
+      const allInserted = result.data.entries.map((e: any) => ({
+        ...e,
+        tags: form.tags.map(name => ({ tag: { id: name, name } })),
+        employee_splits: computeEqualSplit(Number(e.amount_inr) || 0, insertSplitIds).map(s => ({
+          id: s.employeeId,
+          employee_id: s.employeeId,
+          amount: computeEqualSplit(Number(e.amount) || 0, insertSplitIds).find(n => n.employeeId === s.employeeId)?.amount ?? s.amount,
+          amount_inr: s.amount,
+          employee: employees.find((emp: any) => emp.id === s.employeeId),
+        })),
+      }))
       // Add all inserted entries to local state (sorted newest first)
       setEntries(prev => [...[...allInserted].reverse(), ...prev])
       setShowForm(false)
       setRecurringMonths(0)
-      setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: new Date().toISOString().split('T')[0], description: '', reference: '', linked_invoice_id: '', client_filter_id: '', fully_paid: false, scope: '' })
+      setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: new Date().toISOString().split('T')[0], description: '', reference: '', linked_invoice_id: '', client_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [] })
     }
     setSaving(false)
   }
@@ -674,6 +735,14 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
 
   const isInvoiceCategory = form.category_id === invoiceCategoryId && form.type === 'inflow'
 
+  // Live equal-split preview for the employee cost-split section — recomputed
+  // on every render from the current form amount, so it never drifts from
+  // what will actually be saved.
+  const formAmountInr = form.currency === 'INR'
+    ? (parseFloat(form.amount) || 0)
+    : (parseFloat(form.amountInr) || 0)
+  const splitPreview = computeEqualSplit(formAmountInr, form.splitEmployeeIds)
+
   // Determine smart mode from selected category name
   const selectedCat = categories.find(c => c.id === form.category_id)
   const smartMode = selectedCat ? (SMART[selectedCat.name.toLowerCase()] || null) : null
@@ -732,6 +801,12 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       )
     }
 
+    if (filterTags.length) {
+      // Inclusive OR: match if the entry carries ANY of the selected tags.
+      const wanted = new Set(filterTags)
+      result = result.filter(e => (e.tags ?? []).some(t => wanted.has(t.tag.name)))
+    }
+
     if (filterMinAmount) {
       const min = parseFloat(filterMinAmount)
       if (!isNaN(min)) result = result.filter(e => (e.amount_inr ?? 0) >= min)
@@ -749,7 +824,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     })
 
     return result
-  }, [entries, filterType, filterMonth, activeFacets, filterCategory, filterScope, filterAllocStatus, filterClient, sortDir, filterMinAmount, filterMaxAmount, invoiceCategoryId, salaryCategoryId])
+  }, [entries, filterType, filterMonth, activeFacets, filterCategory, filterScope, filterAllocStatus, filterClient, filterTags, sortDir, filterMinAmount, filterMaxAmount, invoiceCategoryId, salaryCategoryId])
 
   const totalInflow  = filteredEntries.filter(e => e.type === 'inflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
   const totalOutflow = filteredEntries.filter(e => e.type === 'outflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
@@ -1111,6 +1186,18 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               {scopedFilterClients.map(c => <option key={c.id} value={c.id}>{c.code ? `${c.name} · ${c.code}` : c.name}</option>)}
             </select>
 
+            <FilterDropdown
+              options={allTags.map(t => ({ value: t, label: t }))}
+              value=""
+              onChange={() => {}}
+              placeholder="Tags"
+              compact
+              multiple
+              values={filterTags}
+              onToggle={t => setFilterTags(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t])}
+              onClear={() => setFilterTags([])}
+            />
+
             <button
               type="button"
               onClick={() => setSortDir(d => d === 'desc' ? 'asc' : 'desc')}
@@ -1139,8 +1226,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               />
             </div>
 
-            {(filterType || filterMonth || filterCategory || filterScope || searchFacets.length || filterAllocStatus || filterMinAmount || filterMaxAmount) && (
-              <button onClick={() => { setFilterType(''); setFilterMonth(''); setFilterCategory(''); setFilterScope(''); setSearchFacets([]); setSearchDraft(''); setFilterAllocStatus(''); setFilterMinAmount(''); setFilterMaxAmount('') }} className="text-xs text-muted-foreground hover:text-foreground px-2 whitespace-nowrap">Clear</button>
+            {(filterType || filterMonth || filterCategory || filterScope || searchFacets.length || filterAllocStatus || filterMinAmount || filterMaxAmount || filterTags.length > 0) && (
+              <button onClick={() => { setFilterType(''); setFilterMonth(''); setFilterCategory(''); setFilterScope(''); setSearchFacets([]); setSearchDraft(''); setFilterAllocStatus(''); setFilterMinAmount(''); setFilterMaxAmount(''); setFilterTags([]) }} className="text-xs text-muted-foreground hover:text-foreground px-2 whitespace-nowrap">Clear</button>
             )}
           </div>
         </div>
@@ -1157,8 +1244,9 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             ...(filterAllocStatus ? [{ key: 'alloc', label: 'Allocation', value: filterAllocStatus, onRemove: () => setFilterAllocStatus('') }] : []),
             ...(filterMinAmount ? [{ key: 'min', label: 'Min ₹', value: filterMinAmount, onRemove: () => setFilterMinAmount('') }] : []),
             ...(filterMaxAmount ? [{ key: 'max', label: 'Max ₹', value: filterMaxAmount, onRemove: () => setFilterMaxAmount('') }] : []),
+            ...filterTags.map(t => ({ key: `tag:${t}`, label: 'Tag', value: t, onRemove: () => setFilterTags(prev => prev.filter(x => x !== t)) })),
           ]}
-          onClearAll={() => { setFilterType(''); setFilterMonth(''); setFilterCategory(''); setFilterScope(''); setSearchFacets([]); setSearchDraft(''); setFilterAllocStatus(''); setFilterMinAmount(''); setFilterMaxAmount(''); setFilterClient('') }}
+          onClearAll={() => { setFilterType(''); setFilterMonth(''); setFilterCategory(''); setFilterScope(''); setSearchFacets([]); setSearchDraft(''); setFilterAllocStatus(''); setFilterMinAmount(''); setFilterMaxAmount(''); setFilterClient(''); setFilterTags([]) }}
         />
 
         {/* Entries */}
@@ -1225,8 +1313,20 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                         entry.description || <span className="text-muted-foreground italic">No description</span>
                       )}
                       {entry.transfer_ref && <span className="inline-flex items-center gap-1 bg-purple-500/10 text-purple-400 text-[10px] px-1.5 py-0.5 rounded font-medium"><ArrowLeftRight className="w-3 h-3" />Internal Transfer</span>}
+                      {((entry.tags?.length ?? 0) > 0 || (entry.employee_splits?.length ?? 0) > 0) && (
+                        <div className="flex flex-wrap gap-1">
+                          {entry.tags?.map(t => (
+                            <span key={t.tag.id} className="bg-primary/10 text-primary text-[10px] px-1.5 py-0.5 rounded font-medium">{t.tag.name}</span>
+                          ))}
+                          {(entry.employee_splits?.length ?? 0) > 0 && (
+                            <span className="inline-flex items-center gap-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[10px] px-1.5 py-0.5 rounded font-medium">
+                              <Users className="w-3 h-3" />Split × {entry.employee_splits!.length}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    
+
                     {/* Date and actions */}
                     <div className="flex justify-between items-center text-xs text-muted-foreground">
                       <div className="flex items-center gap-3">
@@ -1412,6 +1512,18 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                               ))}
                             </div>
                           )}
+                          {((entry.tags?.length ?? 0) > 0 || (entry.employee_splits?.length ?? 0) > 0) && (
+                            <div className="flex flex-wrap items-center gap-1 mt-1 ml-3.5">
+                              {entry.tags?.map(t => (
+                                <span key={t.tag.id} className="bg-primary/10 text-primary text-[9px] px-1.5 py-0.5 rounded font-medium">{t.tag.name}</span>
+                              ))}
+                              {(entry.employee_splits?.length ?? 0) > 0 && (
+                                <span className="inline-flex items-center gap-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[9px] px-1.5 py-0.5 rounded font-medium">
+                                  <Users className="w-2.5 h-2.5" />Split × {entry.employee_splits!.length}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </>
                       )}
                     </td>
@@ -1585,7 +1697,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                   <button
                     key={t}
                     type="button"
-                    onClick={() => { setForm(p => ({ ...p, type: t, category_id: t === 'inflow' ? invoiceCategoryId : '', linked_invoice_id: '', client_filter_id: '', fully_paid: false, scope: '' })); resetSmart() }}
+                    onClick={() => { setForm(p => ({ ...p, type: t, category_id: t === 'inflow' ? invoiceCategoryId : '', linked_invoice_id: '', client_filter_id: '', fully_paid: false, scope: '', splitEmployeeIds: [] })); resetSmart() }}
                     className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${form.type === t
                       ? t === 'inflow' ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'
                       : 'bg-secondary text-muted-foreground border border-transparent hover:text-foreground'
@@ -1999,6 +2111,57 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                   <p className="text-[10px] text-muted-foreground mt-1">
                     Company entries feed the Company P&L. “Tag later” keeps it in the triage queue until a client is linked.
                   </p>
+                </div>
+              )}
+
+              {/* ── Tags — free-form spend labels ("Photoshop", "Design", …)
+                   for the Cost & Tags report, independent of category. ── */}
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Tags</label>
+                <TagPicker
+                  availableTags={allTags}
+                  value={form.tags}
+                  onChange={tags => setForm(p => ({ ...p, tags }))}
+                  placeholder="e.g. Photoshop, Design…"
+                />
+              </div>
+
+              {/* ── Employee cost split — one expense shared across employees
+                   (e.g. one Photoshop seat for two designers), divided equally.
+                   Outflow-only: an inflow has no "cost" to attribute. ── */}
+              {form.type === 'outflow' && (
+                <div className="rounded-xl border border-border/60 bg-foreground/[0.02] p-3 space-y-2.5">
+                  <label className="block text-xs font-medium text-muted-foreground">
+                    Split across employees <span className="text-muted-foreground/60 font-normal">(optional — divides the cost equally)</span>
+                  </label>
+                  <FilterDropdown
+                    options={employees.map((e: any) => ({ value: e.id, label: e.name || e.cqid }))}
+                    value=""
+                    onChange={() => {}}
+                    placeholder={form.splitEmployeeIds.length > 0 ? `${form.splitEmployeeIds.length} employee${form.splitEmployeeIds.length === 1 ? '' : 's'} selected` : 'Select employees…'}
+                    multiple
+                    values={form.splitEmployeeIds}
+                    onToggle={id => setForm(p => ({
+                      ...p,
+                      splitEmployeeIds: p.splitEmployeeIds.includes(id)
+                        ? p.splitEmployeeIds.filter(x => x !== id)
+                        : [...p.splitEmployeeIds, id],
+                    }))}
+                    onClear={() => setForm(p => ({ ...p, splitEmployeeIds: [] }))}
+                  />
+                  {splitPreview.length > 0 && (
+                    <div className="space-y-1 pt-1">
+                      {splitPreview.map(s => {
+                        const emp = employees.find((e: any) => e.id === s.employeeId)
+                        return (
+                          <div key={s.employeeId} className="flex items-center justify-between text-xs">
+                            <span className="text-muted-foreground">{emp?.name || emp?.cqid || 'Employee'}</span>
+                            <span className="font-medium tabular-nums">₹{s.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
 

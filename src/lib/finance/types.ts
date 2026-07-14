@@ -39,6 +39,25 @@ export interface JournalLine {
   amountInr: number
   description: string | null
   isTransfer: boolean
+  /** Tag names on this entry — only populated when fetched with includeTags. */
+  tags?: string[]
+}
+
+/** One row of the "Spend by Tag" report. */
+export interface TagSpendRow {
+  tag: string
+  totalInr: number
+  entryCount: number
+}
+
+/** One row of the "Cost by Employee" report (money spent ON an employee —
+ *  e.g. a shared software seat — not to be confused with contribution
+ *  earnings, which is money EARNED BY an employee on client work). */
+export interface EmployeeCostRow {
+  employeeId: string
+  employeeName: string
+  totalInr: number
+  itemCount: number
 }
 
 /** One P&L report line (an account) across months. */

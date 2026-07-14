@@ -199,6 +199,13 @@ export function stripCashbookAmounts<T extends Record<string, any>>(entry: T, ca
       return rest
     })
   }
+  if (Array.isArray(out.employee_splits)) {
+    out.employee_splits = out.employee_splits.map((s: any) => {
+      const { amount, amount_inr, ...rest } = s
+      void amount; void amount_inr
+      return rest
+    })
+  }
   return out as T
 }
 export function stripCashbookList<T extends Record<string, any>>(entries: T[], canView: boolean): T[] {

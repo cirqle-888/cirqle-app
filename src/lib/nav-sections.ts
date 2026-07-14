@@ -7,7 +7,7 @@ import {
   LayoutDashboard, CheckSquare, Users2, FileText, BookOpen, Wallet, BarChart3, Sheet,
   Settings, TrendingUp, Upload, Inbox, PhoneCall, Award, Activity, Blocks, Megaphone, Handshake,
   SlidersHorizontal, MessageSquare, ClipboardCheck, NotebookPen, LayoutGrid,
-  Briefcase, ClipboardList, CalendarClock, BadgeCheck, PieChart, Building2,
+  Briefcase, ClipboardList, CalendarClock, BadgeCheck, PieChart, Building2, Tags,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -68,6 +68,9 @@ export const navSections: NavSection[] = [
       // Client Profitability: per-client contribution margin (revenue − direct
       // costs − attributed labor + markup). Same Finance Engine.
       { label: 'Client Profitability', href: '/dashboard/reports/client-profitability', icon: TrendingUp, requiredPerm: 'reports.view' },
+      // Cost & Tags: spend-by-tag ("Photoshop", "Design"…) + cost attributed
+      // to individual employees via shared-expense splits. Same Finance Engine.
+      { label: 'Cost & Tags', href: '/dashboard/reports/cost-attribution', icon: Tags, requiredPerm: 'reports.view' },
       // Client Ranking: payment reliability + business value scoring per client.
       { label: 'Client Ranking', href: '/dashboard/clients/ranking', icon: Award, requiredPerm: 'reports.view' },
       // Business Health Center: cash/collections, overdue aging, client risk

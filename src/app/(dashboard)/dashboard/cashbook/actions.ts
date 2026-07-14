@@ -16,6 +16,7 @@ import { syncDraftInvoiceExpenses } from '@/lib/sync/integrity'
 import { recomputeCampaignBilling } from '@/lib/advertising/billing'
 import { logActivity } from '@/lib/activity/log'
 import { retryWithoutScope, withoutScope, type FinanceScope } from '@/lib/finance/classify'
+import { computeEqualSplit } from '@/lib/finance/splits'
 
 const REVALIDATE = '/dashboard/cashbook'
 
@@ -62,6 +63,10 @@ export interface CashbookEntryPayload {
   // Finance dimension: 'client' | 'company' | null (null = leave untriaged —
   // the DB trigger may still derive it from client/employee/category).
   scope?: FinanceScope | null
+  // Free-form spend tags (e.g. "Photoshop", "Design") for ad-hoc reporting.
+  tags?: string[]
+  // Employees sharing this expense — split equally (see computeEqualSplit).
+  employee_split_ids?: string[]
 }
 
 export interface SmartEffect {
@@ -105,6 +110,81 @@ async function generateReceiptNumber(
   return data as string
 }
 
+// ─── Tags & employee cost splits ──────────────────────────────────────────────
+// Both are best-effort against the optional 20260714160000 migration: on a
+// pre-migration DB, saving still succeeds — the entry just has no tags/splits.
+
+/** Find-or-create tags by name (case-insensitive), returning their ids. */
+async function resolveOrCreateTagIds(
+  admin: ReturnType<typeof createAdminClient>,
+  names: string[],
+): Promise<string[]> {
+  const cleaned = [...new Set(names.map(n => n.trim()).filter(Boolean))]
+  if (cleaned.length === 0) return []
+
+  const ids: string[] = []
+  for (const name of cleaned) {
+    const { data: existing } = await admin
+      .from('cashbook_tags').select('id').ilike('name', name).limit(1).maybeSingle()
+    if (existing) { ids.push((existing as any).id); continue }
+
+    const { data: created, error } = await admin
+      .from('cashbook_tags').insert({ name }).select('id').single()
+    if (created) {
+      ids.push((created as any).id)
+    } else if (error?.code === '23505') {
+      // Lost a race to create the same new tag — use the winner's row.
+      const { data: retry } = await admin
+        .from('cashbook_tags').select('id').ilike('name', name).limit(1).maybeSingle()
+      if (retry) ids.push((retry as any).id)
+    }
+  }
+  return ids
+}
+
+/** Replace an entry's tag set. No-op (not an error) if the tags tables aren't migrated yet. */
+async function saveEntryTags(
+  admin: ReturnType<typeof createAdminClient>,
+  entryId: string,
+  tagNames: string[],
+): Promise<void> {
+  try {
+    await admin.from('cashbook_entry_tags').delete().eq('cashbook_entry_id', entryId)
+    const tagIds = await resolveOrCreateTagIds(admin, tagNames)
+    if (tagIds.length > 0) {
+      await admin.from('cashbook_entry_tags')
+        .insert(tagIds.map(tag_id => ({ cashbook_entry_id: entryId, tag_id })))
+    }
+  } catch { /* tags tables not migrated yet */ }
+}
+
+/**
+ * Replace an entry's employee cost splits with a fresh equal split of its
+ * current amount. No-op (not an error) if the splits table isn't migrated yet.
+ */
+async function saveEntryEmployeeSplits(
+  admin: ReturnType<typeof createAdminClient>,
+  entryId: string,
+  employeeIds: string[],
+  amount: number,
+  amountInr: number,
+): Promise<void> {
+  try {
+    await admin.from('cashbook_entry_employee_splits').delete().eq('cashbook_entry_id', entryId)
+    if (employeeIds.length === 0) return
+
+    const nativeShares = computeEqualSplit(amount, employeeIds)
+    const inrByEmployee = new Map(computeEqualSplit(amountInr, employeeIds).map(s => [s.employeeId, s.amount]))
+    const rows = nativeShares.map(s => ({
+      cashbook_entry_id: entryId,
+      employee_id: s.employeeId,
+      amount: s.amount,
+      amount_inr: inrByEmployee.get(s.employeeId) ?? s.amount,
+    }))
+    if (rows.length > 0) await admin.from('cashbook_entry_employee_splits').insert(rows)
+  } catch { /* splits table not migrated yet */ }
+}
+
 export async function insertCashbookEntries(
   baseDates: string[],
   basePayload: Omit<CashbookEntryPayload, 'entry_date'>,
@@ -139,8 +219,12 @@ export async function insertCashbookEntries(
     )
   )
 
+  // Tags and employee splits aren't columns on cashbook_entries — pull them
+  // out before building the insert payload, apply them per-row afterward.
+  const { tags: entryTags, employee_split_ids: splitEmployeeIds, ...tableFields } = basePayload
+
   const rows = baseDates.map((entry_date, i) => ({
-    ...basePayload,
+    ...tableFields,
     entry_date,
     receipt_number: receiptNumbers[i],
     description: i > 0 && baseDates.length > 1
@@ -159,6 +243,23 @@ export async function insertCashbookEntries(
 
   const allInserted = Array.isArray(data) ? data : data ? [data] : []
   const firstEntry = allInserted[0]
+
+  // Tags + employee splits apply to every occurrence in a recurring series
+  // (same labels, split recomputed per-entry from that row's own amount).
+  if (entryTags?.length || splitEmployeeIds?.length) {
+    for (const entry of allInserted) {
+      const entryId = (entry as any)?.id
+      if (typeof entryId !== 'string') continue
+      if (entryTags?.length) await saveEntryTags(admin, entryId, entryTags)
+      if (splitEmployeeIds?.length) {
+        await saveEntryEmployeeSplits(
+          admin, entryId, splitEmployeeIds,
+          Number((entry as any).amount ?? basePayload.amount),
+          Number((entry as any).amount_inr ?? basePayload.amount_inr),
+        )
+      }
+    }
+  }
 
   // Smart mode side effects on the base (first) entry
   if (firstEntry) {
@@ -228,6 +329,8 @@ export interface CashbookEntryUpdate {
   reference: string
   client_id?: string | null
   scope?: FinanceScope | null
+  tags?: string[]
+  employee_split_ids?: string[]
 }
 
 export async function updateCashbookEntry(
@@ -238,13 +341,21 @@ export async function updateCashbookEntry(
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const admin = createAdminClient()
+  const { tags: entryTags, employee_split_ids: splitEmployeeIds, ...tableFields } = changes
   const { error } = await retryWithoutScope(strip =>
     admin
       .from('cashbook_entries')
-      .update(strip ? withoutScope(changes) : changes)
+      .update(strip ? withoutScope(tableFields) : tableFields)
       .eq('id', id)
   )
   if (error) return { ok: false, error: error.message }
+
+  // Tags/splits are always replaced with the submitted set (including an
+  // empty array — clearing all tags on edit is a valid, explicit action).
+  if (entryTags !== undefined) await saveEntryTags(admin, id, entryTags)
+  if (splitEmployeeIds !== undefined) {
+    await saveEntryEmployeeSplits(admin, id, splitEmployeeIds, changes.amount, changes.amount_inr)
+  }
 
   // Sync potential expense changes to draft invoice
   await syncDraftInvoiceExpenses(id)
