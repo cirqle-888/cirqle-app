@@ -19,6 +19,7 @@ import { requirePermission } from '@/lib/auth/enforce'
 import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
 import { computeMonthlyCommissions } from '@/lib/payroll/compute'
+import { retryWithoutScope, withoutScope } from '@/lib/finance/classify'
 
 const REVALIDATE = '/dashboard/payroll'
 
@@ -355,7 +356,7 @@ export async function markPayrollPaid(
   if (input.finalNet > 0) {
     const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
     const monthName = MONTHS[input.month - 1]
-    const { data: entry } = await admin.from('cashbook_entries').insert({
+    const salaryRow = {
       entry_date:  today,
       type:        'outflow',
       category_id: input.salaryCategory,
@@ -365,7 +366,11 @@ export async function markPayrollPaid(
       amount_inr:  input.finalNet,
       currency:    'INR',
       reference:   `payroll:${input.id}`,
-    }).select('id').single()
+      scope:       'company' as const,   // salaries are company opex on the P&L
+    }
+    const { data: entry } = await retryWithoutScope(strip =>
+      admin.from('cashbook_entries').insert(strip ? withoutScope(salaryRow) : salaryRow).select('id').single()
+    )
 
     if (entry) {
       // Insert fires the trigger that marks the payroll allocation status.

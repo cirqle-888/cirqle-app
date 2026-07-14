@@ -32,6 +32,7 @@ import { TokenizedSearch, type SearchFacet } from '@/components/ui/tokenized-sea
 import { recordMatchesFacets, type FacetFieldDef } from '@/lib/search/match-facets'
 import type { Currency } from '@/types'
 import { taskCode, taskCodeMatches, nextTaskNumber } from '@/lib/utils/task-code'
+import { deriveWorkScope, retryWithoutScope, withoutScope, isScopeColumnMissing } from '@/lib/finance/classify'
 import { seedFromTasks } from '@/lib/hooks/use-smart-sort'
 import { useRole } from '@/contexts/role-context'
 import { usePermissions } from '@/contexts/permission-context'
@@ -1125,7 +1126,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
     try {
       const maxRow = await supabase.from('tasks').select('task_number').order('task_number', { ascending: false, nullsFirst: false }).limit(1).maybeSingle()
       const tn = nextTaskNumber(maxRow.data?.task_number)
-      const { data, error } = await supabase.from('tasks').insert({
+      const duplicateRow = {
         task_number: tn,
         title: task.title,
         description: task.description,
@@ -1137,7 +1138,12 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
         currency: task.currency,
         task_date: new Date().toISOString().split('T')[0],
         quantity: task.quantity || 1,
-      }).select('*, client:clients(id,name,code), service:services(id,name)').single()
+        scope: deriveWorkScope(task.client_id),
+      }
+      const { data, error } = await retryWithoutScope(strip =>
+        supabase.from('tasks').insert(strip ? withoutScope(duplicateRow) : duplicateRow)
+          .select('*, client:clients(id,name,code), service:services(id,name)').single()
+      )
       if (data) {
         setTasks(prev => [data as Task, ...prev])
         // Source had no amount (e.g. pricing was hidden or unset when it was
@@ -1220,6 +1226,8 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       // Empty or the Internal sentinel → NULL: internal Cirqle work with no
       // client. The task→invoice trigger ignores NULL-client tasks entirely.
       client_id: form.client_id && form.client_id !== INTERNAL_CLIENT ? form.client_id : null,
+      // Finance dimension — explicit, mirroring the client_id rule above.
+      scope: deriveWorkScope(form.client_id && form.client_id !== INTERNAL_CLIENT ? form.client_id : null),
       service_id: form.service_id,
       status: form.status,
       billing_amount: computedAmount,
@@ -1257,6 +1265,13 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
     if (error && /billing_snapshot/i.test(`${error.message ?? ''} ${(error as { details?: string }).details ?? ''}`)) {
       console.warn('tasks.billing_snapshot missing — saving variant without snapshot. Apply migrations/003_billing_snapshot.sql.')
       ;({ data, error } = await supabase.from('tasks').insert(insertPayload).select(selectCols).single())
+    }
+
+    // Pre-scope-migration DBs: retry without the scope column (the Phase-1
+    // trigger normally derives it; here it simply isn't stored yet).
+    if (error && isScopeColumnMissing(error)) {
+      console.warn('tasks.scope missing — saving without scope. Apply supabase/migrations/20260714090000_finance_scope_foundation.sql.')
+      ;({ data, error } = await supabase.from('tasks').insert(withoutScope(insertPayload)).select(selectCols).single())
     }
 
     if (!error && data) {

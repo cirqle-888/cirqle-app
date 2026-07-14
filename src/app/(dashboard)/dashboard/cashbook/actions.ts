@@ -15,6 +15,7 @@ import { fetchRates } from '@/lib/fx/sync'
 import { syncDraftInvoiceExpenses } from '@/lib/sync/integrity'
 import { recomputeCampaignBilling } from '@/lib/advertising/billing'
 import { logActivity } from '@/lib/activity/log'
+import { retryWithoutScope, withoutScope, type FinanceScope } from '@/lib/finance/classify'
 
 const REVALIDATE = '/dashboard/cashbook'
 
@@ -58,6 +59,9 @@ export interface CashbookEntryPayload {
   reference: string
   invoice_id: string | null
   client_id: string | null      // entity tag for per-client FIFO allocation
+  // Finance dimension: 'client' | 'company' | null (null = leave untriaged —
+  // the DB trigger may still derive it from client/employee/category).
+  scope?: FinanceScope | null
 }
 
 export interface SmartEffect {
@@ -144,10 +148,12 @@ export async function insertCashbookEntries(
       : baseDescription,
   }))
 
-  const { data, error } = await admin
-    .from('cashbook_entries')
-    .insert(rows)
-    .select(ENTRY_SELECT)
+  const { data, error } = await retryWithoutScope(strip =>
+    admin
+      .from('cashbook_entries')
+      .insert(strip ? rows.map(withoutScope) : rows)
+      .select(ENTRY_SELECT)
+  )
 
   if (error) return { ok: false, error: error.message }
 
@@ -221,6 +227,7 @@ export interface CashbookEntryUpdate {
   description: string
   reference: string
   client_id?: string | null
+  scope?: FinanceScope | null
 }
 
 export async function updateCashbookEntry(
@@ -231,10 +238,12 @@ export async function updateCashbookEntry(
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const admin = createAdminClient()
-  const { error } = await admin
-    .from('cashbook_entries')
-    .update(changes)
-    .eq('id', id)
+  const { error } = await retryWithoutScope(strip =>
+    admin
+      .from('cashbook_entries')
+      .update(strip ? withoutScope(changes) : changes)
+      .eq('id', id)
+  )
   if (error) return { ok: false, error: error.message }
 
   // Sync potential expense changes to draft invoice
@@ -499,24 +508,19 @@ export async function insertTransfer(
     rate_date: payload.entry_date,
     entry_date: payload.entry_date,
     transfer_ref: transferRef,
+    scope: 'company' as const,   // account-to-account moves are Cirqle's own books
   }
 
   const outflowDesc = payload.description || `Transfer to ${nameOf(payload.to_account_id)}`
   const inflowDesc  = payload.description || `Transfer from ${nameOf(payload.from_account_id)}`
 
+  const outRow = { ...baseFields, type: 'outflow', bank_account_id: payload.from_account_id, description: outflowDesc }
+  const inRow  = { ...baseFields, type: 'inflow',  bank_account_id: payload.to_account_id,   description: inflowDesc }
   const [outRes, inRes] = await Promise.all([
-    admin.from('cashbook_entries').insert({
-      ...baseFields,
-      type: 'outflow',
-      bank_account_id: payload.from_account_id,
-      description: outflowDesc,
-    }).select(ENTRY_SELECT).single(),
-    admin.from('cashbook_entries').insert({
-      ...baseFields,
-      type: 'inflow',
-      bank_account_id: payload.to_account_id,
-      description: inflowDesc,
-    }).select(ENTRY_SELECT).single(),
+    retryWithoutScope(strip =>
+      admin.from('cashbook_entries').insert(strip ? withoutScope(outRow) : outRow).select(ENTRY_SELECT).single()),
+    retryWithoutScope(strip =>
+      admin.from('cashbook_entries').insert(strip ? withoutScope(inRow) : inRow).select(ENTRY_SELECT).single()),
   ])
 
   if (outRes.error) return { ok: false, error: outRes.error.message }

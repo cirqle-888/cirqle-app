@@ -22,6 +22,7 @@ import { getWalletSummary, getEntryUncredited } from '@/lib/advertising/wallet'
 import { createManualRequest } from '@/app/(dashboard)/dashboard/requests/actions'
 import { logRequestActivity } from '@/lib/requests/core'
 import { logActivity } from '@/lib/activity/log'
+import { deriveWorkScope, retryWithoutScope, withoutScope } from '@/lib/finance/classify'
 
 interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
 
@@ -120,7 +121,7 @@ export async function createCampaignTask(
       .from('tasks').select('task_number')
       .order('task_number', { ascending: false, nullsFirst: false }).limit(1).maybeSingle()
     const billingInr = await toInr(admin, opts.serviceCharge, opts.currency)
-    const { data: t } = await admin.from('tasks').insert({
+    const taskRow = {
       task_number: nextTaskNumber((maxRow as any)?.task_number),
       title: opts.campaignName,
       client_id: opts.clientId,
@@ -131,7 +132,11 @@ export async function createCampaignTask(
       billing_amount_inr: billingInr,
       currency: opts.currency,
       created_by: opts.employeeId,
-    }).select('id').single()
+      scope: deriveWorkScope(opts.clientId),
+    }
+    const { data: t } = await retryWithoutScope(strip =>
+      admin.from('tasks').insert(strip ? withoutScope(taskRow) : taskRow).select('id').single()
+    )
     if (!t) return null
     await admin.from('ad_project_tasks').insert({ project_id: opts.projectId, task_id: (t as any).id })
     return (t as any).id
@@ -148,7 +153,7 @@ export async function createAdProject(
   if (!name) return { ok: false, error: 'Campaign name is required.' }
 
   const admin = createAdminClient()
-  const { data, error } = await admin.from('ad_projects').insert({
+  const projectRow = {
     client_id:            input.clientId || null,
     request_id:           input.requestId || null,
     campaign_name:        name,
@@ -165,7 +170,11 @@ export async function createAdProject(
     start_date:           input.startDate || null,
     end_date:             input.endDate || null,
     created_by:           guard.employeeId,
-  }).select('id').single()
+    scope:                deriveWorkScope(input.clientId || null),
+  }
+  const { data, error } = await retryWithoutScope(strip =>
+    admin.from('ad_projects').insert(strip ? withoutScope(projectRow) : projectRow).select('id').single()
+  )
 
   if (error) return { ok: false, error: error.message }
   const id = (data as any).id as string
@@ -702,12 +711,16 @@ export async function addAdTask(
   const admin = createAdminClient()
   const { data: maxRow } = await admin.from('tasks')
     .select('task_number').order('task_number', { ascending: false, nullsFirst: false }).limit(1).maybeSingle()
-  const { data: t, error } = await admin.from('tasks').insert({
+  const addTaskRow = {
     task_number: nextTaskNumber((maxRow as any)?.task_number),
     title, client_id: input.clientId || null, service_id: input.serviceId || null,
     status: 'pending', task_date: today(), billing_amount: 0, billing_amount_inr: 0,
     currency: 'INR', created_by: guard.employeeId,
-  }).select('id').single()
+    scope: deriveWorkScope(input.clientId || null),
+  }
+  const { data: t, error } = await retryWithoutScope(strip =>
+    admin.from('tasks').insert(strip ? withoutScope(addTaskRow) : addTaskRow).select('id').single()
+  )
   if (error) return { ok: false, error: error.message }
 
   await admin.from('ad_project_tasks').insert({ project_id: projectId, task_id: (t as any).id })

@@ -7,6 +7,7 @@ import { PERMS } from '@/lib/permissions/keys'
 import { publishAdEvent } from '@/lib/advertising/events'
 import { discoverAccountCampaigns } from '@/lib/advertising/discovery'
 import { isCampaignType } from '@/lib/advertising/campaign-objective'
+import { deriveWorkScope, retryWithoutScope, withoutScope } from '@/lib/finance/classify'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 type MapResult = { success: true; projectId: string } | { success: false; error: string }
@@ -138,7 +139,7 @@ async function mapCampaignCore(
       .select('id').eq('project_id', input.existingProjectId).neq('id', camp.id).maybeSingle()
     if (clash) return { success: false, error: 'That project is already mapped to another campaign' }
 
-    const { error: updErr } = await admin.from('ad_projects').update({
+    const linkUpdate = {
       external_campaign_id: camp.external_campaign_id,
       ad_account_id:        camp.ad_account_id,
       client_id:            input.clientId,
@@ -146,11 +147,15 @@ async function mapCampaignCore(
       sync_enabled:         true,
       sync_status:          'queued',
       provider_metadata:    { ...(proj.provider_metadata ?? {}), ...providerMetadata },
-    }).eq('id', input.existingProjectId)
+      scope:                deriveWorkScope(input.clientId),
+    }
+    const { error: updErr } = await retryWithoutScope(strip =>
+      admin.from('ad_projects').update(strip ? withoutScope(linkUpdate) : linkUpdate).eq('id', input.existingProjectId)
+    )
     if (updErr) return { success: false, error: updErr.message }
     projectId = input.existingProjectId
   } else {
-    const { data: created, error: insErr } = await admin.from('ad_projects').insert({
+    const mappedRow = {
       campaign_name:        camp.name,
       client_id:            input.clientId,
       platform:             camp.provider,
@@ -162,7 +167,11 @@ async function mapCampaignCore(
       sync_enabled:         true,
       sync_status:          'queued',
       provider_metadata:    providerMetadata,
-    }).select('id').single()
+      scope:                deriveWorkScope(input.clientId),
+    }
+    const { data: created, error: insErr } = await retryWithoutScope(strip =>
+      admin.from('ad_projects').insert(strip ? withoutScope(mappedRow) : mappedRow).select('id').single()
+    )
     if (insErr || !created) return { success: false, error: insErr?.message || 'Failed to create project' }
     projectId = created.id
 

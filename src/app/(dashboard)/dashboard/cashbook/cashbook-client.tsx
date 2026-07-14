@@ -62,6 +62,8 @@ interface Entry {
   reference?: string
   invoice_id?: string
   client_id?: string        // entity tag for per-client FIFO allocation
+  // Finance dimension: 'client' | 'company'; null/undefined = untriaged.
+  scope?: 'client' | 'company' | null
   exchange_rate?: number
   rate_source?: string
   receipt_number?: string | null
@@ -286,6 +288,10 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     // implicit via the invoice. Auto-fills when an invoice is selected.
     client_filter_id: '',
     fully_paid: false,
+    // Finance scope for entries with NO client: 'company' = Cirqle's own books
+    // (feeds the Company P&L), '' = leave untriaged (client money, tag later).
+    // When a client is tagged the entry is 'client'-scoped regardless.
+    scope: '' as '' | 'company',
   })
 
   const supabase = createClient()
@@ -376,6 +382,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       linked_invoice_id: '',
       client_filter_id:  entry.client_id ?? '',
       fully_paid:      false,
+      scope:           entry.scope === 'company' ? 'company' : '',
     })
     setFormEditingId(null)
     setRecurringMonths(0)
@@ -404,6 +411,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       linked_invoice_id: entry.invoice_id ?? '',
       client_filter_id:  entry.client_id  ?? '',
       fully_paid:      false,
+      scope:           entry.scope === 'company' ? 'company' : '',
     })
     setSmartExtra(entry.client_id ? { client_id: entry.client_id } : {})
     setFormEditingId(entry.id)
@@ -434,6 +442,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     // ── EDIT MODE: update existing entry ────────────────────────────────────
     if (formEditingId) {
       const savedClientId = smartExtra.client_id || form.client_filter_id || null
+      const savedScope = savedClientId ? ('client' as const) : (form.scope || null)
       const result = await updateCashbookEntry(formEditingId, {
         entry_date:      form.entry_date,
         amount,
@@ -447,6 +456,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         description:     form.description,
         reference:       form.reference,
         client_id:       savedClientId,
+        scope:           savedScope,
       })
       if (result.ok) {
         setEntries(prev => prev.map(e =>
@@ -465,12 +475,13 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 description:     form.description,
                 reference:       form.reference,
                 client_id:       savedClientId || undefined,
+                scope:           savedScope,
               }
             : e,
         ))
         setShowForm(false)
         setFormEditingId(null)
-        setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: new Date().toISOString().split('T')[0], description: '', reference: '', linked_invoice_id: '', client_filter_id: '', fully_paid: false })
+        setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: new Date().toISOString().split('T')[0], description: '', reference: '', linked_invoice_id: '', client_filter_id: '', fully_paid: false, scope: '' })
       }
       setSaving(false)
       return
@@ -503,6 +514,11 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       invoice_id: form.linked_invoice_id || null, // Storing strict database link
     }))
 
+    // The client tag can come from either the smart section (client-linked
+    // outflow categories) or the invoice-mode client filter — same rule the
+    // edit path uses. A tagged client makes the money client-scoped; otherwise
+    // the user's Books choice applies ('' = leave for triage).
+    const insertClientId = smartExtra.client_id || form.client_filter_id || null
     const result = await insertCashbookEntries(
       baseDates,
       {
@@ -519,7 +535,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         reference: form.reference,
         invoice_id: form.linked_invoice_id || null,
         // Persist the client tag so auto-allocation only considers this client's invoices.
-        client_id: form.client_filter_id || null,
+        client_id: insertClientId,
+        scope: insertClientId ? 'client' : (form.scope || null),
       },
       form.description,
       {
@@ -537,7 +554,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       setEntries(prev => [...[...allInserted].reverse(), ...prev])
       setShowForm(false)
       setRecurringMonths(0)
-      setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: new Date().toISOString().split('T')[0], description: '', reference: '', linked_invoice_id: '', client_filter_id: '', fully_paid: false })
+      setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: new Date().toISOString().split('T')[0], description: '', reference: '', linked_invoice_id: '', client_filter_id: '', fully_paid: false, scope: '' })
     }
     setSaving(false)
   }
@@ -1553,7 +1570,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                   <button
                     key={t}
                     type="button"
-                    onClick={() => { setForm(p => ({ ...p, type: t, category_id: t === 'inflow' ? invoiceCategoryId : '', linked_invoice_id: '', client_filter_id: '', fully_paid: false })); resetSmart() }}
+                    onClick={() => { setForm(p => ({ ...p, type: t, category_id: t === 'inflow' ? invoiceCategoryId : '', linked_invoice_id: '', client_filter_id: '', fully_paid: false, scope: '' })); resetSmart() }}
                     className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${form.type === t
                       ? t === 'inflow' ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'
                       : 'bg-secondary text-muted-foreground border border-transparent hover:text-foreground'
@@ -1570,7 +1587,12 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                   <Combobox
                     options={relevantCategories.map(c => ({ id: c.id, label: c.name }))}
                     value={form.category_id}
-                    onChange={id => setForm(p => ({ ...p, category_id: id }))}
+                    onChange={id => setForm(p => {
+                      // Pre-select the Books choice from the category's default
+                      // scope (e.g. Rent/Software/Salary → Company).
+                      const cat = categories.find(c => c.id === id)
+                      return { ...p, category_id: id, scope: cat?.default_scope === 'company' ? 'company' : '' }
+                    })}
                     placeholder="Select category…"
                     sortKey="cashbook_categories"
                   />
@@ -1931,6 +1953,37 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                     placeholder="Select client…"
                     sortKey="clients"
                   />
+                </div>
+              )}
+
+              {/* ── Books — which economy this money belongs to. Hidden when a
+                   client is tagged (client money by definition). ── */}
+              {!(smartExtra.client_id || form.client_filter_id) && (
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Books</label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setForm(p => ({ ...p, scope: 'company' }))}
+                      className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors border ${form.scope === 'company'
+                        ? 'bg-primary/15 text-primary border-primary/30'
+                        : 'bg-secondary text-muted-foreground border-transparent hover:text-foreground'}`}
+                    >
+                      Company (Cirqle)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setForm(p => ({ ...p, scope: '' }))}
+                      className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors border ${form.scope === ''
+                        ? 'bg-primary/15 text-primary border-primary/30'
+                        : 'bg-secondary text-muted-foreground border-transparent hover:text-foreground'}`}
+                    >
+                      Client — tag later
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Company entries feed the Company P&L. “Tag later” keeps it in the triage queue until a client is linked.
+                  </p>
                 </div>
               )}
 

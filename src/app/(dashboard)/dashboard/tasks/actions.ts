@@ -22,6 +22,7 @@ import { revalidatePath } from 'next/cache'
 import { recalcTaskCommissions, syncDraftInvoices } from '@/lib/sync/integrity'
 import { recalculatePayrollForMonth } from '@/app/(dashboard)/dashboard/payroll/actions'
 import { syncRequestStatusFromTask, syncRequestStatusFromTasks } from '@/lib/requests/task-sync'
+import { retryWithoutScope, withoutScope } from '@/lib/finance/classify'
 
 const REVALIDATE = '/dashboard/tasks'
 
@@ -304,12 +305,19 @@ export async function serverCancelTask(
       + (input.clientName ? ` — ${input.clientName}` : '')
       + ` (${input.completionPct}% done, ${who})`
       + (input.notes ? ` — ${input.notes}` : '')
-    await admin.from('cashbook_entries').insert({
+    // Written-off work is Cirqle's loss — company books. Deliberately NO
+    // client_id: the auto_attach_expense_to_invoice trigger would rebill a
+    // client-tagged outflow onto their draft invoice.
+    const lossRow = {
       type:        'outflow',
       amount_inr:  input.lossAmount,
       entry_date:  input.taskDate,
       description: desc,
-    })
+      scope:       'company' as const,
+    }
+    await retryWithoutScope(strip =>
+      admin.from('cashbook_entries').insert(strip ? withoutScope(lossRow) : lossRow)
+    )
   }
 
   void logActivity({

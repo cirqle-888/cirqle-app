@@ -12,6 +12,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission } from '@/lib/auth/enforce'
 import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
+import { retryWithoutScope, withoutScope } from '@/lib/finance/classify'
 
 interface ActionResult<T = void> {
   ok: boolean
@@ -56,7 +57,7 @@ export interface RecordInvoicePaymentInput {
  */
 export async function recordInvoicePayment(
   input: RecordInvoicePaymentInput,
-): Promise<ActionResult<{ paymentId: string; cashbookEntryId: string | null }>> {
+): Promise<ActionResult<{ paymentId: string; cashbookEntryId: string | null; receiptNumber: string | null }>> {
   const guard = await requirePermission(PERMS.BILLING_EDIT)
   if (!guard.ok) return { ok: false, error: guard.error }
 
@@ -110,27 +111,32 @@ export async function recordInvoicePayment(
 
   // 4. Create cashbook inflow entry
   const description = `Invoice payment — ${input.invoiceNumber}${input.clientName ? ` (${input.clientName})` : ''}`
-  const { data: entry, error: entryErr } = await admin
-    .from('cashbook_entries')
-    .insert({
-      type:            'inflow',
-      category_id:     input.categoryId || null,
-      bank_account_id: input.bankAccountId || null,
-      amount:          input.amount,
-      currency:        input.currency,
-      amount_inr:      input.amountInr,
-      exchange_rate:   input.exchangeRate,
-      rate_source:     input.rateSource,
-      rate_date:       input.rateDate,
-      entry_date:      input.paymentDate,
-      description,
-      reference:       input.reference || null,
-      invoice_id:      input.invoiceId,
-      client_id:       input.clientId || null,
-      receipt_number:  receiptNumber,
-    })
-    .select('id')
-    .single()
+  const paymentRow = {
+    type:            'inflow',
+    category_id:     input.categoryId || null,
+    bank_account_id: input.bankAccountId || null,
+    amount:          input.amount,
+    currency:        input.currency,
+    amount_inr:      input.amountInr,
+    exchange_rate:   input.exchangeRate,
+    rate_source:     input.rateSource,
+    rate_date:       input.rateDate,
+    entry_date:      input.paymentDate,
+    description,
+    reference:       input.reference || null,
+    invoice_id:      input.invoiceId,
+    client_id:       input.clientId || null,
+    receipt_number:  receiptNumber,
+    // Client revenue; without a client tag the trigger leaves it for triage.
+    scope:           input.clientId ? ('client' as const) : null,
+  }
+  const { data: entry, error: entryErr } = await retryWithoutScope(strip =>
+    admin
+      .from('cashbook_entries')
+      .insert(strip ? withoutScope(paymentRow) : paymentRow)
+      .select('id')
+      .single()
+  )
 
   // Timeline: payment received on this invoice (fire-and-forget)
   void logActivity({
@@ -143,7 +149,7 @@ export async function recordInvoicePayment(
     // Payment already recorded — don't fail, just skip cashbook entry
     console.error('[recordInvoicePayment] cashbook entry insert failed:', entryErr)
     revalidatePath('/dashboard/invoices')
-    return { ok: true, data: { paymentId: pmt.id, cashbookEntryId: null } }
+    return { ok: true, data: { paymentId: pmt.id, cashbookEntryId: null, receiptNumber } }
   }
 
   // 5. Allocate cashbook entry → invoice
@@ -157,5 +163,5 @@ export async function recordInvoicePayment(
   revalidatePath('/dashboard/invoices')
   revalidatePath('/dashboard/cashbook')
 
-  return { ok: true, data: { paymentId: pmt.id, cashbookEntryId: entry.id } }
+  return { ok: true, data: { paymentId: pmt.id, cashbookEntryId: entry.id, receiptNumber } }
 }
