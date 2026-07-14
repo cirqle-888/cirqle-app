@@ -51,6 +51,10 @@ export const ContributionActivityBar = dynamic(
   () => import('./_charts').then(m => m.ContributionActivityBar),
   { ssr: false, loading: () => <ChartSkeleton h={240} /> },
 )
+export const DashboardTrendGraph = dynamic(
+  () => import('./_trend-graph').then(m => m.DashboardTrendGraph),
+  { ssr: false, loading: () => <ChartSkeleton h={460} /> },
+)
 
 // ─── Amount display mode (short = 1.5L / full = 1,50,000) ────────────────────
 const AMOUNT_DISPLAY_KEY = 'cirqle-amount-display'

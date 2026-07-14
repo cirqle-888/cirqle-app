@@ -28,7 +28,7 @@ import {
 import { usePrivacy } from '@/contexts/privacy-context'
 import {
   fmt, fmtFull, fmtDate, daysLate, daysToGo, getPeriodKey, getPeriodLabel,
-  StatusBadge, IncomeOutflowBar, JobsDoneBar,
+  StatusBadge, IncomeOutflowBar, JobsDoneBar, DashboardTrendGraph,
   WEEKDAY, MONTH_NAMES, FULL_MONTHS,
 } from './dashboard-utils'
 import type { Granularity, PulseTab, DrawerType } from './dashboard-utils'
@@ -360,6 +360,12 @@ export default function DashboardAnalytics({
         <KpiCard label="Overdue"         value={f(stats.overdueAmount)}      icon={<AlertTriangle className="w-3.5 h-3.5"/>} color="red"    badge={stats.overdueCount} trend={stats.overdueCount > 0 ? { pct: null, invert: true } : null} clickable onClick={() => setDrawer('overdue')} />
         <KpiCard label="To Be Invoiced"  value={f(stats.toBeInvoicedAmount)} icon={<FileText className="w-3.5 h-3.5"/>}  color="yellow" badge={stats.toBeInvoicedCount} clickable onClick={() => setDrawer('toBeInvoiced')} />
       </div>
+
+      {/* ── Business Trends graph (Finance Engine) ─────── */}
+      {/* Jobs / inflow / outflow / bank balance with per-series toggles and a
+          period-over-period comparison overlay. Fed entirely from the two
+          datasets already on the page (all-time cashbook + analytics tasks). */}
+      <DashboardTrendGraph cashbook={allCashbook} tasks={allAnalyticsTasks} fmt={f} />
 
       {/* ── Company Ops (Finance Engine) ───────────────── */}
       {/* Company-scoped money only — fully separate from client billing above. */}
