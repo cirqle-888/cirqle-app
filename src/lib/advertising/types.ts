@@ -119,6 +119,12 @@ export interface AdProjectRow {
   updated_at: string
   deleted_at: string | null
   archived_at?: string | null
+  /**
+   * Finance scope (migration 20260714090000): 'client' = billable client work,
+   * 'company' = Cirqle's own (internal) campaign — funded from the company
+   * wallet, never invoiced. Optional: absent on pre-migration rows.
+   */
+  scope?: 'client' | 'company' | null
 
   // --- Phase 2: ERP Architecture ---
   ad_account_id?: string | null

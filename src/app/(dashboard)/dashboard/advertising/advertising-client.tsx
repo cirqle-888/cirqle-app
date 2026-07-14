@@ -24,7 +24,7 @@ import { remainingBudget } from '@/lib/advertising/metrics'
 import { aggregateMetrics } from '@/lib/advertising/reporting'
 import { healthScore } from '@/lib/advertising/health'
 import { computeServiceCharge, gstOnSpend, spendWithGst } from '@/lib/advertising/budget'
-import { startAdvertisingRequest, addClientFund, removeWalletTransaction } from './actions'
+import { startAdvertisingRequest, addClientFund, addCompanyFund, removeWalletTransaction } from './actions'
 
 interface PendingRequest {
   id: string
@@ -203,7 +203,8 @@ export default function AdvertisingClient({
   const walletByClient = useMemo(() => {
     const out: Record<string, ClientWallet> = {}
     for (const r of ledger) {
-      const w = (out[r.client_id] ||= { credited: 0, allocated: 0, balance: 0 })
+      // client_id NULL = the COMPANY wallet (internal campaigns).
+      const w = (out[r.client_id ?? COMPANY_KEY] ||= { credited: 0, allocated: 0, balance: 0 })
       if (r.direction === 'credit') w.credited = round2(w.credited + Number(r.amount_inr || 0))
       else w.allocated = round2(w.allocated + Number(r.amount_inr || 0))
     }
@@ -213,7 +214,7 @@ export default function AdvertisingClient({
 
   const ledgerByClient = useMemo(() => {
     const out: Record<string, LedgerRowView[]> = {}
-    for (const r of ledger) (out[r.client_id] ||= []).push(r)
+    for (const r of ledger) (out[r.client_id ?? COMPANY_KEY] ||= []).push(r)
     return out
   }, [ledger])
 
@@ -259,7 +260,16 @@ export default function AdvertisingClient({
       (byId[id] ||= { clientId: id, name, code, cards: [], wallet: walletByClient[id] || { credited: 0, allocated: 0, balance: 0 }, metaSpend: 0 })
 
     for (const c of filteredCards) {
-      if (!c.p.client?.id) continue
+      if (!c.p.client?.id) {
+        // Company (internal) campaigns get their own first-class section with
+        // the company wallet; other clientless cards stay in `unassigned`.
+        if (c.p.scope === 'company') {
+          const g = ensure(COMPANY_KEY, 'Cirqle — Company', '')
+          g.cards.push(c)
+          g.metaSpend = round2(g.metaSpend + (c.agg.spend || 0))
+        }
+        continue
+      }
       const g = ensure(c.p.client.id, c.p.client.name, c.p.client.code)
       g.cards.push(c)
       g.metaSpend = round2(g.metaSpend + (c.agg.spend || 0))
@@ -268,6 +278,7 @@ export default function AdvertisingClient({
       for (const clientId of Object.keys(walletByClient)) {
         if (byId[clientId]) continue
         if (fClient && clientId !== fClient) continue
+        if (clientId === COMPANY_KEY) { ensure(COMPANY_KEY, 'Cirqle — Company', ''); continue }
         const meta = clients.find(cl => cl.id === clientId)
         ensure(clientId, meta?.name || 'Unknown client', meta?.code || '')
       }
@@ -285,7 +296,7 @@ export default function AdvertisingClient({
     return list
   }, [filteredCards, walletByClient, clients, fClient, fBalance, cardFiltersActive])
 
-  const unassigned = filteredCards.filter(c => !c.p.client?.id)
+  const unassigned = filteredCards.filter(c => !c.p.client?.id && c.p.scope !== 'company')
 
   const platforms = useMemo(
     () => [...new Set(initialProjects.map(p => p.platform).filter(Boolean))],
@@ -529,6 +540,9 @@ export default function AdvertisingClient({
 
 // ─── Client section (wallet + campaigns) ─────────────────────────────────────
 
+/** Synthetic group key for Cirqle's own (company) wallet + internal campaigns. */
+const COMPANY_KEY = '__company__'
+
 function ClientSection({ group, history, candidates, walletSupported, canManage }: {
   group: ClientGroup
   history: LedgerRowView[]
@@ -586,7 +600,11 @@ function ClientSection({ group, history, candidates, walletSupported, canManage 
         )}
 
         {showAdd && canManage && walletSupported && (
-          <AddFundsForm clientId={group.clientId} candidates={candidates} onDone={() => { setShowAdd(false); router.refresh() }} />
+          <AddFundsForm
+            clientId={group.clientId === COMPANY_KEY ? null : group.clientId}
+            candidates={candidates}
+            onDone={() => { setShowAdd(false); router.refresh() }}
+          />
         )}
 
         {showHistory && walletSupported && (
@@ -624,7 +642,8 @@ function WalletStat({ label, value, tone }: { label: string; value: string; tone
 }
 
 function AddFundsForm({ clientId, candidates, onDone }: {
-  clientId: string
+  /** null = the COMPANY wallet (internal campaigns). */
+  clientId: string | null
   candidates: FundCandidate[]
   onDone: () => void
 }) {
@@ -644,7 +663,8 @@ function AddFundsForm({ clientId, candidates, onDone }: {
   async function submit() {
     if (!entryId) { setErr('Pick a cashbook entry.'); return }
     setBusy(true); setErr(null)
-    const res = await addClientFund(clientId, { cashbookEntryId: entryId, amount: Number(amount) || 0 })
+    const input = { cashbookEntryId: entryId, amount: Number(amount) || 0 }
+    const res = clientId ? await addClientFund(clientId, input) : await addCompanyFund(input)
     setBusy(false)
     if (res.ok) onDone()
     else setErr(res.error || 'Could not add funds.')
@@ -652,7 +672,11 @@ function AddFundsForm({ clientId, candidates, onDone }: {
 
   return (
     <div className="mt-3 rounded-lg border border-border bg-card p-3 space-y-2">
-      <div className="text-xs font-medium">Credit this client&apos;s wallet from a Cashbook payment (e.g. a Meta top-up)</div>
+      <div className="text-xs font-medium">
+        {clientId
+          ? <>Credit this client&apos;s wallet from a Cashbook payment (e.g. a Meta top-up)</>
+          : <>Credit the company wallet from a Cashbook payment — funds Cirqle&apos;s own campaigns, never invoiced</>}
+      </div>
       <div className="flex flex-wrap items-end gap-2">
         <div className="flex-1 min-w-[220px]">
           <label className="block text-[10px] font-medium text-muted-foreground mb-1">Cashbook entry (outflow)</label>

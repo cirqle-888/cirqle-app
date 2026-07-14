@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { insertCashbookEntries, updateCashbookEntry, softDeleteCashbookEntry, fetchLiveRate, backupAndResetAllocations, toggleCashbookEntryReview } from './actions'
+import { SCOPE_FILTER_OPTIONS, matchesScopeFilter, getScopeFilterLabel, type ScopeFilterValue } from '@/components/ui/scope-filter'
 import { formatCompact, round2 } from '@/lib/calculations/currency'
 import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
 import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, RefreshCw, Landmark, CheckCircle, ArrowLeftRight, Copy } from 'lucide-react'
@@ -208,6 +209,9 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     [searchFacets, searchDraft],
   )
   const [filterCategory, setFilterCategory] = useState(searchParams.get('category') || '')
+  const [filterScope, setFilterScope] = useState<ScopeFilterValue>(
+    (searchParams.get('scope') as ScopeFilterValue) || '',
+  )
   const [filterAllocStatus, setFilterAllocStatus] = useState(searchParams.get('alloc') || '')
   const [filterClient, setFilterClient] = useState(searchParams.get('client') || '')
   const [sortDir, setSortDir] = useState(searchParams.get('sort') || 'desc') // date: desc = newest first
@@ -224,6 +228,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     if (filterMonth) params.set('month', filterMonth); else params.delete('month')
     if (searchFacets.length) params.set('sf', JSON.stringify(searchFacets)); else params.delete('sf')
     if (filterCategory) params.set('category', filterCategory); else params.delete('category')
+    if (filterScope) params.set('scope', filterScope); else params.delete('scope')
     if (filterAllocStatus) params.set('alloc', filterAllocStatus); else params.delete('alloc')
     if (filterClient) params.set('client', filterClient); else params.delete('client')
     if (sortDir && sortDir !== 'desc') params.set('sort', sortDir); else params.delete('sort')
@@ -234,7 +239,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     if (newQueryString !== searchParams.toString()) {
       router.replace(`${pathname}?${newQueryString}`, { scroll: false })
     }
-  }, [filterType, filterMonth, searchFacets, filterCategory, filterAllocStatus, filterClient, sortDir, filterMinAmount, filterMaxAmount, pathname, router, searchParams])
+  }, [filterType, filterMonth, searchFacets, filterCategory, filterScope, filterAllocStatus, filterClient, sortDir, filterMinAmount, filterMaxAmount, pathname, router, searchParams])
 
   // Deep-link focus: when arriving via `?focus=<entryId>` (e.g. from an invoice's
   // linked-payments list), scroll that row into view and flash a highlight once.
@@ -694,6 +699,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     if (filterType) result = result.filter(e => e.type === filterType)
     if (filterMonth) result = result.filter(e => e.entry_date?.startsWith(filterMonth))
     if (filterCategory) result = result.filter(e => e.category_id === filterCategory)
+    if (filterScope) result = result.filter(e => matchesScopeFilter(filterScope, e.scope))
     
     if (activeFacets.length) {
       result = result.filter(e => recordMatchesFacets(activeFacets, e, CASHBOOK_FIELDS, cashbookGeneric))
@@ -743,7 +749,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     })
 
     return result
-  }, [entries, filterType, filterMonth, activeFacets, filterCategory, filterAllocStatus, filterClient, sortDir, filterMinAmount, filterMaxAmount, invoiceCategoryId, salaryCategoryId])
+  }, [entries, filterType, filterMonth, activeFacets, filterCategory, filterScope, filterAllocStatus, filterClient, sortDir, filterMinAmount, filterMaxAmount, invoiceCategoryId, salaryCategoryId])
 
   const totalInflow  = filteredEntries.filter(e => e.type === 'inflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
   const totalOutflow = filteredEntries.filter(e => e.type === 'outflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
@@ -1077,6 +1083,14 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             </select>
 
             <select
+              value={filterScope}
+              onChange={e => setFilterScope(e.target.value as ScopeFilterValue)}
+              className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50"
+            >
+              {SCOPE_FILTER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+
+            <select
               value={filterAllocStatus}
               onChange={e => setFilterAllocStatus(e.target.value)}
               className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50"
@@ -1125,8 +1139,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               />
             </div>
 
-            {(filterType || filterMonth || filterCategory || searchFacets.length || filterAllocStatus || filterMinAmount || filterMaxAmount) && (
-              <button onClick={() => { setFilterType(''); setFilterMonth(''); setFilterCategory(''); setSearchFacets([]); setSearchDraft(''); setFilterAllocStatus(''); setFilterMinAmount(''); setFilterMaxAmount('') }} className="text-xs text-muted-foreground hover:text-foreground px-2 whitespace-nowrap">Clear</button>
+            {(filterType || filterMonth || filterCategory || filterScope || searchFacets.length || filterAllocStatus || filterMinAmount || filterMaxAmount) && (
+              <button onClick={() => { setFilterType(''); setFilterMonth(''); setFilterCategory(''); setFilterScope(''); setSearchFacets([]); setSearchDraft(''); setFilterAllocStatus(''); setFilterMinAmount(''); setFilterMaxAmount('') }} className="text-xs text-muted-foreground hover:text-foreground px-2 whitespace-nowrap">Clear</button>
             )}
           </div>
         </div>
@@ -1137,13 +1151,14 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
           chips={[
             ...(filterType ? [{ key: 'type', label: 'Type', value: filterType === 'inflow' ? 'Inflow' : 'Outflow', onRemove: () => setFilterType('') }] : []),
             ...(filterCategory ? [{ key: 'category', label: 'Category', value: categories.find((c: any) => c.id === filterCategory)?.name || 'Selected', onRemove: () => setFilterCategory('') }] : []),
+            ...(filterScope ? [{ key: 'scope', label: 'Books', value: getScopeFilterLabel(filterScope), onRemove: () => setFilterScope('') }] : []),
             ...(filterClient ? [{ key: 'client', label: 'Client', value: clients.find((c: any) => c.id === filterClient)?.name || 'Selected', onRemove: () => setFilterClient('') }] : []),
             ...(filterMonth ? [{ key: 'month', label: 'Month', value: filterMonth, onRemove: () => setFilterMonth('') }] : []),
             ...(filterAllocStatus ? [{ key: 'alloc', label: 'Allocation', value: filterAllocStatus, onRemove: () => setFilterAllocStatus('') }] : []),
             ...(filterMinAmount ? [{ key: 'min', label: 'Min ₹', value: filterMinAmount, onRemove: () => setFilterMinAmount('') }] : []),
             ...(filterMaxAmount ? [{ key: 'max', label: 'Max ₹', value: filterMaxAmount, onRemove: () => setFilterMaxAmount('') }] : []),
           ]}
-          onClearAll={() => { setFilterType(''); setFilterMonth(''); setFilterCategory(''); setSearchFacets([]); setSearchDraft(''); setFilterAllocStatus(''); setFilterMinAmount(''); setFilterMaxAmount(''); setFilterClient('') }}
+          onClearAll={() => { setFilterType(''); setFilterMonth(''); setFilterCategory(''); setFilterScope(''); setSearchFacets([]); setSearchDraft(''); setFilterAllocStatus(''); setFilterMinAmount(''); setFilterMaxAmount(''); setFilterClient('') }}
         />
 
         {/* Entries */}

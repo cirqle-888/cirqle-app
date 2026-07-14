@@ -56,6 +56,8 @@ interface DashboardAnalyticsProps {
   granularity: Granularity
   setDrawer: React.Dispatch<React.SetStateAction<DrawerType>>
   displayFull?: boolean
+  /** Company Ops strip (Finance Engine) — null pre-scope-migration. */
+  companyOps?: import('@/lib/finance/kpis').CompanyOpsStrip | null
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -66,6 +68,7 @@ export default function DashboardAnalytics({
   stats, invoices, overdueInvoices, dueInvoices, allCashbook,
   activeTasks, toBeInvoiced, employees, payrollRecords,
   dateFilter, granularity, setDrawer, displayFull,
+  companyOps = null,
 }: DashboardAnalyticsProps) {
   // ── Unwrap the streamed promises (suspends until resolved) ──────────────────
   const allAnalyticsTasks = use(allAnalyticsTasksPromise)
@@ -357,6 +360,27 @@ export default function DashboardAnalytics({
         <KpiCard label="Overdue"         value={f(stats.overdueAmount)}      icon={<AlertTriangle className="w-3.5 h-3.5"/>} color="red"    badge={stats.overdueCount} trend={stats.overdueCount > 0 ? { pct: null, invert: true } : null} clickable onClick={() => setDrawer('overdue')} />
         <KpiCard label="To Be Invoiced"  value={f(stats.toBeInvoicedAmount)} icon={<FileText className="w-3.5 h-3.5"/>}  color="yellow" badge={stats.toBeInvoicedCount} clickable onClick={() => setDrawer('toBeInvoiced')} />
       </div>
+
+      {/* ── Company Ops (Finance Engine) ───────────────── */}
+      {/* Company-scoped money only — fully separate from client billing above. */}
+      {companyOps && (
+        <section>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Company Ops · this month</h3>
+            <Link href="/dashboard/reports/company-ops" className="text-xs text-primary hover:underline">
+              Company Operations report →
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+            <KpiCard label="Company Spend" value={f(companyOps.opexInr)}      icon={<Briefcase className="w-3.5 h-3.5"/>}   color="purple" sub="company books" />
+            <KpiCard label="Payroll"       value={f(companyOps.payrollInr)}   icon={<Users className="w-3.5 h-3.5"/>}       color="teal" />
+            <KpiCard label="Marketing"     value={f(companyOps.marketingInr)} icon={<TrendingUp className="w-3.5 h-3.5"/>}  color="orange" sub="incl. internal ads" />
+            <KpiCard label="Software"      value={f(companyOps.softwareInr)}  icon={<FileText className="w-3.5 h-3.5"/>}    color="yellow" />
+            <KpiCard label="Burn Rate"     value={f(companyOps.burnRateInr)}  icon={<AlertTriangle className="w-3.5 h-3.5"/>} color="red" sub="3-mo avg net outflow" />
+            <KpiCard label="Runway"        value={companyOps.runwayMonths == null ? '—' : `${companyOps.runwayMonths} mo`} icon={<Clock className="w-3.5 h-3.5"/>} color={companyOps.runwayMonths != null && companyOps.runwayMonths < 3 ? 'red' : 'green'} sub={companyOps.untriagedCount > 0 ? `${companyOps.untriagedCount} entries need triage` : 'all entries classified'} />
+          </div>
+        </section>
+      )}
 
       {/* ── Production Output ─────────────────────────── */}
       {/* Distinct from financial KPIs — measures studio output (volume), not money. */}

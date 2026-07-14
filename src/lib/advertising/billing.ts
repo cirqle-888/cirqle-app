@@ -105,6 +105,12 @@ export async function recomputeCampaignBilling(admin: SupabaseClient, projectId:
       .eq('id', projectId).is('deleted_at', null).maybeSingle()
     if (!project) return
 
+    // Company (internal) campaigns are never billed: no service charge is
+    // derived onto the task (which would create a commission pool from our own
+    // ad spend) and no invoice lines are ever written. Budget tracking,
+    // wallet allocations and metrics all still work.
+    if ((project as any).scope === 'company') return
+
     const currency = (project as any).ad_budget_currency || 'INR'
     const basis = await getAllocationBasis(admin, projectId, currency)
     const spendBasis = basis.allocatedNative
@@ -140,6 +146,7 @@ export async function resyncInvoiceForProject(admin: SupabaseClient, projectId: 
     const { data: project } = await admin.from('ad_projects')
       .select('*, client:clients(default_currency)').eq('id', projectId).maybeSingle()
     if (!project) return
+    if ((project as any).scope === 'company') return   // internal campaigns are never invoiced
     const { data: inv } = await admin.from('invoices')
       .select('id, status').eq('ad_project_id', projectId)
       .order('created_at', { ascending: false }).limit(1).maybeSingle()

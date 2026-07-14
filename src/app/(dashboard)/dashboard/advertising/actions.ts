@@ -18,7 +18,7 @@ import { generateInvoiceNumber } from '@/lib/invoices/numbering'
 import { nextTaskNumber } from '@/lib/utils/task-code'
 import { computeBudgetTotals, computeServiceCharge } from '@/lib/advertising/budget'
 import { recomputeCampaignBilling, writeInvoiceLines } from '@/lib/advertising/billing'
-import { getWalletSummary, getEntryUncredited } from '@/lib/advertising/wallet'
+import { getWalletSummary, getCompanyWalletSummary, getEntryUncredited } from '@/lib/advertising/wallet'
 import { createManualRequest } from '@/app/(dashboard)/dashboard/requests/actions'
 import { logRequestActivity } from '@/lib/requests/core'
 import { logActivity } from '@/lib/activity/log'
@@ -197,9 +197,13 @@ export async function createAdProject(
   })
 
   // One task per campaign (the work item). Billing = the agency service charge.
-  const serviceCharge = computeServiceCharge(
-    input.adBudget ?? 0, input.serviceChargeType || 'fixed', input.serviceChargeValue ?? 0,
-  )
+  // Company (internal) campaigns have no one to charge: the task starts at 0 —
+  // any contribution pool for internal work is a deliberate manual decision.
+  const serviceCharge = input.clientId
+    ? computeServiceCharge(
+        input.adBudget ?? 0, input.serviceChargeType || 'fixed', input.serviceChargeValue ?? 0,
+      )
+    : 0
   const taskId = await createCampaignTask(admin, {
     projectId: id,
     campaignName: name,
@@ -398,12 +402,27 @@ export interface AddClientFundInput {
 export async function addClientFund(
   clientId: string, input: AddClientFundInput,
 ): Promise<ActionResult> {
+  if (!clientId) return { ok: false, error: 'Client is required.' }
+  return creditWallet(clientId, input)
+}
+
+/**
+ * CREDIT the COMPANY wallet: a share of a Cashbook outflow reserved for
+ * Cirqle's own (company-scoped) campaigns. Same rails as client wallets —
+ * client_id NULL is the company wallet (migration 20260714093000).
+ */
+export async function addCompanyFund(input: AddClientFundInput): Promise<ActionResult> {
+  return creditWallet(null, input)
+}
+
+async function creditWallet(
+  clientId: string | null, input: AddClientFundInput,
+): Promise<ActionResult> {
   const guard = await requirePermission(PERMS.ADVERTISING_MANAGE_BUDGET)
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const amount = Math.round((Number(input.amount) || 0) * 100) / 100
   if (amount <= 0) return { ok: false, error: 'Amount must be greater than zero.' }
-  if (!clientId) return { ok: false, error: 'Client is required.' }
 
   const admin = createAdminClient()
   const { data: entry, error: entryErr } = await admin
@@ -438,7 +457,12 @@ export async function addClientFund(
     notes: input.notes?.trim() || null,
     created_by: guard.employeeId,
   })
-  if (error) return { ok: false, error: error.message.includes('does not exist') ? LEDGER_MISSING : error.message }
+  if (error) {
+    if (clientId === null && /not-null|null value/i.test(error.message)) {
+      return { ok: false, error: 'Company wallet not enabled yet — apply migration 20260714093000_finance_views_company_wallet.sql first.' }
+    }
+    return { ok: false, error: error.message.includes('does not exist') ? LEDGER_MISSING : error.message }
+  }
 
   revalidatePath(REVALIDATE)
   return { ok: true }
@@ -456,15 +480,22 @@ export async function allocateToCampaign(
 
   const admin = createAdminClient()
   const { data: project } = await admin
-    .from('ad_projects').select('id, client_id, campaign_name')
+    .from('ad_projects').select('*')
     .eq('id', projectId).is('deleted_at', null).maybeSingle()
   if (!project) return { ok: false, error: 'Campaign not found.' }
   const clientId = (project as any).client_id as string | null
-  if (!clientId) return { ok: false, error: 'Assign a client to this campaign before allocating funds.' }
+  const isCompanyCampaign = (project as any).scope === 'company'
+  if (!clientId && !isCompanyCampaign) {
+    return { ok: false, error: 'Assign a client to this campaign before allocating funds.' }
+  }
 
-  const wallet = await getWalletSummary(admin, clientId)
+  // Company campaigns draw from the company wallet (client_id NULL rows).
+  const wallet = clientId
+    ? await getWalletSummary(admin, clientId)
+    : await getCompanyWalletSummary(admin)
   if (amount > wallet.balanceInr + 0.005) {
-    return { ok: false, error: `Client wallet has only ₹${wallet.balanceInr.toLocaleString('en-IN')} available. Add funds to the wallet first.` }
+    const which = clientId ? 'Client wallet' : 'Company wallet'
+    return { ok: false, error: `${which} has only ₹${wallet.balanceInr.toLocaleString('en-IN')} available. Add funds to the wallet first.` }
   }
 
   const { error } = await admin.from('ad_wallet_ledger').insert({
@@ -503,7 +534,10 @@ export async function removeWalletTransaction(ledgerId: string): Promise<ActionR
   if (!row) return { ok: false, error: 'Transaction not found.' }
 
   if ((row as any).direction === 'credit') {
-    const wallet = await getWalletSummary(admin, (row as any).client_id)
+    const rowClientId = (row as any).client_id as string | null
+    const wallet = rowClientId
+      ? await getWalletSummary(admin, rowClientId)
+      : await getCompanyWalletSummary(admin)
     if (wallet.balanceInr - Number((row as any).amount_inr || 0) < -0.005) {
       return { ok: false, error: 'Removing this credit would make the wallet negative — remove campaign allocations first.' }
     }

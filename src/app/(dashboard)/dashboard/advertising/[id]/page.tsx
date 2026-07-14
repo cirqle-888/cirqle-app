@@ -2,7 +2,7 @@ import { notFound, redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
-import { getWalletSummary } from '@/lib/advertising/wallet'
+import { getWalletSummary, getCompanyWalletSummary } from '@/lib/advertising/wallet'
 import ProjectDetailClient from './project-detail-client'
 
 export const dynamic = 'force-dynamic'
@@ -41,7 +41,13 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   ])
 
   const allocSupported = !allocRes.error
-  const wallet = project.client_id ? await getWalletSummary(admin, project.client_id) : null
+  // Client campaigns read the client wallet; company (internal) campaigns read
+  // the company wallet (client_id NULL rows — migration 20260714093000).
+  const wallet = project.client_id
+    ? await getWalletSummary(admin, project.client_id)
+    : (project as any).scope === 'company'
+      ? await getCompanyWalletSummary(admin)
+      : null
 
   const perms = {
     edit:           isAdmin || hasPermission(me, PERMS.ADVERTISING_EDIT),

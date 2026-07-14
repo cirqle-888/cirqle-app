@@ -16,7 +16,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 const round2 = (v: number) => Math.round((Number(v || 0) + Number.EPSILON) * 100) / 100
 
 export interface WalletSummary {
-  clientId: string
+  /** null = the COMPANY wallet (Cirqle's own, funding internal campaigns). */
+  clientId: string | null
   /** Σ active credits (top-up shares), INR. */
   creditedInr: number
   /** Σ active campaign-allocation debits, INR. */
@@ -66,6 +67,30 @@ export async function getWalletSummaries(
 export async function getWalletSummary(admin: SupabaseClient, clientId: string): Promise<WalletSummary> {
   const map = await getWalletSummaries(admin, [clientId])
   return map[clientId] ?? { clientId, creditedInr: 0, allocatedInr: 0, balanceInr: 0 }
+}
+
+/**
+ * The COMPANY wallet: ledger rows with client_id NULL. Funds Cirqle's own
+ * (company-scoped) campaigns through the same credit/debit rails as client
+ * wallets — never invoiced. Requires migration 20260714093000 (nullable
+ * client_id); returns a zero wallet before that.
+ */
+export async function getCompanyWalletSummary(admin: SupabaseClient): Promise<WalletSummary> {
+  const summary: WalletSummary = { clientId: null, creditedInr: 0, allocatedInr: 0, balanceInr: 0 }
+  try {
+    const { data, error } = await admin
+      .from('ad_wallet_ledger')
+      .select('direction, amount_inr')
+      .is('client_id', null)
+      .is('deleted_at', null)
+    if (error || !data) return summary
+    for (const r of data as any[]) {
+      if (r.direction === 'credit') summary.creditedInr = round2(summary.creditedInr + Number(r.amount_inr || 0))
+      else summary.allocatedInr = round2(summary.allocatedInr + Number(r.amount_inr || 0))
+    }
+    summary.balanceInr = round2(summary.creditedInr - summary.allocatedInr)
+  } catch { /* ledger not migrated */ }
+  return summary
 }
 
 /** Σ active campaign-allocation debits per project (INR), for a set of projects. */

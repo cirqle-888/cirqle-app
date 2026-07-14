@@ -65,6 +65,8 @@ interface Props {
   pendingRequests?: { count: number; items: { id: string; title: string }[] }
   draftInvoicesSample?: string[]
   payrollPendingCount?: number
+  /** Company Ops strip (Finance Engine) — null pre-scope-migration or for non-admins. */
+  companyOps?: import('@/lib/finance/kpis').CompanyOpsStrip | null
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -249,6 +251,7 @@ function AdminDashboard({
   activeTasks, toBeInvoiced, employees, scoresPromise, payrollRecords,
   todayStr, exchangeRates = [], followupCounts,
   notifications, pendingRequests, draftInvoicesSample = [], payrollPendingCount = 0,
+  companyOps = null,
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
@@ -565,6 +568,7 @@ function AdminDashboard({
           <DashboardAnalytics
             allAnalyticsTasksPromise={allAnalyticsTasksPromise}
             scoresPromise={scoresPromise}
+            companyOps={companyOps}
             stats={effectiveStats}
             invoices={invoices}
             overdueInvoices={overdueInvoices}

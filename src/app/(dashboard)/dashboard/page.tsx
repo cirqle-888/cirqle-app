@@ -1,4 +1,6 @@
 import { createAdminClient, fetchAll, stablePaginationQuery } from '@/lib/supabase/server'
+import { fetchJournalLines } from '@/lib/finance/journal'
+import { computeCompanyOpsStrip, type CompanyOpsStrip } from '@/lib/finance/kpis'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { getPendingPricing } from '@/lib/pricing/pending'
 import { PricingPendingBanner } from '@/components/pricing/pricing-pending-banner'
@@ -304,6 +306,21 @@ export default async function DashboardPage() {
     } catch { /* defensive — widget simply stays hidden */ }
   }
 
+  // ── Company Ops strip (Finance Engine) ────────────────────────────────────
+  // Admin-only. Trailing 4 months covers the 3-month burn window; untriaged
+  // count is window-scoped (the Company Operations report shows the full queue).
+  // Tolerant of the unapplied scope migration — the strip simply stays hidden.
+  let companyOps: CompanyOpsStrip | null = null
+  if (isAdmin) {
+    try {
+      const now = new Date()
+      const stripFrom = new Date(now.getFullYear(), now.getMonth() - 3, 1).toISOString().slice(0, 10)
+      const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+      const journal = await fetchJournalLines(supabase, { from: stripFrom })
+      companyOps = computeCompanyOpsStrip(journal, { month: thisMonthKey, bankBalanceInr: bankBalance })
+    } catch { /* finance engine unavailable (pre-migration) — strip hidden */ }
+  }
+
   return (
     <>
     {canSeePricing && <PricingPendingBanner clients={pendingPricing.clients} services={pendingPricing.services} />}
@@ -346,6 +363,7 @@ export default async function DashboardPage() {
       pendingRequests={pendingRequests}
       draftInvoicesSample={draftInvoicesSample}
       payrollPendingCount={payrollPendingCount}
+      companyOps={companyOps}
     />
     </>
   )

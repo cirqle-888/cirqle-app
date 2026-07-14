@@ -52,7 +52,8 @@ export interface CampaignAllocation {
 }
 
 export interface WalletSummaryView {
-  clientId: string
+  /** null = the COMPANY wallet (internal campaigns). */
+  clientId: string | null
   creditedInr: number
   allocatedInr: number
   balanceInr: number
@@ -766,7 +767,13 @@ function FundAllocationCard({ project, allocations, wallet, supported, reportedS
   const allocatedTotal = round2(allocations.reduce((s, a) => s + Number(a.amount_inr || 0), 0))
   const hasAllocations = allocations.length > 0
   const basis = allocatedTotal
-  const serviceCharge = computeServiceCharge(basis, project.service_charge_type, Number(project.service_charge_value || 0))
+  // Company (internal) campaigns draw from the company wallet and are never
+  // billed — no service charge applies.
+  const isCompanyCampaign = !project.client_id && (project as any).scope === 'company'
+  const walletEligible = Boolean(project.client_id) || isCompanyCampaign
+  const serviceCharge = isCompanyCampaign
+    ? 0
+    : computeServiceCharge(basis, project.service_charge_type, Number(project.service_charge_value || 0))
   const spendGross = spendWithGst(reportedSpend) // actual money consumed (incl. 18% GST)
   const balance = wallet?.balanceInr ?? 0
 
@@ -790,15 +797,19 @@ function FundAllocationCard({ project, allocations, wallet, supported, reportedS
     <div className="rounded-xl border border-border bg-card p-4 space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h3 className="text-sm font-semibold">Campaign Funds (Client Wallet)</h3>
+          <h3 className="text-sm font-semibold">
+            {isCompanyCampaign ? 'Campaign Funds (Company Wallet)' : 'Campaign Funds (Client Wallet)'}
+          </h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Billing follows the funds allocated to this campaign from the client&apos;s wallet (GST-inclusive money actually
-            paid). Platform-reported spend stays reporting-only. Top up the wallet from the Advertising dashboard.
+            {isCompanyCampaign
+              ? <>Internal campaign — funded from Cirqle&apos;s own wallet (GST-inclusive money actually paid). Never invoiced; the spend lands on the Company P&amp;L. Top up the company wallet from the Advertising dashboard.</>
+              : <>Billing follows the funds allocated to this campaign from the client&apos;s wallet (GST-inclusive money actually
+            paid). Platform-reported spend stays reporting-only. Top up the wallet from the Advertising dashboard.</>}
           </p>
         </div>
         {supported && wallet && (
           <div className="rounded-lg bg-secondary/60 px-3 py-1.5 text-xs">
-            <span className="text-muted-foreground">{project.client?.name || 'Client'} wallet: </span>
+            <span className="text-muted-foreground">{isCompanyCampaign ? 'Company' : (project.client?.name || 'Client')} wallet: </span>
             <span className={`font-semibold tabular-nums ${balance < 0 ? 'text-red-500' : ''}`}>{inr(balance, 2)}</span>
             <span className="text-muted-foreground"> available</span>
           </div>
@@ -811,13 +822,13 @@ function FundAllocationCard({ project, allocations, wallet, supported, reportedS
         </div>
       )}
 
-      {supported && !project.client_id && (
+      {supported && !walletEligible && (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
           Assign a client to this campaign to allocate wallet funds.
         </div>
       )}
 
-      {supported && project.client_id && (
+      {supported && walletEligible && (
         <>
           {/* Allocation ledger for this campaign */}
           {allocations.length > 0 ? (
@@ -1111,11 +1122,13 @@ function ProjectReportsTab({
             <select value={template} onChange={e => setTemplate(e.target.value)}
               className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm">
               <option value="daily">Daily Report (Meta / WhatsApp style)</option>
+              <option value="monthly">Monthly Report (Meta / WhatsApp style)</option>
               <option value="performance">Performance Report</option>
               <option value="executive">Executive Summary</option>
               <option value="marketing">Marketing Performance</option>
               <option value="lead_gen">Lead Generation</option>
               <option value="ecommerce">E-commerce</option>
+              <option value="agency">Agency Report</option>
             </select>
           </div>
 

@@ -148,9 +148,14 @@ export default function NewCampaignForm({ clients, services, servicePricing }: P
             <div>
               <label className={labelCls}>Client</label>
               <select value={clientId} onChange={e => { setClientId(e.target.value); applyServiceCharge(serviceId, e.target.value) }} className={field}>
-                <option value="">— None —</option>
+                <option value="">Internal — Cirqle (company campaign)</option>
                 {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
+              {!clientId && (
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  Funded from the company wallet, tracked on the Company P&L, never invoiced.
+                </p>
+              )}
             </div>
             <div>
               <label className={labelCls}>Platform</label>

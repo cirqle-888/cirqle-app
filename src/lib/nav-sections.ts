@@ -7,7 +7,7 @@ import {
   LayoutDashboard, CheckSquare, Users2, FileText, BookOpen, Wallet, BarChart3, Sheet,
   Settings, TrendingUp, Upload, Inbox, PhoneCall, Award, Activity, Blocks, Megaphone, Handshake,
   SlidersHorizontal, MessageSquare, ClipboardCheck, NotebookPen, LayoutGrid,
-  Briefcase, ClipboardList, CalendarClock, BadgeCheck, PieChart,
+  Briefcase, ClipboardList, CalendarClock, BadgeCheck, PieChart, Building2,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -61,6 +61,10 @@ export const navSections: NavSection[] = [
       // Contribution Analysis: spreadsheet-style per-task profitability / earnings
       // BI report. Same reports.view gate. Lives under Insights, NOT Settings.
       { label: 'Contribution Analysis', href: '/dashboard/reports/contribution-analysis', icon: Sheet, requiredPerm: 'reports.view' },
+      // Company Operations: the company-scoped P&L (salaries, rent, software,
+      // internal marketing…) + burn rate / runway + scope triage queue.
+      // Powered by the Finance Engine (src/lib/finance).
+      { label: 'Company Operations', href: '/dashboard/reports/company-ops', icon: Building2, requiredPerm: 'reports.view' },
       // Client Ranking: payment reliability + business value scoring per client.
       { label: 'Client Ranking', href: '/dashboard/clients/ranking', icon: Award, requiredPerm: 'reports.view' },
       // Business Health Center: cash/collections, overdue aging, client risk
