@@ -493,7 +493,7 @@ export function CommandPalette() {
       onMouseDown={e => { if (e.target === e.currentTarget) setOpen(false) }}
     >
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onMouseDown={() => setOpen(false)} />
 
       {/* Panel */}
       <div role="dialog" aria-modal="true" aria-label="Command palette" className="relative w-full max-w-xl bg-secondary border border-foreground/15 rounded-2xl shadow-2xl shadow-black/60 overflow-hidden animate-in fade-in zoom-in-95 duration-150">

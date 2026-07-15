@@ -117,7 +117,7 @@ export async function fetchAll(query: any) {
   }
 
   if (allData.length >= 5000) {
-    console.warn(`[PERF WARNING] fetchAll fetched ${allData.length} rows — consider adding date filters or cursor pagination.`)
+    console.warn(`[PERF WARNING] fetchAll fetched ${allData.length} rows from "${table ?? 'unknown'}" (${Math.ceil(allData.length / PAGE)} sequential round-trips) — consider adding date filters or cursor pagination.`)
   }
 
   // Dev-only duplicate detection: catches unstable ordering bugs early

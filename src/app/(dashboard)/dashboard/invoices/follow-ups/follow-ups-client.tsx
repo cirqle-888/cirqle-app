@@ -14,15 +14,24 @@ import {
 } from '@/lib/followups/grouping'
 import { logFollowup, markInvoiceSent, deleteFollowup, recordPayment } from './actions'
 import { publicInvoiceUrl, buildInvoiceShareText, whatsappShareUrl } from '@/lib/invoices/share'
+import { buildPartnerStatementTextFromLines } from '@/lib/partners/whatsapp'
+import { copyToClipboard } from '@/lib/clipboard'
 import type { MessageTemplates } from '@/lib/messaging/templates'
 import {
   PhoneCall, MessageCircle, Send, Clock, AlertTriangle, CalendarClock,
   ChevronDown, ChevronRight, ExternalLink, Copy, Trash2, History,
   Plus, X, Phone, Inbox, BellRing, CircleDollarSign, CheckCircle2, CreditCard,
-  TrendingUp,
+  TrendingUp, Handshake,
 } from 'lucide-react'
 
 // ── Types ────────────────────────────────────────────────────────────
+export interface FUPartner {
+  id:    string
+  name:  string
+  code:  string | null
+  phone: string | null
+}
+
 interface FUInvoice {
   id:             string
   invoice_number: string
@@ -30,7 +39,7 @@ interface FUInvoice {
   issue_date:     string | null
   due_date:       string | null
   currency:       string
-  client:         { id: string; name: string; code: string | null; phone: string | null } | null
+  client:         { id: string; name: string; code: string | null; phone: string | null; partner: FUPartner | null } | null
   outstanding:    number | null
   total:          number | null
   hasAllocations: boolean
@@ -86,8 +95,12 @@ const GROUP_META: Record<FollowupGroup, { label: string; hint: string; icon: typ
 const GROUP_ORDER: FollowupGroup[] = ['needs_sent', 'urgent', 'regular']
 
 // ── Group-by clustering (within each section) ──────────────────────────
-type ViewMode = 'flat' | 'client' | 'overdue' | 'amount'
-const VIEW_MODE_LABEL: Record<ViewMode, string> = { flat: 'Flat', client: 'By Client', overdue: 'By Overdue', amount: 'By Amount' }
+type ViewMode = 'flat' | 'client' | 'partner' | 'overdue' | 'amount'
+const VIEW_MODES: ViewMode[] = ['flat', 'client', 'partner', 'overdue', 'amount']
+const VIEW_MODE_LABEL: Record<ViewMode, string> = {
+  flat: 'Flat', client: 'By Client', partner: 'By Business Partner', overdue: 'By Overdue', amount: 'By Amount',
+}
+const NO_PARTNER_KEY = 'no_partner'
 
 function overdueBucket(days: number | null): { key: string; label: string; order: number } {
   if (days == null || days <= 0) return { key: 'not_due', label: 'Not yet due', order: 0 }
@@ -117,6 +130,25 @@ function clusterInvoices(list: FUInvoice[], mode: ViewMode): Cluster[] {
     }
     return [...map.values()].sort((a, b) => a.label.localeCompare(b.label))
   }
+  if (mode === 'partner') {
+    const map = new Map<string, Cluster>()
+    for (const inv of list) {
+      const partner = inv.client?.partner ?? null
+      const key = partner?.id ?? NO_PARTNER_KEY
+      const label = partner
+        ? `${partner.name}${partner.code ? ` · ${partner.code}` : ''}`
+        : 'No business partner'
+      const e = map.get(key) ?? { key, label, items: [] }
+      e.items.push(inv)
+      map.set(key, e)
+    }
+    // Partners first (alphabetical); the unassigned bucket always sinks to the bottom.
+    return [...map.values()].sort((a, b) => {
+      if (a.key === NO_PARTNER_KEY) return 1
+      if (b.key === NO_PARTNER_KEY) return -1
+      return a.label.localeCompare(b.label)
+    })
+  }
   const bucketFn = mode === 'overdue'
     ? (inv: FUInvoice) => overdueBucket(daysOverdue(inv))
     : (inv: FUInvoice) => amountBucket(inv.outstanding ?? 0)
@@ -138,6 +170,8 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
   const [openHistory, setOpenHistory] = useState<Set<string>>(new Set())
   const [waInvoice, setWaInvoice]     = useState<string | null>(null) // invoice id whose WhatsApp popover is open
   const [waText, setWaText]           = useState('')
+  const [bpCluster, setBpCluster]     = useState<string | null>(null) // cluster id whose partner-statement popover is open
+  const [bpText, setBpText]           = useState('')
   // "Needs to be sent" starts collapsed (drafts are lower priority); Urgent/Regular start open.
   const [collapsed, setCollapsed]     = useState<Set<FollowupGroup>>(new Set(['needs_sent']))
   const [viewMode, setViewMode]       = useState<Record<FollowupGroup, ViewMode>>({ needs_sent: 'flat', urgent: 'flat', regular: 'flat' })
@@ -174,6 +208,22 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
       const arr = m.get(inv.client.id) ?? []
       arr.push(inv)
       m.set(inv.client.id, arr)
+    }
+    return m
+  }, [invoices])
+
+  // Business partner → every pending invoice of every client they own. Like
+  // pendingByClient, this deliberately spans all three groups (and skips drafts):
+  // a partner chases the client's whole outstanding book, not one bucket of it.
+  const pendingByPartner = useMemo(() => {
+    const m = new Map<string, FUInvoice[]>()
+    for (const inv of invoices) {
+      const pid = inv.client?.partner?.id
+      if (!pid) continue
+      if (!['sent', 'partial', 'overdue'].includes(inv.status)) continue
+      const arr = m.get(pid) ?? []
+      arr.push(inv)
+      m.set(pid, arr)
     }
     return m
   }, [invoices])
@@ -337,33 +387,35 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
     window.open(whatsappShareUrl(invoiceShareText(inv), inv.client?.phone ?? null), '_blank', 'noopener,noreferrer')
     void doMarkSent(inv.id)
   }
-  const copyText = async (text: string) => {
-    try {
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(text)
-      } else {
-        const textArea = document.createElement("textarea")
-        textArea.value = text
-        textArea.style.position = "absolute"
-        textArea.style.left = "-999999px"
-        document.body.prepend(textArea)
-        textArea.select()
-        try {
-          document.execCommand('copy')
-        } catch (error) {
-          console.error(error)
-          toastError('Copy failed', 'Select the text and copy manually')
-          return
-        } finally {
-          textArea.remove()
-        }
-      }
-      success('Copied', 'Reminder text copied')
-    } catch (err) {
-      console.error(err)
-      toastError('Copy failed', 'Select the text and copy manually')
-    }
+  const copyText = async (text: string, label = 'Reminder text copied') => {
+    if (await copyToClipboard(text)) success('Copied', label)
+    else toastError('Copy failed', 'Select the text and copy manually')
   }
+
+  // ── Business-partner collection statement ──────────────────────────
+  // Same message the partner's own dashboard produces (shared builder + the
+  // Settings templates), but reachable from the chase list.
+  const partnerStatementText = useCallback((partner: FUPartner) => {
+    const list = pendingByPartner.get(partner.id) ?? []
+    const lines = [...list]
+      .sort((a, b) => (a.client?.name ?? '').localeCompare(b.client?.name ?? '')
+        || a.invoice_number.localeCompare(b.invoice_number))
+      .map(inv => ({
+        clientName:    inv.client?.name ?? 'Unknown client',
+        invoiceNumber: inv.invoice_number,
+        pending:       inv.outstanding ?? 0,
+        status:        inv.status,
+      }))
+    const total = lines.reduce((s, l) => s + l.pending, 0)
+    return buildPartnerStatementTextFromLines(partner.name, lines, total, templates)
+  }, [pendingByPartner, templates])
+
+  const openPartnerStatement = (clusterId: string, partner: FUPartner) => {
+    if (bpCluster === clusterId) { setBpCluster(null); return }
+    setBpText(partnerStatementText(partner))
+    setBpCluster(clusterId)
+  }
+
   const sendWhatsApp = (phone: string | null, text: string) => {
     let digits = (phone || '').replace(/\D/g, '')
     if (!digits) { copyText(text); info('No phone on file', 'Reminder copied — paste into WhatsApp'); return }
@@ -453,7 +505,7 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
                 return (
                   <>
                     <div className="flex items-center gap-1.5 mb-3 ml-6 flex-wrap">
-                      {(['flat', 'client', 'overdue', 'amount'] as const).map(m => (
+                      {VIEW_MODES.map(m => (
                         <button
                           key={m}
                           onClick={() => setViewMode(p => ({ ...p, [g]: m }))}
@@ -475,6 +527,14 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
                       {clusters.map(cluster => {
                         const clusterId = `${g}:${mode}:${cluster.key}`
                         const clusterCollapsed = cluster.label !== '' && collapsedClusters.has(clusterId)
+                        // In the partner view, the cluster header doubles as the partner's
+                        // own follow-up bar (statement text → copy / WhatsApp / log).
+                        // Not in "Needs to be sent": you can't ask a partner to chase an
+                        // invoice the client has never received.
+                        const partner = mode === 'partner' && g !== 'needs_sent'
+                          ? (cluster.items[0]?.client?.partner ?? null)
+                          : null
+                        const partnerPending = partner ? (pendingByPartner.get(partner.id) ?? []) : []
                         return (
                           <div key={cluster.key}>
                             {cluster.label && (
@@ -485,6 +545,7 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
                                 {clusterCollapsed
                                   ? <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                                   : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
+                                {partner && <Handshake className="w-3.5 h-3.5 text-violet-500 shrink-0" />}
                                 <span className="text-xs font-semibold text-foreground">{cluster.label}</span>
                                 <span className="text-[10px] text-muted-foreground">
                                   {cluster.items.length} invoice{cluster.items.length === 1 ? '' : 's'}
@@ -492,6 +553,85 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
                                 </span>
                               </button>
                             )}
+
+                            {partner && partnerPending.length > 0 && (
+                              <div className="ml-6 mb-3">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <button
+                                    onClick={() => openPartnerStatement(clusterId, partner)}
+                                    className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-violet-500/15 text-violet-700 border border-violet-500/30 hover:bg-violet-500/25 dark:text-violet-400 transition-colors"
+                                  >
+                                    <Handshake className="w-3.5 h-3.5" />
+                                    {bpCluster === clusterId ? 'Hide statement' : 'Collection statement'}
+                                  </button>
+                                  <button
+                                    onClick={() => copyText(partnerStatementText(partner), 'Partner statement copied')}
+                                    className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-secondary border border-border hover:bg-secondary/70 text-foreground transition-colors"
+                                  >
+                                    <Copy className="w-3.5 h-3.5" /> Copy statement
+                                  </button>
+                                  <button
+                                    onClick={() => sendWhatsApp(partner.phone, partnerStatementText(partner))}
+                                    className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-700 border border-emerald-500/30 hover:bg-emerald-500/25 dark:text-emerald-400 transition-colors"
+                                  >
+                                    <MessageCircle className="w-3.5 h-3.5" /> Send to partner
+                                  </button>
+                                  <Link
+                                    href={`/dashboard/partners/${partner.id}`}
+                                    className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                                  >
+                                    <ExternalLink className="w-3.5 h-3.5" /> Partner page
+                                  </Link>
+                                  <span className="text-[10px] text-muted-foreground">
+                                    {partnerPending.length} pending invoice{partnerPending.length === 1 ? '' : 's'} across all buckets
+                                    {showAmounts && ` · ${fmtINR(partnerPending.reduce((s, i) => s + (i.outstanding ?? 0), 0))}`}
+                                  </span>
+                                </div>
+
+                                {bpCluster === clusterId && (
+                                  <div className="mt-2 rounded-lg border border-violet-500/30 bg-violet-500/5 p-3">
+                                    <div className="flex items-center gap-1.5 text-[11px] font-semibold text-violet-700 dark:text-violet-400 mb-2">
+                                      <Handshake className="w-3.5 h-3.5" /> Collection statement for {partner.name}
+                                      <span className="text-muted-foreground font-normal">(every sent invoice of their clients — drafts excluded)</span>
+                                    </div>
+                                    <textarea
+                                      value={bpText}
+                                      onChange={e => setBpText(e.target.value)}
+                                      rows={Math.min(14, bpText.split('\n').length + 1)}
+                                      className="w-full text-xs bg-background border border-border rounded-lg px-3 py-2 text-foreground font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-violet-500/40 resize-y"
+                                    />
+                                    <div className="flex items-center gap-2 mt-2 flex-wrap">
+                                      <button
+                                        onClick={() => sendWhatsApp(partner.phone, bpText)}
+                                        className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+                                      >
+                                        <Send className="w-3.5 h-3.5" /> Open WhatsApp
+                                      </button>
+                                      <button
+                                        onClick={() => copyText(bpText, 'Partner statement copied')}
+                                        className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-secondary border border-border hover:bg-secondary/70 text-foreground transition-colors"
+                                      >
+                                        <Copy className="w-3.5 h-3.5" /> Copy text
+                                      </button>
+                                      <button
+                                        onClick={() => { doBulkFollowup(partnerPending); setBpCluster(null) }}
+                                        disabled={busy === 'bulk'}
+                                        title="Log 'Reminder sent' on every invoice in this statement"
+                                        className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors ml-auto"
+                                      >
+                                        <CheckCircle2 className="w-3.5 h-3.5" /> Log &quot;Reminder sent&quot; for all {partnerPending.length}
+                                      </button>
+                                    </div>
+                                    {!partner.phone && (
+                                      <p className="text-[10px] text-muted-foreground mt-2">
+                                        No phone on file for this partner — &quot;Open WhatsApp&quot; will copy the text instead.
+                                      </p>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
                             {!clusterCollapsed && (
                               <div className="space-y-3">
                                 {cluster.items.map(inv => (

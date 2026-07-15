@@ -15,8 +15,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const [
     groupsRes, paramsRes, toolsRes, servicesRes, clientsRes,
     employeesRes, bankRes, categoriesRes, companyRes, ratesRes,
-    paramServicesRes, toolServicesRes, taskServiceUsageRes, groupServicesRes,
-    invoicesRes,
+    toolServicesRes, taskServiceUsageRes, groupServicesRes,
   ] = await Promise.all([
     supabase.from('contribution_groups').select('*').order('display_order'),
     supabase.from('parameters').select('*').order('display_order'),
@@ -28,11 +27,13 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     supabase.from('cashbook_categories').select('*').order('type').order('name'),
     supabase.from('company_settings').select('*'),
     supabase.from('exchange_rates').select('*'),
-    supabase.from('parameter_services').select('*'),
+    // parameter_services is dead data (no write path exists) — params are
+    // scoped to services via their group (group_services); nothing loads it here.
     supabase.from('tool_services').select('*'),
     supabase.from('tasks').select('service_id, created_at').not('service_id', 'is', null).order('created_at', { ascending: false }).limit(500),
     supabase.from('group_services').select('group_id, service_id'),
-    supabase.from('invoices').select('client_id, total_amount, paid_amount, status'),
+    // NOTE: invoices are intentionally NOT loaded here anymore — per-client
+    // outstanding lives in the Clients module, which computes it itself.
   ])
 
   // Load designations (graceful — may not exist yet if migration not run)
@@ -44,6 +45,13 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       .order('display_order')
     designations = data || []
   } catch {}
+
+  // Employee ↔ service assignments (graceful — table lands in migration 20260714150000)
+  let employeeServices: { employee_id: string; service_id: string }[] = []
+  {
+    const { data } = await supabase.from('employee_services').select('employee_id, service_id')
+    employeeServices = data || []
+  }
 
   return (
     <SettingsClient
@@ -57,11 +65,10 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       categories={categoriesRes.data || []}
       companySettings={companyRes.data || []}
       exchangeRates={ratesRes.data || []}
-      parameterServices={paramServicesRes.data || []}
       toolServices={toolServicesRes.data || []}
       taskServiceUsage={(taskServiceUsageRes.data || []) as any[]}
       groupServices={groupServicesRes.data || []}
-      invoices={(invoicesRes.data || []) as any[]}
+      employeeServices={employeeServices}
       designations={designations}
       initialTab={initialTab}
       initialEditClientId={editClient}

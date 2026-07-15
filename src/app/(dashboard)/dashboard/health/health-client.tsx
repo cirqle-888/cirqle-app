@@ -10,7 +10,7 @@ import {
 interface Props {
   showAmounts: boolean
   cash: {
-    bankBalance: number; totalBilled: number; totalPaid: number
+    bankBalance: number; totalBilled: number; totalPaid: number; badDebtInr: number
     outstanding: number; toBeInvoiced: number
     collectionRatePct: number | null; totalExpectedCash: number
   }
@@ -72,6 +72,7 @@ export default function HealthClient({ showAmounts, cash, agingBuckets, clientRi
               { label: 'Outstanding', value: amt(cash.outstanding) },
               { label: 'To Be Invoiced', value: amt(cash.toBeInvoiced) },
               { label: 'Collection Rate', value: cash.collectionRatePct !== null ? `${cash.collectionRatePct}%` : '—' },
+              { label: 'Bad Debt', value: amt(cash.badDebtInr) },
             ].map(c => (
               <div key={c.label} className="bg-card border border-border rounded-xl p-4">
                 <p className="text-[11px] text-muted-foreground uppercase tracking-wide">{c.label}</p>

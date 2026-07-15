@@ -4,6 +4,7 @@ import { RoleProvider, type ServerEmployee } from '@/contexts/role-context'
 import { PermissionProvider, type PermissionUser } from '@/contexts/permission-context'
 import { FavoritesProvider } from '@/contexts/favorites-context'
 import { WorkspaceProvider } from '@/contexts/workspace-context'
+import { RequestsBadgeProvider } from '@/contexts/requests-badge-context'
 import { CommandPalette } from '@/components/ui/command-palette'
 import { DesktopNotifier } from '@/components/desktop/desktop-notifier'
 import { FloatingCommsWidget } from '@/components/comms/floating-comms-widget'
@@ -117,6 +118,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <PermissionProvider user={user} logoUrl={logoUrl} logoUrlDark={logoUrlDark} faviconUrl={faviconUrl}>
           <FavoritesProvider initialFavorites={initialFavorites}>
           <WorkspaceProvider initial={initialWorkspaceState}>
+          <RequestsBadgeProvider>
           {/* h-dvh = dynamic viewport height (adapts as Safari toolbar shows/hides).
               h-screen (100vh) on iOS uses the *large* viewport (toolbar-hidden),
               making the container taller than the visible area when the address bar
@@ -150,6 +152,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               />
             )}
           </div>
+          </RequestsBadgeProvider>
           </WorkspaceProvider>
           </FavoritesProvider>
         </PermissionProvider>

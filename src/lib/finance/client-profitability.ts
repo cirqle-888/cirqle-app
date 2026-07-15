@@ -18,10 +18,16 @@ export function buildClientProfitability(
 ): { rows: ClientProfitabilityRow[]; totals: ClientProfitabilityRow } {
   const rows: ClientProfitabilityRow[] = inputs.map(i => {
     const markup = round2(i.markupRevenueInr ?? 0)
+    // invoicedInr is RECOGNISED revenue (see lib/finance/invoice-revenue.ts):
+    // already net of discounts, and already excluding what a write-off never
+    // paid. Bad debt and discounts are carried alongside for disclosure, never
+    // subtracted again — that would double-count them.
     const margin = round2(i.invoicedInr - i.directCostsInr - i.attributedLaborInr + markup)
     return {
       ...i,
       markupRevenueInr: markup,
+      badDebtInr: round2(i.badDebtInr ?? 0),
+      discountInr: round2(i.discountInr ?? 0),
       contributionMarginInr: margin,
       marginPct: i.invoicedInr > 0 ? Math.round((margin / i.invoicedInr) * 1000) / 10 : 0,
     }
@@ -37,6 +43,8 @@ export function buildClientProfitability(
     directCostsInr: sum(r => r.directCostsInr),
     attributedLaborInr: sum(r => r.attributedLaborInr),
     markupRevenueInr: sum(r => r.markupRevenueInr),
+    badDebtInr: sum(r => r.badDebtInr),
+    discountInr: sum(r => r.discountInr),
     contributionMarginInr: sum(r => r.contributionMarginInr),
     marginPct: 0,
   }

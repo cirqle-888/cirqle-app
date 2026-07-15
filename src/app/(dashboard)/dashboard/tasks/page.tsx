@@ -2,6 +2,7 @@ import { createAdminClient, fetchAll, stablePaginationQuery, safeQuery, columnEx
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility, stripTaskListPricing, userCanSee } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
+import { resolveTaskVisibilityMode, fetchEmployeeServiceIds, filterTasksByVisibility } from '@/lib/tasks/visibility'
 import { getPendingPricing } from '@/lib/pricing/pending'
 import { PricingPendingBanner } from '@/components/pricing/pricing-pending-banner'
 import TasksClient from './tasks-client'
@@ -171,13 +172,18 @@ export default async function TasksPage({
   // roles can be granted task visibility without pricing.
   const selectClause = vis.tasksPricing ? ADMIN_TASK_SELECT : EMPLOYEE_TASK_SELECT
 
+  // Service-scoped task visibility (tasks.view_by_service). 'services' viewers
+  // only receive tasks of their assigned services plus tasks they worked on —
+  // filtered server-side below so hidden tasks never reach the client state.
+  const visibilityMode = resolveTaskVisibilityMode(me)
+
   // Fetch tasks via pagination (bypasses Supabase's 1000-row response cap)
   // in parallel with all the smaller reference-data queries, including the
   // three visibility_* settings rows (used to be a separate sequential await).
   const [allTasks, dbCountRes, clientsRes, servicesRes, clientPricingsRes, employeesRes, taskAssignmentsRes,
     groupsRes, paramsRes, groupServicesRes, paramServicesRes,
     taskGroupsRes, taskGroupAssignmentsRes, taskParamAssignmentsRes, myTaskIds,
-    visibilityBillingRes, visibilityContribRes, visibilityNamesRes] = await Promise.all([
+    visibilityBillingRes, visibilityContribRes, visibilityNamesRes, myServiceIds] = await Promise.all([
     fetchAllTasks(supabase, hasDeletedAt, selectClause),
     // Real DB count of all tasks (used for the "DB search" fallback in the UI).
     hasDeletedAt
@@ -230,6 +236,11 @@ export default async function TasksPage({
     supabase.from('company_settings').select('value').eq('key', 'visibility_billing').maybeSingle(),
     supabase.from('company_settings').select('value').eq('key', 'visibility_contributions').maybeSingle(),
     supabase.from('company_settings').select('value').eq('key', 'visibility_employee_names').maybeSingle(),
+    // Services assigned to the viewer (employee_services) — only needed when
+    // their designation restricts task visibility by service.
+    visibilityMode === 'services' && me?.employeeId
+      ? fetchEmployeeServiceIds(supabase, me.employeeId)
+      : Promise.resolve([] as string[]),
   ])
 
   // Fetch trash only if column exists. Trash uses the same pricing-aware
@@ -249,8 +260,14 @@ export default async function TasksPage({
   // Belt-and-suspenders: even with the right select, run the strip helper to
   // guarantee no late-added column slips through if a future select switches
   // to `*`. Cheap no-op when vis.tasksPricing is true.
-  const initialTasks = stripTaskListPricing(allTasks || [], vis.tasksPricing)
-  const initialTrash = stripTaskListPricing((trashRes.data || []) as any[], vis.tasksPricing)
+  const initialTasks = filterTasksByVisibility(
+    stripTaskListPricing(allTasks || [], vis.tasksPricing),
+    visibilityMode, myServiceIds, myTaskIds,
+  )
+  const initialTrash = filterTasksByVisibility(
+    stripTaskListPricing((trashRes.data || []) as any[], vis.tasksPricing),
+    visibilityMode, myServiceIds, myTaskIds,
+  )
 
   // Pending-to-price banner — only for users who can see/set pricing.
   const pendingPricing = vis.tasksPricing ? await getPendingPricing(supabase) : { clients: [], services: [], total: 0 }

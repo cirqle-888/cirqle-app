@@ -12,11 +12,19 @@ export interface CirqleDesktopBridge {
   version: number
   retry?: (pane: string) => void
   updateLogo?: (url: string) => void
-  /** Share a PNG data URL to the linked WhatsApp pane. Resolves to { ok, action }. */
+  /** Write text to the OS clipboard from the main process (v3+). See lib/clipboard.ts. */
+  copyText?: (text: string) => Promise<boolean>
+
+  /**
+   * Share a PNG data URL to the linked WhatsApp pane. `caption`, if given, is
+   * best-effort typed into WhatsApp's image-caption box (only takes effect
+   * for the 'paste' action). Resolves to { ok, action }.
+   */
   shareReceipt?: (
     dataUrl: string,
     filename: string,
     action: ReceiptShareAction,
+    caption?: string,
   ) => Promise<{ ok: boolean; action?: ReceiptShareAction; reason?: string; path?: string }>
 }
 

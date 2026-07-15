@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createAdminClient, fetchAll } from '@/lib/supabase/server'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility } from '@/lib/permissions/strip'
+import { billedForCollection, collectedAmount, badDebtLoss } from '@/lib/finance/invoice-revenue'
 import { computeClientScores } from '@/lib/clients/scoring'
 import { daysOverdue } from '@/lib/followups/grouping'
 import HealthClient from './health-client'
@@ -49,13 +50,18 @@ export default async function BusinessHealthPage() {
   const bankBalance = (cashbookRaw || []).reduce((s: number, e: any) =>
     e.type === 'inflow' ? s + (e.amount_inr || 0) : s - (e.amount_inr || 0), 0)
 
-  const billedStatuses = ['sent', 'partial', 'overdue', 'paid']
   const liveStatuses = ['sent', 'partial', 'overdue']
   const draftStatuses = ['draft', 'reviewed']
 
-  const totalBilled = (invoices || []).filter((i: any) => billedStatuses.includes(i.status))
-    .reduce((s: number, i: any) => s + (i.total_amount_inr || 0), 0)
-  const totalPaid = (invoices || []).reduce((s: number, i: any) => s + (i.paid_amount_inr || 0), 0)
+  // Collection rate = collected ÷ billed-and-expected-to-collect.
+  //
+  // Write-offs MUST sit in the denominator: a written-off invoice is a collection
+  // FAILURE, not an invoice that never existed. Excluding them while their partial
+  // recoveries stayed in the numerator was letting this rate drift above 100% —
+  // the worse the debt, the better the rate looked.
+  const totalBilled = (invoices || []).reduce((s: number, i: any) => s + billedForCollection(i), 0)
+  const totalPaid = (invoices || []).reduce((s: number, i: any) => s + collectedAmount(i), 0)
+  const badDebtInr = (invoices || []).reduce((s: number, i: any) => s + badDebtLoss(i), 0)
   const outstanding = (invoices || []).filter((i: any) => liveStatuses.includes(i.status))
     .reduce((s: number, i: any) => s + Math.max(0, (i.total_amount_inr || 0) - (i.paid_amount_inr || 0)), 0)
   const toBeInvoiced = (invoices || []).filter((i: any) => draftStatuses.includes(i.status))
@@ -130,7 +136,7 @@ export default async function BusinessHealthPage() {
   return (
     <HealthClient
       showAmounts={showAmounts}
-      cash={{ bankBalance, totalBilled, totalPaid, outstanding, toBeInvoiced, collectionRatePct, totalExpectedCash: bankBalance + outstanding + toBeInvoiced }}
+      cash={{ bankBalance, totalBilled, totalPaid, badDebtInr, outstanding, toBeInvoiced, collectionRatePct, totalExpectedCash: bankBalance + outstanding + toBeInvoiced }}
       agingBuckets={buckets}
       clientRisk={clientScores.map(s => ({ clientId: s.clientId, clientName: s.clientName, strategicScore: s.strategicScore, classification: s.classification }))}
       cronStatus={cronStatus}

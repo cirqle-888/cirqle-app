@@ -63,6 +63,8 @@ interface Props {
   parameterServices: { parameter_id: string; service_id: string }[]
   toolServices: { tool_id: string; service_id: string }[]
   groupServices: { group_id: string; service_id: string }[]
+  /** employee ↔ service assignments — scopes the scoring UI to each task's service team */
+  employeeServices?: { employee_id: string; service_id: string }[]
   scores: Score[]
   clients: { id: string; name: string; code?: string }[]
   services: { id: string; name: string }[]
@@ -162,6 +164,7 @@ function StatusBadge({ done, total }: { done: number; total: number }) {
 export default function ContributionsClient({
   tasks: initialTasks, employees, groups, parameters, tools,
   parameterServices, toolServices, groupServices: groupServicesFromDB,
+  employeeServices = [],
   scores, clients, services, taskAssignments: taskAssignmentsFromDB,
   contributorRecords, taskToolRecords, pricingMatrix, performanceHistory, visibilitySettings,
   permissionFlags,
@@ -521,10 +524,12 @@ export default function ContributionsClient({
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Derived data ─────────────────────────────────────
-  const groupServices = useMemo<{ group_id: string; service_id: string }[]>(() => {
-    if (groupServicesFromDB.length > 0) return groupServicesFromDB
-    try { return JSON.parse(localStorage.getItem('cirqle_group_services') || '[]') } catch { return [] }
-  }, [groupServicesFromDB])
+  // DB rows only — no localStorage fallback. The server recalc paths
+  // (integrity.ts, /api/recalc-commissions) read only the DB junction, and
+  // "no rows = all groups" is now the consistent rule everywhere; a stale
+  // localStorage copy would silently restrict this screen to different groups
+  // than every other path computes with.
+  const groupServices = groupServicesFromDB
 
   const mergedParameters = useMemo(() => {
     try {
@@ -679,6 +684,30 @@ export default function ContributionsClient({
     return m
   }, [assignments])
 
+  // Service team lookup: serviceId → Set<employeeId> (employee_services junction)
+  const serviceEmployeeMap = useMemo(() => {
+    const m: Record<string, Set<string>> = {}
+    employeeServices.forEach(es => {
+      if (!m[es.service_id]) m[es.service_id] = new Set()
+      m[es.service_id].add(es.employee_id)
+    })
+    return m
+  }, [employeeServices])
+
+  // Employees relevant to a task: its service's assigned team, plus anyone who
+  // already contributed / was assigned (historic data must never disappear).
+  // A service with no assigned employees falls back to the full roster, so
+  // nothing changes until assignments are configured.
+  function employeesForTask(task: any): any[] {
+    const team = task?.service_id ? serviceEmployeeMap[task.service_id] : undefined
+    if (!team || team.size === 0) return employees
+    return employees.filter(e =>
+      team.has(e.id)
+      || taskScoreMap[task.id]?.has(e.id)
+      || taskAssignmentMap[task.id]?.has(e.id)
+    )
+  }
+
   // ── Smart Mode: with a date filter active, the Employee/Client/Service
   // dropdowns only offer values present in tasks within the selected period
   // (current selection is kept so it stays clearable).
@@ -786,9 +815,12 @@ export default function ContributionsClient({
   const canViewAll = permissionFlags.viewAll ?? (role !== 'employee')
 
   // In 'own' scope, the entry form only shows the logged-in employee's card.
+  // Either way the roster is first scoped to the open task's service team
+  // (employee_services) so unrelated departments never clutter the entry form.
+  const serviceScopedEmployees = selectedTask ? employeesForTask(selectedTask) : employees
   const scopedEmployees = canViewAll
-    ? employees
-    : employees.filter(e => e.id === currentEmployee?.id)
+    ? serviceScopedEmployees
+    : serviceScopedEmployees.filter(e => e.id === currentEmployee?.id)
 
   // Most recent save time for the open task (shown in the per-employee summary).
   const taskLastSaved = useMemo(() => {
@@ -837,7 +869,10 @@ export default function ContributionsClient({
   const filteredGroups = useMemo(() => {
     if (!selectedTask) return groups
     const linked = groupServices.filter(gs => gs.service_id === selectedTask.service_id).map(gs => gs.group_id)
-    if (!linked.length) return []
+    // No linked groups = ALL groups available — same fallback as openTask,
+    // the silent recalc, integrity.ts and /api/recalc-commissions, and what
+    // the Settings service form promises.
+    if (!linked.length) return groups
     return groups.filter(g => linked.includes(g.id))
   }, [selectedTask, groups, groupServices])
 
@@ -849,7 +884,9 @@ export default function ContributionsClient({
   const filteredTools = useMemo(() => {
     if (!selectedTask) return tools
     const linked = toolServices.filter(ts => ts.service_id === selectedTask.service_id).map(ts => ts.tool_id)
-    if (!linked.length) return []
+    // No linked tools = ALL tools available — matches the recalculation paths
+    // (same empty-junction fallback rule as filteredGroups above).
+    if (!linked.length) return tools
     return tools.filter(t => linked.includes(t.id))
   }, [selectedTask, tools, toolServices])
 
@@ -1656,7 +1693,7 @@ export default function ContributionsClient({
                                   {taskCode(task)}
                                 </span>
                                 <p className="font-semibold text-sm">{task.title}</p>
-                                <StatusBadge done={doneEmps.length} total={employees.length} />
+                                <StatusBadge done={doneEmps.length} total={employeesForTask(task).length} />
                               </div>
                               <div className="flex items-center gap-2 flex-wrap text-xs text-muted-foreground">
                                 {task.client?.name && <span className="font-medium text-foreground/70">{task.client.name}{task.client?.code && <span className="ml-1 text-[10px] font-mono text-muted-foreground/50">{task.client.code}</span>}</span>}
@@ -1688,7 +1725,7 @@ export default function ContributionsClient({
                               {/* Employee chips — buttons are valid inside a div */}
                               {employees.length > 0 && (
                                 <div className="flex flex-wrap gap-1.5 mt-1.5 items-center" onClick={e => e.stopPropagation()}>
-                                  {employees.map(emp => {
+                                  {employeesForTask(task).map(emp => {
                                     const done = contributed?.has(emp.id)
                                     const assigned = taskAssignmentMap[task.id]?.has(emp.id)
                                     const scoreDetail = taskScoreDetailMap[task.id]?.[emp.id]
@@ -2604,7 +2641,7 @@ export default function ContributionsClient({
                     <div className="border-t border-border p-4 space-y-2">
                       {groupedParams.length === 0 && (
                         <p className="text-xs text-muted-foreground text-center py-4">
-                          No contribution groups linked to this service. Configure in{' '}
+                          No contribution groups with parameters are available for this service. Configure in{' '}
                           <Link href="/dashboard/settings" className="underline hover:text-foreground">Settings</Link>.
                         </p>
                       )}

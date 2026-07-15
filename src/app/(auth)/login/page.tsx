@@ -8,7 +8,7 @@ import { Eye, EyeOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { resolveLoginEmail, getCompanyLogo, recordLoginActivity } from './actions'
+import { resolveLoginEmail, getCompanyLogo } from './actions'
 
 const REMEMBER_KEY = 'cirqle-login-id'
 
@@ -90,7 +90,7 @@ function LoginInner() {
     }
 
     // Timeline: record the sign-in (fire-and-forget; resolved server-side)
-    void recordLoginActivity()
+    fetch('/api/login/activity', { method: 'POST', keepalive: true }).catch(() => {})
 
     // Step 3: persist the typed identifier (CQID or email — whichever the
     // user prefers) for next time, or clear it if they unchecked the box.

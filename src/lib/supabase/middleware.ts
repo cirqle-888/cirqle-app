@@ -167,6 +167,16 @@ export async function updateSession(request: NextRequest) {
                                                          // i.e. silently never executing in production.
 
   if (!user && !isAuthPage && !isPublic) {
+    // Server Action POSTs cannot follow an HTML redirect. `fetch` auto-follows
+    // the 307, receives /login's text/html, and Next's server-action-reducer
+    // throws the opaque "An unexpected response was received from the server."
+    // — which is what surfaces as an unhandled rejection on the dashboard.
+    // Answer them with an honest status instead. Auth is NOT relaxed here: the
+    // request is still refused, it just fails legibly. Public/tokenized action
+    // surfaces (intake, careers, portal) are already excluded by isPublic above.
+    if (request.method === 'POST' && request.headers.has('next-action')) {
+      return new NextResponse('Unauthorized', { status: 401 })
+    }
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)

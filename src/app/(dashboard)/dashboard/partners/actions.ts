@@ -11,6 +11,7 @@
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission } from '@/lib/auth/enforce'
+import { loadCurrentUser } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { getPartnerStatementData, type PartnerStatementData } from '@/lib/partners/queries'
 
@@ -123,15 +124,154 @@ export async function linkClientToPartner(clientId: string, partnerId: string | 
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const admin = createAdminClient()
+  // Unlinking drops the handover date with the link, so re-linking later doesn't
+  // silently inherit the old partner's attribution window.
   const { error } = await admin
     .from('clients')
-    .update({ business_partner_id: partnerId })
+    .update(partnerId ? { business_partner_id: partnerId } : { business_partner_id: null, partner_since: null })
     .eq('id', clientId)
 
-  if (error) return { ok: false, error: error.message }
+  if (error) {
+    // Pre-migration DBs have no partner_since column — unlink still has to work.
+    if (!partnerId && /partner_since/i.test(error.message)) {
+      const { error: fallbackError } = await admin
+        .from('clients')
+        .update({ business_partner_id: null })
+        .eq('id', clientId)
+      if (fallbackError) return { ok: false, error: fallbackError.message }
+    } else {
+      return { ok: false, error: error.message }
+    }
+  }
 
   revalidatePath('/dashboard/partners')
   if (partnerId) revalidatePath(`/dashboard/partners/${partnerId}`)
+  return { ok: true }
+}
+
+/**
+ * Set (or clear) the date a partner took a client over. Only invoices issued on
+ * or after it count towards that partner's collected / pending / statement
+ * figures — see `attributedToPartner` in lib/partners/queries.ts. Clearing it
+ * (null) means "this client was theirs from the start".
+ */
+export async function setClientPartnerSince(clientId: string, since: string | null): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.PARTNERS_EDIT)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from('clients')
+    .update({ partner_since: since || null })
+    .eq('id', clientId)
+    .select('business_partner_id')
+    .single()
+
+  if (error) {
+    return /partner_since/i.test(error.message)
+      ? { ok: false, error: 'Apply migration 20260714170000_client_partner_since.sql first.' }
+      : { ok: false, error: error.message }
+  }
+
+  revalidatePath('/dashboard/partners')
+  if (data?.business_partner_id) revalidatePath(`/dashboard/partners/${data.business_partner_id}`)
+  return { ok: true }
+}
+
+/**
+ * Save the partner's commission rate straight from the planner.
+ *
+ * Nothing else reads this yet — it's the remembered starting point for the next
+ * planning session, not an agreement and not a payable. Settlement (who was
+ * actually paid what, when) is still the "Coming Soon" card.
+ */
+export async function setPartnerCommissionRate(partnerId: string, percent: number | null): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.PARTNERS_EDIT)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  if (percent != null && (!Number.isFinite(percent) || percent < 0 || percent > 100)) {
+    return { ok: false, error: 'Commission must be between 0 and 100%.' }
+  }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('business_partners')
+    .update({
+      commission_type:  percent == null ? null : 'percentage',
+      commission_value: percent,
+      updated_at:       new Date().toISOString(),
+    })
+    .eq('id', partnerId)
+
+  if (error) return { ok: false, error: error.message }
+
+  revalidatePath(`/dashboard/partners/${partnerId}`)
+  return { ok: true }
+}
+
+export interface CommissionPaymentInput {
+  partnerId: string
+  amountInr: number
+  paidOn: string
+  method: string | null
+  reference: string | null
+  /** Snapshot of what the payout was computed under — the rate can change later. */
+  percent: number | null
+  basis: 'net_collected' | 'net_invoiced' | 'profit' | null
+  periodFrom: string | null
+  periodTo: string | null
+  notes: string | null
+}
+
+const MIGRATION_HINT = 'Apply migration 20260714180000_partner_commission_payments.sql first.'
+
+/** Record a commission payout. The register stores what was PAID — never what is owed. */
+export async function recordCommissionPayment(input: CommissionPaymentInput): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.PARTNERS_EDIT)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  if (!(input.amountInr > 0)) return { ok: false, error: 'Enter an amount greater than zero.' }
+
+  const me = await loadCurrentUser().catch(() => null)
+  const admin = createAdminClient()
+  const { error } = await admin.from('partner_commission_payments').insert({
+    partner_id:  input.partnerId,
+    amount_inr:  input.amountInr,
+    paid_on:     input.paidOn || new Date().toISOString().slice(0, 10),
+    method:      input.method || null,
+    reference:   input.reference || null,
+    percent:     input.percent,
+    basis:       input.basis,
+    period_from: input.periodFrom || null,
+    period_to:   input.periodTo || null,
+    notes:       input.notes || null,
+    created_by:  me?.employeeId ?? null,
+  })
+
+  if (error) {
+    return /relation|does not exist|schema cache/i.test(error.message)
+      ? { ok: false, error: MIGRATION_HINT }
+      : { ok: false, error: error.message }
+  }
+
+  revalidatePath(`/dashboard/partners/${input.partnerId}`)
+  return { ok: true }
+}
+
+/** Soft-delete a payout — the row stays for audit, it just stops counting. */
+export async function deleteCommissionPayment(id: string, partnerId: string): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.PARTNERS_EDIT)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('partner_commission_payments')
+    .update({ deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq('id', id)
+
+  if (error) return { ok: false, error: error.message }
+
+  revalidatePath(`/dashboard/partners/${partnerId}`)
   return { ok: true }
 }
 

@@ -236,6 +236,7 @@ type SectionKey = typeof SECTION_OPTIONS[number]['key']
 // Uses Record<string, boolean> to include kpiScorecard (always-on, not user-toggleable).
 const TEMPLATE_DEFAULTS: Record<string, Record<string, boolean>> = {
   daily:       { kpiScorecard: true, dailyBreakdown: true, budgetAnalysis: true },
+  monthly:     { kpiScorecard: true, dailyBreakdown: true, budgetAnalysis: true },
   performance: { executiveSummary: true, kpiScorecard: true, dailyBreakdown: true, campaignHealth: true, benchmarkComparison: true, forecast: true, aiInsights: true, budgetAnalysis: true, recommendations: true },
   executive:   { executiveSummary: true, kpiScorecard: true, campaignHealth: true, benchmarkComparison: true, forecast: true, aiInsights: true, budgetAnalysis: true, recommendations: true },
   marketing:   { executiveSummary: true, kpiScorecard: true, dailyBreakdown: true, campaignHealth: true, benchmarkComparison: true, forecast: true, aiInsights: true, recommendations: true },
@@ -415,6 +416,7 @@ function GenerateTab({ projects, canEdit }: { projects: Project[]; canEdit: bool
         <select value={template} onChange={e => onTemplateChange(e.target.value)}
           className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm">
           <option value="daily">Daily Report — Cirqle style (Reach · Impressions · Clicks · Spend · CPR)</option>
+          <option value="monthly">Monthly Report — Cirqle style (month-by-month rollup)</option>
           <option value="performance">Performance Report</option>
           <option value="executive">Executive Summary</option>
           <option value="marketing">Marketing Performance</option>
@@ -648,10 +650,14 @@ function SchedulesTab({ schedules, projects, canEdit }: { schedules: Schedule[];
               <label className="block text-xs font-medium text-muted-foreground mb-1">Template</label>
               <select value={template} onChange={e => setTemplate(e.target.value)}
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm">
+                <option value="daily">Daily</option>
+                <option value="monthly">Monthly</option>
                 <option value="performance">Performance</option>
                 <option value="executive">Executive</option>
                 <option value="marketing">Marketing</option>
                 <option value="lead_gen">Lead Gen</option>
+                <option value="ecommerce">E-commerce</option>
+                <option value="agency">Agency</option>
               </select>
             </div>
           </div>

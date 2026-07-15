@@ -57,8 +57,14 @@ export interface ClientScore {
   classification: ClientClass
 }
 
+import { recognisedRevenue } from '@/lib/finance/invoice-revenue'
+
 const LIVE_STATUSES = ['sent', 'partial', 'overdue']            // currently with the client, unpaid
-const BILLED_STATUSES = ['sent', 'partial', 'overdue', 'paid']  // counts toward revenue/frequency
+// Counts toward revenue/frequency. `bad_debt` belongs here: the work WAS billed,
+// and a client who was written off should show the revenue they actually paid
+// (usually nothing) rather than vanishing from the ranking as if they never
+// traded with us. recognisedRevenue() books only the recovered part.
+const BILLED_STATUSES = ['sent', 'partial', 'overdue', 'paid', 'bad_debt']
 const day = 86400000
 
 function daysBetween(a: string, b: string): number {
@@ -177,7 +183,7 @@ export function computeClientScores(
     const reliabilityScore  = Math.round(0.30 * latenessComponent + 0.30 * promiseComponent + 0.25 * overdueComponent + 0.15 * effortComponent)
 
     // Business value raw figures.
-    const totalRevenueInr = billed.reduce((s, i) => s + (i.total_amount_inr ?? 0), 0)
+    const totalRevenueInr = billed.reduce((s, i) => s + recognisedRevenue(i), 0)
     const invoiceCount = billed.length
     const clientTasks = (tasksByClient.get(c.id) ?? []).filter(t => ['done', 'invoiced', 'paid'].includes(t.status))
     const taskCount = clientTasks.length
@@ -189,8 +195,8 @@ export function computeClientScores(
 
     const cutoff90 = new Date(today.getTime() - 90 * day).toISOString().slice(0, 10)
     const cutoff180 = new Date(today.getTime() - 180 * day).toISOString().slice(0, 10)
-    const recentRevenue = billed.filter(i => i.issue_date && i.issue_date >= cutoff90).reduce((s, i) => s + i.total_amount_inr, 0)
-    const priorRevenue = billed.filter(i => i.issue_date && i.issue_date >= cutoff180 && i.issue_date < cutoff90).reduce((s, i) => s + i.total_amount_inr, 0)
+    const recentRevenue = billed.filter(i => i.issue_date && i.issue_date >= cutoff90).reduce((s, i) => s + recognisedRevenue(i), 0)
+    const priorRevenue = billed.filter(i => i.issue_date && i.issue_date >= cutoff180 && i.issue_date < cutoff90).reduce((s, i) => s + recognisedRevenue(i), 0)
     const revenueTrendPct = priorRevenue > 0
       ? Math.round(((recentRevenue - priorRevenue) / priorRevenue) * 100)
       : (recentRevenue > 0 ? 100 : null)

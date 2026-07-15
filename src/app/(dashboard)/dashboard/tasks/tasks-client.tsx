@@ -160,7 +160,7 @@ interface Props {
   clientPricings: { client_id: string; service_id: string; price: number; currency: string }[]
   employees: { id: string; cqid: string; name: string | null; is_active: boolean }[]
   taskAssignments: { task_id: string; employee_id: string }[]
-  groups: { id: string; name: string; weight: number; display_order: number }[]
+  groups: { id: string; name: string; weight: number; display_order: number; is_active?: boolean }[]
   parameters: { id: string; name: string; group_id: string; weight: number; is_master?: boolean; input_type?: 'percentage' | 'count'; display_order: number }[]
   groupServices: { group_id: string; service_id: string }[]
   parameterServices: { parameter_id: string; service_id: string }[]
@@ -792,11 +792,14 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
   // The billing math is GROUP-NORMALIZED:
   //   share(param)         = weight × (value if count, value/100 if percentage)
   //   group_internal_share = min(1.0, Σ share over selected params in that group)
-  //   total_fraction       = Σ over groups: (group.weight / 100) × group_internal_share
+  //   total_fraction       = Σ over relevant groups: normalized_group_weight × group_internal_share
   //   billing              = parent_billing × total_fraction
   //
-  // Mathematically capped at 100% because Σ group.weight = 100 and each
-  // group_internal_share is clamped to 1.0.
+  // Group weights are RELATIVE (matching the commission engine): each relevant
+  // group's weight is divided by the relevant groups' total, so total_fraction
+  // is mathematically capped at 1.0 no matter how many groups exist or what
+  // their weights sum to. "Relevant" = the groups linked to the task's service
+  // via group_services (none linked = all groups).
   const [variantParamIds, setVariantParamIds] = useState<Set<string>>(new Set())
   const [variantParamValues, setVariantParamValues] = useState<Record<string, string>>({})
 
@@ -826,9 +829,32 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
     return Math.min(1, idsInGroup.reduce((sum, id) => sum + paramRawShare(id), 0))
   }
 
-  /** Total task fraction. Σ over groups: (group.weight / 100) × group_share. Capped at 1.0. */
+  /**
+   * Normalized weight portion (0..1) of one group for the variant math.
+   * Weights are relative — normalized over the groups relevant to the selected
+   * service (group_services links; a service with no links = all groups), the
+   * same rule the commission engine applies. Equals the old `weight / 100`
+   * whenever the relevant weights sum to 100, so historical configurations
+   * compute identical billing; unlike the old form it can never exceed 1.0.
+   * Groups outside the relevant set contribute 0.
+   */
+  function variantGroupPortion(groupId: string): number {
+    // Active groups only — this page loads contribution_groups unfiltered, and
+    // archived groups must not dilute the denominator (the scoring surfaces
+    // only ever see active groups).
+    const activeGroups = groups.filter(g => g.is_active !== false)
+    const linked = new Set(groupServices.filter(gs => gs.service_id === form.service_id).map(gs => gs.group_id))
+    const linkedActive = form.service_id ? activeGroups.filter(g => linked.has(g.id)) : []
+    const relevant = linkedActive.length > 0 ? linkedActive : activeGroups
+    const totalWeight = relevant.reduce((s, g) => s + (g.weight || 0), 0)
+    if (totalWeight <= 0) return 0
+    const g = relevant.find(x => x.id === groupId)
+    return g ? (g.weight || 0) / totalWeight : 0
+  }
+
+  /** Total task fraction. Σ over relevant groups: normalized_weight × group_share. Capped at 1.0. */
   function computeTotalFraction(): number {
-    return groups.reduce((sum, g) => sum + ((g.weight || 0) / 100) * computeGroupShare(g.id), 0)
+    return groups.reduce((sum, g) => sum + variantGroupPortion(g.id) * computeGroupShare(g.id), 0)
   }
 
   // Auto-default billing_mode by variant_type
@@ -850,7 +876,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       setForm(p => ({ ...p, billing_percent: pct }))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [variantParamIds, variantParamValues, form.billing_mode, parameters, groups])
+  }, [variantParamIds, variantParamValues, form.billing_mode, form.service_id, parameters, groups, groupServices])
 
   // Reset checklist & values when modal closes or parent unlinked
   useEffect(() => {
@@ -1198,8 +1224,9 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
               group_id:               g.id,
               group_name:             g.name,
               group_weight:           g.weight || 0,
+              group_weight_normalized: variantGroupPortion(g.id),
               internal_share:         internalShare,
-              contribution_to_parent: ((g.weight || 0) / 100) * internalShare * 100,
+              contribution_to_parent: variantGroupPortion(g.id) * internalShare * 100,
               selections: groupParams.map(p => ({
                 parameter_id: p.id,
                 name:         p.name,
@@ -4463,8 +4490,8 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                                   const masterSelected = masterParam ? variantParamIds.has(masterParam.id) : false
                                   const anySubSelected = subParams.some(p => variantParamIds.has(p.id))
                                   const internalShare  = computeGroupShare(g.id)
-                                  const groupPct       = (g.weight || 0)
-                                  const groupContrib   = (groupPct / 100) * internalShare * 100
+                                  const groupPct       = variantGroupPortion(g.id) * 100
+                                  const groupContrib   = variantGroupPortion(g.id) * internalShare * 100
 
                                   // Helpers for master/sub exclusivity
                                   const checkMaster = () => {
@@ -4510,7 +4537,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                                       {/* Group header */}
                                       <div className="flex items-center gap-2 px-2.5 py-1.5 bg-foreground/[0.03] border-b border-foreground/[0.05]">
                                         <span className="text-[11px] font-semibold text-foreground">{g.name}</span>
-                                        <span className="text-[9px] font-mono text-blue-300 bg-blue-500/10 border border-blue-500/20 rounded px-1.5 py-0.5">{groupPct}% of task</span>
+                                        <span className="text-[9px] font-mono text-blue-300 bg-blue-500/10 border border-blue-500/20 rounded px-1.5 py-0.5">{groupPct.toFixed(2).replace(/\.?0+$/, '')}% of task</span>
                                         <span className="ml-auto text-[10px] font-mono text-violet-300/80">
                                           → {groupContrib.toFixed(2).replace(/\.?0+$/, '')}% of parent
                                         </span>

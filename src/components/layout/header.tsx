@@ -16,6 +16,12 @@ interface HeaderProps {
   title: string
   subtitle?: React.ReactNode
   actions?: React.ReactNode
+  /**
+   * Label for the final breadcrumb on detail routes, whose last segment is a
+   * record id. Without it a UUID route falls back to "Details" rather than
+   * printing the raw id at the user.
+   */
+  crumbLabel?: string
 }
 
 const ROUTE_LABELS: Record<string, string> = {
@@ -25,6 +31,8 @@ const ROUTE_LABELS: Record<string, string> = {
   invoices:      'Invoices',
   quotations:    'Quotations',
   cashbook:      'Cash Book',
+  clients:       'Clients',
+  ranking:       'Client Ranking',
   partners:      'Business Partners',
   payroll:       'HR & Payroll',
   reports:       'Reports',
@@ -33,44 +41,74 @@ const ROUTE_LABELS: Record<string, string> = {
   health:        'Business Health',
 }
 
-function Breadcrumbs({ isEmployee }: { isEmployee: boolean }) { // eslint-disable-line @typescript-eslint/no-unused-vars
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function Breadcrumbs({ isEmployee, crumbLabel }: { isEmployee: boolean; crumbLabel?: string }) { // eslint-disable-line @typescript-eslint/no-unused-vars
   const pathname = usePathname()
   // e.g. /dashboard/tasks  →  ['dashboard', 'tasks']
   const segments = pathname.split('/').filter(Boolean)
 
   // Build cumulative hrefs
-  const crumbs = segments.map((seg, i) => ({
-    label: ROUTE_LABELS[seg] ?? seg.charAt(0).toUpperCase() + seg.slice(1),
-    href:  '/' + segments.slice(0, i + 1).join('/'),
-    isLast: i === segments.length - 1,
-  }))
+  const crumbs = segments.map((seg, i) => {
+    const isLast = i === segments.length - 1
+    const fallback = UUID_RE.test(seg)
+      ? 'Details'                                  // never print a raw record id
+      : ROUTE_LABELS[seg] ?? seg.charAt(0).toUpperCase() + seg.slice(1)
+    return {
+      label: isLast && crumbLabel ? crumbLabel : fallback,
+      href:  '/' + segments.slice(0, i + 1).join('/'),
+      isLast,
+    }
+  })
 
   // Only show breadcrumbs when there's more than one level (not just /dashboard)
   if (crumbs.length <= 1) return null
 
+  const middle = crumbs.slice(0, -1)
+  const last = crumbs[crumbs.length - 1]
+  const parent = crumbs.length > 2 ? crumbs[crumbs.length - 2] : null
+
+  // Mobile shows a compact trail — Home › … › Current — because the full one
+  // can't fit a phone width; the "…" links to the immediate parent. The last
+  // crumb truncates so a long record name ("Nazer (Sea Star)") can never wrap
+  // over the header action icons. Desktop keeps the full trail.
   return (
-    <nav aria-label="Breadcrumb" className={`flex items-center gap-1.5 text-[12px] font-medium text-muted-foreground/60 mb-1 ${isEmployee ? 'hidden sm:flex' : ''}`}>
-      <Link href="/dashboard" className="hover:text-foreground transition-colors flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm">
+    <nav aria-label="Breadcrumb" className={`flex items-center gap-1.5 text-[12px] font-medium text-muted-foreground/60 mb-1 min-w-0 ${isEmployee ? 'hidden sm:flex' : ''}`}>
+      <Link href="/dashboard" className="hover:text-foreground transition-colors flex items-center shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm">
         <Home className="w-3.5 h-3.5" />
       </Link>
-      {crumbs.map((crumb, i) => (
-        <span key={crumb.href} className="flex items-center gap-1.5">
-          <ChevronRight className="w-3.5 h-3.5 opacity-40" />
-          {crumb.isLast ? (
-            <span className="text-foreground tracking-tight">{crumb.label}</span>
-          ) : (
-            <Link href={crumb.href} className="hover:text-foreground transition-colors truncate max-w-[120px] sm:max-w-[200px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm">
-              {crumb.label}
-            </Link>
-          )}
+      {/* Full trail — sm and up */}
+      {middle.map(crumb => (
+        <span key={crumb.href} className="hidden sm:flex items-center gap-1.5 min-w-0">
+          <ChevronRight className="w-3.5 h-3.5 opacity-40 shrink-0" />
+          <Link href={crumb.href} className="hover:text-foreground transition-colors truncate max-w-[200px] whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm">
+            {crumb.label}
+          </Link>
         </span>
       ))}
+      {/* Condensed middle — mobile only, when deeper than Home › Page */}
+      {parent && (
+        <span className="flex sm:hidden items-center gap-1.5 shrink-0">
+          <ChevronRight className="w-3.5 h-3.5 opacity-40 shrink-0" />
+          <Link
+            href={parent.href}
+            aria-label={`Back to ${parent.label}`}
+            className="hover:text-foreground transition-colors px-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm"
+          >
+            …
+          </Link>
+        </span>
+      )}
+      <span className="flex items-center gap-1.5 min-w-0">
+        <ChevronRight className="w-3.5 h-3.5 opacity-40 shrink-0" />
+        <span className="text-foreground tracking-tight truncate whitespace-nowrap">{last.label}</span>
+      </span>
     </nav>
   )
 }
 
 const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
-  { title, subtitle, actions },
+  { title, subtitle, actions, crumbLabel },
   ref,
 ) {
   const { user } = usePermissions()
@@ -132,7 +170,7 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
       <div className="flex items-center justify-between w-full sm:w-auto sm:flex-1 min-w-0 gap-2">
         {/* Left: Branding & Title */}
         <div className="flex flex-col min-w-0 flex-1 justify-center">
-          <Breadcrumbs isEmployee={isEmployee} />
+          <Breadcrumbs isEmployee={isEmployee} crumbLabel={crumbLabel} />
           <div className="flex items-center gap-2 min-w-0">
             {isEmployee && (
               <div className="w-7 h-7 rounded-lg gradient-bg flex items-center justify-center shrink-0 shadow-sm sm:hidden">
@@ -141,7 +179,9 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
             )}
             <h1 className="text-lg md:text-xl font-semibold text-foreground truncate tracking-tight">{title}</h1>
             {subtitle && (
-              <div className="text-sm text-muted-foreground truncate hidden lg:block tracking-tight">{subtitle}</div>
+              // flex-1 basis-0 = subtitle only ever takes LEFTOVER space, so it
+              // can never squeeze the title into truncating while room remains.
+              <div className="text-sm text-muted-foreground truncate hidden lg:block tracking-tight flex-1 min-w-0">{subtitle}</div>
             )}
           </div>
         </div>

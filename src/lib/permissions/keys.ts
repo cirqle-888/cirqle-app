@@ -14,6 +14,12 @@ export const PERMS = {
   // Tasks
   TASKS_VIEW_OWN:     'tasks.view_own',
   TASKS_VIEW_ALL:     'tasks.view_all',
+  /**
+   * Restrict task visibility to the services assigned to the employee
+   * (employee_services junction), plus tasks they personally worked on.
+   * Opt-in: with neither this nor view_all, legacy behaviour (all tasks) holds.
+   */
+  TASKS_VIEW_BY_SERVICE: 'tasks.view_by_service',
   TASKS_CREATE:       'tasks.create',
   TASKS_EDIT:         'tasks.edit',
   TASKS_DELETE:       'tasks.delete',
@@ -114,6 +120,8 @@ export const PERMS = {
   ADVERTISING_VIEW_FORECASTS:  'advertising.view_forecasts',
 
   // Clients / Services — granular "add" perms (separate from settings.access)
+  /** Open the Clients module (list + per-client dashboard). Admins bypass pre-migration. */
+  CLIENTS_VIEW:    'clients.view',
   /** Create new clients (e.g. + Add client in the task form). */
   CLIENTS_CREATE:  'clients.create',
   /** Create new services (e.g. + Add service in the task form). */

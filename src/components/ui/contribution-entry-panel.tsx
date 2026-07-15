@@ -246,7 +246,9 @@ export function ContributionEntryPanel({
 
   const filteredGroups = useMemo(() => {
     const linked = groupServices.filter(gs => gs.service_id === task.service_id).map(gs => gs.group_id)
-    if (!linked.length) return []
+    // No linked groups = ALL groups available — same fallback as this panel's
+    // own load path above, the contributions page, and every recalc path.
+    if (!linked.length) return groups
     return groups.filter(g => linked.includes(g.id))
   }, [groups, groupServices, task.service_id])
 
@@ -257,7 +259,8 @@ export function ContributionEntryPanel({
 
   const filteredTools = useMemo(() => {
     const linked = toolServices.filter(ts => ts.service_id === task.service_id).map(ts => ts.tool_id)
-    if (!linked.length) return []
+    // No linked tools = ALL tools available — matches the recalculation paths.
+    if (!linked.length) return tools
     return tools.filter((t: any) => linked.includes(t.id))
   }, [tools, toolServices, task.service_id])
 
@@ -676,7 +679,7 @@ export function ContributionEntryPanel({
                       <div className="border-t border-border p-4 space-y-2">
                         {groupedParams.length === 0 && (
                           <p className="text-xs text-muted-foreground text-center py-4">
-                            No contribution groups linked to this service. Configure in Settings.
+                            No contribution groups with parameters are available for this service. Configure in Settings.
                           </p>
                         )}
                         {/* Per-employee summary — instant feedback without scrolling */}

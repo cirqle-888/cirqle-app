@@ -1,6 +1,7 @@
 import { createAdminClient, fetchAll, stablePaginationQuery } from '@/lib/supabase/server'
 import { fetchJournalLines } from '@/lib/finance/journal'
 import { computeCompanyOpsStrip, type CompanyOpsStrip } from '@/lib/finance/kpis'
+import { recognisedRevenue, collectedAmount, badDebtLoss } from '@/lib/finance/invoice-revenue'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { getPendingPricing } from '@/lib/pricing/pending'
 import { PricingPendingBanner } from '@/components/pricing/pricing-pending-banner'
@@ -195,8 +196,12 @@ export default async function DashboardPage() {
   const invTotalInr = (i: any) => i.total_amount_inr ?? i.total_amount ?? 0
   const invPaidInr  = (i: any) => i.paid_amount_inr ?? i.paid_amount ?? 0
 
-  const totalBilled   = invoices.filter(i => i.status !== 'cancelled').reduce((s, i) => s + invTotalInr(i), 0)
-  const totalPaid     = invoices.reduce((s, i) => s + invPaidInr(i), 0)
+  // Revenue we may honestly claim: a written-off invoice counts only for what it
+  // actually collected, and unsent drafts aren't revenue at all. Counting a
+  // write-off at full value here used to overstate the headline by the loss.
+  const totalBilled   = invoices.reduce((s, i) => s + recognisedRevenue(i), 0)
+  const totalPaid     = invoices.reduce((s, i) => s + collectedAmount(i), 0)
+  const badDebtInr    = invoices.reduce((s, i) => s + badDebtLoss(i), 0)
   // Outstanding = unpaid from invoices already sent to clients (not drafts)
   const outstanding   = sentInvoices.reduce((s, i) => s + Math.max(0, invTotalInr(i) - invPaidInr(i)), 0)
   // Sub-figure: outstanding from invoices ISSUED this calendar month — shows
@@ -344,6 +349,7 @@ export default async function DashboardPage() {
       stats={{
         totalBilled,
         totalPaid,
+        badDebtInr,
         outstanding,
         outstandingThisMonth,
         bankBalance,

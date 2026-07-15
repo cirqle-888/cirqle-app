@@ -2,7 +2,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility } from '@/lib/permissions/strip'
 import { templatesFromSettings } from '@/lib/messaging/templates'
-import FollowUpsClient from './follow-ups-client'
+import FollowUpsClient, { type FUPartner } from './follow-ups-client'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,7 +22,7 @@ export default async function FollowUpsPage() {
     .select(`
       id, invoice_number, status, issue_date, due_date, public_token,
       total_amount, paid_amount, total_amount_inr, paid_amount_inr, currency,
-      client:clients(id, name, code, phone),
+      client:clients(id, name, code, phone, business_partner_id),
       items:invoice_items(task_id),
       cashbook_invoice_allocations(id, deleted_at)
     `)
@@ -52,6 +52,28 @@ export default async function FollowUpsPage() {
     }
   }
 
+  // Business partners of the invoiced clients — powers the "By Business Partner"
+  // view and the partner collection statement. Queried separately (not embedded)
+  // so a missing business_partners table can't take the whole page down.
+  const partnerIds = [...new Set(
+    invoices
+      .map(i => (Array.isArray(i.client) ? i.client[0] : i.client)?.business_partner_id)
+      .filter(Boolean) as string[],
+  )]
+  const partners: Record<string, FUPartner> = {}
+  if (partnerIds.length) {
+    try {
+      const { data } = await supabase
+        .from('business_partners')
+        .select('id, name, partner_code, phone')
+        .in('id', partnerIds)
+        .returns<{ id: string; name: string; partner_code: string | null; phone: string | null }[]>()
+      ;(data || []).forEach(p => {
+        partners[p.id] = { id: p.id, name: p.name, code: p.partner_code, phone: p.phone }
+      })
+    } catch { /* partners feature not set up — page still works, just no partner view */ }
+  }
+
   // Company name for the WhatsApp reminder text.
   const { data: settingsRows } = await supabase.from('company_settings').select('key, value')
   const settings: Record<string, string> = {}
@@ -75,7 +97,12 @@ export default async function FollowUpsPage() {
       due_date:       i.due_date,
       public_token:   i.public_token || null,
       currency:       i.currency || 'INR',
-      client:         client ? { id: client.id, name: client.name, code: client.code, phone: client.phone } : null,
+      client:         client
+        ? {
+            id: client.id, name: client.name, code: client.code, phone: client.phone,
+            partner: partners[client.business_partner_id as string] ?? null,
+          }
+        : null,
       outstanding:    showAmounts ? outstanding : null,
       total:          showAmounts ? totalInr : null,
       hasAllocations,

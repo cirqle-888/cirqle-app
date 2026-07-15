@@ -2,6 +2,7 @@ import { createAdminClient, fetchAll } from '@/lib/supabase/server'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility, userCanSee } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
+import { resolveTaskVisibilityMode, filterTasksByVisibility } from '@/lib/tasks/visibility'
 import ContributionsClient from './contributions-client'
 
 export const dynamic = 'force-dynamic'
@@ -72,7 +73,8 @@ export default async function ContributionsPage() {
     scoresRes, clientsRes, servicesRes, assignmentsRes,
     contributorRecordsRes, taskToolRecordsRes, pricingRes,
     visibilityBillingRes, visibilityContribRes, visibilityNamesRes,
-    taskGroupAssignmentsRes, taskParamAssignmentsRes, performanceHistoryRes
+    taskGroupAssignmentsRes, taskParamAssignmentsRes, performanceHistoryRes,
+    employeeServicesRes,
   ] = await Promise.all([
     // Tasks — same shape for both roles, employee select drops billing_amount_inr.
     timed('tasks',                  fetchAll(tasksQuery)),
@@ -118,6 +120,9 @@ export default async function ContributionsPage() {
     timed('task_group_assigns',     fetchAll(supabase.from('task_group_assignments').select('task_id, group_id, employee_id'))),
     timed('task_param_assigns',     fetchAll(supabase.from('task_parameter_assignments').select('task_id, employee_id'))),
     timed('performance_history',    fetchAll(supabase.from('employee_performance_history').select('*').order('effective_from', { ascending: false }))),
+    // Employee ↔ service assignments — drives "only employees of this task's
+    // service" in the scoring UI. Missing table (pre-migration) → empty list.
+    timed('employee_services',      supabase.from('employee_services').select('employee_id, service_id')),
   ])
 
   // Merge all assignment types into a unique list for visibility filtering
@@ -151,9 +156,26 @@ export default async function ContributionsPage() {
   const outContributorRecords = mine(contributorRecordsRes.data || [])
   const outAssignments        = mine(mergedAssignments)
 
+  // ── Service-scoped task visibility (tasks.view_by_service) ────────────────
+  // Opt-in restriction: viewers with the perm (and without tasks.view_all) see
+  // only tasks of their assigned services, plus tasks they personally worked on.
+  const visibilityMode = resolveTaskVisibilityMode(me)
+  let outTasks = tasksRes.data || []
+  if (visibilityMode === 'services' && myEmployeeId) {
+    const myServiceIds = (employeeServicesRes.data || [])
+      .filter((es: any) => es.employee_id === myEmployeeId)
+      .map((es: any) => es.service_id)
+    const ownTaskIds = new Set<string>([
+      ...mergedAssignments.filter(a => a.employee_id === myEmployeeId).map(a => a.task_id),
+      ...(scoresRes.data || []).filter((s: any) => s.employee_id === myEmployeeId).map((s: any) => s.task_id),
+      ...(contributorRecordsRes.data || []).filter((c: any) => c.employee_id === myEmployeeId).map((c: any) => c.task_id),
+    ])
+    outTasks = filterTasksByVisibility(outTasks, visibilityMode, myServiceIds, ownTaskIds)
+  }
+
   return (
     <ContributionsClient
-      tasks={tasksRes.data || []}
+      tasks={outTasks}
       employees={outEmployees}
       groups={groupsRes.data || []}
       parameters={parametersRes.data || []}
@@ -161,6 +183,7 @@ export default async function ContributionsPage() {
       parameterServices={paramServicesRes.data || []}
       toolServices={toolServicesRes.data || []}
       groupServices={groupServicesRes.data || []}
+      employeeServices={employeeServicesRes.data || []}
       scores={outScores}
       clients={clientsRes.data || []}
       services={servicesRes.data || []}

@@ -31,6 +31,7 @@ module.exports = Object.freeze({
   NOTIF_BADGE: 'notif-badge',
   CAPTURE_CLIPBOARD: 'capture:clipboard',
   SHARE_RECEIPT: 'share:receipt',
+  CLIPBOARD_WRITE: 'clipboard:write',
 
   // Downloads
   DOWNLOADS: 'downloads',

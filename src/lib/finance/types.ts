@@ -102,10 +102,24 @@ export interface ClientProfitabilityInput {
   attributedLaborInr: number
   /** Σ invoice_expense_items.markup_amount (INR) — margin on rebilling. */
   markupRevenueInr?: number
+  /**
+   * Delivered, never paid, written off. Already EXCLUDED from invoicedInr (see
+   * lib/finance/invoice-revenue.ts) — reported so the loss is visible instead of
+   * silently shrinking the margin.
+   */
+  badDebtInr?: number
+  /**
+   * Revenue given away. `invoicedInr` is already net of it, so this is a
+   * disclosure, not a deduction — it answers "what did this client cost us in
+   * concessions?", which a smaller revenue figure alone can never show.
+   */
+  discountInr?: number
 }
 
 export interface ClientProfitabilityRow extends ClientProfitabilityInput {
   markupRevenueInr: number
+  badDebtInr: number
+  discountInr: number
   /** invoiced − directCosts − attributedLabor + markup. */
   contributionMarginInr: number
   /** margin ÷ invoiced (0 when no revenue). */

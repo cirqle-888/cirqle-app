@@ -83,6 +83,84 @@ export async function updateEmployee(
   return { ok: true, data }
 }
 
+// ── Employee ↔ Service assignment ────────────────────────────────────────────
+// Both directions write the same employee_services junction, so the employee
+// form and the service form can never drift out of sync.
+
+// Diff-based writes (insert additions first, then delete removals) so a
+// failure mid-way never wipes the existing assignments — the worst case is
+// a partial update, not data loss.
+
+/** Replace the full set of services assigned to one employee. */
+export async function setEmployeeServices(
+  employeeId: string,
+  serviceIds: string[],
+): Promise<ActionResult> {
+  const auth = await requirePermission('employees.edit')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { data: existing, error: readError } = await admin
+    .from('employee_services').select('service_id').eq('employee_id', employeeId)
+  if (readError) return { ok: false, error: readError.message }
+  const current = new Set((existing || []).map(r => r.service_id))
+  const wanted = new Set(serviceIds)
+  const toAdd = serviceIds.filter(sid => !current.has(sid))
+  const toRemove = [...current].filter(sid => !wanted.has(sid))
+
+  if (toAdd.length > 0) {
+    const { error } = await admin
+      .from('employee_services')
+      .upsert(toAdd.map(sid => ({ employee_id: employeeId, service_id: sid })), { onConflict: 'employee_id,service_id' })
+    if (error) return { ok: false, error: error.message }
+  }
+  if (toRemove.length > 0) {
+    const { error } = await admin
+      .from('employee_services').delete().eq('employee_id', employeeId).in('service_id', toRemove)
+    if (error) return { ok: false, error: error.message }
+  }
+  void logActivity({
+    actorId: auth.employeeId, subjectId: employeeId, entityType: 'employee',
+    entityId: employeeId, action: 'services_assigned', detail: { service_ids: serviceIds },
+  })
+  return { ok: true }
+}
+
+/** Replace the full set of employees assigned to one service. */
+export async function setServiceEmployees(
+  serviceId: string,
+  employeeIds: string[],
+): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { data: existing, error: readError } = await admin
+    .from('employee_services').select('employee_id').eq('service_id', serviceId)
+  if (readError) return { ok: false, error: readError.message }
+  const current = new Set((existing || []).map(r => r.employee_id))
+  const wanted = new Set(employeeIds)
+  const toAdd = employeeIds.filter(eid => !current.has(eid))
+  const toRemove = [...current].filter(eid => !wanted.has(eid))
+
+  if (toAdd.length > 0) {
+    const { error } = await admin
+      .from('employee_services')
+      .upsert(toAdd.map(eid => ({ employee_id: eid, service_id: serviceId })), { onConflict: 'employee_id,service_id' })
+    if (error) return { ok: false, error: error.message }
+  }
+  if (toRemove.length > 0) {
+    const { error } = await admin
+      .from('employee_services').delete().eq('service_id', serviceId).in('employee_id', toRemove)
+    if (error) return { ok: false, error: error.message }
+  }
+  void logActivity({
+    actorId: auth.employeeId, entityType: 'setting', action: 'changed',
+    detail: { label: 'service employees', service_id: serviceId, employee_ids: employeeIds },
+  })
+  return { ok: true }
+}
+
 // ── Clients ───────────────────────────────────────────────────────────────────
 
 // The clients list is loaded with the pricing matrix embedded
@@ -155,6 +233,16 @@ export async function upsertClientServicePricings(
   await admin.from('clients').update({ pricing_pending: false }).in('id', clientIds).then(undefined, () => {})
   await admin.from('services').update({ pricing_pending: false }).in('id', serviceIds).then(undefined, () => {})
 
+  return { ok: true }
+}
+
+export async function reactivateClient(id: string): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('clients').update({ is_active: true }).eq('id', id)
+  if (error) return { ok: false, error: error.message }
   return { ok: true }
 }
 
@@ -253,6 +341,16 @@ export async function deactivateService(id: string): Promise<ActionResult> {
   return { ok: true }
 }
 
+export async function reactivateService(id: string): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('services').update({ is_active: true }).eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
 export async function quickEditService(
   id: string,
   field: string,
@@ -299,6 +397,47 @@ export async function updateGroup(
     .single()
   if (error) return { ok: false, error: error.message }
   return { ok: true, data }
+}
+
+// Quick-edit fields are constrained: only these columns, and weights must be
+// finite non-negative numbers (a 0-weight group silently zeroes every score
+// computed from it, so garbage input must never reach the DB).
+const QUICK_EDIT_FIELDS = new Set(['name', 'weight', 'description', 'display_order'])
+
+function validateQuickEdit(field: string, value: unknown): string | null {
+  if (!QUICK_EDIT_FIELDS.has(field)) return `Field "${field}" is not quick-editable`
+  if (field === 'name' && !String(value ?? '').trim()) return 'Name cannot be empty'
+  if ((field === 'weight' || field === 'display_order')
+    && (typeof value !== 'number' || !Number.isFinite(value) || value < 0)) {
+    return `${field} must be a non-negative number`
+  }
+  return null
+}
+
+export async function quickEditGroup(
+  id: string,
+  field: string,
+  value: unknown,
+): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+  const invalid = validateQuickEdit(field, value)
+  if (invalid) return { ok: false, error: invalid }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('contribution_groups').update({ [field]: value }).eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
+export async function restoreGroup(id: string): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('contribution_groups').update({ is_active: true }).eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
 }
 
 export async function deactivateGroup(id: string): Promise<ActionResult> {
@@ -368,6 +507,32 @@ export async function updateParameter(
   return { ok: true, data }
 }
 
+export async function quickEditParameter(
+  id: string,
+  field: string,
+  value: unknown,
+): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+  const invalid = validateQuickEdit(field, value)
+  if (invalid) return { ok: false, error: invalid }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('parameters').update({ [field]: value }).eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
+export async function restoreParameter(id: string): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('parameters').update({ is_active: true }).eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
 export async function deactivateParameter(id: string): Promise<ActionResult> {
   const auth = await requirePermission('settings.access')
   if (!auth.ok) return { ok: false, error: auth.error }
@@ -413,6 +578,16 @@ export async function deactivateTool(id: string): Promise<ActionResult> {
 
   const admin = createAdminClient()
   const { error } = await admin.from('tools').update({ is_active: false }).eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
+export async function reactivateTool(id: string): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('tools').update({ is_active: true }).eq('id', id)
   if (error) return { ok: false, error: error.message }
   return { ok: true }
 }
@@ -527,6 +702,19 @@ export async function updateCashbookCategory(
     .single()
   if (error) return { ok: false, error: error.message }
   return { ok: true, data }
+}
+
+export async function reactivateCashbookCategory(id: string): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('cashbook_categories')
+    .update({ is_active: true })
+    .eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
 }
 
 export async function deactivateCashbookCategory(id: string): Promise<ActionResult> {

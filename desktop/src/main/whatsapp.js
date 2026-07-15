@@ -65,11 +65,39 @@ async function pasteIntoWhatsappComposer(wa) {
     return true
   } catch { return false }
 }
-function shareImageToWhatsApp(image, { autoPaste = false } = {}) {
+// Pasting an image opens WhatsApp's attachment-preview overlay with its own
+// caption box (a SEPARATE contenteditable from the message composer). Best-
+// effort: find it by its "…caption…" aria-label (WhatsApp's exact wording has
+// changed before, so we match loosely), focus it, then reuse the OS clipboard
+// — swapped from image to text — to paste the caption in the same way a human
+// would. Never auto-sends; the user still reviews and presses Send.
+async function typeCaptionIntoWhatsapp(wa, caption) {
+  if (!wa || !caption) return false
+  try {
+    const found = await wa.webContents.executeJavaScript(`(() => {
+      const box = [...document.querySelectorAll('div[contenteditable="true"]')]
+        .find(el => /caption/i.test(el.getAttribute('aria-label') || ''))
+      if (box) { box.focus(); return true }
+      return false
+    })()`, true)
+    if (!found) return false
+    clipboard.writeText(caption)
+    wa.webContents.paste()
+    return true
+  } catch { return false }
+}
+function shareImageToWhatsApp(image, { autoPaste = false, caption = null } = {}) {
   if (!image || image.isEmpty?.()) return { ok: false, reason: 'empty' }
   clipboard.writeImage(image)
   const wa = focusWhatsapp()
-  if (autoPaste) setTimeout(() => pasteIntoWhatsappComposer(wa), 250)
+  if (autoPaste) {
+    setTimeout(async () => {
+      await pasteIntoWhatsappComposer(wa)
+      // Extra delay so WhatsApp's caption-preview overlay has time to mount
+      // and animate in before we go looking for its input.
+      if (caption) setTimeout(() => typeCaptionIntoWhatsapp(wa, caption), 450)
+    }, 250)
+  }
   return { ok: true, pasted: autoPaste }
 }
 // Best-effort MIME type for the synthetic WhatsApp drop — WhatsApp Web uses it

@@ -41,7 +41,9 @@ export interface TaskCalculationResult {
  * This prevents unused sub-parameters (revisions with 0 count) from diluting
  * the master % score.
  *
- * Group weights (stored as %) must sum to 100 for the score to be on a 0–100 scale.
+ * Group weights are RELATIVE importance values — they are normalized over the
+ * active groups (step 1) and again in the final score (step 5), so any weight
+ * combination yields scores on a 0–100 scale; weights never need to sum to 100.
  */
 export function calculateCommission(input: TaskContributionInput): TaskCalculationResult {
   const {

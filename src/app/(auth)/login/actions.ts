@@ -1,30 +1,6 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { createClient } from '@/lib/supabase/server'
-import { logActivity } from '@/lib/activity/log'
-
-/**
- * Records a successful sign-in on the employee's timeline (fire-and-forget).
- * Called by the login page AFTER signInWithPassword succeeds, so the session
- * cookie is present and the employee can be resolved server-side (never
- * trusting a client-supplied id).
- */
-export async function recordLoginActivity(): Promise<void> {
-  try {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-    const admin = createAdminClient()
-    const { data: emp } = await admin
-      .from('employees').select('id').eq('auth_id', user.id).maybeSingle()
-    if (!emp?.id) return
-    void logActivity({
-      actorId: emp.id, subjectId: emp.id,
-      entityType: 'auth', entityId: emp.id, action: 'login',
-    })
-  } catch { /* never block login on logging */ }
-}
 
 /**
  * Resolves a login identifier (email OR CQID like "CQID001") to the

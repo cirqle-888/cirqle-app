@@ -10,22 +10,24 @@ import { createClient as createSupabaseClient } from '@/lib/supabase/client'
 import {
   upsertCompanySettings,
   createEmployee, updateEmployee,
-  createClient, updateClient, upsertClientServicePricings, deactivateClient, quickEditClient,
-  createService, updateService, deactivateService, quickEditService,
-  createGroup, updateGroup, deactivateGroup,
-  createParameter, updateParameter, deactivateParameter,
-  createTool, updateTool, deactivateTool, quickEditTool,
+  createClient, updateClient, upsertClientServicePricings, deactivateClient, reactivateClient, quickEditClient,
+  createService, updateService, deactivateService, reactivateService, quickEditService,
+  createGroup, updateGroup, deactivateGroup, quickEditGroup, restoreGroup,
+  createParameter, updateParameter, deactivateParameter, quickEditParameter, restoreParameter,
+  createTool, updateTool, deactivateTool, reactivateTool, quickEditTool,
   createBankAccount, updateBankAccount, deactivateBankAccount, reactivateBankAccount, setDefaultBankAccount,
-  createCashbookCategory, updateCashbookCategory, deactivateCashbookCategory,
+  createCashbookCategory, updateCashbookCategory, deactivateCashbookCategory, reactivateCashbookCategory,
   upsertExchangeRate,
   syncExchangeRates,
   upsertMatrixCell,
+  setEmployeeServices, setServiceEmployees,
 } from './actions'
 import { Plus, X, Edit2, Archive, ArchiveRestore, Save, ChevronDown, ChevronLeft, ChevronRight, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Mail, Send, RotateCcw as ResetKey, RefreshCw, Star, LayoutGrid, List, Building2, MapPin, Users, Handshake } from 'lucide-react'
 import type { Currency } from '@/types'
 import InfoTip from '@/components/ui/info-tip'
 import { usePrivacy, getStoredPin, setStoredPin, isForceLocked } from '@/contexts/privacy-context'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { useToast, ToastContainer } from '@/components/ui/toast'
 import { generateInviteToken, revokeInviteToken, archiveEmployee, restoreEmployee, adminResetPassword, updateEmployeeAvatar } from './employee-actions'
 import dynamic from 'next/dynamic'
 
@@ -35,6 +37,7 @@ const PerformanceHistoryModal = dynamic(() => import('./performance-history-moda
 import { EmployeeAvatar, AvatarPicker } from '@/components/ui/employee-avatar'
 import { DEFAULT_TEMPLATES, TEMPLATE_KEYS, TEMPLATE_DOCS, templatesFromSettings, type MessageTemplates } from '@/lib/messaging/templates'
 import { INTAKE_KINDS, INTAKE_KIND_META } from '@/lib/services/intake'
+import { normalizeGroupWeights } from '@/lib/contributions/weights'
 import { isDesktop, getReceiptSharePref, setReceiptSharePref, RECEIPT_SHARE_LABELS, RECEIPT_SHARE_HINTS, type ReceiptShareAction } from '@/lib/desktop'
 import { buildInvoiceShareText } from '@/lib/invoices/share'
 import { buildReminderText } from '@/lib/followups/grouping'
@@ -74,6 +77,23 @@ function SearchBar({ value, onChange, placeholder = 'Search…', className = '' 
   )
 }
 
+// Active/Archived/All segmented control shared by the catalog tabs.
+function ArchFilterTabs({ value, onChange }: { value: 'active' | 'archived' | 'all'; onChange: (v: 'active' | 'archived' | 'all') => void }) {
+  return (
+    <div className="flex bg-secondary/30 border border-border/50 rounded-lg p-0.5 w-fit shrink-0">
+      {(['active', 'archived', 'all'] as const).map(f => (
+        <button key={f} onClick={() => onChange(f)}
+          className={cn(
+            'px-3 py-1.5 text-[13px] font-medium rounded-md transition-all',
+            value === f ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50',
+          )}>
+          {f === 'active' ? 'Active' : f === 'archived' ? 'Archived' : 'All'}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 const SETTINGS_TABS = [
   'Company', 'Employees', 'Clients', 'Services',
   'Groups & Params', 'Tools', 'Bank Accounts', 'Cash Categories', 'Exchange Rates',
@@ -107,11 +127,10 @@ interface Props {
   categories: any[]
   companySettings: any[]
   exchangeRates: any[]
-  parameterServices: any[]
   toolServices: any[]
   taskServiceUsage: { service_id: string; created_at: string }[]
   groupServices: { group_id: string; service_id: string }[]
-  invoices: { client_id: string; total_amount: number; paid_amount: number; status: string }[]
+  employeeServices?: { employee_id: string; service_id: string }[]
   designations?: { id: string; name: string; is_admin: boolean; is_system: boolean }[]
   initialTab?: string
   initialEditClientId?: string
@@ -120,20 +139,9 @@ interface Props {
 }
 
 export default function SettingsClient(props: Props) {
-  const { taskServiceUsage, invoices = [] } = props
-
-  // ── Per-client outstanding amount ───────────────────────────────────────────
-  const clientOutstanding = useMemo(() => {
-    const map: Record<string, { billed: number; paid: number; outstanding: number }> = {}
-    invoices.forEach(inv => {
-      if (!inv.client_id) return
-      if (!map[inv.client_id]) map[inv.client_id] = { billed: 0, paid: 0, outstanding: 0 }
-      map[inv.client_id].billed += inv.total_amount || 0
-      map[inv.client_id].paid   += inv.paid_amount  || 0
-      map[inv.client_id].outstanding = map[inv.client_id].billed - map[inv.client_id].paid
-    })
-    return map
-  }, [invoices])
+  const { taskServiceUsage } = props
+  // Per-client outstanding now lives in the Clients module (/dashboard/clients),
+  // which loads invoice rollups itself — Settings no longer fetches invoices.
   // groupServices: which contribution groups belong to each service
   // Uses localStorage as fallback before the SQL migration is run.
   const [groupServices, setGroupServices] = useState<{ group_id: string; service_id: string }[]>(() => {
@@ -141,9 +149,13 @@ export default function SettingsClient(props: Props) {
     if (fromDB.length > 0) return fromDB
     try { return JSON.parse(localStorage.getItem('cirqle_group_services') || '[]') } catch { return [] }
   })
+  // empServices: which services each employee is assigned to (employee ↔ service
+  // junction — same rows power both the employee form and the service form).
+  const [empServices, setEmpServices] = useState<{ employee_id: string; service_id: string }[]>(props.employeeServices || [])
   const [tab, setTab] = useState(props.initialTab ?? 'Company')
   const router = useRouter()
   const supabase = createSupabaseClient()
+  const toast = useToast()
   const { dn, ds, isUnlocked, forceLock, setForceLockMode } = usePrivacy()
   const [forceLockState, setForceLockState] = useState<boolean>(false)
   useEffect(() => { setForceLockState(isForceLocked()) }, [])
@@ -165,7 +177,8 @@ export default function SettingsClient(props: Props) {
     setEditingId(svc.id)
     setShowForm('service')
     const gids = props.groupServices.filter((gs: any) => gs.service_id === svc.id).map((gs: any) => gs.group_id)
-    setForm({ ...svc, _groupIds: gids })
+    const eids = (props.employeeServices || []).filter(es => es.service_id === svc.id).map(es => es.employee_id)
+    setForm({ ...svc, _groupIds: gids, _employeeIds: eids })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -242,8 +255,14 @@ export default function SettingsClient(props: Props) {
   const [salaryDayCalOpen, setSalaryDayCalOpen] = useState(false)
   const [salaryCalViewDate, setSalaryCalViewDate] = useState(() => new Date())
 
+  // Shared Active/Archived/All filter for the catalog tabs (Clients, Services,
+  // Tools, Cash Categories) — archived records stay inspectable + restorable.
+  const [archFilter, setArchFilter] = useState<'active' | 'archived' | 'all'>('active')
+
   const filteredClients = useMemo(() => {
-    let list = clients.filter((c: any) => c.is_active !== false)
+    let list = clients
+    if (archFilter === 'active')   list = list.filter((c: any) => c.is_active !== false)
+    if (archFilter === 'archived') list = list.filter((c: any) => c.is_active === false)
     if (clientSearch) {
       const q = clientSearch.toLowerCase()
       list = list.filter((c: any) => c.name?.toLowerCase().includes(q) || c.code?.toLowerCase().includes(q) || c.email?.toLowerCase().includes(q))
@@ -252,40 +271,67 @@ export default function SettingsClient(props: Props) {
       ? (a.code || '').localeCompare(b.code || '')
       : (a.name || '').localeCompare(b.name || ''))
     return list
-  }, [clients, clientSearch, clientSort])
+  }, [clients, clientSearch, clientSort, archFilter])
 
   const filteredServices = useMemo(() => {
-    let activeServices = services.filter((s: any) => s.is_active !== false)
-    let list = serviceSort === 'usage' 
-      ? servicesSortedByUsage.filter((s: any) => s.is_active !== false) 
-      : activeServices.sort((a: any, b: any) => a.name.localeCompare(b.name))
+    const byFilter = (s: any) =>
+      archFilter === 'active' ? s.is_active !== false :
+      archFilter === 'archived' ? s.is_active === false : true
+    let list = serviceSort === 'usage'
+      ? servicesSortedByUsage.filter(byFilter)
+      : services.filter(byFilter).sort((a: any, b: any) => a.name.localeCompare(b.name))
     if (serviceSearch) {
       const q = serviceSearch.toLowerCase()
       list = list.filter((s: any) => s.name?.toLowerCase().includes(q) || s.description?.toLowerCase().includes(q))
     }
     return list
-  }, [services, servicesSortedByUsage, serviceSearch, serviceSort])
+  }, [services, servicesSortedByUsage, serviceSearch, serviceSort, archFilter])
+
+  // Groups & Params tab: shared active/archived/all filter (mirrors the
+  // employee filter) so archived groups/params can be inspected and restored.
+  const [gpFilter, setGpFilter] = useState<'active' | 'archived' | 'all'>('active')
+  // Parameter list is grouped by contribution group; collapsed by default so
+  // 50+ params read as a handful of group headers. Searching expands matches.
+  const [expandedParamGroups, setExpandedParamGroups] = useState<Set<string>>(new Set())
 
   const filteredGroups = useMemo(() => {
-    let pool = groups.filter((g: any) => g.is_active !== false)
+    let pool = groups
+    if (gpFilter === 'active')   pool = pool.filter((g: any) => g.is_active !== false)
+    if (gpFilter === 'archived') pool = pool.filter((g: any) => g.is_active === false)
     if (!groupSearch) return pool
     const q = groupSearch.toLowerCase()
     return pool.filter((g: any) => g.name?.toLowerCase().includes(q))
-  }, [groups, groupSearch])
+  }, [groups, groupSearch, gpFilter])
 
   const filteredParams = useMemo(() => {
-    let pool = params.filter((p: any) => p.is_active !== false)
+    let pool = params
+    if (gpFilter === 'active')   pool = pool.filter((p: any) => p.is_active !== false)
+    if (gpFilter === 'archived') pool = pool.filter((p: any) => p.is_active === false)
     if (!paramSearch) return pool
     const q = paramSearch.toLowerCase()
     return pool.filter((p: any) => p.name?.toLowerCase().includes(q))
-  }, [params, paramSearch])
+  }, [params, paramSearch, gpFilter])
+
+  // Parameters bucketed under their group (ordered like the groups list),
+  // with a trailing bucket for params that have no group.
+  const paramsByGroup = useMemo(() => {
+    const orderedGroups = [...groups].sort((a: any, b: any) => (a.display_order || 0) - (b.display_order || 0))
+    const buckets = orderedGroups
+      .map((g: any) => ({ group: g, params: filteredParams.filter((p: any) => p.group_id === g.id) }))
+      .filter(b => b.params.length > 0)
+    const orphans = filteredParams.filter((p: any) => !p.group_id || !groups.some((g: any) => g.id === p.group_id))
+    if (orphans.length > 0) buckets.push({ group: null as any, params: orphans })
+    return buckets
+  }, [groups, filteredParams])
 
   const filteredTools = useMemo(() => {
-    let pool = tools.filter((t: any) => t.is_active !== false)
+    let pool = tools
+    if (archFilter === 'active')   pool = pool.filter((t: any) => t.is_active !== false)
+    if (archFilter === 'archived') pool = pool.filter((t: any) => t.is_active === false)
     if (!toolSearch) return pool
     const q = toolSearch.toLowerCase()
     return pool.filter((t: any) => t.name?.toLowerCase().includes(q))
-  }, [tools, toolSearch])
+  }, [tools, toolSearch, archFilter])
 
   // Employee filter tabs: active | archived | all
   const [empFilter, setEmpFilter] = useState<'active' | 'archived' | 'all'>('active')
@@ -324,7 +370,7 @@ export default function SettingsClient(props: Props) {
     setInviteBusy(emp.id)
     const res = await generateInviteToken(emp.id)
     setInviteBusy(null)
-    if (!res.ok || !res.data) { alert(res.error || 'Failed to generate invite'); return }
+    if (!res.ok || !res.data) { toast.error('Failed to generate invite', res.error); return }
     setInviteLink({ employeeId: emp.id, cqid: emp.cqid, url: res.data.url, expiresAt: res.data.expiresAt })
     setInviteCopied(false)
     // patch local state
@@ -336,7 +382,7 @@ export default function SettingsClient(props: Props) {
     setInviteBusy(emp.id)
     const res = await archiveEmployee(emp.id)
     setInviteBusy(null)
-    if (!res.ok) { alert(res.error || 'Failed to archive'); return }
+    if (!res.ok) { toast.error('Failed to archive', res.error); return }
     setEmployees(prev => prev.map((x: any) => x.id === emp.id ? { ...x, is_archived: true, is_active: false } : x))
   }
 
@@ -344,7 +390,7 @@ export default function SettingsClient(props: Props) {
     setInviteBusy(emp.id)
     const res = await restoreEmployee(emp.id)
     setInviteBusy(null)
-    if (!res.ok) { alert(res.error || 'Failed to restore'); return }
+    if (!res.ok) { toast.error('Failed to restore', res.error); return }
     setEmployees(prev => prev.map((x: any) => x.id === emp.id ? { ...x, is_archived: false, is_active: true } : x))
   }
 
@@ -353,7 +399,7 @@ export default function SettingsClient(props: Props) {
     setInviteBusy(emp.id)
     const res = await adminResetPassword(emp.id)
     setInviteBusy(null)
-    if (!res.ok || !res.data) { alert(res.error || 'Failed'); return }
+    if (!res.ok || !res.data) { toast.error('Password reset failed', res.error); return }
     setResetPwdModal({ cqid: emp.cqid, tempPassword: res.data.tempPassword })
   }
 
@@ -468,7 +514,8 @@ export default function SettingsClient(props: Props) {
       cqid = `CQID${String(num + 1).padStart(3, '0')}`
     }
     setShowForm('employee')
-    setForm(emp ? emp : { role: 'employee', salary_type: 'fixed', base_salary: 0, performance_rating: 70, is_active: true, reveal_salary: false, cqid })
+    const serviceIds = emp ? empServices.filter(es => es.employee_id === emp.id).map(es => es.service_id) : []
+    setForm(emp ? { ...emp, _serviceIds: serviceIds } : { role: 'employee', salary_type: 'fixed', base_salary: 0, performance_rating: 70, is_active: true, reveal_salary: false, cqid, _serviceIds: [] })
     setEditingId(emp?.id || null)
   }
 
@@ -501,23 +548,39 @@ export default function SettingsClient(props: Props) {
     const entries = Object.entries(companySettings).map(([key, value]) => ({ key, value }))
     const res = await upsertCompanySettings(entries)
     setSaving(false)
-    if (!res.ok) { alert(res.error || 'Failed to save'); return }
-    alert('Saved!')
+    if (!res.ok) { toast.error('Failed to save', res.error); return }
+    toast.success('Company settings saved')
   }
 
   // --- Employees ---
   async function saveEmployee(e: React.FormEvent) {
     e.preventDefault(); setSaving(true)
+    // _serviceIds is UI-only state — saved via the employee_services junction, not an employees column.
+    const { _serviceIds, ...employeePayload } = form
+    const serviceIds: string[] = _serviceIds || []
     let res: Awaited<ReturnType<typeof createEmployee>>
     if (editingId) {
-      res = await updateEmployee(editingId, form)
+      res = await updateEmployee(editingId, employeePayload)
       if (res.ok && res.data) setEmployees(prev => prev.map(emp => emp.id === editingId ? res.data : emp))
     } else {
-      res = await createEmployee(form)
+      res = await createEmployee(employeePayload)
       if (res.ok && res.data) setEmployees(prev => [...prev, res.data])
     }
+    if (!res.ok) { setSaving(false); toast.error('Failed to save employee', res.error); return }
+
+    const employeeId = editingId || res.data?.id
+    if (employeeId) {
+      const svcRes = await setEmployeeServices(employeeId, serviceIds)
+      if (svcRes.ok) {
+        setEmpServices(prev => [
+          ...prev.filter(es => es.employee_id !== employeeId),
+          ...serviceIds.map(sid => ({ employee_id: employeeId, service_id: sid })),
+        ])
+      } else if (serviceIds.length > 0) {
+        toast.error('Service assignments not saved', svcRes.error || 'Run the employee_services migration.')
+      }
+    }
     setSaving(false)
-    if (!res.ok) { alert(res.error || 'Failed to save employee'); return }
     setShowForm(null)
   }
 
@@ -538,7 +601,7 @@ export default function SettingsClient(props: Props) {
       res = await createClient(form)
       if (res.ok && res.data) { clientId = res.data.id; setClients(prev => [...prev, { ...res.data, service_pricings: [] }]) }
     }
-    if (!res.ok) { setSaving(false); alert(res.error || 'Failed to save client'); return }
+    if (!res.ok) { setSaving(false); toast.error('Failed to save client', res.error); return }
     // Save service pricings
     if (clientId) {
       const pricingRows = Object.entries(clientPricings)
@@ -565,9 +628,10 @@ export default function SettingsClient(props: Props) {
   async function saveService(e: React.FormEvent) {
     e.preventDefault(); setSaving(true)
 
-    // Strip internal _groupIds from the DB payload
-    const { _groupIds, ...servicePayload } = form
+    // Strip internal _groupIds / _employeeIds from the DB payload
+    const { _groupIds, _employeeIds, ...servicePayload } = form
     const selectedGroupIds: string[] = _groupIds || []
+    const selectedEmployeeIds: string[] = _employeeIds || []
 
     let res: Awaited<ReturnType<typeof createService>>
     if (editingId) {
@@ -578,7 +642,7 @@ export default function SettingsClient(props: Props) {
       if (res.ok && res.data?.service) setServices(prev => [...prev, res.data!.service])
     }
 
-    if (!res.ok) { setSaving(false); alert(res.error || 'Failed to save service'); return }
+    if (!res.ok) { setSaving(false); toast.error('Failed to save service', res.error); return }
 
     const serviceId = editingId || res.data?.service?.id
     if (serviceId) {
@@ -595,6 +659,17 @@ export default function SettingsClient(props: Props) {
         ]
         localStorage.setItem('cirqle_group_services', JSON.stringify(updated))
       } catch {}
+
+      // Sync assigned employees (same junction the employee form writes)
+      const empRes = await setServiceEmployees(serviceId, selectedEmployeeIds)
+      if (empRes.ok) {
+        setEmpServices(prev => [
+          ...prev.filter(es => es.service_id !== serviceId),
+          ...selectedEmployeeIds.map(eid => ({ employee_id: eid, service_id: serviceId })),
+        ])
+      } else if (selectedEmployeeIds.length > 0) {
+        toast.error('Employee assignments not saved', empRes.error || 'Run the employee_services migration.')
+      }
     }
 
     setSaving(false); closeForm()
@@ -612,7 +687,7 @@ export default function SettingsClient(props: Props) {
       if (res.ok && res.data) setGroups(prev => [...prev, res.data])
     }
     setSaving(false)
-    if (!res.ok) { alert(res.error || 'Failed to save group'); return }
+    if (!res.ok) { toast.error('Failed to save group', res.error); return }
     setShowForm(null)
   }
 
@@ -639,7 +714,7 @@ export default function SettingsClient(props: Props) {
     }
 
     setSaving(false)
-    if (!res.ok) { alert(res.error || 'Failed to save parameter'); return }
+    if (!res.ok) { toast.error('Failed to save parameter', res.error); return }
     setShowForm(null)
   }
 
@@ -655,7 +730,7 @@ export default function SettingsClient(props: Props) {
       if (res.ok && res.data) setTools(prev => [...prev, res.data])
     }
     setSaving(false)
-    if (!res.ok) { alert(res.error || 'Failed to save tool'); return }
+    if (!res.ok) { toast.error('Failed to save tool', res.error); return }
     setShowForm(null)
   }
 
@@ -671,14 +746,14 @@ export default function SettingsClient(props: Props) {
       if (res.ok && res.data) setBankAccounts(prev => [...prev, res.data])
     }
     setSaving(false)
-    if (!res.ok) { alert(res.error || 'Failed to save bank account'); return }
+    if (!res.ok) { toast.error('Failed to save bank account', res.error); return }
     setShowForm(null)
   }
 
   async function makeDefaultBank(id: string) {
     setBankAccounts(prev => prev.map(b => ({ ...b, is_default: b.id === id })))
     const res = await setDefaultBankAccount(id)
-    if (!res.ok) alert(res.error || 'Failed to set default account')
+    if (!res.ok) toast.error('Failed to set default account', res.error)
   }
 
   // --- Cash Categories ---
@@ -693,7 +768,7 @@ export default function SettingsClient(props: Props) {
       if (res.ok && res.data) setCategories((prev: any[]) => [...prev, res.data])
     }
     setSaving(false)
-    if (!res.ok) { alert(res.error || 'Failed to save category'); return }
+    if (!res.ok) { toast.error('Failed to save category', res.error); return }
     setShowForm(null)
   }
 
@@ -1579,9 +1654,9 @@ export default function SettingsClient(props: Props) {
                     </p>
                     <ol className="text-[13px] text-muted-foreground space-y-1.5 list-decimal list-inside">
                       <li>Make sure the employee record below has their correct email address</li>
-                      <li>Go to <a href="https://supabase.com/dashboard/project/lgqarkdmlyfpacyqhfha/auth/users" target="_blank" className="text-blue-500 dark:text-blue-400 underline hover:text-blue-600 dark:hover:text-blue-300 font-medium">Supabase Auth → Users</a> and invite them by email</li>
-                      <li>They receive a login link, set their password, and can log in at <strong className="text-foreground font-semibold">/login</strong></li>
-                      <li>The app automatically recognizes their role from their employee record</li>
+                      <li>Click the <Send className="w-3 h-3 inline mx-0.5 text-violet-400" /> invite button on their row to generate a registration link</li>
+                      <li>Share the link — they set their own password and log in at <strong className="text-foreground font-semibold">/login</strong></li>
+                      <li>Their designation controls exactly what they can see and do</li>
                     </ol>
                   </div>
                 </div>
@@ -1627,6 +1702,23 @@ export default function SettingsClient(props: Props) {
                           <span className="w-1 h-1 rounded-full bg-border"></span>
                           <span className="flex items-center gap-1"><Zap className="w-3 h-3 text-amber-500/70" /> {emp.performance_rating}% rating</span>
                         </p>
+                        {(() => {
+                          const svcNames = empServices
+                            .filter(es => es.employee_id === emp.id)
+                            .map(es => services.find((s: any) => s.id === es.service_id)?.name)
+                            .filter(Boolean)
+                          if (svcNames.length === 0) return null
+                          return (
+                            <div className="flex flex-wrap gap-1 mt-1.5">
+                              {svcNames.slice(0, 5).map(n => (
+                                <span key={n} className="text-[10px] bg-primary/10 text-primary border border-primary/20 px-1.5 py-0.5 rounded-full font-medium">{n}</span>
+                              ))}
+                              {svcNames.length > 5 && (
+                                <span className="text-[10px] text-muted-foreground/60 px-1 py-0.5">+{svcNames.length - 5} more</span>
+                              )}
+                            </div>
+                          )
+                        })()}
                       </div>
                     </div>
                     <div className="flex items-center gap-2 opacity-100 md:opacity-40 md:group-hover:opacity-100 transition-opacity flex-wrap">
@@ -1756,11 +1848,17 @@ export default function SettingsClient(props: Props) {
                     </button>
                   </div>
                 </div>
-                <button onClick={() => openClientForm()} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:shadow-lg hover:shadow-primary/20 hover:opacity-90 transition-all">
-                  <Plus className="w-4 h-4" /> Add Client
-                </button>
+                <div className="flex items-center gap-2">
+                  <Link href="/dashboard/clients" className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg border border-primary/30 bg-primary/10 text-primary hover:bg-primary/15 transition-colors">
+                    Open Clients module <ChevronRight className="w-3 h-3" />
+                  </Link>
+                  <button onClick={() => openClientForm()} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:shadow-lg hover:shadow-primary/20 hover:opacity-90 transition-all">
+                    <Plus className="w-4 h-4" /> Add Client
+                  </button>
+                </div>
               </div>
               <div className="flex items-center gap-2 mb-4">
+                <ArchFilterTabs value={archFilter} onChange={setArchFilter} />
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <input
@@ -1826,15 +1924,9 @@ export default function SettingsClient(props: Props) {
                           {client.pricing_pending && (
                             <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-500 border border-amber-500/20">Needs pricing</span>
                           )}
-                          {clientOutstanding[client.id]?.outstanding > 0 && (
-                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-orange-500/10 text-orange-500 border border-orange-500/20">
-                              ₹{Math.round(clientOutstanding[client.id].outstanding).toLocaleString('en-IN')} out
-                            </span>
-                          )}
-                          {clientOutstanding[client.id] && clientOutstanding[client.id].outstanding <= 0 && clientOutstanding[client.id].billed > 0 && (
-                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">Paid</span>
-                          )}
-                          {!client.pricing_pending && !(clientOutstanding[client.id]?.outstanding > 0) && !(clientOutstanding[client.id] && clientOutstanding[client.id].outstanding <= 0 && clientOutstanding[client.id].billed > 0) && (
+                          {client.is_active === false ? (
+                            <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">Archived</span>
+                          ) : !client.pricing_pending && (
                             <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-secondary text-muted-foreground border border-border/50">Active</span>
                           )}
                         </div>
@@ -1928,18 +2020,8 @@ export default function SettingsClient(props: Props) {
                                 {client.pricing_pending && (
                                   <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-500 border border-amber-500/20">Needs pricing</span>
                                 )}
-                                {clientOutstanding[client.id]?.outstanding > 0 && (
-                                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-orange-500/10 text-orange-500 border border-orange-500/20">
-                                    ₹{Math.round(clientOutstanding[client.id].outstanding).toLocaleString('en-IN')} out
-                                  </span>
-                                )}
-                                {clientOutstanding[client.id] && clientOutstanding[client.id].outstanding <= 0 && clientOutstanding[client.id].billed > 0 && (
-                                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">Paid</span>
-                                )}
-                                {clientOutstanding[client.id]?.billed > 0 && (
-                                  <span className="text-[10px] text-muted-foreground ml-1">
-                                    Billed: ₹{Math.round(clientOutstanding[client.id].billed).toLocaleString('en-IN')}
-                                  </span>
+                                {client.is_active === false && (
+                                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">Archived</span>
                                 )}
                               </div>
                             </td>
@@ -1948,12 +2030,22 @@ export default function SettingsClient(props: Props) {
                                 <button onClick={() => openClientForm(client)} className="p-1.5 rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground">
                                   <Edit2 className="w-3.5 h-3.5" />
                                 </button>
-                                <button onClick={() => requestDelete('Client', client.id, client.name, async () => {
-                                  await deactivateClient(client.id)
-                                  setClients(prev => prev.filter((x: any) => x.id !== client.id))
-                                })} className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors" title="Archive client">
-                                  <Archive className="w-3.5 h-3.5" />
-                                </button>
+                                {client.is_active === false ? (
+                                  <button onClick={async () => {
+                                    const res = await reactivateClient(client.id)
+                                    if (!res.ok) { toast.error('Failed to restore', res.error); return }
+                                    setClients(prev => prev.map((x: any) => x.id === client.id ? { ...x, is_active: true } : x))
+                                  }} className="p-1.5 rounded-md hover:bg-emerald-500/15 text-muted-foreground hover:text-emerald-500 transition-colors" title="Restore client">
+                                    <ArchiveRestore className="w-3.5 h-3.5" />
+                                  </button>
+                                ) : (
+                                  <button onClick={() => requestDelete('Client', client.id, client.name, async () => {
+                                    await deactivateClient(client.id)
+                                    setClients(prev => prev.map((x: any) => x.id === client.id ? { ...x, is_active: false } : x))
+                                  })} className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors" title="Archive client">
+                                    <Archive className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -1984,6 +2076,7 @@ export default function SettingsClient(props: Props) {
                 </button>
               </div>
               <div className="flex items-center gap-2 mb-3">
+                <ArchFilterTabs value={archFilter} onChange={setArchFilter} />
                 <SearchBar value={serviceSearch} onChange={setServiceSearch} placeholder="Search services…" className="flex-1" />
                 <button onClick={() => setServiceSort(s => s === 'name' ? 'usage' : 'name')}
                   className="flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg bg-secondary border border-border text-muted-foreground hover:text-foreground transition-colors shrink-0">
@@ -2018,7 +2111,7 @@ export default function SettingsClient(props: Props) {
                           ))}
                         </div>
                       )}
-                      <button onClick={() => { setEditingId(svc.id); setShowForm('service'); const gids = groupServices.filter(gs => gs.service_id === svc.id).map(gs => gs.group_id); setForm({ ...svc, _groupIds: gids }) }}
+                      <button onClick={() => { setEditingId(svc.id); setShowForm('service'); const gids = groupServices.filter(gs => gs.service_id === svc.id).map(gs => gs.group_id); const eids = empServices.filter(es => es.service_id === svc.id).map(es => es.employee_id); setForm({ ...svc, _groupIds: gids, _employeeIds: eids }) }}
                         className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground/40 hover:text-foreground shrink-0">
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
@@ -2028,6 +2121,9 @@ export default function SettingsClient(props: Props) {
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="font-medium">{svc.name}</p>
+                          {svc.is_active === false && (
+                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">Archived</span>
+                          )}
                           {svc.pricing_pending && (
                             <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/25">
                               Needs pricing
@@ -2042,19 +2138,35 @@ export default function SettingsClient(props: Props) {
                               ))
                             : <span className="text-[10px] text-muted-foreground/50 italic">No groups linked</span>
                           }
+                          {(() => {
+                            const count = empServices.filter(es => es.service_id === svc.id).length
+                            return count > 0
+                              ? <span className="text-[10px] bg-blue-500/10 text-blue-500 dark:text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-full font-medium flex items-center gap-1"><Users className="w-2.5 h-2.5" />{count} employee{count === 1 ? '' : 's'}</span>
+                              : <span className="text-[10px] text-muted-foreground/50 italic">No employees assigned</span>
+                          })()}
                         </div>
                       </div>
                       <div className="flex items-center gap-1">
-                        <button onClick={() => { setEditingId(svc.id); setShowForm('service'); const gids = groupServices.filter(gs => gs.service_id === svc.id).map(gs => gs.group_id); setForm({ ...svc, _groupIds: gids }) }}
+                        <button onClick={() => { setEditingId(svc.id); setShowForm('service'); const gids = groupServices.filter(gs => gs.service_id === svc.id).map(gs => gs.group_id); const eids = empServices.filter(es => es.service_id === svc.id).map(es => es.employee_id); setForm({ ...svc, _groupIds: gids, _employeeIds: eids }) }}
                           className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground">
                           <Edit2 className="w-4 h-4" />
                         </button>
-                        <button onClick={() => requestDelete('Service', svc.id, svc.name, async () => {
-                          await deactivateService(svc.id)
-                          setServices(prev => prev.filter((x: any) => x.id !== svc.id))
-                        })} className="p-2 rounded-lg hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400 transition-colors" title="Archive service">
-                          <Archive className="w-4 h-4" />
-                        </button>
+                        {svc.is_active === false ? (
+                          <button onClick={async () => {
+                            const res = await reactivateService(svc.id)
+                            if (!res.ok) { toast.error('Failed to restore', res.error); return }
+                            setServices(prev => prev.map((x: any) => x.id === svc.id ? { ...x, is_active: true } : x))
+                          }} className="p-2 rounded-lg hover:bg-emerald-500/15 text-muted-foreground hover:text-emerald-500 transition-colors" title="Restore service">
+                            <ArchiveRestore className="w-4 h-4" />
+                          </button>
+                        ) : (
+                          <button onClick={() => requestDelete('Service', svc.id, svc.name, async () => {
+                            await deactivateService(svc.id)
+                            setServices(prev => prev.map((x: any) => x.id === svc.id ? { ...x, is_active: false } : x))
+                          })} className="p-2 rounded-lg hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400 transition-colors" title="Archive service">
+                            <Archive className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </div>
                   )
@@ -2066,105 +2178,252 @@ export default function SettingsClient(props: Props) {
           {/* Groups & Params */}
           {tab === 'Groups & Params' && (
             <div className="space-y-6">
+              {/* How weights work — group weights are relative, the engine normalizes per task */}
+              <div className="px-4 py-3 rounded-xl border bg-blue-500/[0.04] border-blue-500/15 text-xs text-muted-foreground leading-relaxed">
+                <span className="font-semibold text-foreground">Weights are relative importance values, not fixed percentages.</span>{' '}
+                When a task is scored, the weights of the groups actually used on that task are automatically
+                normalized to split 100% of the commission pool — e.g. three groups weighted 50 / 50 / 50 each
+                receive 33.3%, and 50 / 25 becomes 66.7% / 33.3%. Weights never need to sum to 100, and adding a
+                group to a task can never push the total past 100%. The same applies to parameter weights within a group.
+              </div>
+
               {/* Groups */}
               <div>
                 <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-sm font-semibold">Contribution Groups ({filteredGroups.length}{groupSearch ? `/${groups.length}` : ''})</h2>
+                  <div className="flex items-center gap-3">
+                    <h2 className="text-sm font-semibold">Contribution Groups ({filteredGroups.length}{groupSearch ? `/${groups.length}` : ''})</h2>
+                    <button onClick={() => setQuickEdit(q => !q)}
+                      className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-all ${
+                        quickEdit ? 'bg-amber-500/15 border-amber-500/30 text-amber-400' : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
+                      }`}>
+                      <Zap className="w-3 h-3" /> {quickEdit ? 'Exit edit' : 'Quick edit'}
+                    </button>
+                  </div>
                   <button onClick={() => openForm('group', { weight: 50, display_order: groups.length + 1, is_active: true })} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-3 py-2 rounded-lg hover:opacity-90 text-xs">
                     <Plus className="w-3.5 h-3.5" /> Add Group
                   </button>
                 </div>
-                <SearchBar value={groupSearch} onChange={setGroupSearch} placeholder="Search groups…" className="mb-3" />
-                {/* Weight sum warning */}
-                {(() => {
-                  const total = groups.reduce((s: number, g: any) => s + (g.weight || 0), 0)
-                  if (Math.abs(total - 100) > 0.5) return (
-                    <div className={`mb-3 px-4 py-2.5 rounded-xl border text-sm flex items-center gap-2 ${total > 100 ? 'bg-red-500/10 border-red-500/20 text-red-400' : 'bg-amber-500/10 border-amber-500/20 text-amber-400'}`}>
-                      <span className="font-semibold">⚠</span>
-                      Group weights sum to <strong>{total}%</strong> — should equal exactly <strong>100%</strong>.
-                      {total > 100 && ' Overage will reduce each employee\'s effective earnings.'}
-                      {total < 100 && ' Shortfall means some commission pool is unallocated.'}
-                    </div>
-                  )
-                  return null
-                })()}
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="flex bg-secondary/30 backdrop-blur-sm border border-border/50 rounded-lg p-0.5 w-fit shrink-0">
+                    {(['active', 'archived', 'all'] as const).map(f => (
+                      <button
+                        key={f}
+                        onClick={() => setGpFilter(f)}
+                        className={cn(
+                          "px-3 py-1.5 text-[13px] font-medium rounded-md transition-all",
+                          gpFilter === f
+                            ? "bg-background text-foreground shadow-sm ring-1 ring-border/50"
+                            : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                        )}
+                      >
+                        {f === 'active' ? 'Active' : f === 'archived' ? 'Archived' : 'All'}
+                      </button>
+                    ))}
+                  </div>
+                  <SearchBar value={groupSearch} onChange={setGroupSearch} placeholder="Search groups…" className="flex-1" />
+                </div>
                 <div className="space-y-2">
-                  {filteredGroups.map((g: any) => (
+                  {filteredGroups.map((g: any) => quickEdit ? (
+                    <div key={g.id} className="bg-card border border-amber-500/20 rounded-xl px-3 py-2.5 flex items-center gap-2">
+                      <input
+                        key={`${g.id}-name`}
+                        defaultValue={g.name}
+                        onBlur={e => qeSave(quickEditGroup, g.id, 'name', e.target.value.trim(), setGroups as any)}
+                        className="flex-1 bg-secondary border border-border/0 hover:border-border focus:border-primary rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:bg-background transition-colors"
+                        placeholder="Group name"
+                      />
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="text-xs text-muted-foreground">Weight</span>
+                        <input
+                          key={`${g.id}-weight`}
+                          defaultValue={g.weight}
+                          type="number" min="0" step="0.01"
+                          onBlur={e => {
+                            // Guard: an accidentally-cleared field must not save weight 0
+                            // (a 0-weight group zeroes every score computed from it alone).
+                            const v = parseFloat(e.target.value)
+                            if (!Number.isFinite(v) || v < 0) { e.target.value = String(g.weight); return }
+                            if (v === g.weight) return
+                            qeSave(quickEditGroup, g.id, 'weight', e.target.value, setGroups as any, () => v)
+                          }}
+                          className="w-16 bg-secondary border border-border/0 hover:border-border focus:border-primary rounded-lg px-2 py-1.5 text-sm text-center focus:outline-none focus:bg-background transition-colors"
+                        />
+                      </div>
+                      <button onClick={() => { setEditingId(g.id); setShowForm('group'); setForm(g) }}
+                        className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground/40 hover:text-foreground shrink-0">
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : (
                     <div key={g.id} className="bg-card border border-border rounded-xl px-4 py-3 flex items-center justify-between">
                       <div>
-                        <p className="font-medium text-sm">{g.name}</p>
-                        <p className="text-xs text-muted-foreground">Weight: {g.weight}% · Order: {g.display_order}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium text-sm">{g.name}</p>
+                          {g.is_active === false && (
+                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">Archived</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">Relative weight: {g.weight} · Order: {g.display_order}</p>
                       </div>
                       <div className="flex items-center gap-1">
                         <button onClick={() => { setEditingId(g.id); setShowForm('group'); setForm(g) }} className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground">
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => requestDelete('Group', g.id, g.name, async () => {
-                          await deactivateGroup(g.id)
-                          setGroups(prev => prev.filter((x: any) => x.id !== g.id))
-                        })} className="p-2 rounded-lg hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400 transition-colors" title="Archive group">
-                          <Archive className="w-3.5 h-3.5" />
-                        </button>
+                        {g.is_active === false ? (
+                          <button onClick={async () => {
+                            await restoreGroup(g.id)
+                            setGroups(prev => prev.map((x: any) => x.id === g.id ? { ...x, is_active: true } : x))
+                          }} className="p-2 rounded-lg hover:bg-emerald-500/15 text-muted-foreground hover:text-emerald-500 transition-colors" title="Restore group">
+                            <ArchiveRestore className="w-3.5 h-3.5" />
+                          </button>
+                        ) : (
+                          <button onClick={() => requestDelete('Group', g.id, g.name, async () => {
+                            await deactivateGroup(g.id)
+                            setGroups(prev => prev.map((x: any) => x.id === g.id ? { ...x, is_active: false } : x))
+                          })} className="p-2 rounded-lg hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400 transition-colors" title="Archive group">
+                            <Archive className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
-                  {filteredGroups.length === 0 && groupSearch && (
-                    <p className="text-sm text-muted-foreground text-center py-4 opacity-60">No groups match "{groupSearch}"</p>
+                  {filteredGroups.length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-4 opacity-60">
+                      {groupSearch ? `No groups match "${groupSearch}"` : gpFilter === 'archived' ? 'No archived groups' : 'No groups yet'}
+                    </p>
                   )}
                 </div>
               </div>
 
-              {/* Parameters */}
+              {/* Parameters — bucketed under their group, collapsible */}
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <h2 className="text-sm font-semibold">Parameters ({filteredParams.length}{paramSearch ? `/${params.length}` : ''})</h2>
-                  <button onClick={() => openForm('param', { weight: 1, is_master: false, input_type: 'count', display_order: params.length + 1, is_active: true })} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-3 py-2 rounded-lg hover:opacity-90 text-xs">
-                    <Plus className="w-3.5 h-3.5" /> Add Parameter
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setExpandedParamGroups(prev =>
+                      prev.size >= paramsByGroup.length
+                        ? new Set()
+                        : new Set(paramsByGroup.map(b => b.group?.id || '__none__'))
+                    )} className="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-secondary border border-border text-muted-foreground hover:text-foreground transition-colors">
+                      {expandedParamGroups.size >= paramsByGroup.length && paramsByGroup.length > 0 ? 'Collapse all' : 'Expand all'}
+                    </button>
+                    <button onClick={() => openForm('param', { weight: 1, is_master: false, input_type: 'count', display_order: params.length + 1, is_active: true })} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-3 py-2 rounded-lg hover:opacity-90 text-xs">
+                      <Plus className="w-3.5 h-3.5" /> Add Parameter
+                    </button>
+                  </div>
                 </div>
                 <SearchBar value={paramSearch} onChange={setParamSearch} placeholder="Search parameters…" className="mb-3" />
                 <div className="space-y-2">
-                  {filteredParams.map((p: any) => {
-                    const group = groups.find((g: any) => g.id === p.group_id)
-                    const linkedServices = props.parameterServices.filter((ps: any) => ps.parameter_id === p.id).length
-                    const isMaster = p.is_master === true
-                    const inputType = p.input_type || 'count'
+                  {paramsByGroup.map(({ group, params: bucket }) => {
+                    const gid = group?.id || '__none__'
+                    // Searching auto-expands so matches are never hidden behind a collapsed header.
+                    const isOpen = !!paramSearch || expandedParamGroups.has(gid)
                     return (
-                      <div key={p.id} className="bg-card border border-border rounded-xl px-4 py-3 flex items-center justify-between">
-                        <div>
-                          <div className="flex items-center gap-2 mb-0.5">
-                            <p className="font-medium text-sm">{p.name}</p>
-                            {isMaster && <span className="text-[10px] bg-purple-500/15 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded font-medium">MASTER</span>}
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${inputType === 'percentage' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-secondary text-muted-foreground border-border'}`}>
-                              {inputType === 'percentage' ? '%' : '#'}
-                            </span>
+                      <div key={gid} className="bg-card border border-border rounded-xl overflow-hidden">
+                        <button type="button"
+                          onClick={() => setExpandedParamGroups(prev => {
+                            const n = new Set(prev); n.has(gid) ? n.delete(gid) : n.add(gid); return n
+                          })}
+                          className="w-full flex items-center justify-between px-4 py-3 hover:bg-secondary/40 transition-colors">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <ChevronRight className={`w-4 h-4 text-muted-foreground shrink-0 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+                            <p className="font-medium text-sm truncate">{group?.name || 'No group assigned'}</p>
+                            {group?.is_active === false && (
+                              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 shrink-0">Group archived</span>
+                            )}
                           </div>
-                          <p className="text-xs text-muted-foreground">Group: {group?.name || '—'} · Weight: {p.weight} · {linkedServices} services linked</p>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <button onClick={() => {
-                            // Merge localStorage overrides so values are correct even pre-migration
-                            let isMaster = p.is_master ?? false
-                            let inputType = p.input_type ?? 'count'
-                            try {
-                              const meta = JSON.parse(localStorage.getItem('cirqle_param_meta') || '{}')
-                              if (meta[p.id]) { isMaster = meta[p.id].is_master; inputType = meta[p.id].input_type }
-                            } catch {}
-                            setEditingId(p.id); setShowForm('param')
-                            setForm({ ...p, is_master: isMaster, input_type: inputType })
-                          }} className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground">
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button onClick={() => requestDelete('Parameter', p.id, p.name, async () => {
-                            await deactivateParameter(p.id)
-                            setParams(prev => prev.filter((x: any) => x.id !== p.id))
-                          })} className="p-2 rounded-lg hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400 transition-colors" title="Archive parameter">
-                            <Archive className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                          <span className="text-xs text-muted-foreground shrink-0 ml-2">
+                            {group ? <>Relative weight {group.weight} · </> : null}{bucket.length} parameter{bucket.length === 1 ? '' : 's'}
+                          </span>
+                        </button>
+                        {isOpen && (
+                          <div className="border-t border-border/50 divide-y divide-border/40">
+                            {bucket.map((p: any) => {
+                              const isMaster = p.is_master === true
+                              const inputType = p.input_type || 'count'
+                              return quickEdit ? (
+                                <div key={p.id} className="px-3 py-2 flex items-center gap-2 bg-amber-500/[0.03]">
+                                  <input
+                                    key={`${p.id}-name`}
+                                    defaultValue={p.name}
+                                    onBlur={e => qeSave(quickEditParameter, p.id, 'name', e.target.value.trim(), setParams as any)}
+                                    className="flex-1 bg-secondary border border-border/0 hover:border-border focus:border-primary rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:bg-background transition-colors"
+                                    placeholder="Parameter name"
+                                  />
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <span className="text-xs text-muted-foreground">Weight</span>
+                                    <input
+                                      key={`${p.id}-weight`}
+                                      defaultValue={p.weight}
+                                      type="number" min="0" step="0.001"
+                                      onBlur={e => {
+                                        const v = parseFloat(e.target.value)
+                                        if (!Number.isFinite(v) || v < 0) { e.target.value = String(p.weight); return }
+                                        if (v === p.weight) return
+                                        qeSave(quickEditParameter, p.id, 'weight', e.target.value, setParams as any, () => v)
+                                      }}
+                                      className="w-20 bg-secondary border border-border/0 hover:border-border focus:border-primary rounded-lg px-2 py-1.5 text-sm text-center focus:outline-none focus:bg-background transition-colors"
+                                    />
+                                  </div>
+                                </div>
+                              ) : (
+                                <div key={p.id} className="px-4 py-2.5 flex items-center justify-between">
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-2 mb-0.5">
+                                      <p className="font-medium text-sm truncate">{p.name}</p>
+                                      {isMaster && <span className="text-[10px] bg-purple-500/15 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded font-medium shrink-0">MASTER</span>}
+                                      <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium shrink-0 ${inputType === 'percentage' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-secondary text-muted-foreground border-border'}`}>
+                                        {inputType === 'percentage' ? '%' : '#'}
+                                      </span>
+                                      {p.is_active === false && (
+                                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 shrink-0">Archived</span>
+                                      )}
+                                    </div>
+                                    <p className="text-xs text-muted-foreground">Weight: {p.weight}</p>
+                                  </div>
+                                  <div className="flex items-center gap-1 shrink-0 ml-2">
+                                    <button onClick={() => {
+                                      // Merge localStorage overrides so values are correct even pre-migration
+                                      let isMaster = p.is_master ?? false
+                                      let inputType = p.input_type ?? 'count'
+                                      try {
+                                        const meta = JSON.parse(localStorage.getItem('cirqle_param_meta') || '{}')
+                                        if (meta[p.id]) { isMaster = meta[p.id].is_master; inputType = meta[p.id].input_type }
+                                      } catch {}
+                                      setEditingId(p.id); setShowForm('param')
+                                      setForm({ ...p, is_master: isMaster, input_type: inputType })
+                                    }} className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground">
+                                      <Edit2 className="w-3.5 h-3.5" />
+                                    </button>
+                                    {p.is_active === false ? (
+                                      <button onClick={async () => {
+                                        await restoreParameter(p.id)
+                                        setParams(prev => prev.map((x: any) => x.id === p.id ? { ...x, is_active: true } : x))
+                                      }} className="p-2 rounded-lg hover:bg-emerald-500/15 text-muted-foreground hover:text-emerald-500 transition-colors" title="Restore parameter">
+                                        <ArchiveRestore className="w-3.5 h-3.5" />
+                                      </button>
+                                    ) : (
+                                      <button onClick={() => requestDelete('Parameter', p.id, p.name, async () => {
+                                        await deactivateParameter(p.id)
+                                        setParams(prev => prev.map((x: any) => x.id === p.id ? { ...x, is_active: false } : x))
+                                      })} className="p-2 rounded-lg hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400 transition-colors" title="Archive parameter">
+                                        <Archive className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
                       </div>
                     )
                   })}
+                  {filteredParams.length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-4 opacity-60">
+                      {paramSearch ? `No parameters match "${paramSearch}"` : gpFilter === 'archived' ? 'No archived parameters' : 'No parameters yet'}
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -2187,7 +2446,10 @@ export default function SettingsClient(props: Props) {
                   <Plus className="w-4 h-4" /> Add Tool
                 </button>
               </div>
-              <SearchBar value={toolSearch} onChange={setToolSearch} placeholder="Search tools…" className="mb-3" />
+              <div className="flex items-center gap-2 mb-3">
+                <ArchFilterTabs value={archFilter} onChange={setArchFilter} />
+                <SearchBar value={toolSearch} onChange={setToolSearch} placeholder="Search tools…" className="flex-1" />
+              </div>
               <div className="space-y-1.5">
                 {filteredTools.map((tool: any) => {
                   const group = groups.find((g: any) => g.id === tool.group_id)
@@ -2219,7 +2481,12 @@ export default function SettingsClient(props: Props) {
                   ) : (
                     <div key={tool.id} className="bg-card border border-border rounded-xl px-4 py-3 flex items-center justify-between">
                       <div>
-                        <p className="font-medium text-sm">{tool.name}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium text-sm">{tool.name}</p>
+                          {tool.is_active === false && (
+                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">Archived</span>
+                          )}
+                        </div>
                         <p className="text-xs text-muted-foreground">Deducts {tool.fixed_percentage}% from {group?.name || '—'} group</p>
                       </div>
                       <div className="flex items-center gap-1">
@@ -2227,12 +2494,22 @@ export default function SettingsClient(props: Props) {
                           className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground">
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => requestDelete('Tool', tool.id, tool.name, async () => {
-                          await deactivateTool(tool.id)
-                          setTools(prev => prev.filter((x: any) => x.id !== tool.id))
-                        })} className="p-2 rounded-lg hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400 transition-colors" title="Archive tool">
-                          <Archive className="w-3.5 h-3.5" />
-                        </button>
+                        {tool.is_active === false ? (
+                          <button onClick={async () => {
+                            const res = await reactivateTool(tool.id)
+                            if (!res.ok) { toast.error('Failed to restore', res.error); return }
+                            setTools(prev => prev.map((x: any) => x.id === tool.id ? { ...x, is_active: true } : x))
+                          }} className="p-2 rounded-lg hover:bg-emerald-500/15 text-muted-foreground hover:text-emerald-500 transition-colors" title="Restore tool">
+                            <ArchiveRestore className="w-3.5 h-3.5" />
+                          </button>
+                        ) : (
+                          <button onClick={() => requestDelete('Tool', tool.id, tool.name, async () => {
+                            await deactivateTool(tool.id)
+                            setTools(prev => prev.map((x: any) => x.id === tool.id ? { ...x, is_active: false } : x))
+                          })} className="p-2 rounded-lg hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400 transition-colors" title="Archive tool">
+                            <Archive className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </div>
                   )
@@ -2299,7 +2576,7 @@ export default function SettingsClient(props: Props) {
                         <button
                           onClick={async () => {
                             const res = await reactivateBankAccount(b.id)
-                            if (!res.ok) { alert(res.error || 'Failed to restore'); return }
+                            if (!res.ok) { toast.error('Failed to restore', res.error); return }
                             setBankAccounts(prev => prev.map((x) => x.id === b.id ? { ...x, is_active: true } : x))
                           }}
                           className="p-2 rounded-lg hover:bg-emerald-500/15 text-muted-foreground hover:text-emerald-400 transition-colors"
@@ -2325,7 +2602,10 @@ export default function SettingsClient(props: Props) {
           {/* Cash Categories */}
           {tab === 'Cash Categories' && (
             <div>
-              <h2 className="text-sm font-semibold mb-4">Cash Book Categories ({categories.length})</h2>
+              <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
+                <h2 className="text-sm font-semibold">Cash Book Categories ({categories.length})</h2>
+                <ArchFilterTabs value={archFilter} onChange={setArchFilter} />
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                 {(['inflow', 'outflow', 'both'] as const).map(type => {
                   const styleMap: Record<string, { header: string; addBtn: string; dot: string }> = {
@@ -2334,7 +2614,8 @@ export default function SettingsClient(props: Props) {
                     both:    { header: 'bg-blue-500/10 text-blue-400',    addBtn: 'hover:bg-blue-500/15 hover:text-blue-400',  dot: 'bg-blue-400' },
                   }
                   const s = styleMap[type]
-                  const filtered = categories.filter((c: any) => c.type === type && c.is_active !== false)
+                  const filtered = categories.filter((c: any) => c.type === type
+                    && (archFilter === 'active' ? c.is_active !== false : archFilter === 'archived' ? c.is_active === false : true))
                   return (
                     <div key={type} className="bg-card border border-border rounded-xl overflow-hidden flex flex-col">
                       <div className={`px-4 py-3 border-b border-border flex items-center justify-between ${s.header}`}>
@@ -2350,7 +2631,7 @@ export default function SettingsClient(props: Props) {
                         )}
                         {filtered.map((c: any) => (
                           <div key={c.id} className="flex items-center justify-between px-4 py-2.5 group hover:bg-secondary/20">
-                            <span className="text-sm">{c.name}</span>
+                            <span className={`text-sm ${c.is_active === false ? 'text-muted-foreground line-through decoration-border' : ''}`}>{c.name}</span>
                             <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                               <button
                                 onClick={() => { setEditingId(c.id); setShowForm('category'); setForm(c) }}
@@ -2358,16 +2639,30 @@ export default function SettingsClient(props: Props) {
                               >
                                 <Edit2 className="w-3.5 h-3.5" />
                               </button>
-                              <button
-                                onClick={() => requestDelete('Category', c.id, c.name, async () => {
-                                  await deactivateCashbookCategory(c.id)
-                                  setCategories((prev: any[]) => prev.filter((x: any) => x.id !== c.id))
-                                })}
-                                title="Archive category (past entries are preserved)"
-                                className="p-1.5 rounded-md hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400"
-                              >
-                                <X className="w-3.5 h-3.5" />
-                              </button>
+                              {c.is_active === false ? (
+                                <button
+                                  onClick={async () => {
+                                    const res = await reactivateCashbookCategory(c.id)
+                                    if (!res.ok) { toast.error('Failed to restore', res.error); return }
+                                    setCategories((prev: any[]) => prev.map((x: any) => x.id === c.id ? { ...x, is_active: true } : x))
+                                  }}
+                                  title="Restore category"
+                                  className="p-1.5 rounded-md hover:bg-emerald-500/15 text-muted-foreground hover:text-emerald-500"
+                                >
+                                  <ArchiveRestore className="w-3.5 h-3.5" />
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => requestDelete('Category', c.id, c.name, async () => {
+                                    await deactivateCashbookCategory(c.id)
+                                    setCategories((prev: any[]) => prev.map((x: any) => x.id === c.id ? { ...x, is_active: false } : x))
+                                  })}
+                                  title="Archive category (past entries are preserved)"
+                                  className="p-1.5 rounded-md hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                             </div>
                           </div>
                         ))}
@@ -2836,6 +3131,35 @@ export default function SettingsClient(props: Props) {
                     </FieldRow>
                   )}
 
+                  {/* Services / task types this employee works on — employee_services junction */}
+                  <FieldRow label={<span className="flex items-center gap-1">Services / Task Types <InfoTip text="Which services this employee usually works on (e.g. Graphic Design, Video Editing). Contribution scoring offers only the employees assigned to a task's service. Editing the same assignment from Settings → Services updates here too." /></span>}>
+                    <div className="flex flex-wrap gap-1.5">
+                      {services.filter((s: any) => s.is_active).map((svc: any) => {
+                        const selected: string[] = form._serviceIds || []
+                        const isSelected = selected.includes(svc.id)
+                        return (
+                          <button key={svc.id} type="button"
+                            onClick={() => setForm((p: any) => ({
+                              ...p,
+                              _serviceIds: isSelected
+                                ? (p._serviceIds || []).filter((id: string) => id !== svc.id)
+                                : [...(p._serviceIds || []), svc.id],
+                            }))}
+                            className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+                              isSelected
+                                ? 'bg-primary/15 text-primary border-primary/30'
+                                : 'bg-secondary text-muted-foreground border-transparent hover:border-border hover:text-foreground'
+                            }`}>
+                            {isSelected ? '✓ ' : ''}{svc.name}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {(form._serviceIds || []).length === 0 && (
+                      <p className="text-xs text-muted-foreground/60 mt-1.5">No services assigned — this employee appears for every task type in contribution scoring.</p>
+                    )}
+                  </FieldRow>
+
                   <div className="grid grid-cols-2 gap-3">
                     <FieldRow label={<span className="flex items-center">Role (legacy) <InfoTip text="Legacy role — kept for compatibility. Designation above is now the source of truth." /></span>}>
                       <AppSelect value={form.role || 'employee'} onChange={e => setForm(p => ({ ...p, role: e.target.value }))}>
@@ -3182,9 +3506,10 @@ export default function SettingsClient(props: Props) {
                   <FieldRow label="Service Name" required><input value={form.name || ''} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} required className={inputCls} /></FieldRow>
 
                   {/* Contribution Groups */}
-                  <FieldRow label={<span className="flex items-center gap-1">Contribution Groups <InfoTip text="Select which groups apply to this service. Only selected groups will appear in the Contribution Entry screen for tasks of this service type." /></span>}>
+                  <FieldRow label={<span className="flex items-center gap-1">Contribution Groups <InfoTip text="Select which groups apply to this service — only those appear in the Contribution Entry screen for its tasks. Leave empty to make ALL groups available. Weights auto-normalize per task, so any combination always splits exactly 100%." /></span>}>
                     <div className="space-y-2">
-                      {groups.map((g: any) => {
+                      {/* Active groups, plus archived ones already linked (badged) so stale links stay visible */}
+                      {groups.filter((g: any) => g.is_active !== false || (form._groupIds || []).includes(g.id)).map((g: any) => {
                         const selected: string[] = form._groupIds || []
                         const isSelected = selected.includes(g.id)
                         return (
@@ -3201,8 +3526,13 @@ export default function SettingsClient(props: Props) {
                                 : 'bg-secondary border-transparent text-muted-foreground hover:border-border'
                             }`}>
                             <div className="text-left">
-                              <p className="font-medium">{g.name}</p>
-                              <p className="text-xs opacity-60">Weight: {g.weight}%</p>
+                              <p className="font-medium flex items-center gap-2">
+                                {g.name}
+                                {g.is_active === false && (
+                                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">Archived</span>
+                                )}
+                              </p>
+                              <p className="text-xs opacity-60">Relative weight: {g.weight}</p>
                             </div>
                             <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all ${
                               isSelected ? 'border-primary bg-primary' : 'border-muted-foreground/30'
@@ -3212,10 +3542,70 @@ export default function SettingsClient(props: Props) {
                           </button>
                         )
                       })}
-                      {(form._groupIds || []).length === 0 && (
-                        <p className="text-xs text-amber-400 mt-1">⚠ No groups selected — all groups will show for this service.</p>
-                      )}
+                      {/* Live normalized preview — the split the engine will actually use.
+                          Future per-service weight overrides would feed resolved junction
+                          weights into normalizeGroupWeights here (see lib/contributions/weights.ts). */}
+                      {(() => {
+                        const selectedIds: string[] = form._groupIds || []
+                        // Scoring only ever sees ACTIVE groups — the preview must mirror that.
+                        const selectedGroups = groups.filter((g: any) => selectedIds.includes(g.id) && g.is_active !== false)
+                        if (selectedIds.length > 0 && selectedGroups.length === 0) return (
+                          <p className="text-xs text-amber-400 mt-1">⚠ Every selected group is archived — tasks of this service will have nothing to score. Restore the groups or select active ones.</p>
+                        )
+                        if (selectedGroups.length === 0) return (
+                          <p className="text-xs text-muted-foreground mt-1">No groups selected — <span className="font-medium text-foreground/80">all groups</span> will be available when scoring tasks of this service.</p>
+                        )
+                        const split = normalizeGroupWeights(selectedGroups)
+                        return (
+                          <div className="mt-1 px-3 py-2.5 rounded-lg bg-blue-500/[0.05] border border-blue-500/15">
+                            <p className="text-[11px] font-semibold text-blue-500 dark:text-blue-400 mb-1.5">Effective split when scoring (weights auto-normalize to 100%)</p>
+                            <div className="flex w-full h-2 rounded-full overflow-hidden bg-secondary mb-1.5">
+                              {split.map((g, i) => (
+                                <div key={g.id} title={`${g.name}: ${g.pct.toFixed(1)}%`}
+                                  className={i % 2 === 0 ? 'bg-primary/70' : 'bg-blue-400/70'}
+                                  style={{ width: `${g.pct}%` }} />
+                              ))}
+                            </div>
+                            <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                              {split.map(g => (
+                                <span key={g.id} className="text-[11px] text-muted-foreground">
+                                  {g.name.replace(' Group', '')} <span className="font-semibold text-foreground">{g.pct.toFixed(g.pct % 1 === 0 ? 0 : 1)}%</span>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      })()}
                     </div>
+                  </FieldRow>
+
+                  {/* Assigned employees — employee_services junction (same rows as the employee form) */}
+                  <FieldRow label={<span className="flex items-center gap-1">Assigned Employees <InfoTip text="Employees who work on this service. Contribution scoring for tasks of this service offers only these employees. Editing the same assignment from the employee form updates here too." /></span>}>
+                    <div className="flex flex-wrap gap-1.5">
+                      {employees.filter((emp: any) => emp.is_active && !emp.is_archived).map((emp: any) => {
+                        const selected: string[] = form._employeeIds || []
+                        const isSelected = selected.includes(emp.id)
+                        return (
+                          <button key={emp.id} type="button"
+                            onClick={() => setForm((p: any) => ({
+                              ...p,
+                              _employeeIds: isSelected
+                                ? (p._employeeIds || []).filter((id: string) => id !== emp.id)
+                                : [...(p._employeeIds || []), emp.id],
+                            }))}
+                            className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+                              isSelected
+                                ? 'bg-primary/15 text-primary border-primary/30'
+                                : 'bg-secondary text-muted-foreground border-transparent hover:border-border hover:text-foreground'
+                            }`}>
+                            {isSelected ? '✓ ' : ''}{emp.cqid}{isUnlocked && emp.name ? ` · ${emp.name}` : ''}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {(form._employeeIds || []).length === 0 && (
+                      <p className="text-xs text-muted-foreground/60 mt-1.5">No employees assigned — every employee appears for this service in contribution scoring.</p>
+                    )}
                   </FieldRow>
 
                   <FieldRow label={<span className="flex items-center">Pricing Type <InfoTip text="How this service is billed to clients." /></span>}>
@@ -3265,7 +3655,7 @@ export default function SettingsClient(props: Props) {
                 <>
                   <FieldRow label="Group Name" required><input value={form.name || ''} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} required className={inputCls} /></FieldRow>
                   <div className="grid grid-cols-2 gap-3">
-                    <FieldRow label="Weight (%)"><input type="number" min="0" max="100" step="0.01" value={form.weight || ''} onChange={e => setForm(p => ({ ...p, weight: parseFloat(e.target.value) || 0 }))} className={inputCls} placeholder="e.g. 50" /></FieldRow>
+                    <FieldRow label={<span className="flex items-center gap-1">Relative Weight <InfoTip text="Importance relative to other groups — NOT a fixed percentage. When a task is scored, the weights of the groups used on it are normalized to split 100% of the pool (e.g. 50/50/50 → 33.3% each). Weights never need to sum to 100." /></span>}><input type="number" min="0" step="0.01" value={form.weight || ''} onChange={e => setForm(p => ({ ...p, weight: parseFloat(e.target.value) || 0 }))} className={inputCls} placeholder="e.g. 50" /></FieldRow>
                     <FieldRow label="Display Order"><input type="number" min="1" value={form.display_order || ''} onChange={e => setForm(p => ({ ...p, display_order: parseInt(e.target.value) || 1 }))} className={inputCls} /></FieldRow>
                   </div>
                   <FieldRow label="Description"><textarea value={form.description || ''} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} rows={2} className={inputCls + ' resize-none'} /></FieldRow>
@@ -3560,7 +3950,7 @@ export default function SettingsClient(props: Props) {
                   setAvatarSaving(true)
                   const res = await updateEmployeeAvatar(avatarModal.id, avatarPickerValue)
                   setAvatarSaving(false)
-                  if (!res.ok) { alert(res.error || 'Failed to save avatar'); return }
+                  if (!res.ok) { toast.error('Failed to save avatar', res.error); return }
                   // Refresh page data so avatars update
                   window.location.reload()
                 }}
@@ -3594,6 +3984,8 @@ export default function SettingsClient(props: Props) {
           employees={employees}
         />
       )}
+
+      <ToastContainer toasts={toast.toasts} onDismiss={toast.dismiss} />
     </div>
   )
 }

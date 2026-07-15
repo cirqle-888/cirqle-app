@@ -33,6 +33,9 @@ const pad = (n: number) => String(n).padStart(2, '0')
 const toKey = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 const parse = (s: string) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d) }
 
+// YYYY-MM-DD strings compare lexicographically like dates, so plain `>` works.
+const clampToToday = (end: string, today: string) => (end > today ? today : end)
+
 export function addDays(date: string, n: number): string {
   const d = parse(date); d.setDate(d.getDate() + n); return toKey(d)
 }
@@ -76,14 +79,14 @@ export function resolveComparisonPeriods(
     const dow = (t.getDay() + 6) % 7                       // Monday = 0
     const from = addDays(today, -dow)
     return {
-      current: { from, to: addDays(from, 6) },
+      current: { from, to: clampToToday(addDays(from, 6), today) },
       previous: { from: addDays(from, -7), to: addDays(from, -1) },
       granularity: 'day',
     }
   }
   if (mode === 'month') {
     return {
-      current: { from: toKey(new Date(y, m, 1)), to: toKey(new Date(y, m + 1, 0)) },
+      current: { from: toKey(new Date(y, m, 1)), to: clampToToday(toKey(new Date(y, m + 1, 0)), today) },
       previous: { from: toKey(new Date(y, m - 1, 1)), to: toKey(new Date(y, m, 0)) },
       granularity: 'day',
     }
@@ -91,14 +94,14 @@ export function resolveComparisonPeriods(
   if (mode === 'quarter') {
     const q = Math.floor(m / 3) * 3
     return {
-      current: { from: toKey(new Date(y, q, 1)), to: toKey(new Date(y, q + 3, 0)) },
+      current: { from: toKey(new Date(y, q, 1)), to: clampToToday(toKey(new Date(y, q + 3, 0)), today) },
       previous: { from: toKey(new Date(y, q - 3, 1)), to: toKey(new Date(y, q, 0)) },
       granularity: 'day',
     }
   }
   if (mode === 'year') {
     return {
-      current: { from: `${y}-01-01`, to: `${y}-12-31` },
+      current: { from: `${y}-01-01`, to: clampToToday(`${y}-12-31`, today) },
       previous: { from: `${y - 1}-01-01`, to: `${y - 1}-12-31` },
       granularity: 'month',
     }

@@ -135,6 +135,29 @@ const TEMPLATE_CONFIGS: Record<ReportTemplate, TemplateConfig> = {
       recommendations:     false,
     },
   },
+
+  /**
+   * Monthly — same branded style and section set as Daily, but the
+   * `dailyBreakdown` table rolls up performance by calendar month instead of
+   * by day, for campaigns that run long enough that a day-by-day table stops
+   * being useful.
+   */
+  monthly: {
+    name: 'monthly',
+    displayName: 'Monthly Report',
+    primaryKPI: 'reach',
+    sections: {
+      executiveSummary:    false,
+      kpiScorecard:        true,
+      dailyBreakdown:      true,
+      campaignHealth:      false,
+      benchmarkComparison: false,
+      forecast:            false,
+      aiInsights:          false,
+      budgetAnalysis:      true,
+      recommendations:     false,
+    },
+  },
 }
 
 /**

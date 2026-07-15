@@ -29,8 +29,9 @@ import {
   Tag,
   Package,
 } from 'lucide-react'
-import { navSections } from '@/lib/nav-sections'
+import { navSections, isNavItemVisible, resolveActiveHref } from '@/lib/nav-sections'
 import { useWorkspace } from '@/contexts/workspace-context'
+import { useRequestsBadge } from '@/contexts/requests-badge-context'
 import { WorkspaceSwitcher } from '@/components/layout/workspace-switcher'
 import { EmployeeAvatar } from '@/components/ui/employee-avatar'
 import { FavoritesSection } from '@/components/layout/favorites-section'
@@ -220,31 +221,9 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
   const [logoBroken, setLogoBroken] = useState(false)
   const [faviconBroken, setFaviconBroken] = useState(false)
 
-  // Requests badge — count of requests with new external activity. This is the
-  // ONLY global indicator for the Request Portal (design: no popups/toasts).
-  // Defensive: silently 0 if the portal tables don't exist yet.
-  const [requestsBadge, setRequestsBadge] = useState(0)
-  const canSeeRequests = can('requests.view')
-  useEffect(() => {
-    if (!canSeeRequests) return
-    let alive = true
-    ;(async () => {
-      try {
-        const supabase = createClient()
-        const { data, error } = await supabase
-          .from('task_requests')
-          .select('id, last_external_activity_at, last_staff_viewed_at, status')
-          .not('status', 'in', '("rejected","archived")')
-          .limit(500)
-        if (!alive || error || !data) return
-        setRequestsBadge(data.filter((r: any) =>
-          r.last_external_activity_at &&
-          (!r.last_staff_viewed_at || r.last_external_activity_at > r.last_staff_viewed_at)
-        ).length)
-      } catch { /* table missing pre-migration */ }
-    })()
-    return () => { alive = false }
-  }, [canSeeRequests, pathname])
+  // Requests badge — shared with the App Launcher via RequestsBadgeProvider
+  // (single subscription/fetch, see src/contexts/requests-badge-context.tsx).
+  const requestsBadge = useRequestsBadge()
 
   useEffect(() => {
     if (typeof window !== 'undefined' && (window as any).__CIRQLE_DESKTOP__) {
@@ -265,8 +244,7 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
         .map(s => ({
           ...s,
           items: s.items.filter(i =>
-            (!i.requiredPerm || can(i.requiredPerm)) &&
-            (!i.adminOnly || user.isAdmin) &&
+            isNavItemVisible(i, can, user.isAdmin) &&
             (!workspaceHrefs || workspaceHrefs.includes(i.href))
           ),
         }))
@@ -274,15 +252,38 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
     [can, user.isAdmin, workspaceHrefs],
   )
 
-  // Most-specific matching nav href wins, so a parent ("Invoices") doesn't also
-  // light up when a child route ("Invoices › Follow-ups") is active.
-  const activeHref = useMemo(() => {
-    const candidates = visibleNavSections
-      .flatMap(s => s.items.map(i => i.href))
-      .filter(h => pathname === h || (h !== '/dashboard' && pathname.startsWith(h + '/')))
-    if (candidates.length === 0) return null
-    return candidates.reduce((a, b) => (b.length > a.length ? b : a))
-  }, [visibleNavSections, pathname])
+  const activeHref = useMemo(() => resolveActiveHref(visibleNavSections, pathname), [visibleNavSections, pathname])
+
+  // ── Accordion state ─────────────────────────────────
+  // Labeled sections collapse to keep the sidebar short. First paint uses each
+  // section's defaultOpen (SSR-safe); the user's own toggles then hydrate from
+  // localStorage and persist on every change.
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({})
+  useEffect(() => {
+    try { setOpenSections(JSON.parse(localStorage.getItem('sidebar-open-sections') || '{}')) } catch { /* first run */ }
+  }, [])
+
+  const isSectionOpen = (label: string | undefined, defaultOpen?: boolean) =>
+    !label || (openSections[label] ?? defaultOpen ?? true)
+
+  function toggleSection(label: string, currentOpen: boolean) {
+    setOpenSections(prev => {
+      const next = { ...prev, [label]: !currentOpen }
+      try { localStorage.setItem('sidebar-open-sections', JSON.stringify(next)) } catch { /* private mode */ }
+      return next
+    })
+  }
+
+  // Never let the active route hide inside a closed group: opening happens in
+  // state only (not persisted), so the user's saved preference is untouched.
+  const activeSectionLabel = useMemo(
+    () => visibleNavSections.find(s => s.items.some(i => i.href === activeHref))?.label ?? null,
+    [visibleNavSections, activeHref],
+  )
+  useEffect(() => {
+    if (!activeSectionLabel) return
+    setOpenSections(prev => prev[activeSectionLabel] === true ? prev : { ...prev, [activeSectionLabel]: true })
+  }, [activeSectionLabel])
 
   async function handleSignOut() {
     const supabase = createClient()
@@ -376,69 +377,108 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
         <FavoritesSection isCollapsed={isCollapsed} activeHref={activeHref} onNavClick={onNavClick} />
         {visibleNavSections.map((section, sIdx) => {
           const visibleItems = section.items
-          return (
-            <div key={sIdx} className={sIdx > 0 ? 'mt-4' : ''}>
-              {section.label && (
-                <div className="relative">
-                  <div className={`overflow-hidden transition-all duration-300 ${isCollapsed ? 'h-0 opacity-0 mb-0' : 'h-4 opacity-100 mb-1.5'}`}>
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/40 px-3 whitespace-nowrap">
-                      {section.label}
-                    </p>
-                  </div>
-                  <div className={`flex justify-center overflow-hidden transition-all duration-300 ${isCollapsed ? 'h-4 opacity-100 mb-1.5' : 'h-0 opacity-0 mb-0'}`}>
-                    <div className="w-4 h-px bg-sidebar-border mt-2" />
-                  </div>
-                </div>
-              )}
-              <div className="space-y-0.5">
-                {visibleItems.map(({ label, href, icon: Icon }) => {
-                  const active = href === activeHref
-                  const iconKey = Icon.displayName || 'Star'
-                  return (
-                    <div key={href} className="relative group">
-                      <Link
-                        href={href}
-                        onClick={onNavClick}
-                        title={isCollapsed ? label : undefined}
-                        className={`flex items-center rounded-lg text-sm font-medium transition-all duration-300 ${
-                          isCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2.5'
-                        } ${
-                          active
-                            ? 'bg-sidebar-accent/60 text-foreground shadow-sm ring-1 ring-border/50'
-                            : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-                        }`}
-                      >
-                        <span className="relative shrink-0">
-                          <Icon className={`w-4 h-4 shrink-0 transition-colors ${active ? 'text-foreground' : 'text-muted-foreground group-hover:text-sidebar-accent-foreground'}`} />
-                          {href === '/dashboard/requests' && requestsBadge > 0 && isCollapsed && (
-                            <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400" />
-                          )}
-                        </span>
-                        <div className={`flex items-center overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0' : 'flex-1 opacity-100'}`}>
-                          <span className="flex-1 truncate whitespace-nowrap">{label}</span>
-                          {href === '/dashboard/requests' && requestsBadge > 0 && (
-                            <span className="ml-2 shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-bold flex items-center justify-center">
-                              {requestsBadge > 99 ? '99+' : requestsBadge}
-                            </span>
-                          )}
-                          {active && <ChevronRight className="w-3.5 h-3.5 text-foreground/40 shrink-0 ml-2" />}
-                        </div>
-                      </Link>
-                      {!isCollapsed && (
-                        <FavoriteToggle
-                          entityType="nav_page"
-                          // href doubles as the entity id — each nav page must be
-                          // individually identifiable or pinning one replaces another
-                          entityId={href}
-                          href={href}
-                          label={label}
-                          iconKey={iconKey}
-                          className="absolute right-1.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100"
-                        />
+          const open = isSectionOpen(section.label, section.defaultOpen)
+          const sectionHasActive = visibleItems.some(i => i.href === activeHref)
+          const sectionHasBadge = visibleItems.some(i => i.href === '/dashboard/requests') && requestsBadge > 0
+          const itemsBlock = (
+            <div className="space-y-px">
+              {visibleItems.map(({ label, href, icon: Icon }) => {
+                const active = href === activeHref
+                const iconKey = Icon.displayName || 'Star'
+                return (
+                  <div key={href} className="relative group">
+                    <Link
+                      href={href}
+                      onClick={onNavClick}
+                      title={isCollapsed ? label : undefined}
+                      aria-current={active ? 'page' : undefined}
+                      className={`relative flex items-center rounded-lg text-sm transition-all duration-200 ${
+                        isCollapsed ? 'justify-center p-2.5' : 'gap-2.5 px-3 py-2'
+                      } ${
+                        active
+                          ? 'bg-sidebar-accent/70 text-foreground font-semibold'
+                          : 'font-medium text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-foreground'
+                      }`}
+                    >
+                      {/* Active indicator — slim brand-gradient bar */}
+                      {active && !isCollapsed && (
+                        <span aria-hidden className="absolute left-0 top-1/2 -translate-y-1/2 h-4 w-[3px] rounded-full gradient-bg" />
                       )}
-                    </div>
-                  )
-                })}
+                      <span className="relative shrink-0">
+                        <Icon className={`w-4 h-4 shrink-0 transition-colors ${active ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground'}`} />
+                        {href === '/dashboard/requests' && requestsBadge > 0 && isCollapsed && (
+                          <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400" />
+                        )}
+                      </span>
+                      <div className={`flex items-center overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0' : 'flex-1 opacity-100'}`}>
+                        <span className="flex-1 truncate whitespace-nowrap">{label}</span>
+                        {href === '/dashboard/requests' && requestsBadge > 0 && (
+                          <span className="ml-2 shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-bold flex items-center justify-center">
+                            {requestsBadge > 99 ? '99+' : requestsBadge}
+                          </span>
+                        )}
+                      </div>
+                    </Link>
+                    {!isCollapsed && (
+                      <FavoriteToggle
+                        entityType="nav_page"
+                        // href doubles as the entity id — each nav page must be
+                        // individually identifiable or pinning one replaces another
+                        entityId={href}
+                        href={href}
+                        label={label}
+                        iconKey={iconKey}
+                        className="absolute right-1.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100"
+                      />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )
+
+          // Collapsed rail: every icon stays reachable — accordion only applies
+          // to the expanded sidebar. Sections separate with a short divider.
+          if (isCollapsed) {
+            return (
+              <div key={sIdx} className={sIdx > 0 ? 'mt-2' : ''}>
+                {section.label && (
+                  <div className="flex justify-center mb-2">
+                    <div className="w-4 h-px bg-sidebar-border" />
+                  </div>
+                )}
+                {itemsBlock}
+              </div>
+            )
+          }
+
+          // Unlabeled section (Dashboard) — always visible, no header.
+          if (!section.label) return <div key={sIdx} className={sIdx > 0 ? 'mt-3' : ''}>{itemsBlock}</div>
+
+          return (
+            <div key={sIdx} className="mt-3">
+              <button
+                type="button"
+                onClick={() => toggleSection(section.label!, open)}
+                aria-expanded={open}
+                className="w-full flex items-center justify-between px-3 py-1 rounded-md group/hdr select-none"
+              >
+                <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.09em] text-muted-foreground/50 group-hover/hdr:text-muted-foreground transition-colors whitespace-nowrap">
+                  {section.label}
+                  {/* Closed-state hints: a dot when the group holds the active page
+                      (can only flash briefly — it auto-opens), amber when it holds
+                      the Requests badge so pending work is never invisible. */}
+                  {!open && sectionHasActive && <span className="w-1 h-1 rounded-full gradient-bg" />}
+                  {!open && sectionHasBadge && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
+                </span>
+                <ChevronDown className={`w-3 h-3 text-muted-foreground/40 group-hover/hdr:text-muted-foreground transition-transform duration-200 ${open ? '' : '-rotate-90'}`} />
+              </button>
+              <div className={`grid transition-[grid-template-rows] duration-200 ease-out ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+                {/* inert removes the hidden links from tab order + screen readers
+                    while collapsed — overflow-hidden alone only hides them visually. */}
+                <div className="overflow-hidden min-h-0" inert={!open}>
+                  {itemsBlock}
+                </div>
               </div>
             </div>
           )

@@ -1,18 +1,21 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import Header from '@/components/layout/header'
 import {
-  Users2, Wallet, CheckCircle2, Clock, Sparkles,
+  Users2, Wallet, CheckCircle2, Clock, FileClock, TrendingUp, CircleSlash,
   Copy, Image as ImageIcon, Download, Mail, Link as LinkIcon, X,
 } from 'lucide-react'
-import { linkClientToPartner, fetchPartnerStatement } from '../actions'
+import { linkClientToPartner, fetchPartnerStatement, setClientPartnerSince } from '../actions'
 import { sendPartnerStatementEmail } from '@/lib/partners/send-email'
 import { buildPartnerStatementText, partnerWhatsappShareUrl } from '@/lib/partners/whatsapp'
+import { copyToClipboard } from '@/lib/clipboard'
 import { downloadStatementImage } from '@/lib/partners/statement-image'
 import { downloadStatementPdf } from '@/lib/partners/statement-pdf'
 import { FavoriteToggle } from '@/components/ui/favorite-toggle'
-import type { BusinessPartner, PartnerDashboardData, PartnerStatementData } from '@/lib/partners/queries'
+import CommissionPlanner from '@/components/partners/commission-planner'
+import type { BusinessPartner, PartnerDashboardData, PartnerStatementData, CommissionPayment } from '@/lib/partners/queries'
 
 interface UnlinkedClient { id: string; name: string; code: string }
 interface Brand { companyName: string; primaryColor: string }
@@ -21,9 +24,11 @@ interface Props {
   partner: BusinessPartner
   dashboard: PartnerDashboardData
   unlinkedClients: UnlinkedClient[]
+  commissionPayments: CommissionPayment[]
   brand: Brand
   canEdit: boolean
   canExport: boolean
+  canViewProfit: boolean
 }
 
 const fmtAmt = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
@@ -33,7 +38,10 @@ const fmtDate = (s: string | null) => {
   return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-export default function PartnerDashboardClient({ partner, dashboard, unlinkedClients, brand, canEdit, canExport }: Props) {
+export default function PartnerDashboardClient({ partner, dashboard, unlinkedClients, commissionPayments, brand, canEdit, canExport, canViewProfit }: Props) {
+  const hasDrafts = dashboard.draftInvoices > 0
+  const hasHandover = dashboard.clients.some(c => c.partnerSince)
+  const hasBadDebt = dashboard.totalBadDebt > 0
   const [linkOpen, setLinkOpen] = useState(false)
   const [linking, setLinking] = useState(false)
   const [statement, setStatement] = useState<PartnerStatementData | null>(null)
@@ -56,9 +64,10 @@ export default function PartnerDashboardClient({ partner, dashboard, unlinkedCli
     setActionMsg(null)
     const data = await ensureStatement()
     if (data) {
-      const text = buildPartnerStatementText(data)
-      await navigator.clipboard.writeText(text)
-      setActionMsg('Statement text copied to clipboard.')
+      const ok = await copyToClipboard(buildPartnerStatementText(data))
+      setActionMsg(ok
+        ? 'Statement text copied to clipboard.'
+        : 'Could not reach the clipboard — open WhatsApp from the link instead.')
     }
     setBusyAction(null)
   }
@@ -110,6 +119,7 @@ export default function PartnerDashboardClient({ partner, dashboard, unlinkedCli
     <>
       <Header
         title={partner.name}
+        crumbLabel={partner.name}
         subtitle={`${partner.partner_code}${partner.company ? ` · ${partner.company}` : ''}`}
         actions={
           <FavoriteToggle
@@ -125,16 +135,48 @@ export default function PartnerDashboardClient({ partner, dashboard, unlinkedCli
 
       <div className="p-4 sm:p-6 space-y-6">
         {/* KPI cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        {/* Up to 7 tiles (drafts + profit are conditional) — wrap instead of
+            squeezing them into one unreadable row. */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           <Kpi icon={Users2} label="Total Clients" value={String(dashboard.totalClients)} />
-          <Kpi icon={Clock} label="Pending Collection" value={fmtAmt(dashboard.pendingCollection)} />
-          <Kpi icon={CheckCircle2} label="Collected Amount" value={fmtAmt(dashboard.collectedAmount)} />
+          <Kpi icon={Clock} label="Pending Collection" value={fmtAmt(dashboard.pendingCollection)} hint="Billed to the client — what this partner chases" />
+          {hasDrafts && (
+            <Link href="/dashboard/invoices/follow-ups" className="block rounded-xl transition-colors hover:bg-secondary/70">
+              <Kpi
+                icon={FileClock}
+                label="Not yet sent"
+                value={fmtAmt(dashboard.draftAmount)}
+                hint={`${dashboard.draftInvoices} draft invoice${dashboard.draftInvoices === 1 ? '' : 's'} · internal, never on the statement`}
+              />
+            </Link>
+          )}
+          <Kpi
+            icon={CheckCircle2}
+            label="Collected Amount"
+            value={fmtAmt(dashboard.collectedAmount)}
+            hint={hasHandover
+              ? 'Excludes billing from before they took each client over'
+              : 'Every client’s full history — set a Partner Since date below to narrow it'}
+          />
+          {canViewProfit && (
+            <Kpi
+              icon={TrendingUp}
+              label="Total Profit"
+              value={fmtAmt(dashboard.totalProfit)}
+              tint={dashboard.totalProfit < 0 ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'}
+              hint={`${dashboard.totalMarginPct}% margin · invoiced minus direct costs and staff commission`}
+            />
+          )}
+          {dashboard.totalBadDebt > 0 && (
+            <Kpi
+              icon={CircleSlash}
+              label="Bad debt (loss)"
+              value={fmtAmt(dashboard.totalBadDebt)}
+              tint="text-red-500"
+              hint="Written off — delivered, never paid. Already subtracted from profit."
+            />
+          )}
           <Kpi icon={Wallet} label="Last Collection" value={fmtDate(dashboard.lastCollection)} />
-          <div className="bg-secondary border border-dashed border-border rounded-xl p-4 flex flex-col justify-center items-center text-center">
-            <Sparkles className="w-4 h-4 text-muted-foreground mb-1" />
-            <div className="text-xs font-medium text-muted-foreground">Commission Settlement</div>
-            <div className="text-xs text-muted-foreground/70 mt-0.5">Coming Soon</div>
-          </div>
         </div>
 
         {/* Generate Statement */}
@@ -158,6 +200,18 @@ export default function PartnerDashboardClient({ partner, dashboard, unlinkedCli
             </div>
             {actionMsg && <div className="text-xs text-muted-foreground mt-3">{actionMsg}</div>}
           </div>
+        )}
+
+        {/* Commission planner — margin-revealing, so same gate as the profit column */}
+        {canViewProfit && (
+          <CommissionPlanner
+            partnerId={partner.id}
+            partnerName={partner.name}
+            clients={dashboard.clients}
+            savedPercent={partner.commission_type === 'percentage' ? partner.commission_value : null}
+            payments={commissionPayments}
+            canEdit={canEdit}
+          />
         )}
 
         {/* Linked clients */}
@@ -193,6 +247,20 @@ export default function PartnerDashboardClient({ partner, dashboard, unlinkedCli
                     <p className="text-xs text-muted-foreground">
                       {c.pendingInvoices} pending · last payment {fmtDate(c.lastPayment)} · last invoice {fmtDate(c.lastInvoice)}
                     </p>
+                    {canViewProfit && (
+                      <p className={`text-xs mt-0.5 ${c.profitInr < 0 ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                        {fmtAmt(c.profitInr)} profit · {c.marginPct}% margin
+                      </p>
+                    )}
+                    <div className="text-[11px] text-muted-foreground/70 mt-0.5 flex items-center gap-1">
+                      Partner since
+                      <PartnerSinceCell clientId={c.id} value={c.partnerSince} canEdit={canEdit} onError={setActionMsg} />
+                    </div>
+                    {c.draftInvoices > 0 && (
+                      <p className="text-[11px] text-muted-foreground/70 mt-0.5">
+                        {fmtAmt(c.draftAmount)} in {c.draftInvoices} draft{c.draftInvoices === 1 ? '' : 's'} — not sent, not on the statement
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -202,8 +270,12 @@ export default function PartnerDashboardClient({ partner, dashboard, unlinkedCli
                 <thead>
                   <tr className="text-left text-xs text-muted-foreground border-b border-border">
                     <th className="pb-2 font-medium">Client</th>
+                    <th className="pb-2 font-medium">Partner Since</th>
                     <th className="pb-2 font-medium text-right">Outstanding</th>
                     <th className="pb-2 font-medium text-right">Pending Invoices</th>
+                    {hasDrafts && <th className="pb-2 font-medium text-right">Not Sent</th>}
+                    {hasBadDebt && <th className="pb-2 font-medium text-right">Bad Debt</th>}
+                    {canViewProfit && <th className="pb-2 font-medium text-right">Profit</th>}
                     <th className="pb-2 font-medium text-right">Last Payment</th>
                     <th className="pb-2 font-medium text-right">Last Invoice</th>
                     {canEdit && <th className="pb-2"></th>}
@@ -213,8 +285,35 @@ export default function PartnerDashboardClient({ partner, dashboard, unlinkedCli
                   {dashboard.clients.map(c => (
                     <tr key={c.id} className="border-b border-border/50 last:border-0">
                       <td className="py-2.5 text-foreground">{c.name}</td>
+                      <td className="py-2.5">
+                        <PartnerSinceCell
+                          clientId={c.id}
+                          value={c.partnerSince}
+                          canEdit={canEdit}
+                          onError={setActionMsg}
+                        />
+                      </td>
                       <td className="py-2.5 text-right text-foreground">{fmtAmt(c.outstanding)}</td>
                       <td className="py-2.5 text-right text-muted-foreground">{c.pendingInvoices}</td>
+                      {hasDrafts && (
+                        <td className="py-2.5 text-right text-muted-foreground/70" title="Draft invoices — not sent to the client, not on the statement">
+                          {c.draftInvoices > 0 ? `${fmtAmt(c.draftAmount)} · ${c.draftInvoices}` : '—'}
+                        </td>
+                      )}
+                      {hasBadDebt && (
+                        <td className="py-2.5 text-right text-red-500 tabular-nums" title="Delivered but never paid — written off">
+                          {c.badDebtInr > 0 ? fmtAmt(c.badDebtInr) : '—'}
+                        </td>
+                      )}
+                      {canViewProfit && (
+                        <td
+                          className={`py-2.5 text-right font-medium ${c.profitInr < 0 ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'}`}
+                          title="Invoiced minus direct costs and attributed staff commission, on this partner's invoices only"
+                        >
+                          {fmtAmt(c.profitInr)}
+                          <span className="text-[10px] text-muted-foreground ml-1">{c.marginPct}%</span>
+                        </td>
+                      )}
                       <td className="py-2.5 text-right text-muted-foreground">{fmtDate(c.lastPayment)}</td>
                       <td className="py-2.5 text-right text-muted-foreground">{fmtDate(c.lastInvoice)}</td>
                       {canEdit && (
@@ -265,12 +364,82 @@ export default function PartnerDashboardClient({ partner, dashboard, unlinkedCli
   )
 }
 
-function Kpi({ icon: Icon, label, value }: { icon: typeof Users2; label: string; value: string }) {
+/**
+ * The handover date, editable inline. A client the partner originated has no
+ * date ("From the start") — one they inherited gets the date they took over,
+ * and everything billed before it stops counting as theirs.
+ */
+function PartnerSinceCell({ clientId, value, canEdit, onError }: {
+  clientId: string
+  value: string | null
+  canEdit: boolean
+  onError: (msg: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value ?? '')
+  const [saving, setSaving] = useState(false)
+
+  async function save(next: string | null) {
+    setSaving(true)
+    const res = await setClientPartnerSince(clientId, next)
+    if (!res.ok) {
+      setSaving(false)
+      onError(res.error || 'Could not save the handover date.')
+      return
+    }
+    // Every figure on this page is derived from the date, so reload rather than
+    // trying to re-add the arithmetic client-side.
+    window.location.reload()
+  }
+
+  if (!canEdit) {
+    return <span className="text-muted-foreground">{value ? fmtDate(value) : 'From the start'}</span>
+  }
+
+  if (!editing) {
+    return (
+      <button
+        onClick={() => { setDraft(value ?? ''); setEditing(true) }}
+        title="Invoices issued before this date aren't attributed to this partner"
+        className={`text-xs hover:underline ${value ? 'text-foreground' : 'text-muted-foreground'}`}
+      >
+        {value ? fmtDate(value) : 'From the start'}
+      </button>
+    )
+  }
+
   return (
-    <div className="bg-secondary border border-border rounded-xl p-4">
+    <div className="flex items-center gap-1">
+      <input
+        type="date"
+        value={draft}
+        autoFocus
+        disabled={saving}
+        onChange={e => setDraft(e.target.value)}
+        className="text-xs bg-background border border-border rounded-lg px-2 py-1 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+      />
+      <button onClick={() => save(draft || null)} disabled={saving}
+        className="text-xs font-medium text-primary hover:underline disabled:opacity-50">Save</button>
+      {value && (
+        <button onClick={() => save(null)} disabled={saving}
+          title="This client was the partner's from the start"
+          className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-50">Clear</button>
+      )}
+      <button onClick={() => setEditing(false)} disabled={saving}
+        className="text-muted-foreground hover:text-foreground p-0.5"><X className="w-3 h-3" /></button>
+    </div>
+  )
+}
+
+function Kpi({ icon: Icon, label, value, hint, tint }: {
+  icon: typeof Users2; label: string; value: string; hint?: string; tint?: string
+}) {
+  return (
+    <div className="bg-secondary border border-border rounded-xl p-4 h-full">
       <Icon className="w-4 h-4 text-muted-foreground mb-2" />
-      <div className="text-lg font-semibold text-foreground">{value}</div>
+      <div className={`text-lg font-semibold ${tint || 'text-foreground'}`}>{value}</div>
       <div className="text-xs text-muted-foreground">{label}</div>
+      {hint && <div className="text-[10px] text-muted-foreground/70 mt-1 leading-snug">{hint}</div>}
     </div>
   )
 }

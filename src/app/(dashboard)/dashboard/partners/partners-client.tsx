@@ -8,15 +8,32 @@ import Header from '@/components/layout/header'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { Plus, Handshake, ChevronRight, Edit2 } from 'lucide-react'
 import { createPartner, updatePartner, type PartnerInput } from './actions'
-import type { BusinessPartner } from '@/lib/partners/queries'
+import type { BusinessPartner, PartnerSummary } from '@/lib/partners/queries'
 
 interface ClientRow { id: string; name: string; code: string; business_partner_id: string | null }
 
 interface Props {
   initialPartners: BusinessPartner[]
   allClients: ClientRow[]
+  summaries: Record<string, PartnerSummary>
   canCreate: boolean
   canEdit: boolean
+}
+
+const fmtAmt = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
+const fmtDate = (s: string | null) => {
+  if (!s) return '—'
+  const d = new Date(s)
+  return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+function Figure({ label, value, muted, tint }: { label: string; value: string; muted?: boolean; tint?: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] text-muted-foreground truncate">{label}</div>
+      <div className={`text-sm font-semibold truncate ${tint || (muted ? 'text-muted-foreground' : 'text-foreground')}`}>{value}</div>
+    </div>
+  )
 }
 
 const EMPTY_FORM: PartnerInput = {
@@ -38,7 +55,7 @@ function nextPartnerCode(existing: BusinessPartner[]): string {
   return `BP-${String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, '0')}`
 }
 
-export default function PartnersClient({ initialPartners, allClients, canCreate, canEdit }: Props) {
+export default function PartnersClient({ initialPartners, allClients, summaries, canCreate, canEdit }: Props) {
   const [partners, setPartners] = useState(initialPartners)
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<BusinessPartner | null>(null)
@@ -140,6 +157,21 @@ export default function PartnersClient({ initialPartners, allClients, canCreate,
                     {p.status === 'active' ? 'Active' : 'Inactive'}
                   </span>
                 </div>
+
+                {/* Headline figures — the same definitions as the partner dashboard:
+                    outstanding is collectible only, drafts are called out apart. */}
+                <div className="mt-3 grid grid-cols-2 gap-2 border-t border-border/60 pt-3">
+                  <Figure label="Outstanding" value={fmtAmt(summaries[p.id]?.pendingCollection ?? 0)} />
+                  <Figure label="Collected" value={fmtAmt(summaries[p.id]?.collectedAmount ?? 0)} muted />
+                  {(summaries[p.id]?.draftAmount ?? 0) > 0 && (
+                    <Figure label="Not yet sent" value={fmtAmt(summaries[p.id]!.draftAmount)} muted />
+                  )}
+                  {(summaries[p.id]?.badDebtInr ?? 0) > 0 && (
+                    <Figure label="Bad debt" value={fmtAmt(summaries[p.id]!.badDebtInr)} tint="text-red-500" />
+                  )}
+                  <Figure label="Last collection" value={fmtDate(summaries[p.id]?.lastCollection ?? null)} muted />
+                </div>
+
                 <Link href={`/dashboard/partners/${p.id}`} className="mt-3 flex items-center justify-center gap-1 text-xs font-medium text-primary hover:underline">
                   View dashboard <ChevronRight className="w-3.5 h-3.5" />
                 </Link>

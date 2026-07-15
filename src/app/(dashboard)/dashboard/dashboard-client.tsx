@@ -41,7 +41,7 @@ import { useWorkspace } from '@/contexts/workspace-context'
 // ─────────────────────────────────────────────────────────────────────────────
 interface Props {
   stats: {
-    totalBilled: number; totalPaid: number; outstanding: number; outstandingThisMonth: number; bankBalance: number
+    totalBilled: number; totalPaid: number; badDebtInr: number; outstanding: number; outstandingThisMonth: number; bankBalance: number
     overdueCount: number; overdueAmount: number
     dueCount: number; dueAmount: number
     toBeInvoicedCount: number; toBeInvoicedAmount: number

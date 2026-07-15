@@ -18,7 +18,7 @@ import type { BenchmarkMetrics } from '@/lib/advertising/ai/benchmarks'
 // ─── Report Config ────────────────────────────────────────────────────────────
 
 export type ReportType = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'custom'
-export type ReportTemplate = 'executive' | 'marketing' | 'lead_gen' | 'ecommerce' | 'performance' | 'agency' | 'daily'
+export type ReportTemplate = 'executive' | 'marketing' | 'lead_gen' | 'ecommerce' | 'performance' | 'agency' | 'daily' | 'monthly'
 export type ReportFormat = 'pdf' | 'xlsx' | 'csv' | 'image_portrait' | 'image_square'
 export type WhiteLabelMode = 'cirqle' | 'client' | 'agency'
 export type ReportStatus = 'pending' | 'generating' | 'ready' | 'failed'

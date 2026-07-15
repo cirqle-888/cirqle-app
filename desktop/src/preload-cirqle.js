@@ -9,9 +9,17 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('__CIRQLE_DESKTOP__', {
-  version: 2,
+  version: 3,
   retry: (pane) => ipcRenderer.send('retry', pane),
   updateLogo: (url) => ipcRenderer.send('cirqle:logo', url),
+
+  /**
+   * Write text to the OS clipboard from the main process. The page's own
+   * navigator.clipboard rejects whenever this view isn't the focused document,
+   * which is most of the time in a multi-pane shell — src/lib/clipboard.ts
+   * tries this first and falls back to the web APIs outside the desktop.
+   */
+  copyText: (text) => ipcRenderer.invoke('clipboard:write', text),
 
   /**
    * Fire a native OS notification (system tone + high-priority dock bounce),
@@ -35,10 +43,13 @@ contextBridge.exposeInMainWorld('__CIRQLE_DESKTOP__', {
    *   'copy'     — copy image to clipboard + focus WhatsApp (paste with ⌘V)   [default]
    *   'paste'    — additionally auto-paste into the currently-open chat
    *   'download' — save into the common Downloads + reveal in Finder to drag in
+   * `caption`, if given, is best-effort typed into WhatsApp's image-caption box
+   * after the auto-paste (only applies to the 'paste' action — 'copy'/'download'
+   * don't touch the composer, so there's no caption box to type into yet).
    * Resolves to { ok, action, ... }.
    */
-  shareReceipt: (dataUrl, filename, action = 'copy') =>
-    ipcRenderer.invoke('share:receipt', { dataUrl, filename, action }),
+  shareReceipt: (dataUrl, filename, action = 'copy', caption) =>
+    ipcRenderer.invoke('share:receipt', { dataUrl, filename, action, caption }),
 })
 
 ipcRenderer.on('cirqle:capture', (_e, payload) => {

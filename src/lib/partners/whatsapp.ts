@@ -18,13 +18,29 @@ const STATUS_LABEL: Record<string, string> = {
   overdue: 'Overdue',
 }
 
-/** Copy-friendly WhatsApp collection summary for a Business Partner statement. */
-export function buildPartnerStatementText(
-  data: PartnerStatementData,
-  templates?: { partnerStatement?: string; partnerStatementItem?: string },
+export interface PartnerStatementLine {
+  clientName:    string
+  invoiceNumber: string
+  pending:       number
+  status:        string
+}
+
+export type PartnerStatementTemplates = { partnerStatement?: string; partnerStatementItem?: string }
+
+/**
+ * The statement text itself — shared by the partner dashboard (which passes
+ * server-loaded statement rows) and the Follow-ups page (which passes the
+ * partner's pending invoices already on screen), so both produce byte-identical
+ * messages from the same Settings templates.
+ */
+export function buildPartnerStatementTextFromLines(
+  partnerName: string,
+  lines: PartnerStatementLine[],
+  totalPending: number,
+  templates?: PartnerStatementTemplates,
 ): string {
   const itemTpl = templates?.partnerStatementItem || DEFAULT_TEMPLATES.partnerStatementItem
-  const items_block = data.rows
+  const items_block = lines
     .map(row => renderTemplate(itemTpl, {
       client_name:    row.clientName,
       invoice_number: row.invoiceNumber,
@@ -34,10 +50,23 @@ export function buildPartnerStatementText(
     .join('\n')
 
   return renderTemplate(templates?.partnerStatement || DEFAULT_TEMPLATES.partnerStatement, {
-    partner_name:   data.partner.name,
+    partner_name:   partnerName,
     items_block:    items_block || 'No pending invoices.',
-    total_pending:  fmtAmt(data.totalOutstanding),
+    total_pending:  fmtAmt(totalPending),
   })
+}
+
+/** Copy-friendly WhatsApp collection summary for a Business Partner statement. */
+export function buildPartnerStatementText(
+  data: PartnerStatementData,
+  templates?: PartnerStatementTemplates,
+): string {
+  return buildPartnerStatementTextFromLines(
+    data.partner.name,
+    data.rows.map(r => ({ clientName: r.clientName, invoiceNumber: r.invoiceNumber, pending: r.pending, status: r.status })),
+    data.totalOutstanding,
+    templates,
+  )
 }
 
 /** Build a wa.me deep link. 10-digit numbers are assumed Indian (prefix 91). */

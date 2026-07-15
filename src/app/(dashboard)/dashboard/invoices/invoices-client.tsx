@@ -104,6 +104,12 @@ interface Payment {
   // FX: amount is in the invoice/payment currency; amount_inr is the INR base.
   currency?: string; exchange_rate?: number; amount_inr?: number
   rate_source?: string; rate_date?: string
+  // Not columns on `payments` — populated only for a payment just recorded in
+  // this session (see handlePayment), from the auto-created cashbook entry.
+  // For payments loaded from the server, the receipt looks these up from the
+  // linked cashbook_entries row instead (see findLinkedCashbookEntry below).
+  receipt_number?: string | null
+  bank_account_name?: string | null
 }
 interface Invoice {
   id: string; invoice_number: string; client_id: string
@@ -147,7 +153,11 @@ interface Invoice {
     id: string
     deleted_at?: string | null
     allocated_amount?: number
-    cashbook_entry?: { id: string; reference?: string | null; entry_date?: string; description?: string | null } | null
+    cashbook_entry?: {
+      id: string; reference?: string | null; entry_date?: string; description?: string | null
+      receipt_number?: string | null
+      bank_account?: { name: string } | null
+    } | null
   }[]
 }
 
@@ -219,6 +229,18 @@ function balanceDueInr(inv: Invoice): number { return Math.max(0, invTotalInr(in
 // invoice must not also take a direct "Record Payment" (the two would clobber).
 function hasActiveAllocations(inv: Invoice): boolean {
   return (inv.cashbook_invoice_allocations || []).some(a => !a.deleted_at)
+}
+// `payments` has no receipt_number / bank_account of its own — recordInvoicePayment
+// auto-creates a matching cashbook_entries inflow (same invoice, date, amount) for
+// every direct payment, and THAT row carries the generated receipt number + bank
+// account. Correlate a payment back to its entry the same way the "Cash Book
+// Allocation" list above already does (date + amount), so the receipt can pull
+// the real receipt number and bank name instead of a generic fallback.
+function findLinkedCashbookEntry(inv: Invoice, p: Payment) {
+  return (inv.cashbook_invoice_allocations || [])
+    .filter(a => !a.deleted_at && a.cashbook_entry)
+    .find(a => a.cashbook_entry!.entry_date === p.payment_date && a.allocated_amount === (p.amount_inr ?? p.amount))
+    ?.cashbook_entry
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -1074,6 +1096,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       payment_method: payForm.payment_method,
       reference: payForm.reference || undefined,
       notes: noteText ?? undefined,
+      receipt_number: res.data!.receiptNumber,
+      bank_account_name: bankAccounts.find(b => b.id === payForm.bank_account_id)?.name ?? null,
     }
 
     setInvoices(prev => prev.map(i => i.id === invoiceId
@@ -2535,7 +2559,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
   async function refreshInvoice(invoiceId: string) {
     const { data } = await supabase.from('invoices')
-      .select('*, client:clients(id,name,code,phone,email), items:invoice_items(*, task:tasks(id,title,task_date,status,billing_amount_inr,currency), service:services(id,name)), payments(*)')
+      .select('*, client:clients(id,name,code,phone,email), items:invoice_items(*, task:tasks(id,title,task_date,status,billing_amount_inr,currency), service:services(id,name)), payments(*), cashbook_invoice_allocations(id, deleted_at, allocated_amount, cashbook_entry:cashbook_entries(id, reference, entry_date, description, receipt_number, bank_account:bank_accounts(name)))')
       .eq('id', invoiceId).single()
     if (data) setInvoices(prev => prev.map(i => i.id === invoiceId ? data as any : i))
   }
@@ -6084,14 +6108,19 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             const pmt = receiptPayment.pmt
             const compact = (pmt.payment_date || '').replace(/-/g, '')
             const legacyNo = `RCPT-${compact}-${pmt.id.slice(-4).toUpperCase()}`
-            
+            // `payments` doesn't store its own receipt number / bank account — pull
+            // them from the auto-created cashbook entry (real just-recorded payment
+            // carries these directly; a payment loaded from the server is matched
+            // via findLinkedCashbookEntry).
+            const linkedEntry = inv ? findLinkedCashbookEntry(inv, pmt) : undefined
+
             return {
-              receiptNo: pmt.receipt_number || legacyNo,
+              receiptNo: pmt.receipt_number || linkedEntry?.receipt_number || legacyNo,
               defaultClientName: inv?.client?.name || '',
               amount: pmt.amount ?? pmt.amount_inr ?? 0,
               currency: pmt.currency,
               dateISO: pmt.payment_date,
-              method: pmt.payment_method?.replace(/_/g, ' '),
+              method: pmt.bank_account_name || linkedEntry?.bank_account?.name || pmt.payment_method?.replace(/_/g, ' '),
               reference: pmt.reference,
               invoices: [{
                 number: inv?.invoice_number || '—',

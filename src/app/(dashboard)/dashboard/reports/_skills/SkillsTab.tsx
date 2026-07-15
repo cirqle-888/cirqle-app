@@ -205,7 +205,7 @@ export default function SkillsTab({ employees, contributions, parameters, groups
                       className="px-2 py-2 text-[10px] font-semibold text-muted-foreground border-l border-border/30 text-center"
                     >
                       {group.name.replace(' Group', '')}
-                      <span className="ml-1 text-muted-foreground/50 font-normal">{group.weight}%</span>
+                      <span className="ml-1 text-muted-foreground/50 font-normal" title="Relative weight — normalized per task during scoring">w{group.weight}</span>
                     </th>
                   ))}
                 </tr>
@@ -432,7 +432,7 @@ export default function SkillsTab({ employees, contributions, parameters, groups
                 {/* Group header */}
                 <div className="px-5 py-2 bg-secondary/30">
                   <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
-                    {group.name} · {group.weight}%
+                    {group.name} · weight {group.weight}
                   </span>
                 </div>
                 {params.map(p => {

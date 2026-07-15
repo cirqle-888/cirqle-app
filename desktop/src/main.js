@@ -347,7 +347,7 @@ ipcMain.on(CH.CIRQLE_COMPARE_TOGGLE, () => {
 // ── Share (from the Cirqle pane → the linked WhatsApp pane) ────────────────────
 // action: 'copy' (copy image + focus WA), 'paste' (auto-paste into open chat),
 // 'download' (save into common downloads + reveal in Finder to drag in).
-ipcMain.handle(CH.SHARE_RECEIPT, (_e, { dataUrl, filename, action } = {}) => {
+ipcMain.handle(CH.SHARE_RECEIPT, (_e, { dataUrl, filename, action, caption } = {}) => {
   if (action === 'download') {
     const p = dl.saveDataUrlToDownloads(dataUrl, filename)
     if (p) { focusWhatsapp(); shell.showItemInFolder(p) }
@@ -355,8 +355,15 @@ ipcMain.handle(CH.SHARE_RECEIPT, (_e, { dataUrl, filename, action } = {}) => {
   }
   const img = dataUrlToImage(dataUrl)
   if (!img || img.isEmpty()) return { ok: false, reason: 'bad-image' }
-  const r = shareImageToWhatsApp(img, { autoPaste: action === 'paste' })
+  const r = shareImageToWhatsApp(img, { autoPaste: action === 'paste', caption })
   return { ...r, action }
+})
+// The web app's clipboard helper falls back to this: navigator.clipboard
+// rejects inside a WebContentsView that isn't the focused document, but the
+// main process can always write to the OS clipboard.
+ipcMain.handle(CH.CLIPBOARD_WRITE, (_e, text) => {
+  try { clipboard.writeText(String(text ?? '')); return true }
+  catch { return false }
 })
 ipcMain.on(CH.CAPTURE_CLIPBOARD, sendClipboardToCirqle)
 ipcMain.on(CH.RETRY, (_e, pane) => {

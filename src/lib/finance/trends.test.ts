@@ -7,30 +7,38 @@ import {
 const TODAY = '2026-07-14' // a Tuesday
 
 describe('resolveComparisonPeriods', () => {
-  it('week: Monday-start week vs the week before', () => {
+  it('week: Monday-start week vs the week before, current clamped to today', () => {
     const p = resolveComparisonPeriods('week', TODAY)
-    expect(p.current).toEqual({ from: '2026-07-13', to: '2026-07-19' })
+    expect(p.current).toEqual({ from: '2026-07-13', to: '2026-07-14' })
     expect(p.previous).toEqual({ from: '2026-07-06', to: '2026-07-12' })
     expect(p.granularity).toBe('day')
   })
 
-  it('month: calendar month vs previous month (different lengths ok)', () => {
+  it('month: calendar month vs previous month, current clamped to today', () => {
     const p = resolveComparisonPeriods('month', TODAY)
-    expect(p.current).toEqual({ from: '2026-07-01', to: '2026-07-31' })
+    expect(p.current).toEqual({ from: '2026-07-01', to: '2026-07-14' })
     expect(p.previous).toEqual({ from: '2026-06-01', to: '2026-06-30' })
   })
 
-  it('quarter: calendar quarter vs previous quarter', () => {
+  it('quarter: calendar quarter vs previous quarter, current clamped to today', () => {
     const p = resolveComparisonPeriods('quarter', TODAY)
-    expect(p.current).toEqual({ from: '2026-07-01', to: '2026-09-30' })
+    expect(p.current).toEqual({ from: '2026-07-01', to: '2026-07-14' })
     expect(p.previous).toEqual({ from: '2026-04-01', to: '2026-06-30' })
   })
 
-  it('year: monthly granularity, this year vs last year', () => {
+  it('year: monthly granularity, this year vs last year, current clamped to today', () => {
     const p = resolveComparisonPeriods('year', TODAY)
-    expect(p.current).toEqual({ from: '2026-01-01', to: '2026-12-31' })
+    expect(p.current).toEqual({ from: '2026-01-01', to: '2026-07-14' })
     expect(p.previous).toEqual({ from: '2025-01-01', to: '2025-12-31' })
     expect(p.granularity).toBe('month')
+  })
+
+  it('current period never extends past today, but previous stays a full historical period', () => {
+    // Viewing "Month" mid-month must not plot unrealized future days as a flat
+    // carried-forward balance — the dashed previous-period line is unaffected.
+    const p = resolveComparisonPeriods('month', TODAY)
+    expect(p.current.to).toBe(TODAY)
+    expect(p.previous.to).toBe('2026-06-30')
   })
 
   it('custom: previous = same number of days immediately before, back-to-back', () => {
