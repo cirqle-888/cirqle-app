@@ -95,6 +95,10 @@ export const PERMS = {
   INTAKE_LINKS_MANAGE:    'intake_links.manage',
   AGENCY_LINKS_MANAGE:    'agency_links.manage',
 
+  // Social Media Calendar — content planner feeding the Requests inbox
+  SOCIAL_VIEW:   'social.view',
+  SOCIAL_MANAGE: 'social.manage',
+
   // Advertising — paid-ads campaign management module
   ADVERTISING_VIEW:            'advertising.view',
   ADVERTISING_CREATE:          'advertising.create',
@@ -118,6 +122,10 @@ export const PERMS = {
   ADVERTISING_MANAGE_AI:       'advertising.manage_ai',
   ADVERTISING_RUN_AI:          'advertising.run_ai',
   ADVERTISING_VIEW_FORECASTS:  'advertising.view_forecasts',
+
+  // Offer Flyer — internal offer preparation (staff paste → designer sheet)
+  /** Open the internal Offer Preparation workspace: pick a client, paste their offer list, review products and generate the designer Google Sheet. */
+  OFFER_PREPARE: 'offer.prepare',
 
   // Clients / Services — granular "add" perms (separate from settings.access)
   /** Open the Clients module (list + per-client dashboard). Admins bypass pre-migration. */

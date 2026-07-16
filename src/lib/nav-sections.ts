@@ -11,7 +11,8 @@ import {
   LayoutDashboard, CheckSquare, Users2, FileText, BookOpen, Wallet, BarChart3, Sheet,
   Settings, TrendingUp, Upload, Inbox, PhoneCall, Award, Activity, Blocks, Megaphone, Handshake,
   SlidersHorizontal, MessageSquare, ClipboardCheck, NotebookPen, LayoutGrid,
-  Briefcase, ClipboardList, CalendarClock, BadgeCheck, PieChart, Building2, Tags, History,
+  Briefcase, ClipboardList, CalendarClock, CalendarDays, BadgeCheck, PieChart, Building2, Tags, History, Sparkles,
+  BadgePercent,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -61,6 +62,10 @@ export const navSections: NavSection[] = [
     label: 'Work',
     defaultOpen: true,
     items: [
+      { label: 'AI Capture',    href: '/dashboard/capture',       icon: Sparkles, keywords: ['quick capture', 'paste', 'whatsapp', 'email', 'offer flyer'] },
+      // Direct entrance for offer-flyer coordinators/designers (gated by the
+      // dedicated offer.prepare permission; admins always see it).
+      { label: 'Prepare Offer', href: '/dashboard/offer-prepare', icon: BadgePercent, requiredPerm: 'offer.prepare', keywords: ['offer flyer', 'weekly offer', 'sheet', 'whatsapp list'] },
       { label: 'Requests',      href: '/dashboard/requests',      icon: Inbox, requiredPerm: 'requests.view' },
       { label: 'Tasks',         href: '/dashboard/tasks',         icon: CheckSquare },
       { label: 'Clients',       href: '/dashboard/clients',       icon: Users2, requiredPerm: 'clients.view' },
@@ -123,6 +128,9 @@ export const navSections: NavSection[] = [
     defaultOpen: false,
     items: [
       { label: 'Advertising',    href: '/dashboard/advertising', icon: Megaphone, requiredPerm: 'advertising.view', keywords: ['campaigns', 'ads', 'marketing'] },
+      // Social Calendar: plan a client's content month, push items into the
+      // Requests inbox (social_meta pattern — see docs in the migration).
+      { label: 'Social Calendar', href: '/dashboard/social-calendar', icon: CalendarDays, requiredPerm: 'social.view', keywords: ['content', 'planner', 'posts', 'instagram', 'social media'] },
       { label: 'Apps Directory', href: '/dashboard/apps',        icon: Blocks, keywords: ['integrations', 'marketplace'] },
     ],
   },
