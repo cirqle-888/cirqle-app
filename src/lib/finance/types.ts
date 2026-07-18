@@ -56,6 +56,7 @@ export interface TagSpendRow {
 export interface EmployeeCostRow {
   employeeId: string
   employeeName: string
+  employeeCqid: string
   totalInr: number
   itemCount: number
 }

@@ -36,6 +36,118 @@ export function tintHex(hex: string, f: number): string {
     return v.toString(16).padStart(2, '0')
   }).join('')
 }
+/** Decorative layers can be viewport-fixed (print) or page-div-absolute (PDF pages). */
+export type DecorLayerPos = 'fixed' | 'absolute'
+
+export interface PageDecor {
+  /** dots/diagonal pattern css for the page background ('' otherwise) */
+  bgCss: string
+  /** shade/custom-image styles bleed to the paper edge (zero @page margin) */
+  fullBleed: boolean
+  bgTop: (pos: DecorLayerPos) => string
+  bgBottom: (pos: DecorLayerPos) => string
+  cornerSvg: (pos: DecorLayerPos) => string
+}
+
+/**
+ * The branded page decoration (silk-shade waves / corner accent / dot patterns
+ * / custom top+bottom images) driven by the invoice design settings. Shared by
+ * every A4 export that must look like an invoice — invoices themselves and the
+ * Social Media Plan PDF — so the "top and bottom design" can never drift
+ * between document types.
+ */
+export function buildPageDecor(companySettings: Record<string, string>): PageDecor {
+  const NAVY       = companySettings.invoice_primary_color || '#1a2744'
+  const NAVY_LIGHT = companySettings.invoice_accent_color  || '#243459'
+  const bgStyle    = companySettings.invoice_bg_style || 'none'
+
+  const bgCss = bgStyle === 'dots'
+    ? `background-image:radial-gradient(circle,${NAVY}1a 1.5px,transparent 1.5px);background-size:18px 18px;`
+    : bgStyle === 'diagonal'
+    ? `background-image:repeating-linear-gradient(45deg,${NAVY}12 0px,${NAVY}12 1px,transparent 1px,transparent 16px);`
+    : ''
+
+  const cornerSvg = (pos: DecorLayerPos) => bgStyle === 'corner'
+    ? `<svg style="position:${pos};top:0;right:0;width:180px;height:180px;pointer-events:none;z-index:0" viewBox="0 0 180 180" xmlns="http://www.w3.org/2000/svg">
+         <path d="M180 0 L180 180 L0 0 Z" fill="${NAVY}" opacity="0.07"/>
+         <path d="M180 0 L180 120 L60 0 Z" fill="${NAVY}" opacity="0.07"/>
+       </svg>`
+    : ''
+
+  // Silk Shade — layered flowing silk-wave ribbons hugging the top & bottom
+  // page edges (multiple translucent layers + white highlight streaks, blurred)
+  const ACC = NAVY_LIGHT
+  const shadeTopSvg = (pos: DecorLayerPos) =>
+    `<svg style="position:${pos};top:0;left:0;width:100%;height:190px;pointer-events:none;z-index:0" viewBox="0 0 800 190" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+         <defs>
+           <linearGradient id="wgT" x1="0" y1="0" x2="1" y2="0.25">
+             <stop offset="0" stop-color="${ACC}" stop-opacity="0.20"/>
+             <stop offset="0.45" stop-color="${ACC}" stop-opacity="0.08"/>
+             <stop offset="0.8" stop-color="${ACC}" stop-opacity="0.18"/>
+             <stop offset="1" stop-color="${ACC}" stop-opacity="0.07"/>
+           </linearGradient>
+           <filter id="wbT1" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="8"/></filter>
+           <filter id="wbT2" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="2.6"/></filter>
+         </defs>
+         <g filter="url(#wbT1)">
+           <path d="M0 0 H800 V112 C696 158 588 104 470 118 C338 134 222 84 124 120 C72 140 28 132 0 150 Z" fill="url(#wgT)"/>
+           <path d="M0 0 H800 V72 C688 124 556 56 424 80 C292 104 168 50 0 104 Z" fill="${ACC}" opacity="0.09"/>
+           <path d="M0 0 H800 V34 C648 70 472 26 326 48 C204 66 86 30 0 58 Z" fill="${ACC}" opacity="0.12"/>
+           <path d="M800 0 V92 C744 66 668 36 596 6 C664 2 744 0 800 0 Z" fill="${ACC}" opacity="0.16"/>
+           <path d="M0 0 H132 C88 28 38 42 0 38 Z" fill="${ACC}" opacity="0.13"/>
+         </g>
+         <g filter="url(#wbT2)">
+           <path d="M0 112 C156 150 348 88 540 110 C664 124 752 102 800 114 L800 121 C752 109 664 131 540 117 C348 95 156 158 0 119 Z" fill="#ffffff" opacity="0.85"/>
+           <path d="M0 66 C196 112 416 36 624 70 C700 82 764 68 800 76 L800 83 C764 75 700 89 624 77 C416 43 196 119 0 73 Z" fill="#ffffff" opacity="0.65"/>
+           <path d="M30 88 C220 124 430 60 640 88 L640 92 C430 64 220 129 30 92 Z" fill="${ACC}" opacity="0.18"/>
+         </g>
+       </svg>`
+  const shadeBottomSvg = (pos: DecorLayerPos) =>
+    `<svg style="position:${pos};bottom:0;left:0;width:100%;height:200px;pointer-events:none;z-index:0" viewBox="0 0 800 200" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+         <defs>
+           <linearGradient id="wgB" x1="0" y1="1" x2="1" y2="0.7">
+             <stop offset="0" stop-color="${ACC}" stop-opacity="0.18"/>
+             <stop offset="0.5" stop-color="${ACC}" stop-opacity="0.07"/>
+             <stop offset="1" stop-color="${ACC}" stop-opacity="0.22"/>
+           </linearGradient>
+           <filter id="wbB1" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="8"/></filter>
+           <filter id="wbB2" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="2.6"/></filter>
+         </defs>
+         <g filter="url(#wbB1)">
+           <path d="M0 200 H800 V96 C676 56 556 116 432 96 C296 74 178 124 84 92 C48 80 18 88 0 72 Z" fill="url(#wgB)"/>
+           <path d="M0 200 H800 V136 C672 96 540 152 408 130 C276 108 150 156 0 116 Z" fill="${ACC}" opacity="0.08"/>
+           <path d="M0 200 H800 V170 C640 138 460 178 318 158 C198 142 84 172 0 150 Z" fill="${ACC}" opacity="0.12"/>
+           <path d="M800 200 V104 C740 134 656 166 576 196 C648 200 740 200 800 200 Z" fill="${ACC}" opacity="0.18"/>
+           <path d="M0 200 H148 C96 168 40 152 0 158 Z" fill="${ACC}" opacity="0.14"/>
+         </g>
+         <g filter="url(#wbB2)">
+           <path d="M0 130 C168 92 372 152 568 126 C684 110 756 130 800 118 L800 125 C756 137 684 117 568 133 C372 159 168 99 0 137 Z" fill="#ffffff" opacity="0.85"/>
+           <path d="M40 158 C240 122 450 182 660 150 L660 154 C450 187 240 127 40 162 Z" fill="${ACC}" opacity="0.18"/>
+           <path d="M0 178 C200 146 420 196 636 168 C700 160 760 172 800 162 L800 169 C760 179 700 167 636 175 C420 203 200 153 0 185 Z" fill="#ffffff" opacity="0.6"/>
+         </g>
+       </svg>`
+
+  const customTopImg = (pos: DecorLayerPos) => companySettings.invoice_bg_image_top_url
+    ? `<img src="${companySettings.invoice_bg_image_top_url}" style="position:${pos === 'fixed' ? 'absolute' : pos};top:0;left:0;width:100%;height:auto;pointer-events:none;z-index:0;display:block;" />`
+    : ''
+  const customBottomImg = (pos: DecorLayerPos) => companySettings.invoice_bg_image_bottom_url
+    ? `<img src="${companySettings.invoice_bg_image_bottom_url}" style="position:${pos === 'fixed' ? 'absolute' : pos};bottom:0;left:0;width:100%;height:auto;pointer-events:none;z-index:0;display:block;" />`
+    : ''
+
+  const bgTop = (pos: DecorLayerPos) =>
+    bgStyle === 'shade' ? shadeTopSvg(pos)
+    : bgStyle === 'custom_images' ? customTopImg(pos)
+    : ''
+  const bgBottom = (pos: DecorLayerPos) =>
+    bgStyle === 'shade' ? shadeBottomSvg(pos)
+    : bgStyle === 'custom_images' ? customBottomImg(pos)
+    : ''
+
+  const fullBleed = bgStyle === 'shade' || bgStyle === 'custom_images'
+
+  return { bgCss, fullBleed, bgTop, bgBottom, cornerSvg }
+}
+
 /** Sync QR SVG (errorCorrection H so the centre badge can overlay). */
 function qrSvgBlock(text: string, accent: string, size = 104): string {
   try {
@@ -134,7 +246,7 @@ export function buildInvoiceParts(
     name:    companySettings.company_name    || 'cirqle',
     phone:   companySettings.company_phone   || '',
     website: companySettings.company_website || '',
-    tagline: companySettings.company_tagline || 'Get Budget Designs',
+    tagline: companySettings.company_tagline || 'Creative & Marketing Solutions',
     holder:  companySettings.bank_holder     || '',
     account: companySettings.bank_account    || '',
     ifsc:    companySettings.bank_ifsc       || '',
@@ -333,94 +445,14 @@ export function buildInvoiceParts(
       ${line3 ? `<div style="font-size:27px;font-weight:700;${THANK_FILL}">${line3}</div>` : ''}
     </div>`
 
-  const bgCss = bgStyle === 'dots'
-    ? `background-image:radial-gradient(circle,${NAVY}1a 1.5px,transparent 1.5px);background-size:18px 18px;`
-    : bgStyle === 'diagonal'
-    ? `background-image:repeating-linear-gradient(45deg,${NAVY}12 0px,${NAVY}12 1px,transparent 1px,transparent 16px);`
-    : ''
-
-  const cornerSvg = (pos: LayerPos) => bgStyle === 'corner'
-    ? `<svg style="position:${pos};top:0;right:0;width:180px;height:180px;pointer-events:none;z-index:0" viewBox="0 0 180 180" xmlns="http://www.w3.org/2000/svg">
-         <path d="M180 0 L180 180 L0 0 Z" fill="${NAVY}" opacity="0.07"/>
-         <path d="M180 0 L180 120 L60 0 Z" fill="${NAVY}" opacity="0.07"/>
-       </svg>`
-    : ''
-
-  // Silk Shade — layered flowing silk-wave ribbons hugging the top & bottom
-  // page edges (multiple translucent layers + white highlight streaks, blurred)
-  const ACC = NAVY_LIGHT
-  const shadeTopSvg = (pos: LayerPos) =>
-    `<svg style="position:${pos};top:0;left:0;width:100%;height:190px;pointer-events:none;z-index:0" viewBox="0 0 800 190" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
-         <defs>
-           <linearGradient id="wgT" x1="0" y1="0" x2="1" y2="0.25">
-             <stop offset="0" stop-color="${ACC}" stop-opacity="0.20"/>
-             <stop offset="0.45" stop-color="${ACC}" stop-opacity="0.08"/>
-             <stop offset="0.8" stop-color="${ACC}" stop-opacity="0.18"/>
-             <stop offset="1" stop-color="${ACC}" stop-opacity="0.07"/>
-           </linearGradient>
-           <filter id="wbT1" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="8"/></filter>
-           <filter id="wbT2" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="2.6"/></filter>
-         </defs>
-         <g filter="url(#wbT1)">
-           <path d="M0 0 H800 V112 C696 158 588 104 470 118 C338 134 222 84 124 120 C72 140 28 132 0 150 Z" fill="url(#wgT)"/>
-           <path d="M0 0 H800 V72 C688 124 556 56 424 80 C292 104 168 50 0 104 Z" fill="${ACC}" opacity="0.09"/>
-           <path d="M0 0 H800 V34 C648 70 472 26 326 48 C204 66 86 30 0 58 Z" fill="${ACC}" opacity="0.12"/>
-           <path d="M800 0 V92 C744 66 668 36 596 6 C664 2 744 0 800 0 Z" fill="${ACC}" opacity="0.16"/>
-           <path d="M0 0 H132 C88 28 38 42 0 38 Z" fill="${ACC}" opacity="0.13"/>
-         </g>
-         <g filter="url(#wbT2)">
-           <path d="M0 112 C156 150 348 88 540 110 C664 124 752 102 800 114 L800 121 C752 109 664 131 540 117 C348 95 156 158 0 119 Z" fill="#ffffff" opacity="0.85"/>
-           <path d="M0 66 C196 112 416 36 624 70 C700 82 764 68 800 76 L800 83 C764 75 700 89 624 77 C416 43 196 119 0 73 Z" fill="#ffffff" opacity="0.65"/>
-           <path d="M30 88 C220 124 430 60 640 88 L640 92 C430 64 220 129 30 92 Z" fill="${ACC}" opacity="0.18"/>
-         </g>
-       </svg>`
-  const shadeBottomSvg = (pos: LayerPos) =>
-    `<svg style="position:${pos};bottom:0;left:0;width:100%;height:200px;pointer-events:none;z-index:0" viewBox="0 0 800 200" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
-         <defs>
-           <linearGradient id="wgB" x1="0" y1="1" x2="1" y2="0.7">
-             <stop offset="0" stop-color="${ACC}" stop-opacity="0.18"/>
-             <stop offset="0.5" stop-color="${ACC}" stop-opacity="0.07"/>
-             <stop offset="1" stop-color="${ACC}" stop-opacity="0.22"/>
-           </linearGradient>
-           <filter id="wbB1" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="8"/></filter>
-           <filter id="wbB2" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="2.6"/></filter>
-         </defs>
-         <g filter="url(#wbB1)">
-           <path d="M0 200 H800 V96 C676 56 556 116 432 96 C296 74 178 124 84 92 C48 80 18 88 0 72 Z" fill="url(#wgB)"/>
-           <path d="M0 200 H800 V136 C672 96 540 152 408 130 C276 108 150 156 0 116 Z" fill="${ACC}" opacity="0.08"/>
-           <path d="M0 200 H800 V170 C640 138 460 178 318 158 C198 142 84 172 0 150 Z" fill="${ACC}" opacity="0.12"/>
-           <path d="M800 200 V104 C740 134 656 166 576 196 C648 200 740 200 800 200 Z" fill="${ACC}" opacity="0.18"/>
-           <path d="M0 200 H148 C96 168 40 152 0 158 Z" fill="${ACC}" opacity="0.14"/>
-         </g>
-         <g filter="url(#wbB2)">
-           <path d="M0 130 C168 92 372 152 568 126 C684 110 756 130 800 118 L800 125 C756 137 684 117 568 133 C372 159 168 99 0 137 Z" fill="#ffffff" opacity="0.85"/>
-           <path d="M40 158 C240 122 450 182 660 150 L660 154 C450 187 240 127 40 162 Z" fill="${ACC}" opacity="0.18"/>
-           <path d="M0 178 C200 146 420 196 636 168 C700 160 760 172 800 162 L800 169 C760 179 700 167 636 175 C420 203 200 153 0 185 Z" fill="#ffffff" opacity="0.6"/>
-         </g>
-       </svg>`
-
-  const customTopImg = (pos: LayerPos) => companySettings.invoice_bg_image_top_url
-    ? `<img src="${companySettings.invoice_bg_image_top_url}" style="position:${pos === 'fixed' ? 'absolute' : pos};top:0;left:0;width:100%;height:auto;pointer-events:none;z-index:0;display:block;" />`
-    : ''
-  const customBottomImg = (pos: LayerPos) => companySettings.invoice_bg_image_bottom_url
-    ? `<img src="${companySettings.invoice_bg_image_bottom_url}" style="position:${pos === 'fixed' ? 'absolute' : pos};bottom:0;left:0;width:100%;height:auto;pointer-events:none;z-index:0;display:block;" />`
-    : ''
-
-  const bgTop = (pos: LayerPos) =>
-    bgStyle === 'shade' ? shadeTopSvg(pos)
-    : bgStyle === 'custom_images' ? customTopImg(pos)
-    : ''
-  const bgBottom = (pos: LayerPos) =>
-    bgStyle === 'shade' ? shadeBottomSvg(pos)
-    : bgStyle === 'custom_images' ? customBottomImg(pos)
-    : ''
-
-  const fullBleed = bgStyle === 'shade' || bgStyle === 'custom_images'
+  // Decorative layers come from the shared helper so every invoice-styled A4
+  // export (invoices, Social Media Plan PDF, …) renders identical page decor.
+  const { bgCss, fullBleed, bgTop, bgBottom, cornerSvg } = buildPageDecor(companySettings)
   // Shade bleeds to the paper edge: zero the @page margin and carry it on the body instead
   const pageMargin = fullBleed ? '0' : '15mm 12mm'
   const bodyPad = '53px 64px 46px'
 
-  // Tagline splits into "Get Budget" / "Designs" (last word bold on its own line)
+  // Tagline splits so the last word lands bold on its own line (e.g. "Creative & Marketing" / "Solutions")
   const tagWords = (co.tagline || '').trim().split(/\s+/)
 
   // Inline icons — rendered as <img> with data-URI SVGs so html2canvas rasterises

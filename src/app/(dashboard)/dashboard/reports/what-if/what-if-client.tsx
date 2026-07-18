@@ -9,6 +9,7 @@
  */
 
 import { useMemo, useState } from 'react'
+import { usePrivacy } from '@/contexts/privacy-context'
 import Header from '@/components/layout/header'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { DateFilter, matchesDateFilter, getDateFilterLabel, type DateFilterValue } from '@/components/ui/date-filter'
@@ -62,7 +63,16 @@ const AGREEMENT_TYPE_LABEL: Record<AgreementType, string> = {
 
 let scenarioSeq = 1
 
-export default function WhatIfClient({ raw, employees, baseSalaries, currentPrices, canApply }: Props) {
+export default function WhatIfClient({ raw, employees: rawEmployees, baseSalaries, currentPrices, canApply }: Props) {
+  // Privacy: mask names ONCE here so every downstream panel/table/apply-payload
+  // renders the CQID when locked (and the real name only when unlocked) without
+  // each sub-component having to remember. `dn` keys on the whole employee.
+  const { dn } = usePrivacy()
+  const employees = useMemo(
+    () => rawEmployees.map(e => ({ ...e, name: dn(e) })),
+    [rawEmployees, dn],
+  )
+
   // ── Baseline period ─────────────────────────────────────────────────────────
   const [dateFilter, setDateFilter] = useState<DateFilterValue>({ type: 'lastMonth' })
   const [normalizeMonthly, setNormalizeMonthly] = useState(false)

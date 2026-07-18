@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * Quick Capture review UI.
+ * AI Capture review UI.
  *
  * Paste a snippet (or receive one from the desktop app via the `cirqle:capture`
  * window event), see what the Capture Engine classified it as + the detected
@@ -26,7 +26,7 @@ const TYPE_META: Record<CaptureType, { label: string; color: string }> = {
   unknown:   { label: 'Unknown',   color: 'text-muted-foreground bg-muted' },
 }
 
-export default function CaptureClient() {
+export default function CaptureClient({ offerMode = false }: { offerMode?: boolean }) {
   const router = useRouter()
   const [text, setText] = useState('')
   const [phone, setPhone] = useState('')
@@ -45,7 +45,11 @@ export default function CaptureClient() {
   async function analyze() {
     if (!text.trim() || busy) return
     setBusy(true); setDone(null); setResult(null)
-    setResult(await analyzeCapture(buildInput()))
+    // Offer mode (dedicated flyer designers): every paste IS an offer list —
+    // skip classification and parse straight as an Offer, no destination step.
+    setResult(offerMode
+      ? await analyzeCaptureAs(buildInput(), 'offer')
+      : await analyzeCapture(buildInput()))
     setBusy(false)
   }
 
@@ -127,11 +131,12 @@ export default function CaptureClient() {
       {/* pl-12 on mobile clears the fixed global sidebar hamburger. */}
       <div className="pl-12 md:pl-0">
         <h1 className="text-xl font-semibold flex items-center gap-2">
-          <Sparkles className="h-5 w-5 text-violet-500" /> Quick Capture
+          <Sparkles className="h-5 w-5 text-violet-500" /> AI Capture
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Paste a WhatsApp message, email, product list, or contact. Cirqle detects what it is and the
-          client, then prepares a draft for you to confirm.
+          {offerMode
+            ? 'Paste a client’s WhatsApp offer list. Cirqle detects the client and prepares the offer draft — review it, then open it in Prepare Offer.'
+            : 'Paste a WhatsApp message, email, product list, or contact. Cirqle detects what it is and the client, then prepares a draft for you to confirm.'}
         </p>
       </div>
 
@@ -198,21 +203,24 @@ export default function CaptureClient() {
 
           <DraftFields type={draft.type} fields={draft.fields} />
 
-          <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border">
-            <span className="text-xs text-muted-foreground">
-              {cls.type === 'unknown' ? 'Choose a destination:' : 'Wrong? Send to:'}
-            </span>
-            {(result.alternatives || []).filter(t => t !== cls.type).map(t => (
-              <button
-                key={t}
-                onClick={() => redirect(t)}
-                disabled={busy}
-                className="rounded-full border border-border px-2.5 py-1 text-xs hover:bg-muted disabled:opacity-50"
-              >
-                {TYPE_META[t].label}
-              </button>
-            ))}
-          </div>
+          {/* Offer-mode users never re-route — their pastes are always offers. */}
+          {!offerMode && (
+            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border">
+              <span className="text-xs text-muted-foreground">
+                {cls.type === 'unknown' ? 'Choose a destination:' : 'Wrong? Send to:'}
+              </span>
+              {(result.alternatives || []).filter(t => t !== cls.type).map(t => (
+                <button
+                  key={t}
+                  onClick={() => redirect(t)}
+                  disabled={busy}
+                  className="rounded-full border border-border px-2.5 py-1 text-xs hover:bg-muted disabled:opacity-50"
+                >
+                  {TYPE_META[t].label}
+                </button>
+              ))}
+            </div>
+          )}
 
           {draft.type !== 'unknown' && (
             <div className="flex justify-end">

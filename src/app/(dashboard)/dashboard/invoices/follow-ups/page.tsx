@@ -78,7 +78,7 @@ export default async function FollowUpsPage() {
   const { data: settingsRows } = await supabase.from('company_settings').select('key, value')
   const settings: Record<string, string> = {}
   ;(settingsRows || []).forEach((s: any) => { settings[s.key] = s.value })
-  const companyName = settings.company_name || 'Cirqle Design'
+  const companyName = settings.company_name || 'Cirqle Works'
   const templates = templatesFromSettings(settings)
 
   // Shape the payload; strip ₹ figures when the user can't see billing amounts.

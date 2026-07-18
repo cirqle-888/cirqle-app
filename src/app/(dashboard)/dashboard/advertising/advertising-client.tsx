@@ -12,6 +12,7 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { usePrivacy } from '@/contexts/privacy-context'
 import {
   Megaphone, Plus, TrendingUp, Target, Wallet, ArrowRight, Inbox, Play,
   Loader2, Link2, BarChart3, MousePointerClick, Users, Zap, AlertTriangle,
@@ -46,7 +47,7 @@ export interface LedgerRowView {
   amount_inr: number
   notes: string | null
   created_at: string
-  creator?: { id: string; name: string } | null
+  creator?: { id: string; name: string; cqid?: string | null } | null
   entry?: { id: string; entry_date: string; description: string; reference: string | null } | null
   project?: { id: string; campaign_name: string } | null
 }
@@ -713,6 +714,7 @@ function LedgerHistory({ rows, canManage, onChange }: {
   canManage: boolean
   onChange: () => void
 }) {
+  const { dn } = usePrivacy()
   const [busy, setBusy] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
@@ -746,7 +748,7 @@ function LedgerHistory({ rows, canManage, onChange }: {
                 <div className="text-xs truncate">{what}{r.notes ? <span className="text-muted-foreground"> · {r.notes}</span> : null}</div>
                 <div className="text-[10px] text-muted-foreground">
                   {new Date(r.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                  {r.creator?.name ? ` · ${r.creator.name}` : ''}
+                  {r.creator ? ` · ${dn(r.creator)}` : ''}
                 </div>
               </div>
             </div>

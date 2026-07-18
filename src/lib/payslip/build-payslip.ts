@@ -15,7 +15,7 @@ const BAND_LABELS: Record<string, string> = {
 const BAND_ORDER: PayslipBand['band'][] = ['100', '76-99', '51-75', '26-50', '0-25']
 
 const COMPANY_DEFAULTS = {
-  name:    'Cirqle Design',
+  name:    'Cirqle Works',
   email:   'team@cirqle.work',
   website: 'www.cirqle.work',
   phone:   '+91 81295 34377',

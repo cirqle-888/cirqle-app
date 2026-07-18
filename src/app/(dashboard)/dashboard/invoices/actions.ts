@@ -42,6 +42,11 @@ export interface RecordInvoicePaymentInput {
   newPaid:         number
   newPaidInr:      number
   newStatus:       string
+  // Deltas for the ATOMIC path (server-side increment, avoids lost updates when
+  // two payments are recorded concurrently). Optional for backward-compat: if
+  // absent the action falls back to the absolute newPaid/newPaidInr write.
+  appliedInvoiceCcy?: number   // this payment's amount in the invoice's currency
+  appliedInr?:        number   // this payment's amount in INR
   // Category: the "Invoice Payment" inflow category id, resolved client-side
   // from the categories list. If null, entry is created without a category.
   categoryId:      string | null
@@ -85,17 +90,37 @@ export async function recordInvoicePayment(
 
   if (pmtErr || !pmt) return { ok: false, error: pmtErr?.message ?? 'Payment insert failed' }
 
-  // 2. Update invoice paid_amount / status
-  const { error: invErr } = await admin
-    .from('invoices')
-    .update({
-      paid_amount:     input.newPaid,
-      paid_amount_inr: input.newPaidInr,
-      status:          input.newStatus,
+  // 2. Update invoice paid_amount / status.
+  // Prefer an ATOMIC server-side increment (RPC) so two concurrent payments
+  // both count — computing the new total on the client and writing it as an
+  // absolute value loses the first payment when a second overwrites it.
+  let balanceUpdated = false
+  if (typeof input.appliedInvoiceCcy === 'number' && typeof input.appliedInr === 'number') {
+    const { error: rpcErr } = await (admin as any).rpc('increment_invoice_paid', {
+      p_invoice_id: input.invoiceId,
+      p_delta:      input.appliedInvoiceCcy,
+      p_delta_inr:  input.appliedInr,
     })
-    .eq('id', input.invoiceId)
+    if (!rpcErr) {
+      balanceUpdated = true
+    } else if (rpcErr.code !== 'PGRST202' && !/function .* does not exist/i.test(rpcErr.message ?? '')) {
+      // Real failure (not "RPC not deployed yet") — surface it.
+      return { ok: false, error: rpcErr.message }
+    }
+  }
+  if (!balanceUpdated) {
+    // Fallback: absolute write (used until the RPC migration is applied).
+    const { error: invErr } = await admin
+      .from('invoices')
+      .update({
+        paid_amount:     input.newPaid,
+        paid_amount_inr: input.newPaidInr,
+        status:          input.newStatus,
+      })
+      .eq('id', input.invoiceId)
 
-  if (invErr) return { ok: false, error: invErr.message }
+    if (invErr) return { ok: false, error: invErr.message }
+  }
 
   // 3. Generate receipt number for the cashbook entry
   let receiptNumber: string | null = null

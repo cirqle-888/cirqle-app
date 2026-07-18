@@ -31,11 +31,11 @@ export function PricingPendingBanner({ clients, services, href }: Props) {
   const serviceHref = (id: string) => `/dashboard/settings?tab=Services&editService=${id}${ret}`
 
   // "Set pricing" target: jump straight to the single item, otherwise the most
-  // relevant tab (Services if only services pending, else Clients).
+  // relevant bulk view (Services tab if only services pending, else the Pricing Matrix).
   const primaryHref = href
     ?? (total === 1
         ? (clients[0] ? clientHref(clients[0].id) : serviceHref(services[0].id))
-        : `/dashboard/settings?tab=${clients.length === 0 ? 'Services' : 'Clients'}${ret}`)
+        : (clients.length === 0 ? `/dashboard/settings?tab=Services${ret}` : '/dashboard/pricing-matrix'))
 
   const itemLinkCls = 'text-xs text-red-700/80 hover:text-red-800 underline decoration-red-500/30 underline-offset-2 hover:decoration-red-500 transition-colors dark:text-red-400/80 dark:hover:text-red-300'
 

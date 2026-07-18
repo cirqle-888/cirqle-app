@@ -3,10 +3,12 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { usePrivacy } from '@/contexts/privacy-context'
 import { X, Plus, Trash2, Calendar, Percent, FileText } from 'lucide-react'
 import type { Employee, EmployeePerformanceHistory } from '@/types'
 
 export function PerformanceHistoryModal({ employee, onClose }: { employee: Employee; onClose: () => void }) {
+  const { dn } = usePrivacy()
   const [history, setHistory] = useState<EmployeePerformanceHistory[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -85,7 +87,7 @@ export function PerformanceHistoryModal({ employee, onClose }: { employee: Emplo
             <h2 className="text-lg font-semibold flex items-center gap-2">
               Performance History Register
             </h2>
-            <p className="text-sm text-muted-foreground">For {employee.name} ({employee.cqid})</p>
+            <p className="text-sm text-muted-foreground">For {dn(employee)} ({employee.cqid})</p>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-secondary rounded-lg text-muted-foreground hover:text-foreground">
             <X className="w-4 h-4" />

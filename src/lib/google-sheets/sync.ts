@@ -3,20 +3,51 @@
  *
  * No Google Cloud Console, no Service Account, no billing, no org policy issues.
  *
- * Each client's Google Sheet has a small Apps Script deployed as a Web App.
- * Cirqle App POSTs JSON to that URL and the script writes the rows.
+ * TWO deployment models, resolved per campaign:
  *
- * Setup per client (2 min):
- *   1. Open client's Google Sheet
- *   2. Extensions → Apps Script → paste the script from GOOGLE_SHEETS_SETUP.md
- *   3. Deploy → New deployment → Web App → Execute as: Me → Who has access: Anyone → Deploy
- *   4. Copy the Web App URL → paste into client record in Cirqle App (offer_sheet_webhook_url)
+ *  1. Shared script (recommended, default). ONE standalone Apps Script Web App
+ *     is deployed once for the whole workspace; its URL + a shared secret live
+ *     in company_settings (`offer_sheet_webhook_url`, `offer_sheet_secret`).
+ *     Each client just pastes their Google Sheet LINK (clients.offer_sheet_url).
+ *     We send the spreadsheetId (parsed from that link) + the secret, and the
+ *     one script writes into that sheet via openById. Adding a client = paste a
+ *     link; no per-client Apps Script deploy.
+ *
+ *  2. Legacy per-client script (still supported). A script bound to that one
+ *     client's sheet, its Web App URL stored in clients.offer_sheet_webhook_url.
+ *     Takes precedence when set, so existing setups keep working untouched.
+ *
+ * See GOOGLE_SHEETS_SETUP.md for the one-time shared-script deploy.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { notifyAdmins } from '@/lib/notifications/create'
+import { OFFER_SHEET_HEADERS, buildOfferSheetRows } from '@/lib/offer-sheet'
+
+/**
+ * How long to wait for the client's Apps Script to answer.
+ *
+ * Apps Script routinely needs 10-20s on a cold start plus the sheet write, so
+ * the original 15s tripped on healthy-but-slow scripts and fired a recurring
+ * "sync failed" notification for a setup that was actually fine. The automatic
+ * sync is fire-and-forget (offer-intake save path), so a longer ceiling costs
+ * the user nothing; the manual "Sync now" actions are deliberate and can wait.
+ */
+const SHEET_SYNC_TIMEOUT_MS = 45_000
 
 interface SyncResult { ok: boolean; error?: string; sheetUrl?: string }
+
+/**
+ * Pull the spreadsheet ID out of a Google Sheets link (or accept a raw ID).
+ * `https://docs.google.com/spreadsheets/d/<ID>/edit#gid=0` → `<ID>`.
+ */
+export function extractSheetId(url: string | null | undefined): string | null {
+  if (!url) return null
+  const m = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/)
+  if (m) return m[1]
+  const trimmed = url.trim()
+  return /^[a-zA-Z0-9_-]{30,}$/.test(trimmed) ? trimmed : null
+}
 
 function formatDate(campaign: {
   date_type: string
@@ -40,24 +71,27 @@ function formatDate(campaign: {
   return ''
 }
 
-function splitPrice(price?: number | null): [string, string] {
-  if (!price) return ['', '']
-  const parts = price.toFixed(2).split('.')
-  return [parts[0], parts[1] === '00' ? '' : parts[1]]
-}
-
 export async function syncCampaignToSheet(
   admin: SupabaseClient,
   campaignId: string,
   clientId: string,
 ): Promise<SyncResult> {
 
-  // 1. Load client webhook URL
+  // 1. Load client sheet destination (per-client override URL + the Sheet link)
   const { data: client } = await admin
     .from('clients')
-    .select('offer_sheet_webhook_url, name')
+    .select('offer_sheet_webhook_url, offer_sheet_url, name')
     .eq('id', clientId)
     .maybeSingle()
+
+  // Workspace-wide shared-script config (one deploy for all clients).
+  const { data: settingsRows } = await admin
+    .from('company_settings')
+    .select('key, value')
+    .in('key', ['offer_sheet_webhook_url', 'offer_sheet_secret'])
+  const settings = Object.fromEntries((settingsRows || []).map((r: any) => [r.key, r.value]))
+  const globalWebhook = (settings['offer_sheet_webhook_url'] || '').trim()
+  const sharedSecret = (settings['offer_sheet_secret'] || '').trim()
 
   // 2. Load campaign + products (sheet_sync_error included so we can tell a
   // BRAND NEW failure apart from "still broken since last sync attempt" —
@@ -89,64 +123,83 @@ export async function syncCampaignToSheet(
     })
   }
 
-  if (!client?.offer_sheet_webhook_url) {
-    const errMsg = 'No Google Sheet webhook configured for this client.'
+  // Resolve where this campaign's rows go. Legacy per-client webhook wins when
+  // present (that script is bound to the client's own sheet). Otherwise use the
+  // shared script + the client's Sheet link.
+  let targetUrl: string
+  let routePayload: Record<string, unknown> = {}
+  if (client?.offer_sheet_webhook_url) {
+    targetUrl = client.offer_sheet_webhook_url
+  } else if (globalWebhook && client?.offer_sheet_url) {
+    const spreadsheetId = extractSheetId(client.offer_sheet_url)
+    if (!spreadsheetId) {
+      const errMsg = 'The client Sheet link is not a valid Google Sheets URL.'
+      await admin.from('offer_campaigns').update({ sheet_sync_error: errMsg }).eq('id', campaignId)
+      notifyNewFailure(errMsg)
+      return { ok: false, error: errMsg }
+    }
+    targetUrl = globalWebhook
+    routePayload = { spreadsheetId, secret: sharedSecret }
+  } else {
+    const errMsg = globalWebhook
+      ? 'No Google Sheet linked for this client. Paste the client’s Google Sheet link in Offer Intake settings.'
+      : 'Google Sheet sync is not set up yet. Connect the shared script in Offer Intake settings.'
     await admin.from('offer_campaigns')
       .update({ sheet_sync_error: errMsg })
       .eq('id', campaignId)
     notifyNewFailure(errMsg)
-    return { ok: false, error: 'No sheet webhook URL configured.' }
+    return { ok: false, error: errMsg }
   }
 
   const offerDate = formatDate(campaign)
-  const products = (campaign.products as any[] || [])
-    .sort((a: any, b: any) => a.display_order - b.display_order)
-
-  // 3. Build rows
-  const rows = products.map((p: any) => {
-    const [price1, price2] = splitPrice(p.price)
-    let offerText = p.offer_text || ''
-    if (p.offer_type === 'bogo') offerText = 'Buy 1 Get 1'
-    const badgeLabels = ((p.badges || []) as any[])
-      .map(b => b.custom_label || (Array.isArray(b.badge) ? b.badge[0] : b.badge)?.label)
-      .filter(Boolean)
-      .join(', ')
-    let productName = p.name || ''
-    if (p.weight) {
-      productName = `${productName} ${p.weight}`.trim()
-    }
-    return [
-      productName,
-      price1,
-      price2,
-      p.mrp ? String(p.mrp) : '',
-      offerText,
-      badgeLabels,
-      p.image_url || '',
-      offerDate,
-      String(p.page || 1),
-    ]
+  // 3. Build the stable Figma/Sheets data contract. The offer editor's
+  // “Copy table” button imports this same helper, so pasted and synced output
+  // always have identical columns.
+  const rows = buildOfferSheetRows({
+    clientName: client?.name,
+    offerTitle: campaign.title,
+    offerDate,
+    products: (campaign.products as any[] || []),
   })
 
-  // 4. POST to Apps Script Web App
+  // 4. POST to the Apps Script Web App. `routePayload` carries the spreadsheetId
+  // + shared secret for the shared-script model; it's empty for legacy bound
+  // scripts (which already know their own sheet).
   const payload = {
     offerTitle: campaign.title || '',
     offerDate,
-    headers: ['Product', 'Price 1', 'Price 2', 'MRP', 'Offer Text', 'Badge', 'Image URL', 'Offer Date', 'Page'],
+    headers: OFFER_SHEET_HEADERS,
     rows,
+    ...routePayload,
+  }
+
+  // Mark this attempt in progress: clear any error left over from a PREVIOUS
+  // failed sync so an in-flight re-sync isn't shown as failed (both the offer
+  // editor's status poll and the campaign card read sheet_sync_error). wasHealthy
+  // was captured above, so the healthy→broken notify throttle stays intact.
+  if (!wasHealthy) {
+    await admin.from('offer_campaigns').update({ sheet_sync_error: null }).eq('id', campaignId)
   }
 
   try {
-    const res = await fetch(client.offer_sheet_webhook_url, {
+    const res = await fetch(targetUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(SHEET_SYNC_TIMEOUT_MS),
     })
 
     if (!res.ok) {
       const body = await res.text().catch(() => '')
-      const errMsg = `Sheet sync failed (HTTP ${res.status}): ${body.slice(0, 200)}`
+      // Google answers blocked/broken Apps Script deployments with an HTML
+      // sign-in or error page — raw markup is useless to staff, so translate
+      // the common cases into an actionable message.
+      const isHtml = /^\s*<!doctype|^\s*<html/i.test(body)
+      const errMsg = res.status === 401 || res.status === 403
+        ? `Google blocked the sheet webhook (HTTP ${res.status}). Open the client's sheet → Extensions → Apps Script → Deploy → Manage deployments → set "Who has access" to "Anyone" and re-deploy; if the URL changed, update it in Cirqle's Offer Intake settings.`
+        : res.status === 404
+          ? 'Sheet webhook not found (HTTP 404) — the Apps Script deployment was removed or the URL is wrong. Re-deploy and update the URL in Offer Intake settings.'
+          : `Sheet sync failed (HTTP ${res.status}): ${isHtml ? 'Google returned an error page instead of the Apps Script response.' : body.slice(0, 200)}`
       await admin.from('offer_campaigns')
         .update({ sheet_sync_error: errMsg })
         .eq('id', campaignId)
@@ -175,8 +228,13 @@ export async function syncCampaignToSheet(
     return { ok: true, sheetUrl: returnedSheetUrl }
 
   } catch (err: any) {
+    // A WRONG url does not time out — Google answers it with 404/403, handled
+    // above with its own message. Reaching here means the script accepted the
+    // request and simply did not finish in time (cold start, or a long write
+    // on a big offer list), so point at that instead of sending staff to
+    // re-check a URL that is almost certainly fine.
     const errMsg = err?.name === 'TimeoutError'
-      ? 'Sheet sync timed out. Check the Apps Script URL is correct.'
+      ? `Sheet sync timed out after ${Math.round(SHEET_SYNC_TIMEOUT_MS / 1000)}s — the Apps Script did not finish. Usually a slow/cold script or a very long offer list; open the sheet's Apps Script → Executions to see if it is still running, then re-sync.`
       : `Sheet sync error: ${err?.message || 'Unknown error'}`
     await admin.from('offer_campaigns')
       .update({ sheet_sync_error: errMsg })

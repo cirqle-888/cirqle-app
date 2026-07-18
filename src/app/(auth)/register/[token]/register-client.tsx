@@ -235,7 +235,7 @@ export default function RegisterClient({ token, employee }: Props) {
         </div>
 
         <p className="text-center text-xs text-muted-foreground mt-6">
-          Cirqle Design © {new Date().getFullYear()}
+          Cirqle Works © {new Date().getFullYear()}
         </p>
       </div>
     </div>

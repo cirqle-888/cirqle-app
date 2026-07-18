@@ -1,8 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { ChevronRight, Home, ChevronDown, UserCircle } from 'lucide-react'
+import { usePathname, useRouter } from 'next/navigation'
+import { ChevronRight, Home, ChevronDown, UserCircle, Sparkles } from 'lucide-react'
 import { forwardRef, useState } from 'react'
 import { usePermissions } from '@/contexts/permission-context'
 import { usePrivacy } from '@/contexts/privacy-context'
@@ -33,6 +33,8 @@ const ROUTE_LABELS: Record<string, string> = {
   cashbook:      'Cash Book',
   clients:       'Clients',
   ranking:       'Client Ranking',
+  capture:       'AI Capture',
+  'pricing-matrix': 'Pricing Matrix',
   partners:      'Business Partners',
   payroll:       'HR & Payroll',
   reports:       'Reports',
@@ -113,13 +115,36 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
 ) {
   const { user } = usePermissions()
   const { isUnlocked } = usePrivacy()
+  const router = useRouter()
   const isEmployee = !user.isAdmin
   
   const [profileOpen, setProfileOpen] = useState(false)
   const [showPwdModal, setShowPwdModal] = useState(false)
 
+  async function openAiCapture() {
+    // Capture the user's copied WhatsApp/email text when the browser permits
+    // it, but never block the universal input when clipboard access is denied.
+    try {
+      const text = await navigator.clipboard.readText()
+      if (text) {
+        // @ts-expect-error Desktop and browser entry points share this handoff.
+        window.__pendingCirqleCapture = { text }
+      }
+    } catch { /* manual paste remains available */ }
+    router.push('/dashboard/capture')
+  }
+
   const globalActions = (
     <>
+      <button
+        type="button"
+        onClick={() => void openAiCapture()}
+        title="AI Capture — paste any WhatsApp message, email, product list, or request"
+        className="inline-flex items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-2 text-xs font-semibold text-violet-600 hover:bg-violet-500/15 dark:text-violet-300 transition-colors"
+      >
+        <Sparkles className="h-3.5 w-3.5" />
+        <span className="hidden lg:inline">AI Capture</span>
+      </button>
       <CommandPaletteTrigger className="hidden md:flex w-52 lg:w-64" />
       <CommandPaletteTrigger className="md:hidden" isCollapsed={true} />
       

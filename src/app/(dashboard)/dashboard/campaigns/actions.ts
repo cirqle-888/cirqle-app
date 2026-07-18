@@ -34,10 +34,16 @@ export async function finaliseCampaign(campaignId: string): Promise<ActionResult
   const guard = await requireAdmin()
   if (!guard.ok) return { ok: false, error: guard.error }
   const admin = createAdminClient()
+  const now = new Date().toISOString()
+  // Stamp completed_at so the auto-archive job can age this finalised campaign
+  // out later (only set it the first time it's finalised).
   const { error } = await admin.from('offer_campaigns')
-    .update({ status: 'finalised', updated_at: new Date().toISOString() })
+    .update({ status: 'finalised', updated_at: now, completed_at: now })
     .eq('id', campaignId)
+    .is('completed_at', null)
   if (error) return { ok: false, error: 'Could not finalise.' }
+  // If completed_at was already set (re-finalise), still flip the status.
+  await admin.from('offer_campaigns').update({ status: 'finalised', updated_at: now }).eq('id', campaignId)
   revalidatePath('/dashboard/campaigns')
   return { ok: true }
 }
@@ -46,8 +52,9 @@ export async function archiveCampaign(campaignId: string): Promise<ActionResult>
   const guard = await requireAdmin()
   if (!guard.ok) return { ok: false, error: guard.error }
   const admin = createAdminClient()
+  const now = new Date().toISOString()
   const { error } = await admin.from('offer_campaigns')
-    .update({ status: 'archived', updated_at: new Date().toISOString() })
+    .update({ status: 'archived', updated_at: now, archived_at: now })
     .eq('id', campaignId)
   if (error) return { ok: false, error: 'Could not archive.' }
   revalidatePath('/dashboard/campaigns')

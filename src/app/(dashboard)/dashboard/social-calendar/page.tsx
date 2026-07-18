@@ -56,25 +56,61 @@ export default async function SocialCalendarPage({
   // status; it never stores it.
   let items: any[] = []
   if (migrated && selectedId) {
-    const { data } = await admin
-      .from('social_calendar_items')
-      .select(`
+    // service_id / variants need the 202607170xxxxx patch migrations — fall back without them.
+    const ITEM_COLS = `
         id, calendar_id, scheduled_date, title, content_type, platforms,
         caption, notes, status, request_id, created_at,
         request:task_requests!social_calendar_items_request_id_fkey(
           id, ref_no, status, promoted_task_id,
           promoted_task:tasks!task_requests_promoted_task_id_fkey(id, task_number, status)
         )
-      `)
-      .eq('calendar_id', selectedId)
-      .order('scheduled_date', { ascending: true })
-      .order('display_order', { ascending: true })
-      .order('created_at', { ascending: true })
-    items = data || []
+      `
+    // Drop ONLY the column each retry trips on — a pending patch migration
+    // must not also hide columns that already exist.
+    let extraCols = ['service_id', 'variants', 'reference_url', 'reference_urls', 'scheduled_end_date', 'caption_canvas']
+    for (let attempt = 0; attempt <= 6; attempt++) {
+      const sel = [...extraCols, ITEM_COLS].join(', ')
+      const itemsRes = await admin
+        .from('social_calendar_items')
+        .select(sel)
+        .eq('calendar_id', selectedId)
+        .order('scheduled_date', { ascending: true })
+        .order('display_order', { ascending: true })
+        .order('created_at', { ascending: true })
+      if (!itemsRes.error) { items = itemsRes.data || []; break }
+      // Match the column NAME the error quotes. A plain substring test would
+      // resolve a missing `reference_urls` to `reference_url` and drop the
+      // column that exists, hiding every legacy reference image.
+      const msg = itemsRes.error.message || ''
+      const quoted = [...msg.matchAll(/'([a-z_]+)'/gi)].map(m => m[1])
+      const col = extraCols.find(c => quoted.includes(c))
+        ?? [...extraCols].sort((a, b) => b.length - a.length).find(c => msg.includes(c))
+      if (!col) break
+      extraCols = extraCols.filter(c => c !== col)
+    }
   }
 
   const clients = (await admin
     .from('clients').select('id, name, code').eq('is_active', true).order('name')).data || []
+
+  // Services power the item modal's Service picker — the same catalogue the
+  // Requests form uses, so calendar items align with request types.
+  const services = (await admin
+    .from('services').select('id, name').eq('is_active', true)
+    .order('display_order').order('name')).data || []
+
+  // Full settings map: the PDF export borrows the invoice template's branding
+  // keys (logo, colors, company identity), and the content-type → service
+  // defaults live under 'social_content_type_services'.
+  let companySettings: Record<string, string> = {}
+  let serviceMap: Record<string, string> = {}
+  try {
+    const { data } = await admin.from('company_settings').select('key, value')
+    companySettings = Object.fromEntries((data || []).map((r: { key: string; value: string }) => [r.key, r.value]))
+    if (companySettings.social_content_type_services) {
+      serviceMap = JSON.parse(companySettings.social_content_type_services)
+    }
+  } catch { /* unset or malformed — keyword fallback covers it */ }
 
   return (
     <SocialCalendarClient
@@ -83,6 +119,9 @@ export default async function SocialCalendarPage({
       selectedId={selectedId}
       initialItems={items}
       clients={clients as any[]}
+      services={services as any[]}
+      serviceMap={serviceMap}
+      companySettings={companySettings}
       canManage={isAdmin || hasPermission(me, PERMS.SOCIAL_MANAGE)}
     />
   )

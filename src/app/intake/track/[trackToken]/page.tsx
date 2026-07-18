@@ -89,7 +89,7 @@ export default async function TrackPage({ params }: { params: Promise<{ trackTok
         </div>
       </div>
 
-      <p className="text-center text-[11px] text-muted-foreground/50 mt-6">Cirqle Design · cirqle.work</p>
+      <p className="text-center text-[11px] text-muted-foreground/50 mt-6">Cirqle Works · cirqle.work</p>
     </div>
   )
 }

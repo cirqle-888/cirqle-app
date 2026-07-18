@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin']
 
 export const metadata: Metadata = {
   title: 'Cirqle — Business Management',
-  description: 'Cirqle Design agency business management system',
+  description: 'Cirqle Works business management system',
   // Icons come from the app/ file conventions: icon.svg → <link rel="icon">
   // (favicon) and apple-icon.png → <link rel="apple-touch-icon"> (iOS home
   // screen — iOS ignores SVG icons, so a real 180² PNG is required). A manual

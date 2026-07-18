@@ -570,7 +570,7 @@ export default function PayrollClient({
   .pending{border-color:#d97706;color:#d97706}
   @media print{button{display:none}}
 </style></head><body>
-<h1>Salary Slip</h1><p class="sub">Cirqle Design Agency &nbsp;|&nbsp; ${mon} ${record.year}</p>
+<h1>Salary Slip</h1><p class="sub">Cirqle Works &nbsp;|&nbsp; ${mon} ${record.year}</p>
 <table><tr><th>Employee</th><th>CQID</th><th>Period</th></tr>
 <tr><td>${empName}</td><td>${emp?.cqid || '—'}</td><td>${mon} ${record.year}</td></tr></table>
 <table><tr><th>Component</th><th>Amount</th></tr>

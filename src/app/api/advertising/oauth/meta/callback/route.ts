@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { publishAdEvent } from '@/lib/advertising/events'
+import { loadCurrentUser } from '@/lib/permissions/check'
+import { verifyOAuthState } from '@/lib/oauth/state'
 
 /**
  * Meta OAuth callback handler.
@@ -26,9 +28,19 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // 1. Decode state
-    const state = JSON.parse(Buffer.from(stateParam || '', 'base64').toString('utf-8'))
-    const { clientId: targetClientId, employeeId } = state
+    // 1. Require a signed-in employee session (the person completing the flow)
+    const user = await loadCurrentUser().catch(() => null)
+    if (!user) {
+      return NextResponse.redirect(new URL('/dashboard/advertising/integrations?error=not_signed_in', req.url))
+    }
+
+    // 2. Verify HMAC-signed state (rejects forged/expired states)
+    const state = verifyOAuthState<{ clientId: string; employeeId: string }>(stateParam)
+    if (!state) {
+      return NextResponse.redirect(new URL('/dashboard/advertising/integrations?error=invalid_state', req.url))
+    }
+    const targetClientId = state.clientId
+    const employeeId = user.employeeId // attribute to the live session, not the state payload
 
     if (!targetClientId) throw new Error('Missing target client ID in state')
 

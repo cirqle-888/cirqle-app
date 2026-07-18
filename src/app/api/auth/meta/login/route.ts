@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { loadCurrentUser } from '@/lib/permissions/check'
+import { signOAuthState } from '@/lib/oauth/state'
 
 export async function GET(req: NextRequest) {
   // 1. Authenticate user initiating the request
@@ -23,10 +24,10 @@ export async function GET(req: NextRequest) {
 
   // 4. Construct Redirect URI & State
   const redirectUri = process.env.META_REDIRECT_URI || `${url.origin}/api/auth/meta/callback`
-  const state = Buffer.from(JSON.stringify({ 
-    clientId: targetClientId, 
-    employeeId: user.employeeId 
-  })).toString('base64')
+  const state = signOAuthState({
+    clientId: targetClientId,
+    employeeId: user.employeeId,
+  })
 
   // 5. Construct Meta OAuth URL
   const scope = 'ads_management,ads_read,business_management'

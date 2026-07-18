@@ -126,6 +126,7 @@ export default function PortalClient({ employee, tasks, contributions, scores, p
             </div>
             <div className="text-right">
               <div className="font-semibold text-sm">{employee.cqid}</div>
+              {/* eslint-disable-next-line no-restricted-syntax -- self-view: the employee's own name on their own token-scoped portal */}
               {employee.name && <div className="text-xs text-muted-foreground">{employee.name}</div>}
             </div>
           </div>

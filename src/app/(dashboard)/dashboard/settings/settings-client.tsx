@@ -10,7 +10,7 @@ import { createClient as createSupabaseClient } from '@/lib/supabase/client'
 import {
   upsertCompanySettings,
   createEmployee, updateEmployee,
-  createClient, updateClient, upsertClientServicePricings, deactivateClient, reactivateClient, quickEditClient,
+  createClient, updateClient, upsertClientServicePricings,
   createService, updateService, deactivateService, reactivateService, quickEditService,
   createGroup, updateGroup, deactivateGroup, quickEditGroup, restoreGroup,
   createParameter, updateParameter, deactivateParameter, quickEditParameter, restoreParameter,
@@ -19,10 +19,9 @@ import {
   createCashbookCategory, updateCashbookCategory, deactivateCashbookCategory, reactivateCashbookCategory,
   upsertExchangeRate,
   syncExchangeRates,
-  upsertMatrixCell,
   setEmployeeServices, setServiceEmployees,
 } from './actions'
-import { Plus, X, Edit2, Archive, ArchiveRestore, Save, ChevronDown, ChevronLeft, ChevronRight, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Mail, Send, RotateCcw as ResetKey, RefreshCw, Star, LayoutGrid, List, Building2, MapPin, Users, Handshake } from 'lucide-react'
+import { Plus, X, Edit2, Archive, ArchiveRestore, Save, ChevronDown, ChevronLeft, ChevronRight, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Mail, Send, RotateCcw as ResetKey, RefreshCw, Star, Building2, MapPin, Users, Handshake } from 'lucide-react'
 import type { Currency } from '@/types'
 import InfoTip from '@/components/ui/info-tip'
 import { usePrivacy, getStoredPin, setStoredPin, isForceLocked } from '@/contexts/privacy-context'
@@ -31,7 +30,6 @@ import { useToast, ToastContainer } from '@/components/ui/toast'
 import { generateInviteToken, revokeInviteToken, archiveEmployee, restoreEmployee, adminResetPassword, updateEmployeeAvatar } from './employee-actions'
 import dynamic from 'next/dynamic'
 
-const RecalcBillingModal = dynamic(() => import('./recalc-billing-modal').then(mod => mod.RecalcBillingModal), { ssr: false })
 const RecalcCommissionsModal = dynamic(() => import('./recalc-commissions-modal').then(mod => mod.RecalcCommissionsModal), { ssr: false })
 const PerformanceHistoryModal = dynamic(() => import('./performance-history-modal').then(mod => mod.PerformanceHistoryModal), { ssr: false })
 import { EmployeeAvatar, AvatarPicker } from '@/components/ui/employee-avatar'
@@ -95,9 +93,9 @@ function ArchFilterTabs({ value, onChange }: { value: 'active' | 'archived' | 'a
 }
 
 const SETTINGS_TABS = [
-  'Company', 'Employees', 'Clients', 'Services',
+  'Company', 'Employees', 'Services',
   'Groups & Params', 'Tools', 'Bank Accounts', 'Cash Categories', 'Exchange Rates',
-  'Pricing Matrix', 'Privacy & Security', 'Message Templates', 'Matching'
+  'Privacy & Security', 'Message Templates', 'Matching'
 ] as const
 type SettingsTab = typeof SETTINGS_TABS[number]
 
@@ -105,7 +103,6 @@ type SettingsTab = typeof SETTINGS_TABS[number]
 const SETTINGS_GROUPS: { label: string; emoji: string; tabs: SettingsTab[] }[] = [
   { label: 'Organization',    emoji: '🏢', tabs: ['Company', 'Privacy & Security'] },
   { label: 'People',          emoji: '👥', tabs: ['Employees'] },
-  { label: 'Clients & Pricing', emoji: '🤝', tabs: ['Clients', 'Pricing Matrix'] },
   { label: 'Service Catalog', emoji: '📦', tabs: ['Services', 'Groups & Params', 'Tools'] },
   { label: 'Finance',         emoji: '💸', tabs: ['Bank Accounts', 'Cash Categories', 'Exchange Rates', 'Matching'] },
   { label: 'Communication',   emoji: '💬', tabs: ['Message Templates'] },
@@ -225,7 +222,7 @@ export default function SettingsClient(props: Props) {
       return a.name.localeCompare(b.name)
     })
   }, [services, taskServiceUsage])
-  const [clients, setClients] = useState(props.clients)
+  const [, setClients] = useState(props.clients)
   const [employees, setEmployees] = useState(props.employees)
   const [bankAccounts, setBankAccounts] = useState(props.bankAccounts)
   const [categories, setCategories] = useState(props.categories)
@@ -240,16 +237,11 @@ export default function SettingsClient(props: Props) {
   const [quickEdit, setQuickEdit] = useState(false)
 
   // ── Per-tab search + sort + view ───────────────────────────
-  const [clientSearch, setClientSearch] = useState('')
-  const [clientSort, setClientSort] = useState<'name' | 'code'>('name')
-  const [clientViewMode, setClientViewMode] = useState<'list' | 'grid'>('list')
   const [serviceSearch, setServiceSearch] = useState('')
   const [serviceSort, setServiceSort] = useState<'name' | 'usage'>('usage')
   const [groupSearch, setGroupSearch] = useState('')
   const [paramSearch, setParamSearch] = useState('')
   const [toolSearch, setToolSearch] = useState('')
-  const [matrixClientSearch, setMatrixClientSearch] = useState('')
-  const [matrixServiceSearch, setMatrixServiceSearch] = useState('')
   const [empSearch, setEmpSearch] = useState('')
   const [copiedPortalId, setCopiedPortalId] = useState<string | null>(null)
   const [salaryDayCalOpen, setSalaryDayCalOpen] = useState(false)
@@ -258,20 +250,6 @@ export default function SettingsClient(props: Props) {
   // Shared Active/Archived/All filter for the catalog tabs (Clients, Services,
   // Tools, Cash Categories) — archived records stay inspectable + restorable.
   const [archFilter, setArchFilter] = useState<'active' | 'archived' | 'all'>('active')
-
-  const filteredClients = useMemo(() => {
-    let list = clients
-    if (archFilter === 'active')   list = list.filter((c: any) => c.is_active !== false)
-    if (archFilter === 'archived') list = list.filter((c: any) => c.is_active === false)
-    if (clientSearch) {
-      const q = clientSearch.toLowerCase()
-      list = list.filter((c: any) => c.name?.toLowerCase().includes(q) || c.code?.toLowerCase().includes(q) || c.email?.toLowerCase().includes(q))
-    }
-    list.sort((a: any, b: any) => clientSort === 'code'
-      ? (a.code || '').localeCompare(b.code || '')
-      : (a.name || '').localeCompare(b.name || ''))
-    return list
-  }, [clients, clientSearch, clientSort, archFilter])
 
   const filteredServices = useMemo(() => {
     const byFilter = (s: any) =>
@@ -429,9 +407,6 @@ export default function SettingsClient(props: Props) {
     pendingDeleteRef.current = null
   }
 
-  // Pricing matrix collapse
-  const [showAllPricingClients, setShowAllPricingClients] = useState(false)
-
   // Forms
   const [showForm, setShowForm] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -443,61 +418,6 @@ export default function SettingsClient(props: Props) {
   const [clientPricings, setClientPricings] = useState<Record<string, { price: string; commission_percentage: string; currency: string }>>({})
   const [selectedClientServices, setSelectedClientServices] = useState<Set<string>>(new Set())
   const [clientFormServiceSearch, setClientFormServiceSearch] = useState('')
-
-  // Pricing matrix: `clientId::serviceId` -> { price, commission_percentage, currency }
-  type MatrixCell = { price: string; commission_percentage: string; currency: string }
-  const [matrix, setMatrix] = useState<Record<string, MatrixCell>>(() => {
-    const m: Record<string, MatrixCell> = {}
-    props.clients.forEach((c: any) => {
-      c.service_pricings?.forEach((p: any) => {
-        m[`${c.id}::${p.service_id}`] = {
-          price: p.price != null ? String(p.price) : '',
-          commission_percentage: p.commission_percentage != null ? String(p.commission_percentage) : '',
-          currency: p.currency || c.default_currency || 'INR',
-        }
-      })
-    })
-    return m
-  })
-  const [matrixSaving, setMatrixSaving] = useState<string | null>(null)
-
-  // Recalculate-task-billing modal (one-off maintenance action — hidden behind a button)
-  const [showRecalcModal, setShowRecalcModal] = useState(false)
-  // Flatten the matrix into the array shape the modal expects
-  const clientPricingsArray = useMemo(() => {
-    return Object.entries(matrix).flatMap(([key, cell]) => {
-      const [client_id, service_id] = key.split('::')
-      if (!client_id || !service_id) return []
-      const priceNum = cell.price === '' ? null : parseFloat(cell.price)
-      return [{
-        client_id,
-        service_id,
-        price: priceNum,
-        percentage_rate: null,  // matrix UI doesn't expose percentage_rate yet; modal falls back to default
-        currency: cell.currency,
-      }]
-    })
-  }, [matrix])
-
-  async function saveMatrixCell(clientId: string, serviceId: string, cell: MatrixCell) {
-    const key = `${clientId}::${serviceId}`
-    setMatrixSaving(key)
-    await upsertMatrixCell(
-      clientId,
-      serviceId,
-      parseFloat(cell.price) || 0,
-      parseFloat(cell.commission_percentage) || 0,
-      cell.currency || 'INR',
-    )
-    setMatrixSaving(null)
-    setClients(prev => prev.map(c => c.id === clientId ? { ...c, pricing_pending: false } : c))
-    setServices(prev => prev.map(s => s.id === serviceId ? { ...s, pricing_pending: false } : s))
-  }
-
-  function updateMatrix(clientId: string, serviceId: string, field: keyof MatrixCell, value: string) {
-    const key = `${clientId}::${serviceId}`
-    setMatrix(prev => ({ ...prev, [key]: { ...((prev[key]) || { price: '', commission_percentage: '', currency: 'INR' }), [field]: value } }))
-  }
 
   function openForm(type: string, defaults: Record<string, any> = {}) {
     setShowForm(type)
@@ -1218,7 +1138,7 @@ export default function SettingsClient(props: Props) {
                             </div>
                             {companySettings['invoice_show_tagline'] !== 'false' && (
                               <div style={{ fontSize: 8, color: '#888', letterSpacing: 1, textTransform: 'uppercase' }}>
-                                {companySettings['company_tagline'] || 'Get Budget Designs'}
+                                {companySettings['company_tagline'] || 'Creative & Marketing Solutions'}
                               </div>
                             )}
                           </div>
@@ -1688,6 +1608,7 @@ export default function SettingsClient(props: Props) {
                         <div className="flex items-center gap-2 mb-0.5">
                           <p className="font-semibold text-sm tracking-tight text-foreground">{emp.cqid}</p>
                           {isUnlocked && emp.name && (
+                            // eslint-disable-next-line no-restricted-syntax -- deliberate: name shown only when privacy is unlocked, on the admin Employees settings page
                             <span className="text-[13px] text-foreground/80 font-medium">— {emp.name}</span>
                           )}
                           {emp.auth_id
@@ -1822,239 +1743,6 @@ export default function SettingsClient(props: Props) {
                   </div>
                 ))}
               </div>
-            </div>
-          )}
-
-          {/* Clients */}
-          {tab === 'Clients' && (
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <h2 className="text-sm font-semibold">Clients ({filteredClients.length}{clientSearch ? `/${clients.length}` : ''})</h2>
-                  <button onClick={() => setQuickEdit(q => !q)}
-                    title={quickEdit ? 'Exit quick edit mode' : 'Enable quick edit — edit rows inline'}
-                    className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-all ${
-                      quickEdit ? 'bg-amber-500/15 border-amber-500/30 text-amber-400' : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
-                    }`}>
-                    <Zap className="w-3 h-3" /> {quickEdit ? 'Exit edit' : 'Quick edit'}
-                  </button>
-                  {/* View Toggle */}
-                  <div className="flex items-center bg-secondary border border-border rounded-lg p-0.5">
-                    <button onClick={() => setClientViewMode('list')} className={`p-1 rounded-md transition-colors ${clientViewMode === 'list' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
-                      <List className="w-3.5 h-3.5" />
-                    </button>
-                    <button onClick={() => setClientViewMode('grid')} className={`p-1 rounded-md transition-colors ${clientViewMode === 'grid' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
-                      <LayoutGrid className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Link href="/dashboard/clients" className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg border border-primary/30 bg-primary/10 text-primary hover:bg-primary/15 transition-colors">
-                    Open Clients module <ChevronRight className="w-3 h-3" />
-                  </Link>
-                  <button onClick={() => openClientForm()} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:shadow-lg hover:shadow-primary/20 hover:opacity-90 transition-all">
-                    <Plus className="w-4 h-4" /> Add Client
-                  </button>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 mb-4">
-                <ArchFilterTabs value={archFilter} onChange={setArchFilter} />
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <input
-                    value={clientSearch}
-                    onChange={e => setClientSearch(e.target.value)}
-                    placeholder="Search clients by name, code, or email…"
-                    className="w-full pl-9 pr-3 py-2 bg-card border border-border hover:border-border/80 focus:border-primary rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all shadow-sm"
-                  />
-                </div>
-                <button onClick={() => setClientSort(s => s === 'name' ? 'code' : 'name')}
-                  className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-card border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-all shadow-sm shrink-0">
-                  <ArrowUpDown className="w-3.5 h-3.5" />
-                  Sort: {clientSort === 'name' ? 'Name' : 'Code'}
-                </button>
-              </div>
-              {quickEdit && (
-                <p className="text-[11px] text-amber-400/70 bg-amber-500/5 border border-amber-500/15 rounded-lg px-3 py-2 mb-4 flex items-center gap-1.5">
-                  <Zap className="w-3 h-3 shrink-0" /> Click any field to edit — changes auto-save when you leave the field. Use the ✏️ button for full edit.
-                </p>
-              )}
-
-              {clientViewMode === 'grid' && !quickEdit ? (
-                /* Grid View */
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {filteredClients.map((client: any) => {
-                    const initials = (client.name.match(/\b\w/g) || []).slice(0, 2).join('').toUpperCase()
-                    return (
-                      <div key={client.id} className="group relative bg-card border border-border/60 hover:border-primary/30 hover:shadow-md hover:shadow-primary/5 rounded-2xl p-5 transition-all overflow-hidden flex flex-col h-full">
-                        <div className="flex items-start justify-between mb-3">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary/10 to-violet-500/10 border border-primary/10 flex items-center justify-center text-primary font-semibold text-sm shrink-0 shadow-inner">
-                              {initials}
-                            </div>
-                            <div className="min-w-0">
-                              <p className="font-semibold text-foreground truncate">{client.name}</p>
-                              <p className="text-xs text-muted-foreground font-mono mt-0.5">{client.code}</p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => openClientForm(client)} className="p-1.5 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"><Edit2 className="w-3.5 h-3.5" /></button>
-                          </div>
-                        </div>
-
-                        <div className="space-y-1.5 mb-4 flex-1">
-                          {client.email && (
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground truncate">
-                              <Mail className="w-3.5 h-3.5 shrink-0" /> <span className="truncate">{client.email}</span>
-                            </div>
-                          )}
-                          {client.phone && (
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground truncate">
-                              <Building2 className="w-3.5 h-3.5 shrink-0" /> <span className="truncate">{client.phone}</span>
-                            </div>
-                          )}
-                          {client.country && (
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground truncate">
-                              <MapPin className="w-3.5 h-3.5 shrink-0" /> <span className="truncate">{client.country}</span>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="flex flex-wrap gap-1.5 mt-auto pt-4 border-t border-border/40">
-                          {client.pricing_pending && (
-                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-500 border border-amber-500/20">Needs pricing</span>
-                          )}
-                          {client.is_active === false ? (
-                            <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">Archived</span>
-                          ) : !client.pricing_pending && (
-                            <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-secondary text-muted-foreground border border-border/50">Active</span>
-                          )}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              ) : (
-                /* List View / Quick Edit */
-                <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-secondary/50 text-muted-foreground sticky top-0 z-10 backdrop-blur-md">
-                        <tr>
-                          <th className="text-left font-medium px-4 py-3 text-xs w-[300px]">Client</th>
-                          <th className="text-left font-medium px-4 py-3 text-xs">Contact Info</th>
-                          <th className="text-left font-medium px-4 py-3 text-xs">Financial Status</th>
-                          <th className="text-right font-medium px-4 py-3 text-xs w-[100px]">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border/40">
-                        {filteredClients.map((client: any) => quickEdit ? (
-                          <tr key={client.id} className="bg-amber-500/5 group">
-                            <td className="px-4 py-2.5">
-                              <div className="flex items-center gap-2">
-                                <input
-                                  key={`${client.id}-name`}
-                                  defaultValue={client.name}
-                                  onBlur={e => qeSave(quickEditClient, client.id, 'name', e.target.value.trim(), setClients as any)}
-                                  className="w-[180px] bg-background border border-border/50 hover:border-border focus:border-primary rounded-md px-2 py-1 text-sm focus:outline-none transition-colors"
-                                  placeholder="Name"
-                                />
-                                <input
-                                  key={`${client.id}-code`}
-                                  defaultValue={client.code}
-                                  onBlur={e => qeSave(quickEditClient, client.id, 'code', e.target.value.trim().toUpperCase(), setClients as any)}
-                                  className="w-16 bg-background border border-border/50 hover:border-border focus:border-primary rounded-md px-2 py-1 text-sm font-mono focus:outline-none transition-colors"
-                                  placeholder="Code"
-                                />
-                              </div>
-                            </td>
-                            <td className="px-4 py-2.5">
-                              <div className="flex flex-col gap-1.5">
-                                <input
-                                  key={`${client.id}-email`}
-                                  defaultValue={client.email || ''}
-                                  onBlur={e => qeSave(quickEditClient, client.id, 'email', e.target.value.trim(), setClients as any)}
-                                  className="w-full bg-background border border-border/50 hover:border-border focus:border-primary rounded-md px-2 py-1 text-xs focus:outline-none transition-colors"
-                                  placeholder="Email"
-                                />
-                                <input
-                                  key={`${client.id}-phone`}
-                                  defaultValue={client.phone || ''}
-                                  onBlur={e => qeSave(quickEditClient, client.id, 'phone', e.target.value.trim(), setClients as any)}
-                                  className="w-full bg-background border border-border/50 hover:border-border focus:border-primary rounded-md px-2 py-1 text-xs focus:outline-none transition-colors"
-                                  placeholder="Phone"
-                                />
-                              </div>
-                            </td>
-                            <td className="px-4 py-2.5">
-                              <span className="text-[11px] text-muted-foreground/60 italic">Quick edit restricted</span>
-                            </td>
-                            <td className="px-4 py-2.5 text-right">
-                              <button onClick={() => openClientForm(client)} className="p-1.5 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground">
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
-                            </td>
-                          </tr>
-                        ) : (
-                          <tr key={client.id} className="hover:bg-secondary/40 transition-colors group">
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-3 min-w-0">
-                                <div className="w-8 h-8 rounded-lg bg-secondary border border-border/50 flex items-center justify-center text-foreground font-semibold text-xs shrink-0">
-                                  {(client.name.match(/\b\w/g) || []).slice(0, 2).join('').toUpperCase()}
-                                </div>
-                                <div className="min-w-0">
-                                  <p className="font-medium text-foreground truncate">{client.name}</p>
-                                  <p className="text-xs font-mono text-muted-foreground mt-0.5">{client.code}</p>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-4 py-3">
-                              <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-                                {client.email && <span className="truncate">{client.email}</span>}
-                                {client.phone && <span className="truncate">{client.phone}</span>}
-                                {!client.email && !client.phone && <span className="opacity-40 italic">No contact info</span>}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                {client.pricing_pending && (
-                                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-500 border border-amber-500/20">Needs pricing</span>
-                                )}
-                                {client.is_active === false && (
-                                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">Archived</span>
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button onClick={() => openClientForm(client)} className="p-1.5 rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground">
-                                  <Edit2 className="w-3.5 h-3.5" />
-                                </button>
-                                {client.is_active === false ? (
-                                  <button onClick={async () => {
-                                    const res = await reactivateClient(client.id)
-                                    if (!res.ok) { toast.error('Failed to restore', res.error); return }
-                                    setClients(prev => prev.map((x: any) => x.id === client.id ? { ...x, is_active: true } : x))
-                                  }} className="p-1.5 rounded-md hover:bg-emerald-500/15 text-muted-foreground hover:text-emerald-500 transition-colors" title="Restore client">
-                                    <ArchiveRestore className="w-3.5 h-3.5" />
-                                  </button>
-                                ) : (
-                                  <button onClick={() => requestDelete('Client', client.id, client.name, async () => {
-                                    await deactivateClient(client.id)
-                                    setClients(prev => prev.map((x: any) => x.id === client.id ? { ...x, is_active: false } : x))
-                                  })} className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors" title="Archive client">
-                                    <Archive className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
@@ -2754,146 +2442,6 @@ export default function SettingsClient(props: Props) {
                   })}
                 </div>
                 <p className="text-xs text-muted-foreground mt-3">Rates auto-save on blur — editing one marks it “Manual”. “Sync now” fetches live mid-market rates from the free FX API.</p>
-              </div>
-            )
-          })()}
-
-          {/* Pricing Matrix */}
-          {tab === 'Pricing Matrix' && (() => {
-            const allActiveClients = clients.filter((c: any) => c.is_active)
-            const allActiveServices = services.filter((s: any) => s.is_active)
-            if (allActiveClients.length === 0 || allActiveServices.length === 0) {
-              return <p className="text-sm text-muted-foreground">Add clients and services first.</p>
-            }
-            // Apply search filters
-            const activeClients = matrixClientSearch
-              ? allActiveClients.filter((c: any) => c.name?.toLowerCase().includes(matrixClientSearch.toLowerCase()) || c.code?.toLowerCase().includes(matrixClientSearch.toLowerCase()))
-              : allActiveClients
-            const activeServices = matrixServiceSearch
-              ? allActiveServices.filter((s: any) => s.name?.toLowerCase().includes(matrixServiceSearch.toLowerCase()))
-              : allActiveServices
-            return (
-              <div>
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="flex-1">
-                    <h2 className="text-sm font-semibold mb-0.5">Pricing Matrix</h2>
-                    <p className="text-xs text-muted-foreground">Click any cell to edit. Changes auto-save when you leave the field.</p>
-                  </div>
-                  {/* Maintenance action — applies this matrix to existing tasks. Hidden behind a button
-                      because it's only used after bulk imports or matrix-wide price changes. */}
-                  <button
-                    type="button"
-                    onClick={() => setShowRecalcModal(true)}
-                    title="Apply the current Pricing Matrix to existing tasks (one-time / on-demand maintenance)"
-                    className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg border border-violet-500/30 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20 shrink-0"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    Recalculate Task Billing
-                  </button>
-                </div>
-                {/* flex-col on phones: the two filter inputs can't shrink below
-                    their intrinsic min-width, so side-by-side the second
-                    ('Filter services') was pushed off-screen and clipped (no
-                    scroll container). Stacked full-width on mobile, restored
-                    to a shared row (flex-1 each) from sm: up. */}
-                <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-3">
-                  <SearchBar value={matrixClientSearch} onChange={setMatrixClientSearch} placeholder="Filter clients…" className="flex-1" />
-                  <SearchBar value={matrixServiceSearch} onChange={setMatrixServiceSearch} placeholder="Filter services…" className="flex-1" />
-                  {(matrixClientSearch || matrixServiceSearch) && (
-                    <button type="button" onClick={() => { setMatrixClientSearch(''); setMatrixServiceSearch('') }}
-                      className="text-xs text-muted-foreground hover:text-foreground px-2.5 py-1.5 rounded-lg bg-secondary border border-border shrink-0">
-                      Clear
-                    </button>
-                  )}
-                </div>
-                <div className="overflow-auto rounded-xl border border-border max-h-[calc(100dvh-280px)]">
-                  <table className="text-xs w-full border-collapse">
-                    <thead className="sticky top-0 z-20">
-                      <tr className="bg-secondary/90 backdrop-blur-sm border-b border-border">
-                        <th className="text-left px-4 py-3 font-medium text-muted-foreground sticky left-0 bg-secondary/90 min-w-[160px] z-30 border-r border-border">
-                          Client
-                        </th>
-                        {activeServices.map((svc: any) => (
-                          <th key={svc.id} className="px-3 py-3 font-semibold text-muted-foreground text-center min-w-[160px] border-r border-border last:border-r-0 bg-secondary/90">
-                            {svc.name}
-                          </th>
-                        ))}
-                      </tr>
-                      <tr className="bg-secondary/60 backdrop-blur-sm border-b border-border">
-                        <th className="sticky left-0 bg-secondary/60 border-r border-border z-30 py-1.5 px-4">
-                          <span className="text-[10px] text-muted-foreground/40 uppercase tracking-wider font-semibold">
-                            {activeClients.length}{matrixClientSearch ? `/${allActiveClients.length}` : ''} clients
-                          </span>
-                        </th>
-                        {activeServices.map((svc: any) => (
-                          <th key={svc.id} className="border-r border-border last:border-r-0 bg-secondary/60">
-                            <div className="grid grid-cols-2 divide-x divide-border">
-                              <span className="px-2 py-1.5 text-muted-foreground/60 font-semibold text-center text-[10px] uppercase tracking-wide">Price</span>
-                              <span className="px-2 py-1.5 text-muted-foreground/60 font-semibold text-center text-[10px] uppercase tracking-wide">Comm%</span>
-                            </div>
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {activeClients.map((client: any) => (
-                        <tr key={client.id} className="hover:bg-secondary/10 group">
-                          <td className="px-4 py-2.5 sticky left-0 bg-card group-hover:bg-secondary/10 border-r border-border z-10">
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono text-primary font-semibold">{client.code}</span>
-                              <span className="text-foreground truncate max-w-[90px]">{client.name}</span>
-                            </div>
-                          </td>
-                          {activeServices.map((svc: any) => {
-                            const key = `${client.id}::${svc.id}`
-                            const cell = matrix[key] || { price: '', commission_percentage: '', currency: client.default_currency || 'INR' }
-                            const isSaving = matrixSaving === key
-                            return (
-                              <td key={svc.id} className={`border-r border-border last:border-r-0 p-0 ${isSaving ? 'bg-primary/5' : ''}`}>
-                                <div className="grid grid-cols-2 divide-x divide-border">
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    value={cell.price}
-                                    onChange={e => updateMatrix(client.id, svc.id, 'price', e.target.value)}
-                                    onBlur={e => { if (e.target.value !== '') saveMatrixCell(client.id, svc.id, { ...cell, price: e.target.value }) }}
-                                    placeholder="—"
-                                    className="w-full bg-transparent px-2 py-2.5 text-center focus:outline-none focus:bg-primary/10 placeholder-muted-foreground/30 transition-colors"
-                                  />
-                                  <div className="relative">
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      max="100"
-                                      step="0.1"
-                                      value={cell.commission_percentage}
-                                      onChange={e => updateMatrix(client.id, svc.id, 'commission_percentage', e.target.value)}
-                                      onBlur={e => { if (e.target.value !== '') saveMatrixCell(client.id, svc.id, { ...cell, commission_percentage: e.target.value }) }}
-                                      placeholder="—"
-                                      className="w-full bg-transparent px-2 py-2.5 text-center focus:outline-none focus:bg-primary/10 placeholder-muted-foreground/30 transition-colors pr-5"
-                                    />
-                                    {cell.commission_percentage && <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground/50 pointer-events-none">%</span>}
-                                  </div>
-                                </div>
-                              </td>
-                            )
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <p className="text-xs text-muted-foreground mt-3">Price is billed amount per creative / per unit. Commission % is what comes off the top before employee calculation.</p>
-
-                {/* One-off maintenance modal — applies the matrix to existing tasks */}
-                <RecalcBillingModal
-                  open={showRecalcModal}
-                  onClose={() => setShowRecalcModal(false)}
-                  clients={props.clients}
-                  services={props.services}
-                  clientPricings={clientPricingsArray}
-                />
               </div>
             )
           })()}
@@ -3598,6 +3146,7 @@ export default function SettingsClient(props: Props) {
                                 ? 'bg-primary/15 text-primary border-primary/30'
                                 : 'bg-secondary text-muted-foreground border-transparent hover:border-border hover:text-foreground'
                             }`}>
+                            {/* eslint-disable-next-line no-restricted-syntax -- deliberate: name shown only when privacy is unlocked, on the admin settings employee picker */}
                             {isSelected ? '✓ ' : ''}{emp.cqid}{isUnlocked && emp.name ? ` · ${emp.name}` : ''}
                           </button>
                         )
@@ -4073,7 +3622,7 @@ function MessageTemplatesTab({ companySettings, setCompanySettings, saveCompanyS
   saving: boolean
 }) {
   const templates = templatesFromSettings(companySettings)
-  const companyName = companySettings.company_name || 'Cirqle Design'
+  const companyName = companySettings.company_name || 'Cirqle Works'
 
   // Sample data so admins can see exactly what a client would receive.
   const sampleLink = 'https://app.cirqle.work/i/sample-token'

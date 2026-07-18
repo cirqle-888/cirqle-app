@@ -65,6 +65,23 @@ export interface BillingPeriod {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
+ * Format a Date as YYYY-MM-DD using its LOCAL calendar fields.
+ *
+ * IMPORTANT: never use `date.toISOString().split('T')[0]` for a calendar date.
+ * In Asia/Calcutta (UTC+5:30) a local-midnight Date serialises to the PREVIOUS
+ * day in UTC (e.g. 2025-09-01 00:00 IST → 2025-08-31T18:30Z → "2025-08-31"),
+ * which silently shifts invoice issue/due/period-end dates a day (and a month)
+ * early. This helper reads the local Y/M/D directly so the string matches what
+ * the user sees.
+ */
+export function formatLocalDate(date: Date): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+/**
  * Convert a Date to a YYMM string (two-digit year + zero-padded month).
  * e.g.  new Date('2025-09-01') → '2509'
  */

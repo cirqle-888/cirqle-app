@@ -1,9 +1,12 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/server'
+import { requireAdmin } from '@/lib/auth/enforce'
 import { revalidatePath } from 'next/cache'
 
 export async function fetchJobsSummary() {
+  const auth = await requireAdmin()
+  if (!auth.ok) return { pending: 0, running: 0, failed: 0, completed: 0, dead_letter: 0 }
   const admin = createAdminClient()
   const { data, error } = await admin
     .from('system_jobs')
@@ -24,6 +27,8 @@ export async function fetchJobsSummary() {
 }
 
 export async function fetchRecentJobs() {
+  const auth = await requireAdmin()
+  if (!auth.ok) return []
   const admin = createAdminClient()
   const { data, error } = await admin
     .from('system_jobs')
@@ -36,6 +41,8 @@ export async function fetchRecentJobs() {
 }
 
 export async function retryJob(jobId: string) {
+  const auth = await requireAdmin()
+  if (!auth.ok) return { ok: false, error: auth.error }
   const admin = createAdminClient()
   const { error } = await admin
     .from('system_jobs')
@@ -55,6 +62,8 @@ export async function retryJob(jobId: string) {
 }
 
 export async function cancelJob(jobId: string) {
+  const auth = await requireAdmin()
+  if (!auth.ok) return { ok: false, error: auth.error }
   const admin = createAdminClient()
   const { error } = await admin
     .from('system_jobs')

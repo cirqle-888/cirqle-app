@@ -10,6 +10,7 @@
  */
 
 import { useState } from 'react'
+import { usePrivacy } from '@/contexts/privacy-context'
 
 // ─── Preset definitions ──────────────────────────────────────────────────────
 
@@ -282,6 +283,12 @@ export function EmployeeAvatar({
   rounded = 'full',
 }: EmployeeAvatarProps) {
   const [imgError, setImgError] = useState(false)
+  const { isUnlocked } = usePrivacy()
+
+  // Privacy: never derive initials or the image alt from the real name while
+  // locked. Callers may still pass `name` freely — this component masks it, so
+  // every avatar is safe by default without each call site remembering to.
+  const revealName = isUnlocked ? name : null
 
   const roundedCls = rounded === 'full' ? 'rounded-full' : rounded === 'xl' ? 'rounded-xl' : 'rounded-lg'
 
@@ -290,7 +297,7 @@ export function EmployeeAvatar({
     return (
       <img
         src={avatarUrl}
-        alt={name || cqid || 'avatar'}
+        alt={revealName || cqid || 'avatar'}
         width={size}
         height={size}
         onError={() => setImgError(true)}
@@ -316,7 +323,7 @@ export function EmployeeAvatar({
   }
 
   // Default: gradient circle with initials
-  const initials = getInitials(name ?? null, cqid ?? null)
+  const initials = getInitials(revealName ?? null, cqid ?? null)
   const ci = getColorIndex(cqid ?? null)
   const [c1, c2] = CQID_COLORS[ci]
 

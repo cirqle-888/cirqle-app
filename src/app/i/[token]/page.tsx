@@ -29,7 +29,7 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
   const settings: Record<string, string> = {}
   ;(settingsRows || []).forEach((s: any) => { settings[s.key] = s.value })
 
-  const companyName = settings.company_name || 'Cirqle Design'
+  const companyName = settings.company_name || 'Cirqle Works'
   const logoUrl = `https://app.cirqle.work/api/logo?v=${token}`
 
   const title = `Invoice ${inv.invoice_number} from ${companyName}`
@@ -83,7 +83,7 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
   ;(settingsRows || []).forEach((s: any) => { settings[s.key] = s.value })
 
   const html = renderInvoiceHtml(inv, settings)
-  const companyName = settings.company_name || 'Cirqle Design'
+  const companyName = settings.company_name || 'Cirqle Works'
 
   return (
     <PublicInvoiceView

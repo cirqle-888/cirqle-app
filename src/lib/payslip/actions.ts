@@ -21,7 +21,7 @@ import type { PayslipData } from './types'
 interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
 
 function defaultSubject(d: PayslipData): string {
-  return `Payslip — ${d.period.label} — Cirqle Design`
+  return `Payslip — ${d.period.label} — Cirqle Works`
 }
 
 // ─── Preview ──────────────────────────────────────────────────────────────────

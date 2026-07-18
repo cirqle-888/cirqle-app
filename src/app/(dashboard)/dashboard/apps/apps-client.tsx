@@ -7,7 +7,8 @@ import {
   Inbox, Tag, Settings as SettingsIcon, ArrowRight,
   Sparkles, Link2, Copy, Check, MessageCircle, Users, ExternalLink,
   Megaphone, Shield, ArrowUpRight, BarChart3, CreditCard,
-  CheckCircle, Paintbrush, FileText, Image as ImageIcon, Briefcase
+  CheckCircle, Paintbrush, FileText, Image as ImageIcon, Briefcase,
+  BadgePercent,
 } from 'lucide-react'
 import { INTAKE_KIND_META } from '@/lib/services/intake'
 import { createTypedClient } from '@/lib/supabase/client'
@@ -206,6 +207,9 @@ function ClientPortalCard({
 // ─── 3. Internal Modules ──────────────────────────────────────────────────────
 
 const INTERNAL_MODULES = [
+  // The staff-side twin of the Offer Campaign Intake portal above: same editor,
+  // reached by client instead of token. Gated at the route by offer.prepare.
+  { label: 'Offer Flyer Studio', description: 'Prepare weekly offer sheets — paste a WhatsApp list, review, sync to the designer Google Sheet.', href: '/dashboard/offer-prepare', icon: BadgePercent },
   { label: 'Advertising ERP', description: 'Internal campaign management, budget tracking, and meta integration.', href: '/dashboard/advertising', icon: BarChart3 },
   { label: 'Internal Operations', description: 'Task routing, billing, and internal project state.', href: '/dashboard/tasks', icon: Briefcase },
   { label: 'Admin Modules', description: 'User management, permissions, and internal configuration.', href: '/dashboard/settings', icon: Shield },
@@ -213,7 +217,7 @@ const INTERNAL_MODULES = [
 
 function InternalModules() {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
       {INTERNAL_MODULES.map(mod => (
         <Link key={mod.label} href={mod.href} className="group rounded-xl border border-border/60 bg-secondary/20 p-5 hover:bg-secondary/40 transition-colors">
           <div className="flex items-center gap-3 mb-3">

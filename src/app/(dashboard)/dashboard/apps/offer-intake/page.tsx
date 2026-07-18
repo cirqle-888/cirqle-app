@@ -13,14 +13,25 @@ export default async function OfferIntakeSettingsPage() {
 
   const admin = createAdminClient()
 
-  const [{ data: clientsRaw }, kindsByClient] = await Promise.all([
+  const [{ data: clientsRaw }, kindsByClient, { data: settingsRows }] = await Promise.all([
     admin
       .from('clients')
       .select('id, name, code, is_active, offer_intake_token, offer_sheet_webhook_url, offer_sheet_url, has_offer_flyer_service')
       .eq('is_active', true)
       .order('name'),
     getIntakeKindsByClient(),
+    admin
+      .from('company_settings')
+      .select('key, value')
+      .in('key', ['offer_sheet_webhook_url', 'offer_sheet_secret']),
   ])
+
+  const settingsMap = Object.fromEntries((settingsRows || []).map(r => [r.key, r.value]))
+  const globalConfig = {
+    webhookUrl: (settingsMap['offer_sheet_webhook_url'] || '').trim(),
+    secret: (settingsMap['offer_sheet_secret'] || '').trim(),
+    configured: !!(settingsMap['offer_sheet_webhook_url'] || '').trim(),
+  }
 
   // Capability is SERVICE-DRIVEN: a client has the offer service when any of
   // their assigned services has intake_kind = 'offer_intake'. The legacy
@@ -43,6 +54,7 @@ export default async function OfferIntakeSettingsPage() {
     <OfferIntakeSettingsClient
       clients={clients || []}
       appUrl={appUrl}
+      globalConfig={globalConfig}
     />
   )
 }

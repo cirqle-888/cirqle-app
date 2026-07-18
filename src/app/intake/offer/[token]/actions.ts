@@ -141,12 +141,15 @@ export async function saveCampaign(
 
   // ── Upsert campaign header ────────────────────────────────────────────────
   let campaign: any
+  let previousCampaign: any = null
   if (campaignId) {
     // Verify ownership
     const { data: existing } = await admin.from('offer_campaigns')
-      .select('id, client_id').eq('id', campaignId).maybeSingle()
+      .select('id, client_id, title, date_type, offer_date, offer_date_from, offer_date_to')
+      .eq('id', campaignId).maybeSingle()
     if (!existing || existing.client_id !== client.id)
       return { ok: false, error: 'Campaign not found.' }
+    previousCampaign = existing
 
     const { data, error } = await admin.from('offer_campaigns')
       .update({
@@ -162,6 +165,27 @@ export async function saveCampaign(
     if (error || !data) return { ok: false, error: 'Could not update campaign.' }
     campaign = data
   } else {
+    // One active campaign per client: finalise ALL of the client's currently
+    // active campaigns BEFORE creating the new one, so the new weekly offer
+    // becomes the sole active offer. Doing it first (rather than excluding the
+    // new id afterwards) means there's never a moment with two active rows, and
+    // it also cleans up any pre-existing extra actives. If this fails we abort
+    // rather than risk a second active campaign — the invariant is the point.
+    // completed_at is stamped only where still null (preserves an earlier
+    // completion time). (A DB partial-unique index isn't used because existing
+    // data may already have multiple actives, which would fail the migration.)
+    const { error: finErr } = await admin.from('offer_campaigns')
+      .update({ status: 'finalised', completed_at: now })
+      .eq('client_id', client.id)
+      .eq('status', 'active')
+      .is('completed_at', null)
+    if (finErr) return { ok: false, error: 'Could not close the previous offer. Please try again.' }
+    // Anomaly guard: any active row that somehow already carried a completed_at.
+    await admin.from('offer_campaigns')
+      .update({ status: 'finalised' })
+      .eq('client_id', client.id)
+      .eq('status', 'active')
+
     const { data, error } = await admin.from('offer_campaigns')
       .insert({
         client_id: client.id,
@@ -329,17 +353,13 @@ export async function saveCampaign(
   }
 
   // Header diff (title / dates)
-  if (campaignId) {
-    const { data: prevCampaign } = await admin.from('offer_campaigns')
-      .select('title, date_type, offer_date, offer_date_from, offer_date_to')
-      .eq('id', campaignId).single()
-    if (prevCampaign) {
+  if (previousCampaign) {
       const headerFields: [string, string, any, any][] = [
-        ['title', 'Offer title', prevCampaign.title, input.title],
-        ['date_type', 'Date type', prevCampaign.date_type, input.date_type],
-        ['offer_date', 'Offer date', prevCampaign.offer_date, input.offer_date],
-        ['offer_date_from', 'Date from', prevCampaign.offer_date_from, input.offer_date_from],
-        ['offer_date_to', 'Date to', prevCampaign.offer_date_to, input.offer_date_to],
+        ['title', 'Offer title', previousCampaign.title, input.title],
+        ['date_type', 'Date type', previousCampaign.date_type, input.date_type],
+        ['offer_date', 'Offer date', previousCampaign.offer_date, input.offer_date],
+        ['offer_date_from', 'Date from', previousCampaign.offer_date_from, input.offer_date_from],
+        ['offer_date_to', 'Date to', previousCampaign.offer_date_to, input.offer_date_to],
       ]
       for (const [field, label, oldV, newV] of headerFields) {
         if (String(oldV ?? '') !== String(newV ?? '')) {
@@ -352,7 +372,6 @@ export async function saveCampaign(
           })
         }
       }
-    }
   }
 
   // Client note
@@ -403,6 +422,49 @@ export async function getImageUploadUrl(
       publicUrl: pub.publicUrl,
       path,
     },
+  }
+}
+
+/**
+ * Fetch an external product image server-side and hand it to the browser as
+ * base64. Needed by the in-browser background remover: pasted image links
+ * (manufacturer sites, CDNs) almost never send CORS headers, so the browser
+ * can't read their pixels directly. Token-gated like every intake action.
+ */
+export async function fetchExternalImage(
+  token: string,
+  url: string,
+): Promise<ActionResult<{ base64: string; contentType: string }>> {
+  const client = await resolveOfferToken(token)
+  if (!client) return { ok: false, error: 'Invalid link.' }
+
+  // SSRF guard: only plain public http(s) hosts — never internal addresses.
+  let parsed: URL
+  try { parsed = new URL(url) } catch { return { ok: false, error: 'Not a valid image URL.' } }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    return { ok: false, error: 'Only http(s) image URLs are supported.' }
+  }
+  const host = parsed.hostname.toLowerCase()
+  const isPrivate =
+    host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal') ||
+    /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host) || host === '0.0.0.0' || host === '[::1]'
+  if (isPrivate) return { ok: false, error: 'That URL is not reachable.' }
+
+  try {
+    const res = await fetch(parsed.toString(), { signal: AbortSignal.timeout(15_000) })
+    if (!res.ok) return { ok: false, error: `Could not load the image (HTTP ${res.status}).` }
+    const contentType = res.headers.get('content-type') || ''
+    if (!contentType.startsWith('image/')) {
+      return { ok: false, error: 'That link is not a direct image (it returned a web page). Open the image itself and copy its URL.' }
+    }
+    const buf = await res.arrayBuffer()
+    if (buf.byteLength > 8 * 1024 * 1024) {
+      return { ok: false, error: 'Image is too large (max 8MB).' }
+    }
+    return { ok: true, data: { base64: Buffer.from(buf).toString('base64'), contentType } }
+  } catch (err: any) {
+    return { ok: false, error: err?.name === 'TimeoutError' ? 'Image download timed out.' : 'Could not download the image.' }
   }
 }
 
@@ -515,7 +577,144 @@ async function mirrorProductToGlobalCatalog(
     .upsert({ client_id: clientId, product_id: productId, is_active: true }, { onConflict: 'client_id,product_id' })
 }
 
-export async function cancelCampaign(campaignId: string) {
+export async function cancelCampaign(token: string, campaignId: string): Promise<ActionResult> {
+  const client = await resolveOfferToken(token)
+  if (!client) return { ok: false, error: 'This link is no longer valid.' }
+
   const admin = createAdminClient()
-  await admin.from('offer_campaigns').update({ status: 'cancelled' }).eq('id', campaignId)
+  const { data, error } = await admin
+    .from('offer_campaigns')
+    .update({ status: 'cancelled' })
+    .eq('id', campaignId)
+    .eq('client_id', client.id)
+    .eq('status', 'active')
+    .select('id')
+    .maybeSingle()
+  if (error || !data) return { ok: false, error: 'Could not cancel this offer request.' }
+  return { ok: true }
+}
+
+// ── Start from last week (clone previous campaign products) ─────────────────────
+
+/**
+ * Return the products of this client's most recent *completed* offer campaign
+ * (finalised or archived) as fresh ProductInput rows the coordinator can drop
+ * into a new week and just re-price. Prices are blanked (they change weekly);
+ * ids are dropped (they insert as new rows); name/weight/image/offer type/MRP/
+ * badges/page all carry over. Cancelled campaigns are ignored — they're junk.
+ * This does NOT touch the database; the client reviews the rows and saves as usual.
+ */
+export async function cloneLastCampaign(
+  token: string,
+): Promise<ActionResult<{ products: ProductInput[] }>> {
+  const client = await resolveOfferToken(token)
+  if (!client) return { ok: false, error: 'This link is no longer valid.' }
+
+  const admin = createAdminClient()
+  const { data: prev } = await admin
+    .from('offer_campaigns')
+    .select(`
+      id,
+      products:offer_products(
+        name, weight, image_url, offer_type, mrp, page, display_order, catalog_id,
+        badges:offer_product_badges(badge_id, custom_label, color, display_order)
+      )
+    `)
+    .eq('client_id', client.id)
+    .in('status', ['finalised', 'archived'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  type ClonedBadge = { badge_id: string | null; custom_label: string | null; color: string | null; display_order: number | null }
+  type ClonedRow = {
+    name: string
+    weight: string | null
+    image_url: string | null
+    offer_type: ProductInput['offer_type']
+    mrp: number | null
+    page: number | null
+    display_order: number | null
+    catalog_id: string | null
+    badges: ClonedBadge[] | null
+  }
+  const prevProducts = (prev?.products ?? []) as unknown as ClonedRow[]
+  if (!prevProducts.length) return { ok: false, error: 'No previous offer to copy yet.' }
+
+  const products: ProductInput[] = prevProducts
+    .slice()
+    .sort((a, b) => (a.page || 1) - (b.page || 1) || (a.display_order || 0) - (b.display_order || 0))
+    .map((p, i) => ({
+      catalog_id: p.catalog_id || undefined,
+      name: p.name,
+      weight: p.weight || undefined,
+      image_url: p.image_url || undefined,
+      offer_type: p.offer_type || 'price',
+      price: null,               // fresh price each week
+      mrp: p.mrp ?? null,
+      offer_text: undefined,
+      badges: (p.badges ?? [])
+        .slice()
+        .sort((a, b) => (a.display_order || 0) - (b.display_order || 0))
+        .map(b => ({
+          badge_id: b.badge_id || null,
+          custom_label: b.badge_id ? null : (b.custom_label || null),
+          color: b.color || 'amber',
+        })),
+      page: p.page || 1,
+      display_order: i,
+    }))
+
+  return { ok: true, data: { products } }
+}
+
+// ── Google Sheet sync status / manual resync (token-gated, for the editor) ──────
+
+/**
+ * Report the campaign's Google Sheet sync state so the editor can show
+ * "Syncing / Synced / Sync failed" after a save. Timestamps are compared
+ * against each other (both DB-sourced) so the result is clock-skew safe.
+ */
+export async function getCampaignSyncStatus(
+  token: string,
+  campaignId: string,
+): Promise<ActionResult<{ syncedAt: string | null; syncError: string | null; updatedAt: string | null }>> {
+  const client = await resolveOfferToken(token)
+  if (!client) return { ok: false, error: 'This link is no longer valid.' }
+
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('offer_campaigns')
+    .select('id, client_id, sheet_last_synced_at, sheet_sync_error, updated_at')
+    .eq('id', campaignId)
+    .eq('client_id', client.id)
+    .maybeSingle()
+  if (!data) return { ok: false, error: 'Campaign not found.' }
+  return {
+    ok: true,
+    data: {
+      syncedAt: data.sheet_last_synced_at || null,
+      syncError: data.sheet_sync_error || null,
+      updatedAt: data.updated_at || null,
+    },
+  }
+}
+
+/** Re-run the Google Sheet sync for a campaign the caller's token owns. */
+export async function resyncOfferSheet(token: string, campaignId: string): Promise<ActionResult> {
+  const client = await resolveOfferToken(token)
+  if (!client) return { ok: false, error: 'This link is no longer valid.' }
+
+  const admin = createAdminClient()
+  const { data: campaign } = await admin
+    .from('offer_campaigns')
+    .select('id, client_id')
+    .eq('id', campaignId)
+    .eq('client_id', client.id)
+    .maybeSingle()
+  if (!campaign) return { ok: false, error: 'Campaign not found.' }
+
+  const result = await syncCampaignToSheet(admin, campaignId, client.id)
+  if (!result.ok) return { ok: false, error: result.error || 'Sync failed.' }
+  return { ok: true }
 }

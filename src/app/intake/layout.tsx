@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Submit a Request — Cirqle Design',
+  title: 'Submit a Request — Cirqle Works',
   description: 'Send your design requests and track their progress',
   robots: { index: false, follow: false },
 }

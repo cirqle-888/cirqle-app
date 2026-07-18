@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { loadCurrentUser } from '@/lib/permissions/check'
+import { signOAuthState } from '@/lib/oauth/state'
 
 export async function GET(req: NextRequest) {
   // 1. Authenticate user initiating the request
@@ -23,10 +24,10 @@ export async function GET(req: NextRequest) {
 
   // 4. Construct Redirect URI & State
   const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL || url.origin}/api/auth/google/callback`
-  const state = Buffer.from(JSON.stringify({ 
-    clientId: targetClientId, 
-    employeeId: user.employeeId 
-  })).toString('base64')
+  const state = signOAuthState({
+    clientId: targetClientId,
+    employeeId: user.employeeId,
+  })
 
   // 5. Construct Google OAuth URL
   const scope = 'https://www.googleapis.com/auth/adwords'

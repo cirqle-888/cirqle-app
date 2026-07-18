@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveCurrentEmployeeId } from '@/lib/auth/enforce'
+import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
+import { PERMS } from '@/lib/permissions/keys'
 import { redirect, notFound } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
@@ -13,12 +14,15 @@ export const dynamic = 'force-dynamic'
  * token server-side and renders the SAME OfferIntakeClient the public
  * tokenized page uses — one form, two entrances. All server actions it calls
  * are token-gated, so reuse is safe without any new mutation paths.
+ *
+ * Gated by the dedicated `offer.prepare` permission (admins bypass).
  */
 export default async function OfferPrepareForClientPage({ params }: {
   params: Promise<{ clientId: string }>
 }) {
-  const employeeId = await resolveCurrentEmployeeId()
-  if (!employeeId) redirect('/login')
+  const me = await loadCurrentUser().catch(() => null)
+  if (!me) redirect('/login')
+  if (!me.isAdmin && !hasPermission(me, PERMS.OFFER_PREPARE)) redirect('/dashboard')
 
   const { clientId } = await params
   const admin = createAdminClient()
@@ -55,6 +59,7 @@ export default async function OfferPrepareForClientPage({ params }: {
         catalog={catalog}
         badges={badges}
         logoUrl={logoDarkUrl || logoUrl}
+        staff
       />
     </div>
   )

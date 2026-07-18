@@ -17,6 +17,8 @@ import { recordMatchesFacets, type FacetFieldDef } from '@/lib/search/match-face
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from '@/lib/utils'
 import type { DateFilterValue } from '@/components/ui/date-filter'
 import Combobox from '@/components/ui/combobox'
+import { usePermissions } from '@/contexts/permission-context'
+import { displayEmployee } from '@/lib/utils/employee-display'
 import AppSelect from '@/components/ui/app-select'
 import TagPicker from '@/components/ui/tag-picker'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
@@ -205,6 +207,12 @@ const CURRENCIES: Currency[] = ['INR', 'AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
 export default function CashBookClient({ initialEntries, categories, bankAccounts, exchangeRates, dueInvoices, employees, clients, outstandingCredits, pendingPayrolls, companySettings, showAmounts, allTags }: Props) {
   const { role } = useRole()
   const isAdmin = role === 'super_admin'
+  // Employee names are private: show CQID by default and the real name only
+  // when an admin has unlocked reveal. The expense-split picker previously
+  // rendered `e.name || e.cqid`, i.e. the name whenever one existed.
+  const { revealNames } = usePermissions()
+  const maskEmployee = (e: { name?: string | null; cqid?: string | null } | null | undefined) =>
+    displayEmployee({ name: e?.name ?? '', cqid: e?.cqid ?? '' }, { revealNames, canReveal: true })
   const [entries, setEntries] = useState<Entry[]>(initialEntries)
   const [showForm, setShowForm] = useState(false)
   const [showTransfer, setShowTransfer] = useState(false)
@@ -482,6 +490,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       const savedScope = savedClientId ? ('client' as const) : (form.scope || null)
       const result = await updateCashbookEntry(formEditingId, {
         entry_date:      form.entry_date,
+        type:            form.type,
         amount,
         amount_inr:      amountInr,
         currency:        form.currency,
@@ -537,14 +546,21 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       return
     }
 
-    // Build list of dates (base date + recurring copies)
+    // Build list of dates (base date + recurring copies).
+    // Anchor on year/month/day and clamp the day to the target month's length so
+    // month-overflow can't skip/duplicate months (e.g. Jan-31 + 1mo must be
+    // Feb-28, not Mar-03). Format from local Y/M/D — never toISOString(), which
+    // shifts a day earlier in Asia/Calcutta (UTC+5:30).
     const baseDates: string[] = [form.entry_date]
     if (recurringMonths > 0) {
-      const base = new Date(form.entry_date)
+      const [by, bm, bd] = form.entry_date.split('-').map(Number)
       for (let m = 1; m <= recurringMonths; m++) {
-        const d = new Date(base)
-        d.setMonth(d.getMonth() + m)
-        baseDates.push(d.toISOString().split('T')[0])
+        const targetMonthIndex = (bm - 1) + m           // 0-based month, may exceed 11
+        const y = by + Math.floor(targetMonthIndex / 12)
+        const mo = targetMonthIndex % 12                // 0-based
+        const lastDay = new Date(y, mo + 1, 0).getDate()
+        const day = Math.min(bd, lastDay)
+        baseDates.push(`${y}-${String(mo + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`)
       }
     }
 
@@ -2135,7 +2151,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                     Split across employees <span className="text-muted-foreground/60 font-normal">(optional — divides the cost equally)</span>
                   </label>
                   <FilterDropdown
-                    options={employees.map((e: any) => ({ value: e.id, label: e.name || e.cqid }))}
+                    options={employees.map((e: any) => ({ value: e.id, label: maskEmployee(e) }))}
                     value=""
                     onChange={() => {}}
                     placeholder={form.splitEmployeeIds.length > 0 ? `${form.splitEmployeeIds.length} employee${form.splitEmployeeIds.length === 1 ? '' : 's'} selected` : 'Select employees…'}
@@ -2155,7 +2171,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                         const emp = employees.find((e: any) => e.id === s.employeeId)
                         return (
                           <div key={s.employeeId} className="flex items-center justify-between text-xs">
-                            <span className="text-muted-foreground">{emp?.name || emp?.cqid || 'Employee'}</span>
+                            <span className="text-muted-foreground">{maskEmployee(emp)}</span>
                             <span className="font-medium tabular-nums">₹{s.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                           </div>
                         )

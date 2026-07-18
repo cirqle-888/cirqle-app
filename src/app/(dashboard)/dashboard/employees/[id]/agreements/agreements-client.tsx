@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import Combobox from '@/components/ui/combobox'
+import { usePrivacy } from '@/contexts/privacy-context'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import {
   ArrowLeft, Plus, Pencil, Trash2, Loader2, AlertTriangle, Check, X, Handshake, RefreshCw,
@@ -45,6 +46,7 @@ export default function AgreementsClient({
   clients: Client[]; services: Service[]; pricing: Pricing[]; initialAgreements: Agreement[]
 }) {
   const router = useRouter()
+  const { dn } = usePrivacy()
   const { toasts, dismiss, success, error: toastError } = useToast()
   const [rows, setRows] = useState<Agreement[]>(initialAgreements)
   const [form, setForm] = useState<(AgreementInput & { id?: string }) | null>(null)
@@ -130,7 +132,7 @@ export default function AgreementsClient({
           <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center"><Handshake className="w-4.5 h-4.5 text-primary" /></div>
           <div>
             <h1 className="text-lg font-bold">Commission Agreements</h1>
-            <p className="text-xs text-muted-foreground">{employee.name} · {employee.cqid}</p>
+            <p className="text-xs text-muted-foreground">{dn(employee)} · {employee.cqid}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -269,7 +271,7 @@ export default function AgreementsClient({
       {rows.length === 0 ? (
         <div className="bg-card border border-border rounded-2xl px-6 py-12 text-center">
           <Handshake className="w-8 h-8 text-muted-foreground/40 mx-auto mb-3" />
-          <p className="text-sm text-muted-foreground">No commission agreements for {employee.name} yet.</p>
+          <p className="text-sm text-muted-foreground">No commission agreements for {dn(employee)} yet.</p>
           <p className="text-xs text-muted-foreground/60 mt-1">They earn through the normal contribution system.</p>
         </div>
       ) : (

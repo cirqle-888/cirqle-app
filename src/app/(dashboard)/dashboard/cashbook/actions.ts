@@ -317,6 +317,7 @@ export async function insertCashbookEntries(
 
 export interface CashbookEntryUpdate {
   entry_date: string
+  type?: 'inflow' | 'outflow'
   amount: number
   amount_inr: number
   currency: string

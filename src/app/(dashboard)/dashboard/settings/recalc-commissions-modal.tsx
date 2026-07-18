@@ -2,15 +2,17 @@
 
 import { useEffect, useState } from 'react'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { usePrivacy } from '@/contexts/privacy-context'
 import { X, RefreshCw, AlertTriangle, Check, CalendarIcon } from 'lucide-react'
 
 interface Props {
   open: boolean
   onClose: () => void
-  employees: { id: string; name: string }[]
+  employees: { id: string; name: string; cqid?: string | null }[]
 }
 
 export function RecalcCommissionsModal({ open, onClose, employees }: Props) {
+  const { dn } = usePrivacy()
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [employeeId, setEmployeeId] = useState('')
@@ -130,7 +132,7 @@ export function RecalcCommissionsModal({ open, onClose, employees }: Props) {
               >
                 <option value="">All Employees</option>
                 {employees.map(emp => (
-                  <option key={emp.id} value={emp.id}>{emp.name}</option>
+                  <option key={emp.id} value={emp.id}>{dn(emp)}</option>
                 ))}
               </select>
             </div>

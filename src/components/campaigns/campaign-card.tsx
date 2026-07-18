@@ -91,6 +91,15 @@ export function CampaignCard({
   const products: any[] = campaign.products || []
   const clientId = campaign.client?.id
 
+  // "Changed since last sync" — the designer pulls the Google Sheet into Figma,
+  // so any edit made after the last sync means the sheet (and the in-progress
+  // artwork) is stale until someone re-syncs. Computed from the two timestamps
+  // that already exist; a small grace window absorbs the write→sync clock skew.
+  const staleSinceSync = !!campaign.sheet_last_synced_at
+    && !campaign.sheet_sync_error
+    && campaign.updated_at
+    && new Date(campaign.updated_at).getTime() - new Date(campaign.sheet_last_synced_at).getTime() > 2000
+
   async function handleAcknowledgeAll() {
     setBusy(true)
     const ids = unacknowledged.map((l: any) => l.id)
@@ -190,6 +199,11 @@ export function CampaignCard({
             {unacknowledged.length > 0 && (
               <span className="flex items-center gap-1 text-amber-400">
                 <AlertCircle className="w-3 h-3" /> {unacknowledged.length} unreviewed change{unacknowledged.length !== 1 ? 's' : ''}
+              </span>
+            )}
+            {staleSinceSync && (
+              <span className="flex items-center gap-1 text-amber-400" title="Edited after the last Google Sheet sync — re-sync so the designer's data matches">
+                <RefreshCw className="w-3 h-3" /> Sheet out of date
               </span>
             )}
             <span>Updated {fmtDateTime(campaign.updated_at)}</span>
@@ -323,6 +337,9 @@ export function CampaignCard({
                   ? `Last synced ${fmtDateTime(campaign.sheet_last_synced_at)}`
                   : 'Not synced yet'}
               </p>
+              {staleSinceSync && (
+                <p className="text-[10px] text-amber-400 mt-0.5">⚠ Edited since last sync — re-sync so the designer's sheet matches.</p>
+              )}
               {campaign.sheet_sync_error && (
                 <p className="text-[10px] text-red-400 mt-0.5">{campaign.sheet_sync_error}</p>
               )}

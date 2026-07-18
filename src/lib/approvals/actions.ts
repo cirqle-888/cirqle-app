@@ -275,7 +275,7 @@ export async function requestApproval(input: {
       employeeId: empId,
       type: 'approval_requested',
       title: `Approval needed: ${title}`,
-      message: `Requested by ${me.name || me.cqid}`,
+      message: `Requested by ${me.cqid}`,
       link: input.conversationId ? `/dashboard/chat?c=${input.conversationId}` : '/dashboard/approvals',
       sourceKey: `approval:${appr.id}:requested:${empId}`,
     })
@@ -367,7 +367,7 @@ export async function decideApproval(input: {
         employeeId: empId,
         type: 'approval_requested',
         title: `Approval needed (step ${nextStep.step_no}/${chainSteps.length}): ${row.title}`,
-        message: `Approved at step ${currentStep} by ${me.name || me.cqid}`,
+        message: `Approved at step ${currentStep} by ${me.cqid}`,
         link: row.conversation_id ? `/dashboard/chat?c=${row.conversation_id}` : '/dashboard/approvals',
         sourceKey: `approval:${input.approvalId}:step:${nextStep.step_no}:${empId}`,
       })
@@ -407,7 +407,7 @@ export async function decideApproval(input: {
   // Live-update the chat card
   if (row.message_id) {
     void admin.from('messages')
-      .update({ metadata: { approvalStatus: input.decision, approvalId: input.approvalId, decidedByName: me.name } })
+      .update({ metadata: { approvalStatus: input.decision, approvalId: input.approvalId, decidedByName: me.cqid } })
       .eq('id', row.message_id).then(undefined, () => {})
   }
 
@@ -421,7 +421,7 @@ export async function decideApproval(input: {
     employeeId: row.requested_by,
     type: 'approval_decided',
     title: `${input.decision === 'approved' ? '✅ Approved' : input.decision === 'rejected' ? '❌ Rejected' : '✏️ Changes requested'}: ${row.title}`,
-    message: input.comment || `by ${me.name || me.cqid}`,
+    message: input.comment || `by ${me.cqid}`,
     link: row.conversation_id ? `/dashboard/chat?c=${row.conversation_id}` : '/dashboard/approvals',
     sourceKey: `approval:${input.approvalId}:decided`,
   })

@@ -43,7 +43,7 @@ function shell(title: string, bodyHtml: string): string {
     <div style="font-size:20px;font-weight:800;color:#fff;margin-bottom:4px">cirqle<span style="color:#60a5fa">.</span></div>
     <div style="font-size:15px;font-weight:700;color:#fff;margin:16px 0 8px">${title}</div>
     ${bodyHtml}
-    <div style="font-size:11px;color:#6b7280;margin-top:20px">Cirqle Design · cirqle.work</div>
+    <div style="font-size:11px;color:#6b7280;margin-top:20px">Cirqle Works · cirqle.work</div>
   </div>`
 }
 

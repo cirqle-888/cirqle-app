@@ -4,22 +4,36 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Plus, Loader2, CheckCircle2, Check, X, ChevronDown, ChevronUp,
   Upload, Search, Calendar, MessageSquare, RefreshCw,
-  ImageIcon, Trash2, GripVertical, Copy, FilePlus, CopyPlus, LayoutGrid, List,
-  ArrowUp, ArrowDown, Shuffle, Sparkles, ClipboardPaste,
-  ArrowLeft, AlertTriangle, FileSpreadsheet, Pencil, SlidersHorizontal,
+  ImageIcon, ImageOff, Trash2, GripVertical, Copy, FilePlus, CopyPlus, LayoutGrid, List,
+  ArrowUp, ArrowDown, Shuffle, Sparkles, ClipboardPaste, Clipboard,
+  ArrowLeft, AlertTriangle, FileSpreadsheet, Pencil, SlidersHorizontal, Link2,
+  Download, History, Table2, Eraser,
 } from 'lucide-react'
-import { saveCampaign, getImageUploadUrl, aiParseProductList, cancelCampaign, type ProductInput, type ProductBadgeInput, type CampaignInput } from './actions'
+import {
+  DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext, useSortable, arrayMove, sortableKeyboardCoordinates,
+  verticalListSortingStrategy, rectSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import {
+  saveCampaign, getImageUploadUrl, aiParseProductList, cancelCampaign,
+  cloneLastCampaign, getCampaignSyncStatus, resyncOfferSheet, fetchExternalImage,
+  type ProductInput, type ProductBadgeInput, type CampaignInput,
+} from './actions'
 import type { ParsedOfferProduct } from '@/lib/ai/offer-capture'
 import { ImageLightbox } from '@/components/ui/image-lightbox'
 import { IntakeAppSwitcher } from '@/components/intake/app-switcher'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 
 import { useValidationEngine } from './components/useValidationEngine'
 import { ValidationPanel } from './components/ValidationPanel'
 import { useKeyboardShortcuts } from './components/useKeyboardShortcuts'
-import { AiAssistantPanel } from './components/AiAssistantPanel'
-import { CollaborationProvider } from './components/useCollaborationContext'
-import { CollaborationStatus } from './components/CollaborationStatus'
+import { buildOfferSheetRows, offerSheetTsv, offerSheetCsv } from '@/lib/offer-sheet'
+import { formatProductName, type NameCaseMode } from '@/lib/format-product-name'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -68,6 +82,144 @@ function fmtDate(d?: string | null) {
   return new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
+function isPublicImageUrl(value: string | undefined | null) {
+  try {
+    const url = new URL(value || '')
+    return url.protocol === 'https:' || url.protocol === 'http:'
+  } catch {
+    return false
+  }
+}
+
+// Google Drive / Dropbox *share* links (the "…/view", "?dl=0" pages) are HTML
+// viewers, not hotlinkable image bytes — they load in a browser but break in
+// Google Sheets IMAGE()/the Figma plugin. Flag them so the user swaps in a
+// direct image URL before it silently produces a blank flyer cell.
+function isFragileImageShareLink(value: string | undefined | null): boolean {
+  if (!value) return false
+  try {
+    const url = new URL(value)
+    const host = url.hostname.replace(/^www\./, '')
+    if (host === 'drive.google.com' || host === 'docs.google.com') return true
+    if (host.endsWith('dropbox.com') && !host.startsWith('dl.')) return true
+    return false
+  } catch {
+    return false
+  }
+}
+
+// Pull an image off the clipboard (e.g. a pasted screenshot) as a File the
+// existing signed-upload path can consume. Returns null when the clipboard has
+// no image or the browser doesn't support async clipboard reads.
+async function readImageFromClipboard(): Promise<File | null> {
+  try {
+    if (!navigator.clipboard?.read) return null
+    const items = await navigator.clipboard.read()
+    for (const item of items) {
+      const type = item.types.find(t => t.startsWith('image/'))
+      if (type) {
+        const blob = await item.getType(type)
+        const ext = type.split('/')[1] || 'png'
+        return new File([blob], `pasted-${Date.now()}.${ext}`, { type })
+      }
+    }
+  } catch {
+    /* clipboard permission denied or unsupported — caller shows a hint */
+  }
+  return null
+}
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch { /* fall through to the legacy clipboard fallback */ }
+
+  try {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    const copied = document.execCommand('copy')
+    textarea.remove()
+    return copied
+  } catch {
+    return false
+  }
+}
+
+// ── Split price input (Price 1 / Price 2) ────────────────────────────────────
+// Prices are entered and shown as two parts everywhere, mirroring the flyer
+// design and the sheet's Price 1 / Price 2 columns: big rupees, small paisa
+// ("49" + "99" = ₹49.99). Typing/pasting "49.99" into the rupee box still
+// works — it splits automatically. Both parts write back to the single
+// numeric `price`, so saving, validation, and the sheet output are unchanged.
+
+function SplitPriceInput({
+  value, onChange, onKeyDown, wholeId, wholeCls, paiseCls, placeholder = 'Price',
+}: {
+  value: number | null | undefined
+  onChange: (v: number | null) => void
+  onKeyDown?: (e: React.KeyboardEvent) => void
+  wholeId?: string
+  wholeCls: string
+  paiseCls: string
+  placeholder?: string
+}) {
+  const wholeNum = value == null ? null : Math.trunc(value)
+  const paiseNum = value == null ? 0 : Math.round((value - Math.trunc(value)) * 100)
+
+  function setWhole(text: string) {
+    const t = text.trim()
+    if (!t) { onChange(null); return }
+    if (t.includes('.')) {
+      const f = parseFloat(t)
+      onChange(Number.isNaN(f) ? null : f)
+      return
+    }
+    const n = parseInt(t, 10)
+    if (Number.isNaN(n)) return
+    onChange(n + paiseNum / 100)
+  }
+
+  function setPaise(text: string) {
+    const digits = text.replace(/\D/g, '').slice(0, 2)
+    const p = digits ? parseInt(digits, 10) : 0
+    onChange((wholeNum ?? 0) + p / 100)
+  }
+
+  return (
+    <span className="inline-flex items-baseline gap-0.5 min-w-0">
+      <input
+        id={wholeId}
+        type="text"
+        inputMode="decimal"
+        value={wholeNum == null ? '' : String(wholeNum)}
+        onChange={e => setWhole(e.target.value)}
+        onKeyDown={onKeyDown}
+        placeholder={placeholder}
+        className={wholeCls}
+      />
+      <span className="text-white/25 text-[10px] shrink-0 select-none">.</span>
+      <input
+        type="text"
+        inputMode="numeric"
+        maxLength={2}
+        value={paiseNum ? String(paiseNum) : ''}
+        onChange={e => setPaise(e.target.value)}
+        onKeyDown={onKeyDown}
+        placeholder="99"
+        title="Paise (Price 2) — shown smaller in the flyer design"
+        className={paiseCls}
+      />
+    </span>
+  )
+}
+
 // ── Empty product ─────────────────────────────────────────────────────────────
 
 function emptyProduct(order: number): ProductInput & { _key: string } {
@@ -90,7 +242,8 @@ function emptyProduct(order: number): ProductInput & { _key: string } {
 
 function ProductRow({
   product, badges, catalog, catalogImages, onUpdate, onRemove, onUploadImage, uploading,
-  onDuplicate, onAddNext, selected, onToggleSelect
+  onDuplicate, onAddNext, selected, onToggleSelect,
+  setDragNodeRef, dragStyle, dragHandle, isDragging, onRemoveBg,
 }: {
   product: (ProductInput & { _key: string; id?: string })
   badges: Badge[]
@@ -104,8 +257,14 @@ function ProductRow({
   onAddNext: () => void
   selected?: boolean
   onToggleSelect?: () => void
+  setDragNodeRef?: (el: HTMLElement | null) => void
+  dragStyle?: React.CSSProperties
+  dragHandle?: React.ReactNode
+  isDragging?: boolean
+  onRemoveBg?: (imageUrl: string) => Promise<string | null>
 }) {
   const [imgUploading, setImgUploading] = useState(false)
+  const [bgBusy, setBgBusy] = useState(false)
   const [showGallery, setShowGallery] = useState(false)
   const [lightbox, setLightbox] = useState<string | null>(null)
   const [customBadgeOpen, setCustomBadgeOpen] = useState(false)
@@ -114,9 +273,38 @@ function ProductRow({
   const [isExpanded, setIsExpanded] = useState(false)
   const [showAutocomplete, setShowAutocomplete] = useState(false)
   const [showImgMenu, setShowImgMenu] = useState(false)
+  const [showImageUrl, setShowImageUrl] = useState(false)
+  const [pasteMsg, setPasteMsg] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const searchMatch = product.name?.trim().length > 1 
+  // Paste a screenshot / copied image straight onto this product.
+  async function handlePasteImage() {
+    setShowImgMenu(false)
+    setPasteMsg(null)
+    setImgUploading(true)
+    const file = await readImageFromClipboard()
+    if (!file) {
+      setImgUploading(false)
+      setPasteMsg('No image found on the clipboard. Copy an image first, then Paste image.')
+      setTimeout(() => setPasteMsg(null), 5000)
+      return
+    }
+    const url = await onUploadImage(file)
+    if (url) onUpdate({ image_url: url })
+    setImgUploading(false)
+  }
+
+  // Cut the product out of its background (on-device AI) and save the PNG.
+  async function handleRemoveBg() {
+    if (!product.image_url || !onRemoveBg || bgBusy) return
+    setShowImgMenu(false)
+    setBgBusy(true)
+    const url = await onRemoveBg(product.image_url)
+    if (url) onUpdate({ image_url: url })
+    setBgBusy(false)
+  }
+
+  const searchMatch = product.name?.trim().length > 1
     ? catalog.filter(c => c.name.toLowerCase().includes(product.name.toLowerCase()) || (c.category || '').toLowerCase().includes(product.name.toLowerCase())).slice(0, 6)
     : []
 
@@ -152,11 +340,16 @@ function ProductRow({
   const offerType = product.offer_type
 
   return (
-    <div id={`product-row-${product._key}`} className={`bg-white/5 border ${isExpanded ? 'border-white/20 shadow-xl' : 'border-white/10 hover:border-white/15'} ${selected ? 'border-violet-500/50 bg-violet-500/5' : ''} rounded-2xl transition-all relative ${showAutocomplete ? 'z-20' : 'z-10'}`}>
+    <div
+      ref={setDragNodeRef}
+      style={dragStyle}
+      id={`product-row-${product._key}`}
+      className={`bg-white/5 border ${isExpanded ? 'border-white/20 shadow-xl' : 'border-white/10 hover:border-white/15'} ${selected ? 'border-violet-500/50 bg-violet-500/5' : ''} ${isDragging ? 'opacity-80 shadow-2xl ring-1 ring-violet-500/40' : ''} rounded-2xl transition-all relative ${showAutocomplete ? 'z-20' : 'z-10'}`}
+    >
       {/* ── Collapsed / Header ── */}
       <div className="flex items-center gap-2 p-3">
-        <GripVertical className="w-4 h-4 text-white/20 shrink-0 cursor-grab" />
-        
+        {dragHandle ?? <GripVertical className="w-4 h-4 text-white/20 shrink-0" />}
+
         {onToggleSelect && (
           <input 
             type="checkbox" 
@@ -215,20 +408,20 @@ function ProductRow({
               </div>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <span className="text-white/30 text-xs font-medium shrink-0">₹</span>
-            <input
-              type="number" step="0.01" min="0"
-              value={product.price ?? ''}
-              onChange={e => onUpdate({ price: e.target.value ? parseFloat(e.target.value) : null })}
+            <SplitPriceInput
+              value={product.price}
+              onChange={price => onUpdate({ price })}
               onKeyDown={e => {
                  if (e.key === 'Enter') {
                    e.preventDefault()
                    onAddNext()
                  }
               }}
-              className="bg-transparent border border-transparent hover:border-white/10 focus:bg-white/5 focus:border-violet-500/50 rounded-lg px-2 py-1.5 text-sm focus:outline-none placeholder:text-white/20 w-full"
-              placeholder="Sale price"
+              placeholder="Price"
+              wholeCls="bg-transparent border border-transparent hover:border-white/10 focus:bg-white/5 focus:border-violet-500/50 rounded-lg px-2 py-1.5 text-sm focus:outline-none placeholder:text-white/20 w-full min-w-0"
+              paiseCls="bg-transparent border border-transparent hover:border-white/10 focus:bg-white/5 focus:border-violet-500/50 rounded-lg px-1 py-1 text-xs text-white/70 focus:outline-none placeholder:text-white/15 w-7 shrink-0"
             />
           </div>
         </div>
@@ -259,6 +452,28 @@ function ProductRow({
                      >
                        <Upload className="w-3.5 h-3.5" /> Upload new
                      </button>
+                     <button
+                       onClick={() => { setIsExpanded(true); void handlePasteImage() }}
+                       className="w-full text-left px-3 py-2 text-xs text-white/80 hover:bg-white/5 hover:text-white flex items-center gap-2"
+                     >
+                       <Clipboard className="w-3.5 h-3.5" /> Paste image
+                     </button>
+                     <button
+                       onClick={() => { setShowImgMenu(false); setIsExpanded(true); setShowImageUrl(true); }}
+                       className="w-full text-left px-3 py-2 text-xs text-white/80 hover:bg-white/5 hover:text-white flex items-center gap-2"
+                     >
+                       <Link2 className="w-3.5 h-3.5" /> Use public link
+                     </button>
+                     {onRemoveBg && (
+                       <button
+                         onClick={handleRemoveBg}
+                         disabled={bgBusy}
+                         className="w-full text-left px-3 py-2 text-xs text-white/80 hover:bg-white/5 hover:text-white flex items-center gap-2 disabled:opacity-50"
+                       >
+                         {bgBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Eraser className="w-3.5 h-3.5" />}
+                         {bgBusy ? 'Removing…' : 'Remove background'}
+                       </button>
+                     )}
                      {!!catalogImages?.length && catalogImages.length > 1 && (
                        <button
                          onClick={() => { setShowImgMenu(false); setIsExpanded(true); setShowGallery(true); }}
@@ -443,13 +658,64 @@ function ProductRow({
                 {imgUploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
                 {product.image_url ? 'Change' : 'Upload'}
               </button>
+              <button
+                onClick={handlePasteImage}
+                disabled={imgUploading}
+                title="Paste a copied image or screenshot from your clipboard"
+                className="px-3 py-1.5 rounded-lg text-xs bg-white/5 border border-white/10 hover:border-white/20 text-white/50 flex items-center gap-1.5 disabled:opacity-40"
+              >
+                <Clipboard className="w-3 h-3" /> Paste
+              </button>
               {!!catalogImages?.length && catalogImages.length > 1 && (
                 <button onClick={() => setShowGallery(g => !g)}
                   className="px-3 py-1.5 rounded-lg text-xs bg-white/5 border border-white/10 hover:border-white/20 text-white/50 flex items-center gap-1.5">
                   <ImageIcon className="w-3 h-3" /> Past photos
                 </button>
               )}
+              {product.image_url && onRemoveBg && (
+                <button
+                  onClick={handleRemoveBg}
+                  disabled={bgBusy || imgUploading}
+                  title="Cut the product out of its background (runs on your device) and save as a transparent PNG"
+                  className="px-3 py-1.5 rounded-lg text-xs bg-violet-500/10 border border-violet-500/25 hover:border-violet-500/50 text-violet-300 flex items-center gap-1.5 disabled:opacity-40"
+                >
+                  {bgBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Eraser className="w-3 h-3" />}
+                  {bgBusy ? 'Removing…' : 'Remove BG'}
+                </button>
+              )}
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+            </div>
+            {pasteMsg && <p className="mt-1.5 text-[11px] text-amber-300">{pasteMsg}</p>}
+            <div className="mt-3">
+              <div className="flex items-center justify-between gap-3 mb-1.5">
+                <label className={labelCls + ' mb-0'}>Public image link</label>
+                <button
+                  type="button"
+                  onClick={() => setShowImageUrl(value => !value)}
+                  className="text-[11px] text-violet-300 hover:text-violet-200"
+                >
+                  {showImageUrl ? 'Hide link' : 'Paste link instead'}
+                </button>
+              </div>
+              {showImageUrl && (
+                <>
+                  <input
+                    type="url"
+                    value={product.image_url || ''}
+                    onChange={e => onUpdate({ image_url: e.target.value.trim() })}
+                    placeholder="https://…/product-photo.jpg"
+                    aria-invalid={!!product.image_url && !isPublicImageUrl(product.image_url)}
+                    className={inputCls}
+                  />
+                  <p className={`mt-1.5 text-[11px] ${product.image_url && (!isPublicImageUrl(product.image_url) || isFragileImageShareLink(product.image_url)) ? 'text-amber-300' : 'text-white/35'}`}>
+                    {product.image_url && !isPublicImageUrl(product.image_url)
+                      ? 'Use a public http(s) image URL so Google Sheets and Figma can load it.'
+                      : product.image_url && isFragileImageShareLink(product.image_url)
+                        ? 'This looks like a Drive/Dropbox share link — it won’t load in Figma. Open the image and use its direct URL.'
+                        : 'Use a public direct image URL. It will be sent to Google Sheets and Figma unchanged.'}
+                  </p>
+                </>
+              )}
             </div>
             {showGallery && !!catalogImages?.length && (
               <div className="mt-2 flex gap-1.5 flex-wrap bg-white/5 border border-white/10 rounded-xl p-2">
@@ -480,7 +746,8 @@ function ProductRow({
 }
 
 function ProductGridCard({
-  product, badges, catalogImages, onUpdate, onRemove, onUploadImage, uploading, selected, onToggleSelect
+  product, badges, catalogImages, onUpdate, onRemove, onUploadImage, uploading, selected, onToggleSelect,
+  setDragNodeRef, dragStyle, dragHandle, isDragging, onRemoveBg,
 }: {
   product: any
   badges: Badge[]
@@ -491,10 +758,18 @@ function ProductGridCard({
   uploading: boolean
   selected?: boolean
   onToggleSelect?: () => void
+  setDragNodeRef?: (el: HTMLElement | null) => void
+  dragStyle?: React.CSSProperties
+  dragHandle?: React.ReactNode
+  isDragging?: boolean
+  onRemoveBg?: (imageUrl: string) => Promise<string | null>
 }) {
   const [lightbox, setLightbox] = useState<string | null>(null)
   const [imgUploading, setImgUploading] = useState(false)
+  const [bgBusy, setBgBusy] = useState(false)
   const [showGallery, setShowGallery] = useState(false)
+  const [showImageUrl, setShowImageUrl] = useState(false)
+  const [pasteMsg, setPasteMsg] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const productBadges = (product.badges || [])
 
@@ -507,18 +782,47 @@ function ProductGridCard({
     setImgUploading(false)
   }
 
+  async function handlePasteImage() {
+    setPasteMsg(null)
+    setImgUploading(true)
+    const file = await readImageFromClipboard()
+    if (!file) {
+      setImgUploading(false)
+      setPasteMsg('No image on the clipboard.')
+      setTimeout(() => setPasteMsg(null), 4000)
+      return
+    }
+    const url = await onUploadImage(file)
+    if (url) onUpdate({ image_url: url })
+    setImgUploading(false)
+  }
+
+  async function handleRemoveBg() {
+    if (!product.image_url || !onRemoveBg || bgBusy) return
+    setBgBusy(true)
+    const url = await onRemoveBg(product.image_url)
+    if (url) onUpdate({ image_url: url })
+    setBgBusy(false)
+  }
+
   return (
     <>
-      <div id={`product-grid-${product._key}`} className={`bg-white/5 border ${selected ? 'border-violet-500/50 bg-violet-500/5' : 'border-white/10 hover:border-white/20'} rounded-2xl overflow-hidden shadow-lg flex flex-col transition-all relative`}>
+      <div
+        ref={setDragNodeRef}
+        style={dragStyle}
+        id={`product-grid-${product._key}`}
+        className={`bg-white/5 border ${selected ? 'border-violet-500/50 bg-violet-500/5' : 'border-white/10 hover:border-white/20'} ${isDragging ? 'opacity-80 shadow-2xl ring-1 ring-violet-500/40' : ''} rounded-2xl overflow-hidden shadow-lg flex flex-col transition-all relative`}
+      >
         <div className="absolute top-2 left-2 z-30 flex gap-1 items-center">
           {onToggleSelect && (
-            <input 
-              type="checkbox" 
+            <input
+              type="checkbox"
               checked={!!selected}
               onChange={onToggleSelect}
               className="w-4 h-4 shrink-0 rounded border-white/20 bg-black/20 accent-violet-500 focus:ring-violet-500/30 cursor-pointer ml-1"
             />
           )}
+          {dragHandle}
           <button onClick={onRemove} className="p-1.5 bg-black/40 hover:bg-red-500/80 rounded text-white/50 hover:text-white backdrop-blur-md transition-colors" title="Remove">
             <Trash2 className="w-3.5 h-3.5" />
           </button>
@@ -540,12 +844,47 @@ function ProductGridCard({
              <button onClick={() => fileRef.current?.click()} className="p-2 bg-white/20 hover:bg-white/40 rounded-full text-white transition-colors" disabled={imgUploading} title="Upload new">
                {imgUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
              </button>
+             <button onClick={handlePasteImage} className="p-2 bg-white/20 hover:bg-white/40 rounded-full text-white transition-colors" disabled={imgUploading} title="Paste image from clipboard">
+               <Clipboard className="w-4 h-4" />
+             </button>
+             <button onClick={() => setShowImageUrl(value => !value)} className="p-2 bg-white/20 hover:bg-white/40 rounded-full text-white transition-colors" title="Use public image link">
+               <Link2 className="w-4 h-4" />
+             </button>
+             {product.image_url && onRemoveBg && (
+               <button onClick={handleRemoveBg} disabled={bgBusy} className="p-2 bg-violet-500/40 hover:bg-violet-500/70 rounded-full text-white transition-colors disabled:opacity-50" title="Remove background (on-device AI)">
+                 {bgBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eraser className="w-4 h-4" />}
+               </button>
+             )}
              {!!catalogImages?.length && catalogImages.length > 1 && (
                <button onClick={() => setShowGallery(g => !g)} className="p-2 bg-white/20 hover:bg-white/40 rounded-full text-white transition-colors" title="Past photos"><ImageIcon className="w-4 h-4"/></button>
              )}
           </div>
 
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+
+          {showImageUrl && (
+            <div className="absolute inset-x-2 bottom-2 z-40 rounded-xl border border-white/15 bg-[#12121b]/95 p-2 shadow-xl backdrop-blur">
+              <div className="flex gap-1.5">
+                <input
+                  type="url"
+                  value={product.image_url || ''}
+                  onChange={e => onUpdate({ image_url: e.target.value.trim() })}
+                  placeholder="Paste public image URL…"
+                  aria-label="Public product image URL"
+                  className="min-w-0 flex-1 rounded-lg border border-white/15 bg-white/5 px-2 py-1.5 text-xs text-white outline-none focus:border-violet-400"
+                />
+                <button onClick={() => setShowImageUrl(false)} className="rounded-lg px-2 text-xs text-white/60 hover:bg-white/10">Done</button>
+              </div>
+              {product.image_url && !isPublicImageUrl(product.image_url) && <p className="mt-1 text-[10px] text-amber-300">Use a public http(s) image URL for Figma.</p>}
+              {product.image_url && isPublicImageUrl(product.image_url) && isFragileImageShareLink(product.image_url) && (
+                <p className="mt-1 text-[10px] text-amber-300">Drive/Dropbox share link — won’t load in Figma. Use a direct image URL.</p>
+              )}
+              {pasteMsg && <p className="mt-1 text-[10px] text-amber-300">{pasteMsg}</p>}
+            </div>
+          )}
+          {pasteMsg && !showImageUrl && (
+            <div className="absolute inset-x-2 bottom-2 z-40 rounded-lg bg-black/70 px-2 py-1 text-[10px] text-amber-300 backdrop-blur">{pasteMsg}</div>
+          )}
           
           {showGallery && !!catalogImages?.length && (
             <div className="absolute inset-x-0 bottom-0 top-1/2 bg-black/90 backdrop-blur-xl p-2 flex gap-2 overflow-x-auto items-center z-30 border-t border-white/10">
@@ -594,12 +933,12 @@ function ProductGridCard({
           <div className="mt-auto pt-3 flex items-end justify-between gap-2">
              <div className="shrink-0 flex items-center gap-0.5">
                <span className="text-emerald-400 font-bold text-[11px] mb-0.5">₹</span>
-               <input
-                 type="number" step="0.01" min="0"
-                 value={product.price ?? ''}
-                 onChange={e => onUpdate({ price: e.target.value ? parseFloat(e.target.value) : null })}
-                 className="bg-transparent font-bold text-emerald-400 text-sm w-16 focus:outline-none focus:bg-white/10 hover:bg-white/5 rounded px-1 py-0.5 transition-colors"
+               <SplitPriceInput
+                 value={product.price}
+                 onChange={price => onUpdate({ price })}
                  placeholder="Price"
+                 wholeCls="bg-transparent font-bold text-emerald-400 text-sm w-10 focus:outline-none focus:bg-white/10 hover:bg-white/5 rounded px-1 py-0.5 transition-colors"
+                 paiseCls="bg-transparent font-semibold text-emerald-400/80 text-[10px] w-5 focus:outline-none focus:bg-white/10 hover:bg-white/5 rounded px-0.5 py-0.5 transition-colors placeholder:text-emerald-400/25"
                />
              </div>
              {product.offer_type !== 'price' && product.offer_text && (
@@ -612,6 +951,310 @@ function ProductGridCard({
       </div>
       {lightbox && <ImageLightbox src={lightbox} alt={product.name} onClose={() => setLightbox(null)} />}
     </>
+  )
+}
+
+// ── Sortable wrappers (drag-reorder within a single page) ───────────────────────
+// Each page renders its own DndContext, so a drag can only reorder within that
+// page — moving a product across pages is the "Move page" bulk op, not drag.
+// The grip is the only drag handle, so clicks in the product's inputs never
+// start a drag. Reorder is disabled while a view filter is active.
+
+type SortableRowProps = Omit<
+  React.ComponentProps<typeof ProductRow>,
+  'setDragNodeRef' | 'dragStyle' | 'dragHandle' | 'isDragging'
+> & { canReorder: boolean }
+
+function SortableProductRow({ canReorder, ...rowProps }: SortableRowProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: rowProps.product._key, disabled: !canReorder })
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    ...(isDragging ? { zIndex: 40 } : {}),
+  }
+  const handle = (
+    <button
+      type="button"
+      {...attributes}
+      {...listeners}
+      aria-label="Drag to reorder"
+      title={canReorder ? 'Drag to reorder' : 'Turn off filters to reorder'}
+      className={`shrink-0 rounded p-0.5 -ml-1 text-white/25 hover:text-white/60 ${canReorder ? 'cursor-grab active:cursor-grabbing touch-none' : 'cursor-not-allowed opacity-40'}`}
+    >
+      <GripVertical className="w-4 h-4" />
+    </button>
+  )
+  return <ProductRow {...rowProps} setDragNodeRef={setNodeRef} dragStyle={style} dragHandle={handle} isDragging={isDragging} />
+}
+
+type SortableGridProps = Omit<
+  React.ComponentProps<typeof ProductGridCard>,
+  'setDragNodeRef' | 'dragStyle' | 'dragHandle' | 'isDragging'
+> & { canReorder: boolean }
+
+function SortableProductGridCard({ canReorder, ...cardProps }: SortableGridProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: cardProps.product._key, disabled: !canReorder })
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    ...(isDragging ? { zIndex: 40 } : {}),
+  }
+  const handle = canReorder ? (
+    <button
+      type="button"
+      {...attributes}
+      {...listeners}
+      aria-label="Drag to reorder"
+      title="Drag to reorder"
+      className="p-1.5 bg-black/40 hover:bg-black/70 rounded text-white/50 hover:text-white backdrop-blur-md transition-colors cursor-grab active:cursor-grabbing touch-none"
+    >
+      <GripVertical className="w-3.5 h-3.5" />
+    </button>
+  ) : null
+  return <ProductGridCard {...cardProps} setDragNodeRef={setNodeRef} dragStyle={style} dragHandle={handle} isDragging={isDragging} />
+}
+
+// ── Table (spreadsheet) view ─────────────────────────────────────────────────
+// A Google-Sheet-like grid: one flat row per product, columns mirroring the
+// designer sheet (Page, #, Product, Weight, Type, Price, MRP, Offer text,
+// Badges, Image). Cells edit inline; Enter jumps to the same column on the
+// next row (adding a row when at the bottom), so clients who think in
+// spreadsheets can type products in cell-by-cell exactly like Sheets.
+
+const tdCellCls = 'bg-transparent border border-transparent hover:border-white/10 focus:bg-white/5 focus:border-violet-500/50 rounded-md px-2 py-1.5 text-sm focus:outline-none placeholder:text-white/20 w-full'
+
+function ProductTableView({
+  products, badges, onUpdate, onRemove, onAddRow, onUploadImage,
+  selectedKeys, onToggleSelect,
+}: {
+  products: (ProductInput & { _key: string; id?: string })[]
+  badges: Badge[]
+  onUpdate: (key: string, updates: Partial<ProductInput>) => void
+  onRemove: (key: string) => void
+  onAddRow: (page: number) => void
+  onUploadImage: (key: string, file: File) => Promise<string | null>
+  selectedKeys: Set<string>
+  onToggleSelect: (key: string) => void
+}) {
+  const fileRef = useRef<HTMLInputElement>(null)
+  const uploadRowRef = useRef<string | null>(null)
+  const [uploadingKey, setUploadingKey] = useState<string | null>(null)
+  const [lightbox, setLightbox] = useState<string | null>(null)
+
+  // Flat sheet order: page, then display order — same as the exported sheet.
+  const rows = [...products].sort((a, b) =>
+    (a.page || 1) - (b.page || 1) || a.display_order - b.display_order)
+
+  function badgeText(p: ProductInput): string {
+    return (p.badges || [])
+      .map(b => b.custom_label || (b.badge_id ? badges.find(x => x.id === b.badge_id)?.label : ''))
+      .filter(Boolean)
+      .join(', ')
+  }
+
+  // Comma-separated labels → badge inputs (predefined match by label, else custom).
+  function parseBadges(text: string): ProductBadgeInput[] {
+    return text.split(',').map(s => s.trim()).filter(Boolean).map(label => {
+      const known = badges.find(b => b.label.toLowerCase() === label.toLowerCase())
+      return known
+        ? { badge_id: known.id, color: known.color }
+        : { custom_label: label, color: 'amber' }
+    })
+  }
+
+  // Enter = same column, next row (spreadsheet muscle memory). On the last row
+  // it creates a new one; focus lands after React renders it.
+  function handleEnter(e: React.KeyboardEvent, col: string, idx: number) {
+    if (e.key !== 'Enter') return
+    e.preventDefault()
+    if (idx + 1 >= rows.length) onAddRow(rows[rows.length - 1]?.page || 1)
+    window.setTimeout(() => {
+      document.getElementById(`tcell-${col}-${idx + 1}`)?.focus()
+    }, 30)
+  }
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    const key = uploadRowRef.current
+    e.target.value = ''
+    if (!file || !key) return
+    setUploadingKey(key)
+    const url = await onUploadImage(key, file)
+    if (url) onUpdate(key, { image_url: url })
+    setUploadingKey(null)
+  }
+
+  return (
+    <div className="bg-[#1a1a24] border border-white/10 rounded-3xl shadow-xl overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[900px]">
+          <thead>
+            <tr className="text-[10px] uppercase tracking-wider text-white/30 border-b border-white/10">
+              <th className="px-2 py-2.5 w-8"></th>
+              <th className="px-2 py-2.5 w-12 text-left">Page</th>
+              <th className="px-2 py-2.5 w-8 text-left">#</th>
+              <th className="px-2 py-2.5 text-left min-w-[220px]">Product</th>
+              <th className="px-2 py-2.5 w-24 text-left">Weight</th>
+              <th className="px-2 py-2.5 w-24 text-left">Type</th>
+              <th className="px-2 py-2.5 w-24 text-right">Price ₹</th>
+              <th className="px-2 py-2.5 w-24 text-right">MRP ₹</th>
+              <th className="px-2 py-2.5 w-32 text-left">Offer text</th>
+              <th className="px-2 py-2.5 w-36 text-left">Badges</th>
+              <th className="px-2 py-2.5 w-14 text-left">Image</th>
+              <th className="px-2 py-2.5 w-10"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((p, idx) => (
+              <tr key={p._key} className={`border-b border-white/5 last:border-0 ${selectedKeys.has(p._key) ? 'bg-violet-500/5' : ''}`}>
+                <td className="px-2 py-1 align-middle">
+                  <input
+                    type="checkbox"
+                    checked={selectedKeys.has(p._key)}
+                    onChange={() => onToggleSelect(p._key)}
+                    className="w-3.5 h-3.5 rounded accent-violet-500 cursor-pointer"
+                  />
+                </td>
+                <td className="px-1 py-1 align-middle">
+                  <input
+                    id={`tcell-page-${idx}`}
+                    type="number" min={1}
+                    value={p.page ?? 1}
+                    onChange={e => onUpdate(p._key, { page: Math.max(1, parseInt(e.target.value) || 1) })}
+                    onKeyDown={e => handleEnter(e, 'page', idx)}
+                    className={tdCellCls + ' text-center'}
+                  />
+                </td>
+                <td className="px-2 py-1 text-white/30 text-xs align-middle">{idx + 1}</td>
+                <td className="px-1 py-1 align-middle">
+                  <input
+                    id={`tcell-name-${idx}`}
+                    value={p.name}
+                    onChange={e => onUpdate(p._key, { name: e.target.value })}
+                    onKeyDown={e => handleEnter(e, 'name', idx)}
+                    placeholder="Product name"
+                    className={tdCellCls + ' font-medium text-white/90'}
+                  />
+                </td>
+                <td className="px-1 py-1 align-middle">
+                  <input
+                    id={`tcell-weight-${idx}`}
+                    value={p.weight ?? ''}
+                    onChange={e => onUpdate(p._key, { weight: e.target.value })}
+                    onKeyDown={e => handleEnter(e, 'weight', idx)}
+                    placeholder="—"
+                    className={tdCellCls}
+                  />
+                </td>
+                <td className="px-1 py-1 align-middle">
+                  <select
+                    value={p.offer_type}
+                    onChange={e => onUpdate(p._key, { offer_type: e.target.value as ProductInput['offer_type'] })}
+                    className="bg-white/5 border border-white/10 rounded-md px-1.5 py-1.5 text-xs text-white/80 focus:outline-none focus:border-violet-500/50 w-full"
+                  >
+                    <option value="price">₹ Price</option>
+                    <option value="percent">% Off</option>
+                    <option value="bogo">B1G1</option>
+                    <option value="other">Other</option>
+                  </select>
+                </td>
+                <td className="px-1 py-1 align-middle">
+                  <SplitPriceInput
+                    value={p.price}
+                    onChange={price => onUpdate(p._key, { price })}
+                    onKeyDown={e => handleEnter(e, 'price', idx)}
+                    placeholder="—"
+                    wholeId={`tcell-price-${idx}`}
+                    wholeCls={tdCellCls + ' text-right font-semibold text-emerald-400 min-w-0'}
+                    paiseCls="bg-transparent border border-transparent hover:border-white/10 focus:bg-white/5 focus:border-violet-500/50 rounded-md px-1 py-1 text-[11px] text-emerald-400/80 focus:outline-none placeholder:text-white/15 w-7 shrink-0"
+                  />
+                </td>
+                <td className="px-1 py-1 align-middle">
+                  <input
+                    id={`tcell-mrp-${idx}`}
+                    type="number" step="0.01" min="0"
+                    value={p.mrp ?? ''}
+                    onChange={e => onUpdate(p._key, { mrp: e.target.value ? parseFloat(e.target.value) : null })}
+                    onKeyDown={e => handleEnter(e, 'mrp', idx)}
+                    placeholder="—"
+                    className={tdCellCls + ' text-right text-white/50'}
+                  />
+                </td>
+                <td className="px-1 py-1 align-middle">
+                  <input
+                    id={`tcell-text-${idx}`}
+                    value={p.offer_text ?? ''}
+                    onChange={e => onUpdate(p._key, { offer_text: e.target.value })}
+                    onKeyDown={e => handleEnter(e, 'text', idx)}
+                    placeholder="—"
+                    className={tdCellCls + ' text-xs'}
+                  />
+                </td>
+                <td className="px-1 py-1 align-middle">
+                  {/* Uncontrolled + commit on blur/Enter: retyping "Fresh, Hot" mid-comma
+                      would fight a controlled value that re-joins parsed badges. */}
+                  <input
+                    id={`tcell-badges-${idx}`}
+                    key={`${p._key}-${badgeText(p)}`}
+                    defaultValue={badgeText(p)}
+                    onBlur={e => onUpdate(p._key, { badges: parseBadges(e.target.value) })}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') onUpdate(p._key, { badges: parseBadges((e.target as HTMLInputElement).value) })
+                      handleEnter(e, 'badges', idx)
+                    }}
+                    placeholder="e.g. Hot, Fresh"
+                    className={tdCellCls + ' text-xs text-amber-300'}
+                  />
+                </td>
+                <td className="px-2 py-1 align-middle">
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => { uploadRowRef.current = p._key; fileRef.current?.click() }}
+                      title={p.image_url ? 'Change image' : 'Upload image'}
+                      className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 overflow-hidden flex items-center justify-center hover:ring-2 hover:ring-violet-500/50 transition-all shrink-0"
+                    >
+                      {uploadingKey === p._key ? (
+                        <Loader2 className="w-3.5 h-3.5 text-white/40 animate-spin" />
+                      ) : p.image_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={p.image_url} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <ImageOff className="w-3.5 h-3.5 text-white/25" />
+                      )}
+                    </button>
+                    {p.image_url && (
+                      <button onClick={() => setLightbox(p.image_url!)} title="View larger"
+                        className="p-1 rounded text-white/25 hover:text-white/70">
+                        <Search className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                </td>
+                <td className="px-2 py-1 align-middle">
+                  <button onClick={() => onRemove(p._key)} title="Remove row"
+                    className="p-1.5 rounded-lg text-white/25 hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="px-4 py-3 border-t border-white/10 flex items-center justify-between">
+        <button
+          onClick={() => onAddRow(rows[rows.length - 1]?.page || 1)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold bg-violet-600/20 text-violet-300 hover:bg-violet-600/40 transition-colors"
+        >
+          <Plus className="w-4 h-4" /> Add row
+        </button>
+        <p className="text-[11px] text-white/30">Enter ↵ moves down a row · badges are comma-separated</p>
+      </div>
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+      {lightbox && <ImageLightbox src={lightbox} alt="Product" onClose={() => setLightbox(null)} />}
+    </div>
   )
 }
 
@@ -702,7 +1345,7 @@ const getTomorrowStr = () => {
 }
 
 function OfferIntakeClientInner({
-  token, client, campaign: initialCampaign, catalog, badges, logoUrl, logoDarkUrl, switcher, hub,
+  token, client, campaign: initialCampaign, catalog, badges, logoUrl, logoDarkUrl, switcher, hub, staff,
 }: {
   token: string
   client: { id: string; name: string }
@@ -713,12 +1356,31 @@ function OfferIntakeClientInner({
   logoDarkUrl?: string | null
   switcher?: { kind: string; label: string; href: string }[]
   hub?: string
+  /** True on the internal staff entrance (/dashboard/offer-prepare); shows the Google Sheet sync status. */
+  staff?: boolean
 }) {
-  useKeyboardShortcuts({})
+  const router = useRouter()
+  type LocalProduct = ProductInput & { _key: string; id?: string }
+
+  // Build the editor's product rows from the loaded active campaign.
+  function initialProducts(): LocalProduct[] {
+    return (initialCampaign?.products || [])
+      .slice()
+      .sort((a, b) => a.display_order - b.display_order)
+      .map((p, i) => ({ ...p, _key: p.id, display_order: i }))
+  }
+
+  // Weekly-offer decision: on the STAFF entrance, if the client already has an
+  // active campaign with products, we must NOT auto-load/merge it — the
+  // coordinator first chooses Start New / Continue / Start From Last Week. The
+  // public client entrance just continues its own offer as before.
+  const needsCampaignDecision = !!staff && !!initialCampaign && (initialCampaign.products?.length ?? 0) > 0
+  const [pendingDecision, setPendingDecision] = useState(needsCampaignDecision)
+
   // ── Header state ────────────────────────────────────────────────────────────
   const [title, setTitle] = useState(initialCampaign?.title || '')
   const [dateType, setDateType] = useState<'single' | 'range'>(initialCampaign?.date_type || 'single')
-  
+
   // Use lazy initialization for tomorrow's date so it evaluates accurately when the component mounts
   const [offerDate, setOfferDate] = useState(() => initialCampaign?.offer_date || getTomorrowStr())
   const [offerDateFrom, setOfferDateFrom] = useState(() => initialCampaign?.offer_date_from || getTomorrowStr())
@@ -728,13 +1390,9 @@ function OfferIntakeClientInner({
   const [headerExpanded, setHeaderExpanded] = useState(!initialCampaign?.title && !initialCampaign?.offer_date)
 
   // ── Products state ──────────────────────────────────────────────────────────
-  type LocalProduct = ProductInput & { _key: string; id?: string }
+  // Empty while a decision is pending — the modal populates it on the choice.
   const [products, setProducts] = useState<LocalProduct[]>(() =>
-    initialCampaign?.products?.length
-      ? initialCampaign.products
-          .sort((a, b) => a.display_order - b.display_order)
-          .map((p, i) => ({ ...p, _key: p.id, display_order: i }))
-      : []
+    needsCampaignDecision ? [] : initialProducts()
   )
 
   const validation = useValidationEngine(products)
@@ -760,12 +1418,34 @@ function OfferIntakeClientInner({
 
   // ── UI state ────────────────────────────────────────────────────────────────
   const [showCatalog, setShowCatalog] = useState(false)
-  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list')
+  const [viewMode, setViewMode] = useState<'list' | 'grid' | 'table'>('list')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
-  const [campaignId, setCampaignId] = useState<string | undefined>(initialCampaign?.id)
+  const [campaignId, setCampaignId] = useState<string | undefined>(
+    needsCampaignDecision ? undefined : initialCampaign?.id
+  )
   const [cancelling, setCancelling] = useState(false)
+  const [copyMessage, setCopyMessage] = useState<string | null>(null)
+  const [showMissingImagesOnly, setShowMissingImagesOnly] = useState(false)
+  const [cloning, setCloning] = useState(false)
+  // AI Capture merge guard: a whole-list capture into a non-empty offer prompts
+  // Replace vs Add; a per-page "AI Capture to Page N" is an intentional add.
+  const [bulkApply, setBulkApply] = useState<{ generate: boolean } | null>(null)
+
+  // Google Sheet sync status (staff entrance only) — reflects the fire-and-forget
+  // server sync that runs after each save.
+  type SyncState = 'idle' | 'saving' | 'syncing' | 'synced' | 'error'
+  const [syncState, setSyncState] = useState<SyncState>('idle')
+  const [syncErrorMsg, setSyncErrorMsg] = useState<string | null>(null)
+  const syncPollRef = useRef(0)
+
+  // Drag-reorder sensors (pointer with a small activation distance so clicks on
+  // the row's inputs never start a drag; keyboard for accessibility).
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
 
   const [catalogPageTarget, setCatalogPageTarget] = useState<number>(1)
 
@@ -778,11 +1458,18 @@ function OfferIntakeClientInner({
   const [bulkPasteBusy, setBulkPasteBusy] = useState(false)
   const [bulkPasteReview, setBulkPasteReview] = useState<BulkPasteRow[] | null>(null)
   const [bulkPasteTargetPage, setBulkPasteTargetPage] = useState(1)
+  // true when the capture is an intentional "add to this page" (per-page button);
+  // false for a whole-list capture (which prompts Replace vs Add if the offer
+  // already has products).
+  const [bulkPasteAddToPage, setBulkPasteAddToPage] = useState(false)
+  // A dashboard AI-Capture draft parked until the weekly-offer decision is made.
+  const pendingDraftRef = useRef<BulkPasteRow[] | null>(null)
 
-  function openBulkPaste() {
+  function openBulkPaste(targetPage?: number, addToPage = false) {
     setBulkPasteText('')
     setBulkPasteReview(null)
-    setBulkPasteTargetPage(Math.max(1, ...products.map(p => p.page || 1)))
+    setBulkPasteAddToPage(addToPage)
+    setBulkPasteTargetPage(targetPage ?? Math.max(1, ...products.map(p => p.page || 1)))
     setBulkPasteOpen(true)
   }
 
@@ -841,11 +1528,17 @@ function OfferIntakeClientInner({
       rows = toReviewRows(parsed)
     } catch { /* corrupt draft — ignore */ }
     if (rows.length) {
-      // One-time mount handoff from an external store — the review table can
-      // only exist after this read, so the extra render is inherent.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setBulkPasteReview(rows)
-      setBulkPasteOpen(true)
+      if (needsCampaignDecision) {
+        // Hold the draft until the coordinator chooses Start New / Continue in
+        // the modal, then show the review (see the decision handlers).
+        pendingDraftRef.current = rows
+      } else {
+        // One-time mount handoff from an external store — the review table can
+        // only exist after this read, so the extra render is inherent.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setBulkPasteReview(rows)
+        setBulkPasteOpen(true)
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -855,15 +1548,33 @@ function OfferIntakeClientInner({
   }
 
   /**
-   * Apply the reviewed rows to the product list. With `generate` set, it also
-   * saves + syncs the sheet in the same click — the "WhatsApp list → designer
-   * sheet in under 2 minutes" path.
+   * Confirm the reviewed rows. A whole-list capture into a non-empty offer first
+   * asks Replace vs Add (so a new weekly list never silently merges); a per-page
+   * "AI Capture to Page N" is an intentional add and skips the prompt.
    */
   function confirmBulkPaste(generate = false) {
     if (!bulkPasteReview) return
     const included = bulkPasteReview.filter(r => r.include && r.name.trim())
     if (!included.length) return
-    let order = products.length
+    if (!bulkPasteAddToPage && products.length > 0) {
+      setBulkApply({ generate })
+      return
+    }
+    applyBulkPaste('append', generate)
+  }
+
+  /**
+   * Apply the reviewed rows. 'replace' starts a fresh single-page offer from the
+   * captured rows; 'append' adds them to the current list. With `generate` set,
+   * it also saves + syncs the sheet in the same click.
+   */
+  function applyBulkPaste(mode: 'append' | 'replace', generate = false) {
+    if (!bulkPasteReview) return
+    const included = bulkPasteReview.filter(r => r.include && r.name.trim())
+    if (!included.length) return
+    const base = mode === 'replace' ? [] : products
+    const targetPage = mode === 'replace' ? 1 : bulkPasteTargetPage
+    let order = base.length
     const newRows = included.map(r => {
       const match = r.matchedCatalogId ? catalog.find(c => c.id === r.matchedCatalogId) : undefined
       // AI-detected promo tag → a real badge: reuse a predefined badge when the
@@ -889,16 +1600,92 @@ function OfferIntakeClientInner({
         mrp: r.mrp ?? null,
         offer_text: isBogo ? 'Buy 1 Get 1' : '',
         badges: productBadges,
-        page: bulkPasteTargetPage,
+        page: targetPage,
         display_order: order++,
       }
     })
-    const merged = [...products, ...newRows]
+    const merged = [...base, ...newRows].map((p, i) => ({ ...p, display_order: i }))
     setProducts(merged)
+    setBulkApply(null)
     setBulkPasteOpen(false)
     setBulkPasteReview(null)
     setBulkPasteText('')
     if (generate) void saveProducts(merged)
+  }
+
+  // ── Weekly-offer decision handlers (staff, when an active campaign exists) ────
+  // A parked dashboard-capture draft is shown only AFTER the coordinator chooses,
+  // so the modal always comes first.
+  function applyPendingDraft() {
+    const rows = pendingDraftRef.current
+    if (!rows) return
+    pendingDraftRef.current = null
+    setBulkPasteAddToPage(false)
+    setBulkPasteTargetPage(1)
+    setBulkPasteReview(rows)
+    setBulkPasteOpen(true)
+  }
+
+  function chooseContinueOffer() {
+    setProducts(initialProducts())
+    setCampaignId(initialCampaign?.id)
+    setTitle(initialCampaign?.title || '')
+    setDateType(initialCampaign?.date_type || 'single')
+    setOfferDate(initialCampaign?.offer_date || getTomorrowStr())
+    setOfferDateFrom(initialCampaign?.offer_date_from || getTomorrowStr())
+    setOfferDateTo(initialCampaign?.offer_date_to || '')
+    setHeaderExpanded(!initialCampaign?.title && !initialCampaign?.offer_date)
+    setPendingDecision(false)
+    applyPendingDraft()
+  }
+
+  function resetHeaderForNewOffer() {
+    setCampaignId(undefined)   // a new campaign is created on save (old auto-finalised)
+    setTitle('')
+    setDateType('single')
+    setOfferDate(getTomorrowStr())
+    setOfferDateFrom(getTomorrowStr())
+    setOfferDateTo('')
+    setHeaderExpanded(true)
+  }
+
+  function chooseStartNewOffer() {
+    resetHeaderForNewOffer()
+    setProducts([])
+    setPendingDecision(false)
+    if (pendingDraftRef.current) applyPendingDraft()
+    else setBulkPasteOpen(true)
+  }
+
+  function chooseStartFromLastWeek() {
+    resetHeaderForNewOffer()
+    // Clone name/weight/image/badges/page from the current active campaign; blank
+    // the offer price (coordinator re-prices). MRP is the product's stable standard
+    // price, so it's kept. No ids → these insert as a brand-new campaign on save.
+    const cloned: LocalProduct[] = (initialCampaign?.products || [])
+      .slice()
+      .sort((a, b) => (a.page || 1) - (b.page || 1) || a.display_order - b.display_order)
+      .map((p, i) => ({
+        _key: `clone-${Date.now()}-${i}`,
+        catalog_id: p.catalog_id,
+        name: p.name,
+        weight: p.weight || '',
+        image_url: p.image_url || '',
+        offer_type: p.offer_type,
+        price: null,
+        mrp: p.mrp ?? null,
+        offer_text: '',
+        badges: (p.badges || []).map(b => ({ badge_id: b.badge_id || null, custom_label: b.custom_label || null, color: b.color })),
+        page: p.page || 1,
+        display_order: i,
+      }))
+    setProducts(cloned)
+    setPendingDecision(false)
+    applyPendingDraft()
+  }
+
+  function cancelDecision() {
+    router.push('/dashboard/offer-prepare')
   }
 
   function addBlankProduct(page: number) {
@@ -944,8 +1731,108 @@ function OfferIntakeClientInner({
     })
   }
 
+  // Drag-reorder within a single page: move the dragged product to the drop
+  // slot and renumber that page's display_order (other pages untouched),
+  // mirroring sortPageProducts so the sheet's Display Order column stays 0..n.
+  function reorderPage(pageNum: number, e: DragEndEvent) {
+    const { active, over } = e
+    if (!over || active.id === over.id) return
+    setProducts(prev => {
+      const pageItems = prev.filter(p => (p.page || 1) === pageNum)
+      const otherItems = prev.filter(p => (p.page || 1) !== pageNum)
+      const from = pageItems.findIndex(p => p._key === active.id)
+      const to = pageItems.findIndex(p => p._key === over.id)
+      if (from < 0 || to < 0) return prev
+      const reordered = arrayMove(pageItems, from, to)
+      return [...otherItems, ...reordered].map((p, i) => ({ ...p, display_order: i }))
+    })
+  }
+
+  // Load the previous campaign's products (blank prices) so a new week starts
+  // from last week instead of a blank page. Shown only when the editor is empty.
+  async function handleStartFromLastWeek() {
+    setCloning(true); setError('')
+    const res = await cloneLastCampaign(token)
+    setCloning(false)
+    if (!res.ok || !res.data) { setError(res.error || 'No previous offer to copy yet.'); return }
+    const rows: LocalProduct[] = res.data.products.map((p, i) => ({
+      ...p,
+      _key: `clone-${Date.now()}-${i}`,
+      display_order: i,
+    }))
+    setProducts(rows)
+    setBulkPasteOpen(false)
+    setCopyMessage(`Copied ${rows.length} product${rows.length === 1 ? '' : 's'} from your last offer — just set this week's prices.`)
+    window.setTimeout(() => setCopyMessage(null), 6000)
+  }
+
   function removeProduct(key: string) {
     setProducts(prev => prev.filter(p => p._key !== key).map((p, i) => ({ ...p, display_order: i })))
+  }
+
+  // ── Bulk operations on the current selection ────────────────────────────────
+  // These power both the selection toolbar and the keyboard shortcuts, so the
+  // coordinator can price/badge/move a whole page of products in one action
+  // instead of touching each card.
+  function bulkSetWeight() {
+    const wt = prompt('Set weight/unit for the selected products (e.g. 500gm, 1kg):')
+    if (wt === null) return
+    setProducts(prev => prev.map(p => selectedKeys.has(p._key) ? { ...p, weight: wt } : p))
+  }
+
+  function bulkSetPrice() {
+    const raw = prompt('Set offer price (₹) for the selected products (blank to clear):')
+    if (raw === null) return
+    const trimmed = raw.trim()
+    const price = trimmed === '' ? null : Number(trimmed)
+    if (price !== null && Number.isNaN(price)) { setError('Enter a valid number for price.'); return }
+    setProducts(prev => prev.map(p => selectedKeys.has(p._key) ? { ...p, price } : p))
+  }
+
+  function bulkMoveToPage() {
+    const raw = prompt('Move selected products to page number:')
+    if (raw === null) return
+    const page = Math.round(Number(raw))
+    if (Number.isNaN(page) || page < 1) { setError('Enter a valid page number (1 or higher).'); return }
+    setProducts(prev => prev.map(p => selectedKeys.has(p._key) ? { ...p, page } : p))
+  }
+
+  function bulkSetBadge() {
+    const label = prompt('Badge label for selected products (blank to clear badges):')
+    if (label === null) return
+    const trimmed = label.trim()
+    setProducts(prev => prev.map(p => {
+      if (!selectedKeys.has(p._key)) return p
+      if (!trimmed) return { ...p, badges: [] }
+      // Reuse a predefined badge when the label matches; otherwise a custom one.
+      const known = badges.find(b => b.label.toLowerCase() === trimmed.toLowerCase())
+      const badge: ProductBadgeInput = known
+        ? { badge_id: known.id, color: known.color }
+        : { custom_label: trimmed, color: 'amber' }
+      return { ...p, badges: [badge] }
+    }))
+  }
+
+  // Re-case the selected products' names: UPPERCASE / First letter / Title Case
+  // (title keeps connector words + unit tokens like 500gm lowercase).
+  function bulkFormatNames(mode: NameCaseMode) {
+    setProducts(prev => prev.map(p =>
+      selectedKeys.has(p._key) ? { ...p, name: formatProductName(p.name, mode) } : p))
+  }
+
+  function duplicateSelected() {
+    const toDup = products.filter(p => selectedKeys.has(p._key))
+    if (!toDup.length) return
+    let order = products.length
+    const clones = toDup.map(src => ({ ...src, id: undefined, _key: `dup-${Date.now()}-${order}-${Math.random()}`, display_order: order++ }))
+    setProducts(prev => [...prev, ...clones])
+  }
+
+  function deleteSelected() {
+    if (!selectedKeys.size) return
+    if (!confirm(`Delete ${selectedKeys.size} selected product${selectedKeys.size === 1 ? '' : 's'}?`)) return
+    setProducts(prev => prev.filter(p => !selectedKeys.has(p._key)).map((p, i) => ({ ...p, display_order: i })))
+    clearSelection()
   }
 
   function addFromCatalog(item: CatalogItem) {
@@ -995,6 +1882,48 @@ function OfferIntakeClientInner({
   }
 
   /**
+   * Cut the product out of its background and save the transparent PNG through
+   * the normal upload path (so the catalog mirrors it and it's reused in future
+   * campaigns). Runs entirely on-device — no per-image cost. External image
+   * links are fetched through a token-gated server proxy because most product
+   * CDNs don't send CORS headers.
+   */
+  async function removeProductBackground(imageUrl: string): Promise<string | null> {
+    try {
+      // 1. Source bytes — direct fetch first (our own Supabase URLs allow it).
+      let blob: Blob | null = null
+      try {
+        const res = await fetch(imageUrl, { mode: 'cors' })
+        if (res.ok) blob = await res.blob()
+      } catch { /* CORS-blocked — fall through to the proxy */ }
+      if (!blob) {
+        const prox = await fetchExternalImage(token, imageUrl)
+        if (!prox.ok || !prox.data) {
+          setError(prox.error || 'Could not load that image for background removal.')
+          return null
+        }
+        const bin = atob(prox.data.base64)
+        const bytes = new Uint8Array(bin.length)
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+        blob = new Blob([bytes], { type: prox.data.contentType })
+      }
+
+      // 2. On-device model (lazy-loaded on first use).
+      const { removeBackground } = await import('@/lib/images/remove-background')
+      const cutout = await removeBackground(blob)
+
+      // 3. Save as a new image so the original stays in the catalog history.
+      const file = new File([cutout], 'product-cutout.png', { type: 'image/png' })
+      const url = await handleUploadImage('bg-removal', file)
+      if (url) setError('')
+      return url
+    } catch {
+      setError('Background removal failed — try a clearer photo, or check your connection (the first use downloads the model).')
+      return null
+    }
+  }
+
+  /**
    * Save the given product list (usually the current state, but bulk-paste's
    * one-click "Generate Sheet" passes the freshly-merged list directly since
    * setState hasn't flushed yet). saveCampaign also fires the Google Sheet
@@ -1006,6 +1935,7 @@ function OfferIntakeClientInner({
     if (list.length === 0) { setError('Add at least one product.'); return }
 
     setSaving(true); setError(''); setSaved(false)
+    if (staff) { setSyncState('saving'); setSyncErrorMsg(null) }
 
     const input: CampaignInput = {
       title: title.trim() || undefined,
@@ -1039,12 +1969,82 @@ function OfferIntakeClientInner({
       setClientNote('')
       setShowNote(false)
       setTimeout(() => setSaved(false), 4000)
+      if (staff) { setSyncState('syncing'); void pollSyncStatus(res.data.campaignId) }
     } else {
       setError(res.error || 'Could not save. Please try again.')
+      if (staff) setSyncState('idle')
     }
   }
 
+  // Poll the campaign's Google Sheet sync status after a save (the server runs
+  // the sync fire-and-forget). Correctness rules:
+  //  • A newer save supersedes an in-flight poll via the run token.
+  //  • Success is only ever claimed when THIS save's rows reached the sheet:
+  //    sheet_last_synced_at must be at/after this save's updated_at (strict, no
+  //    slop) — a stale prior-sync timestamp can't count.
+  //  • The server clears sheet_sync_error at the start of each attempt, so a
+  //    non-null error here belongs to this attempt → a real failure.
+  //  • We wait out the server sync's own 15s fetch timeout before giving up, and
+  //    on timeout we never claim success we didn't observe.
+  // All timestamps are DB-sourced, so the comparison is clock-skew safe.
+  async function pollSyncStatus(cid: string) {
+    const run = ++syncPollRef.current
+    let baseUpdatedAt: string | null = null
+    let consecutiveErrors = 0
+    const deadline = Date.now() + 18_000 // cover the server sync's 15s fetch timeout + slack
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 1300))
+      if (syncPollRef.current !== run) return // a newer save took over
+      const res = await getCampaignSyncStatus(token, cid)
+      if (!res.ok || !res.data) continue
+      const { syncedAt, syncError, updatedAt } = res.data
+      if (baseUpdatedAt == null) baseUpdatedAt = updatedAt
+      // A completed sync of THIS save always wins (its timestamp is at/after the
+      // save's updated_at), even over a lingering error.
+      const syncedThisSave = !!syncedAt && !!baseUpdatedAt
+        && new Date(syncedAt).getTime() >= new Date(baseUpdatedAt).getTime()
+      if (syncedThisSave) { setSyncState('synced'); return }
+      // The server clears a prior attempt's error at the start of this one, but
+      // that clear can land just after our first read. Require the error to
+      // persist across two reads before declaring failure so we never latch on
+      // that brief stale window; genuine failures still surface within ~2.6s.
+      if (syncError) {
+        if (++consecutiveErrors >= 2) { setSyncState('error'); setSyncErrorMsg(syncError); return }
+      } else {
+        consecutiveErrors = 0
+      }
+    }
+    // Window elapsed without an observed success or error — genuinely
+    // indeterminate. Leave a soft "syncing" rather than a false "synced".
+    if (syncPollRef.current === run) setSyncState('syncing')
+  }
+
+  async function handleRetrySync() {
+    if (!campaignId) return
+    setSyncState('syncing'); setSyncErrorMsg(null)
+    // resyncOfferSheet awaits the sync fully, so its result is authoritative.
+    const res = await resyncOfferSheet(token, campaignId)
+    if (res.ok) setSyncState('synced')
+    else { setSyncState('error'); setSyncErrorMsg(res.error || 'Sync failed.') }
+  }
+
   function handleSave() { void saveProducts(products) }
+
+  // Power-user keyboard shortcuts for the daily coordinator flow. Defined here,
+  // after every handler above, so the useCallback consts (selectAll/clearSelection)
+  // are initialised before they're referenced.
+  useKeyboardShortcuts({
+    onSelectAll: () => selectAll(products.map(p => p._key)),
+    onClearSelection: clearSelection,
+    onDeleteSelected: deleteSelected,
+    onDuplicateSelected: duplicateSelected,
+    onBulkWeight: bulkSetWeight,
+    onBulkMove: bulkMoveToPage,
+    onBulkPrice: bulkSetPrice,
+    onBulkBadge: bulkSetBadge,
+    onAiCapture: () => openBulkPaste(),
+    onSave: handleSave,
+  })
 
   // Paste/review flow active — the bottom note + save controls belong to the
   // editor and would just add noise (the review table has its own CTA).
@@ -1054,8 +2054,154 @@ function OfferIntakeClientInner({
     ? (offerDate ? fmtDate(offerDate) : '')
     : [offerDateFrom ? fmtDate(offerDateFrom) : '', offerDateTo ? fmtDate(offerDateTo) : ''].filter(Boolean).join(' – ')
 
+  // "Missing images only" is a view filter (never mutates order/data). Drag-
+  // reorder is disabled while it's active so reordering a partial view can't
+  // scramble the hidden rows' display_order.
+  const missingImagesCount = products.filter(p => !p.image_url).length
+  const visibleProducts = showMissingImagesOnly ? products.filter(p => !p.image_url) : products
+  const canReorder = !showMissingImagesOnly
+
+  // The single Figma-ready row set used by "Copy table", "Copy selected" and
+  // "Download CSV" — identical columns to the Google Sheet, so a manual paste or
+  // download is interchangeable with the webhook sync.
+  function sheetRowsFor(list: LocalProduct[]) {
+    return buildOfferSheetRows({
+      clientName: client.name,
+      offerTitle: title,
+      offerDate: dateDisplay,
+      products: list.map(product => ({
+        ...product,
+        badges: (product.badges || []).map(badge => ({
+          custom_label: badge.custom_label || (badge.badge_id ? badges.find(item => item.id === badge.badge_id)?.label : null),
+        })),
+      })),
+    })
+  }
+
+  // Shared by "Copy table" (all / per-page) and "Copy selected".
+  async function copyProductsAsTable(list: LocalProduct[], label: string) {
+    if (!list.length) return
+    const copied = await copyText(offerSheetTsv(sheetRowsFor(list)))
+    if (!copied) {
+      setError('Could not copy the table. Please allow clipboard access and try again.')
+      return
+    }
+    setCopyMessage(`${label} copied as a table — paste directly into Google Sheets, Excel, or Figma data tools.`)
+    window.setTimeout(() => setCopyMessage(null), 5000)
+  }
+
+  async function copyOfferTable(page?: number) {
+    const list = page == null ? products : products.filter(product => (product.page || 1) === page)
+    const label = page == null ? `${list.length} product${list.length === 1 ? '' : 's'}` : `Page ${page} (${list.length})`
+    await copyProductsAsTable(list, label)
+  }
+
+  async function copySelected() {
+    const sel = products.filter(p => selectedKeys.has(p._key))
+    if (!sel.length) return
+    await copyProductsAsTable(sel, `${sel.length} selected`)
+  }
+
+  // Download the offer as a CSV file — the webhook-free fallback for importing
+  // into Google Sheets / Excel. Same frozen columns as the sheet.
+  function downloadCsv() {
+    if (!products.length) return
+    const csv = offerSheetCsv(sheetRowsFor(products))
+    const safeClient = (client.name || 'offer').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'offer'
+    const datePart = (dateType === 'single' ? offerDate : offerDateFrom) || ''
+    const filename = `${safeClient}-offer${datePart ? `-${datePart}` : ''}.csv`
+    // BOM so Excel opens UTF-8 (₹, accented names) correctly.
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    setCopyMessage(`Downloaded ${filename} — import it into Google Sheets or Excel.`)
+    window.setTimeout(() => setCopyMessage(null), 5000)
+  }
+
+  // Weekly-offer decision gate (staff): show the choice BEFORE loading any
+  // products, so a new week never merges with last week's list.
+  if (pendingDecision) {
+    const existingCount = initialCampaign?.products?.length ?? 0
+    return (
+      <div className="min-h-dvh bg-[#0f0f1a] text-white flex items-center justify-center p-4">
+        <div className="w-full max-w-md bg-[#1a1a24] border border-white/10 rounded-3xl shadow-2xl overflow-hidden">
+          <div className="p-5 border-b border-white/10">
+            <h2 className="text-base font-bold text-white/90 flex items-center gap-2">
+              <FilePlus className="w-4 h-4 text-violet-400" /> Existing Weekly Offer Found
+            </h2>
+            <p className="text-xs text-white/50 mt-1">
+              {client.name} already has an active offer with {existingCount} product{existingCount === 1 ? '' : 's'}. What would you like to do?
+            </p>
+          </div>
+          <div className="p-4 space-y-2.5">
+            <button onClick={chooseStartNewOffer} className="w-full text-left rounded-2xl border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 px-4 py-3 transition-colors">
+              <div className="flex items-center gap-2 text-sm font-semibold text-emerald-300">
+                <Sparkles className="w-4 h-4" /> Start New Weekly Offer
+                <span className="ml-auto text-[10px] font-medium text-emerald-400/90 bg-emerald-500/15 px-2 py-0.5 rounded-full">Recommended</span>
+              </div>
+              <p className="text-[11px] text-white/50 mt-1">Empty list, fresh start. The current offer is finalised automatically when you save the new one.</p>
+            </button>
+            <button onClick={chooseContinueOffer} className="w-full text-left rounded-2xl border border-blue-500/30 bg-blue-500/5 hover:bg-blue-500/15 px-4 py-3 transition-colors">
+              <div className="flex items-center gap-2 text-sm font-semibold text-blue-300">
+                <RefreshCw className="w-4 h-4" /> Continue Current Offer
+              </div>
+              <p className="text-[11px] text-white/50 mt-1">Keep editing this week&apos;s offer with its existing {existingCount} product{existingCount === 1 ? '' : 's'}.</p>
+            </button>
+            <button onClick={chooseStartFromLastWeek} className="w-full text-left rounded-2xl border border-violet-500/30 bg-violet-500/5 hover:bg-violet-500/15 px-4 py-3 transition-colors">
+              <div className="flex items-center gap-2 text-sm font-semibold text-violet-300">
+                <History className="w-4 h-4" /> Start From Last Week
+              </div>
+              <p className="text-[11px] text-white/50 mt-1">A new offer pre-filled with the same products (prices cleared) — you just re-price.</p>
+            </button>
+          </div>
+          <div className="px-4 pb-4">
+            <button onClick={cancelDecision} className="w-full py-2.5 rounded-2xl text-xs text-white/50 hover:text-white/80 hover:bg-white/5 transition-colors">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-dvh bg-[#0f0f1a] text-white">
+      {/* Replace vs Add choice — a whole-list AI Capture into a non-empty offer. */}
+      {bulkApply && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div className="w-full max-w-sm bg-[#1a1a24] border border-white/10 rounded-3xl shadow-2xl overflow-hidden">
+            <div className="p-5 border-b border-white/10">
+              <h2 className="text-base font-bold text-white/90 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-400" /> This offer already has products
+              </h2>
+              <p className="text-xs text-white/50 mt-1">
+                There {products.length === 1 ? 'is' : 'are'} already {products.length} product{products.length === 1 ? '' : 's'} here. Replace them with the captured list, or add the captured list to them?
+              </p>
+            </div>
+            <div className="p-4 space-y-2.5">
+              <button onClick={() => applyBulkPaste('replace', bulkApply.generate)} className="w-full text-left rounded-2xl border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 px-4 py-3 transition-colors">
+                <span className="text-sm font-semibold text-emerald-300">Replace with captured list</span>
+                <p className="text-[11px] text-white/50 mt-0.5">Removes the current {products.length} and starts fresh with the new list.</p>
+              </button>
+              <button onClick={() => applyBulkPaste('append', bulkApply.generate)} className="w-full text-left rounded-2xl border border-white/15 bg-white/5 hover:bg-white/10 px-4 py-3 transition-colors">
+                <span className="text-sm font-semibold text-white/80">Add to current offer</span>
+                <p className="text-[11px] text-white/50 mt-0.5">Keeps the current products and appends the captured list.</p>
+              </button>
+            </div>
+            <div className="px-4 pb-4">
+              <button onClick={() => setBulkApply(null)} className="w-full py-2.5 rounded-2xl text-xs text-white/50 hover:text-white/80 hover:bg-white/5 transition-colors">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Brand header — stays a comfortable reading width even on wide screens; a
           centered logo/title stretched edge-to-edge on a desktop monitor looks broken. */}
       <div className="max-w-2xl mx-auto px-4 pt-8 sm:pt-12">
@@ -1239,12 +2385,12 @@ function OfferIntakeClientInner({
                           />
                         </td>
                         <td className="px-2 py-2 align-middle">
-                          <input
-                            type="number" step="0.01" min="0"
-                            value={row.price ?? ''}
-                            onChange={e => updateBulkPasteRow(row._key, { price: e.target.value ? parseFloat(e.target.value) : null })}
-                            className="w-full text-right bg-transparent border border-transparent hover:border-white/10 focus:bg-white/5 focus:border-violet-500/50 rounded-lg px-2 py-1.5 text-sm font-semibold text-emerald-400 focus:outline-none"
+                          <SplitPriceInput
+                            value={row.price}
+                            onChange={price => updateBulkPasteRow(row._key, { price })}
                             placeholder="—"
+                            wholeCls="w-full min-w-0 text-right bg-transparent border border-transparent hover:border-white/10 focus:bg-white/5 focus:border-violet-500/50 rounded-lg px-2 py-1.5 text-sm font-semibold text-emerald-400 focus:outline-none"
+                            paiseCls="w-7 shrink-0 bg-transparent border border-transparent hover:border-white/10 focus:bg-white/5 focus:border-violet-500/50 rounded-lg px-1 py-1 text-[11px] text-emerald-400/80 focus:outline-none placeholder:text-white/15"
                           />
                         </td>
                         <td className="px-2 py-2 align-middle">
@@ -1307,14 +2453,14 @@ function OfferIntakeClientInner({
           <div className="bg-[#1a1a24] border border-white/10 rounded-3xl p-5 sm:p-6 shadow-xl">
             <div className="flex items-center justify-between">
               <h2 className="font-bold text-white/90 flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-violet-400" /> Paste your offer list
+                <Sparkles className="w-4 h-4 text-violet-400" /> AI Capture to Page {bulkPasteTargetPage}
               </h2>
               {products.length > 0 && (
                 <button onClick={() => setBulkPasteOpen(false)} className="p-1.5 rounded-lg hover:bg-white/10 text-white/50"><X className="w-4 h-4" /></button>
               )}
             </div>
             <p className="text-xs text-white/40 mt-1 mb-4">
-              Copy the product list from WhatsApp and paste it below — AI fills in names, prices, MRP and badges for you.
+              Paste a WhatsApp list, email, or plain text. AI fills in product names, prices, MRP and badges for Page {bulkPasteTargetPage}.
             </p>
             <textarea
               value={bulkPasteText}
@@ -1346,9 +2492,9 @@ function OfferIntakeClientInner({
               className="w-full mt-4 py-3 text-sm font-bold rounded-2xl bg-violet-600 hover:bg-violet-500 text-white shadow-lg shadow-violet-900/40 disabled:opacity-40 transition-all flex items-center justify-center gap-2"
             >
               {bulkPasteBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ClipboardPaste className="w-4 h-4" />}
-              {bulkPasteBusy ? 'AI is reading your list…' : 'Parse with AI'}
+              {bulkPasteBusy ? 'AI is reading your list…' : `Capture to Page ${bulkPasteTargetPage}`}
             </button>
-            <div className="flex items-center justify-center gap-5 mt-4">
+            <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 mt-4">
               <button
                 onClick={() => { setBulkPasteOpen(false); if (!products.length) addBlankProduct(1) }}
                 className="text-xs text-white/40 hover:text-white/80 transition-colors"
@@ -1361,6 +2507,17 @@ function OfferIntakeClientInner({
               >
                 Search past products
               </button>
+              {products.length === 0 && (
+                <button
+                  onClick={handleStartFromLastWeek}
+                  disabled={cloning}
+                  title="Copy last week's products (prices cleared) so you only re-price"
+                  className="flex items-center gap-1.5 text-xs font-medium text-violet-300 hover:text-violet-200 transition-colors disabled:opacity-50"
+                >
+                  {cloning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <History className="w-3.5 h-3.5" />}
+                  Start from last week
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1382,25 +2539,65 @@ function OfferIntakeClientInner({
              </div>
              <div className="flex items-center gap-2">
              <button
-               onClick={openBulkPaste}
+               onClick={() => openBulkPaste()}
                title="Paste a product list and let AI fill in the rows"
                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-violet-600/20 text-violet-300 hover:bg-violet-600/40 transition-colors"
              >
-               <Sparkles className="w-3.5 h-3.5" /> Bulk Paste
+               <Sparkles className="w-3.5 h-3.5" /> AI Capture
              </button>
+             {products.length > 0 && (
+               <button
+                 onClick={() => void copyOfferTable()}
+                 title="Copy Figma-ready columns to Google Sheets or Excel"
+                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/5 border border-white/10 text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+               >
+                 <Copy className="w-3.5 h-3.5" /> Copy table
+               </button>
+             )}
+             {products.length > 0 && (
+               <button
+                 onClick={downloadCsv}
+                 title="Download the offer as a CSV file for Google Sheets or Excel"
+                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/5 border border-white/10 text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+               >
+                 <Download className="w-3.5 h-3.5" /> CSV
+               </button>
+             )}
+             {products.length > 0 && (
+               <button
+                 onClick={() => setShowMissingImagesOnly(v => !v)}
+                 title="Show only products still waiting for an image"
+                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                   showMissingImagesOnly
+                     ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                     : 'bg-white/5 text-white/60 border-white/10 hover:text-white hover:bg-white/10'
+                 }`}
+               >
+                 <ImageOff className="w-3.5 h-3.5" /> Missing images{missingImagesCount > 0 ? ` (${missingImagesCount})` : ''}
+               </button>
+             )}
              {products.length > 0 && (
                <div className="flex items-center bg-white/5 border border-white/10 rounded-lg p-0.5">
                  <button
                    onClick={() => setViewMode('list')}
+                   title="List view"
                    className={`p-1.5 rounded-md transition-colors ${viewMode === 'list' ? 'bg-white/10 text-white' : 'text-white/30 hover:text-white/60'}`}
                  >
                    <List className="w-3.5 h-3.5" />
                  </button>
                  <button
                    onClick={() => setViewMode('grid')}
+                   title="Grid view"
                    className={`p-1.5 rounded-md transition-colors ${viewMode === 'grid' ? 'bg-white/10 text-white' : 'text-white/30 hover:text-white/60'}`}
                  >
                    <LayoutGrid className="w-3.5 h-3.5" />
+                 </button>
+                 <button
+                   onClick={() => setViewMode('table')}
+                   title="Table view — edit cell by cell like a spreadsheet"
+                   className={`p-1.5 rounded-md transition-colors ${viewMode === 'table' ? 'bg-white/10 text-white' : 'text-white/30 hover:text-white/60'}`}
+                 >
+                   <Table2 className="w-3.5 h-3.5" />
                  </button>
                </div>
              )}
@@ -1413,33 +2610,77 @@ function OfferIntakeClientInner({
                 <span className="font-semibold text-sm bg-indigo-500/50 px-2.5 py-1 rounded-lg shadow-inner">{selectedKeys.size} selected</span>
                 <button onClick={clearSelection} className="text-xs text-indigo-200 hover:text-white transition-colors font-medium">Clear</button>
               </div>
-              <div className="flex items-center gap-2">
-                <button onClick={() => {
-                  const wt = prompt('Enter bulk weight/unit for selected items (e.g. 500gm, 1kg):')
-                  if (wt !== null) {
-                    selectedKeys.forEach(key => {
-                      const idx = products.findIndex(p => p._key === key)
-                      if (idx >= 0) updateProduct(key, { weight: wt })
-                    })
-                  }
-                }} className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-xs font-medium transition-colors shadow-sm">
-                  Set Bulk Weight
+              <div className="flex items-center gap-2 flex-wrap justify-end">
+                <button onClick={bulkSetPrice} title="Set the same offer price on all selected (⌘⇧P)"
+                  className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-xs font-medium transition-colors shadow-sm">
+                  Price
                 </button>
-                <button onClick={() => {
-                  if (confirm(`Are you sure you want to delete ${selectedKeys.size} selected items?`)) {
-                    selectedKeys.forEach(key => removeProduct(key))
-                    clearSelection()
-                  }
-                }} className="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/40 border border-red-500/30 text-red-100 rounded-lg text-xs font-medium transition-colors shadow-sm">
-                  Delete Selected
+                <button onClick={bulkSetWeight} title="Set the same weight/unit on all selected (⌘⇧W)"
+                  className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-xs font-medium transition-colors shadow-sm">
+                  Weight
+                </button>
+                <button onClick={bulkSetBadge} title="Set the same badge on all selected (⌘⇧B)"
+                  className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-xs font-medium transition-colors shadow-sm">
+                  Badge
+                </button>
+                <button onClick={bulkMoveToPage} title="Move all selected to another page (⌘⇧M)"
+                  className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-xs font-medium transition-colors shadow-sm">
+                  Move page
+                </button>
+                <div className="flex items-center bg-white/10 rounded-lg overflow-hidden shadow-sm" title="Format the selected product names">
+                  <button onClick={() => bulkFormatNames('upper')} title="ALL UPPERCASE"
+                    className="px-2.5 py-1.5 hover:bg-white/20 text-xs font-medium transition-colors border-r border-indigo-400/30">
+                    AA
+                  </button>
+                  <button onClick={() => bulkFormatNames('sentence')} title="First letter capital only"
+                    className="px-2.5 py-1.5 hover:bg-white/20 text-xs font-medium transition-colors border-r border-indigo-400/30">
+                    Aa
+                  </button>
+                  <button onClick={() => bulkFormatNames('title')} title="Title Case — capitalise each word, keep small words (of, with, per) and units (500gm, 1kg) lowercase"
+                    className="px-2.5 py-1.5 hover:bg-white/20 text-xs font-medium transition-colors">
+                    Aa Bc
+                  </button>
+                </div>
+                <button onClick={duplicateSelected} title="Duplicate all selected (⌘D)"
+                  className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-xs font-medium transition-colors shadow-sm">
+                  Duplicate
+                </button>
+                <button onClick={() => void copySelected()} title="Copy selected rows as a table"
+                  className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-xs font-medium transition-colors shadow-sm">
+                  Copy
+                </button>
+                <button onClick={deleteSelected} title="Delete all selected (Del)"
+                  className="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/40 border border-red-500/30 text-red-100 rounded-lg text-xs font-medium transition-colors shadow-sm">
+                  Delete
                 </button>
               </div>
             </div>
           )}
 
           <div className="space-y-6">
-            {Array.from(new Set(products.map(p => p.page || 1))).sort((a, b) => a - b).map(pageNum => {
-               const pageProducts = products.filter(p => (p.page || 1) === pageNum)
+            {showMissingImagesOnly && visibleProducts.length === 0 && (
+              <div className="bg-[#1a1a24] border border-white/10 rounded-3xl p-8 text-center">
+                <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto mb-3" />
+                <p className="text-sm text-white/70">Every product has an image.</p>
+                <button onClick={() => setShowMissingImagesOnly(false)} className="mt-3 text-xs text-violet-300 hover:text-violet-200">
+                  Show all products
+                </button>
+              </div>
+            )}
+            {viewMode === 'table' && visibleProducts.length > 0 && (
+              <ProductTableView
+                products={visibleProducts}
+                badges={badges}
+                onUpdate={updateProduct}
+                onRemove={removeProduct}
+                onAddRow={addBlankProduct}
+                onUploadImage={(key, file) => handleUploadImage(key, file)}
+                selectedKeys={selectedKeys}
+                onToggleSelect={toggleSelect}
+              />
+            )}
+            {viewMode !== 'table' && Array.from(new Set(visibleProducts.map(p => p.page || 1))).sort((a, b) => a - b).map(pageNum => {
+               const pageProducts = visibleProducts.filter(p => (p.page || 1) === pageNum)
                return (
                  <div key={pageNum} className="bg-[#1a1a24] border border-white/10 rounded-3xl p-4 shadow-xl">
                    <div className="flex items-center justify-between mb-4 px-1">
@@ -1465,7 +2706,7 @@ function OfferIntakeClientInner({
                            {pageProducts.every(p => selectedKeys.has(p._key)) ? 'Deselect Page' : 'Select Page'}
                          </button>
                        )}
-                       {pageProducts.length > 1 && (
+                       {canReorder && pageProducts.length > 1 && (
                          <div className="flex items-center bg-white/5 border border-white/10 rounded-lg p-0.5 mr-1">
                            <button onClick={() => sortPageProducts(pageNum, 'price_asc')} title="Sort by price: low to high"
                              className="p-1 rounded-md text-white/40 hover:text-white hover:bg-white/10 transition-colors">
@@ -1484,46 +2725,65 @@ function OfferIntakeClientInner({
                        <button onClick={() => { setCatalogPageTarget(pageNum); setShowCatalog(true) }} className="text-xs font-medium text-white/50 hover:text-white transition-colors flex items-center gap-1">
                          <Search className="w-3 h-3" /> Search past
                        </button>
-                       <button onClick={() => { setBulkPasteTargetPage(pageNum); openBulkPaste() }} className="text-xs font-medium text-violet-400 hover:text-violet-300 transition-colors flex items-center gap-1 bg-violet-500/10 hover:bg-violet-500/20 px-2 py-1 rounded ml-2">
+                       <button onClick={() => openBulkPaste(pageNum, true)} className="text-xs font-medium text-violet-400 hover:text-violet-300 transition-colors flex items-center gap-1 bg-violet-500/10 hover:bg-violet-500/20 px-2 py-1 rounded ml-2">
                          <Sparkles className="w-3 h-3" /> AI Capture
                        </button>
+                       {pageProducts.length > 0 && (
+                         <button onClick={() => void copyOfferTable(pageNum)} className="text-xs font-medium text-white/50 hover:text-white transition-colors flex items-center gap-1 px-2 py-1 rounded hover:bg-white/5">
+                           <Copy className="w-3 h-3" /> Copy table
+                         </button>
+                       )}
                      </div>
                    </div>
 
-                   {viewMode === 'list' ? (
-                     <div className="space-y-2">
-                       {pageProducts.map(p => (
-                         <ProductRow
-                           key={p._key}
-                           product={p}
-                           badges={badges}
-                           catalog={catalog}
-                           catalogImages={catalog.find(c => c.id === p.catalog_id)?.images}
-                           onUpdate={updates => updateProduct(p._key, updates)}
-                           onRemove={() => removeProduct(p._key)}
-                           onUploadImage={file => handleUploadImage(p._key, file)}
-                           uploading={false}
-                           onDuplicate={() => duplicateProduct(p._key)}
-                           onAddNext={() => addBlankProduct(pageNum)}
-                         />
-                       ))}
-                     </div>
-                   ) : (
-                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-                       {pageProducts.map(p => (
-                         <ProductGridCard
-                           key={p._key}
-                           product={p}
-                           badges={badges}
-                           catalogImages={catalog.find(c => c.id === p.catalog_id)?.images}
-                           onUpdate={updates => updateProduct(p._key, updates)}
-                           onRemove={() => removeProduct(p._key)}
-                           onUploadImage={file => handleUploadImage(p._key, file)}
-                           uploading={false}
-                         />
-                       ))}
-                     </div>
-                   )}
+                   {/* Stable id: dnd-kit's auto-generated accessibility ids use a
+                       module counter that differs between SSR and hydration,
+                       spamming a hydration-mismatch console error without it. */}
+                   <DndContext id={`offer-page-dnd-${pageNum}`} sensors={sensors} collisionDetection={closestCenter} onDragEnd={e => reorderPage(pageNum, e)}>
+                     <SortableContext
+                       items={pageProducts.map(p => p._key)}
+                       strategy={viewMode === 'list' ? verticalListSortingStrategy : rectSortingStrategy}
+                     >
+                       {viewMode === 'list' ? (
+                         <div className="space-y-2">
+                           {pageProducts.map(p => (
+                             <SortableProductRow
+                               key={p._key}
+                               canReorder={canReorder}
+                               product={p}
+                               badges={badges}
+                               catalog={catalog}
+                               catalogImages={catalog.find(c => c.id === p.catalog_id)?.images}
+                               onUpdate={updates => updateProduct(p._key, updates)}
+                               onRemove={() => removeProduct(p._key)}
+                               onUploadImage={file => handleUploadImage(p._key, file)}
+                               uploading={false}
+                               onDuplicate={() => duplicateProduct(p._key)}
+                               onAddNext={() => addBlankProduct(pageNum)}
+                               onRemoveBg={removeProductBackground}
+                             />
+                           ))}
+                         </div>
+                       ) : (
+                         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                           {pageProducts.map(p => (
+                             <SortableProductGridCard
+                               key={p._key}
+                               canReorder={canReorder}
+                               product={p}
+                               badges={badges}
+                               catalogImages={catalog.find(c => c.id === p.catalog_id)?.images}
+                               onUpdate={updates => updateProduct(p._key, updates)}
+                               onRemove={() => removeProduct(p._key)}
+                               onUploadImage={file => handleUploadImage(p._key, file)}
+                               uploading={false}
+                               onRemoveBg={removeProductBackground}
+                             />
+                           ))}
+                         </div>
+                       )}
+                     </SortableContext>
+                   </DndContext>
                    
                    <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/5">
                       <button onClick={() => addBlankProduct(pageNum)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold bg-violet-600/20 text-violet-300 hover:bg-violet-600/40 transition-colors">
@@ -1586,6 +2846,12 @@ function OfferIntakeClientInner({
           </div>
         )}
 
+        {copyMessage && (
+          <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-4 py-3 mb-4 flex items-center gap-2 text-sm text-emerald-300">
+            <Check className="w-4 h-4 shrink-0" /> {copyMessage}
+          </div>
+        )}
+
         {/* ── Cancel Button ── */}
         {!inPasteFlow && campaignId && (
           <div className="mb-4">
@@ -1593,8 +2859,10 @@ function OfferIntakeClientInner({
               onClick={async () => {
                 if (confirm('Cancel this request? You will be able to start a new one.')) {
                   setCancelling(true)
-                  await cancelCampaign(campaignId)
-                  window.location.reload()
+                  const res = await cancelCampaign(token, campaignId)
+                  setCancelling(false)
+                  if (res.ok) window.location.reload()
+                  else setError(res.error || 'Could not cancel this offer request.')
                 }
               }}
               disabled={cancelling}
@@ -1622,6 +2890,30 @@ function OfferIntakeClientInner({
           }
         </button>
 
+        {/* Google Sheet sync status — staff entrance only (clients don't manage the sheet). */}
+        {staff && syncState !== 'idle' && (
+          <div className={`mt-3 rounded-xl border px-3 py-2 flex items-center gap-2 text-xs ${
+            syncState === 'error'
+              ? 'bg-red-500/10 border-red-500/25 text-red-300'
+              : syncState === 'synced'
+                ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300'
+                : 'bg-white/5 border-white/10 text-white/60'
+          }`}>
+            {syncState === 'saving' && <><Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" /> Saving…</>}
+            {syncState === 'syncing' && <><RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" /> Syncing Google Sheet…</>}
+            {syncState === 'synced' && <><CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> Google Sheet synced</>}
+            {syncState === 'error' && (
+              <>
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                <span className="flex-1 min-w-0">Sheet sync failed{syncErrorMsg ? `: ${syncErrorMsg}` : ''}</span>
+                <button onClick={handleRetrySync} className="shrink-0 px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 transition-colors flex items-center gap-1">
+                  <RefreshCw className="w-3 h-3" /> Retry sync
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
         {campaignId && (
           <p className="text-center text-xs text-white/25 mt-3">
             You can update this list any time — changes are logged for the Cirqle team.
@@ -1631,7 +2923,7 @@ function OfferIntakeClientInner({
         )}
 
         <p className="text-center text-[11px] text-white/20 mt-8">
-          Cirqle Design · cirqle.work · This page is private to {client.name}.
+          Cirqle Works · cirqle.work · This page is private to {client.name}.
         </p>
        </div>
       </div>
@@ -1645,26 +2937,17 @@ function OfferIntakeClientInner({
         />
       )}
 
-      {/* Enterprise Add-ons */}
-      <ValidationPanel 
-        products={products} 
+      {/* Live validation summary (missing price/image, duplicates, price > MRP). */}
+      <ValidationPanel
+        products={products}
         issues={validation.issues}
         errors={validation.errors}
         warnings={validation.warnings}
-      />
-      <AiAssistantPanel 
-        products={products} 
-        onApplySuggestion={(key, updates) => updateProduct(key, updates)} 
       />
     </div>
   )
 }
 
 export default function OfferIntakeClient(props: any) {
-  return (
-    <CollaborationProvider>
-      <CollaborationStatus />
-      <OfferIntakeClientInner {...props} />
-    </CollaborationProvider>
-  )
+  return <OfferIntakeClientInner {...props} />
 }

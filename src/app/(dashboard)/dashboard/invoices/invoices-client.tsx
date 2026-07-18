@@ -16,6 +16,7 @@ import {
   getInvoiceDateForTaskMonth,
   buildBillingPeriod,
   toSequenceMonth,
+  formatLocalDate,
 } from '@/lib/invoices/numbering'
 import { createClient } from '@/lib/supabase/client'
 import {
@@ -720,7 +721,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const newItems = (inv.items || []).filter(it => it.id !== itemId)
     const newSubtotal = newItems.reduce((s, it) => s + it.total, 0)
     const newTax = newSubtotal * (inv.tax_rate || 0) / 100
-    const newTotal = newSubtotal + newTax - (inv.discount_amount || 0)
+    const newTotal = newSubtotal + newTax - (inv.discount_amount || 0) + (inv.previous_balance || 0)
     await supabase.from('invoices').update({
       subtotal: newSubtotal, tax_amount: newTax, total_amount: newTotal, updated_at: new Date().toISOString(),
     }).eq('id', invoiceId)
@@ -737,7 +738,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     if (!inv) return
     const sub = inv.subtotal || inv.total_amount || 0
     const taxAmt = sub * taxRate / 100
-    const total = sub + taxAmt - (inv.discount_amount || 0)
+    const total = sub + taxAmt - (inv.discount_amount || 0) + (inv.previous_balance || 0)
     await supabase.from('invoices').update({
       tax_rate: taxRate, tax_amount: taxAmt, total_amount: total, updated_at: new Date().toISOString(),
     }).eq('id', invoiceId)
@@ -970,7 +971,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     if (!inv) return
     const sub = inv.subtotal || 0
     const taxAmt = sub * (inv.tax_rate || 0) / 100
-    const total = Math.max(0, sub + taxAmt - discount)
+    const total = Math.max(0, sub + taxAmt - discount + (inv.previous_balance || 0))
     await supabase.from('invoices').update({
       discount_amount: discount, total_amount: total, updated_at: new Date().toISOString(),
     }).eq('id', invoiceId)
@@ -986,7 +987,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     if (inv) {
       const sub = inv.subtotal || 0
       const taxAmt = sub * (inv.tax_rate || 0) / 100
-      const newTotal = Math.max(0, sub + taxAmt)
+      const newTotal = Math.max(0, sub + taxAmt + (inv.previous_balance || 0))
       await supabase.from('invoices')
         .update({ discount_amount: 0, total_amount: newTotal, updated_at: new Date().toISOString() })
         .eq('id', invoiceId)
@@ -1078,6 +1079,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       newPaid,
       newPaidInr,
       newStatus,
+      appliedInvoiceCcy: appliedInvoiceCcy,   // delta for atomic server-side increment
+      appliedInr:        amountInr,
       categoryId:     invoiceCategoryId,
     })
 
@@ -1110,6 +1113,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       onClick: async () => {
         await supabase.from('payments').delete().eq('id', pmt.id)
         await supabase.from('invoices').update({ paid_amount: prevPaid, paid_amount_inr: prevPaidInr, status: prevStatus }).eq('id', invoiceId)
+        // Also reverse the cashbook inflow + allocation that recordInvoicePayment
+        // created, otherwise undo leaves phantom cash inflated in the Cash Book.
+        await reverseInvoicePaymentCashbook(invoiceId, { payment_date: pmt.payment_date, amount_inr: pmt.amount_inr, amount: pmt.amount })
         setInvoices(prev => prev.map(i => i.id === invoiceId
           ? { ...i, paid_amount: prevPaid, paid_amount_inr: prevPaidInr, status: prevStatus, payments: (i.payments || []).filter(p => p.id !== pmt.id) }
           : i
@@ -1120,6 +1126,33 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     setIsAdvancePayment(false)
     setPanelMode('detail')
     setSaving(false)
+  }
+
+  // Reverse the auto-created cashbook inflow + allocation for a single payment.
+  // Matches on invoice + inflow type + payment date AND amount so that when an
+  // invoice has two same-day payments, removing one never deletes the other's
+  // cashbook entry. Returns true if an entry was removed.
+  async function reverseInvoicePaymentCashbook(
+    invoiceId: string,
+    pmt: { payment_date?: string; amount_inr?: number; amount?: number },
+  ): Promise<boolean> {
+    const { data: allocRows } = await supabase
+      .from('cashbook_invoice_allocations')
+      .select('cashbook_entry_id, cashbook_entries!inner(entry_date, type, amount_inr, amount)')
+      .eq('invoice_id', invoiceId)
+    if (!allocRows || allocRows.length === 0) return false
+    const targetInr = round2(pmt.amount_inr ?? pmt.amount ?? 0)
+    const candidates = (allocRows as any[]).filter(
+      r => r.cashbook_entries?.type === 'inflow' && r.cashbook_entries?.entry_date === pmt.payment_date,
+    )
+    // Prefer an amount match; fall back to the single date+type match if only one.
+    const matchEntry =
+      candidates.find(r => round2(r.cashbook_entries?.amount_inr ?? r.cashbook_entries?.amount ?? 0) === targetInr) ??
+      (candidates.length === 1 ? candidates[0] : undefined)
+    if (!matchEntry) return false
+    await supabase.from('cashbook_invoice_allocations').delete().eq('cashbook_entry_id', matchEntry.cashbook_entry_id)
+    await supabase.from('cashbook_entries').delete().eq('id', matchEntry.cashbook_entry_id)
+    return true
   }
 
   async function deletePayment(invoiceId: string, paymentId: string) {
@@ -1147,22 +1180,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         await supabase.from('payments').delete().eq('id', paymentId)
         // Restore invoice amounts
         await supabase.from('invoices').update({ paid_amount: newPaid, paid_amount_inr: newPaidInr, status: newStatus }).eq('id', invoiceId)
-        // Delete any auto-created cashbook entry linked to this invoice on the same date
-        // (we look for an inflow entry with the payment date + invoice_id that has an allocation)
-        const { data: allocRows } = await supabase
-          .from('cashbook_invoice_allocations')
-          .select('cashbook_entry_id, cashbook_entries!inner(entry_date, type)')
-          .eq('invoice_id', invoiceId)
-        if (allocRows && allocRows.length > 0) {
-          // Find entry matching the payment date and type=inflow
-          const matchEntry = (allocRows as any[]).find(
-            r => r.cashbook_entries?.type === 'inflow' && r.cashbook_entries?.entry_date === pmt.payment_date
-          )
-          if (matchEntry) {
-            await supabase.from('cashbook_invoice_allocations').delete().eq('cashbook_entry_id', matchEntry.cashbook_entry_id)
-            await supabase.from('cashbook_entries').delete().eq('id', matchEntry.cashbook_entry_id)
-          }
-        }
+        // Delete the auto-created cashbook inflow linked to THIS payment
+        // (matched by date + type + amount so sibling same-day payments are safe).
+        await reverseInvoicePaymentCashbook(invoiceId, pmt)
 
         // Update local state
         setInvoices(prev => prev.map(i => i.id === invoiceId
@@ -1530,7 +1550,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       invNum = invoiceNumber
       const { data: created, error } = await supabase.from('invoices').insert({
         invoice_number: invNum, client_id: genForm.client_id, status: 'draft',
-        issue_date: invoiceDate.toISOString().split('T')[0],
+        issue_date: formatLocalDate(invoiceDate),
         total_amount: 0, paid_amount: 0,
         currency: invCurrency,
       }).select('id').single()
@@ -1699,7 +1719,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     for (const g of groups) {
       const [yr, mo] = g.month.split('-').map(Number)
       const monthStart = g.month + '-01'
-      const monthEnd = new Date(yr, mo, 0).toISOString().split('T')[0]
+      const monthEnd = formatLocalDate(new Date(yr, mo, 0))
       g.expenses = expEntriesRaw.filter(e =>
         e.client_id === g.client_id &&
         !billedExpIds.has(e.id) &&
@@ -1750,9 +1770,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           const { invoiceNumber: invNum, sequenceMonth } =
             await generateInvoiceNumber(supabase, invoiceDate, group.client_code)
 
-          const issueDateStr = invoiceDate.toISOString().split('T')[0]
+          const issueDateStr = formatLocalDate(invoiceDate)
           const dueDateObj = new Date(invoiceDate); dueDateObj.setDate(dueDateObj.getDate() + 30)
-          const dueDateStr = dueDateObj.toISOString().split('T')[0]
+          const dueDateStr = formatLocalDate(dueDateObj)
           const { data: created, error } = await supabase.from('invoices').insert({
             invoice_number: invNum,
             client_id: group.client_id,
@@ -1926,7 +1946,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const ACCENT  = companySettings.invoice_accent_color  || '#243459'
     const FONT    = companySettings.invoice_font          || 'Arial, Helvetica, sans-serif'
     const coName  = companySettings.company_name          || 'cirqle'
-    const coTag   = companySettings.company_tagline       || 'Get Budget Designs'
+    const coTag   = companySettings.company_tagline       || 'Creative & Marketing Solutions'
     const logoUrl = companySettings.logo_url_light || companySettings.logo_url || ''
     const showTag = companySettings.invoice_show_tagline  !== 'false'
 
@@ -2989,7 +3009,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 const text = buildInvoiceShareText({
                   invoiceNumber: inv.invoice_number,
                   clientName:    inv.client?.name ?? null,
-                  companyName:   companySettings.company_name || 'Cirqle Design',
+                  companyName:   companySettings.company_name || 'Cirqle Works',
                   amount:        inv.total_amount,
                   dueDate:       inv.due_date,
                   showAmounts,
@@ -3459,7 +3479,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                           const newExps = (inv.expense_items || []).filter(e => e.id !== exp.id)
                           const newExpTotal = newExps.reduce((s, e) => s + (e.amount || 0), 0)
                           const taskTotal = (inv.items || []).reduce((s, i) => s + (i.total || 0), 0)
-                          const newTotal = round2(taskTotal + newExpTotal - (inv.discount_amount || 0) + (inv.tax_amount || 0))
+                          const newTotal = round2(taskTotal + newExpTotal - (inv.discount_amount || 0) + (inv.tax_amount || 0) + (inv.previous_balance || 0))
                           await supabase.from('invoices').update({ total_amount: newTotal, subtotal: round2(taskTotal + newExpTotal) }).eq('id', inv.id)
                           setInvoices(prev => prev.map(i => i.id === inv.id
                             ? { ...i, expense_items: newExps, total_amount: newTotal, total_amount_inr: round2(newTotal * (i.exchange_rate || 1)), subtotal: round2(taskTotal + newExpTotal) }

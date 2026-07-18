@@ -102,7 +102,7 @@ export default function ForgotPasswordPage() {
         </div>
 
         <p className="text-center text-xs text-muted-foreground mt-6">
-          Cirqle Design © {new Date().getFullYear()}
+          Cirqle Works © {new Date().getFullYear()}
         </p>
       </div>
     </div>

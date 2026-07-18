@@ -1446,12 +1446,25 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
     setAssignSaving(true)
     const tid = assignModal.taskId
 
-    // 1. Save task-level employee assignments
-    await supabase.from('task_assignments').delete().eq('task_id', tid)
+    // 1. Save task-level employee assignments.
+    // Delete-then-insert: supabase-js returns errors rather than throwing, so
+    // check the insert. If it fails after the delete, every assignee would be
+    // silently wiped while the UI reports success — surface it and abort.
+    const delAssign = await supabase.from('task_assignments').delete().eq('task_id', tid)
+    if (delAssign.error) {
+      setAssignSaving(false)
+      toastError('Failed to save assignments', delAssign.error.message)
+      return
+    }
     if (assignSelected.size > 0) {
-      await supabase.from('task_assignments').insert(
+      const insAssign = await supabase.from('task_assignments').insert(
         [...assignSelected].map(empId => ({ task_id: tid, employee_id: empId }))
       )
+      if (insAssign.error) {
+        setAssignSaving(false)
+        toastError('Failed to save assignments', insAssign.error.message)
+        return
+      }
     }
     setLocalAssignments(prev => [
       ...prev.filter(a => a.task_id !== tid),
@@ -2423,7 +2436,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
               ...(filterStatus ? [{ key: 'status', label: 'Status', value: getStatusLabel(filterStatus), onRemove: () => setFilterStatus('') }] : []),
               ...(filterClient ? [{ key: 'client', label: 'Client', value: filterClient === INTERNAL_CLIENT ? 'Internal' : clientList.find(c => c.id === filterClient)?.name || 'Selected', onRemove: () => setFilterClient('') }] : []),
               ...(filterService ? [{ key: 'service', label: 'Service', value: services.find(s => s.id === filterService)?.name || 'Selected', onRemove: () => setFilterService('') }] : []),
-              ...(filterAssignee ? [{ key: 'assignee', label: 'Assignee', value: employees.find(e => e.id === filterAssignee)?.name || 'Selected', onRemove: () => setFilterAssignee('') }] : []),
+              ...(filterAssignee ? [{ key: 'assignee', label: 'Assignee', value: (() => { const e = employees.find(e => e.id === filterAssignee); return e ? dn(e) : 'Selected' })(), onRemove: () => setFilterAssignee('') }] : []),
               ...(filterDate ? [{ key: 'date', label: 'Date', value: getDateFilterLabel(filterDate), onRemove: () => setFilterDate(null) }] : []),
             ]}
             onClearAll={() => { clearSearch(); setFilterStatus(''); setFilterClient(''); setFilterService(''); setFilterAssignee(''); setFilterDate(null) }}
@@ -3703,7 +3716,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                     })}
                     className="accent-violet-500"
                   />
-                  <span className="text-sm">{emp.name || emp.cqid}</span>
+                  <span className="text-sm">{dn(emp)}</span>
                 </label>
               ))}
             </div>

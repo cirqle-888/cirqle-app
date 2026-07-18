@@ -11,7 +11,7 @@ interface PrivacyContextType {
   openUnlockModal: () => void
   lock: () => void
   /** Returns name when unlocked, CQID when locked */
-  dn: (emp: { cqid?: string; name?: string | null } | null | undefined) => string
+  dn: (emp: { cqid?: string | null; name?: string | null } | null | undefined) => string
   /** Returns value when unlocked, masked string when locked */
   ds: (value: string | null | undefined, mask?: string) => string
   /** When true, names are always hidden regardless of unlock state */
@@ -176,7 +176,7 @@ export function PrivacyProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const dn = useCallback(
-    (emp: { cqid?: string; name?: string | null } | null | undefined): string => {
+    (emp: { cqid?: string | null; name?: string | null } | null | undefined): string => {
       if (!emp) return '—'
       return effectivelyUnlocked ? (emp.name || emp.cqid || '—') : (emp.cqid || '—')
     },

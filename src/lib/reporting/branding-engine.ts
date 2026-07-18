@@ -14,7 +14,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import type { BrandConfig, WhiteLabelMode } from './types'
 
 const CIRQLE_DEFAULTS = {
-  agencyName: 'Marketing Cirqle',
+  agencyName: 'Cirqle Works',
   primaryColor: '#7C3AED',
   secondaryColor: '#A78BFA',
   accentColor: '#F59E0B',

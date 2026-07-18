@@ -501,7 +501,7 @@ export function ContributionEntryPanel({
                       {emp?.cqid?.replace('CQID', '') || '?'}
                     </div>
                     <div>
-                      <p className="text-xs font-semibold">{emp ? dn(emp) : e.employeeName}</p>
+                      <p className="text-xs font-semibold">{dn(emp ?? { name: e.employeeName })}</p>
                       <p className="text-[10px] text-muted-foreground">{emp?.cqid}</p>
                     </div>
                   </div>
@@ -912,7 +912,7 @@ export function ContributionEntryPanel({
                     <div key={e.employeeId} className="px-4 py-3 flex items-center gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
-                          <p className="text-xs font-semibold">{emp ? dn(emp) : e.employeeName}</p>
+                          <p className="text-xs font-semibold">{dn(emp ?? { name: e.employeeName })}</p>
                           <span className="text-[10px] text-muted-foreground">{e.scorePercentage.toFixed(1)}%</span>
                         </div>
                         <div className="flex-1 bg-secondary rounded-full h-1.5">

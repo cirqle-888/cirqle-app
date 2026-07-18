@@ -1068,27 +1068,54 @@ export default function ContributionsClient({
         .map(([empId, value]) => ({ task_id: selectedTask.id, employee_id: empId, parameter_id: paramId, value }))
     )
     const toolInserts = filteredTools.filter(t => toolsUsed[t.id]).map(t => ({ task_id: selectedTask.id, tool_id: t.id }))
-    await Promise.all([
+
+    // This is a delete-then-reinsert. supabase-js returns errors instead of
+    // throwing, so we MUST check every write: if an insert fails after the
+    // deletes succeed, the task's contribution + earnings rows would be wiped
+    // while the UI says "saved" and the draft is cleared — silent data loss.
+    // On any error we surface it, keep the draft, and stop (no success toast).
+    const firstError = (...errs: ({ message?: string } | null | undefined)[]) =>
+      errs.find(e => e)?.message
+
+    const [delContribRes, delToolsRes] = await Promise.all([
       supabase.from('contributions').delete().eq('task_id', selectedTask.id),
       supabase.from('task_tools').delete().eq('task_id', selectedTask.id),
     ])
+    let saveError = firstError(delContribRes.error, delToolsRes.error)
+
     // Always save scores when calculatedResult is available — regardless of showFinancials display toggle
-    if (calculatedResult) {
+    if (!saveError && calculatedResult) {
       const scoreInserts = calculatedResult.employeeEarnings.map((e: any) => ({
         task_id: selectedTask.id, employee_id: e.employeeId,
         score_percentage: e.scorePercentage, earnings_inr: e.earnings,
       }))
-      await supabase.from('contribution_scores').delete().eq('task_id', selectedTask.id)
-      if (scoreInserts.length) await supabase.from('contribution_scores').insert(scoreInserts)
+      const delScores = await supabase.from('contribution_scores').delete().eq('task_id', selectedTask.id)
+      saveError = firstError(delScores.error)
+      if (!saveError && scoreInserts.length) {
+        const insScores = await supabase.from('contribution_scores').insert(scoreInserts)
+        saveError = firstError(insScores.error)
+      }
       // Layer employee commission agreements on top (no-op without agreements).
-      await applyTaskAgreements(selectedTask.id)
+      if (!saveError) await applyTaskAgreements(selectedTask.id)
       // Only advance status to 'done' if task is still pending/in_progress — never downgrade invoiced/paid tasks
-      if (['pending', 'in_progress'].includes(selectedTask.status)) {
+      if (!saveError && ['pending', 'in_progress'].includes(selectedTask.status)) {
         await supabase.from('tasks').update({ status: 'done' }).eq('id', selectedTask.id)
       }
     }
-    if (contribInserts.length) await supabase.from('contributions').insert(contribInserts)
-    if (toolInserts.length) await supabase.from('task_tools').insert(toolInserts)
+    if (!saveError && contribInserts.length) {
+      const insContrib = await supabase.from('contributions').insert(contribInserts)
+      saveError = firstError(insContrib.error)
+    }
+    if (!saveError && toolInserts.length) {
+      const insTools = await supabase.from('task_tools').insert(toolInserts)
+      saveError = firstError(insTools.error)
+    }
+
+    if (saveError) {
+      setSaving(false)
+      toast.error('Failed to save contributions', saveError, 6000)
+      return   // keep the draft — do NOT show success or clear it
+    }
 
     // Record on the task's activity timeline (fire-and-forget — never blocks save).
     logContributionSaved(selectedTask.id, {
@@ -2895,7 +2922,7 @@ export default function ContributionsClient({
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1.5">
-                        <p className="font-semibold text-sm">{emp ? dn(emp) : e.employeeName}</p>
+                        <p className="font-semibold text-sm">{dn(emp ?? { name: e.employeeName })}</p>
                         {emp?.performance_rating && (
                           <span className="text-[10px] bg-secondary border border-border px-1.5 py-0.5 rounded text-muted-foreground">
                             {emp.performance_rating}% rating

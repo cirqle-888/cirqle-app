@@ -12,6 +12,7 @@
 import React, { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { usePrivacy } from '@/contexts/privacy-context'
 import {
   Megaphone, ArrowLeft, Loader2, Plus, Check, Trash2, FileText, ExternalLink, BarChart2,
   Download, Calendar, ChevronDown, CheckCircle, XCircle, Clock,
@@ -760,6 +761,7 @@ function FundAllocationCard({ project, allocations, wallet, supported, reportedS
   canManage: boolean
   onChange: () => void
 }) {
+  const { dn } = usePrivacy()
   const [amount, setAmount] = useState('')
   const [busy, setBusy] = useState<string | null>(null) // 'add' | ledger row id
   const [err, setErr] = useState<string | null>(null)
@@ -842,7 +844,7 @@ function FundAllocationCard({ project, allocations, wallet, supported, reportedS
                     </div>
                     <div className="text-xs text-muted-foreground">
                       {new Date(a.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                      {a.creator?.name ? ` · ${a.creator.name}` : ''}
+                      {a.creator ? ` · ${dn(a.creator)}` : ''}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
@@ -924,6 +926,7 @@ function SummaryCell({ label, value }: { label: string; value: string }) {
 function NotesTab({ projectId, notes, events, canEdit, onChange }: {
   projectId: string; notes: Props['notes']; events: Props['events']; canEdit: boolean; onChange: () => void
 }) {
+  const { dn } = usePrivacy()
   const [body, setBody] = useState('')
   const [busy, setBusy] = useState(false)
   async function add() {
@@ -952,7 +955,7 @@ function NotesTab({ projectId, notes, events, canEdit, onChange }: {
           <div key={nt.id} className="rounded-lg border border-border bg-card p-3 text-sm">
             <div>{nt.body}</div>
             <div className="mt-1 text-[11px] text-muted-foreground">
-              {nt.author?.cqid || nt.author?.name || 'Someone'} · {new Date(nt.created_at).toLocaleString()}
+              {nt.author ? dn(nt.author) : 'Someone'} · {new Date(nt.created_at).toLocaleString()}
             </div>
           </div>
         ))}

@@ -16,22 +16,32 @@ export async function callGroqJSON(
 ): Promise<any> {
   const key = process.env.GROQ_API_KEY
   if (!key) throw new Error('AI parsing is not configured (set GROQ_API_KEY).')
-  const model = opts?.model || process.env.GROQ_MODEL || 'qwen/qwen3-32b'
+  // Default to a NON-reasoning instruct model: it answers this extraction task
+  // in ~57 tokens and stops cleanly. Reasoning models (Qwen3, gpt-oss) spend
+  // the whole budget on hidden thinking and return EMPTY content — measured:
+  // qwen3.6-27b burned 1200/1200 tokens and produced nothing.
+  // Override per-deployment with GROQ_MODEL; Groq retires model ids regularly,
+  // so check console.groq.com/docs/models if a 404 appears.
+  const model = opts?.model || process.env.GROQ_MODEL || 'llama-3.3-70b-versatile'
 
-  const body = JSON.stringify({
+  // Reasoning models emit <think> chain-of-thought and accept reasoning_format
+  // to suppress it. Plain instruct models REJECT that parameter outright
+  // ("`reasoning_format` is not supported with this model", HTTP 400), so only
+  // send it where it applies — otherwise setting GROQ_MODEL to an instruct
+  // model hard-fails every AI call.
+  const isReasoning = /qwen|gpt-oss|deepseek-r1|reason/i.test(model)
+  // Reasoning models need headroom for the hidden thinking on top of the answer.
+  const maxTokens = opts?.maxTokens ?? (isReasoning ? 2048 : 300)
+
+  // Deliberately NOT using response_format: { type: 'json_object' } — Groq
+  // enforces that strictly server-side and a leaked <think> block fails the
+  // validation with a hard 400. Instead: prompt-instruct JSON-only output and
+  // parse leniently below. Soft failure (empty object) beats a hard error.
+  const buildBody = (withReasoningFormat: boolean) => JSON.stringify({
     model,
     temperature: 0,
-    max_tokens: opts?.maxTokens ?? 300,
-    // Deliberately NOT using response_format: { type: 'json_object' } —
-    // Groq enforces that strictly server-side, and Qwen3 (a "reasoning"
-    // model) prepends <think>...</think> chain-of-thought before its answer,
-    // which fails that validation with a hard 400 even with
-    // reasoning_format: 'hidden' (still observed leaking through). Instead:
-    // prompt-instruct JSON-only output, hint reasoning_format to suppress
-    // thinking tokens when the model honors it, and parse leniently below
-    // (strip any <think> block, then regex out the JSON object). Soft
-    // failure (empty object) beats a hard request-level error.
-    reasoning_format: 'hidden',
+    max_tokens: maxTokens,
+    ...(withReasoningFormat ? { reasoning_format: 'hidden' } : {}),
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userText },
@@ -39,14 +49,25 @@ export async function callGroqJSON(
   })
 
   const url = 'https://api.groq.com/openai/v1/chat/completions'
+  const post = (body: string) => fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+    body,
+  })
+
   // Free-tier per-minute limits can throw a transient 429; retry a couple times.
   let res!: Response
+  let sentReasoningFormat = isReasoning
   for (let attempt = 0; attempt < 3; attempt++) {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-      body,
-    })
+    res = await post(buildBody(sentReasoningFormat))
+    // Self-heal if our reasoning-model guess was wrong for this model id.
+    if (res.status === 400 && sentReasoningFormat) {
+      const peek = await res.clone().text().catch(() => '')
+      if (/reasoning_format/i.test(peek)) {
+        sentReasoningFormat = false
+        res = await post(buildBody(false))
+      }
+    }
     if (res.ok || res.status !== 429) break
     if (attempt < 2) await new Promise(r => setTimeout(r, 1500 * (attempt + 1)))
   }

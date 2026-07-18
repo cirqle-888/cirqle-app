@@ -53,11 +53,14 @@ export default async function CostAttributionPage({
   const totalEmployeeCost = employeeCosts.reduce((s, r) => s + r.totalInr, 0)
 
   return (
-    <div className="space-y-6">
+    // Header stays full-bleed (its own padding + sticky border); the content
+    // below it gets the standard page inset so it doesn't touch the nav rail.
+    <>
       <Header
         title="Cost & Tags"
         subtitle="Ad-hoc spend labels and shared-expense cost attribution — independent of the fixed category taxonomy"
       />
+      <div className="p-4 md:p-6 space-y-6">
 
       <div className="flex items-center gap-2 text-xs">
         <span className="text-muted-foreground">Window:</span>
@@ -119,7 +122,7 @@ export default async function CostAttributionPage({
               {employeeCosts.map(row => (
                 <div key={row.employeeId} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
                   <div className="min-w-0">
-                    <span className="font-medium">{row.employeeName}</span>
+                    <span className="font-medium">{row.employeeCqid}</span>
                     <span className="text-xs text-muted-foreground ml-2">{row.itemCount} {row.itemCount === 1 ? 'item' : 'items'}</span>
                   </div>
                   <div className="tabular-nums font-medium whitespace-nowrap">{inr(row.totalInr)}</div>
@@ -130,5 +133,6 @@ export default async function CostAttributionPage({
         </div>
       </div>
     </div>
+    </>
   )
 }

@@ -62,7 +62,7 @@ export default function OfferPrepareClientPicker({ clients }: { clients: PickerC
                   </p>
                 ) : !c.hasWebhook ? (
                   <p className="text-xs text-amber-600 flex items-center gap-1">
-                    <AlertTriangle className="w-3 h-3" /> No Google Sheet webhook — sheet sync won&apos;t run
+                    <AlertTriangle className="w-3 h-3" /> No Google Sheet linked — sheet sync won&apos;t run
                   </p>
                 ) : (
                   <p className="text-xs text-muted-foreground">Ready</p>

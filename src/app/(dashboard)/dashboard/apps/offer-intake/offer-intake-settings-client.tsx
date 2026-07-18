@@ -6,11 +6,11 @@ import {
   ArrowLeft, Link2, Tag, Copy, Check, RefreshCw, Loader2,
   AlertTriangle, CheckCircle2, ExternalLink, Webhook,
   ChevronDown, ChevronUp, Search, ShieldAlert, FlaskConical,
-  Package, Store, Upload,
+  Package, Store, Upload, Settings2,
 } from 'lucide-react'
 import {
   saveWebhookUrl, saveOfferSheetUrl, resetOfferToken, testSheetSync, ensureOfferToken,
-  toggleOfferFlyerService,
+  saveGlobalWebhookUrl, regenerateSheetSecret,
 } from './actions'
 
 const inputCls = 'w-full bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20'
@@ -41,28 +41,10 @@ function StatusDot({ ok }: { ok: boolean }) {
   )
 }
 
-// ── Toggle switch ──────────────────────────────────────────────────────────────
-
-function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
-  return (
-    <button
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      disabled={disabled}
-      className={`relative inline-flex w-9 h-5 rounded-full transition-colors shrink-0 ${
-        checked ? 'gradient-bg' : 'bg-secondary border border-border'
-      } ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-    >
-      <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-4' : 'translate-x-0'}`} />
-    </button>
-  )
-}
-
 // ── Client card ───────────────────────────────────────────────────────────────
 
 function ClientCard({
-  client: initialClient, appUrl,
+  client: initialClient, appUrl, globalConfigured,
 }: {
   client: {
     id: string; name: string; code?: string
@@ -72,6 +54,7 @@ function ClientCard({
     has_offer_flyer_service: boolean
   }
   appUrl: string
+  globalConfigured: boolean
 }) {
   const [client, setClient] = useState(initialClient)
   const [expanded, setExpanded] = useState(false)
@@ -83,33 +66,28 @@ function ClientCard({
   const [resetting, setResetting] = useState(false)
   const [testing, setTesting] = useState(false)
   const [generating, setGenerating] = useState(false)
-  const [togglingService, setTogglingService] = useState(false)
+  const [advancedOpen, setAdvancedOpen] = useState(!!client.offer_sheet_webhook_url)
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
 
   const intakeUrl = token ? `${appUrl}/intake/offer/${token}` : null
   const hasWebhook = !!client.offer_sheet_webhook_url
+  const hasSheetLink = !!client.offer_sheet_url
   const hasToken = !!token
-  const serviceEnabled = client.has_offer_flyer_service
-  const onboardingDone = hasWebhook && hasToken
+  // The sheet is reachable when either a legacy per-client script is set, or the
+  // shared script is connected AND this client has pasted their Sheet link.
+  const hasSheetDestination = hasWebhook || (globalConfigured && hasSheetLink)
+  const onboardingDone = hasSheetDestination && hasToken
 
   function flash(type: 'ok' | 'err', text: string) {
     setMsg({ type, text })
     setTimeout(() => setMsg(null), 4000)
   }
 
-  async function handleToggleService(enabled: boolean) {
-    setTogglingService(true)
-    const res = await toggleOfferFlyerService(client.id, enabled)
-    setTogglingService(false)
-    if (res.ok) setClient(c => ({ ...c, has_offer_flyer_service: enabled }))
-    else flash('err', res.error || 'Could not update service')
-  }
-
   async function handleSaveWebhook() {
     setWebhookSaving(true)
     const res = await saveWebhookUrl(client.id, webhookDraft)
     setWebhookSaving(false)
-    if (res.ok) flash('ok', 'Webhook URL saved ✓')
+    if (res.ok) { setClient(c => ({ ...c, offer_sheet_webhook_url: webhookDraft.trim() || null })); flash('ok', 'Per-client script URL saved ✓') }
     else flash('err', res.error || 'Could not save')
   }
 
@@ -117,7 +95,7 @@ function ClientCard({
     setSheetUrlSaving(true)
     const res = await saveOfferSheetUrl(client.id, sheetUrlDraft)
     setSheetUrlSaving(false)
-    if (res.ok) flash('ok', 'Google Sheet URL saved ✓')
+    if (res.ok) { setClient(c => ({ ...c, offer_sheet_url: sheetUrlDraft.trim() || null })); flash('ok', 'Google Sheet link saved ✓') }
     else flash('err', res.error || 'Could not save')
   }
 
@@ -154,7 +132,7 @@ function ClientCard({
   }
 
   return (
-    <div className={`bg-card border rounded-2xl overflow-hidden transition-colors ${serviceEnabled ? 'border-violet-500/20' : 'border-border'}`}>
+    <div className="bg-card border border-violet-500/20 rounded-2xl overflow-hidden transition-colors">
       {/* Header row */}
       <div
         role="button" tabIndex={0}
@@ -162,36 +140,28 @@ function ClientCard({
         onKeyDown={e => e.key === 'Enter' && setExpanded(e => !e)}
         className="px-5 py-4 flex items-center gap-3 cursor-pointer hover:bg-secondary/30 transition-colors"
       >
-        <Store className={`w-4 h-4 shrink-0 ${serviceEnabled ? 'text-violet-400' : 'text-muted-foreground/30'}`} />
+        <Store className="w-4 h-4 shrink-0 text-violet-400" />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <p className="text-sm font-semibold truncate">{client.name}</p>
-            {serviceEnabled && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-500/10 text-violet-400 border border-violet-500/20 font-medium shrink-0">
-                Offer Flyer
-              </span>
-            )}
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-500/10 text-violet-400 border border-violet-500/20 font-medium shrink-0">
+              Offer Flyer
+            </span>
           </div>
           <p className="text-[11px] text-muted-foreground">
-            {!serviceEnabled
-              ? 'Service not enabled'
-              : onboardingDone
+            {onboardingDone
               ? 'Fully set up'
-              : [!hasToken && 'No intake link', !hasWebhook && 'No sheet webhook'].filter(Boolean).join(' · ')}
+              : [!hasToken && 'No intake link', !hasSheetDestination && 'No sheet linked'].filter(Boolean).join(' · ')}
           </p>
         </div>
 
-        {/* Status dots (only if service on) */}
-        {serviceEnabled && (
-          <div className="flex items-center gap-1 shrink-0">
-            <StatusDot ok={hasToken} />
-            <StatusDot ok={hasWebhook} />
-          </div>
-        )}
+        {/* Status dots — intake link + sheet destination */}
+        <div className="flex items-center gap-1 shrink-0">
+          <StatusDot ok={hasToken} />
+          <StatusDot ok={hasSheetDestination} />
+        </div>
 
-        {!serviceEnabled
-          ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-secondary text-muted-foreground/50 border border-border font-medium shrink-0">Off</span>
-          : onboardingDone
+        {onboardingDone
           ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 font-medium shrink-0">Ready</span>
           : <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/25 font-medium shrink-0">Setup needed</span>
         }
@@ -213,29 +183,22 @@ function ClientCard({
             </div>
           )}
 
-          {/* ── Service toggle ── */}
-          <div className="flex items-center justify-between p-4 bg-secondary/40 rounded-xl border border-border">
-            <div>
-              <p className="text-sm font-semibold flex items-center gap-2">
-                <Store className="w-4 h-4 text-violet-400" /> Offer Flyer Service
-              </p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Enable to give this client access to the campaign intake + product catalog
-              </p>
-            </div>
-            {togglingService
-              ? <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-              : <Toggle checked={serviceEnabled} onChange={handleToggleService} />
-            }
+          {/* Where the capability comes from — read-only. A client appears here
+              because one of their assigned services has Intake Kind = "Offer
+              Intake"; that assignment IS the on/off switch. */}
+          <div className="flex items-center gap-3 p-3 bg-secondary/40 rounded-xl border border-border">
+            <Store className="w-4 h-4 text-violet-400 shrink-0" />
+            <p className="text-xs text-muted-foreground flex-1 min-w-0">
+              Enabled by this client's <span className="text-foreground font-medium">Offer Intake</span> service. To remove access, unassign that service from the client.
+            </p>
+            <Link
+              href={`/dashboard/settings?tab=clients&editClient=${client.id}&returnTo=/dashboard/apps/offer-intake`}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg bg-secondary border border-border hover:bg-secondary/70 text-muted-foreground hover:text-foreground transition-colors shrink-0"
+            >
+              <Settings2 className="w-3 h-3" /> Services
+            </Link>
           </div>
 
-          {/* Everything below is gated on service being enabled */}
-          {!serviceEnabled ? (
-            <p className="text-xs text-muted-foreground/50 text-center py-2">
-              Enable the service above to configure intake settings.
-            </p>
-          ) : (
-            <>
               {/* ── Product catalog shortcut ── */}
               <div className="flex items-center gap-3 p-4 bg-violet-500/5 border border-violet-500/15 rounded-xl">
                 <Package className="w-5 h-5 text-violet-400 shrink-0" />
@@ -302,80 +265,94 @@ function ClientCard({
                 )}
               </div>
 
-              {/* ── Section 2: Webhook URL & Sheet Link ── */}
+              {/* ── Section 2: Sheet link (primary) ── */}
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/60 mb-3 flex items-center gap-1.5">
                   <Webhook className="w-3.5 h-3.5" /> Google Sheet Sync
                 </p>
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <div>
-                      <label className={labelCls}>Google Sheet URL (Anyone can view)</label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          value={sheetUrlDraft}
-                          onChange={e => setSheetUrlDraft(e.target.value)}
-                          className={inputCls}
-                          placeholder="https://docs.google.com/spreadsheets/d/…/edit"
-                        />
-                        {client.offer_sheet_url && (
-                          <>
-                            <CopyBtn text={client.offer_sheet_url} />
-                            <a href={client.offer_sheet_url} target="_blank" rel="noopener noreferrer"
-                              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors shrink-0" title="Open sheet">
-                              <ExternalLink className="w-4 h-4" />
-                            </a>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={handleSaveSheetUrl}
-                        disabled={sheetUrlSaving || sheetUrlDraft === (client.offer_sheet_url || '')}
-                        className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg gradient-bg text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
-                      >
-                        {sheetUrlSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-                        Save Link
-                      </button>
-                    </div>
-                  </div>
 
-                  <div className="space-y-2">
-                    <div>
-                      <label className={labelCls}>Apps Script Web App URL</label>
-                      <input
-                        value={webhookDraft}
-                        onChange={e => setWebhookDraft(e.target.value)}
-                        className={inputCls}
-                        placeholder="https://script.google.com/macros/s/…/exec"
-                      />
-                    </div>
-                    {webhookDraft && !webhookDraft.startsWith('https://script.google.com/macros/s/') && (
-                      <p className="text-xs text-red-400 flex items-center gap-1.5">
-                        <AlertTriangle className="w-3 h-3" /> Must be a Google Apps Script Web App URL
-                      </p>
-                    )}
+                {!globalConfigured && !hasWebhook && (
+                  <div className="flex items-center gap-2 bg-amber-500/5 border border-amber-500/20 rounded-xl px-3 py-2.5 mb-3">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                    <p className="text-xs text-amber-300">Connect the shared sync script once (top of this page), then just paste each client’s Sheet link here.</p>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <div>
+                    <label className={labelCls}>
+                      Google Sheet link <span className="text-muted-foreground/40">— open the client’s sheet and copy the URL</span>
+                    </label>
                     <div className="flex items-center gap-2">
-                      <button
-                        onClick={handleSaveWebhook}
-                        disabled={webhookSaving || webhookDraft === (client.offer_sheet_webhook_url || '')}
-                        className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg gradient-bg text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
-                      >
-                        {webhookSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-                        Save URL
-                      </button>
-                      {!hasWebhook && (
-                        <a
-                          href="https://script.google.com"
-                          target="_blank" rel="noopener noreferrer"
-                          className="text-xs text-violet-400 hover:underline flex items-center gap-1"
-                        >
-                          Open Apps Script <ExternalLink className="w-3 h-3" />
-                        </a>
+                      <input
+                        value={sheetUrlDraft}
+                        onChange={e => setSheetUrlDraft(e.target.value)}
+                        className={inputCls}
+                        placeholder="https://docs.google.com/spreadsheets/d/…/edit"
+                      />
+                      {client.offer_sheet_url && (
+                        <>
+                          <CopyBtn text={client.offer_sheet_url} />
+                          <a href={client.offer_sheet_url} target="_blank" rel="noopener noreferrer"
+                            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors shrink-0" title="Open sheet">
+                            <ExternalLink className="w-4 h-4" />
+                          </a>
+                        </>
                       )}
                     </div>
                   </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleSaveSheetUrl}
+                      disabled={sheetUrlSaving || sheetUrlDraft === (client.offer_sheet_url || '')}
+                      className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg gradient-bg text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+                    >
+                      {sheetUrlSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                      Save link
+                    </button>
+                    <p className="text-[11px] text-muted-foreground/50">Make sure the sheet is shared so “Anyone with the link” can view.</p>
+                  </div>
+                </div>
+
+                {/* Advanced: legacy per-client bound script (override). Rarely needed
+                    once the shared script is connected — kept for existing setups. */}
+                <div className="mt-3">
+                  <button
+                    onClick={() => setAdvancedOpen(o => !o)}
+                    className="text-[11px] text-muted-foreground/60 hover:text-muted-foreground flex items-center gap-1"
+                  >
+                    {advancedOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                    Advanced: per-client script override
+                  </button>
+                  {advancedOpen && (
+                    <div className="space-y-2 mt-2 pl-3 border-l border-border">
+                      <div>
+                        <label className={labelCls}>Apps Script Web App URL (per-client override)</label>
+                        <input
+                          value={webhookDraft}
+                          onChange={e => setWebhookDraft(e.target.value)}
+                          className={inputCls}
+                          placeholder="https://script.google.com/macros/s/…/exec"
+                        />
+                      </div>
+                      {webhookDraft && !webhookDraft.startsWith('https://script.google.com/macros/s/') && (
+                        <p className="text-xs text-red-400 flex items-center gap-1.5">
+                          <AlertTriangle className="w-3 h-3" /> Must be a Google Apps Script Web App URL
+                        </p>
+                      )}
+                      <p className="text-[11px] text-muted-foreground/50">
+                        Only needed for a sheet-bound script. When set, it takes precedence over the shared script + link above.
+                      </p>
+                      <button
+                        onClick={handleSaveWebhook}
+                        disabled={webhookSaving || webhookDraft === (client.offer_sheet_webhook_url || '')}
+                        className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-secondary border border-border hover:bg-secondary/70 text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
+                      >
+                        {webhookSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                        Save override
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -384,7 +361,7 @@ function ClientCard({
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/60 mb-3 flex items-center gap-1.5">
                   <FlaskConical className="w-3.5 h-3.5" /> Test Sheet Sync
                 </p>
-                {hasWebhook ? (
+                {hasSheetDestination ? (
                   <div className="flex items-center gap-3">
                     <button
                       onClick={handleTestSync}
@@ -397,7 +374,7 @@ function ClientCard({
                     <p className="text-[11px] text-muted-foreground/50">Pushes the latest campaign data to the sheet</p>
                   </div>
                 ) : (
-                  <p className="text-xs text-muted-foreground/50">Set the webhook URL first to enable test sync.</p>
+                  <p className="text-xs text-muted-foreground/50">Paste the client’s Google Sheet link first to enable test sync.</p>
                 )}
               </div>
 
@@ -407,7 +384,7 @@ function ClientCard({
                 {[
                   { done: true, label: 'Offer Flyer service enabled' },
                   { done: hasToken, label: 'Intake link generated' },
-                  { done: hasWebhook, label: 'Apps Script deployed & URL saved' },
+                  { done: hasSheetDestination, label: hasWebhook ? 'Per-client script connected' : 'Google Sheet link saved' },
                   { done: hasToken, label: 'Link sent to client via WhatsApp' },
                 ].map((item, i) => (
                   <div key={i} className="flex items-center gap-2 text-xs">
@@ -418,7 +395,96 @@ function ClientCard({
                   </div>
                 ))}
               </div>
-            </>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Global shared-script setup (one-time, whole workspace) ──────────────────
+function GlobalSyncCard({ initial }: { initial: { webhookUrl: string; secret: string; configured: boolean } }) {
+  const [cfg, setCfg] = useState(initial)
+  const [urlDraft, setUrlDraft] = useState(initial.webhookUrl)
+  const [saving, setSaving] = useState(false)
+  const [rotating, setRotating] = useState(false)
+  const [open, setOpen] = useState(!initial.configured)
+  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+
+  function flash(type: 'ok' | 'err', text: string) { setMsg({ type, text }); setTimeout(() => setMsg(null), 4000) }
+
+  async function handleSave() {
+    setSaving(true)
+    const res = await saveGlobalWebhookUrl(urlDraft)
+    setSaving(false)
+    if (res.ok && res.data) { setCfg({ webhookUrl: urlDraft.trim(), secret: res.data.secret, configured: !!urlDraft.trim() }); flash('ok', 'Shared sync script connected ✓') }
+    else flash('err', res.error || 'Could not save')
+  }
+
+  async function handleRotate() {
+    if (!confirm('Generate a new secret? You must paste it into the Apps Script (SECRET) and redeploy, or syncs will fail.')) return
+    setRotating(true)
+    const res = await regenerateSheetSecret()
+    setRotating(false)
+    if (res.ok && res.data) { setCfg(c => ({ ...c, secret: res.data!.secret })); flash('ok', 'New secret generated — update the Apps Script') }
+    else flash('err', res.error || 'Could not regenerate')
+  }
+
+  return (
+    <div className={`bg-card border rounded-2xl overflow-hidden mb-4 ${cfg.configured ? 'border-emerald-500/20' : 'border-amber-500/30'}`}>
+      <button onClick={() => setOpen(o => !o)} className="w-full px-5 py-4 flex items-center gap-3 hover:bg-secondary/30 transition-colors text-left">
+        <Webhook className={`w-4 h-4 shrink-0 ${cfg.configured ? 'text-emerald-400' : 'text-amber-400'}`} />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold">Shared sync script <span className="text-muted-foreground/50 font-normal">· set up once for all clients</span></p>
+          <p className="text-[11px] text-muted-foreground">
+            {cfg.configured ? 'Connected — add a client by pasting their Sheet link below.' : 'Not connected — deploy one Apps Script, paste its URL here, then each client only needs a Sheet link.'}
+          </p>
+        </div>
+        {cfg.configured
+          ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 font-medium shrink-0">Connected</span>
+          : <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/25 font-medium shrink-0">Action needed</span>}
+        {open ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />}
+      </button>
+
+      {open && (
+        <div className="border-t border-border px-5 py-5 space-y-4">
+          {msg && (
+            <div className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm ${msg.type === 'ok' ? 'bg-emerald-500/10 border border-emerald-500/25 text-emerald-300' : 'bg-red-500/10 border border-red-500/25 text-red-400'}`}>
+              {msg.type === 'ok' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
+              {msg.text}
+            </div>
+          )}
+
+          <ol className="text-xs text-muted-foreground space-y-1.5 list-decimal pl-4">
+            <li>Create one Google Sheet Apps Script (standalone) using the script in <span className="font-mono text-muted-foreground/80">GOOGLE_SHEETS_SETUP.md</span>, paste the secret below into its <span className="font-mono">SECRET</span>, and deploy as a Web App (Execute as: Me · Who has access: Anyone).</li>
+            <li>Paste the Web App URL here and Save.</li>
+            <li>For each client, just paste their Google Sheet link in their card below — no more Apps Script per client.</li>
+          </ol>
+
+          <div>
+            <label className={labelCls}>Shared Apps Script Web App URL</label>
+            <input value={urlDraft} onChange={e => setUrlDraft(e.target.value)} className={inputCls} placeholder="https://script.google.com/macros/s/…/exec" />
+            {urlDraft && !urlDraft.startsWith('https://script.google.com/macros/s/') && (
+              <p className="text-xs text-red-400 flex items-center gap-1.5 mt-1"><AlertTriangle className="w-3 h-3" /> Must be a Google Apps Script Web App URL</p>
+            )}
+            <button onClick={handleSave} disabled={saving || urlDraft === cfg.webhookUrl}
+              className="mt-2 flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg gradient-bg text-white hover:opacity-90 disabled:opacity-50 transition-opacity">
+              {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Save & connect
+            </button>
+          </div>
+
+          {cfg.secret && (
+            <div>
+              <label className={labelCls}>Shared secret <span className="text-muted-foreground/40">— paste into the Apps Script’s SECRET</span></label>
+              <div className="flex items-center gap-2">
+                <input readOnly value={cfg.secret} className={`${inputCls} font-mono`} />
+                <CopyBtn text={cfg.secret} />
+                <button onClick={handleRotate} disabled={rotating} title="Generate a new secret"
+                  className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors shrink-0 disabled:opacity-50">
+                  {rotating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                </button>
+              </div>
+              <p className="text-[11px] text-muted-foreground/50 mt-1">The script rejects any request without this secret, so a leaked URL alone can’t write to your sheets.</p>
+            </div>
           )}
         </div>
       )}
@@ -429,25 +495,31 @@ function ClientCard({
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function OfferIntakeSettingsClient({
-  clients, appUrl,
+  clients, appUrl, globalConfig,
 }: {
   clients: any[]
   appUrl: string
+  globalConfig: { webhookUrl: string; secret: string; configured: boolean }
 }) {
   const [q, setQ] = useState('')
 
-  const serviceClients = clients.filter(c => c.has_offer_flyer_service)
+  const globalConfigured = globalConfig.configured
+  // A client is "ready" once it has an intake link AND a reachable sheet — either
+  // its own legacy script, or the shared script + a pasted Sheet link.
+  const isReady = (c: any) => !!c.offer_intake_token
+    && (c.offer_sheet_webhook_url || (globalConfigured && c.offer_sheet_url))
+
   const filtered = [...clients].filter(c =>
     c.name.toLowerCase().includes(q.toLowerCase()) ||
     (c.code || '').toLowerCase().includes(q.toLowerCase())
   ).sort((a, b) => {
-    const aSetup = a.has_offer_flyer_service && a.offer_intake_token && a.offer_sheet_webhook_url ? 1 : 0
-    const bSetup = b.has_offer_flyer_service && b.offer_intake_token && b.offer_sheet_webhook_url ? 1 : 0
+    const aSetup = isReady(a) ? 1 : 0
+    const bSetup = isReady(b) ? 1 : 0
     if (aSetup !== bSetup) return bSetup - aSetup
     return a.name.localeCompare(b.name)
   })
 
-  const readyCount = serviceClients.filter(c => c.offer_intake_token && c.offer_sheet_webhook_url).length
+  const readyCount = clients.filter(isReady).length
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
@@ -461,7 +533,7 @@ export default function OfferIntakeSettingsClient({
         </div>
         <div>
           <h1 className="text-lg font-bold">Offer Intake Configuration</h1>
-          <p className="text-xs text-muted-foreground">Enable per client · manage intake links, catalog, and sheet sync.</p>
+          <p className="text-xs text-muted-foreground">Clients with an Offer Intake service · manage intake links, catalog, and sheet sync.</p>
         </div>
       </div>
 
@@ -469,7 +541,7 @@ export default function OfferIntakeSettingsClient({
       <div className="flex items-center gap-4 mt-5 mb-5 px-4 py-3 bg-card border border-border rounded-2xl flex-wrap">
         <div className="flex items-center gap-2">
           <Store className="w-4 h-4 text-violet-400" />
-          <span className="text-sm font-semibold">{serviceClients.length}</span>
+          <span className="text-sm font-semibold">{clients.length}</span>
           <span className="text-xs text-muted-foreground">clients with service</span>
         </div>
         <div className="w-px h-5 bg-border" />
@@ -491,6 +563,9 @@ export default function OfferIntakeSettingsClient({
         </div>
       </div>
 
+      {/* One-time shared-script setup */}
+      <GlobalSyncCard initial={globalConfig} />
+
       {/* Search */}
       <div className="relative mb-4">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/50" />
@@ -505,16 +580,24 @@ export default function OfferIntakeSettingsClient({
       {/* Client list — service-enabled first, then the rest */}
       <div className="space-y-2">
         {filtered.length === 0 && (
-          <div className="bg-card border border-border rounded-2xl py-10 text-center text-sm text-muted-foreground">
-            No clients found.
+          <div className="bg-card border border-border rounded-2xl py-10 px-6 text-center">
+            <Store className="w-8 h-8 mx-auto mb-3 text-muted-foreground/30" />
+            <p className="text-sm font-medium mb-1">{q ? 'No clients match your search' : 'No clients have the Offer Intake service yet'}</p>
+            {!q && (
+              <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+                A client appears here once you assign them a service whose Intake Kind is{' '}
+                <span className="text-foreground font-medium">Offer Intake</span> — set the kind in{' '}
+                <Link href="/dashboard/settings?tab=services" className="text-violet-400 hover:text-violet-300 underline underline-offset-2">Settings → Services</Link>, then add that service to the client in{' '}
+                <Link href="/dashboard/clients" className="text-violet-400 hover:text-violet-300 underline underline-offset-2">Clients</Link>.
+              </p>
+            )}
           </div>
         )}
         {[
-          ...filtered.filter(c => c.has_offer_flyer_service && c.offer_intake_token && c.offer_sheet_webhook_url),
-          ...filtered.filter(c => c.has_offer_flyer_service && !(c.offer_intake_token && c.offer_sheet_webhook_url)),
-          ...filtered.filter(c => !c.has_offer_flyer_service),
+          ...filtered.filter(c => isReady(c)),
+          ...filtered.filter(c => !isReady(c)),
         ].map(client => (
-          <ClientCard key={client.id} client={client} appUrl={appUrl} />
+          <ClientCard key={client.id} client={client} appUrl={appUrl} globalConfigured={globalConfigured} />
         ))}
       </div>
     </div>

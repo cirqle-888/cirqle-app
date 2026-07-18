@@ -57,7 +57,7 @@ export default async function AdvertisingPage() {
       .select(`
         id, client_id, direction, kind, ad_project_id, cashbook_entry_id,
         amount, amount_inr, notes, created_at,
-        creator:employees(id, name),
+        creator:employees(id, name, cqid),
         entry:cashbook_entries(id, entry_date, description, reference),
         project:ad_projects(id, campaign_name)
       `)

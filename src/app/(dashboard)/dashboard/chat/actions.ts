@@ -282,7 +282,8 @@ function afterReplyHooks(me: { employeeId: string; name: string; cqid: string },
     void createNotification({
       employeeId: snapshot.senderId,
       type: 'chat_reply',
-      title: `${me.name || me.cqid} replied to your ${snapshot.kind === 'voice' ? 'voice message' : 'message'}`,
+      // Notifications go to OTHER employees and persist — always CQID, never the real name.
+      title: `${me.cqid} replied to your ${snapshot.kind === 'voice' ? 'voice message' : 'message'}`,
       message: snapshot.preview || undefined,
       link: `/dashboard/chat?c=${conversationId}`,
       sourceKey: `chat_reply:${newMessageId}`,
@@ -721,7 +722,7 @@ export async function sendMessage(
     void createNotification({
       employeeId: empId,
       type: 'chat_mention',
-      title: `${me.name || me.cqid} mentioned you`,
+      title: `${me.cqid} mentioned you`,
       message: text.length > 120 ? `${text.slice(0, 120)}…` : text,
       link: `/dashboard/chat?c=${conversationId}`,
       sourceKey: `chat_mention:${data.id}:${empId}`,

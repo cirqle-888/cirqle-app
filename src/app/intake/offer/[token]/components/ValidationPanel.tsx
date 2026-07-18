@@ -15,6 +15,27 @@ interface ValidationPanelProps {
 export function ValidationPanel({ issues, errors, warnings, products }: ValidationPanelProps) {
   const [expanded, setExpanded] = useState(false)
 
+  // Group issues by category. Hooks MUST run before the zero-issues early
+  // return below — otherwise fixing the last issue changes the hook order
+  // between renders (React "change in the order of Hooks" error).
+  const errorGroups = useMemo(() => {
+    const groups: Record<string, ValidationIssue[]> = {}
+    errors.forEach(e => {
+      if (!groups[e.message]) groups[e.message] = []
+      groups[e.message].push(e)
+    })
+    return groups
+  }, [errors])
+
+  const warningGroups = useMemo(() => {
+    const groups: Record<string, ValidationIssue[]> = {}
+    warnings.forEach(w => {
+      if (!groups[w.message]) groups[w.message] = []
+      groups[w.message].push(w)
+    })
+    return groups
+  }, [warnings])
+
   if (issues.length === 0) {
     return (
       <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl px-4 py-3 mb-5 flex items-center gap-3">
@@ -35,25 +56,6 @@ export function ValidationPanel({ issues, errors, warnings, products }: Validati
       }, 2000)
     }
   }
-
-  // Group issues by category
-  const errorGroups = useMemo(() => {
-    const groups: Record<string, ValidationIssue[]> = {}
-    errors.forEach(e => {
-      if (!groups[e.message]) groups[e.message] = []
-      groups[e.message].push(e)
-    })
-    return groups
-  }, [errors])
-
-  const warningGroups = useMemo(() => {
-    const groups: Record<string, ValidationIssue[]> = {}
-    warnings.forEach(w => {
-      if (!groups[w.message]) groups[w.message] = []
-      groups[w.message].push(w)
-    })
-    return groups
-  }, [warnings])
 
   return (
     <div className={`border rounded-2xl mb-5 transition-colors ${errors.length > 0 ? 'bg-red-500/10 border-red-500/30' : 'bg-amber-500/10 border-amber-500/30'}`}>

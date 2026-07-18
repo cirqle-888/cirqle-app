@@ -23,6 +23,7 @@ import {
   CalendarDays, MessageSquarePlus, Save, CheckCircle2, X, Flag,
   Search, Plus, UserRound, List, LayoutGrid, Link as LinkIcon, Trash2,
   ExternalLink, GripVertical, Share2, RefreshCw, Sparkles,
+  BadgePercent, Megaphone, ChevronDown,
 } from 'lucide-react'
 import {
   CLIENT_STATUS_LABEL, STATUS_CHIP, PRIORITY_CHIP, refLabel, type RequestStatus,
@@ -52,6 +53,26 @@ const TABS: { key: string; label: string; statuses: string[] }[] = [
 ]
 
 const SORTABLE_TABS = new Set(['new', 'ongoing'])
+
+/**
+ * The "New Request" button is the single front door for creating ANY kind of
+ * request. Each entry either opens the inline design-request form ('form') or
+ * routes to that module's own creation flow. To add an upcoming request type,
+ * append an entry here (use `soon: true` until its module ships).
+ */
+const NEW_REQUEST_TYPES: {
+  key: string
+  label: string
+  description: string
+  icon: typeof Inbox
+  action: { kind: 'form' } | { kind: 'href'; href: string }
+  soon?: boolean
+}[] = [
+  { key: 'design',      label: 'Design Request',       description: 'Brief a design / creative job for a client', icon: Inbox,        action: { kind: 'form' } },
+  { key: 'offer',       label: 'Offer Flyer',          description: 'Weekly offer list → designer Google Sheet',  icon: BadgePercent, action: { kind: 'href', href: '/dashboard/offer-prepare' } },
+  { key: 'advertising', label: 'Advertising Campaign', description: 'Paid-ads campaign brief and budget',         icon: Megaphone,    action: { kind: 'href', href: '/dashboard/advertising/new' } },
+  { key: 'calendar',    label: 'Calendar Plan',        description: 'Monthly social content plan → push items to Requests', icon: CalendarDays, action: { kind: 'href', href: '/dashboard/social-calendar' } },
+]
 
 /** Stage ordering for the "All" tab — active work on top, Completed/closed at
  *  the bottom. Within the same stage, priority_rank still decides order. */
@@ -237,6 +258,7 @@ export default function RequestsClient({
   // Inbox type filter: design requests vs offer-campaign submissions.
   const [typeFilter, setTypeFilter] = useState<'all' | 'request' | 'offer'>('all')
   const [showNew, setShowNew] = useState(false)
+  const [showNewMenu, setShowNewMenu] = useState(false)
   const [newForm, setNewForm] = useState(EMPTY_NEW)
   const [creating, setCreating] = useState(false)
 
@@ -454,13 +476,15 @@ export default function RequestsClient({
   async function doAssign(r: any, employeeId: string) {
     const emp = employees.find(e => e.id === employeeId) || null
     setBusy(true)
-    const res = await assignRequestEmployee(r.id, employeeId || null, emp?.name || null)
+    // Persist the CQID (not the real name) — activity logs are permanent audit
+    // records and must never store a name that could later render unmasked.
+    const res = await assignRequestEmployee(r.id, employeeId || null, emp?.cqid || null)
     setBusy(false)
     if (res.ok) {
       const patch = { assigned_employee_id: employeeId || null, assigned_employee: emp ? { id: emp.id, cqid: emp.cqid, name: emp.name } : null }
       setRequests(prev => prev.map(x => x.id === r.id ? { ...x, ...patch } : x))
       setOpen((o: any) => o && o.id === r.id ? { ...o, ...patch } : o)
-      success(emp ? `Assigned to ${emp.name}` : 'Assignment cleared',
+      success(emp ? `Assigned to ${dn(emp)}` : 'Assignment cleared',
         emp ? 'They get the task assignment when this request is started' : undefined)
     } else toastError('Could not assign', res.error)
   }
@@ -487,7 +511,7 @@ export default function RequestsClient({
     const ids = [...batchSel.selected]
     const emp = employees.find(e => e.id === bulkAssignEmpId) || null
     setBulkBusy(true)
-    const res = await bulkAssignRequestEmployee(ids, bulkAssignEmpId || null, emp?.name || null)
+    const res = await bulkAssignRequestEmployee(ids, bulkAssignEmpId || null, emp?.cqid || null)
     setBulkBusy(false)
     if (res.data) {
       const succeededSet = new Set(res.data.succeeded)
@@ -495,7 +519,7 @@ export default function RequestsClient({
       setRequests(prev => prev.map(x => succeededSet.has(x.id) ? { ...x, ...patch } : x))
     }
     if (res.ok) {
-      success(`${ids.length} request${ids.length !== 1 ? 's' : ''} ${emp ? `assigned to ${emp.name}` : 'unassigned'}`)
+      success(`${ids.length} request${ids.length !== 1 ? 's' : ''} ${emp ? `assigned to ${dn(emp)}` : 'unassigned'}`)
       setBulkAssignOpen(false)
       setBulkAssignEmpId('')
       batchSel.clear()
@@ -728,13 +752,53 @@ export default function RequestsClient({
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap bg-secondary border border-border hover:text-foreground text-muted-foreground transition-colors">
               <Sparkles className="w-3.5 h-3.5" /> AI Capture
             </button>
-            <button onClick={() => setShowNew(true)}
+            {/* A dropdown anchored here would be clipped by this toolbar's
+                overflow-x-auto, so the type chooser opens as a small modal. */}
+            <button onClick={() => setShowNewMenu(true)}
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap gradient-bg text-white hover:opacity-90 transition-opacity">
-              <Plus className="w-3.5 h-3.5" /> New Request
+              <Plus className="w-3.5 h-3.5" /> New Request <ChevronDown className="w-3 h-3 opacity-80" />
             </button>
           </div>
         )}
       </div>
+
+      {/* ── New Request type chooser — one front door for every request kind ── */}
+      {showNewMenu && (
+        <ModalOverlay onClose={() => setShowNewMenu(false)} sheetOnMobile>
+          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md overflow-hidden">
+            <div className="px-5 py-4 border-b border-border">
+              <h2 className="font-bold text-base">What are you creating?</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Every request type starts here.</p>
+            </div>
+            <div className="p-2.5">
+              {NEW_REQUEST_TYPES.map(t => (
+                <button
+                  key={t.key}
+                  disabled={t.soon}
+                  onClick={() => {
+                    setShowNewMenu(false)
+                    if (t.action.kind === 'form') setShowNew(true)
+                    else router.push(t.action.href)
+                  }}
+                  className="w-full text-left px-3 py-3 rounded-xl flex items-start gap-3 hover:bg-secondary/60 transition-colors disabled:opacity-45 disabled:cursor-not-allowed"
+                >
+                  <span className="w-9 h-9 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center shrink-0">
+                    <t.icon className="w-4 h-4 text-violet-500" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-foreground">
+                      {t.label}
+                      {t.soon && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border align-middle">Coming soon</span>}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">{t.description}</span>
+                  </span>
+                  <ChevronRight className="w-4 h-4 text-muted-foreground/40 ml-auto mt-2 shrink-0" />
+                </button>
+              ))}
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
 
       {/* Search + client filter + view toggle */}
       <div className="flex flex-col lg:flex-row gap-2 mb-4">
@@ -1140,7 +1204,7 @@ export default function RequestsClient({
                     onChange={e => doAssign(open, e.target.value)}
                     className="bg-secondary border border-border rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:border-violet-500/50 disabled:opacity-50">
                     <option value="">Unassigned</option>
-                    {employees.map(e => <option key={e.id} value={e.id}>{e.cqid ? `${e.cqid} · ` : ''}{e.name}</option>)}
+                    {employees.map(e => <option key={e.id} value={e.id}>{dn(e)}</option>)}
                   </select>
                   {!open.promoted_task_id && open.assigned_employee_id && (
                     <span className="text-[10px] text-muted-foreground">assigned on the task when you press Start</span>
@@ -1374,7 +1438,7 @@ export default function RequestsClient({
                   <select value={newForm.assignedEmployeeId} onChange={e => setNewForm(f => ({ ...f, assignedEmployeeId: e.target.value }))}
                     className="mt-1 w-full bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50">
                     <option value="">Unassigned</option>
-                    {employees.map(e => <option key={e.id} value={e.id}>{e.cqid ? `${e.cqid} · ` : ''}{e.name}</option>)}
+                    {employees.map(e => <option key={e.id} value={e.id}>{dn(e)}</option>)}
                   </select>
                 </div>
                 <div>
@@ -1460,7 +1524,7 @@ export default function RequestsClient({
                     style={{ background: '#111827', padding: '24px', borderRadius: '16px', fontFamily: 'system-ui, -apple-system, sans-serif', color: '#f9fafb' }}
                   >
                     <div style={{ marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                      <div style={{ fontSize: '15px', fontWeight: 700, letterSpacing: '-0.01em' }}>Cirqle Design</div>
+                      <div style={{ fontSize: '15px', fontWeight: 700, letterSpacing: '-0.01em' }}>Cirqle Works</div>
                       <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '3px' }}>Works in Progress — {shareClientName}</div>
                       <div style={{ fontSize: '10px', color: '#6b7280', marginTop: '3px' }}>
                         {new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
@@ -1527,7 +1591,7 @@ export default function RequestsClient({
             <select value={bulkAssignEmpId} onChange={e => setBulkAssignEmpId(e.target.value)}
               className="w-full bg-secondary border border-foreground/15 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-violet-500/50">
               <option value="">Unassign</option>
-              {employees.map(e => <option key={e.id} value={e.id}>{e.cqid ? `${e.cqid} · ` : ''}{e.name}</option>)}
+              {employees.map(e => <option key={e.id} value={e.id}>{dn(e)}</option>)}
             </select>
             <div className="flex gap-2">
               <button onClick={() => setBulkAssignOpen(false)} className="flex-1 px-4 py-2 rounded-xl border border-border text-sm font-medium hover:bg-secondary">Cancel</button>

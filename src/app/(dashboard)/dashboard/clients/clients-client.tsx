@@ -152,7 +152,7 @@ export default function ClientsClient({ clients: initialClients, stats, showAmou
               <Award className="w-4 h-4" /> Ranking
             </Link>
             {canEdit && (
-              <Link href="/dashboard/settings?tab=pricing-matrix"
+              <Link href="/dashboard/pricing-matrix"
                 className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
                 <Settings2 className="w-4 h-4" /> Pricing Matrix
               </Link>

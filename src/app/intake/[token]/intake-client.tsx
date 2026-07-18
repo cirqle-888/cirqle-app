@@ -252,7 +252,7 @@ export default function IntakeClient({
       <div className="text-center mb-8">
         {logoUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={logoUrl} alt="Cirqle Design" className="h-12 mx-auto object-contain" />
+          <img src={logoUrl} alt="Cirqle Works" className="h-12 mx-auto object-contain" />
         ) : (
           <>
             <div className="text-3xl font-extrabold tracking-tight">cirqle<span className="text-blue-400">.</span></div>
@@ -677,7 +677,7 @@ export default function IntakeClient({
       </div>
 
       <p className="text-center text-[11px] text-muted-foreground/50 mt-8">
-        Cirqle Design · cirqle.work · This page only shows your own requests.
+        Cirqle Works · cirqle.work · This page only shows your own requests.
       </p>
     </div>
   )
