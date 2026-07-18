@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 
 export interface ShortcutHandlers {
   onSelectAll?: () => void
@@ -18,8 +18,16 @@ export interface ShortcutHandlers {
 }
 
 export function useKeyboardShortcuts(handlers: ShortcutHandlers) {
+  // Callers pass a fresh object literal every render, so depending on it
+  // directly tore down and re-attached the window listener on every keystroke.
+  // The ref keeps the listener attached once while still calling the latest
+  // handlers.
+  const handlersRef = useRef(handlers)
+  useEffect(() => { handlersRef.current = handlers })
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const handlers = handlersRef.current
       // Ignore shortcuts if typing inside an input/textarea (except Escape)
       const target = e.target as HTMLElement
       const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
@@ -43,8 +51,13 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers) {
       } else if (ctrlOrCmd && shift && e.key.toLowerCase() === 'a') {
         e.preventDefault()
         handlers.onClearSelection?.()
-      } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        // Backspace outside inputs usually acts like delete for selected items
+      } else if (e.key === 'Delete' || (ctrlOrCmd && e.key === 'Backspace')) {
+        // Bare Backspace used to land here. Outside an input it is also the
+        // browser's "go back" gesture, so a stray press could pop the
+        // delete-confirm dialog on the way to unloading the page — and this
+        // editor has no autosave. Delete is unambiguous; Backspace now needs a
+        // modifier.
+        e.preventDefault()
         handlers.onDeleteSelected?.()
       } else if (ctrlOrCmd && !shift && e.key.toLowerCase() === 'd') {
         e.preventDefault()
@@ -81,5 +94,5 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers) {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handlers])
+  }, [])
 }

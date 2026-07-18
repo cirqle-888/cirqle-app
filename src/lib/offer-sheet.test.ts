@@ -81,4 +81,19 @@ describe('offer sheet output', () => {
     expect(csv).toContain(',Weekend,')
     expect(csv).toContain(',Mart')
   })
+
+  it('neutralizes formulas hidden behind leading whitespace', () => {
+    // Importers trim before deciding if a cell is a formula, so " =..." is
+    // still live code once pasted/imported.
+    const csv = offerSheetCsv([['1', '1', ' =HYPERLINK("x")', '', 'other']], false)
+    expect(csv).toContain(`"' =HYPERLINK(""x"")"`)
+  })
+
+  it('neutralizes formula-injection in the TSV copy path too', () => {
+    // "Copy table" pastes straight into Google Sheets, where =IMPORTXML runs.
+    const tsv = offerSheetTsv([['1', '1', '=IMPORTXML("evil","//x")', '', 'other']], false)
+    expect(tsv).toContain(`'=IMPORTXML("evil","//x")`)
+    // Ordinary product names stay clean.
+    expect(offerSheetTsv([['1', '1', 'Tea']], false)).toBe('1\t1\tTea')
+  })
 })

@@ -238,6 +238,44 @@ function emptyProduct(order: number): ProductInput & { _key: string } {
   }
 }
 
+/**
+ * A stable fingerprint of everything a save would persist, used to tell whether
+ * the editor holds unsaved work.
+ *
+ * Deliberately excludes `id` and `_key`: the server hands back row ids after a
+ * save and the editor adopts them, which must NOT read as a fresh edit.
+ * Position matters (it becomes display_order), so this is order-sensitive.
+ */
+function offerSignature(
+  header: {
+    title: string
+    dateType: 'single' | 'range'
+    offerDate: string
+    offerDateFrom: string
+    offerDateTo: string
+  },
+  products: (ProductInput & { _key?: string })[],
+): string {
+  return JSON.stringify([
+    header.title.trim(),
+    header.dateType,
+    header.dateType === 'single' ? header.offerDate : '',
+    header.dateType === 'range' ? header.offerDateFrom : '',
+    header.dateType === 'range' ? header.offerDateTo : '',
+    products.map(p => [
+      p.name.trim(),
+      p.weight?.trim() || '',
+      p.image_url || '',
+      p.offer_type,
+      p.price ?? '',
+      p.mrp ?? '',
+      p.offer_text?.trim() || '',
+      p.page || 1,
+      (p.badges || []).map(b => [b.badge_id || '', b.custom_label || '', b.color]),
+    ]),
+  ])
+}
+
 // ── Product Row ───────────────────────────────────────────────────────────────
 
 function ProductRow({
@@ -1440,6 +1478,45 @@ function OfferIntakeClientInner({
   const [syncErrorMsg, setSyncErrorMsg] = useState<string | null>(null)
   const syncPollRef = useRef(0)
 
+  // ── Unsaved-work guard ──────────────────────────────────────────────────────
+  // There is no autosave: the only way work reaches the server is Save / Ctrl+S.
+  // Clients open this link on phones, where a closed tab or a stray Back
+  // gesture would otherwise silently discard a whole offer they just built.
+  const savingRef = useRef(false)
+  // Seeded with the state we loaded FROM the server — that's already saved, so
+  // opening the editor and leaving without touching anything must not warn.
+  // Null only when the staff decision modal is pending, since nothing is loaded
+  // yet; each decision branch sets its own baseline.
+  const [savedSignature, setSavedSignature] = useState<string | null>(() =>
+    needsCampaignDecision
+      ? null
+      : offerSignature(
+          {
+            title: initialCampaign?.title || '',
+            dateType: initialCampaign?.date_type || 'single',
+            offerDate: initialCampaign?.offer_date || getTomorrowStr(),
+            offerDateFrom: initialCampaign?.offer_date_from || getTomorrowStr(),
+            offerDateTo: initialCampaign?.offer_date_to || '',
+          },
+          initialProducts(),
+        ),
+  )
+  const currentSignature = offerSignature(
+    { title, dateType, offerDate, offerDateFrom, offerDateTo },
+    products,
+  )
+  // With no baseline (decision still pending) any product at all is unsaved work.
+  const hasUnsavedWork = savedSignature === null
+    ? products.length > 0
+    : currentSignature !== savedSignature
+
+  useEffect(() => {
+    if (!hasUnsavedWork) return
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [hasUnsavedWork])
+
   // Drag-reorder sensors (pointer with a small activation distance so clicks on
   // the row's inputs never start a drag; keyboard for accessibility).
   const sensors = useSensors(
@@ -1627,7 +1704,22 @@ function OfferIntakeClientInner({
   }
 
   function chooseContinueOffer() {
-    setProducts(initialProducts())
+    const existing = initialProducts()
+    // Continuing loads the campaign exactly as stored, so this becomes the
+    // clean baseline — otherwise the unsaved-work guard would fire on an
+    // untouched offer. Start New / Start From Last Week deliberately leave the
+    // baseline alone: their contents genuinely aren't saved yet.
+    setSavedSignature(offerSignature(
+      {
+        title: initialCampaign?.title || '',
+        dateType: initialCampaign?.date_type || 'single',
+        offerDate: initialCampaign?.offer_date || getTomorrowStr(),
+        offerDateFrom: initialCampaign?.offer_date_from || getTomorrowStr(),
+        offerDateTo: initialCampaign?.offer_date_to || '',
+      },
+      existing,
+    ))
+    setProducts(existing)
     setCampaignId(initialCampaign?.id)
     setTitle(initialCampaign?.title || '')
     setDateType(initialCampaign?.date_type || 'single')
@@ -1930,6 +2022,20 @@ function OfferIntakeClientInner({
    * sync server-side.
    */
   async function saveProducts(list: LocalProduct[]) {
+    // In-flight guard. The Save button is disabled while saving, but Ctrl+S and
+    // the bulk-paste "Generate Sheet" button both reach here directly — and two
+    // overlapping saves before campaignId exists each take the server's create
+    // branch, producing two campaigns where the second finalises the first.
+    if (savingRef.current) return
+    savingRef.current = true
+    try {
+      await runSave(list)
+    } finally {
+      savingRef.current = false
+    }
+  }
+
+  async function runSave(list: LocalProduct[]) {
     const invalid = list.find(p => !p.name.trim())
     if (invalid) { setError('All products need a name.'); return }
     if (list.length === 0) { setError('Add at least one product.'); return }
@@ -1960,11 +2066,37 @@ function OfferIntakeClientInner({
       })),
     }
 
+    // Signature of exactly what we're sending — recorded on success so the
+    // unsaved-work guard stops warning about work that did reach the server.
+    const sentSignature = offerSignature(
+      { title, dateType, offerDate, offerDateFrom, offerDateTo },
+      list,
+    )
+
     const res = await saveCampaign(token, input, campaignId)
     setSaving(false)
 
     if (res.ok && res.data) {
       setCampaignId(res.data.campaignId)
+
+      // Adopt the row ids the server just assigned. Without this, products
+      // created by THIS save still look brand-new to the next one, which then
+      // deletes and re-inserts them — churning ids and writing a bogus
+      // "removed + added" pair into the change log on every single save.
+      // Matched by _key (not index) because the list can have been edited
+      // while the request was in flight.
+      const idByKey = new Map<string, string>()
+      res.data.productIds.forEach((id, i) => {
+        const key = list[i]?._key
+        if (id && key) idByKey.set(key, id)
+      })
+      if (idByKey.size) {
+        setProducts(current => current.map(p =>
+          p.id || !idByKey.has(p._key) ? p : { ...p, id: idByKey.get(p._key) }
+        ))
+      }
+
+      setSavedSignature(sentSignature)
       setSaved(true)
       setClientNote('')
       setShowNote(false)

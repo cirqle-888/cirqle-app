@@ -105,9 +105,27 @@ export function buildOfferSheetRows({
     })
 }
 
+/**
+ * Formula-injection guard. Every destination for these rows (Google Sheets via
+ * paste, Sheets via CSV import, Excel) evaluates a cell beginning with = + - @
+ * as a formula, so `=IMPORTXML(...)` in a client-supplied product name becomes
+ * live code in the designer's sheet. A leading apostrophe forces text.
+ *
+ * The leading-\s* matters: several importers strip surrounding whitespace and
+ * THEN decide whether the cell is a formula, so " =HYPERLINK(...)" is still
+ * dangerous even though it doesn't literally start with "=".
+ *
+ * Numeric columns are produced by String(number) and never match, so real
+ * offer data is untouched.
+ */
+function neutralizeFormula(cell: string): string {
+  return /^\s*[=+\-@\t\r]/.test(cell) ? `'${cell}` : cell
+}
+
 /** Browser-friendly TSV for direct paste into Google Sheets or Excel. */
 export function offerSheetTsv(rows: string[][], includeHeaders = true): string {
-  const escapeCell = (value: string) => String(value).replace(/[\t\r\n]+/g, ' ').trim()
+  const escapeCell = (value: string) =>
+    neutralizeFormula(String(value ?? '').replace(/[\t\r\n]+/g, ' ').trim())
   const table = includeHeaders ? [Array.from(OFFER_SHEET_HEADERS), ...rows] : rows
   return table.map(row => row.map(escapeCell).join('\t')).join('\n')
 }
@@ -120,12 +138,7 @@ export function offerSheetTsv(rows: string[][], includeHeaders = true): string {
  */
 export function offerSheetCsv(rows: string[][], includeHeaders = true): string {
   const escapeCell = (value: string) => {
-    let cell = String(value ?? '')
-    // CSV-injection guard: a downloaded CSV is opened/imported into a spreadsheet,
-    // so a cell that could be read as a formula (starts with = + - @, or a tab/CR)
-    // gets a leading apostrophe forcing it to text. Numeric columns are produced by
-    // String(number) and never start with these, so real offer data is untouched.
-    if (/^[=+\-@\t\r]/.test(cell)) cell = `'${cell}`
+    const cell = neutralizeFormula(String(value ?? ''))
     return /[",\n\r]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell
   }
   const table = includeHeaders ? [Array.from(OFFER_SHEET_HEADERS), ...rows] : rows

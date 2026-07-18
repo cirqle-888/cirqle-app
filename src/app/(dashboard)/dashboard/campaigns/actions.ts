@@ -35,15 +35,20 @@ export async function finaliseCampaign(campaignId: string): Promise<ActionResult
   if (!guard.ok) return { ok: false, error: guard.error }
   const admin = createAdminClient()
   const now = new Date().toISOString()
-  // Stamp completed_at so the auto-archive job can age this finalised campaign
-  // out later (only set it the first time it's finalised).
+
+  // completed_at is what the auto-archive job ages against, and it must record
+  // the FIRST finalisation — so read it and preserve any existing value rather
+  // than overwriting on a re-finalise. One write, and its error is surfaced;
+  // the previous two-step version returned ok:true even when the second write
+  // (the one that actually flipped the status) failed.
+  const { data: existing, error: readErr } = await admin.from('offer_campaigns')
+    .select('completed_at').eq('id', campaignId).maybeSingle()
+  if (readErr || !existing) return { ok: false, error: 'Campaign not found.' }
+
   const { error } = await admin.from('offer_campaigns')
-    .update({ status: 'finalised', updated_at: now, completed_at: now })
+    .update({ status: 'finalised', updated_at: now, completed_at: existing.completed_at ?? now })
     .eq('id', campaignId)
-    .is('completed_at', null)
   if (error) return { ok: false, error: 'Could not finalise.' }
-  // If completed_at was already set (re-finalise), still flip the status.
-  await admin.from('offer_campaigns').update({ status: 'finalised', updated_at: now }).eq('id', campaignId)
   revalidatePath('/dashboard/campaigns')
   return { ok: true }
 }
@@ -53,8 +58,23 @@ export async function archiveCampaign(campaignId: string): Promise<ActionResult>
   if (!guard.ok) return { ok: false, error: guard.error }
   const admin = createAdminClient()
   const now = new Date().toISOString()
+
+  // Archiving straight from 'active' is a legitimate staff override, but it
+  // skips the finalise step that normally stamps completed_at — and a NULL
+  // completed_at on an archived row is a hole in the lifecycle (the retention
+  // cron filters on it). Backfill it here so every archived campaign carries a
+  // completion time regardless of the path it took.
+  const { data: existing, error: readErr } = await admin.from('offer_campaigns')
+    .select('completed_at').eq('id', campaignId).maybeSingle()
+  if (readErr || !existing) return { ok: false, error: 'Campaign not found.' }
+
   const { error } = await admin.from('offer_campaigns')
-    .update({ status: 'archived', updated_at: now, archived_at: now })
+    .update({
+      status: 'archived',
+      updated_at: now,
+      archived_at: now,
+      completed_at: existing.completed_at ?? now,
+    })
     .eq('id', campaignId)
   if (error) return { ok: false, error: 'Could not archive.' }
   revalidatePath('/dashboard/campaigns')
@@ -76,9 +96,15 @@ export async function resyncSheet(campaignId: string, clientId: string): Promise
   return { ok: true }
 }
 
+/**
+ * Hands back the client's offer intake token. That token IS an unauthenticated
+ * capability URL — anyone holding it can read and rewrite that client's offers
+ * without signing in — so this is admin-only, matching finalise/archive rather
+ * than the weaker signed-in-employee check it used to carry.
+ */
 export async function generateOfferLink(clientId: string): Promise<ActionResult<{ token: string }>> {
-  const employeeId = await resolveCurrentEmployeeId()
-  if (!employeeId) return { ok: false, error: 'Not signed in.' }
+  const guard = await requireAdmin()
+  if (!guard.ok) return { ok: false, error: guard.error }
   const admin = createAdminClient()
   const { data } = await admin.from('clients')
     .select('offer_intake_token').eq('id', clientId).maybeSingle()

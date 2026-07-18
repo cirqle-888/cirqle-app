@@ -41,7 +41,15 @@ function doPost(e) {
     var data = JSON.parse(e.postData.contents);
 
     // Reject anything that doesn't carry the shared secret.
-    if (SECRET && data.secret !== SECRET) {
+    // This deployment is set to "Anyone", so the secret is the ONLY thing
+    // standing between the open internet and the client's sheet. It therefore
+    // fails CLOSED: an unreplaced placeholder or a blanked SECRET refuses every
+    // request rather than accepting them all, which is what `if (SECRET && ...)`
+    // used to do.
+    if (!SECRET || SECRET === 'PASTE_SHARED_SECRET_HERE') {
+      return json({ ok: false, error: 'Script not configured: SECRET is unset.' });
+    }
+    if (data.secret !== SECRET) {
       return json({ ok: false, error: 'Unauthorized' });
     }
 

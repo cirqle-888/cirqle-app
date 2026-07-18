@@ -127,7 +127,7 @@ export async function saveCampaign(
   token: string,
   input: CampaignInput,
   campaignId?: string,
-): Promise<ActionResult<{ campaignId: string }>> {
+): Promise<ActionResult<{ campaignId: string; productIds: (string | null)[] }>> {
   const client = await resolveOfferToken(token)
   if (!client) return { ok: false, error: 'This link is no longer valid.' }
 
@@ -213,7 +213,8 @@ export async function saveCampaign(
   // ── Delete removed products ───────────────────────────────────────────────
   const removedProducts = (prevProducts || []).filter((p: any) => !newIds.has(p.id))
   for (const p of removedProducts) {
-    await admin.from('offer_products').delete().eq('id', p.id)
+    const { error: delErr } = await admin.from('offer_products').delete().eq('id', p.id)
+    if (delErr) return { ok: false, error: 'Could not save the offer. Please try again.' }
     await admin.from('offer_change_logs').insert({
       campaign_id: campaign.id,
       log_type: 'product_removed',
@@ -224,6 +225,12 @@ export async function saveCampaign(
 
   // ── Upsert current products + diff log ───────────────────────────────────
   const changeLogs: any[] = []
+  // The row id each input product ended up with, positionally aligned with
+  // input.products. Returned to the client so the NEXT save can address these
+  // rows by id — without it every re-save looked like "all products removed,
+  // all products re-added", churning ids and filling the change log (the thing
+  // staff read to see what the client actually altered) with pure noise.
+  const productIds: (string | null)[] = []
 
   for (const p of input.products) {
     const payload = {
@@ -246,7 +253,10 @@ export async function saveCampaign(
     if (p.id && prevMap.has(p.id)) {
       // Update existing — diff every meaningful field
       const prev = prevMap.get(p.id)
-      await admin.from('offer_products').update(payload).eq('id', p.id)
+      const { error: updErr } = await admin.from('offer_products').update(payload).eq('id', p.id)
+      // Previously discarded — a failed update returned ok:true and the editor
+      // showed "Saved ✓" over data that never reached the database.
+      if (updErr) return { ok: false, error: 'Could not save the offer. Please try again.' }
 
       const DIFF_FIELDS: [string, string][] = [
         ['name', 'Product name'],
@@ -282,9 +292,10 @@ export async function saveCampaign(
       }
     } else {
       // New product
-      const { data: newProd } = await admin.from('offer_products')
+      const { data: newProd, error: insErr } = await admin.from('offer_products')
         .insert(payload).select('id').single()
-      productId = newProd?.id
+      if (insErr || !newProd?.id) return { ok: false, error: 'Could not save the offer. Please try again.' }
+      productId = newProd.id
       changeLogs.push({
         campaign_id: campaign.id,
         log_type: 'product_added',
@@ -328,7 +339,8 @@ export async function saveCampaign(
     // Sync multi-badge join rows (replace-all is simplest and matches the
     // small per-product badge count).
     if (productId) {
-      await admin.from('offer_product_badges').delete().eq('product_id', productId)
+      const { error: badgeDelErr } = await admin.from('offer_product_badges').delete().eq('product_id', productId)
+      if (badgeDelErr) return { ok: false, error: 'Could not save the offer. Please try again.' }
       const badgeRows = (p.badges || []).map((b, i) => ({
         product_id: productId,
         badge_id: b.badge_id || null,
@@ -336,7 +348,10 @@ export async function saveCampaign(
         color: b.color || 'amber',
         display_order: i,
       })).filter(b => b.badge_id || b.custom_label)
-      if (badgeRows.length) await admin.from('offer_product_badges').insert(badgeRows)
+      if (badgeRows.length) {
+        const { error: badgeInsErr } = await admin.from('offer_product_badges').insert(badgeRows)
+        if (badgeInsErr) return { ok: false, error: 'Could not save the offer. Please try again.' }
+      }
     }
 
     // Mirror into the global Product Catalog (/dashboard/catalog) so client-
@@ -350,6 +365,8 @@ export async function saveCampaign(
     // Best-effort — never blocks the client's save.
     void mirrorProductToGlobalCatalog(admin, client.id, p.name.trim(), p.weight?.trim() || null, p.image_url || null)
       .catch(() => {})
+
+    productIds.push(productId ?? null)
   }
 
   // Header diff (title / dates)
@@ -390,7 +407,7 @@ export async function saveCampaign(
   // ── Sync to Google Sheets (fire and forget — don't block client save) ────
   void syncCampaignToSheet(admin, campaign.id, client.id).catch(() => {})
 
-  return { ok: true, data: { campaignId: campaign.id } }
+  return { ok: true, data: { campaignId: campaign.id, productIds } }
 }
 
 // ── Upload product image ──────────────────────────────────────────────────────
@@ -403,7 +420,33 @@ export async function getImageUploadUrl(
   const client = await resolveOfferToken(token)
   if (!client) return { ok: false, error: 'Invalid link.' }
 
-  const ext = filename.split('.').pop() || 'jpg'
+  // The bucket is public, so both the declared type and the extension are
+  // attacker-controlled inputs that decide how a browser renders whatever gets
+  // uploaded. Allow only real image types, and derive the extension from the
+  // type rather than from the supplied filename — a "photo.html" or
+  // "photo.svg" served from our own origin is a stored-XSS vector, not a photo.
+  const EXT_BY_TYPE: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+    'image/avif': 'avif',
+    // iPhone photos routinely arrive as HEIC/HEIF rather than JPEG.
+    'image/heic': 'heic',
+    'image/heif': 'heif',
+  }
+  const ALLOWED_EXTS = new Set(Object.values(EXT_BY_TYPE).concat('jpeg'))
+
+  // Browsers occasionally hand over a File with an empty type (some Android
+  // pickers, some drag-and-drop sources), so fall back to the filename
+  // extension — but only when it is one we recognise.
+  const declaredType = contentType.toLowerCase().split(';')[0].trim()
+  const filenameExt = (filename.split('.').pop() || '').toLowerCase()
+  const ext = EXT_BY_TYPE[declaredType] ?? (ALLOWED_EXTS.has(filenameExt) ? filenameExt : undefined)
+  if (!ext) {
+    return { ok: false, error: 'Only JPG, PNG, WebP, GIF, AVIF or HEIC images can be uploaded.' }
+  }
   const path = `${client.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
 
   const admin = createAdminClient()
@@ -438,21 +481,11 @@ export async function fetchExternalImage(
   const client = await resolveOfferToken(token)
   if (!client) return { ok: false, error: 'Invalid link.' }
 
-  // SSRF guard: only plain public http(s) hosts — never internal addresses.
   let parsed: URL
   try { parsed = new URL(url) } catch { return { ok: false, error: 'Not a valid image URL.' } }
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-    return { ok: false, error: 'Only http(s) image URLs are supported.' }
-  }
-  const host = parsed.hostname.toLowerCase()
-  const isPrivate =
-    host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal') ||
-    /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(host) || host === '0.0.0.0' || host === '[::1]'
-  if (isPrivate) return { ok: false, error: 'That URL is not reachable.' }
 
   try {
-    const res = await fetch(parsed.toString(), { signal: AbortSignal.timeout(15_000) })
+    const res = await safePublicFetch(parsed)
     if (!res.ok) return { ok: false, error: `Could not load the image (HTTP ${res.status}).` }
     const contentType = res.headers.get('content-type') || ''
     if (!contentType.startsWith('image/')) {
@@ -464,8 +497,104 @@ export async function fetchExternalImage(
     }
     return { ok: true, data: { base64: Buffer.from(buf).toString('base64'), contentType } }
   } catch (err: any) {
+    if (err instanceof BlockedHostError) return { ok: false, error: 'That URL is not reachable.' }
     return { ok: false, error: err?.name === 'TimeoutError' ? 'Image download timed out.' : 'Could not download the image.' }
   }
+}
+
+class BlockedHostError extends Error {}
+
+/**
+ * True for any address that must never be reachable from a server-side fetch:
+ * loopback, RFC-1918 private ranges, carrier-grade NAT, link-local — including
+ * 169.254.169.254, the cloud instance metadata endpoint whose response would
+ * hand out our own deployment credentials — plus the IPv6 equivalents and
+ * IPv4-mapped IPv6 forms.
+ */
+function isBlockedAddress(ip: string, family: number): boolean {
+  const addr = ip.toLowerCase().replace(/^\[|\]$/g, '')
+
+  if (family === 6) {
+    // ::ffff:10.0.0.1 and friends are IPv4 wearing an IPv6 hat — unwrap and
+    // re-test rather than letting the mapping bypass the v4 rules below.
+    const mapped = addr.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/)
+    if (mapped) return isBlockedAddress(mapped[1], 4)
+    return (
+      addr === '::' || addr === '::1' ||
+      addr.startsWith('fe80:') ||          // link-local
+      /^f[cd][0-9a-f]{2}:/.test(addr)      // unique local (fc00::/7)
+    )
+  }
+
+  const parts = addr.split('.').map(Number)
+  if (parts.length !== 4 || parts.some(n => !Number.isInteger(n) || n < 0 || n > 255)) return true
+  const [a, b] = parts
+  return (
+    a === 0 ||                              // "this network"
+    a === 127 ||                            // loopback
+    a === 10 ||                             // private
+    (a === 172 && b >= 16 && b <= 31) ||    // private
+    (a === 192 && b === 168) ||             // private
+    (a === 169 && b === 254) ||             // link-local INCLUDING cloud metadata
+    (a === 100 && b >= 64 && b <= 127) ||   // carrier-grade NAT
+    a >= 224                                // multicast + reserved
+  )
+}
+
+/**
+ * Fetch a user-supplied URL with the SSRF checks applied at every hop.
+ *
+ * Two things the previous string-matching guard missed:
+ *  - A hostname is not an address. `evil.com` can simply resolve to
+ *    169.254.169.254, so the host has to be resolved and the resulting IP
+ *    checked — matching on the text of the hostname proves nothing.
+ *  - fetch() follows redirects by default, so a public host could answer 302
+ *    and send us anywhere after the check had already passed. Redirects are
+ *    therefore handled manually, re-validating each Location.
+ */
+async function safePublicFetch(initial: URL, maxRedirects = 3): Promise<Response> {
+  const { lookup } = await import('node:dns/promises')
+  let target = initial
+
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    if (target.protocol !== 'https:' && target.protocol !== 'http:') {
+      throw new BlockedHostError('Only http(s) image URLs are supported.')
+    }
+
+    const host = target.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+    if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) {
+      throw new BlockedHostError('Blocked host.')
+    }
+
+    // Resolve every address the name maps to and reject if ANY is internal —
+    // a name with both a public and a private A record must not slip through.
+    let addresses: { address: string; family: number }[]
+    try {
+      addresses = await lookup(host, { all: true })
+    } catch {
+      throw new BlockedHostError('Could not resolve host.')
+    }
+    if (!addresses.length || addresses.some(a => isBlockedAddress(a.address, a.family))) {
+      throw new BlockedHostError('Blocked host.')
+    }
+
+    const res = await fetch(target.toString(), {
+      signal: AbortSignal.timeout(15_000),
+      redirect: 'manual',
+    })
+
+    if (res.status < 300 || res.status > 399) return res
+
+    const location = res.headers.get('location')
+    if (!location) return res
+    try {
+      target = new URL(location, target)
+    } catch {
+      throw new BlockedHostError('Bad redirect target.')
+    }
+  }
+
+  throw new BlockedHostError('Too many redirects.')
 }
 
 // ── Bulk paste (AI) ─────────────────────────────────────────────────────────
@@ -539,11 +668,19 @@ async function mirrorProductToGlobalCatalog(
 ): Promise<void> {
   if (!name) return
 
-  const { data: existing } = await admin
+  // Dedup case-insensitively by name. Two fixes over the previous
+  // `.ilike(name).maybeSingle()`:
+  //  - names are client-supplied, and ilike treats % and _ in them as
+  //    wildcards, so "50% Off Rice" matched unrelated rows. Escaped here.
+  //  - maybeSingle() THROWS when more than one row matches, which is a normal
+  //    state for a shared catalog. limit(1) takes the first instead.
+  const escapedName = name.replace(/[\\%_]/g, c => `\\${c}`)
+  const { data: existingRows } = await admin
     .from('product_catalog')
     .select('id, image_url')
-    .ilike('name', name)
-    .maybeSingle()
+    .ilike('name', escapedName)
+    .limit(1)
+  const existing = existingRows?.[0]
 
   let productId = existing?.id as string | undefined
 
@@ -584,13 +721,24 @@ export async function cancelCampaign(token: string, campaignId: string): Promise
   const admin = createAdminClient()
   const { data, error } = await admin
     .from('offer_campaigns')
-    .update({ status: 'cancelled' })
+    .update({ status: 'cancelled', updated_at: new Date().toISOString() })
     .eq('id', campaignId)
     .eq('client_id', client.id)
     .eq('status', 'active')
     .select('id')
     .maybeSingle()
   if (error || !data) return { ok: false, error: 'Could not cancel this offer request.' }
+
+  // Every other mutation in this file writes to offer_change_logs; a client
+  // cancelling their whole request is the single most important thing for
+  // staff to see, so it gets an entry too. Best-effort: the cancel already
+  // succeeded and must not be reported as failed if only the log write does.
+  await admin.from('offer_change_logs').insert({
+    campaign_id: campaignId,
+    log_type: 'client_note',
+    note: 'Client cancelled this offer request and started over.',
+  }).then(undefined, () => {})
+
   return { ok: true }
 }
 

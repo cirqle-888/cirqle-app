@@ -210,13 +210,26 @@ export async function syncCampaignToSheet(
     let returnedSheetUrl: string | undefined
     try {
       const responseData = await res.json()
-      if (responseData?.sheetUrl) {
-        returnedSheetUrl = responseData.sheetUrl
-        await admin.from('clients')
-          .update({ offer_sheet_url: responseData.sheetUrl })
-          .eq('id', clientId)
+      // The Apps Script reports back which sheet it wrote to, and we persist it
+      // so staff get a working link. But the webhook is deployed "Anyone", so
+      // this response is untrusted input: without validation a broken or
+      // hostile script could write any string here and permanently redirect
+      // this client's sheet link. Only accept a real Google Sheets URL.
+      const candidate = typeof responseData?.sheetUrl === 'string' ? responseData.sheetUrl.trim() : ''
+      if (candidate) {
+        const isGoogleSheetUrl =
+          /^https:\/\/docs\.google\.com\/spreadsheets\/d\/[a-zA-Z0-9_-]+/.test(candidate) &&
+          extractSheetId(candidate) !== null
+        if (isGoogleSheetUrl) {
+          returnedSheetUrl = candidate
+          await admin.from('clients')
+            .update({ offer_sheet_url: candidate })
+            .eq('id', clientId)
+        }
+        // A non-conforming value is ignored rather than failing the sync — the
+        // rows already landed in the sheet; only the bookkeeping link is skipped.
       }
-    } catch (e) {
+    } catch {
       // Ignore parse errors if the response isn't JSON
     }
 

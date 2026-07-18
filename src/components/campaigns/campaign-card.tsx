@@ -116,7 +116,8 @@ export function CampaignCard({
   async function handleFinalise() {
     if (!confirm('Mark this campaign as finalised? The client can still update it.')) return
     setBusy(true)
-    await finaliseCampaign(campaign.id)
+    const res = await finaliseCampaign(campaign.id)
+    if (!res.ok) alert(res.error || 'Could not finalise.')
     onRefresh()
     setBusy(false)
   }
@@ -124,7 +125,8 @@ export function CampaignCard({
   async function handleArchive() {
     if (!confirm('Archive this campaign? It will be hidden from the main view.')) return
     setBusy(true)
-    await archiveCampaign(campaign.id)
+    const res = await archiveCampaign(campaign.id)
+    if (!res.ok) alert(res.error || 'Could not archive.')
     onRefresh()
     setBusy(false)
   }
@@ -143,6 +145,8 @@ export function CampaignCard({
     if (res.ok && res.data) {
       const url = `${window.location.origin}/intake/offer/${res.data.token}`
       setIntakeLink(url)
+    } else {
+      alert(res.error || 'Could not generate the intake link.')
     }
     setLinkLoading(false)
   }
