@@ -139,6 +139,71 @@ export async function setEmployeeServices(
   return { ok: true }
 }
 
+/**
+ * Replace the full set of service CATEGORIES assigned to one employee.
+ *
+ * Deliberately does NOT expand the category into its member services. The
+ * effective set is resolved at read time in lib/scope/service-scope.ts as
+ * (services in my categories) ∪ (my direct services), which is what keeps a
+ * category assignment dynamic — a service added to the category later is
+ * picked up with no re-assignment. Expanding here would freeze today's members.
+ *
+ * Consequence worth knowing: a service can be in scope via its category AND
+ * ticked individually. Removing the individual tick does not remove it while
+ * the category is still assigned. The UI marks category-derived services so
+ * this is visible rather than surprising.
+ */
+export async function setEmployeeServiceCategories(
+  employeeId: string,
+  categoryIds: string[],
+): Promise<ActionResult> {
+  const auth = await requirePermission('employees.edit')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { data: existing, error: readError } = await admin
+    .from('employee_service_categories').select('category_id').eq('employee_id', employeeId)
+  // Pre-migration environments have no table. Report it rather than silently
+  // succeeding, because silently succeeding would look like the assignment
+  // saved when nothing was written.
+  if (readError) return { ok: false, error: readError.message }
+  const current = new Set((existing || []).map(r => r.category_id))
+  const wanted = new Set(categoryIds)
+  const toAdd = categoryIds.filter(cid => !current.has(cid))
+  const toRemove = [...current].filter(cid => !wanted.has(cid))
+
+  // Additions first, then removals — a mid-way failure leaves a partial
+  // update, never a wiped assignment set.
+  if (toAdd.length > 0) {
+    const { error } = await admin
+      .from('employee_service_categories')
+      .upsert(toAdd.map(cid => ({ employee_id: employeeId, category_id: cid })), { onConflict: 'employee_id,category_id' })
+    if (error) return { ok: false, error: error.message }
+  }
+  if (toRemove.length > 0) {
+    const { error } = await admin
+      .from('employee_service_categories').delete().eq('employee_id', employeeId).in('category_id', toRemove)
+    if (error) return { ok: false, error: error.message }
+  }
+
+  void logActivity({
+    actorId: auth.employeeId, subjectId: employeeId, entityType: 'employee',
+    entityId: employeeId, action: 'services_assigned', detail: { category_ids: categoryIds },
+  })
+  // service_scope_audit.scope_kind is open text precisely so new dimensions
+  // reuse the table (20260720100000 §3). service_id stays null: the anchor of
+  // this change is the category, and which services that resolves to is a
+  // function of the catalog at read time, not a fact about this event.
+  await logScopeChanges(admin, diffAssignments({
+    scopeKind: 'employee_service_category',
+    before: current, after: wanted, varying: 'category',
+    anchor: { employeeId }, actorId: auth.employeeId, source: 'ui',
+  }))
+  await invalidateEmployeeUserCache(admin, employeeId)
+  revalidatePath('/dashboard/tasks'); revalidatePath('/dashboard/contributions')
+  return { ok: true }
+}
+
 /** Replace the full set of employees assigned to one service. */
 export async function setServiceEmployees(
   serviceId: string,

@@ -53,6 +53,24 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     employeeServices = data || []
   }
 
+  // Service taxonomy + category-level assignments (graceful — 20260722090000).
+  // NOTE: `serviceCategories`, not `categories` — that prop is already taken by
+  // Cash Book categories, an unrelated concept.
+  let serviceCategories: any[] = []
+  let employeeServiceCategories: { employee_id: string; category_id: string }[] = []
+  {
+    const { data } = await supabase
+      .from('service_categories')
+      .select('id, name, slug, description, color, display_order, is_active')
+      .order('display_order')
+    serviceCategories = data || []
+  }
+  {
+    const { data } = await supabase
+      .from('employee_service_categories').select('employee_id, category_id')
+    employeeServiceCategories = data || []
+  }
+
   return (
     <SettingsClient
       groups={groupsRes.data || []}
@@ -69,6 +87,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       taskServiceUsage={(taskServiceUsageRes.data || []) as any[]}
       groupServices={groupServicesRes.data || []}
       employeeServices={employeeServices}
+      serviceCategories={serviceCategories}
+      employeeServiceCategories={employeeServiceCategories}
       designations={designations}
       initialTab={initialTab}
       initialEditClientId={editClient}

@@ -16,7 +16,7 @@ import type { createAdminClient } from '@/lib/supabase/admin'
 
 type Admin = ReturnType<typeof createAdminClient>
 
-export type ScopeAuditKind = 'employee_service' | 'client_service'
+export type ScopeAuditKind = 'employee_service' | 'client_service' | 'employee_service_category'
 /** 'updated' = repriced without an active-state change (migration 20260720110000). */
 export type ScopeAuditAction = 'added' | 'removed' | 'activated' | 'deactivated' | 'updated'
 export type ScopeAuditSource = 'ui' | 'matrix' | 'import' | 'backfill' | 'api'
@@ -27,6 +27,13 @@ export interface ScopeAuditEntry {
   employeeId?: string | null
   clientId?: string | null
   serviceId?: string | null
+  /**
+   * Set instead of serviceId when the varying side is a category. These are
+   * separate columns, not one polymorphic id, because service_id carries an FK
+   * to services(id) — a category id written there fails the constraint, and
+   * since audit writes are best-effort the row would vanish with no signal.
+   */
+  categoryId?: string | null
   oldValue?: Record<string, unknown> | null
   newValue?: Record<string, unknown> | null
   actorId?: string | null
@@ -39,6 +46,7 @@ const payload = (entries: ScopeAuditEntry[]) => entries.map(e => ({
   employee_id: e.employeeId ?? null,
   client_id:   e.clientId ?? null,
   service_id:  e.serviceId ?? null,
+  category_id: e.categoryId ?? null,
   old_value:   e.oldValue ?? null,
   new_value:   e.newValue ?? null,
   actor_id:    e.actorId ?? null,
@@ -103,27 +111,36 @@ export function diffAssignments(opts: {
   after: Iterable<string>
   /** The fixed side of the pair (the employee, or the client). */
   anchor: { employeeId?: string | null; clientId?: string | null }
-  /** True when the varying side is the service (the usual case). */
+  /**
+   * Which column the varying ids belong in. Defaults to 'service' — the
+   * historical behaviour, so every existing caller is unchanged. Pass
+   * 'category' for employee↔category assignment: those ids are NOT services and
+   * writing them to service_id violates its FK, which (audit being best-effort)
+   * would drop the row silently rather than raise.
+   */
+  varying?: 'service' | 'category'
   actorId?: string | null
   source?: ScopeAuditSource
 }): ScopeAuditEntry[] {
   const before = new Set(opts.before)
   const after = new Set(opts.after)
   const entries: ScopeAuditEntry[] = []
+  const side = (id: string) =>
+    opts.varying === 'category' ? { categoryId: id } : { serviceId: id }
 
-  for (const serviceId of after) {
-    if (before.has(serviceId)) continue
+  for (const id of after) {
+    if (before.has(id)) continue
     entries.push({
-      scopeKind: opts.scopeKind, action: 'added', serviceId,
+      scopeKind: opts.scopeKind, action: 'added', ...side(id),
       employeeId: opts.anchor.employeeId ?? null, clientId: opts.anchor.clientId ?? null,
       oldValue: null, newValue: { assigned: true },
       actorId: opts.actorId ?? null, source: opts.source ?? 'ui',
     })
   }
-  for (const serviceId of before) {
-    if (after.has(serviceId)) continue
+  for (const id of before) {
+    if (after.has(id)) continue
     entries.push({
-      scopeKind: opts.scopeKind, action: 'removed', serviceId,
+      scopeKind: opts.scopeKind, action: 'removed', ...side(id),
       employeeId: opts.anchor.employeeId ?? null, clientId: opts.anchor.clientId ?? null,
       oldValue: { assigned: true }, newValue: null,
       actorId: opts.actorId ?? null, source: opts.source ?? 'ui',

@@ -19,7 +19,7 @@ import {
   createCashbookCategory, updateCashbookCategory, deactivateCashbookCategory, reactivateCashbookCategory,
   upsertExchangeRate,
   syncExchangeRates,
-  setEmployeeServices, setServiceEmployees,
+  setEmployeeServices, setServiceEmployees, setEmployeeServiceCategories,
 } from './actions'
 import { Plus, X, Edit2, Archive, ArchiveRestore, Save, ChevronDown, ChevronLeft, ChevronRight, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Mail, Send, RotateCcw as ResetKey, RefreshCw, Star, Building2, MapPin, Users, Handshake } from 'lucide-react'
 import type { Currency } from '@/types'
@@ -128,6 +128,9 @@ interface Props {
   taskServiceUsage: { service_id: string; created_at: string }[]
   groupServices: { group_id: string; service_id: string }[]
   employeeServices?: { employee_id: string; service_id: string }[]
+  /** Service taxonomy. Distinct from `categories`, which is Cash Book. */
+  serviceCategories?: any[]
+  employeeServiceCategories?: { employee_id: string; category_id: string }[]
   designations?: { id: string; name: string; is_admin: boolean; is_system: boolean }[]
   initialTab?: string
   initialEditClientId?: string
@@ -149,6 +152,8 @@ export default function SettingsClient(props: Props) {
   // empServices: which services each employee is assigned to (employee ↔ service
   // junction — same rows power both the employee form and the service form).
   const [empServices, setEmpServices] = useState<{ employee_id: string; service_id: string }[]>(props.employeeServices || [])
+  const [empCategories, setEmpCategories] = useState<{ employee_id: string; category_id: string }[]>(props.employeeServiceCategories || [])
+  const serviceCategories: any[] = props.serviceCategories || []
   const [tab, setTab] = useState(props.initialTab ?? 'Company')
   const router = useRouter()
   const supabase = createSupabaseClient()
@@ -435,7 +440,8 @@ export default function SettingsClient(props: Props) {
     }
     setShowForm('employee')
     const serviceIds = emp ? empServices.filter(es => es.employee_id === emp.id).map(es => es.service_id) : []
-    setForm(emp ? { ...emp, _serviceIds: serviceIds } : { role: 'employee', salary_type: 'fixed', base_salary: 0, performance_rating: 70, is_active: true, reveal_salary: false, cqid, _serviceIds: [] })
+    const categoryIds = emp ? empCategories.filter(ec => ec.employee_id === emp.id).map(ec => ec.category_id) : []
+    setForm(emp ? { ...emp, _serviceIds: serviceIds, _categoryIds: categoryIds } : { role: 'employee', salary_type: 'fixed', base_salary: 0, performance_rating: 70, is_active: true, reveal_salary: false, cqid, _serviceIds: [], _categoryIds: [] })
     setEditingId(emp?.id || null)
   }
 
@@ -487,9 +493,11 @@ export default function SettingsClient(props: Props) {
   // --- Employees ---
   async function saveEmployee(e: React.FormEvent) {
     e.preventDefault(); setSaving(true)
-    // _serviceIds is UI-only state — saved via the employee_services junction, not an employees column.
-    const { _serviceIds, ...employeePayload } = form
+    // _serviceIds / _categoryIds are UI-only state — saved via their junction
+    // tables, not as employees columns.
+    const { _serviceIds, _categoryIds, ...employeePayload } = form
     const serviceIds: string[] = _serviceIds || []
+    const categoryIds: string[] = _categoryIds || []
     let res: Awaited<ReturnType<typeof createEmployee>>
     if (editingId) {
       res = await updateEmployee(editingId, employeePayload)
@@ -510,6 +518,18 @@ export default function SettingsClient(props: Props) {
         ])
       } else if (serviceIds.length > 0) {
         toast.error('Service assignments not saved', svcRes.error || 'Run the employee_services migration.')
+      }
+
+      // Categories are a separate junction, saved independently: a failure here
+      // must not roll back the individual assignments that already succeeded.
+      const catRes = await setEmployeeServiceCategories(employeeId, categoryIds)
+      if (catRes.ok) {
+        setEmpCategories(prev => [
+          ...prev.filter(ec => ec.employee_id !== employeeId),
+          ...categoryIds.map(cid => ({ employee_id: employeeId, category_id: cid })),
+        ])
+      } else if (categoryIds.length > 0) {
+        toast.error('Category assignments not saved', catRes.error || 'Run the service_categories migration.')
       }
     }
     setSaving(false)
@@ -2711,30 +2731,90 @@ export default function SettingsClient(props: Props) {
                   )}
 
                   {/* Services / task types this employee works on — employee_services junction */}
-                  <FieldRow label={<span className="flex items-center gap-1">Services / Task Types <InfoTip text="Which services this employee usually works on (e.g. Graphic Design, Video Editing). Contribution scoring offers only the employees assigned to a task's service. Editing the same assignment from Settings → Services updates here too." /></span>}>
-                    <div className="flex flex-wrap gap-1.5">
-                      {services.filter((s: any) => s.is_active).map((svc: any) => {
-                        const selected: string[] = form._serviceIds || []
-                        const isSelected = selected.includes(svc.id)
-                        return (
-                          <button key={svc.id} type="button"
-                            onClick={() => setForm((p: any) => ({
-                              ...p,
-                              _serviceIds: isSelected
-                                ? (p._serviceIds || []).filter((id: string) => id !== svc.id)
-                                : [...(p._serviceIds || []), svc.id],
-                            }))}
-                            className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
-                              isSelected
-                                ? 'bg-primary/15 text-primary border-primary/30'
-                                : 'bg-secondary text-muted-foreground border-transparent hover:border-border hover:text-foreground'
-                            }`}>
-                            {isSelected ? '✓ ' : ''}{svc.name}
-                          </button>
-                        )
-                      })}
-                    </div>
-                    {(form._serviceIds || []).length === 0 && (
+                  <FieldRow label={<span className="flex items-center gap-1">Services / Task Types <InfoTip text="Which services this employee usually works on. Tick a CATEGORY to grant the whole discipline — services added to it later are included automatically. Tick individual services for anything extra. Contribution scoring offers only the employees assigned to a task's service. Editing the same assignment from Settings → Services updates here too." /></span>}>
+                    {(() => {
+                      const selectedSvc: string[] = form._serviceIds || []
+                      const selectedCat: string[] = form._categoryIds || []
+                      const activeSvcs = services.filter((s: any) => s.is_active)
+
+                      // Group the catalog by category, preserving display_order,
+                      // with anything unclassified collected at the end. A
+                      // service with a category_id pointing at a since-deleted
+                      // category also lands there rather than vanishing.
+                      const known = new Set(serviceCategories.map((c: any) => c.id))
+                      const groups: { cat: any | null; svcs: any[] }[] = serviceCategories
+                        .filter((c: any) => c.is_active !== false)
+                        .map((c: any) => ({ cat: c, svcs: activeSvcs.filter((s: any) => s.category_id === c.id) }))
+                        .filter((g: any) => g.svcs.length > 0)
+                      const orphans = activeSvcs.filter((s: any) => !s.category_id || !known.has(s.category_id))
+                      if (orphans.length > 0) groups.push({ cat: null, svcs: orphans })
+
+                      const toggleCat = (id: string) => setForm((p: any) => ({
+                        ...p,
+                        _categoryIds: (p._categoryIds || []).includes(id)
+                          ? (p._categoryIds || []).filter((x: string) => x !== id)
+                          : [...(p._categoryIds || []), id],
+                      }))
+                      const toggleSvc = (id: string) => setForm((p: any) => ({
+                        ...p,
+                        _serviceIds: (p._serviceIds || []).includes(id)
+                          ? (p._serviceIds || []).filter((x: string) => x !== id)
+                          : [...(p._serviceIds || []), id],
+                      }))
+
+                      return (
+                        <div className="space-y-3">
+                          {groups.map(({ cat, svcs }) => {
+                            const catOn = cat ? selectedCat.includes(cat.id) : false
+                            return (
+                              <div key={cat?.id || '_uncategorised'} className="rounded-lg border border-border/60 p-2.5">
+                                <div className="flex items-center justify-between mb-2">
+                                  {cat ? (
+                                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                                      <input type="checkbox" checked={catOn} onChange={() => toggleCat(cat.id)}
+                                        className="w-3.5 h-3.5 rounded border-border accent-primary" />
+                                      <span className="text-xs font-semibold">{cat.name}</span>
+                                      <span className="text-[11px] text-muted-foreground/60">{svcs.length}</span>
+                                    </label>
+                                  ) : (
+                                    <span className="text-xs font-semibold text-muted-foreground">
+                                      Uncategorised <span className="text-[11px] font-normal text-muted-foreground/60">{svcs.length}</span>
+                                    </span>
+                                  )}
+                                  {catOn && (
+                                    <span className="text-[11px] text-primary">whole category — future services included</span>
+                                  )}
+                                </div>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {svcs.map((svc: any) => {
+                                    const direct = selectedSvc.includes(svc.id)
+                                    // In scope via the category: shown as on, but
+                                    // not individually removable while the
+                                    // category is ticked — untick the category.
+                                    const viaCat = catOn && !direct
+                                    return (
+                                      <button key={svc.id} type="button"
+                                        onClick={() => toggleSvc(svc.id)}
+                                        title={viaCat ? 'Included by its category. Untick the category to change this individually.' : undefined}
+                                        className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+                                          direct
+                                            ? 'bg-primary/15 text-primary border-primary/30'
+                                            : viaCat
+                                              ? 'bg-primary/5 text-primary/70 border-primary/20 border-dashed'
+                                              : 'bg-secondary text-muted-foreground border-transparent hover:border-border hover:text-foreground'
+                                        }`}>
+                                        {direct ? '✓ ' : viaCat ? '◇ ' : ''}{svc.name}
+                                      </button>
+                                    )
+                                  })}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )
+                    })()}
+                    {(form._serviceIds || []).length === 0 && (form._categoryIds || []).length === 0 && (
                       <p className="text-xs text-muted-foreground/60 mt-1.5">No services assigned — this employee appears for every task type in contribution scoring.</p>
                     )}
                   </FieldRow>

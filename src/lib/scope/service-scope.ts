@@ -74,12 +74,53 @@ export function resolveServiceScopeMode(
 
 // ── Loading ──────────────────────────────────────────────────────────────────
 
-/** Service ids assigned to an employee. `null` signals a READ FAILURE. */
+/**
+ * Service ids assigned to an employee, from BOTH assignment levels:
+ *
+ *     effective = (services in my categories) ∪ (my direct services)
+ *
+ * The category half is resolved at READ time, never expanded at write time.
+ * That is what makes a category assignment dynamic: add a service to Offer
+ * Flyers and everyone assigned to that category picks it up with no
+ * re-assignment. Expanding to children on save would freeze the old set.
+ *
+ * `null` signals a READ FAILURE, which callers degrade to unrestricted on.
+ * A successful read returning [] means "genuinely assigned nothing" and MUST
+ * stay distinguishable — see the caller's comment at the `assigned === null`
+ * branch.
+ *
+ * A missing table (pre-migration) is treated as a read failure for the
+ * category half only, so an environment that has not run 20260722090000 yet
+ * still resolves direct assignments normally instead of blanking the user.
+ */
 async function fetchAssignedServiceIds(admin: Admin, employeeId: string): Promise<string[] | null> {
-  const { data, error } = await admin
-    .from('employee_services').select('service_id').eq('employee_id', employeeId)
-  if (error) return null                       // distinct from "assigned nothing"
-  return (data || []).map((r: { service_id: string }) => r.service_id)
+  const [direct, cats] = await Promise.all([
+    admin.from('employee_services').select('service_id').eq('employee_id', employeeId),
+    admin.from('employee_service_categories').select('category_id').eq('employee_id', employeeId),
+  ])
+  if (direct.error) return null                // distinct from "assigned nothing"
+
+  const ids = new Set<string>(
+    (direct.data || []).map((r: { service_id: string }) => r.service_id),
+  )
+
+  // Pre-migration or a genuinely empty category set: nothing to add, and the
+  // direct assignments above still stand.
+  const categoryIds = cats.error
+    ? []
+    : (cats.data || []).map((r: { category_id: string }) => r.category_id)
+
+  if (categoryIds.length > 0) {
+    const { data, error } = await admin
+      .from('services').select('id').in('category_id', categoryIds)
+    // A failure HERE is a true read failure: the employee is known to hold
+    // category assignments, so silently returning only their direct services
+    // would under-scope them — the inverse of the fail-open intent.
+    if (error) return null
+    for (const r of (data || []) as { id: string }[]) ids.add(r.id)
+  }
+
+  return [...ids]
 }
 
 async function fetchClientNarrowingEnabled(admin: Admin): Promise<boolean> {
