@@ -99,15 +99,26 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
     // Build rows to upsert: selected services (shown + edited) + hidden DB services (unchanged)
     const upsertRows: any[] = []
 
+    // Blank price means "committed, rate not agreed yet" — NOT ₹0. Coercing
+    // it to 0 makes those two states indistinguishable, which is what made the
+    // pricing table unusable as a commitment record in the first place.
+    const num = (raw: string | null | undefined): number | null => {
+      const s = (raw ?? '').trim()
+      if (s === '') return null
+      const n = parseFloat(s)
+      return Number.isFinite(n) ? n : null
+    }
+
     // 1. Services shown in UI — save current edited values
     for (const [service_id, v] of Object.entries(pricings)) {
       if (selectedServices.has(service_id) && !explicitlyRemoved.has(service_id)) {
         upsertRows.push({
           client_id: clientId, service_id,
-          price: parseFloat(v.price) || 0,
-          commission_percentage: parseFloat(v.commission_percentage) || 0,
+          price: num(v.price),
+          commission_percentage: num(v.commission_percentage) ?? 0,
           currency: v.currency || 'INR',
           is_active: true,
+          deactivated_at: null, deactivated_by: null,   // re-adding revives it
         })
       }
     }
@@ -118,8 +129,8 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
         if (!selectedServices.has(service_id) && !explicitlyRemoved.has(service_id)) {
           upsertRows.push({
             client_id: clientId, service_id,
-            price: parseFloat(v.price) || 0,
-            commission_percentage: parseFloat(v.commission_percentage) || 0,
+            price: num(v.price),
+            commission_percentage: num(v.commission_percentage) ?? 0,
             currency: v.currency || 'INR',
             is_active: true,
           })
@@ -131,16 +142,21 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
       await supabase.from('client_service_pricing').upsert(upsertRows, { onConflict: 'client_id,service_id' })
     }
 
-    // Delete only explicitly removed services
-    const toDelete = [...explicitlyRemoved]
+    // Removing a service DEACTIVATES it rather than deleting the row: the row
+    // also carries the agreed price, and destroying it silently breaks
+    // historical commission recompute (lib/payroll/compute.ts reads it for
+    // tasks already invoiced). Deactivated rows are excluded everywhere by the
+    // canonical predicate `is_active IS NOT FALSE`.
+    const toDeactivate = [...explicitlyRemoved]
     if (!serviceId) {
-      // Full edit mode: also delete services that were deselected without explicit remove
-      const allShownIds = Object.keys(allDbPricings)
-      allShownIds.forEach(id => { if (!selectedServices.has(id)) toDelete.push(id) })
+      // Full edit mode: also drop services deselected without an explicit remove
+      Object.keys(allDbPricings).forEach(id => { if (!selectedServices.has(id)) toDeactivate.push(id) })
     }
-    const uniqueToDelete = [...new Set(toDelete)]
-    if (uniqueToDelete.length > 0) {
-      await supabase.from('client_service_pricing').delete().eq('client_id', clientId).in('service_id', uniqueToDelete)
+    const uniqueToDeactivate = [...new Set(toDeactivate)]
+    if (uniqueToDeactivate.length > 0) {
+      await supabase.from('client_service_pricing')
+        .update({ is_active: false, deactivated_at: new Date().toISOString() })
+        .eq('client_id', clientId).in('service_id', uniqueToDeactivate)
     }
 
     setSaving(false)

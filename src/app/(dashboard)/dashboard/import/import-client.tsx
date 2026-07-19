@@ -1437,9 +1437,18 @@ export default function ImportClient({ clients, services, employees, groups, par
       case 'pricing_matrix': {
         const table = 'client_service_pricing'
         if (operation === 'delete') {
+          // DEACTIVATE, never DELETE. A row here is both the client's service
+          // commitment and its agreed price — dropping it breaks historical
+          // commission recompute (lib/payroll/compute.ts). The canonical
+          // predicate `is_active IS NOT FALSE` hides it everywhere, so this is
+          // a removal from the user's point of view.
           const ids = valid.map(r => r.row_id).filter(Boolean) as string[]
           await backupBeforeUpdate(table, ids)
-          await batchDelete(table, ids)
+          if (ids.length > 0) {
+            await supabase.from(table)
+              .update({ is_active: false, deactivated_at: new Date().toISOString() })
+              .in('id', ids)
+          }
           break
         }
         const recs = valid.map(r => ({

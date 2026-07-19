@@ -34,7 +34,9 @@ export default async function ClientsPage() {
       ? fetchAll(supabase.from('invoices').select('client_id, total_amount, paid_amount, status'))
       : Promise.resolve({ data: [] as any[] }),
     fetchAll(supabase.from('tasks').select('client_id, status').is('deleted_at', null)),
-    fetchAll(supabase.from('client_service_pricing').select('client_id, service_id')),
+    // Canonical commitment predicate — without is_active the "services" stat
+    // counts services the client no longer buys.
+    fetchAll(supabase.from('client_service_pricing').select('client_id, service_id').eq('is_active', true)),
     supabase.from('services').select('id, name').eq('is_active', true),
   ])
 

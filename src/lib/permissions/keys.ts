@@ -21,6 +21,7 @@ export const PERMS = {
    */
   TASKS_VIEW_BY_SERVICE: 'tasks.view_by_service',
   TASKS_CREATE:       'tasks.create',
+  // (Service Scope keys live in their own block below — see SCOPE_*.)
   TASKS_EDIT:         'tasks.edit',
   TASKS_DELETE:       'tasks.delete',
   TASKS_ASSIGN:       'tasks.assign',
@@ -98,6 +99,18 @@ export const PERMS = {
   // Social Media Calendar — content planner feeding the Requests inbox
   SOCIAL_VIEW:   'social.view',
   SOCIAL_MANAGE: 'social.manage',
+
+  // Service Scope — cross-module restriction (see src/lib/scope/service-scope.ts).
+  // Dimension-qualified names so a future scope.by_branch sits beside these.
+  /**
+   * RESTRICTION: the holder only sees the services assigned to them
+   * (employee_services) and only the clients who buy those services.
+   * Leave OFF for admin / task-manager / finance designations — they see all.
+   * Opt-in: without it, behaviour is unchanged.
+   */
+  SCOPE_BY_SERVICE: 'scope.by_service',
+  /** Explicit escape hatch: overrides SCOPE_BY_SERVICE and shows everything. */
+  SCOPE_VIEW_ALL:   'scope.view_all',
 
   // Advertising — paid-ads campaign management module
   ADVERTISING_VIEW:            'advertising.view',

@@ -39,6 +39,28 @@ function pruneCache() {
 }
 
 /**
+ * Drop cached permission sets so a change takes effect on the very next
+ * request instead of up to 30s later.
+ *
+ * Call after granting/revoking permissions or changing a designation. The 30s
+ * lag is tolerable for most permissions, but for a RESTRICTION like
+ * `scope.by_service` "I granted it and nothing happened" is exactly the
+ * confusion that makes people distrust the feature.
+ *
+ * Keyed by AUTH id (the cache key), so pass the employee's auth_id. Omit the
+ * argument to clear everyone — correct for designation-level changes, which
+ * affect every employee holding that designation.
+ *
+ * Note: only clears THIS Node process. In serverless prod other warm instances
+ * still expire on their own TTL; this is a best-effort improvement, not a
+ * distributed invalidation.
+ */
+export function invalidateUserCache(authId?: string | null): void {
+  if (authId) USER_CACHE.delete(authId)
+  else USER_CACHE.clear()
+}
+
+/**
  * Load the currently-authenticated user with their effective permission set.
  * Returns null when not signed in. Gracefully degrades to admin-like access when the
  * designations migration has not yet been applied (so the app keeps working pre-migration).

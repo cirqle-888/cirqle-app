@@ -72,10 +72,12 @@ export default async function IntakePage({ params, searchParams }: {
   let driveFolderLink: string | null = null
   if (link.type === 'client' && link.client_id) {
     const [pricingRes, lastTaskRes] = await Promise.all([
+      // Commitment, not price: a service can be committed before a rate is
+      // agreed, so requiring a price would hide legitimate options.
       admin.from('client_service_pricing')
         .select('service_id, price, is_active')
         .eq('client_id', link.client_id)
-        .not('price', 'is', null),
+        .eq('is_active', true),
       admin.from('tasks')
         .select('title')
         .eq('client_id', link.client_id)
@@ -83,10 +85,10 @@ export default async function IntakePage({ params, searchParams }: {
         .order('task_date', { ascending: false })
         .limit(1),
     ])
-    const pricedIds = new Set((pricingRes.data || [])
-      .filter((p: any) => p.is_active !== false && (p.price ?? 0) > 0)
-      .map((p: any) => p.service_id))
-    if (pricedIds.size > 0) services = services.filter((s: any) => pricedIds.has(s.id))
+    const committedIds = new Set((pricingRes.data || []).map((p: any) => p.service_id))
+    // Non-empty guard retained deliberately: a client with nothing recorded
+    // sees everything rather than an empty external form.
+    if (committedIds.size > 0) services = services.filter((s: any) => committedIds.has(s.id))
     lastTaskTitle = lastTaskRes.data?.[0]?.title || null
 
     // drive_folder_link needs the v1.1 patch — read defensively.

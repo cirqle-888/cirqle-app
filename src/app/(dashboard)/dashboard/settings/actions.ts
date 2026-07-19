@@ -4,6 +4,9 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission, resolveCurrentEmployeeId } from '@/lib/auth/enforce'
 import { logActivity } from '@/lib/activity/log'
 import { syncRatesToDb, ratesAreStale } from '@/lib/fx/sync'
+import { revalidatePath } from 'next/cache'
+import { invalidateUserCache } from '@/lib/permissions/check'
+import { logScopeChanges, diffAssignments } from '@/lib/scope/audit'
 
 interface ActionResult<T = void> {
   ok: boolean
@@ -123,6 +126,16 @@ export async function setEmployeeServices(
     actorId: auth.employeeId, subjectId: employeeId, entityType: 'employee',
     entityId: employeeId, action: 'services_assigned', detail: { service_ids: serviceIds },
   })
+  // Per-pair audit (activity_logs only keeps the whole-set snapshot).
+  await logScopeChanges(admin, diffAssignments({
+    scopeKind: 'employee_service',
+    before: current, after: wanted,
+    anchor: { employeeId }, actorId: auth.employeeId, source: 'ui',
+  }))
+  // Service scope is read per-request, but the viewer's PERMISSION set is
+  // cached for 30s — clear it so a reassignment is felt immediately.
+  await invalidateEmployeeUserCache(admin, employeeId)
+  revalidatePath('/dashboard/tasks'); revalidatePath('/dashboard/contributions')
   return { ok: true }
 }
 
@@ -158,7 +171,37 @@ export async function setServiceEmployees(
     actorId: auth.employeeId, entityType: 'setting', action: 'changed',
     detail: { label: 'service employees', service_id: serviceId, employee_ids: employeeIds },
   })
+  // Audit the other direction as the same per-pair shape, so both writers
+  // produce identical records.
+  await logScopeChanges(admin, [
+    ...toAdd.map(eid => ({
+      scopeKind: 'employee_service' as const, action: 'added' as const,
+      employeeId: eid, serviceId, oldValue: null, newValue: { assigned: true },
+      actorId: auth.employeeId, source: 'ui' as const,
+    })),
+    ...toRemove.map(eid => ({
+      scopeKind: 'employee_service' as const, action: 'removed' as const,
+      employeeId: eid, serviceId, oldValue: { assigned: true }, newValue: null,
+      actorId: auth.employeeId, source: 'ui' as const,
+    })),
+  ])
+  for (const eid of [...toAdd, ...toRemove]) await invalidateEmployeeUserCache(admin, eid)
+  revalidatePath('/dashboard/tasks'); revalidatePath('/dashboard/contributions')
   return { ok: true }
+}
+
+/**
+ * Clear an employee's cached permission set by looking up their auth_id
+ * (USER_CACHE is keyed by auth id, not employee id). Best-effort.
+ */
+async function invalidateEmployeeUserCache(
+  admin: ReturnType<typeof createAdminClient>,
+  employeeId: string,
+): Promise<void> {
+  try {
+    const { data } = await admin.from('employees').select('auth_id').eq('id', employeeId).maybeSingle()
+    invalidateUserCache((data as { auth_id?: string | null } | null)?.auth_id ?? null)
+  } catch { /* best-effort — the 30s TTL still expires on its own */ }
 }
 
 // ── Clients ───────────────────────────────────────────────────────────────────
