@@ -21,7 +21,7 @@ import { CSS } from '@dnd-kit/utilities'
 import {
   saveCampaign, getImageUploadUrl, aiParseProductList, cancelCampaign,
   cloneLastCampaign, getCampaignSyncStatus, resyncOfferSheet, fetchExternalImage,
-  type ProductInput, type ProductBadgeInput, type CampaignInput,
+  type ProductInput, type ProductBadgeInput, type CampaignInput, type OfferGroupOption,
 } from './actions'
 import type { ParsedOfferProduct } from '@/lib/ai/offer-capture'
 import { ImageLightbox } from '@/components/ui/image-lightbox'
@@ -53,6 +53,7 @@ interface ProductBadge { id: string; badge_id?: string | null; custom_label?: st
 interface OfferProduct {
   id: string
   catalog_id?: string
+  group_id?: string | null
   name: string
   weight?: string
   image_url?: string
@@ -271,6 +272,7 @@ function offerSignature(
       p.mrp ?? '',
       p.offer_text?.trim() || '',
       p.page || 1,
+      p.group_id || '',
       (p.badges || []).map(b => [b.badge_id || '', b.custom_label || '', b.color]),
     ]),
   ])
@@ -1383,13 +1385,22 @@ const getTomorrowStr = () => {
 }
 
 function OfferIntakeClientInner({
-  token, client, campaign: initialCampaign, catalog, badges, logoUrl, logoDarkUrl, switcher, hub, staff,
+  token, client, campaign: initialCampaign, catalog, badges, groups = [], sheetManaged = false,
+  logoUrl, logoDarkUrl, switcher, hub, staff,
 }: {
   token: string
   client: { id: string; name: string }
   campaign: Campaign | null
   catalog: CatalogItem[]
   badges: Badge[]
+  /**
+   * The client's offer categories (Groceries, Vegetables, …). Empty or a single
+   * entry means this client has one flyer stream, and the editor renders
+   * exactly as it did before categories existed.
+   */
+  groups?: OfferGroupOption[]
+  /** Campaign mirrors the client's own Google Sheet — read-only here. */
+  sheetManaged?: boolean
   logoUrl?: string | null
   logoDarkUrl?: string | null
   switcher?: { kind: string; label: string; href: string }[]
@@ -1466,6 +1477,24 @@ function OfferIntakeClientInner({
   const [cancelling, setCancelling] = useState(false)
   const [copyMessage, setCopyMessage] = useState<string | null>(null)
   const [showMissingImagesOnly, setShowMissingImagesOnly] = useState(false)
+
+  // ── Offer categories ────────────────────────────────────────────────────────
+  // Only a client with MORE THAN ONE category gets tabs; one (or none) keeps the
+  // pre-categories editor exactly as it was. `activeGroupId` then narrows
+  // visibleProducts, so the page grouping below it needs no changes.
+  const showGroupTabs = groups.length > 1
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(
+    showGroupTabs ? groups[0].id : null,
+  )
+  // Products saved before a category existed (or whose category was deleted)
+  // still have to be reachable, so the first tab adopts them.
+  const knownGroupIds = new Set(groups.map(g => g.id))
+  const belongsToActiveGroup = (p: LocalProduct) => {
+    if (!showGroupTabs) return true
+    const isOrphan = !p.group_id || !knownGroupIds.has(p.group_id)
+    if (isOrphan) return activeGroupId === groups[0].id
+    return p.group_id === activeGroupId
+  }
   const [cloning, setCloning] = useState(false)
   // AI Capture merge guard: a whole-list capture into a non-empty offer prompts
   // Replace vs Add; a per-page "AI Capture to Page N" is an intentional add.
@@ -1525,6 +1554,9 @@ function OfferIntakeClientInner({
   )
 
   const [catalogPageTarget, setCatalogPageTarget] = useState<number>(1)
+  // Category the picker was opened from, mirroring catalogPageTarget: the tab
+  // can change while the modal is open, and rows must land where the user asked.
+  const [catalogGroupTarget, setCatalogGroupTarget] = useState<string | null>(null)
 
   // ── Bulk paste (AI) — the PRIMARY flow: paste → review → generate sheet ──
   type BulkPasteRow = ParsedOfferProduct & { _key: string; include: boolean; matchedCatalogId?: string }
@@ -1535,6 +1567,7 @@ function OfferIntakeClientInner({
   const [bulkPasteBusy, setBulkPasteBusy] = useState(false)
   const [bulkPasteReview, setBulkPasteReview] = useState<BulkPasteRow[] | null>(null)
   const [bulkPasteTargetPage, setBulkPasteTargetPage] = useState(1)
+  const [bulkPasteGroupTarget, setBulkPasteGroupTarget] = useState<string | null>(null)
   // true when the capture is an intentional "add to this page" (per-page button);
   // false for a whole-list capture (which prompts Replace vs Add if the offer
   // already has products).
@@ -1547,6 +1580,7 @@ function OfferIntakeClientInner({
     setBulkPasteReview(null)
     setBulkPasteAddToPage(addToPage)
     setBulkPasteTargetPage(targetPage ?? Math.max(1, ...products.map(p => p.page || 1)))
+    setBulkPasteGroupTarget(activeGroupId)
     setBulkPasteOpen(true)
   }
 
@@ -1678,6 +1712,7 @@ function OfferIntakeClientInner({
         offer_text: isBogo ? 'Buy 1 Get 1' : '',
         badges: productBadges,
         page: targetPage,
+        group_id: bulkPasteGroupTarget,
         display_order: order++,
       }
     })
@@ -1760,6 +1795,7 @@ function OfferIntakeClientInner({
       .map((p, i) => ({
         _key: `clone-${Date.now()}-${i}`,
         catalog_id: p.catalog_id,
+        group_id: p.group_id ?? null,
         name: p.name,
         weight: p.weight || '',
         image_url: p.image_url || '',
@@ -1782,7 +1818,7 @@ function OfferIntakeClientInner({
 
   function addBlankProduct(page: number) {
     const order = products.length
-    setProducts(prev => [...prev, { ...emptyProduct(order), page }])
+    setProducts(prev => [...prev, { ...emptyProduct(order), page, group_id: activeGroupId }])
   }
 
   function duplicateProduct(key: string) {
@@ -1932,7 +1968,7 @@ function OfferIntakeClientInner({
     const page = catalogPageTarget
     if (!item.id) {
       // New blank product
-      setProducts(prev => [...prev, { ...emptyProduct(order), page }])
+      setProducts(prev => [...prev, { ...emptyProduct(order), page, group_id: catalogGroupTarget }])
     } else {
       // Check not already added
       const already = products.some(p => p.catalog_id === item.id)
@@ -1950,6 +1986,7 @@ function OfferIntakeClientInner({
         badges: [],
         display_order: order,
         page,
+        group_id: catalogGroupTarget,
       }])
     }
   }
@@ -2053,6 +2090,7 @@ function OfferIntakeClientInner({
       products: list.map((p, i) => ({
         id: p.id,
         catalog_id: p.catalog_id,
+        group_id: p.group_id ?? null,
         name: p.name.trim(),
         weight: p.weight?.trim() || undefined,
         image_url: p.image_url || undefined,
@@ -2190,7 +2228,8 @@ function OfferIntakeClientInner({
   // reorder is disabled while it's active so reordering a partial view can't
   // scramble the hidden rows' display_order.
   const missingImagesCount = products.filter(p => !p.image_url).length
-  const visibleProducts = showMissingImagesOnly ? products.filter(p => !p.image_url) : products
+  const inActiveGroup = showGroupTabs ? products.filter(belongsToActiveGroup) : products
+  const visibleProducts = showMissingImagesOnly ? inActiveGroup.filter(p => !p.image_url) : inActiveGroup
   const canReorder = !showMissingImagesOnly
 
   // The single Figma-ready row set used by "Copy table", "Copy selected" and
@@ -2634,7 +2673,7 @@ function OfferIntakeClientInner({
                 Add manually instead
               </button>
               <button
-                onClick={() => { setCatalogPageTarget(1); setShowCatalog(true) }}
+                onClick={() => { setCatalogPageTarget(1); setCatalogGroupTarget(activeGroupId); setShowCatalog(true) }}
                 className="text-xs text-white/40 hover:text-white/80 transition-colors"
               >
                 Search past products
@@ -2655,17 +2694,46 @@ function OfferIntakeClientInner({
         </div>
         ) : (
         <div className="mb-8">
+          {/* Category tabs — only for clients with more than one flyer stream.
+              Each category has its own designer sheet and Figma file, so the
+              tabs mirror what actually gets produced. */}
+          {showGroupTabs && (
+            <div className="flex items-center gap-1.5 mb-4 px-1 overflow-x-auto pb-1">
+              {groups.map(group => {
+                const count = products.filter(p => {
+                  const isOrphan = !p.group_id || !knownGroupIds.has(p.group_id)
+                  return isOrphan ? group.id === groups[0].id : p.group_id === group.id
+                }).length
+                const active = group.id === activeGroupId
+                return (
+                  <button
+                    key={group.id}
+                    onClick={() => { setActiveGroupId(group.id); clearSelection() }}
+                    className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
+                      active
+                        ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/30'
+                        : 'bg-white/5 border border-white/10 text-white/50 hover:text-white hover:bg-white/10'
+                    }`}
+                  >
+                    {group.name}
+                    <span className={active ? 'text-white/60' : 'text-white/30'}>{count}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
           <div className="flex items-center justify-between mb-3 px-1">
              <div className="flex items-center gap-3">
                <h2 className="text-sm font-semibold text-white/70">
-                 Products <span className="text-white/30">({products.length})</span>
+                 Products <span className="text-white/30">({inActiveGroup.length})</span>
                </h2>
-               {products.length > 0 && (
+               {inActiveGroup.length > 0 && (
                  <button onClick={() => {
-                   if (selectedKeys.size === products.length) clearSelection()
-                   else selectAll(products.map(p => p._key))
+                   const keys = inActiveGroup.map(p => p._key)
+                   if (keys.every(k => selectedKeys.has(k))) clearSelection()
+                   else selectAll(keys)
                  }} className="text-xs text-white/40 hover:text-white/80 transition-colors">
-                   {selectedKeys.size === products.length ? 'Deselect All' : 'Select All'}
+                   {inActiveGroup.every(p => selectedKeys.has(p._key)) ? 'Deselect All' : 'Select All'}
                  </button>
                )}
              </div>
@@ -2854,7 +2922,7 @@ function OfferIntakeClientInner({
                            </button>
                          </div>
                        )}
-                       <button onClick={() => { setCatalogPageTarget(pageNum); setShowCatalog(true) }} className="text-xs font-medium text-white/50 hover:text-white transition-colors flex items-center gap-1">
+                       <button onClick={() => { setCatalogPageTarget(pageNum); setCatalogGroupTarget(activeGroupId); setShowCatalog(true) }} className="text-xs font-medium text-white/50 hover:text-white transition-colors flex items-center gap-1">
                          <Search className="w-3 h-3" /> Search past
                        </button>
                        <button onClick={() => openBulkPaste(pageNum, true)} className="text-xs font-medium text-violet-400 hover:text-violet-300 transition-colors flex items-center gap-1 bg-violet-500/10 hover:bg-violet-500/20 px-2 py-1 rounded ml-2">
@@ -3009,9 +3077,22 @@ function OfferIntakeClientInner({
         {/* ── Save button ── */}
         {!inPasteFlow && (
         <>
+        {/* This offer mirrors a sheet the client maintains themselves. Saving
+            here would be undone by the next import, so the server rejects it —
+            say so up front rather than letting someone type into a dead form. */}
+        {sheetManaged && (
+          <div className="mb-3 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2.5 flex items-start gap-2 text-xs text-amber-200">
+            <FileSpreadsheet className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            <span>
+              <span className="font-semibold">Sheet managed.</span>{' '}
+              This offer is imported from the client’s own Google Sheet and can’t be edited here — update the sheet and pull again.
+              {staff && ' Convert it to a Cirqle offer from the Campaigns page if you need to edit it in Cirqle.'}
+            </span>
+          </div>
+        )}
         <button
           onClick={handleSave}
-          disabled={saving || products.length === 0}
+          disabled={saving || products.length === 0 || sheetManaged}
           className="w-full py-3.5 text-sm font-bold rounded-2xl bg-violet-600 hover:bg-violet-500 text-white shadow-lg shadow-violet-900/40 disabled:opacity-40 transition-all flex items-center justify-center gap-2"
         >
           {saving

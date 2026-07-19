@@ -30,7 +30,13 @@ Cirqle App → **Apps → Offer Intake → Shared sync script** → copy the **S
 ### 2. Create the script
 
 Go to **[script.google.com](https://script.google.com)** → **New project**. Delete everything in the
-editor and paste this, then replace `PASTE_SHARED_SECRET_HERE` with the secret from step 1:
+editor and paste this, then replace `PASTE_SHARED_SECRET_HERE` with the secret from step 1.
+
+> **Already deployed an older version?** Re-paste this script. It adds two things:
+> a `sheetName` key (so a client with multiple offer categories can write
+> Groceries and Vegetables into separate tabs) and a fail-closed secret check.
+> Both are backward compatible — a client without categories still writes to
+> "Offers".
 
 ```javascript
 // Cirqle — shared Offer sheet sync. One deployment serves all clients.
@@ -60,7 +66,11 @@ function doPost(e) {
       : SpreadsheetApp.getActiveSpreadsheet();
     if (!ss) return json({ ok: false, error: 'No spreadsheet' });
 
-    var tab = ss.getSheetByName('Offers') || ss.insertSheet('Offers');
+    // Which tab to write. Cirqle sends `sheetName` when a client has offer
+    // categories (Groceries, Vegetables, …) that each need their own tab;
+    // without it everything goes to "Offers" exactly as before.
+    var sheetName = data.sheetName || 'Offers';
+    var tab = ss.getSheetByName(sheetName) || ss.insertSheet(sheetName);
     tab.clearContents();
 
     // Row 1 = headers (the stable Figma data contract). Rows 2+ = products.

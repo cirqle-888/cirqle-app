@@ -34,7 +34,7 @@ export default async function OfferIntakePage({ params, searchParams }: {
     return <InvalidLink reason={res.error || 'This link has expired or been revoked. Please ask Cirqle for a new one.'} />
   }
 
-  const { client, campaign, catalog, badges, logoUrl, logoDarkUrl } = res.data
+  const { client, campaign, catalog, badges, groups, sheetManaged, logoUrl, logoDarkUrl } = res.data
 
   // Reached via the client's Hub link with more than one app enabled —
   // render a tab switcher to the other app(s) instead of leaving the client
@@ -59,6 +59,8 @@ export default async function OfferIntakePage({ params, searchParams }: {
       campaign={campaign}
       catalog={catalog}
       badges={badges}
+      groups={groups}
+      sheetManaged={sheetManaged}
       logoUrl={logoDarkUrl || logoUrl}
       switcher={switcher}
       hub={hub}

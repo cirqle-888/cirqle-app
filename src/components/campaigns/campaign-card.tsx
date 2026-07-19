@@ -12,11 +12,12 @@ import { useState } from 'react'
 import {
   CheckCircle2, AlertCircle, ChevronDown, ChevronUp,
   RefreshCw, Archive, Flag, Link2, Copy, Check, Loader2,
-  ImageIcon, Tag, Calendar, FileText,
+  ImageIcon, Tag, Calendar, FileText, FileSpreadsheet,
 } from 'lucide-react'
 import {
   acknowledgeLogs, finaliseCampaign, archiveCampaign, resyncSheet, generateOfferLink,
 } from '@/app/(dashboard)/dashboard/campaigns/actions'
+import { convertSheetCampaign } from '@/app/(dashboard)/dashboard/offer-prepare/actions'
 
 const BADGE_COLOR: Record<string, string> = {
   red:    'bg-red-500/15 text-red-400 border-red-500/30',
@@ -122,6 +123,15 @@ export function CampaignCard({
     setBusy(false)
   }
 
+  async function handleConvert() {
+    if (!confirm('Convert this to a Cirqle offer? It will stop tracking the client\u2019s Google Sheet, and future pulls will leave it alone.')) return
+    setBusy(true)
+    const res = await convertSheetCampaign(campaign.id)
+    if (!res.ok) alert(res.error || 'Could not convert.')
+    onRefresh()
+    setBusy(false)
+  }
+
   async function handleArchive() {
     if (!confirm('Archive this campaign? It will be hidden from the main view.')) return
     setBusy(true)
@@ -192,6 +202,14 @@ export function CampaignCard({
             <span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${statusBadge}`}>
               {campaign.status}
             </span>
+            {campaign.source === 'sheet_import' && (
+              <span
+                className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/25 font-medium shrink-0"
+                title="Imported from the client's own Google Sheet — read-only in Cirqle"
+              >
+                Sheet managed
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-3 mt-1 text-[11px] text-muted-foreground flex-wrap">
             <span className="flex items-center gap-1">
@@ -387,6 +405,16 @@ export function CampaignCard({
                 className="text-xs px-3 py-2 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 hover:bg-emerald-500/20 transition-colors flex items-center gap-1.5 disabled:opacity-50"
               >
                 <Flag className="w-3.5 h-3.5" /> Mark finalised
+              </button>
+            )}
+            {campaign.source === 'sheet_import' && (
+              <button
+                onClick={handleConvert}
+                disabled={busy}
+                title="Stop tracking the client's sheet so this offer can be edited in Cirqle"
+                className="text-xs px-3 py-2 rounded-lg bg-sky-500/10 text-sky-400 border border-sky-500/25 hover:bg-sky-500/20 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" /> Convert to Cirqle offer
               </button>
             )}
             <button

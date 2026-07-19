@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { OFFER_SHEET_HEADERS, buildOfferSheetRows, offerSheetTsv, offerSheetCsv } from './offer-sheet'
+import {
+  OFFER_SHEET_HEADERS, DATE_FORMATS,
+  buildOfferSheetRows, offerSheetTsv, offerSheetCsv,
+} from './offer-sheet'
 
 describe('offer sheet output', () => {
   it('keeps the Figma columns stable and sorts products by page then display order', () => {
@@ -14,8 +17,8 @@ describe('offer sheet output', () => {
     })
 
     expect(rows).toEqual([
-      ['1', '4', 'Tea', '250 g', 'bogo', '120', '', 'Buy 1 Get 1', '', '', 'Weekend Offer', '19 Jul 2026', 'B.N. Mart', '120', ''],
-      ['2', '2', 'Rice', '', 'price', '80', '', '', 'Hot', '', 'Weekend Offer', '19 Jul 2026', 'B.N. Mart', '80', ''],
+      ['1', '4', 'Tea', '250 g', 'bogo', '120', '', 'Buy 1 Get 1', '', '', 'Weekend Offer', '19 Jul 2026', 'B.N. Mart', '120', '', '', ''],
+      ['2', '2', 'Rice', '', 'price', '80', '', '', 'Hot', '', 'Weekend Offer', '19 Jul 2026', 'B.N. Mart', '80', '', '', ''],
     ])
     expect(offerSheetTsv(rows).split('\n')[0]).toBe(OFFER_SHEET_HEADERS.join('\t'))
   })
@@ -30,16 +33,89 @@ describe('offer sheet output', () => {
         { name: 'TBD', display_order: 3, price: null },
       ],
     })
-    const tail = rows.map(r => r.slice(-2))
+    const tail = rows.map(r => r.slice(13, 15))
     expect(tail).toEqual([
       ['20', '99'], // paise as its own smaller design layer
       ['20', '50'], // .5 → 50 paise, always two digits
       ['20', ''],   // whole price → Price 2 blank, not "00"
       ['', ''],     // no price yet
     ])
-    // Price 1 / Price 2 are APPENDED — the original 13 columns keep their order.
-    expect(OFFER_SHEET_HEADERS.slice(-2)).toEqual(['Price 1', 'Price 2'])
+    // The frozen contract Figma binds against is the INDEX of each column.
+    // Price 1/Price 2 must stay at 13/14 no matter what gets appended later.
+    expect(OFFER_SHEET_HEADERS[13]).toBe('Price 1')
+    expect(OFFER_SHEET_HEADERS[14]).toBe('Price 2')
     expect(OFFER_SHEET_HEADERS[5]).toBe('Offer Price')
+  })
+
+  it('leaves the two date columns blank when no dates are passed', () => {
+    // Every existing caller omits `dates`; they must not start emitting text.
+    const rows = buildOfferSheetRows({ clientName: 'Mart', products: [{ name: 'Tea', display_order: 0 }] })
+    expect(rows[0].slice(-2)).toEqual(['', ''])
+    expect(rows[0]).toHaveLength(OFFER_SHEET_HEADERS.length)
+  })
+
+  it('emits both bindable date styles from the campaign dates', () => {
+    const rows = buildOfferSheetRows({
+      clientName: 'Mart',
+      dates: { date_type: 'range', offer_date_from: '2026-07-18', offer_date_to: '2026-07-20' },
+      products: [{ name: 'Tea', display_order: 0 }],
+    })
+    expect(rows[0].slice(-2)).toEqual(['18, 19, 20 JULY 2026', 'July 18 – July 20 2026'])
+  })
+})
+
+describe('offer date formats', () => {
+  const enumerated = DATE_FORMATS.enumerated
+  const title = DATE_FORMATS.title
+
+  it('formats a single day', () => {
+    const d = { date_type: 'single', offer_date: '2026-07-19' }
+    expect(enumerated(d)).toBe('19 JULY 2026')
+    expect(title(d)).toBe('Offer valid on July 19 2026')
+  })
+
+  it('enumerates short same-month ranges and collapses long ones', () => {
+    expect(enumerated({ date_type: 'range', offer_date_from: '2026-07-18', offer_date_to: '2026-07-20' }))
+      .toBe('18, 19, 20 JULY 2026')
+    // Five days is still readable as a list; six is not.
+    expect(enumerated({ date_type: 'range', offer_date_from: '2026-07-18', offer_date_to: '2026-07-22' }))
+      .toBe('18, 19, 20, 21, 22 JULY 2026')
+    expect(enumerated({ date_type: 'range', offer_date_from: '2026-07-18', offer_date_to: '2026-07-25' }))
+      .toBe('18 – 25 JULY 2026')
+  })
+
+  it('handles cross-month and cross-year ranges', () => {
+    expect(enumerated({ date_type: 'range', offer_date_from: '2026-06-30', offer_date_to: '2026-07-02' }))
+      .toBe('30 JUNE – 2 JULY 2026')
+    expect(enumerated({ date_type: 'range', offer_date_from: '2025-12-30', offer_date_to: '2026-01-02' }))
+      .toBe('30 DEC 2025 – 2 JAN 2026')
+    expect(title({ date_type: 'range', offer_date_from: '2025-12-30', offer_date_to: '2026-01-02' }))
+      .toBe('December 30 2025 – January 2 2026')
+  })
+
+  it('collapses a degenerate range to a single day', () => {
+    // End missing, equal to start, or before it — a printed flyer must not say
+    // "18 – 18 JULY" or run backwards.
+    const same = { date_type: 'range', offer_date_from: '2026-07-18', offer_date_to: '2026-07-18' }
+    const backwards = { date_type: 'range', offer_date_from: '2026-07-20', offer_date_to: '2026-07-18' }
+    const openEnded = { date_type: 'range', offer_date_from: '2026-07-18', offer_date_to: null }
+    for (const d of [same, backwards, openEnded]) {
+      expect(enumerated(d)).toMatch(/^\d+ JULY 2026$/)
+      expect(title(d)).toMatch(/^Offer valid on July \d+ 2026$/)
+    }
+  })
+
+  it('returns empty for missing or malformed dates', () => {
+    for (const d of [
+      {},
+      { date_type: 'single', offer_date: null },
+      { date_type: 'single', offer_date: 'not-a-date' },
+      { date_type: 'single', offer_date: '2026-13-01' },
+      { date_type: 'range', offer_date_from: null, offer_date_to: '2026-07-20' },
+    ]) {
+      expect(enumerated(d)).toBe('')
+      expect(title(d)).toBe('')
+    }
   })
 
   it('removes tabs and new lines so pasted rows cannot break the sheet', () => {

@@ -2411,6 +2411,84 @@ export type Database = {
           },
         ]
       }
+      client_offer_groups: {
+        Row: {
+          apps_script_url: string | null
+          client_id: string
+          created_at: string
+          date_format: string | null
+          display_order: number
+          id: string
+          integrations: Json
+          is_active: boolean
+          last_pulled_at: string | null
+          master_tab_name: string | null
+          name: string
+          parent_id: string | null
+          pull_schedule: string
+          sheet_id: string | null
+          sheet_tab_name: string | null
+          sheet_url: string | null
+          slug: string
+          updated_at: string
+        }
+        Insert: {
+          apps_script_url?: string | null
+          client_id: string
+          created_at?: string
+          date_format?: string | null
+          display_order?: number
+          id?: string
+          integrations?: Json
+          is_active?: boolean
+          last_pulled_at?: string | null
+          master_tab_name?: string | null
+          name: string
+          parent_id?: string | null
+          pull_schedule?: string
+          sheet_id?: string | null
+          sheet_tab_name?: string | null
+          sheet_url?: string | null
+          slug: string
+          updated_at?: string
+        }
+        Update: {
+          apps_script_url?: string | null
+          client_id?: string
+          created_at?: string
+          date_format?: string | null
+          display_order?: number
+          id?: string
+          integrations?: Json
+          is_active?: boolean
+          last_pulled_at?: string | null
+          master_tab_name?: string | null
+          name?: string
+          parent_id?: string | null
+          pull_schedule?: string
+          sheet_id?: string | null
+          sheet_tab_name?: string | null
+          sheet_url?: string | null
+          slug?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_offer_groups_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_offer_groups_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "client_offer_groups"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       client_product_assignments: {
         Row: {
           client_id: string
@@ -2591,9 +2669,13 @@ export type Database = {
           has_offer_flyer_service: boolean
           hub_token: string
           id: string
+          integrations: Json
           is_active: boolean | null
           name: string
+          offer_flow_mode: string
           offer_intake_token: string | null
+          offer_master_sheet_id: string | null
+          offer_master_sheet_url: string | null
           offer_sheet_webhook_url: string | null
           offer_sheet_url: string | null
           phone: string | null
@@ -2617,9 +2699,14 @@ export type Database = {
           has_offer_flyer_service?: boolean
           hub_token?: string
           id?: string
+          integrations?: Json
           is_active?: boolean | null
           name: string
+          offer_flow_mode?: string
           offer_intake_token?: string | null
+          offer_master_sheet_id?: string | null
+          offer_master_sheet_url?: string | null
+          offer_sheet_url?: string | null
           offer_sheet_webhook_url?: string | null
           phone?: string | null
           pricing_pending?: boolean
@@ -2642,9 +2729,14 @@ export type Database = {
           has_offer_flyer_service?: boolean
           hub_token?: string
           id?: string
+          integrations?: Json
           is_active?: boolean | null
           name?: string
+          offer_flow_mode?: string
           offer_intake_token?: string | null
+          offer_master_sheet_id?: string | null
+          offer_master_sheet_url?: string | null
+          offer_sheet_url?: string | null
           offer_sheet_webhook_url?: string | null
           phone?: string | null
           pricing_pending?: boolean
@@ -4469,6 +4561,7 @@ export type Database = {
           offer_token: string
           sheet_last_synced_at: string | null
           sheet_sync_error: string | null
+          source: string
           status: string
           title: string | null
           updated_at: string
@@ -4484,6 +4577,7 @@ export type Database = {
           offer_token?: string
           sheet_last_synced_at?: string | null
           sheet_sync_error?: string | null
+          source?: string
           status?: string
           title?: string | null
           updated_at?: string
@@ -4499,6 +4593,7 @@ export type Database = {
           offer_token?: string
           sheet_last_synced_at?: string | null
           sheet_sync_error?: string | null
+          source?: string
           status?: string
           title?: string | null
           updated_at?: string
@@ -4635,6 +4730,7 @@ export type Database = {
           catalog_id: string | null
           created_at: string
           display_order: number
+          group_id: string | null
           id: string
           image_url: string | null
           mrp: number | null
@@ -4652,6 +4748,7 @@ export type Database = {
           catalog_id?: string | null
           created_at?: string
           display_order?: number
+          group_id?: string | null
           id?: string
           image_url?: string | null
           mrp?: number | null
@@ -4669,6 +4766,7 @@ export type Database = {
           catalog_id?: string | null
           created_at?: string
           display_order?: number
+          group_id?: string | null
           id?: string
           image_url?: string | null
           mrp?: number | null

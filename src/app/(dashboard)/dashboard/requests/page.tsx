@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/server'
+import { selectWithOptionalColumns } from '@/lib/offer-columns'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import RequestsClient from './requests-client'
 
@@ -51,18 +52,23 @@ export default async function RequestsPage({
   // offer tables may not exist until that migration runs.
   let offerCampaigns: any[] = []
   try {
-    const { data } = await admin
-      .from('offer_campaigns')
-      .select(`
-        id, title, status, date_type, offer_date, offer_date_from, offer_date_to,
-        sheet_last_synced_at, sheet_sync_error, created_at, updated_at,
-        client:clients(id, name),
-        products:offer_products(id, name, offer_type, price, mrp, offer_text, image_url, page, badges:offer_product_badges(badge_id, custom_label, color, badge:offer_badges(label))),
-        logs:offer_change_logs(id, log_type, product_name, field, old_value, new_value, note, acknowledged, acknowledged_by, acknowledged_at, created_at)
-      `)
-      .not('status', 'eq', 'archived')
-      .order('updated_at', { ascending: false })
-      .limit(200)
+    // `source` only exists after the offer-groups migration; asking for it
+    // before that would fail the whole query and empty the inbox, so it is
+    // requested optionally.
+    const data = await selectWithOptionalColumns<any[]>(
+      `id, title, status, date_type, offer_date, offer_date_from, offer_date_to,
+       sheet_last_synced_at, sheet_sync_error, created_at, updated_at,
+       client:clients(id, name),
+       products:offer_products(id, name, offer_type, price, mrp, offer_text, image_url, page, badges:offer_product_badges(badge_id, custom_label, color, badge:offer_badges(label))),
+       logs:offer_change_logs(id, log_type, product_name, field, old_value, new_value, note, acknowledged, acknowledged_by, acknowledged_at, created_at)`,
+      ['source'],
+      cols => admin
+        .from('offer_campaigns')
+        .select(cols)
+        .not('status', 'eq', 'archived')
+        .order('updated_at', { ascending: false })
+        .limit(200),
+    )
     offerCampaigns = data || []
   } catch { /* offer intake not set up yet */ }
 

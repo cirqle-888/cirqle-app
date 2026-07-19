@@ -2,6 +2,7 @@
 
 import { createAdminClient } from '@/lib/supabase/admin'
 import { syncCampaignToSheet } from '@/lib/google-sheets/sync'
+import { safePublicFetch, BlockedHostError } from '@/lib/safe-fetch'
 import { aiParseOfferProducts, type ParsedOfferProduct } from '@/lib/ai/offer-capture'
 
 interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
@@ -24,11 +25,44 @@ async function resolveOfferToken(token: string) {
 
 // ── Load campaign data for client ─────────────────────────────────────────────
 
+export interface OfferGroupOption {
+  id: string
+  name: string
+  display_order: number
+}
+
+/**
+ * A client's configured offer categories, newest schema first.
+ *
+ * Swallows a missing table so a code deploy landing before the migration is
+ * applied simply shows the pre-categories editor rather than erroring.
+ */
+async function loadGroupOptions(
+  admin: ReturnType<typeof createAdminClient>,
+  clientId: string,
+): Promise<OfferGroupOption[]> {
+  try {
+    const { data, error } = await admin
+      .from('client_offer_groups')
+      .select('id, name, display_order')
+      .eq('client_id', clientId)
+      .eq('is_active', true)
+      .is('parent_id', null)
+      .order('display_order')
+    if (error) return []
+    return (data || []) as OfferGroupOption[]
+  } catch {
+    return []
+  }
+}
+
 export async function getOfferPageData(token: string): Promise<ActionResult<{
   client: { id: string; name: string }
   campaign: any | null
   catalog: any[]
   badges: any[]
+  groups: OfferGroupOption[]
+  sheetManaged: boolean
   logoUrl: string | null
   logoDarkUrl: string | null
 }>> {
@@ -37,7 +71,7 @@ export async function getOfferPageData(token: string): Promise<ActionResult<{
 
   const admin = createAdminClient()
 
-  const [campaignRes, catalogRes, badgesRes, logoRes, logoDarkRes] = await Promise.all([
+  const [campaignRes, catalogRes, badgesRes, logoRes, logoDarkRes, groups] = await Promise.all([
     // Most recent active campaign for this client
     admin.from('offer_campaigns')
       .select('*, products:offer_products(*, badges:offer_product_badges(id, badge_id, custom_label, color, display_order, badge:offer_badges(label, color)))')
@@ -57,6 +91,7 @@ export async function getOfferPageData(token: string): Promise<ActionResult<{
       .order('display_order'),
     admin.from('company_settings').select('value').eq('key', 'logo_url').maybeSingle(),
     admin.from('company_settings').select('value').eq('key', 'logo_url_dark').maybeSingle(),
+    loadGroupOptions(admin, client.id),
   ])
 
   // Attach each catalog item's image HISTORY (newest first) from the global
@@ -84,6 +119,10 @@ export async function getOfferPageData(token: string): Promise<ActionResult<{
       campaign: campaignRes.data || null,
       catalog: catalogWithImages,
       badges: badgesRes.data || [],
+      groups,
+      // Snapshots of a client-owned sheet are read-only here: the next pull
+      // would overwrite anything typed, so the editor disables saving.
+      sheetManaged: campaignRes.data?.source === 'sheet_import',
       logoUrl: logoRes.data?.value || null,
       logoDarkUrl: logoDarkRes.data?.value || null,
     },
@@ -101,6 +140,7 @@ export interface ProductBadgeInput {
 export interface ProductInput {
   id?: string           // existing offer_products.id (if updating)
   catalog_id?: string   // link back to catalog
+  group_id?: string | null // which offer category (flyer stream) this belongs to; null = default
   name: string
   weight?: string
   image_url?: string
@@ -145,10 +185,16 @@ export async function saveCampaign(
   if (campaignId) {
     // Verify ownership
     const { data: existing } = await admin.from('offer_campaigns')
-      .select('id, client_id, title, date_type, offer_date, offer_date_from, offer_date_to')
+      .select('id, client_id, title, date_type, offer_date, offer_date_from, offer_date_to, source')
       .eq('id', campaignId).maybeSingle()
     if (!existing || existing.client_id !== client.id)
       return { ok: false, error: 'Campaign not found.' }
+    // A sheet_import campaign mirrors a sheet the client maintains themselves.
+    // Accepting edits here would look like they saved, then silently lose them
+    // on the next pull — so refuse and point at the conversion instead.
+    if (existing.source === 'sheet_import') {
+      return { ok: false, error: 'This offer is managed from the client’s own Google Sheet, so it can’t be edited here. Convert it to a Cirqle offer first if you need to change it in Cirqle.' }
+    }
     previousCampaign = existing
 
     const { data, error } = await admin.from('offer_campaigns')
@@ -236,6 +282,7 @@ export async function saveCampaign(
     const payload = {
       campaign_id: campaign.id,
       catalog_id: p.catalog_id || null,
+      group_id: p.group_id || null,
       name: p.name.trim(),
       weight: p.weight?.trim() || null,
       image_url: p.image_url || null,
@@ -266,6 +313,7 @@ export async function saveCampaign(
         ['mrp', 'MRP'],
         ['offer_text', 'Offer text'],
         ['page', 'Page'],
+        ['group_id', 'Category'],
       ]
       for (const [field, label] of DIFF_FIELDS) {
         const oldVal = String(prev[field] ?? '')
@@ -502,101 +550,6 @@ export async function fetchExternalImage(
   }
 }
 
-class BlockedHostError extends Error {}
-
-/**
- * True for any address that must never be reachable from a server-side fetch:
- * loopback, RFC-1918 private ranges, carrier-grade NAT, link-local — including
- * 169.254.169.254, the cloud instance metadata endpoint whose response would
- * hand out our own deployment credentials — plus the IPv6 equivalents and
- * IPv4-mapped IPv6 forms.
- */
-function isBlockedAddress(ip: string, family: number): boolean {
-  const addr = ip.toLowerCase().replace(/^\[|\]$/g, '')
-
-  if (family === 6) {
-    // ::ffff:10.0.0.1 and friends are IPv4 wearing an IPv6 hat — unwrap and
-    // re-test rather than letting the mapping bypass the v4 rules below.
-    const mapped = addr.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/)
-    if (mapped) return isBlockedAddress(mapped[1], 4)
-    return (
-      addr === '::' || addr === '::1' ||
-      addr.startsWith('fe80:') ||          // link-local
-      /^f[cd][0-9a-f]{2}:/.test(addr)      // unique local (fc00::/7)
-    )
-  }
-
-  const parts = addr.split('.').map(Number)
-  if (parts.length !== 4 || parts.some(n => !Number.isInteger(n) || n < 0 || n > 255)) return true
-  const [a, b] = parts
-  return (
-    a === 0 ||                              // "this network"
-    a === 127 ||                            // loopback
-    a === 10 ||                             // private
-    (a === 172 && b >= 16 && b <= 31) ||    // private
-    (a === 192 && b === 168) ||             // private
-    (a === 169 && b === 254) ||             // link-local INCLUDING cloud metadata
-    (a === 100 && b >= 64 && b <= 127) ||   // carrier-grade NAT
-    a >= 224                                // multicast + reserved
-  )
-}
-
-/**
- * Fetch a user-supplied URL with the SSRF checks applied at every hop.
- *
- * Two things the previous string-matching guard missed:
- *  - A hostname is not an address. `evil.com` can simply resolve to
- *    169.254.169.254, so the host has to be resolved and the resulting IP
- *    checked — matching on the text of the hostname proves nothing.
- *  - fetch() follows redirects by default, so a public host could answer 302
- *    and send us anywhere after the check had already passed. Redirects are
- *    therefore handled manually, re-validating each Location.
- */
-async function safePublicFetch(initial: URL, maxRedirects = 3): Promise<Response> {
-  const { lookup } = await import('node:dns/promises')
-  let target = initial
-
-  for (let hop = 0; hop <= maxRedirects; hop++) {
-    if (target.protocol !== 'https:' && target.protocol !== 'http:') {
-      throw new BlockedHostError('Only http(s) image URLs are supported.')
-    }
-
-    const host = target.hostname.toLowerCase().replace(/^\[|\]$/g, '')
-    if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) {
-      throw new BlockedHostError('Blocked host.')
-    }
-
-    // Resolve every address the name maps to and reject if ANY is internal —
-    // a name with both a public and a private A record must not slip through.
-    let addresses: { address: string; family: number }[]
-    try {
-      addresses = await lookup(host, { all: true })
-    } catch {
-      throw new BlockedHostError('Could not resolve host.')
-    }
-    if (!addresses.length || addresses.some(a => isBlockedAddress(a.address, a.family))) {
-      throw new BlockedHostError('Blocked host.')
-    }
-
-    const res = await fetch(target.toString(), {
-      signal: AbortSignal.timeout(15_000),
-      redirect: 'manual',
-    })
-
-    if (res.status < 300 || res.status > 399) return res
-
-    const location = res.headers.get('location')
-    if (!location) return res
-    try {
-      target = new URL(location, target)
-    } catch {
-      throw new BlockedHostError('Bad redirect target.')
-    }
-  }
-
-  throw new BlockedHostError('Too many redirects.')
-}
-
 // ── Bulk paste (AI) ─────────────────────────────────────────────────────────
 
 /**
@@ -725,6 +678,9 @@ export async function cancelCampaign(token: string, campaignId: string): Promise
     .eq('id', campaignId)
     .eq('client_id', client.id)
     .eq('status', 'active')
+    // Sheet-managed snapshots are owned by the client's own sheet, not by this
+    // editor; cancelling one here would just be undone by the next pull.
+    .eq('source', 'cirqle')
     .select('id')
     .maybeSingle()
   if (error || !data) return { ok: false, error: 'Could not cancel this offer request.' }
@@ -764,7 +720,7 @@ export async function cloneLastCampaign(
     .select(`
       id,
       products:offer_products(
-        name, weight, image_url, offer_type, mrp, page, display_order, catalog_id,
+        name, weight, image_url, offer_type, mrp, page, display_order, catalog_id, group_id,
         badges:offer_product_badges(badge_id, custom_label, color, display_order)
       )
     `)
@@ -784,6 +740,7 @@ export async function cloneLastCampaign(
     page: number | null
     display_order: number | null
     catalog_id: string | null
+    group_id: string | null
     badges: ClonedBadge[] | null
   }
   const prevProducts = (prev?.products ?? []) as unknown as ClonedRow[]
@@ -794,6 +751,7 @@ export async function cloneLastCampaign(
     .sort((a, b) => (a.page || 1) - (b.page || 1) || (a.display_order || 0) - (b.display_order || 0))
     .map((p, i) => ({
       catalog_id: p.catalog_id || undefined,
+      group_id: p.group_id || null,   // keep each product in its own flyer stream
       name: p.name,
       weight: p.weight || undefined,
       image_url: p.image_url || undefined,

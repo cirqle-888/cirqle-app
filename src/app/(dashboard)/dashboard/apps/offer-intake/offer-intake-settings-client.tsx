@@ -11,7 +11,11 @@ import {
 import {
   saveWebhookUrl, saveOfferSheetUrl, resetOfferToken, testSheetSync, ensureOfferToken,
   saveGlobalWebhookUrl, regenerateSheetSecret,
+  saveClientFlowMode,
+  saveMasterSheetUrl,
+  type OfferGroupRow,
 } from './actions'
+import { OfferGroupsPanel } from './offer-groups-panel'
 
 const inputCls = 'w-full bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20'
 const labelCls = 'block text-xs font-medium text-muted-foreground mb-1.5'
@@ -41,20 +45,43 @@ function StatusDot({ ok }: { ok: boolean }) {
   )
 }
 
+function HealthRow({ label, value, ok }: { label: string; value: string; ok: boolean }) {
+  return (
+    <div className="flex items-center gap-1.5 min-w-0">
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${ok ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+      <span className="text-muted-foreground shrink-0">{label}</span>
+      <span className="text-foreground/80 truncate ml-auto">{value}</span>
+    </div>
+  )
+}
+
+type FlowMode = 'push' | 'pull' | 'manual'
+
+const FLOW_LABEL: Record<FlowMode, string> = { push: 'Push', pull: 'Pull', manual: 'Manual' }
+
+const FLOW_HELP: Record<FlowMode, string> = {
+  push: 'Cirqle writes the designer Google Sheet from the offer list collected here.',
+  pull: 'The client maintains their own Google Sheet. Cirqle only reads it — never writes — so their IMPORTRANGE feeds and photo automation stay intact.',
+  manual: 'No sheet sync at all. The flyer is built by hand in Figma.',
+}
+
 // ── Client card ───────────────────────────────────────────────────────────────
 
 function ClientCard({
-  client: initialClient, appUrl, globalConfigured,
+  client: initialClient, appUrl, globalConfigured, groups: initialGroups = [],
 }: {
   client: {
     id: string; name: string; code?: string
     offer_intake_token: string | null
     offer_sheet_webhook_url: string | null
     offer_sheet_url: string | null
+    offer_flow_mode?: string | null
+    offer_master_sheet_url?: string | null
     has_offer_flyer_service: boolean
   }
   appUrl: string
   globalConfigured: boolean
+  groups?: OfferGroupRow[]
 }) {
   const [client, setClient] = useState(initialClient)
   const [expanded, setExpanded] = useState(false)
@@ -68,6 +95,11 @@ function ClientCard({
   const [generating, setGenerating] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(!!client.offer_sheet_webhook_url)
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  const [groups, setGroups] = useState<OfferGroupRow[]>(initialGroups)
+  const [flowMode, setFlowMode] = useState<FlowMode>((client.offer_flow_mode as FlowMode) || 'push')
+  const [flowSaving, setFlowSaving] = useState(false)
+  const [masterDraft, setMasterDraft] = useState(client.offer_master_sheet_url || '')
+  const [masterSaving, setMasterSaving] = useState(false)
 
   const intakeUrl = token ? `${appUrl}/intake/offer/${token}` : null
   const hasWebhook = !!client.offer_sheet_webhook_url
@@ -76,11 +108,33 @@ function ClientCard({
   // The sheet is reachable when either a legacy per-client script is set, or the
   // shared script is connected AND this client has pasted their Sheet link.
   const hasSheetDestination = hasWebhook || (globalConfigured && hasSheetLink)
-  const onboardingDone = hasSheetDestination && hasToken
+  // Readiness means something different per mode, so the chip stops telling a
+  // pull-mode client they are "Setup needed" for a sheet Cirqle never writes.
+  const hasMasterSheet = !!client.offer_master_sheet_url
+  const onboardingDone =
+    flowMode === 'manual' ? true
+    : flowMode === 'pull' ? hasMasterSheet
+    : hasSheetDestination && hasToken
 
   function flash(type: 'ok' | 'err', text: string) {
     setMsg({ type, text })
     setTimeout(() => setMsg(null), 4000)
+  }
+
+  async function handleFlowMode(next: FlowMode) {
+    setFlowSaving(true)
+    const res = await saveClientFlowMode(client.id, next)
+    setFlowSaving(false)
+    if (res.ok) { setFlowMode(next); flash('ok', `Flow mode set to ${FLOW_LABEL[next]} ✓`) }
+    else flash('err', res.error || 'Could not change flow mode')
+  }
+
+  async function handleSaveMasterSheet() {
+    setMasterSaving(true)
+    const res = await saveMasterSheetUrl(client.id, masterDraft)
+    setMasterSaving(false)
+    if (res.ok) { setClient(c => ({ ...c, offer_master_sheet_url: masterDraft.trim() || null })); flash('ok', 'Master sheet link saved ✓') }
+    else flash('err', res.error || 'Could not save')
   }
 
   async function handleSaveWebhook() {
@@ -161,6 +215,11 @@ function ClientCard({
           <StatusDot ok={hasSheetDestination} />
         </div>
 
+        {flowMode !== 'push' && (
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/25 font-medium shrink-0">
+            {FLOW_LABEL[flowMode]}
+          </span>
+        )}
         {onboardingDone
           ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 font-medium shrink-0">Ready</span>
           : <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/25 font-medium shrink-0">Setup needed</span>
@@ -182,6 +241,101 @@ function ClientCard({
               {msg.text}
             </div>
           )}
+
+          {/* ── Flow mode ──────────────────────────────────────────────────
+              Which direction data moves for this client. Getting this wrong is
+              expensive: pushing to a client-maintained sheet destroys their own
+              IMPORTRANGE feeds, so the choice is explicit rather than inferred. */}
+          <div>
+            <p className="text-xs font-semibold text-white/70 mb-2">Flow mode</p>
+            <div className="flex items-center gap-1.5 mb-2">
+              {(['push', 'pull', 'manual'] as FlowMode[]).map(mode => (
+                <button
+                  key={mode}
+                  onClick={() => void handleFlowMode(mode)}
+                  disabled={flowSaving || flowMode === mode}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                    flowMode === mode
+                      ? 'bg-violet-600 text-white'
+                      : 'bg-secondary border border-border text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {FLOW_LABEL[mode]}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground leading-relaxed">{FLOW_HELP[flowMode]}</p>
+          </div>
+
+          {/* Master sheet — only meaningful when Cirqle is the reader. */}
+          {flowMode === 'pull' && (
+            <div>
+              <p className="text-xs font-semibold text-white/70 mb-2">Client's master Google Sheet</p>
+              <div className="flex items-center gap-2">
+                <input
+                  value={masterDraft}
+                  onChange={e => setMasterDraft(e.target.value)}
+                  placeholder="https://docs.google.com/spreadsheets/d/…/edit"
+                  className="flex-1 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder:text-white/25 focus:outline-none focus:border-violet-500/50 transition-colors"
+                />
+                <button
+                  onClick={() => void handleSaveMasterSheet()}
+                  disabled={masterSaving}
+                  className="px-3 py-2 rounded-xl text-xs font-semibold bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-40 transition-colors shrink-0"
+                >
+                  {masterSaving ? 'Saving…' : 'Save link'}
+                </button>
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1.5">
+                Must be shared with “Anyone with the link” (Viewer is enough). Cirqle reads it and never writes to it.
+              </p>
+            </div>
+          )}
+
+          {/* ── Categories ─────────────────────────────────────────────────── */}
+          <OfferGroupsPanel
+            clientId={client.id}
+            flowMode={flowMode}
+            groups={groups}
+            onChanged={setGroups}
+          />
+
+          {/* ── Integration health ─────────────────────────────────────────
+              All derived, nothing stored. Sea Star's sheet sat contaminated for
+              a day and Goodwill's Figma file quietly lost its binding — both
+              would have been obvious at a glance here. */}
+          <div className="rounded-xl bg-secondary/40 border border-border p-3">
+            <p className="text-xs font-semibold text-white/70 mb-2">Integration status</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
+              <HealthRow label="Flow mode" value={FLOW_LABEL[flowMode]} ok />
+              <HealthRow label="Intake link" value={hasToken ? 'Created' : 'Not created'} ok={hasToken} />
+              {flowMode === 'pull' ? (
+                <>
+                  <HealthRow label="Master sheet" value={hasMasterSheet ? 'Linked' : 'Not linked'} ok={hasMasterSheet} />
+                  <HealthRow
+                    label="Source tabs"
+                    value={groups.length ? `${groups.filter(g => g.master_tab_name).length}/${groups.length} mapped` : 'First tab'}
+                    ok={!groups.length || groups.every(g => g.master_tab_name)}
+                  />
+                </>
+              ) : (
+                <>
+                  <HealthRow label="Google Sheet" value={hasSheetLink ? 'Linked' : hasWebhook ? 'Via bound script' : 'Not linked'} ok={hasSheetDestination} />
+                  <HealthRow
+                    label="Apps Script"
+                    value={hasWebhook ? 'Per-client' : globalConfigured ? 'Shared' : 'Not connected'}
+                    ok={hasWebhook || globalConfigured}
+                  />
+                </>
+              )}
+              <HealthRow label="Categories" value={groups.length ? `${groups.length}` : 'Single list'} ok />
+              <HealthRow
+                label="Figma"
+                value={groups.some(g => g.integrations?.figma?.file_url) ? `${groups.filter(g => g.integrations?.figma?.file_url).length} linked` : 'Not linked'}
+                ok={groups.some(g => g.integrations?.figma?.file_url)}
+              />
+            </div>
+          </div>
 
           {/* Where the capability comes from — read-only. A client appears here
               because one of their assigned services has Intake Kind = "Offer
@@ -495,19 +649,25 @@ function GlobalSyncCard({ initial }: { initial: { webhookUrl: string; secret: st
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function OfferIntakeSettingsClient({
-  clients, appUrl, globalConfig,
+  clients, appUrl, globalConfig, groupsByClient = {},
 }: {
   clients: any[]
   appUrl: string
   globalConfig: { webhookUrl: string; secret: string; configured: boolean }
+  groupsByClient?: Record<string, OfferGroupRow[]>
 }) {
   const [q, setQ] = useState('')
 
   const globalConfigured = globalConfig.configured
   // A client is "ready" once it has an intake link AND a reachable sheet — either
   // its own legacy script, or the shared script + a pasted Sheet link.
-  const isReady = (c: any) => !!c.offer_intake_token
-    && (c.offer_sheet_webhook_url || (globalConfigured && c.offer_sheet_url))
+  const isReady = (c: any) => {
+    const mode = (c.offer_flow_mode as FlowMode) || 'push'
+    if (mode === 'manual') return true
+    if (mode === 'pull') return !!c.offer_master_sheet_url
+    return !!c.offer_intake_token
+      && (c.offer_sheet_webhook_url || (globalConfigured && c.offer_sheet_url))
+  }
 
   const filtered = [...clients].filter(c =>
     c.name.toLowerCase().includes(q.toLowerCase()) ||
@@ -597,7 +757,7 @@ export default function OfferIntakeSettingsClient({
           ...filtered.filter(c => isReady(c)),
           ...filtered.filter(c => !isReady(c)),
         ].map(client => (
-          <ClientCard key={client.id} client={client} appUrl={appUrl} globalConfigured={globalConfigured} />
+          <ClientCard key={client.id} client={client} appUrl={appUrl} globalConfigured={globalConfigured} groups={groupsByClient[client.id] || []} />
         ))}
       </div>
     </div>

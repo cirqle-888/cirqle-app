@@ -23,6 +23,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { notifyAdmins } from '@/lib/notifications/create'
 import { OFFER_SHEET_HEADERS, buildOfferSheetRows } from '@/lib/offer-sheet'
+import { extractSheetId, resolveDestinations, type OfferGroup, type RoutedProduct } from './routing'
+
+// Re-exported so existing importers (offer-intake settings actions, tests)
+// keep their import path while the pure logic lives in routing.ts.
+export { extractSheetId, resolveDestinations }
+export type { OfferGroup }
 
 /**
  * How long to wait for the client's Apps Script to answer.
@@ -35,18 +41,36 @@ import { OFFER_SHEET_HEADERS, buildOfferSheetRows } from '@/lib/offer-sheet'
  */
 const SHEET_SYNC_TIMEOUT_MS = 45_000
 
-interface SyncResult { ok: boolean; error?: string; sheetUrl?: string }
+interface SyncResult { ok: boolean; error?: string; sheetUrl?: string; skipped?: boolean }
 
 /**
- * Pull the spreadsheet ID out of a Google Sheets link (or accept a raw ID).
- * `https://docs.google.com/spreadsheets/d/<ID>/edit#gid=0` → `<ID>`.
+ * Active top-level groups for a client, ordered for display.
+ *
+ * Returns [] when the table does not exist yet, so a code deploy that lands
+ * before the migration is applied keeps every client on the legacy
+ * single-destination path instead of failing every sync.
+ *
+ * parent_id IS NULL is filtered from day one: nesting (Groceries → Rice, Oil)
+ * is reserved in the schema but nothing creates children yet, and this query
+ * should keep meaning "top-level streams" once it does.
  */
-export function extractSheetId(url: string | null | undefined): string | null {
-  if (!url) return null
-  const m = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/)
-  if (m) return m[1]
-  const trimmed = url.trim()
-  return /^[a-zA-Z0-9_-]{30,}$/.test(trimmed) ? trimmed : null
+export async function loadOfferGroups(
+  admin: SupabaseClient,
+  clientId: string,
+): Promise<OfferGroup[]> {
+  try {
+    const { data, error } = await admin
+      .from('client_offer_groups')
+      .select('id, name, sheet_url, sheet_id, sheet_tab_name, apps_script_url')
+      .eq('client_id', clientId)
+      .eq('is_active', true)
+      .is('parent_id', null)
+      .order('display_order')
+    if (error) return []
+    return (data || []) as OfferGroup[]
+  } catch {
+    return []
+  }
 }
 
 function formatDate(campaign: {
@@ -80,9 +104,20 @@ export async function syncCampaignToSheet(
   // 1. Load client sheet destination (per-client override URL + the Sheet link)
   const { data: client } = await admin
     .from('clients')
-    .select('offer_sheet_webhook_url, offer_sheet_url, name')
+    .select('offer_sheet_webhook_url, offer_sheet_url, name, offer_flow_mode')
     .eq('id', clientId)
     .maybeSingle()
+
+  // Clients who own their own sheet ('pull') or hand-build the flyer ('manual')
+  // must never be written to — pushing Cirqle's column layout into a
+  // client-maintained sheet would break their IMPORTRANGE feeds and any photo
+  // automation hanging off it. Not an error: there is simply nothing to do.
+  const flowMode = client?.offer_flow_mode || 'push'
+  if (flowMode !== 'push') return { ok: true, skipped: true }
+
+  // Per-client offer groups (Groceries, Vegetables, …). A client with NO groups
+  // takes the original single-destination path below, byte for byte.
+  const groups = await loadOfferGroups(admin, clientId)
 
   // Workspace-wide shared-script config (one deploy for all clients).
   const { data: settingsRows } = await admin
@@ -103,7 +138,7 @@ export async function syncCampaignToSheet(
       products:offer_products(
         name, weight, price, mrp, offer_type, offer_text,
         badges:offer_product_badges(custom_label, badge:offer_badges(label)),
-        image_url, display_order, page
+        image_url, display_order, page, group_id
       )
     `)
     .eq('id', campaignId)
@@ -123,55 +158,27 @@ export async function syncCampaignToSheet(
     })
   }
 
-  // Resolve where this campaign's rows go. Legacy per-client webhook wins when
-  // present (that script is bound to the client's own sheet). Otherwise use the
-  // shared script + the client's Sheet link.
-  let targetUrl: string
-  let routePayload: Record<string, unknown> = {}
-  if (client?.offer_sheet_webhook_url) {
-    targetUrl = client.offer_sheet_webhook_url
-  } else if (globalWebhook && client?.offer_sheet_url) {
-    const spreadsheetId = extractSheetId(client.offer_sheet_url)
-    if (!spreadsheetId) {
-      const errMsg = 'The client Sheet link is not a valid Google Sheets URL.'
-      await admin.from('offer_campaigns').update({ sheet_sync_error: errMsg }).eq('id', campaignId)
-      notifyNewFailure(errMsg)
-      return { ok: false, error: errMsg }
-    }
-    targetUrl = globalWebhook
-    routePayload = { spreadsheetId, secret: sharedSecret }
-  } else {
-    const errMsg = globalWebhook
-      ? 'No Google Sheet linked for this client. Paste the client’s Google Sheet link in Offer Intake settings.'
-      : 'Google Sheet sync is not set up yet. Connect the shared script in Offer Intake settings.'
-    await admin.from('offer_campaigns')
-      .update({ sheet_sync_error: errMsg })
-      .eq('id', campaignId)
+  const allProducts = (campaign.products as RoutedProduct[]) || []
+
+  const fail = async (errMsg: string): Promise<SyncResult> => {
+    await admin.from('offer_campaigns').update({ sheet_sync_error: errMsg }).eq('id', campaignId)
     notifyNewFailure(errMsg)
     return { ok: false, error: errMsg }
   }
 
-  const offerDate = formatDate(campaign)
-  // 3. Build the stable Figma/Sheets data contract. The offer editor's
-  // “Copy table” button imports this same helper, so pasted and synced output
-  // always have identical columns.
-  const rows = buildOfferSheetRows({
-    clientName: client?.name,
-    offerTitle: campaign.title,
-    offerDate,
-    products: (campaign.products as any[] || []),
+  // Resolve where the rows go. With no groups configured this produces exactly
+  // one destination carrying every product and the same routePayload as before
+  // groups existed — the path Goodwill and Sea Star are on.
+  const resolved = resolveDestinations({
+    client,
+    groups,
+    products: allProducts,
+    globalWebhook,
+    sharedSecret,
   })
+  if (!resolved.ok) return fail(resolved.error)
 
-  // 4. POST to the Apps Script Web App. `routePayload` carries the spreadsheetId
-  // + shared secret for the shared-script model; it's empty for legacy bound
-  // scripts (which already know their own sheet).
-  const payload = {
-    offerTitle: campaign.title || '',
-    offerDate,
-    headers: OFFER_SHEET_HEADERS,
-    rows,
-    ...routePayload,
-  }
+  const offerDate = formatDate(campaign)
 
   // Mark this attempt in progress: clear any error left over from a PREVIOUS
   // failed sync so an in-flight re-sync isn't shown as failed (both the offer
@@ -181,6 +188,65 @@ export async function syncCampaignToSheet(
     await admin.from('offer_campaigns').update({ sheet_sync_error: null }).eq('id', campaignId)
   }
 
+  let defaultSheetUrl: string | undefined
+
+  for (const dest of resolved.destinations) {
+    // 3. Build the stable Figma/Sheets data contract. The offer editor's
+    // “Copy table” button imports this same helper, so pasted and synced output
+    // always have identical columns.
+    const rows = buildOfferSheetRows({
+      clientName: client?.name,
+      offerTitle: campaign.title,
+      offerDate,
+      dates: campaign,
+      products: dest.products,
+    })
+
+    // 4. POST to the Apps Script Web App. `routePayload` carries the spreadsheetId
+    // + shared secret for the shared-script model; it's empty for legacy bound
+    // scripts (which already know their own sheet). sheetName is only present
+    // for grouped clients; older scripts ignore the extra key.
+    const payload = {
+      offerTitle: campaign.title || '',
+      offerDate,
+      headers: OFFER_SHEET_HEADERS,
+      rows,
+      ...dest.routePayload,
+    }
+
+    const result = await postToAppsScript(dest.targetUrl, payload)
+
+    if (!result.ok) {
+      // Name the group so staff know which of a client's sheets is broken.
+      const errMsg = dest.groupName ? `[${dest.groupName}] ${result.error}` : result.error!
+      return fail(errMsg)
+    }
+
+    if (result.sheetUrl) {
+      if (dest.groupId) {
+        await admin.from('client_offer_groups')
+          .update({ sheet_url: result.sheetUrl, sheet_id: extractSheetId(result.sheetUrl) })
+          .eq('id', dest.groupId)
+      } else {
+        defaultSheetUrl = result.sheetUrl
+        await admin.from('clients').update({ offer_sheet_url: result.sheetUrl }).eq('id', clientId)
+      }
+    }
+  }
+
+  // 5. Update sync timestamp — only once every destination succeeded.
+  await admin.from('offer_campaigns')
+    .update({ sheet_last_synced_at: new Date().toISOString(), sheet_sync_error: null })
+    .eq('id', campaignId)
+
+  return { ok: true, sheetUrl: defaultSheetUrl }
+}
+
+/** POST one payload to one Apps Script Web App and translate its failures. */
+async function postToAppsScript(
+  targetUrl: string,
+  payload: unknown,
+): Promise<{ ok: boolean; error?: string; sheetUrl?: string }> {
   try {
     const res = await fetch(targetUrl, {
       method: 'POST',
@@ -200,14 +266,10 @@ export async function syncCampaignToSheet(
         : res.status === 404
           ? 'Sheet webhook not found (HTTP 404) — the Apps Script deployment was removed or the URL is wrong. Re-deploy and update the URL in Offer Intake settings.'
           : `Sheet sync failed (HTTP ${res.status}): ${isHtml ? 'Google returned an error page instead of the Apps Script response.' : body.slice(0, 200)}`
-      await admin.from('offer_campaigns')
-        .update({ sheet_sync_error: errMsg })
-        .eq('id', campaignId)
-      notifyNewFailure(errMsg)
       return { ok: false, error: errMsg }
     }
 
-    let returnedSheetUrl: string | undefined
+    let sheetUrl: string | undefined
     try {
       const responseData = await res.json()
       // The Apps Script reports back which sheet it wrote to, and we persist it
@@ -220,12 +282,7 @@ export async function syncCampaignToSheet(
         const isGoogleSheetUrl =
           /^https:\/\/docs\.google\.com\/spreadsheets\/d\/[a-zA-Z0-9_-]+/.test(candidate) &&
           extractSheetId(candidate) !== null
-        if (isGoogleSheetUrl) {
-          returnedSheetUrl = candidate
-          await admin.from('clients')
-            .update({ offer_sheet_url: candidate })
-            .eq('id', clientId)
-        }
+        if (isGoogleSheetUrl) sheetUrl = candidate
         // A non-conforming value is ignored rather than failing the sync — the
         // rows already landed in the sheet; only the bookkeeping link is skipped.
       }
@@ -233,26 +290,16 @@ export async function syncCampaignToSheet(
       // Ignore parse errors if the response isn't JSON
     }
 
-    // 5. Update sync timestamp
-    await admin.from('offer_campaigns')
-      .update({ sheet_last_synced_at: new Date().toISOString(), sheet_sync_error: null })
-      .eq('id', campaignId)
-
-    return { ok: true, sheetUrl: returnedSheetUrl }
-
-  } catch (err: any) {
+    return { ok: true, sheetUrl }
+  } catch (err) {
     // A WRONG url does not time out — Google answers it with 404/403, handled
     // above with its own message. Reaching here means the script accepted the
     // request and simply did not finish in time (cold start, or a long write
     // on a big offer list), so point at that instead of sending staff to
     // re-check a URL that is almost certainly fine.
-    const errMsg = err?.name === 'TimeoutError'
+    const errMsg = err instanceof Error && err.name === 'TimeoutError'
       ? `Sheet sync timed out after ${Math.round(SHEET_SYNC_TIMEOUT_MS / 1000)}s — the Apps Script did not finish. Usually a slow/cold script or a very long offer list; open the sheet's Apps Script → Executions to see if it is still running, then re-sync.`
-      : `Sheet sync error: ${err?.message || 'Unknown error'}`
-    await admin.from('offer_campaigns')
-      .update({ sheet_sync_error: errMsg })
-      .eq('id', campaignId)
-    notifyNewFailure(errMsg)
+      : `Sheet sync error: ${err instanceof Error ? err.message : 'Unknown error'}`
     return { ok: false, error: errMsg }
   }
 }

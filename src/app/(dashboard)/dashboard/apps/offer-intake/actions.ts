@@ -1,6 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
+import { selectWithOptionalColumns } from '@/lib/offer-columns'
 import { requireAdmin, resolveCurrentEmployeeId } from '@/lib/auth/enforce'
 import { syncCampaignToSheet, extractSheetId } from '@/lib/google-sheets/sync'
 import { revalidatePath } from 'next/cache'
@@ -65,13 +66,166 @@ export async function regenerateSheetSecret(): Promise<ActionResult<{ secret: st
 export async function getOfferClients(): Promise<ActionResult<{ clients: any[] }>> {
   const _guard = await requireAdmin(); if (!_guard.ok) return { ok: false, error: _guard.error }
   const admin = createAdminClient()
-  const { data, error } = await admin
-    .from('clients')
-    .select('id, name, code, is_active, offer_intake_token, offer_sheet_webhook_url, offer_sheet_url')
-    .eq('is_active', true)
-    .order('name')
-  if (error) return { ok: false, error: error.message }
+  const data = await selectWithOptionalColumns<any[]>(
+    'id, name, code, is_active, offer_intake_token, offer_sheet_webhook_url, offer_sheet_url',
+    ['offer_flow_mode', 'offer_master_sheet_url'],
+    cols => admin.from('clients').select(cols).eq('is_active', true).order('name'),
+  )
   return { ok: true, data: { clients: data || [] } }
+}
+
+// ── Offer categories (groups) ────────────────────────────────────────────────
+
+export interface OfferGroupRow {
+  id: string
+  client_id: string
+  name: string
+  slug: string
+  sheet_url: string | null
+  sheet_tab_name: string | null
+  master_tab_name: string | null
+  apps_script_url: string | null
+  integrations: { figma?: { file_url?: string } } | null
+  display_order: number
+  is_active: boolean
+  last_pulled_at: string | null
+}
+
+/**
+ * Categories for every client, keyed by client id.
+ *
+ * Returns an empty map if the table isn't there yet so the settings page keeps
+ * working on a deploy that landed before the migration was applied.
+ */
+export async function getOfferGroups(): Promise<ActionResult<{ byClient: Record<string, OfferGroupRow[]> }>> {
+  const _guard = await requireAdmin(); if (!_guard.ok) return { ok: false, error: _guard.error }
+  const admin = createAdminClient()
+  try {
+    const { data, error } = await admin
+      .from('client_offer_groups')
+      .select('id, client_id, name, slug, sheet_url, sheet_tab_name, master_tab_name, apps_script_url, integrations, display_order, is_active, last_pulled_at')
+      .is('parent_id', null)
+      .order('display_order')
+    if (error) return { ok: true, data: { byClient: {} } }
+    const byClient: Record<string, OfferGroupRow[]> = {}
+    for (const row of (data || []) as OfferGroupRow[]) {
+      ;(byClient[row.client_id] ||= []).push(row)
+    }
+    return { ok: true, data: { byClient } }
+  } catch {
+    return { ok: true, data: { byClient: {} } }
+  }
+}
+
+function slugify(name: string): string {
+  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'category'
+}
+
+export async function upsertOfferGroup(input: {
+  id?: string
+  clientId: string
+  name: string
+  sheetUrl?: string
+  sheetTabName?: string
+  masterTabName?: string
+  appsScriptUrl?: string
+  figmaUrl?: string
+  isActive?: boolean
+}): Promise<ActionResult<{ id: string }>> {
+  const _guard = await requireAdmin(); if (!_guard.ok) return { ok: false, error: _guard.error }
+  const admin = createAdminClient()
+
+  const name = input.name.trim()
+  if (!name) return { ok: false, error: 'Give the category a name.' }
+
+  const sheetUrl = (input.sheetUrl || '').trim()
+  // Validate once here rather than letting every sync re-parse it and fail late.
+  const sheetId = sheetUrl ? extractSheetId(sheetUrl) : null
+  if (sheetUrl && !sheetId) {
+    return { ok: false, error: 'That doesn’t look like a Google Sheet link. Open the sheet and copy the URL from your browser (it contains /spreadsheets/d/…).' }
+  }
+
+  const figmaUrl = (input.figmaUrl || '').trim()
+  const payload = {
+    client_id: input.clientId,
+    name,
+    slug: slugify(name),
+    sheet_url: sheetUrl || null,
+    sheet_id: sheetId,
+    sheet_tab_name: (input.sheetTabName || '').trim() || null,
+    master_tab_name: (input.masterTabName || '').trim() || null,
+    apps_script_url: (input.appsScriptUrl || '').trim() || null,
+    // Figma (and any future tool) lives in jsonb so adding one needs no migration.
+    integrations: figmaUrl ? { figma: { file_url: figmaUrl } } : {},
+    is_active: input.isActive ?? true,
+    updated_at: new Date().toISOString(),
+  }
+
+  if (input.id) {
+    const { error } = await admin.from('client_offer_groups').update(payload).eq('id', input.id)
+    if (error) return { ok: false, error: error.message }
+    revalidatePath('/dashboard/apps/offer-intake')
+    return { ok: true, data: { id: input.id } }
+  }
+
+  const { data: existingCount } = await admin
+    .from('client_offer_groups')
+    .select('id')
+    .eq('client_id', input.clientId)
+  const { data, error } = await admin
+    .from('client_offer_groups')
+    .insert({ ...payload, display_order: (existingCount || []).length })
+    .select('id')
+    .single()
+  if (error || !data) {
+    return { ok: false, error: error?.code === '23505' ? 'That client already has a category with this name.' : (error?.message || 'Could not create the category.') }
+  }
+  revalidatePath('/dashboard/apps/offer-intake')
+  return { ok: true, data: { id: data.id } }
+}
+
+export async function deleteOfferGroup(id: string): Promise<ActionResult> {
+  const _guard = await requireAdmin(); if (!_guard.ok) return { ok: false, error: _guard.error }
+  const admin = createAdminClient()
+  // offer_products.group_id is ON DELETE SET NULL, so past campaigns keep their
+  // products — they just fall back to the default bucket.
+  const { error } = await admin.from('client_offer_groups').delete().eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  revalidatePath('/dashboard/apps/offer-intake')
+  return { ok: true }
+}
+
+// ── Flow mode + master sheet (pull-mode clients) ─────────────────────────────
+
+export async function saveClientFlowMode(
+  clientId: string,
+  mode: 'push' | 'pull' | 'manual',
+): Promise<ActionResult> {
+  const _guard = await requireAdmin(); if (!_guard.ok) return { ok: false, error: _guard.error }
+  if (!['push', 'pull', 'manual'].includes(mode)) return { ok: false, error: 'Unknown flow mode.' }
+  const admin = createAdminClient()
+  const { error } = await admin.from('clients').update({ offer_flow_mode: mode }).eq('id', clientId)
+  if (error) return { ok: false, error: error.message }
+  revalidatePath('/dashboard/apps/offer-intake')
+  revalidatePath('/dashboard/offer-prepare')
+  return { ok: true }
+}
+
+export async function saveMasterSheetUrl(clientId: string, url: string): Promise<ActionResult> {
+  const _guard = await requireAdmin(); if (!_guard.ok) return { ok: false, error: _guard.error }
+  const admin = createAdminClient()
+  const trimmed = url.trim()
+  const sheetId = trimmed ? extractSheetId(trimmed) : null
+  if (trimmed && !sheetId) {
+    return { ok: false, error: 'That doesn’t look like a Google Sheet link. Open the sheet and copy the URL from your browser (it contains /spreadsheets/d/…).' }
+  }
+  const { error } = await admin
+    .from('clients')
+    .update({ offer_master_sheet_url: trimmed || null, offer_master_sheet_id: sheetId })
+    .eq('id', clientId)
+  if (error) return { ok: false, error: error.message }
+  revalidatePath('/dashboard/apps/offer-intake')
+  return { ok: true }
 }
 
 // ── Save / update offer sheet URL ────────────────────────────────────────────

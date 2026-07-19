@@ -38,7 +38,7 @@ export default async function OfferPrepareForClientPage({ params }: {
   const res = await getOfferPageData(client.offer_intake_token)
   if (!res.ok || !res.data) notFound()
 
-  const { campaign, catalog, badges, logoUrl, logoDarkUrl } = res.data
+  const { campaign, catalog, badges, groups, sheetManaged, logoUrl, logoDarkUrl } = res.data
 
   return (
     <div>
@@ -58,6 +58,8 @@ export default async function OfferPrepareForClientPage({ params }: {
         campaign={campaign}
         catalog={catalog}
         badges={badges}
+        groups={groups}
+        sheetManaged={sheetManaged}
         logoUrl={logoDarkUrl || logoUrl}
         staff
       />
