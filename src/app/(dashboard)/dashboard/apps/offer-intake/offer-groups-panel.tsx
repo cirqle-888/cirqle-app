@@ -125,7 +125,7 @@ export function OfferGroupsPanel({
       <p className="text-[11px] text-white/35 mb-3 leading-relaxed">
         {isPull
           ? 'Each category reads one tab of the client’s master sheet. Leave this empty if their sheet has a single list.'
-          : 'Only needed when a client gets more than one flyer (e.g. Groceries and Vegetables), each with its own Google Sheet and Figma file. With none set up, this client keeps using the single Sheet link above.'}
+          : 'Only needed when a client gets more than one flyer (e.g. Groceries and Vegetables). Give each category its OWN Google Sheet — the Figma plugin reads only the first tab of a sheet, so two categories sharing one sheet would leave the second one unread. With no categories, this client keeps using the single Sheet link above.'}
       </p>
 
       {groups.length > 0 && (
@@ -176,9 +176,9 @@ export function OfferGroupsPanel({
           ) : (
             <>
               <input value={draft.sheetUrl} onChange={e => setDraft({ ...draft, sheetUrl: e.target.value })}
-                     placeholder="Google Sheet link for this category (optional)" className={inputCls} />
+                     placeholder="Google Sheet link for this category — give it its own sheet" className={inputCls} />
               <input value={draft.sheetTabName} onChange={e => setDraft({ ...draft, sheetTabName: e.target.value })}
-                     placeholder="Tab to write into (optional, defaults to Offers)" className={inputCls} />
+                     placeholder="Tab name (leave blank — Figma reads the first tab only)" className={inputCls} />
             </>
           )}
 

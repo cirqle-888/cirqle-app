@@ -32,17 +32,28 @@ Cirqle App → **Apps → Offer Intake → Shared sync script** → copy the **S
 Go to **[script.google.com](https://script.google.com)** → **New project**. Delete everything in the
 editor and paste this, then replace `PASTE_SHARED_SECRET_HERE` with the secret from step 1.
 
-> **Already deployed an older version?** Re-paste this script. It adds two things:
-> a `sheetName` key (so a client with multiple offer categories can write
-> Groceries and Vegetables into separate tabs) and a fail-closed secret check.
-> Both are backward compatible — a client without categories still writes to
-> "Offers".
+> **Already deployed an older version?** Re-paste this script. It adds four things,
+> all backward compatible — a client without categories still writes to "Offers":
+>
+> 1. A **fail-closed secret check**. The old version accepted every request when
+>    `SECRET` was left unset.
+> 2. A **`sheetName`** key, for a client whose categories write into separate tabs.
+> 3. It **moves the written tab to position 1**. The Figma Google Sheets plugin
+>    reads only the first tab, and a new spreadsheet still has an empty "Sheet1"
+>    in front of it — which would sync a blank flyer with no error anywhere.
+> 4. A **lock**, so two syncs landing on the same sheet at the same moment can't
+>    interleave and leave stale rows.
+>
+> ⚠️ Paste this into the **shared** script only. Clients on their own bound script
+> (`Advanced → per-client script override`) are sent no secret, so this version
+> would reject their syncs — see *Legacy* below.
 
 ```javascript
 // Cirqle — shared Offer sheet sync. One deployment serves all clients.
 var SECRET = 'PASTE_SHARED_SECRET_HERE';
 
 function doPost(e) {
+  var lock = LockService.getScriptLock();
   try {
     var data = JSON.parse(e.postData.contents);
 
@@ -59,6 +70,15 @@ function doPost(e) {
       return json({ ok: false, error: 'Unauthorized' });
     }
 
+    // Several clients often submit their lists within the same minute. Each one
+    // writes to its OWN spreadsheet so the data can't mix, but this single
+    // script runs them all — and two overlapping runs on the SAME sheet would
+    // interleave clearContents() and setValues() and leave stale rows behind.
+    // Serialising the write costs a second or two and removes that risk.
+    if (!lock.tryLock(20000)) {
+      return json({ ok: false, error: 'Another sync is still running. Try again in a moment.' });
+    }
+
     // Open the target sheet by ID (sent by Cirqle from the client's Sheet link).
     // Falls back to the active sheet if this were ever bound to one.
     var ss = data.spreadsheetId
@@ -67,10 +87,18 @@ function doPost(e) {
     if (!ss) return json({ ok: false, error: 'No spreadsheet' });
 
     // Which tab to write. Cirqle sends `sheetName` when a client has offer
-    // categories (Groceries, Vegetables, …) that each need their own tab;
-    // without it everything goes to "Offers" exactly as before.
+    // categories that write into separate tabs; without it everything goes to
+    // "Offers" exactly as before.
     var sheetName = data.sheetName || 'Offers';
     var tab = ss.getSheetByName(sheetName) || ss.insertSheet(sheetName);
+
+    // The Figma Google Sheets plugin reads the FIRST tab of a spreadsheet and
+    // ignores the rest. A brand-new sheet still has an empty "Sheet1" in front,
+    // so inserting "Offers" behind it would sync a blank flyer with no error
+    // anywhere. Force the tab we just wrote to the front.
+    ss.setActiveSheet(tab);
+    ss.moveActiveSheet(1);
+
     tab.clearContents();
 
     // Row 1 = headers (the stable Figma data contract). Rows 2+ = products.
@@ -79,10 +107,13 @@ function doPost(e) {
       tab.getRange(2, 1, data.rows.length, data.rows[0].length).setValues(data.rows);
     }
     tab.autoResizeColumns(1, data.headers.length);
+    SpreadsheetApp.flush();
 
     return json({ ok: true, rows: (data.rows || []).length, sheetUrl: ss.getUrl() });
   } catch (err) {
     return json({ ok: false, error: err.message });
+  } finally {
+    try { lock.releaseLock(); } catch (ignore) {}
   }
 }
 
