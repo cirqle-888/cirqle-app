@@ -131,14 +131,22 @@ async function chunkedUpdate(table, ids, patch, label, auditFor) {
       console.log(`      ${label} chunk ${n}/${total} (${slice.length}) FAILED: ${error.message}`)
       continue
     }
-    const changed = (data || []).length
+    const changedIds = (data || []).map(r => r.id)
+    const changed = changedIds.length
     if (changed !== slice.length) {
-      console.log(`      ⚠️  ${label} chunk ${n}/${total}: asked ${slice.length}, changed ${changed}`)
+      // HALT, do not warn-and-continue. The audit below would otherwise assert
+      // that all `slice.length` rows changed when only `changed` did, and
+      // service_scope_audit is append-only — those false records are permanent.
+      console.error(`\n❌ ${label} chunk ${n}/${total}: asked ${slice.length}, changed ${changed}.`)
+      console.error('   Refusing to audit rows that may not have changed. STOPPING.')
+      failures.push({ chunk: n, ids: slice, error: `row-count mismatch ${changed}/${slice.length}` })
+      return { ok: ok + changed, failures, auditOk, auditFailed, halted: true }
     }
     ok += changed
     let auditNote = ''
     if (auditFor) {
-      const a = await writeAudit(auditFor(slice))
+      // Audit the ids the DB actually returned, never the requested slice.
+      const a = await writeAudit(auditFor(changedIds))
       auditOk += a.ok; auditFailed += a.failed
       auditNote = a.failed ? `, ${a.failed} audit FAILED` : `, ${a.ok} audited`
       // ABORT on a lost trail. The rows are already changed and
@@ -338,7 +346,9 @@ const now = new Date().toISOString()
 const recoveryPath = `backfill-recovery-${now.replace(/[:.]/g, '-')}.json`
 writeFileSync(recoveryPath, JSON.stringify({
   ranAt: now,
-  note: 'Undo: reactivate the deactivateIds, delete the created pairs.',
+  note: 'Undo: UPDATE deactivateIds SET is_active=true, deactivated_at=NULL, deactivated_by=NULL. '
+      + 'For created pairs set is_active=false — do NOT DELETE them: the row carries the agreed price '
+      + 'that historical commission recompute still reads.',
   deactivateIds: toDeactivate.map(x => x.id),
   reactivateIds: toReactivate.map(x => x.id),
   created: toCreate.map(r => ({ client_id: r.client_id, service_id: r.service_id })),
@@ -353,7 +363,7 @@ if (toCreate.length) {
   console.log(`\n[1/3] creating ${toCreate.length}…`)
   for (let i = 0; i < toCreate.length; i += CHUNK) {
     const slice = toCreate.slice(i, i + CHUNK)
-    const { error } = await db.from('client_service_pricing').insert(slice.map(r => ({
+    const { data: inserted, error } = await db.from('client_service_pricing').insert(slice.map(r => ({
       client_id: r.client_id,
       service_id: r.service_id,
       price: null,
@@ -361,7 +371,7 @@ if (toCreate.length) {
       // commission pool because every reader guards with `?? 50` / `!= null`.
       commission_percentage: null,
       is_active: true,
-    })))
+    }))).select('id')
     // ABORT, never continue. The intake guardrail reasoned against a world in
     // which these rows exist (committedAfter counts toCreate as present). If a
     // create fails and we proceed to step [3/3], we deactivate 625 rows using
@@ -374,7 +384,15 @@ if (toCreate.length) {
       console.error(`   Nothing has been deactivated. Recovery file: ${recoveryPath}`)
       process.exit(1)
     }
-    created += slice.length
+    // Count what the DB returned, not what we asked for — same discipline as
+    // chunkedUpdate, which was fixed for exactly this.
+    const insertedCount = (inserted || []).length
+    if (insertedCount !== slice.length) {
+      console.error(`\n❌ create: asked ${slice.length}, inserted ${insertedCount}. STOPPING before deactivation.`)
+      console.error(`   Recovery file: ${recoveryPath}`)
+      process.exit(1)
+    }
+    created += insertedCount
     const a = await writeAudit(slice.map(r => ({
       scope_kind: 'client_service', action: 'added',
       client_id: r.client_id, service_id: r.service_id,
@@ -425,6 +443,10 @@ if (toDeactivate.length) {
     })))
   deactivated = r.ok; auditOk += r.auditOk; auditFailed += r.auditFailed
   problems.push(...r.failures.map(f => `deactivate chunk ${f.chunk}: ${f.error}`))
+  if (r.halted) {
+    console.error(`\n❌ halted during deactivation — ${r.ok} row(s) applied before the stop.`)
+    console.error(`   Recovery file: ${recoveryPath}`)
+  }
 }
 
 console.log(`\n${'='.repeat(72)}`)

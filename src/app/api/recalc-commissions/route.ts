@@ -5,6 +5,7 @@ import { getEffectivePerformanceRating } from '@/lib/calculations/performance-hi
 import { syncTaskAgreementEarnings } from '@/lib/sync/agreement-earnings'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { isMonthFinalized } from '@/lib/payroll/compute'
+import { fetchAll } from '@/lib/supabase/server'
 
 export async function POST(req: NextRequest) {
   try {
@@ -37,7 +38,7 @@ export async function POST(req: NextRequest) {
       // the groups/parameters/tools queries above, which are operational).
       // is_active governs what may be SOLD, never what was EARNED — filtering
       // here would reprice every past task on a deactivated pair.
-      supabase.from('client_service_pricing').select('client_id, service_id, commission_percentage'),
+      fetchAll(supabase.from('client_service_pricing').select('client_id, service_id, commission_percentage').order('client_id').order('service_id')),
       supabase.from('employee_performance_history').select('*').order('effective_from', { ascending: false })
     ])
 

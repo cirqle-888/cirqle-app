@@ -12,6 +12,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { loadActiveAgreements, syncTaskAgreementEarnings } from '@/lib/sync/agreement-earnings'
+import { fetchAll } from '@/lib/supabase/server'
 
 const r2 = (n: number) => Math.round(n * 100) / 100
 
@@ -135,7 +136,7 @@ export async function refreshMonthStoredEarnings(
   // reprices to the 50% fallback. Adding an is_active filter here would rewrite
   // earnings across every deactivated pair. Covered by compute.test.ts.
   const [pricingRes, empRes, taskToolsRes, toolsRes] = await Promise.all([
-    admin.from('client_service_pricing').select('client_id, service_id, commission_percentage'),
+    fetchAll(admin.from('client_service_pricing').select('client_id, service_id, commission_percentage').order('client_id').order('service_id')),
     admin.from('employees').select('id, performance_rating'),
     admin.from('task_tools').select('task_id, tool_id').in('task_id', taskIds),
     admin.from('tools').select('id, fixed_percentage, is_active'),

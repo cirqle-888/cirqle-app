@@ -4,6 +4,7 @@ import { getEffectivePerformanceRating } from '@/lib/calculations/performance-hi
 import { syncTaskAgreementEarnings } from '@/lib/sync/agreement-earnings'
 import { isTaskMonthProtected } from '@/lib/payroll/compute'
 import { getInvoiceDateForTaskMonth, toSequenceMonth } from '@/lib/invoices/numbering'
+import { fetchAll } from '@/lib/supabase/server'
 
 const r2 = (n: number) => Math.round(n * 100) / 100
 
@@ -144,7 +145,7 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
     supabase.from('tools').select('*').eq('is_active', true),
     supabase.from('tool_services').select('tool_id, service_id'),
     supabase.from('group_services').select('group_id, service_id'),
-    supabase.from('client_service_pricing').select('client_id, service_id, commission_percentage'),
+    fetchAll(supabase.from('client_service_pricing').select('client_id, service_id, commission_percentage').order('client_id').order('service_id')),
     (supabase as any).from('employee_performance_history').select('*').order('effective_from', { ascending: false }),
     supabase.from('task_tools').select('tool_id').eq('task_id', taskId),
     supabase.from('contribution_scores').select('*').eq('task_id', taskId)

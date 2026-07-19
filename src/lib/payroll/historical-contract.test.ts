@@ -160,6 +160,68 @@ describe('every writer of earnings_inr guards finalized payroll BEFORE writing',
   })
 })
 
+describe('money readers paginate client_service_pricing', () => {
+  // PostgREST silently caps a response at 1000 rows. This table is 809 rows
+  // and only ever GROWS (deactivation never deletes), so an unpaginated read
+  // is ~190 rows from dropping pairs — and every task on a dropped pair would
+  // reprice via `?? 50`. The failure is completely silent: no error, just
+  // wrong money.
+  it.each([
+    'src/lib/payroll/compute.ts',
+    'src/lib/sync/integrity.ts',
+    'src/app/api/recalc-commissions/route.ts',
+  ])('%s', file => {
+    const src = read(file)
+    let checked = 0
+    // Capture from the START of the statement's line: the `fetchAll(` wrapper
+    // sits BEFORE `from(...)`, so a chain extracted at the `from` marker never
+    // contains it.
+    const chains = src.split('\n').reduce<string[]>((acc, line, i, lines) => {
+      if (!line.includes("from('client_service_pricing')")) return acc
+      let stmt = line
+      for (let k = i + 1; k < lines.length && /^\s*[.)]/.test(lines[k]); k++) stmt += '\n' + lines[k]
+      acc.push(stmt)
+      return acc
+    }, [])
+    for (const chain of chains) {
+      // Only WHOLE-TABLE reads need pagination. A single-pair lookup
+      // (`.eq(client).eq(service).maybeSingle()`) returns at most one row and
+      // is unaffected by the 1000-row cap.
+      if (/\.eq\(|maybeSingle|\.single\(/.test(chain)) continue
+      checked++
+      expect(chain, 'unpaginated whole-table money read').toMatch(/fetchAll\(|\.range\(/)
+      expect(chain, 'pagination needs a stable order').toMatch(/\.order\(/)
+    }
+    expect(checked, 'no whole-table pricing read found — did the reader move?').toBeGreaterThan(0)
+  })
+})
+
+describe('the finalized-month check fails CLOSED', () => {
+  const src = read('src/lib/payroll/compute.ts')
+
+  it('isMonthFinalized treats a query error as finalized', () => {
+    // Mutation that survived: `if (error) return true` -> `return false`.
+    // Failing OPEN means a transient DB error silently re-enables rewriting a
+    // paid month — the single worst outcome, and invisible.
+    const body = src.slice(src.indexOf('export async function isMonthFinalized'))
+    const fn = body.slice(0, body.indexOf('\n}'))
+    expect(fn).toMatch(/if \(error\) return true/)
+    expect(fn, 'fails OPEN on error').not.toMatch(/if \(error\) return false/)
+  })
+
+  it('isTaskMonthProtected treats an unreadable task_date as protected', () => {
+    const body = src.slice(src.indexOf('export async function isTaskMonthProtected'))
+    const fn = body.slice(0, body.indexOf('\n}'))
+    // A null / malformed / out-of-range date must return true, not fall through.
+    expect(fn).toMatch(/Number\.isInteger\(y\)/)
+    expect(fn).toMatch(/Number\.isInteger\(m\)/)
+    expect(fn).toMatch(/m < 1 \|\| m > 12/)
+    expect(fn).toMatch(/return true/)
+    // The bad-date branch must return BEFORE the DB lookup, not after.
+    expect(fn.indexOf('return true')).toBeLessThan(fn.indexOf('isMonthFinalized('))
+  })
+})
+
 describe('buildAnalysisRows: a deactivated commitment still resolves its earned rate', () => {
   const task = {
     id: 't1', client_id: 'c1', service_id: 's1',
@@ -188,6 +250,19 @@ describe('buildAnalysisRows: a deactivated commitment still resolves its earned 
     const row = run([{ client_id: 'c1', service_id: 's1', commission_percentage: 0 }])[0]
     expect(row.commission_pct).toBe(0)
     expect(row.total_earnings).toBe(0)
+  })
+
+  it('a NULL commission is byte-identical to having no row — what the backfill inserts', () => {
+    // The backfill creates 5 rows with commission_percentage: null, and some of
+    // those pairs have live tasks. Every prior case here covered 75 / 0 / 50 /
+    // no-row but never NULL — the exact value being written. If any resolver
+    // distinguished null from absent (e.g. via `.has()` or `!== undefined`),
+    // those 5 pairs would reprice the moment the row appeared.
+    const withNull = run([{ client_id: 'c1', service_id: 's1', commission_percentage: null }])[0]
+    const noRow = run([])[0]
+    expect(withNull.commission_pct).toBe(noRow.commission_pct)
+    expect(withNull.total_earnings).toBe(noRow.total_earnings)
+    expect(withNull.commission_pct).toBe(50)   // falls through to the fallback
   })
 
   it('inserting 50 is byte-identical to having no row at all (the backfill invariant)', () => {
