@@ -117,6 +117,28 @@ function doPost(e) {
   }
 }
 
+// Health check. Open the /exec URL in a browser (or curl it) and this answers
+// without touching any sheet — so you can tell at a glance WHICH version of the
+// script a deployment is actually serving, and whether its secret is filled in.
+//
+// Apps Script pins each deployment to a numbered version, and saving the editor
+// does not move it: "my change had no effect" is nearly always a deployment
+// still serving an older snapshot. Bump SCRIPT_VERSION whenever you edit, then
+// GET the URL to confirm the new number is live.
+//
+// It deliberately never returns the secret itself, only whether one is set.
+var SCRIPT_VERSION = 3;
+
+function doGet() {
+  return json({
+    ok: true,
+    script: 'cirqle-offer-sync',
+    version: SCRIPT_VERSION,
+    secretConfigured: !!SECRET && SECRET !== 'PASTE_SHARED_SECRET_HERE',
+    supportsSheetName: true
+  });
+}
+
 function json(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
