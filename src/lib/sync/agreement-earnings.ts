@@ -1,5 +1,6 @@
 import { createTypedAdminClient } from '@/lib/supabase/server'
 import { matchAgreement, computeAgreementEarning, type CommissionAgreement } from '@/lib/calculations/agreements'
+import { isMonthFinalized } from '@/lib/payroll/compute'
 
 /**
  * Apply employee commission agreements to a task's stored earnings.
@@ -42,6 +43,15 @@ export async function syncTaskAgreementEarnings(taskId: string): Promise<{ chang
     .eq('id', taskId)
     .single()
   if (!task) return { changed: 0 }
+
+  // HISTORICAL EARNINGS PROTECTION — this is a THIRD independent writer of
+  // contribution_scores.earnings_inr (alongside recalcTaskCommissions and
+  // refreshMonthStoredEarnings) and is reachable directly, so it carries its
+  // own guard rather than trusting every caller to have checked.
+  if (task.task_date) {
+    const [y, m] = String(task.task_date).split('-').map(Number)
+    if (y && m && await isMonthFinalized(admin as any, m, y)) return { changed: 0 }
+  }
 
   const { data: scores } = await admin
     .from('contribution_scores')

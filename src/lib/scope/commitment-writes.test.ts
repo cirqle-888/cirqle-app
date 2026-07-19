@@ -66,10 +66,33 @@ describe('no write path hard-deletes a commitment row', () => {
 describe('the backfill script preserves historical commission', () => {
   const src = read('scripts/seed-client-commitments.mjs')
 
+  /**
+   * The row literal passed to `.from('client_service_pricing').insert(` — the
+   * only place a NEW commitment row is born, and therefore the only place the
+   * DB DEFAULT 0 can apply. Extracted by brace-matching from the call site so
+   * assertions cannot be satisfied by an unrelated occurrence elsewhere.
+   */
+  const insertObject = (() => {
+    const call = src.indexOf(".from('client_service_pricing').insert(")
+    expect(call).toBeGreaterThan(-1)
+    const open = src.indexOf('{', src.indexOf('=> (', call))
+    let depth = 0
+    for (let i = open; i < src.length; i++) {
+      if (src[i] === '{') depth++
+      else if (src[i] === '}' && --depth === 0) return src.slice(open, i + 1)
+    }
+    throw new Error('unbalanced braces in the insert row literal')
+  })()
+
   it('writes commission_percentage explicitly as null on new rows', () => {
     // Explicit null, never omitted: the column DEFAULTs to 0, which is the one
     // value that destroys history.
-    expect(src).toMatch(/commission_percentage:\s*null/)
+    //
+    // MUST be scoped to the insert. A file-wide /commission_percentage:\s*null/
+    // is satisfied by the audit payload two lines below, so deleting the null
+    // from the insert — restoring the exact defect this guards — left the test
+    // green. Mutation-tested: removing line 307 now fails.
+    expect(insertObject).toMatch(/commission_percentage:\s*null/)
   })
 
   it('never inserts a literal 0 commission', () => {
@@ -86,12 +109,28 @@ describe('the backfill script preserves historical commission', () => {
     expect(src).toMatch(/for \(let i = 0; i < ids\.length; i \+= CHUNK\)/)
   })
 
-  it('writes audit rows per batch rather than deferring them to the end', () => {
-    // The audit table is append-only, so a trail lost to a later failure can
-    // never be reconstructed.
-    const applyStart = src.indexOf('// ── Apply')
-    const audits = [...src.slice(applyStart).matchAll(/await writeAudit\(/g)]
-    expect(audits.length).toBeGreaterThanOrEqual(3)   // one per write batch
+  it('audits inside the chunk loop, not after it', () => {
+    // The audit table is append-only, so a trail lost to a crash between the
+    // last UPDATE and a deferred audit call can never be reconstructed — rows
+    // would be silently changed with no record. The write must be audited
+    // before the next chunk is attempted.
+    const fn = src.indexOf('async function chunkedUpdate(')
+    const body = src.slice(fn, src.indexOf('\n}', fn))
+    const loop = body.indexOf('for (let i = 0')
+    const audit = body.indexOf('await writeAudit(')
+    const ret = body.indexOf('return {')
+    expect(loop).toBeGreaterThan(-1)
+    expect(audit).toBeGreaterThan(loop)   // inside the loop…
+    expect(audit).toBeLessThan(ret)       // …not after it
+  })
+
+  it('audits every apply path', () => {
+    // create writes directly; reactivate/deactivate go through chunkedUpdate
+    // and must each hand it an auditFor callback — omitting one would apply
+    // hundreds of rows with no trail.
+    const apply = src.slice(src.indexOf('// ── Apply'))
+    expect([...apply.matchAll(/await writeAudit\(/g)]).toHaveLength(1)
+    expect([...apply.matchAll(/slice => slice\.map/g)]).toHaveLength(2)
   })
 
   it('carries the intake-preservation guardrail', () => {

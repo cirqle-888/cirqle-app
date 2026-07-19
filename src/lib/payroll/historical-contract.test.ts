@@ -77,6 +77,50 @@ describe('operational readers SHOULD filter by is_active', () => {
   })
 })
 
+/**
+ * Extract a named function's body, from its declaration to the first
+ * column-0 `}`. Used to assert per-writer ordering without an adjacent
+ * function's guard standing in for a missing one.
+ */
+function functionBody(src: string, name: string): string {
+  const decl = src.search(new RegExp(`(export )?async function ${name}\\b`))
+  expect(decl).toBeGreaterThan(-1)
+  const end = src.indexOf('\n}', decl)
+  return src.slice(decl, end === -1 ? undefined : end)
+}
+
+describe('every writer of earnings_inr guards finalized payroll BEFORE writing', () => {
+  // There are four independent writers, each reachable directly — so each
+  // carries its own guard rather than trusting callers. A missing or
+  // short-circuited guard silently reprices months already paid out.
+  it.each([
+    ['src/lib/sync/integrity.ts', 'recalcTaskCommissions'],
+    ['src/lib/sync/integrity.ts', 'refreshStoredEarningsFromBilling'],
+    ['src/lib/sync/agreement-earnings.ts', 'syncTaskAgreementEarnings'],
+    ['src/lib/payroll/compute.ts', 'refreshMonthStoredEarnings'],
+  ])('%s → %s', (file, fn) => {
+    const body = functionBody(read(file), fn)
+
+    const guard = body.indexOf('isMonthFinalized')
+    expect(guard).toBeGreaterThan(-1)          // the guard exists at all…
+
+    // …in THIS function, not merely somewhere in the file, and it must sit
+    // above every write. `recalcTaskCommissions` originally guarded only its
+    // fallback branch while the primary path wrote unguarded.
+    const write = body.search(/\.(update|upsert|insert)\(/)
+    expect(write).toBeGreaterThan(-1)
+    expect(guard).toBeLessThan(write)
+
+    // The guard must return, not just evaluate.
+    expect(body.slice(guard, guard + 400)).toMatch(/return\b/)
+
+    // And it must not be short-circuited into a no-op — `false && await
+    // isMonthFinalized(...)` keeps every other assertion above green.
+    const condition = body.slice(body.lastIndexOf('if (', guard), guard)
+    expect(condition).not.toMatch(/\bfalse\b/)
+  })
+})
+
 describe('buildAnalysisRows: a deactivated commitment still resolves its earned rate', () => {
   const task = {
     id: 't1', client_id: 'c1', service_id: 's1',

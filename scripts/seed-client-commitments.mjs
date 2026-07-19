@@ -85,9 +85,16 @@ async function tryFetch(table, select, tweak = q => q) {
   try { return await fetchAll(table, select, tweak) } catch { return [] }
 }
 
-/** Run an update over ids in chunks; one failing chunk never aborts the rest. */
-async function chunkedUpdate(table, ids, patch, label) {
-  let ok = 0
+/**
+ * Run an update over ids in chunks; one failing chunk never aborts the rest.
+ *
+ * `auditFor(slice)` is invoked immediately after EACH successful chunk, not
+ * after the loop. service_scope_audit is append-only by trigger, so a trail
+ * lost to a crash between the last update and a deferred audit call can never
+ * be reconstructed — the rows would be silently changed with no record.
+ */
+async function chunkedUpdate(table, ids, patch, label, auditFor) {
+  let ok = 0, auditOk = 0, auditFailed = 0
   const failures = []
   for (let i = 0; i < ids.length; i += CHUNK) {
     const slice = ids.slice(i, i + CHUNK)
@@ -97,12 +104,18 @@ async function chunkedUpdate(table, ids, patch, label) {
     if (error) {
       failures.push({ chunk: n, ids: slice, error: error.message })
       console.log(`      ${label} chunk ${n}/${total} (${slice.length}) FAILED: ${error.message}`)
-    } else {
-      ok += slice.length
-      console.log(`      ${label} chunk ${n}/${total} (${slice.length}) ok`)
+      continue
     }
+    ok += slice.length
+    let auditNote = ''
+    if (auditFor) {
+      const a = await writeAudit(auditFor(slice))
+      auditOk += a.ok; auditFailed += a.failed
+      auditNote = a.failed ? `, ${a.failed} audit FAILED` : `, ${a.ok} audited`
+    }
+    console.log(`      ${label} chunk ${n}/${total} (${slice.length}) ok${auditNote}`)
   }
-  return { ok, failures }
+  return { ok, failures, auditOk, auditFailed }
 }
 
 /** Audit rows are written per batch, never deferred — the table is append-only,
@@ -309,35 +322,33 @@ if (toCreate.length) {
 
 if (toReactivate.length) {
   console.log(`\n[2/3] reactivating ${toReactivate.length}…`)
+  const byId = new Map(toReactivate.map(x => [x.id, x]))
   const r = await chunkedUpdate('client_service_pricing', toReactivate.map(x => x.id),
-    { is_active: true, deactivated_at: null, deactivated_by: null }, 'reactivate')
-  reactivated = r.ok
+    { is_active: true, deactivated_at: null, deactivated_by: null }, 'reactivate',
+    slice => slice.map(id => byId.get(id)).filter(Boolean).map(x => ({
+      scope_kind: 'client_service', action: 'activated',
+      client_id: x.client_id, service_id: x.service_id,
+      old_value: { is_active: false }, new_value: { is_active: true, via: 'evidence' },
+      actor_id: null, source: 'backfill',
+    })))
+  reactivated = r.ok; auditOk += r.auditOk; auditFailed += r.auditFailed
   problems.push(...r.failures.map(f => `reactivate chunk ${f.chunk}: ${f.error}`))
-  const done = new Set(r.failures.flatMap(f => f.ids))
-  const a = await writeAudit(toReactivate.filter(x => !done.has(x.id)).map(x => ({
-    scope_kind: 'client_service', action: 'activated',
-    client_id: x.client_id, service_id: x.service_id,
-    old_value: { is_active: false }, new_value: { is_active: true, via: 'evidence' },
-    actor_id: null, source: 'backfill',
-  })))
-  auditOk += a.ok; auditFailed += a.failed
 }
 
 if (toDeactivate.length) {
   console.log(`\n[3/3] deactivating ${toDeactivate.length}…`)
+  const byId = new Map(toDeactivate.map(x => [x.id, x]))
   const r = await chunkedUpdate('client_service_pricing', toDeactivate.map(x => x.id),
-    { is_active: false, deactivated_at: now }, 'deactivate')
-  deactivated = r.ok
+    { is_active: false, deactivated_at: now }, 'deactivate',
+    slice => slice.map(id => byId.get(id)).filter(Boolean).map(x => ({
+      scope_kind: 'client_service', action: 'deactivated',
+      client_id: x.client_id, service_id: x.service_id,
+      old_value: { is_active: true, price: x.price, commission_percentage: x.commission_percentage },
+      new_value: { is_active: false, reason: x.generic ? 'generic_bucket' : 'no_evidence' },
+      actor_id: null, source: 'backfill',
+    })))
+  deactivated = r.ok; auditOk += r.auditOk; auditFailed += r.auditFailed
   problems.push(...r.failures.map(f => `deactivate chunk ${f.chunk}: ${f.error}`))
-  const failedIds = new Set(r.failures.flatMap(f => f.ids))
-  const a = await writeAudit(toDeactivate.filter(x => !failedIds.has(x.id)).map(x => ({
-    scope_kind: 'client_service', action: 'deactivated',
-    client_id: x.client_id, service_id: x.service_id,
-    old_value: { is_active: true, price: x.price, commission_percentage: x.commission_percentage },
-    new_value: { is_active: false, reason: x.generic ? 'generic_bucket' : 'no_evidence' },
-    actor_id: null, source: 'backfill',
-  })))
-  auditOk += a.ok; auditFailed += a.failed
 }
 
 console.log(`\n${'='.repeat(72)}`)

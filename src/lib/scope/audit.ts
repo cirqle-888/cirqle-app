@@ -41,10 +41,18 @@ export interface ScopeAuditEntry {
 export async function logScopeChanges(
   admin: Admin,
   entries: ScopeAuditEntry[],
-): Promise<void> {
-  if (entries.length === 0) return
+): Promise<{ written: number; error?: string }> {
+  if (entries.length === 0) return { written: 0 }
   try {
-    await admin.from('service_scope_audit').insert(entries.map(e => ({
+    // supabase-js RESOLVES with { error } on a database failure — it does not
+    // reject. A bare try/catch therefore never sees a constraint violation,
+    // an RLS rejection or a missing table, and the audit row silently
+    // disappears. (That is exactly how an unapplied CHECK migration made
+    // every 'updated' entry vanish with no signal anywhere.) Inspect the
+    // error explicitly, log it, and report it to the caller — while still
+    // never throwing, because a failed audit must not fail the write it
+    // describes.
+    const { error } = await admin.from('service_scope_audit').insert(entries.map(e => ({
       scope_kind:  e.scopeKind,
       action:      e.action,
       employee_id: e.employeeId ?? null,
@@ -55,7 +63,16 @@ export async function logScopeChanges(
       actor_id:    e.actorId ?? null,
       source:      e.source ?? 'ui',
     })))
-  } catch { /* audit is best-effort — never break the write it describes */ }
+    if (error) {
+      console.error(`[scope-audit] ${entries.length} row(s) NOT recorded:`, error.message)
+      return { written: 0, error: error.message }
+    }
+    return { written: entries.length }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    console.error(`[scope-audit] ${entries.length} row(s) NOT recorded (transport):`, message)
+    return { written: 0, error: message }
+  }
 }
 
 /**

@@ -268,6 +268,13 @@ export async function upsertClientServicePricings(
 
   if (pricingRows.length === 0) return { ok: true }
   const admin = createAdminClient()
+
+  // Snapshot BEFORE the upsert. Reading prior state afterwards is useless —
+  // the write has already set is_active: true on every row, so a revival
+  // would be indistinguishable from a fresh commitment and 'activated' could
+  // never be emitted.
+  const priorState = await readPriorCommitmentState(admin, pricingRows)
+
   // Re-activating clears the deactivation stamp so the row never carries a
   // stale "removed on" date while being live.
   const rows = pricingRows.map(r => r.is_active
@@ -278,7 +285,7 @@ export async function upsertClientServicePricings(
     .upsert(rows, { onConflict: 'client_id,service_id' })
   if (error) return { ok: false, error: error.message }
 
-  await auditCommitmentWrites(admin, pricingRows, auth.employeeId)
+  await auditCommitmentWrites(admin, pricingRows, priorState, auth.employeeId)
 
   // Setting pricing resolves the "pending to price" flag for the touched
   // clients and services. Best-effort — ignore if the column isn't there yet.
@@ -337,34 +344,57 @@ export async function deactivateClientServices(
   return { ok: true }
 }
 
+type PriorCommitmentState = Map<string, boolean>
+
+/**
+ * Read the CURRENT is_active for the pairs about to be written. Must be called
+ * BEFORE the upsert — see auditCommitmentWrites.
+ */
+async function readPriorCommitmentState(
+  admin: ReturnType<typeof createAdminClient>,
+  rows: { client_id: string; service_id: string }[],
+): Promise<PriorCommitmentState> {
+  const prior: PriorCommitmentState = new Map()
+  try {
+    const { data } = await admin.from('client_service_pricing')
+      .select('client_id, service_id, is_active')
+      .in('client_id', [...new Set(rows.map(r => r.client_id))])
+      // Scoped to the touched services — without this it pulls every row for
+      // each client, which on a full client edit is the entire matrix.
+      .in('service_id', [...new Set(rows.map(r => r.service_id))])
+    for (const r of (data || []) as { client_id: string; service_id: string; is_active: boolean }[]) {
+      prior.set(`${r.client_id}|${r.service_id}`, r.is_active)
+    }
+  } catch { /* best-effort — a missing snapshot only coarsens the audit label */ }
+  return prior
+}
+
 /**
  * Audit commitment writes, distinguishing a brand-new commitment ('added')
- * from the revival of a deactivated one ('activated'). Best-effort.
+ * from the revival of a deactivated one ('activated') and a repricing of a
+ * live one ('updated'). Best-effort: never breaks the write it describes.
  */
 async function auditCommitmentWrites(
   admin: ReturnType<typeof createAdminClient>,
   rows: { client_id: string; service_id: string; is_active: boolean; price?: number | null; commission_percentage?: number | null }[],
+  prior: PriorCommitmentState,
   actorId: string | null,
 ): Promise<void> {
-  try {
-    const active = rows.filter(r => r.is_active)
-    if (active.length === 0) return
-    const { data: existing } = await admin.from('client_service_pricing')
-      .select('client_id, service_id, is_active')
-      .in('client_id', [...new Set(active.map(r => r.client_id))])
-    const prior = new Map((existing || []).map((r: any) => [`${r.client_id}|${r.service_id}`, r.is_active]))
-    await logScopeChanges(admin, active.map(r => {
-      const was = prior.get(`${r.client_id}|${r.service_id}`)
-      return {
-        scopeKind: 'client_service' as const,
-        action: was === false ? ('activated' as const) : ('added' as const),
-        clientId: r.client_id, serviceId: r.service_id,
-        oldValue: was === undefined ? null : { is_active: was },
-        newValue: { is_active: true, price: r.price ?? null },
-        actorId, source: 'ui' as const,
-      }
-    }))
-  } catch { /* audit is best-effort — never break the write it describes */ }
+  const active = rows.filter(r => r.is_active)
+  if (active.length === 0) return
+  await logScopeChanges(admin, active.map(r => {
+    const was = prior.get(`${r.client_id}|${r.service_id}`)
+    return {
+      scopeKind: 'client_service' as const,
+      action: was === undefined ? ('added' as const)
+        : was === false ? ('activated' as const)
+        : ('updated' as const),
+      clientId: r.client_id, serviceId: r.service_id,
+      oldValue: was === undefined ? null : { is_active: was },
+      newValue: { is_active: true, price: r.price ?? null },
+      actorId, source: 'ui' as const,
+    }
+  }))
 }
 
 /** Pages whose pickers are derived from commitments. */

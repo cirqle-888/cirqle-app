@@ -115,6 +115,20 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
   const { data: task } = await supabase.from('tasks').select('*').eq('id', taskId).single()
   if (!task) return { error: 'Task not found' }
 
+  // HISTORICAL EARNINGS PROTECTION — checked HERE, at the entry point, not
+  // only in the refreshStoredEarningsFromBilling fallback below. This function
+  // has its OWN write path (the contribution_scores upsert further down, plus
+  // syncTaskAgreementEarnings), which is the branch taken whenever the task
+  // has raw contributions — i.e. the common case on every task save. Guarding
+  // only the callee left that path wide open for months whose payslips are
+  // already paid. Fails CLOSED on an unreadable task_date.
+  if (task.task_date) {
+    const [y, m] = String(task.task_date).split('-').map(Number)
+    if (y && m && await isMonthFinalized(supabase as any, m, y)) {
+      return { updated: 0, message: 'Payroll for this month is finalized — earnings left unchanged' }
+    }
+  }
+
   // 2. Fetch Contributions
   const { data: contribs } = await supabase.from('contributions').select('*').eq('task_id', taskId).gt('value', 0)
   // No raw contributions → fall back to refreshing stored earnings from the
