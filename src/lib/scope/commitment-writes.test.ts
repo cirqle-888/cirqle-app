@@ -40,15 +40,45 @@ describe('no write path coerces commission_percentage to 0', () => {
     expect(src).not.toMatch(/commission_percentage:\s*0\b/)
     expect(src).not.toMatch(/commission_percentage:\s*[^,\n]*\|\|\s*0\b/)
     expect(src).not.toMatch(/commission_percentage:\s*[^,\n]*\?\?\s*0\b/)
+
+    // The above only sees the assignment LINE, so the incident is
+    // reintroducible by laundering the value through a local:
+    //   const cp = Number(c.to) || 0
+    //   … commission_percentage: cp
+    // An audit proved that exact mutation survives. Follow one level of
+    // indirection: whatever identifier is assigned, check how it was defined.
+    // Terminator includes `}` and `)`: an inline object literal
+    // `{ commission_percentage: cp }` has neither a comma nor a newline after
+    // the identifier, and that mutation survived a narrower match.
+    for (const [, ident] of src.matchAll(/commission_percentage:\s*([A-Za-z_$][\w$]*)\s*[,\n})]/g)) {
+      if (ident === 'null' || ident === 'undefined') continue
+      for (const [, init] of src.matchAll(
+        new RegExp(`(?:const|let|var)\\s+${ident}\\s*=\\s*([^\\n]+)`, 'g')
+      )) {
+        expect(init, `${ident} feeds commission_percentage but coerces to 0`).not.toMatch(/(\|\||\?\?)\s*0\b/)
+      }
+    }
   })
 })
 
 describe('no write path hard-deletes a commitment row', () => {
   it.each(WRITE_PATHS)('%s', file => {
     const src = read(file)
-    // Catches `.from('client_service_pricing').delete()` in either order of
-    // chaining, allowing whitespace/newlines between the calls.
-    expect(src).not.toMatch(/from\(['"]client_service_pricing['"]\)[\s\S]{0,80}?\.delete\(/)
+    // Walk the FULL chain from each .from('client_service_pricing') to its
+    // statement end. A fixed lookahead window (the previous `{0,80}`) is
+    // walked past by inserting a few .eq() calls before the .delete() — an
+    // audit confirmed that mutation survives.
+    for (let i = src.indexOf("from('client_service_pricing')"); i !== -1;
+         i = src.indexOf("from('client_service_pricing')", i + 1)) {
+      const lines = src.slice(i).split('\n')
+      const chain = [lines[0]]
+      for (const line of lines.slice(1)) {
+        if (!/^\s*[.)]/.test(line)) break      // chain ended
+        chain.push(line)
+      }
+      // `\s*` before the paren: `.delete( )` with a space also survived.
+      expect(chain.join('\n'), 'hard delete on a commitment row').not.toMatch(/\.delete\s*\(/)
+    }
   })
 
   it('the import Clean-up tab special-cases pricing_matrix before its generic delete', () => {
@@ -101,7 +131,7 @@ describe('the backfill script preserves historical commission', () => {
 
   it('deactivates rather than deletes', () => {
     expect(src).toMatch(/is_active:\s*false/)
-    expect(src).not.toMatch(/\.delete\(\)/)
+    expect(src).not.toMatch(/\.delete\s*\(/)
   })
 
   it('chunks id-list updates so a large batch cannot exceed the request limit', () => {

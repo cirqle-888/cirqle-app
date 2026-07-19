@@ -33,6 +33,18 @@ export interface ScopeAuditEntry {
   source?: ScopeAuditSource
 }
 
+const payload = (entries: ScopeAuditEntry[]) => entries.map(e => ({
+  scope_kind:  e.scopeKind,
+  action:      e.action,
+  employee_id: e.employeeId ?? null,
+  client_id:   e.clientId ?? null,
+  service_id:  e.serviceId ?? null,
+  old_value:   e.oldValue ?? null,
+  new_value:   e.newValue ?? null,
+  actor_id:    e.actorId ?? null,
+  source:      e.source ?? 'ui',
+}))
+
 /**
  * Record assignment changes. Never throws and never blocks the caller — a
  * failed audit write must not fail the assignment it describes (the table may
@@ -52,22 +64,27 @@ export async function logScopeChanges(
     // error explicitly, log it, and report it to the caller — while still
     // never throwing, because a failed audit must not fail the write it
     // describes.
-    const { error } = await admin.from('service_scope_audit').insert(entries.map(e => ({
-      scope_kind:  e.scopeKind,
-      action:      e.action,
-      employee_id: e.employeeId ?? null,
-      client_id:   e.clientId ?? null,
-      service_id:  e.serviceId ?? null,
-      old_value:   e.oldValue ?? null,
-      new_value:   e.newValue ?? null,
-      actor_id:    e.actorId ?? null,
-      source:      e.source ?? 'ui',
-    })))
-    if (error) {
-      console.error(`[scope-audit] ${entries.length} row(s) NOT recorded:`, error.message)
-      return { written: 0, error: error.message }
+    const { error } = await admin.from('service_scope_audit').insert(payload(entries))
+    if (!error) return { written: entries.length }
+
+    // The insert is ONE statement, so Postgres rolls back the whole array when
+    // a single row violates the CHECK — e.g. an 'updated' action while
+    // migration 20260720110000 is still unapplied would discard the legal
+    // 'added' and 'activated' rows alongside it. Retry per row so one illegal
+    // entry costs only itself.
+    const rows = payload(entries)
+    let written = 0
+    const failures: string[] = []
+    for (const row of rows) {
+      const { error: rowError } = await admin.from('service_scope_audit').insert(row)
+      if (rowError) failures.push(`${row.action}: ${rowError.message}`)
+      else written++
     }
-    return { written: entries.length }
+    if (failures.length === 0) return { written }
+
+    const message = `${failures.length}/${rows.length} audit row(s) rejected — ${[...new Set(failures)].join('; ')}`
+    console.error('[scope-audit]', message)
+    return { written, error: message }
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     console.error(`[scope-audit] ${entries.length} row(s) NOT recorded (transport):`, message)

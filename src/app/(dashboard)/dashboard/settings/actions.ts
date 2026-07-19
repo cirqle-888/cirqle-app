@@ -355,17 +355,37 @@ async function readPriorCommitmentState(
   rows: { client_id: string; service_id: string }[],
 ): Promise<PriorCommitmentState> {
   const prior: PriorCommitmentState = new Map()
+  const clientIds = [...new Set(rows.map(r => r.client_id))]
+  const serviceIds = [...new Set(rows.map(r => r.service_id))]
+
+  // `.in(clients).in(services)` is a CROSS PRODUCT, not a pair-wise match, so
+  // it returns up to |clients| × |services| rows. PostgREST caps a response at
+  // 1000 rows and drops the tail SILENTLY — past that the snapshot is missing
+  // pairs, and a missing pair is indistinguishable from "no row", which
+  // mislabels a reprice as 'added' and a revival as 'added' instead of
+  // 'activated'. Paginate explicitly with a stable order.
   try {
-    const { data } = await admin.from('client_service_pricing')
-      .select('client_id, service_id, is_active')
-      .in('client_id', [...new Set(rows.map(r => r.client_id))])
-      // Scoped to the touched services — without this it pulls every row for
-      // each client, which on a full client edit is the entire matrix.
-      .in('service_id', [...new Set(rows.map(r => r.service_id))])
-    for (const r of (data || []) as { client_id: string; service_id: string; is_active: boolean }[]) {
-      prior.set(`${r.client_id}|${r.service_id}`, r.is_active)
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await admin.from('client_service_pricing')
+        .select('client_id, service_id, is_active')
+        .in('client_id', clientIds)
+        .in('service_id', serviceIds)
+        .order('id', { ascending: true })
+        .range(from, from + 999)
+      // A read failure must NOT be swallowed into an empty map — that would
+      // relabel every row in the batch as 'added'. Report it instead.
+      if (error) {
+        console.error('[scope-audit] prior-state read failed; audit labels may be wrong:', error.message)
+        break
+      }
+      for (const r of (data || []) as { client_id: string; service_id: string; is_active: boolean }[]) {
+        prior.set(`${r.client_id}|${r.service_id}`, r.is_active)
+      }
+      if (!data || data.length < 1000) break
     }
-  } catch { /* best-effort — a missing snapshot only coarsens the audit label */ }
+  } catch (e) {
+    console.error('[scope-audit] prior-state read threw:', e instanceof Error ? e.message : e)
+  }
   return prior
 }
 

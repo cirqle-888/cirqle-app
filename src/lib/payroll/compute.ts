@@ -47,6 +47,27 @@ export async function isMonthFinalized(
 }
 
 /**
+ * True when a task's earnings must not be rewritten — either its month's
+ * payroll is finalized, or its date cannot be read.
+ *
+ * Fails CLOSED on a null or malformed task_date. The earlier inline form,
+ * `if (task_date) { const [y,m] = …; if (y && m && await isMonthFinalized(…)) }`,
+ * claimed this in a comment but did the opposite: a null date skipped the
+ * block entirely and a non-ISO date produced NaN, so both fell through and
+ * wrote UNGUARDED. Currently unreachable (task_date is NOT NULL DEFAULT
+ * CURRENT_DATE and PostgREST always serializes DATE as YYYY-MM-DD), but the
+ * shape was one schema change away from live.
+ */
+export async function isTaskMonthProtected(
+  admin: SupabaseClient,
+  taskDate: string | null | undefined,
+): Promise<boolean> {
+  const [y, m] = String(taskDate ?? '').split('-').map(Number)
+  if (!Number.isInteger(y) || !Number.isInteger(m) || m < 1 || m > 12) return true
+  return await isMonthFinalized(admin, m, y)
+}
+
+/**
  * Bring the month's CACHED `contribution_scores.earnings_inr` back in line
  * with CURRENT billing before payroll sums it.
  *

@@ -90,34 +90,73 @@ function functionBody(src: string, name: string): string {
 }
 
 describe('every writer of earnings_inr guards finalized payroll BEFORE writing', () => {
-  // There are four independent writers, each reachable directly — so each
-  // carries its own guard rather than trusting callers. A missing or
-  // short-circuited guard silently reprices months already paid out.
+  // Every writer reachable directly carries its own guard rather than trusting
+  // callers. A missing, inverted or short-circuited guard silently reprices
+  // months already paid out.
+  //
+  // An independent audit mutation-tested an earlier version of this test and
+  // got THREE survivors: `&& false` placed AFTER the call (the old check only
+  // sliced text before it), an inverted `!(await …)` (maximally destructive —
+  // recomputes finalized months and skips everything else), and replacing the
+  // `return` with a `console.warn` (the old check accepted any `return` within
+  // 400 chars). All three are now caught by asserting the guard's exact shape.
+  // `style` is how the guard stops the write:
+  //   'return' — single-task writers bail out immediately.
+  //   'filter' — the recalc route takes a date RANGE, so it cannot return on
+  //              the first finalized month; it excludes those tasks instead.
   it.each([
-    ['src/lib/sync/integrity.ts', 'recalcTaskCommissions'],
-    ['src/lib/sync/integrity.ts', 'refreshStoredEarningsFromBilling'],
-    ['src/lib/sync/agreement-earnings.ts', 'syncTaskAgreementEarnings'],
-    ['src/lib/payroll/compute.ts', 'refreshMonthStoredEarnings'],
-  ])('%s → %s', (file, fn) => {
+    ['src/lib/sync/integrity.ts', 'recalcTaskCommissions', 'return'],
+    ['src/lib/sync/integrity.ts', 'refreshStoredEarningsFromBilling', 'return'],
+    ['src/lib/sync/agreement-earnings.ts', 'syncTaskAgreementEarnings', 'return'],
+    ['src/lib/payroll/compute.ts', 'refreshMonthStoredEarnings', 'return'],
+    ['src/app/api/recalc-commissions/route.ts', 'POST', 'filter'],
+  ])('%s → %s', (file, fn, style) => {
     const body = functionBody(read(file), fn)
 
-    const guard = body.indexOf('isMonthFinalized')
+    const guard = body.search(/is(MonthFinalized|TaskMonthProtected)\(/)
     expect(guard).toBeGreaterThan(-1)          // the guard exists at all…
 
-    // …in THIS function, not merely somewhere in the file, and it must sit
-    // above every write. `recalcTaskCommissions` originally guarded only its
-    // fallback branch while the primary path wrote unguarded.
+    // …in THIS function, not merely somewhere in the file, and above every
+    // write. recalcTaskCommissions originally guarded only its fallback branch
+    // while the primary path wrote unguarded.
     const write = body.search(/\.(update|upsert|insert)\(/)
     expect(write).toBeGreaterThan(-1)
     expect(guard).toBeLessThan(write)
 
-    // The guard must return, not just evaluate.
-    expect(body.slice(guard, guard + 400)).toMatch(/return\b/)
+    // Assert the WHOLE guard statement, from `if (` through its closing paren,
+    // so a mutation on either side of the call is visible.
+    const open = body.lastIndexOf('if (', guard)
+    expect(open).toBeGreaterThan(-1)
+    let depth = 0, close = -1
+    for (let i = body.indexOf('(', open); i < body.length; i++) {
+      if (body[i] === '(') depth++
+      else if (body[i] === ')' && --depth === 0) { close = i; break }
+    }
+    expect(close).toBeGreaterThan(guard)
+    const condition = body.slice(open, close + 1)
 
-    // And it must not be short-circuited into a no-op — `false && await
-    // isMonthFinalized(...)` keeps every other assertion above green.
-    const condition = body.slice(body.lastIndexOf('if (', guard), guard)
-    expect(condition).not.toMatch(/\bfalse\b/)
+    // Not neutralized (`&& false`, `|| true`) on EITHER side of the call…
+    expect(condition).not.toMatch(/\b(false|true)\b/)
+    // …and not inverted: the guard fires WHEN finalized, never when not.
+    expect(condition).not.toMatch(/!\s*\(?\s*await/)
+    expect(condition).not.toMatch(/!is(MonthFinalized|TaskMonthProtected)/)
+
+    // And it must actually stop the write.
+    const after = body.slice(close + 1)
+    if (style === 'return') {
+      // The very next statement returns — no falling through to the write.
+      expect(after).toMatch(/^\s*(\{\s*)?return\b/)
+    } else {
+      // The guard's verdict is recorded, then used to EXCLUDE tasks before
+      // the write. Both halves matter: recording without filtering would
+      // compute a set nobody consults.
+      expect(after).toMatch(/^\s*finalized\.add\(/)
+      // Anchor on the exclusion itself, not on any `.filter(` — the month-key
+      // extraction above the guard also uses one.
+      const excludeAt = body.indexOf('!finalized.has(')
+      expect(excludeAt).toBeGreaterThan(guard)
+      expect(excludeAt).toBeLessThan(write)
+    }
   })
 })
 

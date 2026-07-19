@@ -2,7 +2,7 @@ import { createTypedAdminClient } from '@/lib/supabase/server'
 import { calculateCommission } from '@/lib/calculations/commission'
 import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
 import { syncTaskAgreementEarnings } from '@/lib/sync/agreement-earnings'
-import { isMonthFinalized } from '@/lib/payroll/compute'
+import { isTaskMonthProtected } from '@/lib/payroll/compute'
 import { getInvoiceDateForTaskMonth, toSequenceMonth } from '@/lib/invoices/numbering'
 
 const r2 = (n: number) => Math.round(n * 100) / 100
@@ -35,11 +35,8 @@ export async function refreshStoredEarningsFromBilling(taskId: string) {
   // This rewrites contribution_scores for the task's month; if payroll for
   // that month has been paid, the payslip is already issued and the ledger
   // behind it must not move. Fails closed on an unreadable task_date.
-  if (task.task_date) {
-    const [y, m] = String(task.task_date).split('-').map(Number)
-    if (y && m && await isMonthFinalized(supabase as any, m, y)) {
-      return { updated: 0, message: 'Payroll for this month is finalized — earnings left unchanged' }
-    }
+  if (await isTaskMonthProtected(supabase as any, task.task_date)) {
+    return { updated: 0, message: 'Payroll for this month is finalized — earnings left unchanged' }
   }
 
   const { data: scores } = await supabase
@@ -122,11 +119,8 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
   // has raw contributions — i.e. the common case on every task save. Guarding
   // only the callee left that path wide open for months whose payslips are
   // already paid. Fails CLOSED on an unreadable task_date.
-  if (task.task_date) {
-    const [y, m] = String(task.task_date).split('-').map(Number)
-    if (y && m && await isMonthFinalized(supabase as any, m, y)) {
-      return { updated: 0, message: 'Payroll for this month is finalized — earnings left unchanged' }
-    }
+  if (await isTaskMonthProtected(supabase as any, task.task_date)) {
+    return { updated: 0, message: 'Payroll for this month is finalized — earnings left unchanged' }
   }
 
   // 2. Fetch Contributions

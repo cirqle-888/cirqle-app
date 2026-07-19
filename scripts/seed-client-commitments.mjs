@@ -51,7 +51,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
-import { readFileSync } from 'fs'
+import { readFileSync, writeFileSync } from 'fs'
 
 const APPLY = process.argv.includes('--apply')
 const SKIP_CONFIRM = process.argv.includes('--yes')
@@ -80,9 +80,31 @@ async function fetchAll(table, select, tweak = q => q) {
   return rows
 }
 
-/** Best-effort read of a table that may not exist / may be empty. */
+/**
+ * Read an evidence source that may not exist yet (pre-migration).
+ *
+ * A MISSING TABLE is tolerated; any other failure ABORTS. The distinction is
+ * critical and was previously absent: a bare `catch { return [] }` turned a
+ * transient 5xx, a renamed column or an RLS change into "this source proved
+ * nothing", which silently moves every pair it would have evidenced from
+ * `keep` into `toDeactivate`. A clean dry run could not warn about it either,
+ * because --apply issues a fresh set of requests.
+ */
 async function tryFetch(table, select, tweak = q => q) {
-  try { return await fetchAll(table, select, tweak) } catch { return [] }
+  try {
+    return await fetchAll(table, select, tweak)
+  } catch (e) {
+    const msg = String(e.message || e)
+    // PostgREST 42P01 / PGRST205: relation genuinely absent.
+    if (/does not exist|42P01|PGRST205|Could not find the table/i.test(msg)) {
+      console.log(`  (evidence source ${table} not present — skipping)`)
+      return []
+    }
+    console.error(`\n❌ evidence source ${table} FAILED to read: ${msg}`)
+    console.error('   Refusing to continue: treating this as "no evidence" would')
+    console.error('   deactivate commitments this source would have proven.')
+    process.exit(1)
+  }
 }
 
 /**
@@ -100,20 +122,37 @@ async function chunkedUpdate(table, ids, patch, label, auditFor) {
     const slice = ids.slice(i, i + CHUNK)
     const n = Math.floor(i / CHUNK) + 1
     const total = Math.ceil(ids.length / CHUNK)
-    const { error } = await db.from(table).update(patch).in('id', slice)
+    // .select('id') so the response carries the rows actually changed. Without
+    // it PostgREST returns no count and `ok += slice.length` reports a success
+    // it never verified — the run's own output could not evidence the change.
+    const { data, error } = await db.from(table).update(patch).in('id', slice).select('id')
     if (error) {
       failures.push({ chunk: n, ids: slice, error: error.message })
       console.log(`      ${label} chunk ${n}/${total} (${slice.length}) FAILED: ${error.message}`)
       continue
     }
-    ok += slice.length
+    const changed = (data || []).length
+    if (changed !== slice.length) {
+      console.log(`      ⚠️  ${label} chunk ${n}/${total}: asked ${slice.length}, changed ${changed}`)
+    }
+    ok += changed
     let auditNote = ''
     if (auditFor) {
       const a = await writeAudit(auditFor(slice))
       auditOk += a.ok; auditFailed += a.failed
       auditNote = a.failed ? `, ${a.failed} audit FAILED` : `, ${a.ok} audited`
+      // ABORT on a lost trail. The rows are already changed and
+      // service_scope_audit is append-only, so a re-run cannot re-audit them
+      // (they no longer match the selection). Continuing would multiply the
+      // number of silently-changed rows.
+      if (a.failed) {
+        console.error(`\n❌ audit write failed after ${label} chunk ${n}. STOPPING.`)
+        console.error('   Rows already changed are recorded in the recovery file above.')
+        failures.push({ chunk: n, ids: slice, error: 'audit failed — run halted' })
+        return { ok, failures, auditOk, auditFailed, halted: true }
+      }
     }
-    console.log(`      ${label} chunk ${n}/${total} (${slice.length}) ok${auditNote}`)
+    console.log(`      ${label} chunk ${n}/${total} (${changed}) ok${auditNote}`)
   }
   return { ok, failures, auditOk, auditFailed }
 }
@@ -291,6 +330,22 @@ if (!SKIP_CONFIRM) {
 // ── Apply ────────────────────────────────────────────────────────────────────
 
 const now = new Date().toISOString()
+
+// RECOVERY FILE — written BEFORE the first write, so undo never depends on the
+// append-only audit table having succeeded. `deactivated_by` is left null on
+// the rows themselves and created rows carry no marker, so without this file a
+// lost audit trail makes the creates unidentifiable.
+const recoveryPath = `backfill-recovery-${now.replace(/[:.]/g, '-')}.json`
+writeFileSync(recoveryPath, JSON.stringify({
+  ranAt: now,
+  note: 'Undo: reactivate the deactivateIds, delete the created pairs.',
+  deactivateIds: toDeactivate.map(x => x.id),
+  reactivateIds: toReactivate.map(x => x.id),
+  created: toCreate.map(r => ({ client_id: r.client_id, service_id: r.service_id })),
+  preserved: preserved.map(p => ({ client_id: p.client_id, service_id: p.service_id })),
+}, null, 2))
+console.log(`\nRecovery file written: ${recoveryPath}`)
+
 let created = 0, reactivated = 0, deactivated = 0, auditOk = 0, auditFailed = 0
 const problems = []
 
@@ -307,7 +362,18 @@ if (toCreate.length) {
       commission_percentage: null,
       is_active: true,
     })))
-    if (error) { problems.push(`create: ${error.message}`); console.log(`      FAILED: ${error.message}`); continue }
+    // ABORT, never continue. The intake guardrail reasoned against a world in
+    // which these rows exist (committedAfter counts toCreate as present). If a
+    // create fails and we proceed to step [3/3], we deactivate 625 rows using
+    // a safety analysis whose premise is now false — which for an
+    // intake-bearing create would break a live client portal while the report
+    // still claimed "0 clients losing an intake kind".
+    if (error) {
+      console.error(`\n❌ create FAILED: ${error.message}`)
+      console.error('   STOPPING before deactivation — the intake guardrail assumed these rows exist.')
+      console.error(`   Nothing has been deactivated. Recovery file: ${recoveryPath}`)
+      process.exit(1)
+    }
     created += slice.length
     const a = await writeAudit(slice.map(r => ({
       scope_kind: 'client_service', action: 'added',
@@ -317,6 +383,11 @@ if (toCreate.length) {
       actor_id: null, source: 'backfill',
     })))
     auditOk += a.ok; auditFailed += a.failed
+    if (a.failed) {
+      console.error(`\n❌ audit write failed for created rows. STOPPING before deactivation.`)
+      console.error(`   Recovery file: ${recoveryPath}`)
+      process.exit(1)
+    }
   }
 }
 
@@ -333,6 +404,11 @@ if (toReactivate.length) {
     })))
   reactivated = r.ok; auditOk += r.auditOk; auditFailed += r.auditFailed
   problems.push(...r.failures.map(f => `reactivate chunk ${f.chunk}: ${f.error}`))
+  if (r.halted) {
+    console.error(`\n❌ halted during reactivation — NOT proceeding to deactivation.`)
+    console.error(`   Recovery file: ${recoveryPath}`)
+    process.exit(1)
+  }
 }
 
 if (toDeactivate.length) {
@@ -355,9 +431,17 @@ console.log(`\n${'='.repeat(72)}`)
 console.log(`created ${created} · reactivated ${reactivated} · deactivated ${deactivated}`)
 console.log(`audit rows: ${auditOk} written${auditFailed ? `, ${auditFailed} FAILED` : ''}`)
 console.log('Prices and commissions are preserved on every deactivated row.')
+console.log(`Recovery file: ${recoveryPath}`)
 if (problems.length) {
-  console.log(`\n⚠️  ${problems.length} problem(s) — re-run to retry only what is still outstanding:`)
+  console.log(`\n⚠️  ${problems.length} problem(s):`)
   for (const p of problems) console.log(`   · ${p}`)
+  // Deliberately NOT "re-run to retry". A re-run retries failed DATA writes
+  // (the rows still match their selection), but it can never re-audit a row
+  // whose data write SUCCEEDED and whose audit write failed — that row no
+  // longer matches, and service_scope_audit is append-only. Use the recovery
+  // file for those.
+  console.log('\n   Data failures: safe to re-run (state is re-derived from live data).')
+  console.log(`   Audit failures: NOT recoverable by re-running — use ${recoveryPath}.`)
   process.exit(1)
 }
 if (auditFailed) { console.log('\n⚠️  Some audit rows failed to write.'); process.exit(1) }

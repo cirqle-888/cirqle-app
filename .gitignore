@@ -65,3 +65,4 @@ next-env.d.ts
 /mobile/*.jks
 /mobile/keystore.properties
 /mobile/latest.json
+backfill-recovery-*.json

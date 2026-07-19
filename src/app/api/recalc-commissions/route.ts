@@ -4,6 +4,7 @@ import { calculateCommission } from '@/lib/calculations/commission'
 import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
 import { syncTaskAgreementEarnings } from '@/lib/sync/agreement-earnings'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
+import { isMonthFinalized } from '@/lib/payroll/compute'
 
 export async function POST(req: NextRequest) {
   try {
@@ -56,9 +57,36 @@ export async function POST(req: NextRequest) {
       .gte('task_date', dateFrom)
       .lte('task_date', dateTo)
 
-    const { data: tasks } = await tasksQuery
-    if (!tasks || tasks.length === 0) {
+    const { data: allTasksInRange } = await tasksQuery
+    if (!allTasksInRange || allTasksInRange.length === 0) {
       return NextResponse.json({ updated: 0, message: 'No tasks found in date range' })
+    }
+
+    // HISTORICAL EARNINGS PROTECTION — this route accepts an arbitrary
+    // dateFrom/dateTo and rewrites earnings_inr for every task in it, so a
+    // range spanning a paid month would silently restate money already paid
+    // out. Checked once per distinct month rather than per task.
+    const monthKeys = new Set(
+      allTasksInRange.map(t => String(t.task_date || '').slice(0, 7)).filter(k => /^\d{4}-\d{2}$/.test(k))
+    )
+    const finalized = new Set<string>()
+    for (const key of monthKeys) {
+      const [y, m] = key.split('-').map(Number)
+      if (await isMonthFinalized(supabase as any, m, y)) finalized.add(key)
+    }
+    // A task with a null or malformed task_date cannot be proven safe, so it
+    // is skipped rather than recomputed — fail closed, matching the
+    // isTaskMonthProtected helper used by the single-task writers.
+    const tasks = allTasksInRange.filter(t => {
+      const key = String(t.task_date || '').slice(0, 7)
+      return /^\d{4}-\d{2}$/.test(key) && !finalized.has(key)
+    })
+    const skippedFinalized = allTasksInRange.length - tasks.length
+    if (tasks.length === 0) {
+      return NextResponse.json({
+        updated: 0,
+        message: `All ${skippedFinalized} task(s) in range fall in finalized payroll months — nothing recalculated.`,
+      })
     }
 
     const taskIds = tasks.map(t => t.id)
@@ -232,7 +260,10 @@ export async function POST(req: NextRequest) {
       success: true,
       totalProcessed,
       updated: updateCount,
-      inserted: insertCount
+      inserted: insertCount,
+      // Surfaced so a caller can tell "nothing changed" from "we declined to
+      // touch already-paid months".
+      skippedFinalized,
     })
 
   } catch (error: any) {
