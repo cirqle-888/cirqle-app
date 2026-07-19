@@ -96,11 +96,22 @@ export default function PricingMatrixClient({ clients, services }: Props) {
   async function saveMatrixCell(clientId: string, serviceId: string, cell: MatrixCell) {
     const key = `${clientId}::${serviceId}`
     setMatrixSaving(key)
+    // Blank means "not agreed yet", not 0. `|| 0` destroyed that distinction:
+    // editing only the commission cell dragged a blank price along as 0, which
+    // then suppressed the service-default fallback in task billing. And a 0
+    // commission is a REAL value to every reader (`?? 50` never fires), so
+    // coercing it silently zeroed the pair's historical earnings pool.
+    const numOrNull = (raw: string) => {
+      const s = (raw ?? '').trim()
+      if (s === '') return null
+      const n = parseFloat(s)
+      return Number.isFinite(n) ? n : null
+    }
     await upsertMatrixCell(
       clientId,
       serviceId,
-      parseFloat(cell.price) || 0,
-      parseFloat(cell.commission_percentage) || 0,
+      numOrNull(cell.price),
+      numOrNull(cell.commission_percentage),
       cell.currency || 'INR',
     )
     setMatrixSaving(null)

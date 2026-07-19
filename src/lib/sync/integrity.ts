@@ -2,6 +2,7 @@ import { createTypedAdminClient } from '@/lib/supabase/server'
 import { calculateCommission } from '@/lib/calculations/commission'
 import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
 import { syncTaskAgreementEarnings } from '@/lib/sync/agreement-earnings'
+import { isMonthFinalized } from '@/lib/payroll/compute'
 import { getInvoiceDateForTaskMonth, toSequenceMonth } from '@/lib/invoices/numbering'
 
 const r2 = (n: number) => Math.round(n * 100) / 100
@@ -25,10 +26,21 @@ export async function refreshStoredEarningsFromBilling(taskId: string) {
 
   const { data: task } = await supabase
     .from('tasks')
-    .select('id, billing_amount_inr, client_id, service_id')
+    .select('id, billing_amount_inr, client_id, service_id, task_date')
     .eq('id', taskId)
     .single()
   if (!task) return { updated: 0, message: 'Task not found' }
+
+  // HISTORICAL EARNINGS PROTECTION — see refreshMonthStoredEarnings.
+  // This rewrites contribution_scores for the task's month; if payroll for
+  // that month has been paid, the payslip is already issued and the ledger
+  // behind it must not move. Fails closed on an unreadable task_date.
+  if (task.task_date) {
+    const [y, m] = String(task.task_date).split('-').map(Number)
+    if (y && m && await isMonthFinalized(supabase as any, m, y)) {
+      return { updated: 0, message: 'Payroll for this month is finalized — earnings left unchanged' }
+    }
+  }
 
   const { data: scores } = await supabase
     .from('contribution_scores')
@@ -37,6 +49,10 @@ export async function refreshStoredEarningsFromBilling(taskId: string) {
   if (!scores || scores.length === 0) return { updated: 0, message: 'No scores' }
 
   // Current commission % (pricing matrix), default 50 to mirror the report.
+  //
+  // HISTORICAL READER CONTRACT — DELIBERATE: no `.eq('is_active', true)`.
+  // is_active governs what may be SOLD, never what was EARNED; filtering here
+  // would reprice every past task on a deactivated pair to the 50% fallback.
   let commPct = 50
   if (task.client_id && task.service_id) {
     const { data: pricing } = await supabase

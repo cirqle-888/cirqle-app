@@ -32,6 +32,10 @@ export async function POST(req: NextRequest) {
       supabase.from('tools').select('*').eq('is_active', true),
       supabase.from('tool_services').select('tool_id, service_id'),
       supabase.from('group_services').select('group_id, service_id'),
+      // HISTORICAL READER CONTRACT — DELIBERATE: no is_active filter (unlike
+      // the groups/parameters/tools queries above, which are operational).
+      // is_active governs what may be SOLD, never what was EARNED — filtering
+      // here would reprice every past task on a deactivated pair.
       supabase.from('client_service_pricing').select('client_id, service_id, commission_percentage'),
       supabase.from('employee_performance_history').select('*').order('effective_from', { ascending: false })
     ])

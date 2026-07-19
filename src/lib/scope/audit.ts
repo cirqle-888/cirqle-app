@@ -17,7 +17,8 @@ import type { createAdminClient } from '@/lib/supabase/admin'
 type Admin = ReturnType<typeof createAdminClient>
 
 export type ScopeAuditKind = 'employee_service' | 'client_service'
-export type ScopeAuditAction = 'added' | 'removed' | 'activated' | 'deactivated'
+/** 'updated' = repriced without an active-state change (migration 20260720110000). */
+export type ScopeAuditAction = 'added' | 'removed' | 'activated' | 'deactivated' | 'updated'
 export type ScopeAuditSource = 'ui' | 'matrix' | 'import' | 'backfill' | 'api'
 
 export interface ScopeAuditEntry {

@@ -16,6 +16,37 @@ import { loadActiveAgreements, syncTaskAgreementEarnings } from '@/lib/sync/agre
 const r2 = (n: number) => Math.round(n * 100) / 100
 
 /**
+ * Payroll states that FINALIZE a month. Once any payslip for a month reaches
+ * one of these, that month's earnings ledger is history and must never be
+ * recomputed — the payslip has been issued and, for 'paid', money has moved.
+ */
+const FINALIZED_PAYROLL_STATUSES = ['paid'] as const
+
+/**
+ * True when a month's payroll has been finalized for anyone.
+ *
+ * Fails CLOSED: if the check itself errors we report the month as finalized,
+ * because wrongly skipping a refresh only leaves a cache stale (recoverable),
+ * while wrongly rewriting a paid month silently rewrites issued payslips
+ * (not recoverable).
+ */
+export async function isMonthFinalized(
+  admin: SupabaseClient,
+  month: number,
+  year: number,
+): Promise<boolean> {
+  const { data, error } = await admin
+    .from('payroll')
+    .select('id, status')
+    .eq('month', month)
+    .eq('year', year)
+    .in('status', FINALIZED_PAYROLL_STATUSES as unknown as string[])
+    .limit(1)
+  if (error) return true
+  return (data?.length ?? 0) > 0
+}
+
+/**
  * Bring the month's CACHED `contribution_scores.earnings_inr` back in line
  * with CURRENT billing before payroll sums it.
  *
@@ -36,7 +67,21 @@ export async function refreshMonthStoredEarnings(
   admin: SupabaseClient,
   monthStart: string,
   nextMonthStart: string,
-): Promise<{ refreshed: number }> {
+  opts: { skipFinalizedCheck?: boolean } = {},
+): Promise<{ refreshed: number; skipped?: 'finalized' }> {
+  // HISTORICAL EARNINGS PROTECTION.
+  // This function REWRITES contribution_scores.earnings_inr. The payroll
+  // status guards elsewhere (payroll/actions.ts: `.eq('status','pending')`
+  // and the 'Cannot refresh a paid payroll record' check) protect the payroll
+  // TABLE only — they do not protect this ledger. Without the check below, a
+  // task edit or the monthly cron would silently rewrite earnings for a month
+  // whose payslips were already issued and paid, so payroll and the
+  // Contribution Analysis report would permanently disagree.
+  if (!opts.skipFinalizedCheck) {
+    const [y, m] = monthStart.split('-').map(Number)
+    if (await isMonthFinalized(admin, m, y)) return { refreshed: 0, skipped: 'finalized' }
+  }
+
   const { data: tasks } = await admin
     .from('tasks')
     .select('id, billing_amount_inr, client_id, service_id')
@@ -61,6 +106,13 @@ export async function refreshMonthStoredEarnings(
   if (scores.length === 0) return { refreshed: 0 }
 
   // Reference data — mirrors buildAnalysisRows (the report) exactly.
+  //
+  // HISTORICAL READER CONTRACT — DELIBERATE: no `.eq('is_active', true)` here.
+  // `is_active` governs what a client may be SOLD today; it must never govern
+  // what was EARNED. A deactivated commitment still has to resolve its
+  // historical commission_percentage, or every past task on that pair silently
+  // reprices to the 50% fallback. Adding an is_active filter here would rewrite
+  // earnings across every deactivated pair. Covered by compute.test.ts.
   const [pricingRes, empRes, taskToolsRes, toolsRes] = await Promise.all([
     admin.from('client_service_pricing').select('client_id, service_id, commission_percentage'),
     admin.from('employees').select('id, performance_rating'),

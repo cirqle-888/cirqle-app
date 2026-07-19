@@ -91,14 +91,19 @@ export async function applyWhatIfScenario(input: ApplyInput): Promise<ActionResu
       const field = c.kind === 'commission_pct' ? 'commission_percentage' : 'price'
       const { data } = await admin
         .from('client_service_pricing')
-        .select(`id, client_id, service_id, ${field}`)
+        .select(`id, client_id, service_id, is_active, ${field}`)
         .eq('client_id', c.clientId).eq('service_id', c.serviceId)
         .maybeSingle()
+      // is_active is snapshotted so a restore can undo a REVIVAL as well as a
+      // value change — applying a scenario to a deactivated pair re-commits
+      // it, and without this the rollback would leave it live.
       snapshotRecords.push({
         table_name: 'client_service_pricing',
         record_id: data ? String((data as Record<string, unknown>).id) : `${c.clientId}|${c.serviceId}`,
-        old_values: data ? { [field]: (data as Record<string, unknown>)[field] } : { [field]: null, missing_row: true },
-        new_values: { [field]: c.to },
+        old_values: data
+          ? { [field]: (data as Record<string, unknown>)[field], is_active: (data as Record<string, unknown>).is_active }
+          : { [field]: null, is_active: false, missing_row: true },
+        new_values: { [field]: c.to, is_active: true },
       })
     } else if (c.kind === 'agreement') {
       if (c.replacesAgreementId) {
@@ -164,10 +169,17 @@ export async function applyWhatIfScenario(input: ApplyInput): Promise<ActionResu
       ;({ error } = await admin.from('employees').update({ base_salary: c.to }).eq('id', c.employeeId))
     } else if (c.kind === 'commission_pct' || c.kind === 'price') {
       const field = c.kind === 'commission_pct' ? 'commission_percentage' : 'price'
+      // Applying a priced scenario commits the client to that service, so the
+      // deactivation stamp is cleared alongside is_active — a live row must
+      // never carry a stale "removed on" date. The prior is_active is captured
+      // in the snapshot above so a restore can reverse this.
       ;({ error } = await admin
         .from('client_service_pricing')
         .upsert(
-          { client_id: c.clientId, service_id: c.serviceId, [field]: c.to, is_active: true },
+          {
+            client_id: c.clientId, service_id: c.serviceId, [field]: c.to,
+            is_active: true, deactivated_at: null, deactivated_by: null,
+          },
           { onConflict: 'client_id,service_id' },
         ))
     } else if (c.kind === 'agreement') {

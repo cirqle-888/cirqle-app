@@ -1451,22 +1451,35 @@ export default function ImportClient({ clients, services, employees, groups, par
           }
           break
         }
-        const recs = valid.map(r => ({
-          row_id: r.row_id,
-          fields: {
-            client_id: r.client_id,
-            service_id: r.service_id,
-            price: r.price ? parseFloat(r.price) : null,
-            percentage_rate: r.percentage_rate ? parseFloat(r.percentage_rate) : null,
-            commission_percentage: parseFloat(r.commission_percentage) || 0,
-            currency: (r.currency || 'INR').toUpperCase(),
-          },
-        }))
+        // A CSV column left blank means "don't change this", never 0. Coercing
+        // commission with `|| 0` rewrote agreed rates in bulk — and 0 is a REAL
+        // value to every commission reader (`?? 50` never fires), so it
+        // silently zeroed those pairs' historical earnings pools.
+        const recs = valid.map(r => {
+          const commission = (r.commission_percentage ?? '').toString().trim()
+          return {
+            row_id: r.row_id,
+            fields: {
+              client_id: r.client_id,
+              service_id: r.service_id,
+              price: r.price ? parseFloat(r.price) : null,
+              percentage_rate: r.percentage_rate ? parseFloat(r.percentage_rate) : null,
+              ...(commission === '' ? {} : { commission_percentage: parseFloat(commission) }),
+              currency: (r.currency || 'INR').toUpperCase(),
+            },
+          }
+        })
         if (operation === 'update') {
           await backupBeforeUpdate(table, recs.map(r => r.row_id))
           await batchUpdate(table, recs)
         } else {
-          await batchInsert(table, recs.map(r => ({ ...r.fields, is_active: true })), 'client_id,service_id')
+          // is_active + a cleared deactivation stamp: importing a commitment
+          // row is an explicit statement that the client buys it.
+          await batchInsert(
+            table,
+            recs.map(r => ({ ...r.fields, is_active: true, deactivated_at: null, deactivated_by: null })),
+            'client_id,service_id',
+          )
         }
         break
       }
@@ -1842,6 +1855,26 @@ export default function ImportClient({ clients, services, employees, groups, par
     }
 
     try {
+      // ── Commitments are DEACTIVATED, never deleted ──────────────────────────
+      // A client_service_pricing row is both the client's commitment AND its
+      // agreed price. Deleting it destroys the price that historical
+      // commission recompute still reads (see the HISTORICAL READER CONTRACT
+      // in lib/payroll/compute.ts), and unlike the import tab's delete mode
+      // this screen takes no backup first. Deactivation is what "remove"
+      // means everywhere else in the commitment model.
+      if (cleanupMode === 'pricing_matrix') {
+        for (let i = 0; i < ids.length; i += BATCH) {
+          const { error } = await supabase.from('client_service_pricing')
+            .update({ is_active: false, deactivated_at: new Date().toISOString() })
+            .in('id', ids.slice(i, i + BATCH))
+          if (error) throw new Error(`client_service_pricing: ${error.message}`)
+        }
+        setDeleting(false)
+        success(`${ids.length} commitment${ids.length !== 1 ? 's' : ''} deactivated — prices preserved`)
+        await loadCleanupRecords(cleanupMode)
+        return
+      }
+
       // ── Cascade deletes before the main delete ──────────────────────────────
       if (cleanupMode === 'parameters') {
         // Delete contributions that use these parameters

@@ -947,8 +947,22 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       await supabase.from('services').update({ default_price: price, default_currency: quickSet.currency }).eq('id', form.service_id)
       setServices(prev => prev.map(s => s.id === form.service_id ? { ...s, default_price: price, default_currency: quickSet.currency } : s))
     } else {
+      // commission_percentage is deliberately ABSENT from this payload: an
+      // omitted column is left untouched by ON CONFLICT DO UPDATE, so setting
+      // a price can never overwrite an agreed commission. Sending 0 here used
+      // to zero the pair's commission pool — every reader guards with
+      // `?? 50` / `!= null`, and neither catches 0, so past earnings on that
+      // pair silently recomputed to zero.
+      //
+      // is_active: true because entering a price for a client IS the act of
+      // committing them to that service; without it a previously deactivated
+      // pair would keep the new price but stay hidden from every picker.
       await supabase.from('client_service_pricing').upsert(
-        { client_id: form.client_id, service_id: form.service_id, price, currency: quickSet.currency, commission_percentage: 0 },
+        {
+          client_id: form.client_id, service_id: form.service_id,
+          price, currency: quickSet.currency,
+          is_active: true, deactivated_at: null, deactivated_by: null,
+        },
         { onConflict: 'client_id,service_id' }
       )
       setClientPricings(prev => {

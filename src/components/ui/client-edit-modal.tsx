@@ -41,9 +41,9 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
   // Services currently shown in the UI (for editing pricing)
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set())
   // ALL pricing from DB — used to preserve rows we don't show on save
-  const [allDbPricings, setAllDbPricings] = useState<Record<string, { price: string; commission_percentage: string; currency: string }>>({})
+  const [allDbPricings, setAllDbPricings] = useState<Record<string, { price: string; commission_percentage: string; currency: string; is_active?: boolean }>>({})
   // Pricing state for all selected services (including newly added)
-  const [pricings, setPricings] = useState<Record<string, { price: string; commission_percentage: string; currency: string }>>({})
+  const [pricings, setPricings] = useState<Record<string, { price: string; commission_percentage: string; currency: string; is_active?: boolean }>>({})
   // Services user explicitly removed this session (to delete from DB)
   const [explicitlyRemoved, setExplicitlyRemoved] = useState<Set<string>>(new Set())
 
@@ -59,13 +59,18 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
       if (clientRes.data) setForm(clientRes.data)
       if (servicesRes.data) setServices(servicesRes.data)
 
-      const allPricing: Record<string, { price: string; commission_percentage: string; currency: string }> = {}
+      const allPricing: Record<string, { price: string; commission_percentage: string; currency: string; is_active: boolean }> = {}
       if (pricingRes.data) {
         pricingRes.data.forEach((r: any) => {
           allPricing[r.service_id] = {
-            price: String(r.price || ''),
-            commission_percentage: String(r.commission_percentage || ''),
+            // `!= null` NOT `||` — a legitimately stored 0 must round-trip as
+            // "0", not collapse to blank and then be written back as NULL.
+            price: r.price != null ? String(r.price) : '',
+            commission_percentage: r.commission_percentage != null ? String(r.commission_percentage) : '',
             currency: r.currency || 'INR',
+            // Carried so a DEACTIVATED commitment is never silently revived by
+            // a save that merely touched the client's phone number.
+            is_active: r.is_active !== false,
           }
         })
       }
@@ -75,13 +80,16 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
       // When opened without a serviceId (e.g. from settings): show all configured services
       if (serviceId) {
         const sel = new Set([serviceId])
-        const shown: Record<string, { price: string; commission_percentage: string; currency: string }> = {
-          [serviceId]: allPricing[serviceId] || { price: '', commission_percentage: '', currency: clientRes.data?.default_currency || 'INR' },
+        const shown: Record<string, { price: string; commission_percentage: string; currency: string; is_active: boolean }> = {
+          [serviceId]: allPricing[serviceId] || { price: '', commission_percentage: '', currency: clientRes.data?.default_currency || 'INR', is_active: true },
         }
         setSelectedServices(sel)
         setPricings(shown)
       } else {
-        const sel = new Set(Object.keys(allPricing))
+        // Only ACTIVE commitments are pre-selected. Deactivated rows stay in
+        // allDbPricings (so their price is still visible and re-addable) but
+        // are not ticked, so saving cannot resurrect them wholesale.
+        const sel = new Set(Object.keys(allPricing).filter(id => allPricing[id].is_active))
         setSelectedServices(sel)
         setPricings({ ...allPricing })
       }
@@ -109,13 +117,23 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
       return Number.isFinite(n) ? n : null
     }
 
+    // `undefined` commission means "leave whatever is stored alone" — an
+    // omitted column is untouched by ON CONFLICT DO UPDATE. Writing `?? 0`
+    // here used to zero an agreed commission on every save, which silently
+    // recomputed that pair's historical earnings to nothing.
+    const commissionOrLeave = (raw: string | null | undefined) => {
+      const parsed = num(raw)
+      return parsed === null ? undefined : parsed
+    }
+
     // 1. Services shown in UI — save current edited values
     for (const [service_id, v] of Object.entries(pricings)) {
       if (selectedServices.has(service_id) && !explicitlyRemoved.has(service_id)) {
+        const commission = commissionOrLeave(v.commission_percentage)
         upsertRows.push({
           client_id: clientId, service_id,
           price: num(v.price),
-          commission_percentage: num(v.commission_percentage) ?? 0,
+          ...(commission === undefined ? {} : { commission_percentage: commission }),
           currency: v.currency || 'INR',
           is_active: true,
           deactivated_at: null, deactivated_by: null,   // re-adding revives it
@@ -123,20 +141,11 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
       }
     }
 
-    // 2. Hidden DB services (not shown in this session) — preserve as-is
-    if (serviceId) {
-      for (const [service_id, v] of Object.entries(allDbPricings)) {
-        if (!selectedServices.has(service_id) && !explicitlyRemoved.has(service_id)) {
-          upsertRows.push({
-            client_id: clientId, service_id,
-            price: num(v.price),
-            commission_percentage: num(v.commission_percentage) ?? 0,
-            currency: v.currency || 'INR',
-            is_active: true,
-          })
-        }
-      }
-    }
+    // 2. Hidden DB services in single-service mode are NOT re-upserted.
+    // They were untouched by this session, and rewriting them is what silently
+    // revived every deactivated commitment (and re-stamped their commission)
+    // whenever someone set one price from the Tasks page. An untouched row
+    // needs no "preservation" — leaving it alone preserves it.
 
     if (upsertRows.length > 0) {
       await supabase.from('client_service_pricing').upsert(upsertRows, { onConflict: 'client_id,service_id' })
@@ -149,8 +158,12 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
     // canonical predicate `is_active IS NOT FALSE`.
     const toDeactivate = [...explicitlyRemoved]
     if (!serviceId) {
-      // Full edit mode: also drop services deselected without an explicit remove
-      Object.keys(allDbPricings).forEach(id => { if (!selectedServices.has(id)) toDeactivate.push(id) })
+      // Full edit mode: also drop services deselected without an explicit
+      // remove — but only ones that are currently ACTIVE, so an already
+      // deactivated row is not re-stamped with a fresh deactivation date.
+      Object.keys(allDbPricings).forEach(id => {
+        if (!selectedServices.has(id) && allDbPricings[id]?.is_active) toDeactivate.push(id)
+      })
     }
     const uniqueToDeactivate = [...new Set(toDeactivate)]
     if (uniqueToDeactivate.length > 0) {

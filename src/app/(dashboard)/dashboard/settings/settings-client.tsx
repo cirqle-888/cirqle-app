@@ -10,7 +10,7 @@ import { createClient as createSupabaseClient } from '@/lib/supabase/client'
 import {
   upsertCompanySettings,
   createEmployee, updateEmployee,
-  createClient, updateClient, upsertClientServicePricings,
+  createClient, updateClient, upsertClientServicePricings, deactivateClientServices,
   createService, updateService, deactivateService, reactivateService, quickEditService,
   createGroup, updateGroup, deactivateGroup, quickEditGroup, restoreGroup,
   createParameter, updateParameter, deactivateParameter, quickEditParameter, restoreParameter,
@@ -449,14 +449,26 @@ export default function SettingsClient(props: Props) {
     }
     // Load existing pricings if editing
     const pricings: Record<string, { price: string; commission_percentage: string; currency: string }> = {}
+    const activeServiceIds: string[] = []
     if (client) {
-      const { data } = await supabase.from('client_service_pricing').select('*').eq('client_id', client.id)
+      // Only ACTIVE commitments are loaded and pre-selected. Loading
+      // deactivated rows here and re-selecting them is what made saving a
+      // client (even just to fix a phone number) silently revive every
+      // service they no longer buy.
+      const { data } = await supabase.from('client_service_pricing')
+        .select('*').eq('client_id', client.id).not('is_active', 'is', false)
       data?.forEach((p: any) => {
-        pricings[p.service_id] = { price: String(p.price || ''), commission_percentage: String(p.commission_percentage || ''), currency: p.currency || client?.default_currency || 'INR' }
+        // `!= null` NOT `||` — a stored 0 must not collapse to blank.
+        pricings[p.service_id] = {
+          price: p.price != null ? String(p.price) : '',
+          commission_percentage: p.commission_percentage != null ? String(p.commission_percentage) : '',
+          currency: p.currency || client?.default_currency || 'INR',
+        }
+        activeServiceIds.push(p.service_id)
       })
     }
     setClientPricings(pricings)
-    setSelectedClientServices(new Set(Object.keys(pricings)))
+    setSelectedClientServices(new Set(activeServiceIds))
     setServiceSearch('')
     setShowForm('client')
     setForm(client ? { ...client } : { is_active: true, code, country: 'India', default_currency: 'INR' })
@@ -524,21 +536,40 @@ export default function SettingsClient(props: Props) {
     if (!res.ok) { setSaving(false); toast.error('Failed to save client', res.error); return }
     // Save service pricings
     if (clientId) {
+      // Blank means "not agreed yet", never 0: coercing with `|| 0` made a
+      // committed-but-unpriced service indistinguishable from a free one, and
+      // for commission it silently zeroed the pair's historical earnings pool
+      // (every reader guards with `?? 50` / `!= null`, neither catches 0).
+      const numOrNull = (raw: string) => {
+        const s = (raw ?? '').trim()
+        if (s === '') return null
+        const n = parseFloat(s)
+        return Number.isFinite(n) ? n : null
+      }
       const pricingRows = Object.entries(clientPricings)
-        .filter(([, v]) => v.price !== '' || v.commission_percentage !== '')
-        .map(([service_id, v]) => ({
-          client_id: clientId!,
-          service_id,
-          price: parseFloat(v.price) || 0,
-          commission_percentage: parseFloat(v.commission_percentage) || 0,
-          currency: v.currency || 'INR',
-          is_active: true as const,
-        }))
+        .filter(([service_id]) => selectedClientServices.has(service_id))
+        .map(([service_id, v]) => {
+          const commission = numOrNull(v.commission_percentage)
+          return {
+            client_id: clientId!,
+            service_id,
+            price: numOrNull(v.price),
+            // Omitted when blank → ON CONFLICT DO UPDATE leaves it untouched.
+            ...(commission === null ? {} : { commission_percentage: commission }),
+            currency: v.currency || 'INR',
+            is_active: true as const,
+          }
+        })
       if (pricingRows.length > 0) {
         await upsertClientServicePricings(pricingRows)
         const sIds = pricingRows.map(r => r.service_id)
         setServices(prev => prev.map(s => sIds.includes(s.id) ? { ...s, pricing_pending: false } : s))
       }
+      // Deactivation counterpart: a service deselected in this form must be
+      // removed from the client's commitments, or the form could only ever
+      // add. Deactivates (never deletes) so the agreed price survives.
+      const deselected = Object.keys(clientPricings).filter(id => !selectedClientServices.has(id))
+      if (deselected.length > 0) await deactivateClientServices(clientId!, deselected)
     }
     setSaving(false)
     closeForm()

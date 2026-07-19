@@ -125,6 +125,11 @@ export function buildAnalysisRows(
   /** Active employee commission agreements. Empty ⇒ pure contribution model (unchanged). */
   agreements: CommissionAgreement[] = [],
 ): AnalysisRow[] {
+  // HISTORICAL READER CONTRACT: `pricing` must be passed in UNFILTERED by
+  // is_active. is_active governs what a client may be SOLD today, never what
+  // was EARNED — narrowing it would reprice every past task on a deactivated
+  // pair to defaultCommissionPct. Callers: contribution-analysis/page.tsx,
+  // what-if/page.tsx.
   const pmap = new Map<string, number>()
   for (const p of pricing) {
     if (p.commission_percentage != null) pmap.set(`${p.client_id}|${p.service_id}`, p.commission_percentage)

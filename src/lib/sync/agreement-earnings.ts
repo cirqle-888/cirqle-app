@@ -59,6 +59,9 @@ export async function syncTaskAgreementEarnings(taskId: string): Promise<{ chang
   }
 
   // remainingPool — same derivation the engine / refreshStoredEarningsFromBilling use.
+  //
+  // HISTORICAL READER CONTRACT — DELIBERATE: no `.eq('is_active', true)` below.
+  // is_active governs what may be SOLD, never what was EARNED.
   let commPct = 50
   if (task.client_id && task.service_id) {
     const { data: pricing } = await admin

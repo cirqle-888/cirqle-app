@@ -253,8 +253,12 @@ export async function upsertClientServicePricings(
   pricingRows: {
     client_id: string
     service_id: string
-    price: number
-    commission_percentage: number
+    /** null = committed, rate not agreed yet. Never coerce a blank to 0. */
+    price: number | null
+    /** OMIT to leave the stored value untouched. Never send 0 for "unset" —
+     *  every commission reader guards with `?? 50` / `!= null`, so a 0 is a
+     *  REAL value that collapses the pair's historical earnings pool. */
+    commission_percentage?: number | null
     currency: string
     is_active: boolean
   }[],
@@ -264,10 +268,17 @@ export async function upsertClientServicePricings(
 
   if (pricingRows.length === 0) return { ok: true }
   const admin = createAdminClient()
+  // Re-activating clears the deactivation stamp so the row never carries a
+  // stale "removed on" date while being live.
+  const rows = pricingRows.map(r => r.is_active
+    ? { ...r, deactivated_at: null, deactivated_by: null }
+    : r)
   const { error } = await admin
     .from('client_service_pricing')
-    .upsert(pricingRows, { onConflict: 'client_id,service_id' })
+    .upsert(rows, { onConflict: 'client_id,service_id' })
   if (error) return { ok: false, error: error.message }
+
+  await auditCommitmentWrites(admin, pricingRows, auth.employeeId)
 
   // Setting pricing resolves the "pending to price" flag for the touched
   // clients and services. Best-effort — ignore if the column isn't there yet.
@@ -276,7 +287,91 @@ export async function upsertClientServicePricings(
   await admin.from('clients').update({ pricing_pending: false }).in('id', clientIds).then(undefined, () => {})
   await admin.from('services').update({ pricing_pending: false }).in('id', serviceIds).then(undefined, () => {})
 
+  revalidateCommitmentSurfaces()
   return { ok: true }
+}
+
+/**
+ * Remove services from a client's commitments.
+ *
+ * DEACTIVATES, never deletes: the row also carries the agreed price, and
+ * destroying it breaks historical commission recompute for tasks already
+ * invoiced (see the HISTORICAL READER CONTRACT in lib/payroll/compute.ts).
+ * Writes is_active + deactivated_at + deactivated_by as one unit, and audits.
+ */
+export async function deactivateClientServices(
+  clientId: string,
+  serviceIds: string[],
+): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+  if (serviceIds.length === 0) return { ok: true }
+
+  const admin = createAdminClient()
+  // Only touch rows that are currently active, so an already-deactivated row
+  // is not re-stamped with a fresh date (and not re-audited).
+  const { data: before } = await admin.from('client_service_pricing')
+    .select('service_id, price, commission_percentage')
+    .eq('client_id', clientId).in('service_id', serviceIds).not('is_active', 'is', false)
+  const affected = (before || []).map((r: { service_id: string }) => r.service_id)
+  if (affected.length === 0) return { ok: true }
+
+  const { error } = await admin.from('client_service_pricing')
+    .update({
+      is_active: false,
+      deactivated_at: new Date().toISOString(),
+      deactivated_by: auth.employeeId,
+    })
+    .eq('client_id', clientId).in('service_id', affected)
+  if (error) return { ok: false, error: error.message }
+
+  await logScopeChanges(admin, (before || []).map((r: any) => ({
+    scopeKind: 'client_service' as const, action: 'deactivated' as const,
+    clientId, serviceId: r.service_id,
+    oldValue: { is_active: true, price: r.price, commission_percentage: r.commission_percentage },
+    newValue: { is_active: false },
+    actorId: auth.employeeId, source: 'ui' as const,
+  })))
+
+  revalidateCommitmentSurfaces()
+  return { ok: true }
+}
+
+/**
+ * Audit commitment writes, distinguishing a brand-new commitment ('added')
+ * from the revival of a deactivated one ('activated'). Best-effort.
+ */
+async function auditCommitmentWrites(
+  admin: ReturnType<typeof createAdminClient>,
+  rows: { client_id: string; service_id: string; is_active: boolean; price?: number | null; commission_percentage?: number | null }[],
+  actorId: string | null,
+): Promise<void> {
+  try {
+    const active = rows.filter(r => r.is_active)
+    if (active.length === 0) return
+    const { data: existing } = await admin.from('client_service_pricing')
+      .select('client_id, service_id, is_active')
+      .in('client_id', [...new Set(active.map(r => r.client_id))])
+    const prior = new Map((existing || []).map((r: any) => [`${r.client_id}|${r.service_id}`, r.is_active]))
+    await logScopeChanges(admin, active.map(r => {
+      const was = prior.get(`${r.client_id}|${r.service_id}`)
+      return {
+        scopeKind: 'client_service' as const,
+        action: was === false ? ('activated' as const) : ('added' as const),
+        clientId: r.client_id, serviceId: r.service_id,
+        oldValue: was === undefined ? null : { is_active: was },
+        newValue: { is_active: true, price: r.price ?? null },
+        actorId, source: 'ui' as const,
+      }
+    }))
+  } catch { /* audit is best-effort — never break the write it describes */ }
+}
+
+/** Pages whose pickers are derived from commitments. */
+function revalidateCommitmentSurfaces(): void {
+  for (const p of ['/dashboard/tasks', '/dashboard/clients', '/dashboard/pricing-matrix', '/dashboard/requests']) {
+    try { revalidatePath(p) } catch { /* best-effort */ }
+  }
 }
 
 export async function reactivateClient(id: string): Promise<ActionResult> {
@@ -845,26 +940,47 @@ export async function syncExchangeRatesIfStale(): Promise<ActionResult<{ synced:
 export async function upsertMatrixCell(
   clientId: string,
   serviceId: string,
-  price: number,
-  commissionPercentage: number,
+  /** null = committed, rate not agreed yet. Never coerce a blank to 0. */
+  price: number | null,
+  /** null = leave the stored commission untouched (see below). */
+  commissionPercentage: number | null,
   currency: string,
 ): Promise<ActionResult> {
   const auth = await requirePermission('settings.access')
   if (!auth.ok) return { ok: false, error: auth.error }
 
   const admin = createAdminClient()
+  // Pricing a cell IS the act of committing the client to that service, so
+  // is_active: true is correct here — but the deactivation stamp must be
+  // cleared with it, or the row goes live carrying a stale "removed on" date.
+  const { data: prior } = await admin.from('client_service_pricing')
+    .select('is_active').eq('client_id', clientId).eq('service_id', serviceId).maybeSingle()
   const { error } = await admin.from('client_service_pricing').upsert(
     {
       client_id: clientId,
       service_id: serviceId,
       price,
-      commission_percentage: commissionPercentage,
+      // Omitted when null so ON CONFLICT DO UPDATE leaves the stored
+      // commission alone — a blank cell must never overwrite an agreed rate.
+      ...(commissionPercentage === null ? {} : { commission_percentage: commissionPercentage }),
       currency: currency || 'INR',
       is_active: true,
+      deactivated_at: null,
+      deactivated_by: null,
     },
     { onConflict: 'client_id,service_id' },
   )
   if (error) return { ok: false, error: error.message }
+
+  await logScopeChanges(admin, [{
+    scopeKind: 'client_service',
+    action: (prior as { is_active?: boolean } | null)?.is_active === false ? 'activated'
+      : prior ? 'updated' : 'added',
+    clientId, serviceId,
+    oldValue: prior ? { is_active: (prior as any).is_active } : null,
+    newValue: { is_active: true, price, commission_percentage: commissionPercentage },
+    actorId: auth.employeeId, source: 'matrix',
+  }])
 
   // Resolve the "pending to price" flag since we just set the price
   await admin.from('clients').update({ pricing_pending: false }).eq('id', clientId).then(undefined, () => {})
