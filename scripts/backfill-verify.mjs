@@ -88,8 +88,24 @@ check('task_requests count', requests, base.task_requests_count, 'invariant')
 // unchanged. Any movement means the run overwrote agreed terms.
 check('price SUM (terms preserved)', sum(csp, 'price'), base.price_sum, 'invariant')
 check('commission SUM (terms preserved)', sum(csp, 'commission_percentage'), base.commission_sum, 'invariant')
-check('rows with commission 0', csp.filter(r => Number(r.commission_percentage) === 0).length,
+
+// NULL and 0 are different facts and must never be conflated here: NULL means
+// "no rate agreed", which every resolver treats as identical to having no row
+// at all, while 0 means "earns nothing" and silently collapses the commission
+// pool. `Number(null) === 0` is true in JS, so the null guard is load-bearing —
+// without it this check counts the 5 deliberately-NULL created rows as zeros
+// and fails a run that was correct. (It did, on the 2026-07-19 backfill.)
+check('rows with commission 0 (literal, excl. NULL)',
+  csp.filter(r => r.commission_percentage != null && Number(r.commission_percentage) === 0).length,
   base.rows_with_zero_commission, 'invariant')
+
+// The created rows are the only permitted source of new NULLs. Tracking them
+// explicitly is what turns "the count moved" into "the count moved by exactly
+// the rows we meant to create".
+check('rows with NULL commission', csp.filter(r => r.commission_percentage == null).length,
+  (base.rows_with_null_commission ?? 0) + PLAN.create, 'delta')
+check('rows with NULL price', csp.filter(r => r.price == null).length,
+  (base.rows_with_null_price ?? 0) + PLAN.create, 'delta')
 
 // ── INVARIANT: no active pair carrying work was deactivated ────────────────
 const usedPairs = new Set(tasks.map(t => `${t.client_id}|${t.service_id}`))

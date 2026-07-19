@@ -77,7 +77,12 @@ const baseline = {
   price_sum: sum(csp, 'price'),
   commission_sum: sum(csp, 'commission_percentage'),
   rows_with_null_price: csp.filter(r => r.price == null).length,
-  rows_with_zero_commission: csp.filter(r => Number(r.commission_percentage) === 0).length,
+  // NULL is excluded deliberately: `Number(null) === 0` is true in JS, and a
+  // NULL commission ("no rate agreed") is not a 0 commission ("earns nothing").
+  // Conflating them makes this metric count rows the backfill legitimately
+  // creates. Tracked separately below.
+  rows_with_zero_commission: csp.filter(r => r.commission_percentage != null && Number(r.commission_percentage) === 0).length,
+  rows_with_null_commission: csp.filter(r => r.commission_percentage == null).length,
 
   // Pairs carrying real work. The backfill keeps exactly these active.
   pairs_with_a_task: [...pairs].filter(k => usedPairs.has(k)).length,
