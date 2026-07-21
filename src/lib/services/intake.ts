@@ -12,7 +12,7 @@
  * client and must never be pulled into a client bundle).
  */
 
-export const INTAKE_KINDS = ['none', 'request_portal', 'offer_intake'] as const
+export const INTAKE_KINDS = ['none', 'request_portal', 'offer_intake', 'product_library'] as const
 export type KnownIntakeKind = typeof INTAKE_KINDS[number]
 // Future kinds are allowed as plain strings without code-wide type churn.
 export type IntakeKind = KnownIntakeKind | (string & {})
@@ -21,6 +21,7 @@ export const INTAKE_KIND_META: Record<string, { label: string; short: string; de
   none:           { label: 'None — billing only', short: 'None',         description: 'No client-submittable form. Pure billing / line-item service (e.g. Domain Purchase, Workspace Mail).' },
   request_portal: { label: 'Standard Request',     short: 'Request',      description: 'Design / social-media clients submit work through the standard Request Portal.' },
   offer_intake:   { label: 'Offer Intake',         short: 'Offer Intake', description: 'Supermarket / retail clients submit their offer lists through the Offer Intake form.' },
+  product_library:{ label: 'Product Library',       short: 'Products',     description: 'Clients build up their own catalog of vegetables and fruits — name, local name and photo — for staff to review before it goes live.' },
 }
 
 /** Display label for any kind, including future ones not yet in the meta map. */
@@ -38,12 +39,17 @@ export function deriveIntakeKinds(services: Array<{ intake_kind?: string | null 
 
 /** Which app a multi-service client lands on first when opening their Hub link
  *  — Offer Intake is the primary workflow for supermarket/retail clients. */
-export const INTAKE_KIND_PRIORITY = ['offer_intake', 'request_portal'] as const
+export const INTAKE_KIND_PRIORITY = ['offer_intake', 'product_library', 'request_portal'] as const
 
 /** Route for a given kind, given that client's per-app tokens. Null if the
  *  client doesn't have that app's token (kind not enabled / not provisioned). */
-export function intakeKindHref(kind: string, tokens: { requestToken?: string | null; offerToken?: string | null }): string | null {
+export function intakeKindHref(kind: string, tokens: {
+  requestToken?: string | null
+  offerToken?: string | null
+  libraryToken?: string | null
+}): string | null {
   if (kind === 'request_portal') return tokens.requestToken ? `/intake/${tokens.requestToken}` : null
   if (kind === 'offer_intake') return tokens.offerToken ? `/intake/offer/${tokens.offerToken}` : null
+  if (kind === 'product_library') return tokens.libraryToken ? `/intake/library/${tokens.libraryToken}` : null
   return null
 }

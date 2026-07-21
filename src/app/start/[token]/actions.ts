@@ -12,6 +12,7 @@
 
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getClientIntakeKinds } from '@/lib/services/intake-server'
+import { selectWithOptionalColumns } from '@/lib/offer-columns'
 
 interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
 
@@ -19,13 +20,21 @@ async function resolveHubToken(token: string) {
   if (!token || token.length < 10) return null
   try {
     const admin = createAdminClient()
-    const { data } = await admin
-      .from('clients')
-      .select('id, name, offer_intake_token')
-      .eq('hub_token', token)
-      .eq('is_active', true)
-      .maybeSingle()
-    return data || null
+    // product_library_token arrives with migration 20260719140000. Selecting a
+    // column that doesn't exist yet fails the WHOLE query (42703), which would
+    // take the entire Hub down — including Offer Intake — for every client. Ask
+    // for it, fall back without it.
+    const rows = await selectWithOptionalColumns<any[]>(
+      'id, name, offer_intake_token',
+      ['product_library_token'],
+      cols => admin
+        .from('clients')
+        .select(cols)
+        .eq('hub_token', token)
+        .eq('is_active', true)
+        .limit(1),
+    )
+    return rows?.[0] || null
   } catch { return null }
 }
 
@@ -46,6 +55,7 @@ export async function getClientHubData(token: string): Promise<ActionResult<{
   kinds: string[]
   requestToken: string | null
   offerToken: string | null
+  libraryToken: string | null
   logoUrl: string | null
 }>> {
   const client = await resolveHubToken(token)
@@ -81,6 +91,7 @@ export async function getClientHubData(token: string): Promise<ActionResult<{
   }
 
   const offerToken = kinds.includes('offer_intake') ? client.offer_intake_token : null
+  const libraryToken = kinds.includes('product_library') ? (client.product_library_token || null) : null
 
   const [logoRes, logoDarkRes] = await Promise.all([
     admin.from('company_settings').select('value').eq('key', 'logo_url').maybeSingle(),
@@ -94,6 +105,7 @@ export async function getClientHubData(token: string): Promise<ActionResult<{
       kinds,
       requestToken,
       offerToken,
+      libraryToken,
       logoUrl: (logoDarkRes.data?.value as string) || (logoRes.data?.value as string) || null,
     },
   }

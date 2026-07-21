@@ -24,9 +24,9 @@ export default async function ClientHubPage({ params }: { params: Promise<{ toke
     return <InvalidLink reason={res.error || 'This link has expired or been revoked. Please ask Cirqle for a new one.'} />
   }
 
-  const { kinds, requestToken, offerToken } = res.data
+  const { kinds, requestToken, offerToken, libraryToken } = res.data
   const options = kinds
-    .map(k => ({ kind: k, href: intakeKindHref(k, { requestToken, offerToken }) }))
+    .map(k => ({ kind: k, href: intakeKindHref(k, { requestToken, offerToken, libraryToken }) }))
     .filter((o): o is { kind: string; href: string } => !!o.href)
 
   if (options.length === 0) {

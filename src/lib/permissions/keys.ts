@@ -140,6 +140,10 @@ export const PERMS = {
   /** Open the internal Offer Preparation workspace: pick a client, paste their offer list, review products and generate the designer Google Sheet. */
   OFFER_PREPARE: 'offer.prepare',
 
+  // Product Catalog — staff review of client-submitted products
+  /** Approve / reject products submitted by clients through their product library link. */
+  CATALOG_REVIEW_SUBMISSIONS: 'catalog.review_submissions',
+
   // Clients / Services — granular "add" perms (separate from settings.access)
   /** Open the Clients module (list + per-client dashboard). Admins bypass pre-migration. */
   CLIENTS_VIEW:    'clients.view',

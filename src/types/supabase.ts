@@ -2677,6 +2677,7 @@ export type Database = {
           offer_master_sheet_id: string | null
           offer_master_sheet_url: string | null
           offer_sheet_webhook_url: string | null
+          product_library_token: string | null
           offer_sheet_url: string | null
           phone: string | null
           pricing_pending: boolean
@@ -2708,6 +2709,7 @@ export type Database = {
           offer_master_sheet_url?: string | null
           offer_sheet_url?: string | null
           offer_sheet_webhook_url?: string | null
+          product_library_token?: string | null
           phone?: string | null
           pricing_pending?: boolean
           updated_at?: string | null
@@ -2738,6 +2740,7 @@ export type Database = {
           offer_master_sheet_url?: string | null
           offer_sheet_url?: string | null
           offer_sheet_webhook_url?: string | null
+          product_library_token?: string | null
           phone?: string | null
           pricing_pending?: boolean
           updated_at?: string | null
@@ -5177,9 +5180,15 @@ export type Database = {
           id: string
           image_url: string | null
           name: string
+          names: Json
           notes: string | null
           product_code: string
+          review_status: string
+          reviewed_at: string | null
+          reviewed_by: string | null
           status: string
+          submitted_at: string | null
+          submitted_by_client_id: string | null
           updated_at: string
           weight: string | null
         }
@@ -5191,9 +5200,15 @@ export type Database = {
           id?: string
           image_url?: string | null
           name: string
+          names?: Json
           notes?: string | null
           product_code?: string
+          review_status?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           status?: string
+          submitted_at?: string | null
+          submitted_by_client_id?: string | null
           updated_at?: string
           weight?: string | null
         }
@@ -5205,13 +5220,27 @@ export type Database = {
           id?: string
           image_url?: string | null
           name?: string
+          names?: Json
           notes?: string | null
           product_code?: string
+          review_status?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           status?: string
+          submitted_at?: string | null
+          submitted_by_client_id?: string | null
           updated_at?: string
           weight?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "product_catalog_submitted_by_client_id_fkey"
+            columns: ["submitted_by_client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       product_catalog_images: {
         Row: {

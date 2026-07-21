@@ -3,6 +3,8 @@ import { resolveCurrentEmployeeId } from '@/lib/auth/enforce'
 import { redirect } from 'next/navigation'
 import { getIntakeKindsByClient } from '@/lib/services/intake-server'
 import CatalogClient from './catalog-client'
+import PendingSubmissions from './pending-submissions'
+import { listPendingSubmissions } from './actions'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,7 +14,7 @@ export default async function CatalogPage() {
 
   const admin = createAdminClient()
 
-  const [productsRes, clientsRes, kindsByClient] = await Promise.all([
+  const [productsRes, clientsRes, kindsByClient, pendingRes] = await Promise.all([
     admin
       .from('product_catalog')
       .select(`
@@ -29,7 +31,12 @@ export default async function CatalogPage() {
       .eq('is_active', true)
       .order('name'),
     getIntakeKindsByClient(),
+    // Returns ok:false when the viewer lacks catalog.review_submissions, and an
+    // empty list before migration 20260719140000 — both render nothing.
+    listPendingSubmissions(),
   ])
+
+  const pending = pendingRes.ok ? pendingRes.data?.items ?? [] : []
 
   const products = productsRes.data || []
   const clientsRaw = clientsRes.data || []
@@ -40,11 +47,14 @@ export default async function CatalogPage() {
   const brands = [...new Set(products.map((p: any) => p.brand).filter(Boolean))].sort()
 
   return (
-    <CatalogClient
-      initialProducts={products}
-      clients={clients}
-      categories={categories as string[]}
-      brands={brands as string[]}
-    />
+    <>
+      {pending.length > 0 && <PendingSubmissions items={pending} />}
+      <CatalogClient
+        initialProducts={products}
+        clients={clients}
+        categories={categories as string[]}
+        brands={brands as string[]}
+      />
+    </>
   )
 }
