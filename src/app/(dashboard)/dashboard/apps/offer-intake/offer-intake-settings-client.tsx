@@ -6,7 +6,7 @@ import {
   ArrowLeft, Link2, Tag, Copy, Check, RefreshCw, Loader2,
   AlertTriangle, CheckCircle2, ExternalLink, Webhook,
   ChevronDown, ChevronUp, Search, ShieldAlert, FlaskConical,
-  Package, Store, Upload, Settings2,
+  Package, Store, Upload, Settings2, Sprout,
 } from 'lucide-react'
 import {
   saveWebhookUrl, saveOfferSheetUrl, resetOfferToken, testSheetSync, ensureOfferToken,
@@ -75,6 +75,7 @@ function ClientCard({
   client: {
     id: string; name: string; code?: string
     offer_intake_token: string | null
+    product_library_token?: string | null
     offer_sheet_webhook_url: string | null
     offer_sheet_url: string | null
     offer_flow_mode?: string | null
@@ -107,6 +108,12 @@ function ClientCard({
   const [figmaSaving, setFigmaSaving] = useState(false)
 
   const intakeUrl = token ? `${appUrl}/intake/offer/${token}` : null
+  // Separate link and separate token from the offer form: this one goes to
+  // whoever buys the produce, and is usually not the person who sends the
+  // weekly offer list.
+  const libraryUrl = client.product_library_token
+    ? `${appUrl}/intake/library/${client.product_library_token}`
+    : null
   const hasWebhook = !!client.offer_sheet_webhook_url
   const hasSheetLink = !!client.offer_sheet_url
   const hasToken = !!token
@@ -488,6 +495,35 @@ function ClientCard({
                       Generate link
                     </button>
                   </div>
+                )}
+              </div>
+
+              {/* ── Section 1b: Product Library link ──
+                  A second, independent link. Clients send produce (name,
+                  Malayalam name, photo) into the shared catalog; submissions
+                  wait for staff approval before they can reach a flyer. */}
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/60 mb-3 flex items-center gap-1.5">
+                  <Sprout className="w-3.5 h-3.5" /> Product Library Link
+                </p>
+                {libraryUrl ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 bg-secondary/40 rounded-xl px-3 py-2.5">
+                      <p className="text-xs font-mono text-muted-foreground truncate flex-1">{libraryUrl}</p>
+                      <CopyBtn text={libraryUrl} label="Copy" />
+                      <a href={libraryUrl} target="_blank" rel="noopener noreferrer"
+                        className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors" title="Open link">
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground/50">
+                      For whoever buys the produce — they add vegetables and fruits with a photo, and you approve them in the catalog.
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    No library link yet — it is created automatically for every active client.
+                  </p>
                 )}
               </div>
 

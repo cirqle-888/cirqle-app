@@ -17,7 +17,7 @@ export default async function OfferIntakeSettingsPage() {
   const [clientsRaw, kindsByClient, { data: settingsRows }] = await Promise.all([
     selectWithOptionalColumns<any[]>(
       'id, name, code, is_active, offer_intake_token, offer_sheet_webhook_url, offer_sheet_url, has_offer_flyer_service',
-      ['offer_flow_mode', 'offer_master_sheet_url', 'integrations'],
+      ['offer_flow_mode', 'offer_master_sheet_url', 'integrations', 'product_library_token'],
       cols => admin.from('clients').select(cols).eq('is_active', true).order('name'),
     ),
     getIntakeKindsByClient(),
