@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   OFFER_SHEET_HEADERS, DATE_FORMATS,
   buildOfferSheetRows, offerSheetTsv, offerSheetCsv,
+  figmaLayerName, figmaBindingGuide,
 } from './offer-sheet'
 
 describe('offer sheet output', () => {
@@ -61,6 +62,26 @@ describe('offer sheet output', () => {
       products: [{ name: 'Tea', display_order: 0 }],
     })
     expect(rows[0].slice(-2)).toEqual(['18, 19, 20 JULY 2026', 'July 18 – July 20 2026'])
+  })
+})
+
+describe('figma layer names', () => {
+  it('derives the plugin binding name from each column', () => {
+    // Verified against BN MART JULY 2026, whose working PRODUCT component
+    // contains a text layer literally named "#product".
+    expect(figmaLayerName('Product')).toBe('#product')
+    expect(figmaLayerName('Offer Price')).toBe('#offerprice')
+    expect(figmaLayerName('Price 1')).toBe('#price1')
+    expect(figmaLayerName('MRP')).toBe('#mrp')
+    expect(figmaLayerName('Offer Date Display')).toBe('#offerdatedisplay')
+  })
+
+  it('covers every column and stays unique', () => {
+    const guide = figmaBindingGuide()
+    expect(guide).toHaveLength(OFFER_SHEET_HEADERS.length)
+    // A duplicate would make two columns fight over the same layer.
+    expect(new Set(guide.map(g => g.layer)).size).toBe(guide.length)
+    expect(guide.every(g => g.layer.startsWith('#'))).toBe(true)
   })
 })
 

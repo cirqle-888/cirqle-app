@@ -17,6 +17,7 @@ import {
   type OfferGroupRow,
 } from './actions'
 import { OfferGroupsPanel } from './offer-groups-panel'
+import { FigmaBindingHelp } from '@/components/offer/figma-binding-help'
 
 const inputCls = 'w-full bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20'
 const labelCls = 'block text-xs font-medium text-muted-foreground mb-1.5'
@@ -324,7 +325,10 @@ function ClientCard({
               lives for them — and it puts the design one click from the
               offer list instead of hunting through Figma's file browser. */}
           <div>
-            <p className="text-xs font-semibold text-foreground mb-2">Figma file</p>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-foreground">Figma file</p>
+              <FigmaBindingHelp />
+            </div>
             <div className="flex items-center gap-2">
               <input
                 value={figmaDraft}

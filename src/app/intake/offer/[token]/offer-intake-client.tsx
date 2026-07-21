@@ -25,6 +25,7 @@ import {
 } from './actions'
 import type { ParsedOfferProduct } from '@/lib/ai/offer-capture'
 import { ImageLightbox } from '@/components/ui/image-lightbox'
+import { FigmaBindingHelp } from '@/components/offer/figma-binding-help'
 import { IntakeAppSwitcher } from '@/components/intake/app-switcher'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -2763,6 +2764,8 @@ function OfferIntakeClientInner({
                  <Download className="w-3.5 h-3.5" /> CSV
                </button>
              )}
+             {/* Designers only — a client has no use for Figma layer names. */}
+             {staff && <FigmaBindingHelp tone="dark" />}
              {products.length > 0 && (
                <button
                  onClick={() => setShowMissingImagesOnly(v => !v)}

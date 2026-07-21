@@ -32,6 +32,25 @@ export const OFFER_SHEET_HEADERS = [
   'Offer Date Text',
 ] as const
 
+/**
+ * The Figma layer name that pulls each column in.
+ *
+ * The Google Sheets Sync plugin fills a layer whose name is `#` + the column
+ * name, lowercased with spaces removed — verified against BN MART JULY 2026,
+ * whose working `PRODUCT` component contains a text layer named `#product`.
+ *
+ * Derived from OFFER_SHEET_HEADERS rather than written out, so the help shown
+ * to staff can never drift from the columns actually being written.
+ */
+export function figmaLayerName(header: string): string {
+  return '#' + header.toLowerCase().replace(/\s+/g, '')
+}
+
+/** Every column paired with the layer name a designer should use. */
+export function figmaBindingGuide(): { column: string; layer: string }[] {
+  return OFFER_SHEET_HEADERS.map(h => ({ column: h, layer: figmaLayerName(h) }))
+}
+
 type SheetBadge = {
   custom_label?: string | null
   label?: string | null
