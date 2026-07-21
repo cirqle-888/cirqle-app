@@ -32,9 +32,17 @@ const AXIS_TICK = { fontSize: 10, fill: 'var(--muted-foreground)' }
 const GRID_PROPS = { stroke: 'var(--border)', strokeOpacity: 0.6, vertical: false }
 
 type SeriesKey = 'jobs' | 'inflowInr' | 'outflowInr' | 'balanceInr'
+/** What a series can actually plot. Jobs plots either its count or its ₹ value. */
+type PlotKey = SeriesKey | 'jobValueInr'
 
 // Palette validated for both themes (dataviz six-checks: lightness band,
 // chroma, CVD separation, ≥3:1 contrast on light AND dark surfaces).
+//
+// FOUR colors, deliberately. Job value rides the EXISTING jobs series via the
+// #/₹ toggle rather than becoming a fifth line: at 4 series (8 lines with the
+// comparison overlay) this palette already fails the all-pairs CVD check —
+// #2563eb↔#8b5cf6 is ΔE 2.3 protan / 12.7 normal, below the 15 floor — and
+// every candidate 5th hue made it worse. Faceting beats adding a series.
 const SERIES: { key: SeriesKey; label: string; color: string; money: boolean }[] = [
   { key: 'jobs',       label: 'Jobs Received', color: '#8b5cf6', money: false },
   { key: 'inflowInr',  label: 'Inflow',        color: '#059669', money: true },
@@ -42,6 +50,17 @@ const SERIES: { key: SeriesKey; label: string; color: string; money: boolean }[]
   { key: 'balanceInr', label: 'Bank Balance',  color: '#2563eb', money: true },
 ]
 const JOBS_COLOR = SERIES[0].color
+
+/** Tooltip/axis metadata by PLOT key — jobValueInr is not a SERIES row. */
+const PLOT_META: Record<PlotKey, { label: string; money: boolean }> = {
+  jobs:        { label: 'Jobs Received', money: false },
+  jobValueInr: { label: 'Job Value',     money: true },
+  inflowInr:   { label: 'Inflow',        money: true },
+  outflowInr:  { label: 'Outflow',       money: true },
+  balanceInr:  { label: 'Bank Balance',  money: true },
+}
+/** Keys that get %-of-peak rescaled in the combined view. */
+const SCALED_KEYS: PlotKey[] = ['jobs', 'jobValueInr', 'inflowInr', 'outflowInr', 'balanceInr']
 
 const MODES: { key: ComparisonMode; label: string; prevLabel: string }[] = [
   { key: 'week',    label: 'Week',    prevLabel: 'last week' },
@@ -53,7 +72,7 @@ const MODES: { key: ComparisonMode; label: string; prevLabel: string }[] = [
 
 export function DashboardTrendGraph({ cashbook, tasks, fmt }: {
   cashbook: { type: string; amount_inr?: number; entry_date: string }[]
-  tasks: { task_date: string | null }[]
+  tasks: { task_date: string | null; billing_amount_inr?: number | null }[]
   fmt: (n: number) => string
 }) {
   const today = new Date().toISOString().slice(0, 10)
@@ -68,6 +87,10 @@ export function DashboardTrendGraph({ cashbook, tasks, fmt }: {
   const [visible, setVisible] = useState<Record<SeriesKey, boolean>>({
     jobs: true, inflowInr: true, outflowInr: true, balanceInr: true,
   })
+  // What the jobs series PLOTS. Both numbers are always shown in its chip; this
+  // only decides which one gets a line, so the chart never gains a 5th series.
+  const [jobsMetric, setJobsMetric] = useState<'count' | 'value'>('count')
+  const jobsIsValue = jobsMetric === 'value'
 
   // Normalize once — the raw props come straight from the dashboard's existing
   // fetches (all-time cashbook, 36-month tasks); no extra queries needed.
@@ -75,7 +98,12 @@ export function DashboardTrendGraph({ cashbook, tasks, fmt }: {
     cash: cashbook
       .filter(e => e.entry_date && (e.type === 'inflow' || e.type === 'outflow'))
       .map(e => ({ date: e.entry_date, type: e.type, amountInr: Number(e.amount_inr || 0) })) as TrendCashPoint[],
-    tasks: tasks.filter(t => t.task_date).map(t => ({ date: t.task_date! })) as TrendTaskPoint[],
+    // billing_amount_inr is already the task TOTAL (never a unit price) — every
+    // other dashboard aggregate sums it raw, so "Job Value" here reconciles
+    // with Total Billed on the same screen.
+    tasks: tasks.filter(t => t.task_date).map(t => ({
+      date: t.task_date!, valueInr: Number(t.billing_amount_inr) || 0,
+    })) as TrendTaskPoint[],
   }), [cashbook, tasks])
 
   const { rows, curTotals, prevTotals, prevTruncated, periods } = useMemo(() => {
@@ -106,33 +134,42 @@ export function DashboardTrendGraph({ cashbook, tasks, fmt }: {
   // raw values ride along under raw_* keys for the tooltip.
   const combinedRows = useMemo(() => {
     if (layout !== 'combined') return rows
-    const maxes = Object.fromEntries(SERIES.map(s => [
-      s.key,
+    const maxes = Object.fromEntries(SCALED_KEYS.map(k => [
+      k,
       Math.max(1e-9, ...rows.flatMap(r => [
-        Math.abs((r as any)[s.key] ?? 0),
-        Math.abs((r as any)[`prev_${s.key}`] ?? 0),
+        Math.abs((r as any)[k] ?? 0),
+        Math.abs((r as any)[`prev_${k}`] ?? 0),
       ])),
     ]))
-    const pct = (v: number, key: SeriesKey) => Math.round((v / maxes[key]) * 1000) / 10
+    const pct = (v: number, key: PlotKey) => Math.round((v / maxes[key]) * 1000) / 10
     return rows.map(r => {
       const o = { ...r } as typeof r & Record<string, unknown>
-      for (const s of SERIES) {
-        const cur = (r as any)[s.key], prev = (r as any)[`prev_${s.key}`]
-        o[`raw_${s.key}`] = cur
-        o[`raw_prev_${s.key}`] = prev
-        if (cur != null) (o as any)[s.key] = pct(cur, s.key)
-        if (prev != null) (o as any)[`prev_${s.key}`] = pct(prev, s.key)
+      for (const k of SCALED_KEYS) {
+        const cur = (r as any)[k], prev = (r as any)[`prev_${k}`]
+        o[`raw_${k}`] = cur
+        o[`raw_prev_${k}`] = prev
+        if (cur != null) (o as any)[k] = pct(cur, k)
+        if (prev != null) (o as any)[`prev_${k}`] = pct(prev, k)
       }
       return o
     })
   }, [rows, layout])
 
-  const anyMoney = SERIES.some(s => s.money && visible[s.key])
+  // Jobs plots either its count or its ₹ value; every other series is fixed.
+  const plotKeyOf = (k: SeriesKey): PlotKey => (k === 'jobs' && jobsIsValue ? 'jobValueInr' : k)
+  const isMoneyKey = (k: SeriesKey) => PLOT_META[plotKeyOf(k)].money
+
+  const anyMoney = SERIES.some(s => isMoneyKey(s.key) && visible[s.key])
   const anyVisible = SERIES.some(s => visible[s.key])
+  // The count pane only exists while jobs is plotting a count.
+  const showJobsPane = visible.jobs && !jobsIsValue
   const modeMeta = MODES.find(m => m.key === mode)!
 
-  const totalOf = (t: ReturnType<typeof seriesTotals>, key: SeriesKey) =>
-    key === 'jobs' ? t.jobs : key === 'inflowInr' ? t.inflowInr : key === 'outflowInr' ? t.outflowInr : t.endBalanceInr
+  const totalOf = (t: ReturnType<typeof seriesTotals>, key: PlotKey) =>
+    key === 'jobs' ? t.jobs
+      : key === 'jobValueInr' ? t.jobValueInr
+      : key === 'inflowInr' ? t.inflowInr
+      : key === 'outflowInr' ? t.outflowInr : t.endBalanceInr
 
   return (
     <section className="bg-card border border-border rounded-xl p-4 space-y-4">
@@ -209,6 +246,14 @@ export function DashboardTrendGraph({ cashbook, tasks, fmt }: {
           const pct = prev != null ? pctChange(cur, prev) : null
           // For outflow, growth is bad — invert the tint.
           const good = pct != null && (s.key === 'outflowInr' ? pct <= 0 : pct >= 0)
+          // Jobs carries a second figure: the ₹ value of those same jobs. Shown
+          // ALWAYS, independent of which one the line is plotting — the whole
+          // point is that "46 jobs, down 19%" means little without knowing
+          // whether those 46 were worth more or less than the 57 before them.
+          const isJobs = s.key === 'jobs'
+          const curVal = isJobs ? totalOf(curTotals, 'jobValueInr') : 0
+          const prevVal = isJobs && prevTotals ? totalOf(prevTotals, 'jobValueInr') : null
+          const pctVal = prevVal != null ? pctChange(curVal, prevVal) : null
           return (
             <label
               key={s.key}
@@ -226,6 +271,25 @@ export function DashboardTrendGraph({ cashbook, tasks, fmt }: {
                 />
                 <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ background: s.color }} />
                 <span className="text-[11px] text-muted-foreground truncate">{s.label}</span>
+                {isJobs && (
+                  // Chooses which figure the LINE plots. Inside a <label>, so
+                  // every click must be prevented from toggling the checkbox.
+                  <span className="ml-auto flex shrink-0 rounded-md border border-border overflow-hidden">
+                    {([['count', '#'], ['value', '₹']] as const).map(([m, glyph]) => (
+                      <button
+                        key={m} type="button"
+                        onMouseDown={e => { e.preventDefault(); e.stopPropagation() }}
+                        onClick={e => { e.preventDefault(); e.stopPropagation(); setJobsMetric(m) }}
+                        aria-pressed={jobsMetric === m}
+                        title={m === 'count' ? 'Plot the number of jobs' : 'Plot the ₹ value of those jobs'}
+                        className={`px-1.5 py-0.5 text-[10px] leading-none transition-colors ${
+                          jobsMetric === m
+                            ? 'bg-foreground/10 text-foreground font-semibold'
+                            : 'text-muted-foreground hover:text-foreground'}`}
+                      >{glyph}</button>
+                    ))}
+                  </span>
+                )}
               </div>
               <div className="mt-1 flex items-baseline gap-2 pl-[22px]">
                 <span className="text-sm font-semibold tabular-nums">
@@ -242,6 +306,23 @@ export function DashboardTrendGraph({ cashbook, tasks, fmt }: {
                   </span>
                 )}
               </div>
+              {isJobs && (
+                <div className="mt-0.5 flex items-baseline gap-2 pl-[22px]">
+                  <span className={`text-xs font-semibold tabular-nums ${jobsIsValue ? '' : 'text-muted-foreground'}`}>
+                    {fmt(curVal)}
+                  </span>
+                  {pctVal != null && (
+                    <span className={`text-[10px] font-medium ${pctVal >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                      {pctVal > 0 ? '+' : ''}{pctVal}%
+                    </span>
+                  )}
+                  {prevVal != null && (
+                    <span className="text-[10px] text-muted-foreground">
+                      {prevTruncated ? 'prev to date' : 'prev'} {fmt(prevVal)}
+                    </span>
+                  )}
+                </div>
+              )}
             </label>
           )
         })}
@@ -276,8 +357,8 @@ export function DashboardTrendGraph({ cashbook, tasks, fmt }: {
               cursor={{ stroke: 'var(--border)' }}
               formatter={(value: any, name: any, item: any) => {
                 const isPrev = String(name).startsWith('prev:')
-                const key = (isPrev ? String(name).slice(5) : String(name)) as SeriesKey
-                const meta = SERIES.find(s => s.key === key)
+                const key = (isPrev ? String(name).slice(5) : String(name)) as PlotKey
+                const meta = PLOT_META[key]
                 const raw = item?.payload?.[isPrev ? `raw_prev_${key}` : `raw_${key}`]
                 const formatted = raw == null
                   ? `${value}%`
@@ -292,7 +373,7 @@ export function DashboardTrendGraph({ cashbook, tasks, fmt }: {
             {SERIES.filter(s => visible[s.key]).map(s => (
               <Line
                 key={s.key} type="monotone"
-                dataKey={s.key} name={s.key}
+                dataKey={plotKeyOf(s.key)} name={plotKeyOf(s.key)}
                 stroke={s.color} strokeWidth={2} dot={false}
                 activeDot={{ r: 4, stroke: 'var(--card)', strokeWidth: 2 }}
                 connectNulls
@@ -301,7 +382,7 @@ export function DashboardTrendGraph({ cashbook, tasks, fmt }: {
             {compare && SERIES.filter(s => visible[s.key]).map(s => (
               <Line
                 key={`prev_${s.key}`} type="monotone"
-                dataKey={`prev_${s.key}`} name={`prev:${s.key}`}
+                dataKey={`prev_${plotKeyOf(s.key)}`} name={`prev:${plotKeyOf(s.key)}`}
                 stroke={s.color} strokeWidth={1.5} strokeDasharray="5 4" strokeOpacity={0.5}
                 dot={false} activeDot={{ r: 3, stroke: 'var(--card)', strokeWidth: 2 }}
                 connectNulls
@@ -311,13 +392,13 @@ export function DashboardTrendGraph({ cashbook, tasks, fmt }: {
         </ResponsiveContainer>
       )}
       {layout === 'split' && anyMoney && (
-        <ResponsiveContainer width="100%" height={visible.jobs ? 230 : 290}>
+        <ResponsiveContainer width="100%" height={showJobsPane ? 230 : 290}>
           <ComposedChart data={rows} syncId="business-trends" margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
             <CartesianGrid {...GRID_PROPS} />
             {/* When the jobs strip is shown below, it carries the shared date
                 labels — hiding them here avoids a duplicated axis row. */}
             <XAxis
-              dataKey="label" hide={visible.jobs}
+              dataKey="label" hide={showJobsPane}
               tick={AXIS_TICK} axisLine={false} tickLine={false}
               interval="preserveStartEnd" minTickGap={24}
             />
@@ -330,8 +411,8 @@ export function DashboardTrendGraph({ cashbook, tasks, fmt }: {
               cursor={{ stroke: 'var(--border)' }}
               formatter={(value: any, name: any) => {
                 const isPrev = String(name).startsWith('prev:')
-                const key = (isPrev ? String(name).slice(5) : String(name)) as SeriesKey
-                const meta = SERIES.find(s => s.key === key)
+                const key = (isPrev ? String(name).slice(5) : String(name)) as PlotKey
+                const meta = PLOT_META[key]
                 return [fmt(Number(value)), `${meta?.label ?? name}${isPrev ? ' (prev)' : ''}`]
               }}
               labelFormatter={(label: any, payload: any) => {
@@ -339,19 +420,19 @@ export function DashboardTrendGraph({ cashbook, tasks, fmt }: {
                 return compare && prevLabel ? `${label} · prev: ${prevLabel}` : label
               }}
             />
-            {SERIES.filter(s => s.money && visible[s.key]).map(s => (
+            {SERIES.filter(s => isMoneyKey(s.key) && visible[s.key]).map(s => (
               <Line
                 key={s.key} type="monotone"
-                dataKey={s.key} name={s.key}
+                dataKey={plotKeyOf(s.key)} name={plotKeyOf(s.key)}
                 stroke={s.color} strokeWidth={2} dot={false}
                 activeDot={{ r: 4, stroke: 'var(--card)', strokeWidth: 2 }}
                 connectNulls
               />
             ))}
-            {compare && SERIES.filter(s => s.money && visible[s.key]).map(s => (
+            {compare && SERIES.filter(s => isMoneyKey(s.key) && visible[s.key]).map(s => (
               <Line
                 key={`prev_${s.key}`} type="monotone"
-                dataKey={`prev_${s.key}`} name={`prev:${s.key}`}
+                dataKey={`prev_${plotKeyOf(s.key)}`} name={`prev:${plotKeyOf(s.key)}`}
                 stroke={s.color} strokeWidth={1.5} strokeDasharray="5 4" strokeOpacity={0.5}
                 dot={false} activeDot={{ r: 3, stroke: 'var(--card)', strokeWidth: 2 }}
                 connectNulls
@@ -360,7 +441,7 @@ export function DashboardTrendGraph({ cashbook, tasks, fmt }: {
           </ComposedChart>
         </ResponsiveContainer>
       )}
-      {layout === 'split' && visible.jobs && (
+      {layout === 'split' && showJobsPane && (
         <ResponsiveContainer width="100%" height={anyMoney ? 110 : 240}>
           <ComposedChart data={rows} syncId="business-trends" margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             <CartesianGrid {...GRID_PROPS} />

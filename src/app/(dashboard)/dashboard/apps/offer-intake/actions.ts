@@ -211,6 +211,38 @@ export async function saveClientFlowMode(
   return { ok: true }
 }
 
+/**
+ * The client's main Figma file.
+ *
+ * Categories carry their own Figma link, but most clients have no categories —
+ * they get one flyer from one file — so the link belongs on the client too.
+ * Stored in the `integrations` jsonb rather than its own column so adding
+ * Canva, Drive or anything else later needs no migration.
+ */
+export async function saveClientFigmaUrl(clientId: string, url: string): Promise<ActionResult> {
+  const _guard = await requireAdmin(); if (!_guard.ok) return { ok: false, error: _guard.error }
+  const admin = createAdminClient()
+  const trimmed = url.trim()
+
+  if (trimmed && !/^https?:\/\/(www\.)?figma\.com\//i.test(trimmed)) {
+    return { ok: false, error: 'That doesn’t look like a Figma link. Open the file and copy the URL from your browser (it starts with figma.com/design/…).' }
+  }
+
+  // Merge rather than replace: this column is shared with any other integration.
+  const { data: existing } = await admin
+    .from('clients').select('integrations').eq('id', clientId).maybeSingle()
+  const current = (existing?.integrations as Record<string, unknown>) || {}
+  const next = { ...current }
+  if (trimmed) next.figma = { file_url: trimmed }
+  else delete next.figma
+
+  const { error } = await admin.from('clients').update({ integrations: next }).eq('id', clientId)
+  if (error) return { ok: false, error: error.message }
+  revalidatePath('/dashboard/apps/offer-intake')
+  revalidatePath('/dashboard/offer-prepare')
+  return { ok: true }
+}
+
 export async function saveMasterSheetUrl(clientId: string, url: string): Promise<ActionResult> {
   const _guard = await requireAdmin(); if (!_guard.ok) return { ok: false, error: _guard.error }
   const admin = createAdminClient()

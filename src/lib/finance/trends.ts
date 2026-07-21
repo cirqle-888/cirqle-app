@@ -16,12 +16,20 @@ export type TrendGranularity = 'day' | 'month'
 export interface PeriodRange { from: string; to: string }   // inclusive bounds
 
 export interface TrendCashPoint { date: string; type: 'inflow' | 'outflow'; amountInr: number }
-export interface TrendTaskPoint { date: string }
+/**
+ * `valueInr` is the task's billing_amount_inr — already the TOTAL for the task,
+ * never a unit price. Every other dashboard aggregation sums it raw (see
+ * dashboard-analytics.tsx), so multiplying by `quantity` here would silently
+ * disagree with "Total Billed" on the same screen. Optional: absent means 0,
+ * which keeps callers that only track counts working unchanged.
+ */
+export interface TrendTaskPoint { date: string; valueInr?: number }
 
 export interface TrendBucket {
   key: string          // YYYY-MM-DD (day) or YYYY-MM (month)
   label: string        // short display label, e.g. "7 Jul" / "Jul 26"
   jobs: number         // tasks received (count by task_date)
+  jobValueInr: number  // billing value of those same tasks
   inflowInr: number
   outflowInr: number
   balanceInr: number   // running bank balance at END of bucket (all-time cumulative)
@@ -153,7 +161,7 @@ export function buildTrendSeries(
   const index = new Map<string, TrendBucket>(keys.map(k => [k, {
     key: k,
     label: granularity === 'day' ? dayLabel(k) : monthLabel(k),
-    jobs: 0, inflowInr: 0, outflowInr: 0, balanceInr: 0,
+    jobs: 0, jobValueInr: 0, inflowInr: 0, outflowInr: 0, balanceInr: 0,
   }]))
 
   let opening = 0
@@ -171,7 +179,11 @@ export function buildTrendSeries(
   for (const t of inputs.tasks) {
     if (!t.date || t.date < period.from || t.date > period.to) continue
     const b = index.get(keyOf(t.date, granularity))
-    if (b) b.jobs += 1
+    if (!b) continue
+    b.jobs += 1
+    // Counted on the SAME pass as the job itself, so the two series can never
+    // disagree about which tasks are in a bucket.
+    b.jobValueInr = r2(b.jobValueInr + (Number(t.valueInr) || 0))
   }
 
   let running = r2(opening)
@@ -189,8 +201,9 @@ export function buildTrendSeries(
 export interface ComparisonRow {
   label: string
   prevLabel?: string
-  jobs?: number; inflowInr?: number; outflowInr?: number; balanceInr?: number
-  prev_jobs?: number; prev_inflowInr?: number; prev_outflowInr?: number; prev_balanceInr?: number
+  jobs?: number; jobValueInr?: number; inflowInr?: number; outflowInr?: number; balanceInr?: number
+  prev_jobs?: number; prev_jobValueInr?: number
+  prev_inflowInr?: number; prev_outflowInr?: number; prev_balanceInr?: number
 }
 
 /**
@@ -206,8 +219,8 @@ export function alignComparison(current: TrendBucket[], previous: TrendBucket[])
     rows.push({
       label: c?.label ?? p?.label ?? '',
       prevLabel: p?.label,
-      ...(c ? { jobs: c.jobs, inflowInr: c.inflowInr, outflowInr: c.outflowInr, balanceInr: c.balanceInr } : {}),
-      ...(p ? { prev_jobs: p.jobs, prev_inflowInr: p.inflowInr, prev_outflowInr: p.outflowInr, prev_balanceInr: p.balanceInr } : {}),
+      ...(c ? { jobs: c.jobs, jobValueInr: c.jobValueInr, inflowInr: c.inflowInr, outflowInr: c.outflowInr, balanceInr: c.balanceInr } : {}),
+      ...(p ? { prev_jobs: p.jobs, prev_jobValueInr: p.jobValueInr, prev_inflowInr: p.inflowInr, prev_outflowInr: p.outflowInr, prev_balanceInr: p.balanceInr } : {}),
     })
   }
   return rows
@@ -217,6 +230,7 @@ export function alignComparison(current: TrendBucket[], previous: TrendBucket[])
 
 export interface TrendTotals {
   jobs: number
+  jobValueInr: number
   inflowInr: number
   outflowInr: number
   /** Balance at period end (running), not a sum. */
@@ -226,6 +240,7 @@ export interface TrendTotals {
 export function seriesTotals(buckets: TrendBucket[]): TrendTotals {
   return {
     jobs: buckets.reduce((s, b) => s + b.jobs, 0),
+    jobValueInr: r2(buckets.reduce((s, b) => s + b.jobValueInr, 0)),
     inflowInr: r2(buckets.reduce((s, b) => s + b.inflowInr, 0)),
     outflowInr: r2(buckets.reduce((s, b) => s + b.outflowInr, 0)),
     endBalanceInr: buckets.length ? buckets[buckets.length - 1].balanceInr : 0,

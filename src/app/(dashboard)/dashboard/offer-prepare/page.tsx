@@ -26,7 +26,7 @@ export default async function OfferPreparePage() {
   const [clientsRaw, kindsByClient, { data: globalWebhookRow }] = await Promise.all([
     selectWithOptionalColumns<any[]>(
       'id, name, code, offer_intake_token, offer_sheet_webhook_url, offer_sheet_url, has_offer_flyer_service',
-      ['offer_flow_mode', 'offer_master_sheet_url'],
+      ['offer_flow_mode', 'offer_master_sheet_url', 'integrations'],
       cols => admin.from('clients').select(cols).eq('is_active', true).order('name'),
     ),
     getIntakeKindsByClient(),
@@ -65,7 +65,11 @@ export default async function OfferPreparePage() {
       hasWebhook: !!c.offer_sheet_webhook_url || (globalConfigured && !!c.offer_sheet_url),
       flowMode: ((c as any).offer_flow_mode || 'push') as 'push' | 'pull' | 'manual',
       hasMasterSheet: !!(c as any).offer_master_sheet_url,
-      figmaUrl: figmaByClient.get(c.id) || null,
+      // A category's Figma file wins; otherwise the client's own file.
+      figmaUrl: figmaByClient.get(c.id)
+        || ((c as any).integrations?.figma?.file_url as string | undefined)
+        || null,
+      sheetUrl: ((c as any).offer_master_sheet_url || c.offer_sheet_url || null) as string | null,
     }))
     .sort((a, b) => {
       // "Set up" depends on the mode, so pull-mode clients don't sink to the

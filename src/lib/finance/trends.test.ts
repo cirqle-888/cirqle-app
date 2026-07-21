@@ -81,6 +81,55 @@ describe('buildTrendSeries', () => {
     expect(s[0].label).toBe('1 Jul')
   })
 
+  it('sums job VALUE into the same buckets as the job count', () => {
+    // Same three in-window tasks, now carrying billing values. The out-of-window
+    // one must contribute neither a count nor a rupee.
+    const valued = [
+      { date: '2026-07-01', valueInr: 1500 }, { date: '2026-07-01', valueInr: 500 },
+      { date: '2026-07-03', valueInr: 2000 },
+      { date: '2026-06-30', valueInr: 999999 },   // outside → ignored
+    ]
+    const s = buildTrendSeries({ cash, tasks: valued }, { from: '2026-07-01', to: '2026-07-03' }, 'day')
+    expect(s[0]).toMatchObject({ jobs: 2, jobValueInr: 2000 })
+    expect(s[1]).toMatchObject({ jobs: 0, jobValueInr: 0 })
+    expect(s[2]).toMatchObject({ jobs: 1, jobValueInr: 2000 })
+    expect(seriesTotals(s).jobValueInr).toBe(4000)
+  })
+
+  it('treats a missing or non-numeric value as zero, still counting the job', () => {
+    // Real rows can carry billing_amount_inr = null (unpriced task). Such a task
+    // is still a job received — dropping its COUNT would be the worse error.
+    const s = buildTrendSeries({
+      cash: [],
+      tasks: [
+        { date: '2026-07-01' },                                  // no value key
+        { date: '2026-07-01', valueInr: undefined },
+        { date: '2026-07-01', valueInr: Number.NaN },
+        { date: '2026-07-01', valueInr: 250 },
+      ],
+    }, { from: '2026-07-01', to: '2026-07-01' }, 'day')
+    expect(s[0]).toMatchObject({ jobs: 4, jobValueInr: 250 })
+  })
+
+  it('rounds job value to 2dp so float drift cannot accumulate', () => {
+    const s = buildTrendSeries({
+      cash: [],
+      tasks: Array.from({ length: 3 }, () => ({ date: '2026-07-01', valueInr: 0.1 })),
+    }, { from: '2026-07-01', to: '2026-07-01' }, 'day')
+    expect(s[0].jobValueInr).toBe(0.3)      // not 0.30000000000000004
+  })
+
+  it('carries job value through alignComparison as prev_jobValueInr', () => {
+    const cur = buildTrendSeries({ cash: [], tasks: [{ date: '2026-07-01', valueInr: 10 }] },
+      { from: '2026-07-01', to: '2026-07-01' }, 'day')
+    const prev = buildTrendSeries({ cash: [], tasks: [{ date: '2026-06-01', valueInr: 40 }] },
+      { from: '2026-06-01', to: '2026-06-01' }, 'day')
+    const rows = alignComparison(cur, prev)
+    expect(rows[0].jobValueInr).toBe(10)
+    expect(rows[0].prev_jobValueInr).toBe(40)
+    expect(pctChange(rows[0].jobValueInr!, rows[0].prev_jobValueInr)).toBe(-75)
+  })
+
   it('buckets by month across a year boundary', () => {
     const s = buildTrendSeries(
       { cash: [{ date: '2025-12-15', type: 'inflow', amountInr: 100 }], tasks: [] },
@@ -117,7 +166,7 @@ describe('seriesTotals / pctChange', () => {
       tasks: [{ date: '2026-07-01' }],
     }, { from: '2026-07-01', to: '2026-07-02' }, 'day')
     const t = seriesTotals(s)
-    expect(t).toEqual({ jobs: 1, inflowInr: 150, outflowInr: 30, endBalanceInr: 120 })
+    expect(t).toEqual({ jobs: 1, jobValueInr: 0, inflowInr: 150, outflowInr: 30, endBalanceInr: 120 })
     expect(pctChange(150, 100)).toBe(50)
     expect(pctChange(50, 100)).toBe(-50)
     expect(pctChange(10, 0)).toBeNull()

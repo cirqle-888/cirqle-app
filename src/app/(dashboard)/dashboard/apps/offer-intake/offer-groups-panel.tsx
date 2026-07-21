@@ -4,8 +4,10 @@ import { useState } from 'react'
 import { Plus, Trash2, Loader2, Check, X, Layers, ExternalLink } from 'lucide-react'
 import { upsertOfferGroup, deleteOfferGroup, type OfferGroupRow } from './actions'
 
+// Matches the rest of this settings page. Theme TOKENS, not hardcoded white —
+// this page renders on a light background, where text-white is invisible.
 const inputCls =
-  'w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder:text-white/25 focus:outline-none focus:border-violet-500/50 transition-colors'
+  'w-full bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20'
 
 type Draft = {
   id?: string
@@ -108,21 +110,21 @@ export function OfferGroupsPanel({
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2 text-xs font-semibold text-white/70">
-          <Layers className="w-3.5 h-3.5 text-violet-400" /> Categories
-          <span className="text-white/30 font-normal">{groups.length || 'none'}</span>
+        <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+          <Layers className="w-3.5 h-3.5 text-violet-500" /> Categories
+          <span className="text-muted-foreground font-normal">{groups.length || 'none'}</span>
         </div>
         {!draft && (
           <button
             onClick={() => setDraft(emptyDraft())}
-            className="flex items-center gap-1 text-xs font-medium text-violet-300 hover:text-violet-200 transition-colors"
+            className="flex items-center gap-1 text-xs font-medium text-violet-500 hover:text-violet-400 transition-colors"
           >
             <Plus className="w-3 h-3" /> Add category
           </button>
         )}
       </div>
 
-      <p className="text-[11px] text-white/35 mb-3 leading-relaxed">
+      <p className="text-[11px] text-muted-foreground mb-3 leading-relaxed">
         {isPull
           ? 'Each category reads one tab of the client’s master sheet. Leave this empty if their sheet has a single list.'
           : 'Only needed when a client gets more than one flyer (e.g. Groceries and Vegetables). Give each category its OWN Google Sheet — the Figma plugin reads only the first tab of a sheet, so two categories sharing one sheet would leave the second one unread. With no categories, this client keeps using the single Sheet link above.'}
@@ -133,10 +135,10 @@ export function OfferGroupsPanel({
           {groups.map(group => {
             const figma = group.integrations?.figma?.file_url
             return (
-              <div key={group.id} className="flex items-center gap-2 rounded-xl bg-white/5 border border-white/10 px-3 py-2">
+              <div key={group.id} className="flex items-center gap-2 rounded-xl bg-secondary border border-border px-3 py-2">
                 <div className="min-w-0 flex-1">
-                  <div className="text-xs font-semibold text-white/80 truncate">{group.name}</div>
-                  <div className="text-[11px] text-white/35 truncate">
+                  <div className="text-xs font-semibold text-foreground truncate">{group.name}</div>
+                  <div className="text-[11px] text-muted-foreground truncate">
                     {isPull
                       ? (group.master_tab_name ? `Reads tab “${group.master_tab_name}”` : 'No source tab set')
                       : (group.sheet_url
@@ -145,18 +147,24 @@ export function OfferGroupsPanel({
                     {group.last_pulled_at && ` · pulled ${new Date(group.last_pulled_at).toLocaleDateString()}`}
                   </div>
                 </div>
-                {figma && (
-                  <a href={figma} target="_blank" rel="noopener noreferrer" title="Open the Figma file"
-                     className="shrink-0 p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors">
+                {group.sheet_url && (
+                  <a href={group.sheet_url} target="_blank" rel="noopener noreferrer" title="Open this category's Google Sheet"
+                     className="shrink-0 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-background transition-colors">
                     <ExternalLink className="w-3.5 h-3.5" />
                   </a>
                 )}
+                {figma && (
+                  <a href={figma} target="_blank" rel="noopener noreferrer" title="Open the Figma file"
+                     className="shrink-0 px-2 py-1 rounded-lg text-[11px] font-semibold text-violet-500 hover:bg-violet-500/10 transition-colors">
+                    Figma
+                  </a>
+                )}
                 <button onClick={() => setDraft(toDraft(group))}
-                        className="shrink-0 text-[11px] font-medium text-white/50 hover:text-white transition-colors px-2">
+                        className="shrink-0 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors px-2">
                   Edit
                 </button>
                 <button onClick={() => void remove(group)} title="Remove category"
-                        className="shrink-0 p-1.5 rounded-lg text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                        className="shrink-0 p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors">
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -166,34 +174,51 @@ export function OfferGroupsPanel({
       )}
 
       {draft && (
-        <div className="rounded-xl bg-white/5 border border-violet-500/25 p-3 space-y-2">
-          <input value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })}
-                 placeholder="Category name (e.g. Vegetables)" className={inputCls} autoFocus />
+        <div className="rounded-xl bg-secondary/60 border border-violet-500/25 p-3 space-y-2">
+          <label className="block">
+            <span className="block text-[11px] font-medium text-muted-foreground mb-1">Category name</span>
+            <input value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })}
+                   placeholder="e.g. Vegetables" className={inputCls} autoFocus />
+          </label>
 
           {isPull ? (
-            <input value={draft.masterTabName} onChange={e => setDraft({ ...draft, masterTabName: e.target.value })}
-                   placeholder="Tab name in the client's master sheet (e.g. Vegetables)" className={inputCls} />
+            <label className="block">
+              <span className="block text-[11px] font-medium text-muted-foreground mb-1">Tab in the client’s master sheet</span>
+              <input value={draft.masterTabName} onChange={e => setDraft({ ...draft, masterTabName: e.target.value })}
+                     placeholder="e.g. Vegetables — must match exactly" className={inputCls} />
+            </label>
           ) : (
             <>
-              <input value={draft.sheetUrl} onChange={e => setDraft({ ...draft, sheetUrl: e.target.value })}
-                     placeholder="Google Sheet link for this category — give it its own sheet" className={inputCls} />
-              <input value={draft.sheetTabName} onChange={e => setDraft({ ...draft, sheetTabName: e.target.value })}
-                     placeholder="Tab name (leave blank — Figma reads the first tab only)" className={inputCls} />
+              <label className="block">
+                <span className="block text-[11px] font-medium text-muted-foreground mb-1">Google Sheet for this category</span>
+                <input value={draft.sheetUrl} onChange={e => setDraft({ ...draft, sheetUrl: e.target.value })}
+                       placeholder="https://docs.google.com/spreadsheets/d/…" className={inputCls} />
+              </label>
+              <label className="block">
+                <span className="block text-[11px] font-medium text-muted-foreground mb-1">
+                  Tab name <span className="font-normal">— leave blank, Figma reads the first tab only</span>
+                </span>
+                <input value={draft.sheetTabName} onChange={e => setDraft({ ...draft, sheetTabName: e.target.value })}
+                       placeholder="Offers" className={inputCls} />
+              </label>
             </>
           )}
 
-          <input value={draft.figmaUrl} onChange={e => setDraft({ ...draft, figmaUrl: e.target.value })}
-                 placeholder="Figma file link (optional)" className={inputCls} />
+          <label className="block">
+            <span className="block text-[11px] font-medium text-muted-foreground mb-1">Figma file link</span>
+            <input value={draft.figmaUrl} onChange={e => setDraft({ ...draft, figmaUrl: e.target.value })}
+                   placeholder="https://www.figma.com/design/…" className={inputCls} />
+          </label>
 
           <details>
-            <summary className="text-[11px] text-white/35 cursor-pointer hover:text-white/60 transition-colors">
+            <summary className="text-[11px] text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
               Advanced: own Apps Script for this category
             </summary>
             <input value={draft.appsScriptUrl} onChange={e => setDraft({ ...draft, appsScriptUrl: e.target.value })}
                    placeholder="https://script.google.com/macros/s/…/exec" className={inputCls + ' mt-2'} />
           </details>
 
-          {err && <div className="text-[11px] text-red-300">{err}</div>}
+          {err && <div className="text-[11px] text-red-500">{err}</div>}
 
           <div className="flex items-center gap-2 pt-1">
             <button onClick={() => void save()} disabled={saving || !draft.name.trim()}
@@ -202,7 +227,7 @@ export function OfferGroupsPanel({
               {draft.id ? 'Save' : 'Add'}
             </button>
             <button onClick={() => { setDraft(null); setErr(null) }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white/50 hover:text-white transition-colors">
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
               <X className="w-3 h-3" /> Cancel
             </button>
           </div>

@@ -13,6 +13,7 @@ import {
   saveGlobalWebhookUrl, regenerateSheetSecret,
   saveClientFlowMode,
   saveMasterSheetUrl,
+  saveClientFigmaUrl,
   type OfferGroupRow,
 } from './actions'
 import { OfferGroupsPanel } from './offer-groups-panel'
@@ -77,6 +78,7 @@ function ClientCard({
     offer_sheet_url: string | null
     offer_flow_mode?: string | null
     offer_master_sheet_url?: string | null
+    integrations?: { figma?: { file_url?: string } } | null
     has_offer_flyer_service: boolean
   }
   appUrl: string
@@ -100,6 +102,8 @@ function ClientCard({
   const [flowSaving, setFlowSaving] = useState(false)
   const [masterDraft, setMasterDraft] = useState(client.offer_master_sheet_url || '')
   const [masterSaving, setMasterSaving] = useState(false)
+  const [figmaDraft, setFigmaDraft] = useState(client.integrations?.figma?.file_url || '')
+  const [figmaSaving, setFigmaSaving] = useState(false)
 
   const intakeUrl = token ? `${appUrl}/intake/offer/${token}` : null
   const hasWebhook = !!client.offer_sheet_webhook_url
@@ -135,6 +139,17 @@ function ClientCard({
     setMasterSaving(false)
     if (res.ok) { setClient(c => ({ ...c, offer_master_sheet_url: masterDraft.trim() || null })); flash('ok', 'Master sheet link saved ✓') }
     else flash('err', res.error || 'Could not save')
+  }
+
+  async function handleSaveFigma() {
+    setFigmaSaving(true)
+    const res = await saveClientFigmaUrl(client.id, figmaDraft)
+    setFigmaSaving(false)
+    if (res.ok) {
+      const url = figmaDraft.trim()
+      setClient(c => ({ ...c, integrations: url ? { figma: { file_url: url } } : {} }))
+      flash('ok', url ? 'Figma link saved ✓' : 'Figma link cleared')
+    } else flash('err', res.error || 'Could not save')
   }
 
   async function handleSaveWebhook() {
@@ -247,7 +262,7 @@ function ClientCard({
               expensive: pushing to a client-maintained sheet destroys their own
               IMPORTRANGE feeds, so the choice is explicit rather than inferred. */}
           <div>
-            <p className="text-xs font-semibold text-white/70 mb-2">Flow mode</p>
+            <p className="text-xs font-semibold text-foreground mb-2">Flow mode</p>
             <div className="flex items-center gap-1.5 mb-2">
               {(['push', 'pull', 'manual'] as FlowMode[]).map(mode => (
                 <button
@@ -270,14 +285,25 @@ function ClientCard({
           {/* Master sheet — only meaningful when Cirqle is the reader. */}
           {flowMode === 'pull' && (
             <div>
-              <p className="text-xs font-semibold text-white/70 mb-2">Client's master Google Sheet</p>
+              <p className="text-xs font-semibold text-foreground mb-2">Client's master Google Sheet</p>
               <div className="flex items-center gap-2">
                 <input
                   value={masterDraft}
                   onChange={e => setMasterDraft(e.target.value)}
                   placeholder="https://docs.google.com/spreadsheets/d/…/edit"
-                  className="flex-1 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder:text-white/25 focus:outline-none focus:border-violet-500/50 transition-colors"
+                  className={inputCls + ' flex-1'}
                 />
+                {client.offer_master_sheet_url && (
+                  <a
+                    href={client.offer_master_sheet_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Open the client's master sheet"
+                    className="shrink-0 p-2 rounded-xl bg-secondary border border-border text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                  </a>
+                )}
                 <button
                   onClick={() => void handleSaveMasterSheet()}
                   disabled={masterSaving}
@@ -292,6 +318,44 @@ function ClientCard({
             </div>
           )}
 
+          {/* ── Figma file ─────────────────────────────────────────────────
+              The client's main design file. Categories carry their own link,
+              but most clients have no categories, so this is where the link
+              lives for them — and it puts the design one click from the
+              offer list instead of hunting through Figma's file browser. */}
+          <div>
+            <p className="text-xs font-semibold text-foreground mb-2">Figma file</p>
+            <div className="flex items-center gap-2">
+              <input
+                value={figmaDraft}
+                onChange={e => setFigmaDraft(e.target.value)}
+                placeholder="https://www.figma.com/design/…"
+                className={inputCls + ' flex-1'}
+              />
+              {client.integrations?.figma?.file_url && (
+                <a
+                  href={client.integrations.figma.file_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Open the Figma file"
+                  className="shrink-0 p-2 rounded-xl bg-secondary border border-border text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                </a>
+              )}
+              <button
+                onClick={() => void handleSaveFigma()}
+                disabled={figmaSaving}
+                className="px-3 py-2 rounded-xl text-xs font-semibold bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-40 transition-colors shrink-0"
+              >
+                {figmaSaving ? 'Saving…' : 'Save link'}
+              </button>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1.5">
+              Shows an “Open in Figma” shortcut on this client’s card in Prepare Offer.
+            </p>
+          </div>
+
           {/* ── Categories ─────────────────────────────────────────────────── */}
           <OfferGroupsPanel
             clientId={client.id}
@@ -305,7 +369,7 @@ function ClientCard({
               a day and Goodwill's Figma file quietly lost its binding — both
               would have been obvious at a glance here. */}
           <div className="rounded-xl bg-secondary/40 border border-border p-3">
-            <p className="text-xs font-semibold text-white/70 mb-2">Integration status</p>
+            <p className="text-xs font-semibold text-foreground mb-2">Integration status</p>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
               <HealthRow label="Flow mode" value={FLOW_LABEL[flowMode]} ok />
               <HealthRow label="Intake link" value={hasToken ? 'Created' : 'Not created'} ok={hasToken} />
@@ -331,8 +395,12 @@ function ClientCard({
               <HealthRow label="Categories" value={groups.length ? `${groups.length}` : 'Single list'} ok />
               <HealthRow
                 label="Figma"
-                value={groups.some(g => g.integrations?.figma?.file_url) ? `${groups.filter(g => g.integrations?.figma?.file_url).length} linked` : 'Not linked'}
-                ok={groups.some(g => g.integrations?.figma?.file_url)}
+                value={
+                  groups.some(g => g.integrations?.figma?.file_url)
+                    ? `${groups.filter(g => g.integrations?.figma?.file_url).length} linked`
+                    : client.integrations?.figma?.file_url ? 'Linked' : 'Not linked'
+                }
+                ok={groups.some(g => g.integrations?.figma?.file_url) || !!client.integrations?.figma?.file_url}
               />
             </div>
           </div>
