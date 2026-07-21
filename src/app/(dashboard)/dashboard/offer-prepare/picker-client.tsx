@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { Search, Store, ChevronRight, AlertTriangle, DownloadCloud, Loader2, PenTool, FileSpreadsheet } from 'lucide-react'
 import Header from '@/components/layout/header'
 import { pullFromClientSheet } from './actions'
+import { FigmaLink } from '@/components/offer/figma-link'
 
 interface PickerClient {
   id: string
@@ -132,15 +133,13 @@ export default function OfferPrepareClientPicker({ clients }: { clients: PickerC
               )}
 
               {c.figmaUrl && (
-                <a
-                  href={c.figmaUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title="Open the Figma file"
+                <FigmaLink
+                  url={c.figmaUrl}
+                  title="Open in the Figma desktop app"
                   className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-violet-500/10 border border-violet-500/25 text-violet-500 hover:bg-violet-500/20 transition-colors"
                 >
                   <PenTool className="w-3.5 h-3.5" /> Figma
-                </a>
+                </FigmaLink>
               )}
 
               {c.flowMode === 'pull' && c.hasMasterSheet && (

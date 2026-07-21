@@ -18,6 +18,7 @@ import {
 } from './actions'
 import { OfferGroupsPanel } from './offer-groups-panel'
 import { FigmaBindingHelp } from '@/components/offer/figma-binding-help'
+import { FigmaLink } from '@/components/offer/figma-link'
 
 const inputCls = 'w-full bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20'
 const labelCls = 'block text-xs font-medium text-muted-foreground mb-1.5'
@@ -344,15 +345,13 @@ function ClientCard({
                 className={inputCls + ' flex-1'}
               />
               {client.integrations?.figma?.file_url && (
-                <a
-                  href={client.integrations.figma.file_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title="Open the Figma file"
+                <FigmaLink
+                  url={client.integrations.figma.file_url}
+                  title="Open in the Figma desktop app"
                   className="shrink-0 p-2 rounded-xl bg-secondary border border-border text-muted-foreground hover:text-foreground transition-colors"
                 >
                   <ExternalLink className="w-4 h-4" />
-                </a>
+                </FigmaLink>
               )}
               <button
                 onClick={() => void handleSaveFigma()}

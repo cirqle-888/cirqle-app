@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Plus, Trash2, Loader2, Check, X, Layers, ExternalLink } from 'lucide-react'
 import { upsertOfferGroup, deleteOfferGroup, type OfferGroupRow } from './actions'
+import { FigmaLink } from '@/components/offer/figma-link'
 
 // Matches the rest of this settings page. Theme TOKENS, not hardcoded white —
 // this page renders on a light background, where text-white is invisible.
@@ -154,10 +155,10 @@ export function OfferGroupsPanel({
                   </a>
                 )}
                 {figma && (
-                  <a href={figma} target="_blank" rel="noopener noreferrer" title="Open the Figma file"
+                  <FigmaLink url={figma} title="Open in the Figma desktop app"
                      className="shrink-0 px-2 py-1 rounded-lg text-[11px] font-semibold text-violet-500 hover:bg-violet-500/10 transition-colors">
                     Figma
-                  </a>
+                  </FigmaLink>
                 )}
                 <button onClick={() => setDraft(toDraft(group))}
                         className="shrink-0 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors px-2">
