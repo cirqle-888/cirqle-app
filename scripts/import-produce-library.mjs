@@ -32,6 +32,9 @@ const CATEGORY_OVERRIDE =
  * before anything is written — this list is a starting point, not an authority.
  */
 const FRUIT_NAMES = new Set([
+  // "Butter" is butter fruit — avocado, not dairy. Confirmed by opening the
+  // sheet's own image for that row.
+  'butter',
   'anar', 'apple', 'banana', 'burthukal', 'chikku', 'citrus', 'dates',
   'dragon fruit', 'elantha pazham', 'goosberries', 'grape', 'green mango',
   'kannimanga', 'lemon', 'mango', 'musambi', 'orange', 'pappaya', 'perakka',
