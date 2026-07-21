@@ -460,6 +460,55 @@ const LANG_RE = /^[a-z]{2,8}(-[A-Za-z0-9]{2,8})*$/
  * other languages already stored there. Read-modify-write; an empty value
  * removes that language.
  */
+/**
+ * Save the three things staff fix on a client submission — the tidied title,
+ * the category, and the local-language name — in one call.
+ *
+ * New products arrive with a client's weekly offer list, where all they type is
+ * a name and a photo. Category and a presentable title are the employee's job,
+ * so the queue has to be editable, not just approve/reject.
+ */
+export async function updateSubmission(
+  id: string,
+  patch: { name?: string; category?: string | null; localName?: string },
+): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.CATALOG_REVIEW_SUBMISSIONS)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!id) return { ok: false, error: 'Missing product id.' }
+
+  const admin = createAdminClient()
+  const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
+
+  if (patch.name !== undefined) {
+    const name = patch.name.trim().replace(/\s+/g, ' ')
+    if (!name) return { ok: false, error: 'Product name cannot be empty.' }
+    update.name = name
+  }
+  if (patch.category !== undefined) {
+    update.category = patch.category?.trim() || null
+  }
+
+  // Read-modify-write so setting the Malayalam name never drops an Arabic one.
+  if (patch.localName !== undefined) {
+    const { data: existing, error: readErr } = await admin
+      .from('product_catalog').select('names').eq('id', id).maybeSingle()
+    if (readErr) return { ok: false, error: readErr.message }
+    if (!existing) return { ok: false, error: 'Product not found.' }
+    const current = ((existing as any).names && typeof (existing as any).names === 'object' && !Array.isArray((existing as any).names))
+      ? { ...((existing as any).names as Record<string, string>) }
+      : {}
+    const trimmed = patch.localName.trim()
+    if (trimmed) current.ml = trimmed
+    else delete current.ml
+    update.names = current
+  }
+
+  const { error } = await admin.from('product_catalog').update(update).eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  revalidatePath('/dashboard/catalog')
+  return { ok: true }
+}
+
 export async function updateProductLocalName(
   id: string,
   lang: string,

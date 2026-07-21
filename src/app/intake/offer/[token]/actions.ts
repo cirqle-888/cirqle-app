@@ -638,9 +638,25 @@ async function mirrorProductToGlobalCatalog(
   let productId = existing?.id as string | undefined
 
   if (!productId) {
+    // A name nobody has used before — this is a genuinely new product arriving
+    // with a client's offer list, which is when new products actually turn up.
+    // It goes in as PENDING so staff can set the category, tidy the title and
+    // add the local-language name before it joins the shared library.
+    //
+    // This does NOT hold up the client's flyer: the offer reads
+    // client_product_catalog, so the product is usable in this week's offer
+    // immediately. Review governs only whether it becomes part of the global
+    // catalog that every other client can draw on.
     const { data: created } = await admin
       .from('product_catalog')
-      .insert({ name, weight, image_url: imageUrl })
+      .insert({
+        name,
+        weight,
+        image_url: imageUrl,
+        review_status: 'pending',
+        submitted_by_client_id: clientId,
+        submitted_at: new Date().toISOString(),
+      })
       .select('id')
       .single()
     productId = created?.id

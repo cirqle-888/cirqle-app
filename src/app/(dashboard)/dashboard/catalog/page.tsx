@@ -8,6 +8,28 @@ import { listPendingSubmissions } from './actions'
 
 export const dynamic = 'force-dynamic'
 
+const CATALOG_COLUMNS = `
+  id, product_code, name, weight, category, brand, barcode,
+  image_url, status, notes, created_at, updated_at,
+  images:product_catalog_images(id, version, url, is_primary, created_at),
+  assignments:client_product_assignments(client_id, is_active, client:clients(name))
+`
+
+/** Approved products only, tolerating a pre-migration schema. */
+async function loadApprovedProducts(admin: ReturnType<typeof createAdminClient>) {
+  const filtered = await admin
+    .from('product_catalog')
+    .select(`${CATALOG_COLUMNS}, names, review_status`)
+    .eq('review_status', 'approved')
+    .order('name')
+    .limit(500)
+  if (!filtered.error) return { data: filtered.data }
+
+  const fallback = await admin
+    .from('product_catalog').select(CATALOG_COLUMNS).order('name').limit(500)
+  return { data: fallback.data }
+}
+
 export default async function CatalogPage() {
   const empId = await resolveCurrentEmployeeId()
   if (!empId) redirect('/login')
@@ -15,16 +37,13 @@ export default async function CatalogPage() {
   const admin = createAdminClient()
 
   const [productsRes, clientsRes, kindsByClient, pendingRes] = await Promise.all([
-    admin
-      .from('product_catalog')
-      .select(`
-        id, product_code, name, weight, category, brand, barcode,
-        image_url, status, notes, created_at, updated_at,
-        images:product_catalog_images(id, version, url, is_primary, created_at),
-        assignments:client_product_assignments(client_id, is_active, client:clients(name))
-      `)
-      .order('name')
-      .limit(500),
+    // Only approved products. A row still awaiting review appears in the queue
+    // above; showing it here too would let staff edit and assign it to clients
+    // before anyone had checked it, which is the whole thing the queue exists
+    // to prevent. Falls back to the unfiltered list on 42703, so shipping this
+    // ahead of migration 20260719140000 degrades to today's behaviour instead
+    // of blanking the entire catalog.
+    loadApprovedProducts(admin),
     admin
       .from('clients')
       .select('id, name, has_offer_flyer_service')

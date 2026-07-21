@@ -1,9 +1,16 @@
 'use client'
 
 /**
- * Staff review queue for products clients submitted through their product
- * library link. Sits above the catalog on /dashboard/catalog and renders
- * NOTHING at all when the queue is empty — which is most of the time.
+ * Staff triage queue for new products.
+ *
+ * Most arrive with a client's weekly offer list — that is when new products
+ * actually turn up — where the client types only a name, a photo and a price.
+ * Everything else is the employee's job, so each row is EDITABLE: fix the
+ * title, pick a category, add the Malayalam name, then approve. Approving
+ * saves those edits and lets the product join the shared catalog.
+ *
+ * Sits above the catalog on /dashboard/catalog and renders NOTHING at all when
+ * the queue is empty — which is most of the time.
  *
  * LIGHT theme: theme tokens only (text-foreground / text-muted-foreground /
  * bg-card / bg-secondary / border-border). text-white here renders invisible.
@@ -11,7 +18,7 @@
 
 import { useState } from 'react'
 import { Check, X, Loader2, ImageOff, Inbox, AlertTriangle } from 'lucide-react'
-import { approveSubmission, rejectSubmission, type PendingSubmission } from './actions'
+import { approveSubmission, rejectSubmission, updateSubmission, type PendingSubmission } from './actions'
 
 function timeAgo(iso: string | null): string {
   if (!iso) return ''
@@ -35,24 +42,77 @@ function localNames(names: Record<string, string> | null | undefined): string {
     .join(' · ')
 }
 
+/** Staff-facing buckets. Kept short on purpose — a long list slows triage. */
+const CATEGORIES = ['Vegetables', 'Fruits', 'Groceries', 'Dairy', 'Meat & Fish', 'Other']
+
+type Draft = { name: string; category: string; localName: string }
+
 export default function PendingSubmissions({ items }: { items: PendingSubmission[] }) {
-  const [rows, setRows] = useState<PendingSubmission[]>(items)
+  // Rows are DERIVED from props rather than copied into state, so a submission
+  // that lands after first paint shows up on the next server render instead of
+  // waiting for a hard reload. State holds only what the server cannot know:
+  // which rows this session has already dealt with, and any in-progress edits.
+  const [handled, setHandled] = useState<Set<string>>(() => new Set())
+  const [drafts, setDrafts] = useState<Record<string, Partial<Draft>>>({})
   const [busyId, setBusyId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  const rows = items.filter(i => !handled.has(i.id))
 
   // Usually empty — render nothing rather than an empty-state card.
   if (rows.length === 0) return null
 
+  function edit(id: string, patch: Partial<Draft>) {
+    setDrafts(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }))
+  }
+
+  /** The row's server values, with any unsaved edit laid over the top. */
+  function draftFor(row: PendingSubmission): Draft {
+    const d = drafts[row.id] || {}
+    return {
+      name: d.name ?? row.name,
+      category: d.category ?? (row.category || ''),
+      localName: d.localName ?? (row.names?.ml || ''),
+    }
+  }
+
   async function act(id: string, kind: 'approve' | 'reject') {
     setBusyId(id)
     setError(null)
+
+    // Approving saves the employee's edits first: the whole point of the queue
+    // is that the client's raw name and missing category get fixed on the way
+    // in. Rejecting skips the save — there is no reason to tidy a row that is
+    // about to be turned away.
+    if (kind === 'approve') {
+      const row = rows.find(r => r.id === id)
+      const d = row ? draftFor(row) : null
+      const changed = d && row && (
+        d.name.trim() !== row.name ||
+        (d.category || null) !== (row.category || null) ||
+        d.localName.trim() !== (row.names?.ml || '')
+      )
+      if (changed) {
+        const saved = await updateSubmission(id, {
+          name: d.name,
+          category: d.category || null,
+          localName: d.localName,
+        })
+        if (!saved.ok) {
+          setBusyId(null)
+          setError(saved.error || 'Could not save your changes.')
+          return
+        }
+      }
+    }
+
     const res = kind === 'approve' ? await approveSubmission(id) : await rejectSubmission(id)
     setBusyId(null)
     if (!res.ok) {
       setError(res.error || 'Could not update this submission.')
       return
     }
-    setRows(prev => prev.filter(r => r.id !== id))
+    setHandled(prev => new Set(prev).add(id))
   }
 
   return (
@@ -76,6 +136,7 @@ export default function PendingSubmissions({ items }: { items: PendingSubmission
         {rows.map(row => {
           const busy = busyId === row.id
           const local = localNames(row.names)
+          const draft = draftFor(row)
           return (
             <li
               key={row.id}
@@ -94,17 +155,38 @@ export default function PendingSubmissions({ items }: { items: PendingSubmission
                 </div>
               )}
 
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium text-foreground truncate">{row.name}</div>
-                {local && (
-                  <div className="text-xs text-muted-foreground truncate">{local}</div>
-                )}
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground mt-0.5">
-                  {row.category && (
-                    <span className="px-1.5 py-0.5 rounded bg-card border border-border">{row.category}</span>
-                  )}
+              {/* Editable, because the client only types a name and a photo —
+                  the title, category and local name are the employee's job. */}
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <input
+                  value={draft.name}
+                  onChange={e => edit(row.id, { name: e.target.value })}
+                  placeholder="Product name"
+                  aria-label="Product name"
+                  className="w-full bg-card border border-border rounded-lg px-2 py-1 text-sm font-medium text-foreground focus:outline-none focus:border-violet-500/50"
+                />
+                <div className="flex flex-wrap gap-1.5">
+                  <input
+                    value={draft.localName}
+                    onChange={e => edit(row.id, { localName: e.target.value })}
+                    placeholder="Malayalam / local name"
+                    aria-label="Local name"
+                    className="flex-1 min-w-[9rem] bg-card border border-border rounded-lg px-2 py-1 text-xs text-foreground focus:outline-none focus:border-violet-500/50"
+                  />
+                  <select
+                    value={draft.category}
+                    onChange={e => edit(row.id, { category: e.target.value })}
+                    aria-label="Category"
+                    className="bg-card border border-border rounded-lg px-2 py-1 text-xs text-foreground focus:outline-none focus:border-violet-500/50"
+                  >
+                    <option value="">No category</option>
+                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-muted-foreground">
                   <span className="truncate">{row.client_name || 'Unknown client'}</span>
                   {row.submitted_at && <span>· {timeAgo(row.submitted_at)}</span>}
+                  {local && !draft.localName && <span>· was {local}</span>}
                 </div>
               </div>
 
