@@ -2678,6 +2678,7 @@ export type Database = {
           offer_master_sheet_url: string | null
           offer_sheet_webhook_url: string | null
           product_library_token: string | null
+          region: string | null
           offer_sheet_url: string | null
           phone: string | null
           pricing_pending: boolean
@@ -2710,6 +2711,7 @@ export type Database = {
           offer_sheet_url?: string | null
           offer_sheet_webhook_url?: string | null
           product_library_token?: string | null
+          region?: string | null
           phone?: string | null
           pricing_pending?: boolean
           updated_at?: string | null
@@ -2741,6 +2743,7 @@ export type Database = {
           offer_sheet_url?: string | null
           offer_sheet_webhook_url?: string | null
           product_library_token?: string | null
+          region?: string | null
           phone?: string | null
           pricing_pending?: boolean
           updated_at?: string | null
@@ -5183,6 +5186,7 @@ export type Database = {
           names: Json
           notes: string | null
           product_code: string
+          region: string | null
           review_status: string
           reviewed_at: string | null
           reviewed_by: string | null
@@ -5203,6 +5207,7 @@ export type Database = {
           names?: Json
           notes?: string | null
           product_code?: string
+          region?: string | null
           review_status?: string
           reviewed_at?: string | null
           reviewed_by?: string | null
@@ -5223,6 +5228,7 @@ export type Database = {
           names?: Json
           notes?: string | null
           product_code?: string
+          region?: string | null
           review_status?: string
           reviewed_at?: string | null
           reviewed_by?: string | null

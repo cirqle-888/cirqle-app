@@ -13,14 +13,32 @@ async function resolveOfferToken(token: string) {
   if (!token || token.length < 16) return null
   try {
     const admin = createAdminClient()
+    const base = 'id, name, offer_sheet_webhook_url, offer_intake_token'
+    // `region` decides which shared products this client is offered. Retried
+    // without it so a deploy landing before migration 20260722060000 still
+    // opens the offer form instead of showing every client an invalid link.
+    const withRegion = await admin
+      .from('clients').select(`${base}, region`)
+      .eq('offer_intake_token', token).eq('is_active', true).maybeSingle()
+    if (!withRegion.error) return withRegion.data || null
+
     const { data } = await admin
       .from('clients')
-      .select('id, name, offer_sheet_webhook_url, offer_intake_token')
+      .select(base)
       .eq('offer_intake_token', token)
       .eq('is_active', true)
       .maybeSingle()
     return data || null
   } catch { return null }
+}
+
+/** The shape the offer editor's picker consumes, from either source. */
+interface CatalogRow {
+  id: string
+  name: string
+  weight?: string | null
+  category?: string | null
+  image_url?: string | null
 }
 
 // ── Load campaign data for client ─────────────────────────────────────────────
@@ -94,10 +112,27 @@ export async function getOfferPageData(token: string): Promise<ActionResult<{
     loadGroupOptions(admin, client.id),
   ])
 
+  // The picker is the client's OWN past products plus everything approved in
+  // the shared catalog that is available in their region.
+  //
+  // Without the second half the shared library is unreachable: a shop owner
+  // typing "Tomato" sees a suggestion only if they have sent Tomato before, so
+  // the 101 curated produce items — Malayalam names, cut-out photos — help
+  // nobody. Availability is expressed as the ABSENCE of a region restriction
+  // rather than as assignment rows, so "global by default" needs no backfill
+  // and no upkeep as products and clients are added.
+  const ownCatalog = (catalogRes.data || []) as CatalogRow[]
+  const globalCatalog = await loadSharedCatalogFor(admin, client)
+
+  // The client's own row wins on a name clash — it carries their weight and the
+  // photo they last used, which is more specific than the library's.
+  const key = (row: CatalogRow) => row.name.trim().toLowerCase()
+  const seen = new Set(ownCatalog.map(key))
+  const catalog = [...ownCatalog, ...globalCatalog.filter(g => !seen.has(key(g)))]
+
   // Attach each catalog item's image HISTORY (newest first) from the global
   // Product Catalog, matched by name (same dedup key mirrorProductToGlobalCatalog
   // uses) — lets the client pick among past photos instead of just the latest.
-  const catalog = catalogRes.data || []
   let catalogWithImages = catalog
   if (catalog.length) {
     const { data: globalProducts } = await admin
@@ -363,7 +398,13 @@ export async function saveCampaign(
       if (catId) {
         const { data } = await admin.from('client_product_catalog').select('id, image_url').eq('id', catId).maybeSingle()
         existingCatRow = data
-      } else {
+      }
+
+      // Falls through when catalog_id was absent, and ALSO when it pointed at a
+      // shared-catalog product rather than one of this client's own rows — the
+      // picker now offers both. Without the name check that case would insert a
+      // duplicate every time the client reused a shared product.
+      if (!existingCatRow) {
         const { data } = await admin.from('client_product_catalog').select('id, image_url').eq('client_id', client.id).eq('name', p.name).maybeSingle()
         existingCatRow = data
         catId = data?.id
@@ -606,6 +647,51 @@ function diffBadgeLabels(
   const oldStr = (oldLabels || []).join(', ')
   const newStr = newLabels.join(', ')
   return oldStr !== newStr ? { old: oldStr, new: newStr } : null
+}
+
+/**
+ * Approved shared-catalog products this client may use, shaped like the rows
+ * client_product_catalog returns so the editor treats them identically.
+ *
+ * A product is available when it carries no region ("sells everywhere") or its
+ * region matches the client's. Every row is NULL today, so everyone sees
+ * everything — correct while all clients are in Kerala, and the filter is
+ * already in place for the first Dubai client.
+ *
+ * Degrades to an empty list rather than throwing if migration 20260722060000
+ * has not been applied yet, since this feeds a client-facing form: losing the
+ * shared suggestions is survivable, breaking the offer editor is not.
+ */
+async function loadSharedCatalogFor(
+  admin: ReturnType<typeof createAdminClient>,
+  client: { id: string; region?: string | null },
+): Promise<CatalogRow[]> {
+  const approved = () => admin
+    .from('product_catalog')
+    .select('id, name, weight, category, image_url')
+    .eq('status', 'active')
+    .eq('review_status', 'approved')
+
+  // `region.is.null` keeps unrestricted products; the second arm adds the
+  // client's own. A client with no region set sees only unrestricted ones,
+  // which is the safe reading of "we have not decided yet".
+  //
+  // Region is client data, so it is matched against a strict pattern before
+  // going anywhere near a PostgREST filter string — a comma or a dot in it
+  // would otherwise be read as more filter syntax.
+  const region = /^[A-Za-z0-9_-]{1,32}$/.test(client.region || '') ? client.region : null
+  const scoped = region
+    ? approved().or(`region.is.null,region.eq.${region}`)
+    : approved().is('region', null)
+
+  const withRegion = await scoped.order('name').limit(1000)
+  if (!withRegion.error) return withRegion.data || []
+
+  const plain = await approved().order('name').limit(1000)
+  if (!plain.error) return plain.data || []
+
+  // review_status missing too — pre-produce-library schema. Nothing to add.
+  return []
 }
 
 /** Find-or-create the global product_catalog row for this name, assign it to
