@@ -733,7 +733,7 @@ export function ContributionEntryPanel({
                                       {group.name}
                                     </p>
                                     {isMostUsed && (
-                                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-700 dark:text-blue-300 border border-blue-500/25 whitespace-nowrap">
+                                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-300 border border-blue-500/25 whitespace-nowrap">
                                         🔥 Most Used
                                       </span>
                                     )}

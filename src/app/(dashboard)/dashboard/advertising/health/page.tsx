@@ -58,7 +58,7 @@ export default async function HealthDashboardPage() {
       {healthData?.summary && (
         <div className="mt-8 p-6 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
           <h3 className="font-semibold text-lg mb-2">AI Diagnostic Summary</h3>
-          <p className="text-slate-700 dark:text-slate-700 dark:text-slate-300 leading-relaxed">
+          <p className="text-slate-700 dark:text-slate-300 leading-relaxed">
             {healthData.summary}
           </p>
         </div>

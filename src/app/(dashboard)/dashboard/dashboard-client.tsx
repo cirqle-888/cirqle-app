@@ -388,7 +388,7 @@ function AdminDashboard({
                 </button>
                 <button
                   onClick={() => setFxMode('live')}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all flex items-center gap-1 ${fxMode === 'live' ? 'bg-violet-500/20 text-violet-600 dark:text-violet-700 dark:text-violet-300 shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all flex items-center gap-1 ${fxMode === 'live' ? 'bg-violet-500/20 text-violet-600 dark:text-violet-300 shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
                 >
                   <Zap className="w-2.5 h-2.5" />
                   Live
@@ -489,7 +489,7 @@ function AdminDashboard({
                 <div className="flex items-center gap-2 mb-1">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total Expected Cash</p>
                   {fxMode === 'live' && (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-violet-500/15 text-violet-600 dark:text-violet-700 dark:text-violet-300 border border-violet-500/20 px-1.5 py-0.5 rounded-full">
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-violet-500/15 text-violet-600 dark:text-violet-300 border border-violet-500/20 px-1.5 py-0.5 rounded-full">
                       <Zap className="w-2.5 h-2.5" /> Live FX
                     </span>
                   )}
@@ -534,7 +534,7 @@ function AdminDashboard({
                 title="Outstanding using today's exchange rate from Settings">
                 Live Outstanding
               </p>
-              <p className="text-lg font-bold text-violet-600 dark:text-violet-700 dark:text-violet-300">{f(liveFx.outstanding)}</p>
+              <p className="text-lg font-bold text-violet-600 dark:text-violet-300">{f(liveFx.outstanding)}</p>
               <p className="text-[10px] text-muted-foreground mt-0.5">Today's rate</p>
             </div>
             <div>

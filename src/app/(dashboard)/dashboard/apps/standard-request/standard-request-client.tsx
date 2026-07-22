@@ -18,7 +18,7 @@ const inputCls = 'w-full bg-secondary border border-foreground/15 rounded-xl px-
 const labelCls = 'block text-xs font-medium text-muted-foreground mb-1.5'
 
 const TYPE_META: Record<string, { label: string; icon: any; cls: string }> = {
-  client:  { label: 'Client',  icon: Building2, cls: 'bg-violet-500/12 text-violet-700 dark:text-violet-700 dark:text-violet-300 border-violet-500/25' },
+  client:  { label: 'Client',  icon: Building2, cls: 'bg-violet-500/12 text-violet-700 dark:text-violet-300 border-violet-500/25' },
   agency:  { label: 'Agency',  icon: Megaphone, cls: 'bg-blue-500/12 text-blue-400 border-blue-500/25' },
   generic: { label: 'Generic', icon: Globe,     cls: 'bg-secondary text-muted-foreground border-border' },
 }
@@ -143,7 +143,7 @@ export default function StandardRequestClient({
       {!migrated && (
         <div className="mt-4 flex items-start gap-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3">
           <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
-          <p className="text-sm text-amber-600 dark:text-amber-700 dark:text-amber-300">
+          <p className="text-sm text-amber-600 dark:text-amber-300">
             The Request Portal tables aren&apos;t set up yet. Run <code className="font-mono text-xs">supabase/migrations/20260610120000_request_portal.sql</code> in the Supabase SQL editor first.
           </p>
         </div>

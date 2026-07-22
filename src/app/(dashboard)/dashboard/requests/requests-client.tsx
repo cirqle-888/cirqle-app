@@ -1037,7 +1037,7 @@ export default function RequestsClient({
                           <span>{ago(r.created_at)}</span>
                           {r.service?.name && <span className="text-cyan-700 dark:text-cyan-400/70">{r.service.name}</span>}
                           {r.assigned_employee?.name && (
-                            <span className="flex items-center gap-1 text-violet-700 dark:text-violet-700 dark:text-violet-300/80"><UserRound className="w-3 h-3" />{dn(r.assigned_employee)}</span>
+                            <span className="flex items-center gap-1 text-violet-700 dark:text-violet-300/80"><UserRound className="w-3 h-3" />{dn(r.assigned_employee)}</span>
                           )}
                           {r.promoted_task?.task_number != null && (
                             <span className="font-mono text-green-700 dark:text-green-400/80" title={`Linked task: ${r.promoted_task.title}`}>Task #{r.promoted_task.task_number}</span>

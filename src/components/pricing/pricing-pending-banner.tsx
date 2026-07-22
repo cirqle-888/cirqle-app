@@ -44,7 +44,7 @@ export function PricingPendingBanner({ clients, services, href }: Props) {
       <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 flex items-center gap-3">
         <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 dark:text-red-400" />
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-red-700 dark:text-red-700 dark:text-red-300">
+          <p className="text-sm font-semibold text-red-700 dark:text-red-300">
             {total} {total === 1 ? 'item needs' : 'items need'} pricing
             <span className="font-normal text-red-700/70 dark:text-red-400/70">
               {' · '}{clients.length} client{clients.length !== 1 ? 's' : ''}, {services.length} service{services.length !== 1 ? 's' : ''}

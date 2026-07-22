@@ -1387,7 +1387,7 @@ const getTomorrowStr = () => {
 
 function OfferIntakeClientInner({
   token, client, campaign: initialCampaign, catalog, badges, groups = [], sheetManaged = false,
-  logoUrl, logoDarkUrl, switcher, hub, staff,
+  logoUrl, logoDarkUrl, switcher, hub, staff, flowMode = 'push',
 }: {
   token: string
   client: { id: string; name: string }
@@ -1408,6 +1408,12 @@ function OfferIntakeClientInner({
   hub?: string
   /** True on the internal staff entrance (/dashboard/offer-prepare); shows the Google Sheet sync status. */
   staff?: boolean
+  /**
+   * How this client's designer sheet is maintained. Only 'push' means Cirqle
+   * writes it — the others must not start a sync poll that can never succeed.
+   * Defaults to 'push', the historical behaviour, when not supplied.
+   */
+  flowMode?: 'push' | 'pull' | 'manual'
 }) {
   const router = useRouter()
   type LocalProduct = ProductInput & { _key: string; id?: string }
@@ -1503,7 +1509,7 @@ function OfferIntakeClientInner({
 
   // Google Sheet sync status (staff entrance only) — reflects the fire-and-forget
   // server sync that runs after each save.
-  type SyncState = 'idle' | 'saving' | 'syncing' | 'synced' | 'error'
+  type SyncState = 'idle' | 'saving' | 'syncing' | 'synced' | 'skipped' | 'unknown' | 'error'
   const [syncState, setSyncState] = useState<SyncState>('idle')
   const [syncErrorMsg, setSyncErrorMsg] = useState<string | null>(null)
   const syncPollRef = useRef(0)
@@ -2140,7 +2146,10 @@ function OfferIntakeClientInner({
       setClientNote('')
       setShowNote(false)
       setTimeout(() => setSaved(false), 4000)
-      if (staff) { setSyncState('syncing'); void pollSyncStatus(res.data.campaignId) }
+      if (staff) {
+        if (flowMode === 'push') { setSyncState('syncing'); void pollSyncStatus(res.data.campaignId) }
+        else setSyncState('skipped')
+      }
     } else {
       setError(res.error || 'Could not save. Please try again.')
       if (staff) setSyncState('idle')
@@ -2185,9 +2194,10 @@ function OfferIntakeClientInner({
         consecutiveErrors = 0
       }
     }
-    // Window elapsed without an observed success or error — genuinely
-    // indeterminate. Leave a soft "syncing" rather than a false "synced".
-    if (syncPollRef.current === run) setSyncState('syncing')
+    // Window elapsed with no observed success or error. This is genuinely
+    // indeterminate, but it is NOT "still syncing" — leaving the spinner up
+    // meant it never terminated. Say we stopped watching and offer a retry.
+    if (syncPollRef.current === run) setSyncState('unknown')
   }
 
   async function handleRetrySync() {
@@ -3118,6 +3128,18 @@ function OfferIntakeClientInner({
             {syncState === 'saving' && <><Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" /> Saving…</>}
             {syncState === 'syncing' && <><RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" /> Syncing Google Sheet…</>}
             {syncState === 'synced' && <><CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> Google Sheet synced</>}
+            {syncState === 'skipped' && (
+              <><CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> Saved. No sheet written — this client&apos;s sheet is not managed by Cirqle.</>
+            )}
+            {syncState === 'unknown' && (
+              <>
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                <span className="flex-1 min-w-0">Saved, but the sheet didn&apos;t confirm in time.</span>
+                <button onClick={handleRetrySync} className="shrink-0 px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 transition-colors flex items-center gap-1">
+                  <RefreshCw className="w-3 h-3" /> Retry sync
+                </button>
+              </>
+            )}
             {syncState === 'error' && (
               <>
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" />

@@ -58,6 +58,15 @@ function HealthRow({ label, value, ok }: { label: string; value: string; ok: boo
   )
 }
 
+/** 'warn' = the call succeeded but did no work (skipped / blocked). */
+type Flash = 'ok' | 'err' | 'warn'
+
+const FLASH_CLS: Record<Flash, string> = {
+  ok:   'bg-emerald-500/10 border border-emerald-500/25 text-emerald-700 dark:text-emerald-300',
+  warn: 'bg-amber-500/10 border border-amber-500/25 text-amber-700 dark:text-amber-300',
+  err:  'bg-red-500/10 border border-red-500/25 text-red-700 dark:text-red-300',
+}
+
 type FlowMode = 'push' | 'pull' | 'manual'
 
 const FLOW_LABEL: Record<FlowMode, string> = { push: 'Push', pull: 'Pull', manual: 'Manual' }
@@ -99,7 +108,7 @@ function ClientCard({
   const [testing, setTesting] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(!!client.offer_sheet_webhook_url)
-  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  const [msg, setMsg] = useState<{ type: Flash; text: string } | null>(null)
   const [groups, setGroups] = useState<OfferGroupRow[]>(initialGroups)
   const [flowMode, setFlowMode] = useState<FlowMode>((client.offer_flow_mode as FlowMode) || 'push')
   const [flowSaving, setFlowSaving] = useState(false)
@@ -129,7 +138,7 @@ function ClientCard({
     : flowMode === 'pull' ? hasMasterSheet
     : hasSheetDestination && hasToken
 
-  function flash(type: 'ok' | 'err', text: string) {
+  function flash(type: Flash, text: string) {
     setMsg({ type, text })
     setTimeout(() => setMsg(null), 4000)
   }
@@ -198,14 +207,20 @@ function ClientCard({
     setTesting(true)
     const res = await testSheetSync(client.id)
     setTesting(false)
-    if (res.ok) {
-      flash('ok', res.data?.message || 'Sync successful ✓')
-      if (res.data?.sheetUrl) {
-        setSheetUrlDraft(res.data.sheetUrl)
-        setClient(c => ({ ...c, offer_sheet_url: res.data?.sheetUrl || null }))
-      }
-    } else {
-      flash('err', res.error || 'Sync failed')
+
+    if (!res.ok) { flash('err', res.error || 'Sync failed'); return }
+
+    const out = res.data
+    if (!out) { flash('err', 'Sync returned no result.'); return }
+
+    // Only 'success' is green. A skipped or blocked run wrote nothing, and
+    // saying "synced ✓" for it is exactly the false confidence being removed.
+    flash(out.status === 'success' ? 'ok' : out.status === 'failed' ? 'err' : 'warn', out.message)
+
+    // sheetUrl is only ever returned on a real write.
+    if (out.status === 'success' && out.sheetUrl) {
+      setSheetUrlDraft(out.sheetUrl)
+      setClient(c => ({ ...c, offer_sheet_url: out.sheetUrl || null }))
     }
   }
 
@@ -256,11 +271,7 @@ function ClientCard({
 
           {/* Flash message */}
           {msg && (
-            <div className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm ${
-              msg.type === 'ok'
-                ? 'bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 dark:text-emerald-700 dark:text-emerald-300'
-                : 'bg-red-500/10 border border-red-500/25 text-red-400'
-            }`}>
+            <div className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm ${FLASH_CLS[msg.type]}`}>
               {msg.type === 'ok' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
               {msg.text}
             </div>
@@ -484,7 +495,7 @@ function ClientCard({
                 ) : (
                   <div className="flex items-center gap-3 bg-amber-500/5 border border-amber-500/20 rounded-xl px-4 py-3">
                     <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-                    <p className="text-sm text-amber-600 dark:text-amber-700 dark:text-amber-300 flex-1">No intake link yet</p>
+                    <p className="text-sm text-amber-600 dark:text-amber-300 flex-1">No intake link yet</p>
                     <button
                       onClick={handleGenerateToken}
                       disabled={generating}
@@ -526,7 +537,14 @@ function ClientCard({
                 )}
               </div>
 
-              {/* ── Section 2: Sheet link (primary) ── */}
+              {/* ── Section 2: Sheet link (primary) ──
+                  PUSH ONLY. In pull mode Cirqle reads the client's own sheet
+                  and must never write one; in manual there is no sync at all.
+                  Showing these fields invited staff to paste a sheet URL into
+                  a field that would silently never be used. The matching
+                  server actions refuse the write too — hiding is not
+                  enforcement. */}
+              {flowMode === 'push' && (
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/60 mb-3 flex items-center gap-1.5">
                   <Webhook className="w-3.5 h-3.5" /> Google Sheet Sync
@@ -535,7 +553,7 @@ function ClientCard({
                 {!globalConfigured && !hasWebhook && (
                   <div className="flex items-center gap-2 bg-amber-500/5 border border-amber-500/20 rounded-xl px-3 py-2.5 mb-3">
                     <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-                    <p className="text-xs text-amber-600 dark:text-amber-700 dark:text-amber-300">Connect the shared sync script once (top of this page), then just paste each client’s Sheet link here.</p>
+                    <p className="text-xs text-amber-600 dark:text-amber-300">Connect the shared sync script once (top of this page), then just paste each client’s Sheet link here.</p>
                   </div>
                 )}
 
@@ -617,7 +635,10 @@ function ClientCard({
                 </div>
               </div>
 
-              {/* ── Section 3: Test sync ── */}
+              )}
+
+              {/* ── Section 3: Test sync ── PUSH ONLY, same reason. */}
+              {flowMode === 'push' && (
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/60 mb-3 flex items-center gap-1.5">
                   <FlaskConical className="w-3.5 h-3.5" /> Test Sheet Sync
@@ -639,14 +660,26 @@ function ClientCard({
                 )}
               </div>
 
-              {/* ── Onboarding checklist ── */}
+              )}
+
+              {/* ── Onboarding checklist ──
+                  Steps differ per mode: a pull client never needs a Cirqle-owned
+                  sheet, a manual client needs neither. The old list also had a
+                  row that ticked itself — "Link sent to client via WhatsApp"
+                  shared its predicate with "Intake link generated", so it went
+                  green the moment the link existed, whether or not anyone had
+                  sent it. Nothing records that, so it is now an explicit
+                  reminder rather than a fake tick. */}
               <div className="bg-secondary/30 rounded-xl px-4 py-3 space-y-2">
-                <p className="text-xs font-semibold text-muted-foreground/70 mb-2">Onboarding checklist</p>
+                <p className="text-xs font-semibold text-muted-foreground/70 mb-2">Setup checklist</p>
                 {[
-                  { done: true, label: 'Offer Flyer service enabled' },
-                  { done: hasToken, label: 'Intake link generated' },
-                  { done: hasSheetDestination, label: hasWebhook ? 'Per-client script connected' : 'Google Sheet link saved' },
-                  { done: hasToken, label: 'Link sent to client via WhatsApp' },
+                  { done: true, label: 'Offer Intake service enabled' },
+                  { done: hasToken, label: 'Client link created' },
+                  ...(flowMode === 'push'
+                    ? [{ done: hasSheetDestination, label: 'Google Sheet connected' }]
+                    : flowMode === 'pull'
+                      ? [{ done: hasMasterSheet, label: "Client's own sheet linked" }]
+                      : []),
                 ].map((item, i) => (
                   <div key={i} className="flex items-center gap-2 text-xs">
                     {item.done
@@ -655,6 +688,11 @@ function ClientCard({
                     <span className={item.done ? 'text-foreground/70' : 'text-muted-foreground/50'}>{item.label}</span>
                   </div>
                 ))}
+                {hasToken && (
+                  <p className="text-[11px] text-muted-foreground/60 pt-1">
+                    Last step: send the client link above to the client.
+                  </p>
+                )}
               </div>
         </div>
       )}
@@ -669,9 +707,9 @@ function GlobalSyncCard({ initial }: { initial: { webhookUrl: string; secret: st
   const [saving, setSaving] = useState(false)
   const [rotating, setRotating] = useState(false)
   const [open, setOpen] = useState(!initial.configured)
-  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  const [msg, setMsg] = useState<{ type: Flash; text: string } | null>(null)
 
-  function flash(type: 'ok' | 'err', text: string) { setMsg({ type, text }); setTimeout(() => setMsg(null), 4000) }
+  function flash(type: Flash, text: string) { setMsg({ type, text }); setTimeout(() => setMsg(null), 4000) }
 
   async function handleSave() {
     setSaving(true)
@@ -709,7 +747,7 @@ function GlobalSyncCard({ initial }: { initial: { webhookUrl: string; secret: st
       {open && (
         <div className="border-t border-border px-5 py-5 space-y-4">
           {msg && (
-            <div className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm ${msg.type === 'ok' ? 'bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 dark:text-emerald-700 dark:text-emerald-300' : 'bg-red-500/10 border border-red-500/25 text-red-400'}`}>
+            <div className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm ${FLASH_CLS[msg.type]}`}>
               {msg.type === 'ok' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
               {msg.text}
             </div>
@@ -854,8 +892,8 @@ export default function OfferIntakeSettingsClient({
               <p className="text-xs text-muted-foreground max-w-sm mx-auto">
                 A client appears here once you assign them a service whose Intake Kind is{' '}
                 <span className="text-foreground font-medium">Offer Intake</span> — set the kind in{' '}
-                <Link href="/dashboard/settings?tab=services" className="text-violet-400 hover:text-violet-700 dark:text-violet-700 dark:text-violet-300 underline underline-offset-2">Settings → Services</Link>, then add that service to the client in{' '}
-                <Link href="/dashboard/clients" className="text-violet-400 hover:text-violet-700 dark:text-violet-700 dark:text-violet-300 underline underline-offset-2">Clients</Link>.
+                <Link href="/dashboard/settings?tab=services" className="text-violet-400 hover:text-violet-700 dark:text-violet-300 underline underline-offset-2">Settings → Services</Link>, then add that service to the client in{' '}
+                <Link href="/dashboard/clients" className="text-violet-400 hover:text-violet-700 dark:text-violet-300 underline underline-offset-2">Clients</Link>.
               </p>
             )}
           </div>

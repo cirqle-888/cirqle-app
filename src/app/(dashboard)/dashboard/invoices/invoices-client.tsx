@@ -5849,7 +5849,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               <Calendar className="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" />
               <div>
                 <div className="text-[10px] text-amber-600/70 dark:text-amber-700 dark:text-amber-300/70">Add-on</div>
-                <div className="text-xs font-semibold text-amber-700 dark:text-amber-700 dark:text-amber-300">Generate</div>
+                <div className="text-xs font-semibold text-amber-700 dark:text-amber-300">Generate</div>
               </div>
             </button>
             <button
@@ -5858,7 +5858,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               <History className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
               <div>
                 <div className="text-[10px] text-emerald-700/70 dark:text-emerald-700 dark:text-emerald-300/70">Batch</div>
-                <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-700 dark:text-emerald-300">Historical</div>
+                <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">Historical</div>
               </div>
             </button>
             <button
@@ -5867,7 +5867,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               <Receipt className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
               <div>
                 <div className="text-[10px] text-blue-700/70 dark:text-blue-700 dark:text-blue-300/70">Account</div>
-                <div className="text-xs font-semibold text-blue-700 dark:text-blue-700 dark:text-blue-300">Statement</div>
+                <div className="text-xs font-semibold text-blue-700 dark:text-blue-300">Statement</div>
               </div>
             </button>
             <button
@@ -5876,7 +5876,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               <TrendingUp className="w-4 h-4 text-violet-600 dark:text-violet-400 shrink-0" />
               <div>
                 <div className="text-[10px] text-violet-700/70 dark:text-violet-700 dark:text-violet-300/70">Financial</div>
-                <div className="text-xs font-semibold text-violet-700 dark:text-violet-700 dark:text-violet-300">Analytics</div>
+                <div className="text-xs font-semibold text-violet-700 dark:text-violet-300">Analytics</div>
               </div>
             </button>
           </div>

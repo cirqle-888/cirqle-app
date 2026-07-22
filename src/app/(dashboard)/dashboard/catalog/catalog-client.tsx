@@ -316,7 +316,7 @@ function ProductCard({
                         disabled={assignBusy === c.id}
                         className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs border transition-all ${
                           active
-                            ? 'bg-violet-500/15 text-violet-700 dark:text-violet-700 dark:text-violet-300 border-violet-500/30'
+                            ? 'bg-violet-500/15 text-violet-700 dark:text-violet-300 border-violet-500/30'
                             : 'bg-secondary/50 text-muted-foreground border-border hover:border-violet-500/30'
                         }`}
                       >
