@@ -196,12 +196,12 @@ export default function ClientDetailClient({ client, invoices, tasks, pricing, s
               {client.gstin && <p className="text-sm flex items-center gap-2 text-foreground/90"><Tag className="w-3.5 h-3.5 text-muted-foreground shrink-0" /> GSTIN {client.gstin}</p>}
               <p className="text-sm flex items-center gap-2 text-foreground/90"><Globe className="w-3.5 h-3.5 text-muted-foreground shrink-0" /> Billing currency {client.default_currency || 'INR'}</p>
               {partner && (
-                <Link href={`/dashboard/partners/${partner.id}`} className="text-sm flex items-center gap-2 text-blue-400 hover:text-blue-300 transition-colors">
+                <Link href={`/dashboard/partners/${partner.id}`} className="text-sm flex items-center gap-2 text-blue-400 hover:text-blue-700 dark:text-blue-300 transition-colors">
                   <Handshake className="w-3.5 h-3.5 shrink-0" /> Referred by {partner.name} ({partner.partner_code})
                 </Link>
               )}
               {client.drive_folder_link && (
-                <a href={client.drive_folder_link} target="_blank" rel="noreferrer" className="text-sm flex items-center gap-2 text-blue-400 hover:text-blue-300 transition-colors">
+                <a href={client.drive_folder_link} target="_blank" rel="noreferrer" className="text-sm flex items-center gap-2 text-blue-400 hover:text-blue-700 dark:text-blue-300 transition-colors">
                   <ExternalLink className="w-3.5 h-3.5 shrink-0" /> Drive folder
                 </a>
               )}

@@ -207,7 +207,7 @@ export default function ActivityPanel({ entityType, entityId, canNote, title = '
             <button
               type="button"
               onClick={() => setShowNote(o => !o)}
-              className="inline-flex items-center gap-1 text-[11px] text-violet-600 dark:text-violet-400 hover:text-violet-500 dark:hover:text-violet-300 border border-violet-500/30 rounded-lg px-2 py-1 bg-violet-500/5 hover:bg-violet-500/10 transition-colors"
+              className="inline-flex items-center gap-1 text-[11px] text-violet-600 dark:text-violet-400 hover:text-violet-500 dark:hover:text-violet-700 dark:text-violet-300 border border-violet-500/30 rounded-lg px-2 py-1 bg-violet-500/5 hover:bg-violet-500/10 transition-colors"
             >
               <MessageSquarePlus className="w-3 h-3" /> Log note
             </button>
@@ -298,7 +298,7 @@ export default function ActivityPanel({ entityType, entityId, canNote, title = '
 
                   {/* Note text */}
                   {row.note && (
-                    <p className="text-[12px] text-amber-600 dark:text-amber-300 mt-0.5 italic">“{row.note}”</p>
+                    <p className="text-[12px] text-amber-600 dark:text-amber-700 dark:text-amber-300 mt-0.5 italic">“{row.note}”</p>
                   )}
 
                   {/* Detail line */}

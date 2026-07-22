@@ -392,7 +392,7 @@ export default function AllocateFromCashbookModal({
                       <button
                         type="button"
                         onClick={() => fillMax(e)}
-                        className="text-[11px] font-medium text-violet-400 hover:text-violet-300 px-2 py-1.5 rounded-lg hover:bg-violet-500/10 transition-colors whitespace-nowrap">
+                        className="text-[11px] font-medium text-violet-400 hover:text-violet-700 dark:text-violet-300 px-2 py-1.5 rounded-lg hover:bg-violet-500/10 transition-colors whitespace-nowrap">
                         Max
                       </button>
                     </div>

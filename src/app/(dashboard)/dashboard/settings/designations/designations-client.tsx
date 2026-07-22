@@ -240,7 +240,7 @@ export default function DesignationsClient(props: Props) {
                   <div className="flex items-center gap-1.5">
                     <span className="text-sm font-medium truncate">{d.name}</span>
                     {d.is_admin && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300 font-medium uppercase tracking-wide">Admin</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-700 dark:text-violet-300 font-medium uppercase tracking-wide">Admin</span>
                     )}
                     {!d.is_admin && d.is_system && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground font-medium uppercase tracking-wide">System</span>
@@ -416,7 +416,7 @@ function DesignationDetail({
                 <div className="flex items-center gap-2 flex-wrap">
                   <h1 className="text-xl font-semibold text-foreground">{designation.name}</h1>
                   {designation.is_admin && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300 font-medium uppercase tracking-wide">Admin</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-700 dark:text-violet-300 font-medium uppercase tracking-wide">Admin</span>
                   )}
                   {!designation.is_admin && designation.is_system && (
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground font-medium uppercase tracking-wide">System</span>
@@ -431,7 +431,7 @@ function DesignationDetail({
                 {canEditMeta && (
                   <button
                     onClick={() => setEditing(true)}
-                    className="mt-3 text-xs text-violet-300 hover:text-violet-200"
+                    className="mt-3 text-xs text-violet-700 dark:text-violet-300 hover:text-violet-700 dark:text-violet-200"
                   >
                     Edit name & description
                   </button>
@@ -445,7 +445,7 @@ function DesignationDetail({
       {/* Admin banner */}
       {designation.is_admin ? (
         <div className="bg-violet-500/10 border border-violet-500/30 rounded-2xl p-4 flex items-start gap-3">
-          <Check className="w-5 h-5 text-violet-300 shrink-0 mt-0.5" />
+          <Check className="w-5 h-5 text-violet-700 dark:text-violet-300 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium text-foreground">Admin always has every permission</p>
             <p className="text-xs text-muted-foreground mt-1">
@@ -473,7 +473,7 @@ function DesignationDetail({
         <div className="pt-2 border-t border-border">
           <button
             onClick={onDelete}
-            className="inline-flex items-center gap-2 text-sm rounded-lg px-3 py-2 bg-red-500/10 text-red-300 hover:bg-red-500/20 border border-red-500/30"
+            className="inline-flex items-center gap-2 text-sm rounded-lg px-3 py-2 bg-red-500/10 text-red-700 dark:text-red-300 hover:bg-red-500/20 border border-red-500/30"
           >
             <Trash2 className="w-4 h-4" /> Delete designation
           </button>

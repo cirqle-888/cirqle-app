@@ -113,7 +113,7 @@ function Toast({ toast, onDismiss }: ToastProps) {
           <button
             type="button"
             onClick={handleAction}
-            className="flex items-center gap-1 text-xs font-semibold text-violet-400 hover:text-violet-300 bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/20 rounded-lg px-2 py-1 transition-colors">
+            className="flex items-center gap-1 text-xs font-semibold text-violet-400 hover:text-violet-700 dark:text-violet-300 bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/20 rounded-lg px-2 py-1 transition-colors">
             <RotateCcw className="w-3 h-3" />
             {toast.action.label}
           </button>

@@ -192,7 +192,7 @@ export default function ApplicantProfileClient({ applicationId, canEdit, canDele
           <div className={sectionCls}>
             <h2 className="text-sm font-semibold mb-3">Resume &amp; Documents</h2>
             {app.resumeStoragePath && (
-              <button onClick={() => handleOpenResume(app.resumeStoragePath)} className="flex items-center gap-2 text-sm text-violet-400 hover:text-violet-300 mb-2">
+              <button onClick={() => handleOpenResume(app.resumeStoragePath)} className="flex items-center gap-2 text-sm text-violet-400 hover:text-violet-700 dark:text-violet-300 mb-2">
                 <FileText className="h-4 w-4" />Preview resume<ExternalLink className="h-3 w-3" />
               </button>
             )}
@@ -200,7 +200,7 @@ export default function ApplicantProfileClient({ applicationId, canEdit, canDele
               {documents.map(d => (
                 <div key={d.id} className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground truncate">{d.fileName ?? d.docType}</span>
-                  <button onClick={() => handleOpenResume(d.storagePath)} className="text-violet-400 hover:text-violet-300 text-xs">View</button>
+                  <button onClick={() => handleOpenResume(d.storagePath)} className="text-violet-400 hover:text-violet-700 dark:text-violet-300 text-xs">View</button>
                 </div>
               ))}
               {documents.length === 0 && !app.resumeStoragePath && <p className="text-xs text-muted-foreground/60">No documents uploaded.</p>}
@@ -211,7 +211,7 @@ export default function ApplicantProfileClient({ applicationId, canEdit, canDele
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-semibold">Interview History</h2>
               {canEdit && (
-                <button onClick={() => setShowInterviewForm(v => !v)} className="flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300">
+                <button onClick={() => setShowInterviewForm(v => !v)} className="flex items-center gap-1 text-xs text-violet-400 hover:text-violet-700 dark:text-violet-300">
                   <Plus className="h-3.5 w-3.5" />Schedule
                 </button>
               )}
@@ -259,7 +259,7 @@ export default function ApplicantProfileClient({ applicationId, canEdit, canDele
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-semibold">Offers</h2>
               {canEdit && (
-                <button onClick={() => setShowOfferForm(v => !v)} className="flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300">
+                <button onClick={() => setShowOfferForm(v => !v)} className="flex items-center gap-1 text-xs text-violet-400 hover:text-violet-700 dark:text-violet-300">
                   <Plus className="h-3.5 w-3.5" />New offer
                 </button>
               )}

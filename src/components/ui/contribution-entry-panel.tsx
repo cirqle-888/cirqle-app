@@ -565,7 +565,7 @@ export function ContributionEntryPanel({
               <span className="text-xs text-muted-foreground">%</span>
               {predefinedCommPct !== null && serviceCommPct !== predefinedCommPct && (
                 <button onClick={() => setServiceCommPct(predefinedCommPct!)}
-                  className="text-[10px] text-amber-400 hover:text-amber-300 ml-auto transition-colors">
+                  className="text-[10px] text-amber-400 hover:text-amber-700 dark:text-amber-300 ml-auto transition-colors">
                   Reset to {predefinedCommPct}%
                 </button>
               )}
@@ -583,7 +583,7 @@ export function ContributionEntryPanel({
                     <button key={tool.id} type="button"
                       onClick={() => setToolsUsed(prev => ({ ...prev, [tool.id]: !prev[tool.id] }))}
                       className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border transition-all ${
-                        used ? 'bg-purple-500/15 border-purple-500/30 text-purple-300' : 'bg-secondary border-transparent text-muted-foreground hover:border-border'
+                        used ? 'bg-purple-500/15 border-purple-500/30 text-purple-700 dark:text-purple-300' : 'bg-secondary border-transparent text-muted-foreground hover:border-border'
                       }`}>
                       <span className={`w-1.5 h-1.5 rounded-full ${used ? 'bg-purple-400' : 'bg-muted-foreground/40'}`} />
                       {tool.name}
@@ -733,7 +733,7 @@ export function ContributionEntryPanel({
                                       {group.name}
                                     </p>
                                     {isMostUsed && (
-                                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-300 border border-blue-500/25 whitespace-nowrap">
+                                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-700 dark:text-blue-300 border border-blue-500/25 whitespace-nowrap">
                                         🔥 Most Used
                                       </span>
                                     )}

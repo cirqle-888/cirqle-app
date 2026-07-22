@@ -29,7 +29,7 @@ export function ActiveFilterChips({
     <div className={`flex items-center gap-1.5 flex-wrap ${className}`}>
       {chips.map(c => (
         <span key={c.key}
-          className="inline-flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-full text-[11px] bg-violet-500/10 text-violet-300 border border-violet-500/25">
+          className="inline-flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-full text-[11px] bg-violet-500/10 text-violet-700 dark:text-violet-300 border border-violet-500/25">
           <span className="text-violet-400/70 font-medium">{c.label}:</span>
           <span className="font-semibold max-w-[160px] truncate">{c.value}</span>
           <button

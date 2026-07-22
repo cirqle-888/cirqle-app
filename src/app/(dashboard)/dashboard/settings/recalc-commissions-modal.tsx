@@ -90,7 +90,7 @@ export function RecalcCommissionsModal({ open, onClose, employees }: Props) {
         <div className="p-6 space-y-4">
           <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 flex gap-3 text-sm">
             <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
-            <div className="text-amber-200">
+            <div className="text-amber-700 dark:text-amber-200">
               <p className="font-semibold mb-1">Audit Trail Enabled</p>
               <p className="text-xs">
                 This process will recalculate the commission scores for all tasks in the selected date range. Previous earnings and scores will be saved in the database for auditing purposes.
@@ -139,13 +139,13 @@ export function RecalcCommissionsModal({ open, onClose, employees }: Props) {
           </div>
 
           {error && (
-            <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 text-xs text-red-300">
+            <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 text-xs text-red-700 dark:text-red-300">
               {error}
             </div>
           )}
 
           {result && (
-            <div className="bg-green-500/10 border border-green-500/30 rounded-lg px-3 py-2 text-xs text-green-300 flex items-center gap-2">
+            <div className="bg-green-500/10 border border-green-500/30 rounded-lg px-3 py-2 text-xs text-green-700 dark:text-green-300 flex items-center gap-2">
               <Check className="w-4 h-4 shrink-0" />
               <div>
                 Processed <strong>{result.totalProcessed}</strong> tasks. 

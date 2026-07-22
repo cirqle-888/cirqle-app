@@ -453,7 +453,7 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
         </div>
 
         {setupNeeded && (
-          <div className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
+          <div className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-700 dark:text-amber-300">
             Follow-up history is unavailable until the database migration runs. Apply
             <code className="mx-1 px-1.5 py-0.5 rounded bg-amber-500/20 text-xs">20260616120000_invoice_followups.sql</code>
             in the Supabase SQL editor. Grouping and reminders still work; logged notes will appear once the table exists.
@@ -511,7 +511,7 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
                           onClick={() => setViewMode(p => ({ ...p, [g]: m }))}
                           className={`text-[10px] font-medium px-2 py-1 rounded-full border transition-colors ${
                             viewMode[g] === m
-                              ? 'bg-violet-500/15 border-violet-500/40 text-violet-600 dark:text-violet-300'
+                              ? 'bg-violet-500/15 border-violet-500/40 text-violet-600 dark:text-violet-700 dark:text-violet-300'
                               : 'border-border/40 text-muted-foreground hover:text-foreground'
                           }`}
                         >{VIEW_MODE_LABEL[m]}</button>
@@ -790,7 +790,7 @@ function InvoiceCard(p: CardProps) {
             <div className="flex items-center gap-1.5 mt-1 text-sm text-muted-foreground min-w-0">
               <span className="truncate">{inv.client?.name ?? 'Unknown client'}</span>
               {inv.client?.phone && (
-                <a href={`tel:${inv.client.phone.replace(/[^0-9+]/g, '')}`} className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:underline shrink-0">
+                <a href={`tel:${inv.client.phone.replace(/[^0-9+]/g, '')}`} className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-700 dark:text-blue-300 hover:underline shrink-0">
                   <Phone className="w-3 h-3" /> {inv.client.phone}
                 </a>
               )}

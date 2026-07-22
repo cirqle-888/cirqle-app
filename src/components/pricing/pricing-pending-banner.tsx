@@ -37,14 +37,14 @@ export function PricingPendingBanner({ clients, services, href }: Props) {
         ? (clients[0] ? clientHref(clients[0].id) : serviceHref(services[0].id))
         : (clients.length === 0 ? `/dashboard/settings?tab=Services${ret}` : '/dashboard/pricing-matrix'))
 
-  const itemLinkCls = 'text-xs text-red-700/80 hover:text-red-800 underline decoration-red-500/30 underline-offset-2 hover:decoration-red-500 transition-colors dark:text-red-400/80 dark:hover:text-red-300'
+  const itemLinkCls = 'text-xs text-red-700/80 hover:text-red-800 underline decoration-red-500/30 underline-offset-2 hover:decoration-red-500 transition-colors dark:text-red-400/80 dark:hover:text-red-700 dark:text-red-300'
 
   return (
     <div className="px-4 sm:px-6 pt-4">
       <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 flex items-center gap-3">
         <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 dark:text-red-400" />
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-red-700 dark:text-red-300">
+          <p className="text-sm font-semibold text-red-700 dark:text-red-700 dark:text-red-300">
             {total} {total === 1 ? 'item needs' : 'items need'} pricing
             <span className="font-normal text-red-700/70 dark:text-red-400/70">
               {' · '}{clients.length} client{clients.length !== 1 ? 's' : ''}, {services.length} service{services.length !== 1 ? 's' : ''}
@@ -60,7 +60,7 @@ export function PricingPendingBanner({ clients, services, href }: Props) {
             ))}
           </div>
         </div>
-        <Link href={primaryHref} className="shrink-0 inline-flex items-center gap-1 text-xs font-semibold text-red-700 hover:text-red-800 transition-colors dark:text-red-300 dark:hover:text-red-200">
+        <Link href={primaryHref} className="shrink-0 inline-flex items-center gap-1 text-xs font-semibold text-red-700 hover:text-red-800 transition-colors dark:text-red-700 dark:text-red-300 dark:hover:text-red-700 dark:text-red-200">
           Set pricing <ArrowRight className="w-3 h-3" />
         </Link>
       </div>

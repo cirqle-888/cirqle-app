@@ -228,9 +228,9 @@ export default function AddExpenseModal({
                       )}
                       {exp.notes && <div className="text-[10px] text-muted-foreground italic mt-0.5">{exp.notes}</div>}
                     </div>
-                    <span className="font-mono font-semibold text-amber-300/90 shrink-0">{fmt(exp.amount, exp.currency)}</span>
+                    <span className="font-mono font-semibold text-amber-700 dark:text-amber-300/90 shrink-0">{fmt(exp.amount, exp.currency)}</span>
                     <button onClick={() => handleRemove(exp.id)} disabled={saving}
-                      className="text-red-400 hover:text-red-300 shrink-0 disabled:opacity-40">
+                      className="text-red-400 hover:text-red-700 dark:text-red-300 shrink-0 disabled:opacity-40">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -307,7 +307,7 @@ export default function AddExpenseModal({
                                   <button key={type}
                                     onClick={e => { e.stopPropagation(); updateSel(entry.id, { markupType: type, markupValue: '' }) }}
                                     className={`text-[10px] px-2.5 py-1 rounded-full border transition-colors ${sel.markupType === type
-                                      ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                                      ? 'bg-amber-500/20 border-amber-500/40 text-amber-700 dark:text-amber-300'
                                       : 'border-border/40 text-muted-foreground hover:border-border/70'}`}>
                                     {type === 'none' ? 'No markup' : type === 'percentage' ? '% Percentage' : 'Fixed amount'}
                                   </button>
@@ -335,7 +335,7 @@ export default function AddExpenseModal({
                                     <div className="text-muted-foreground">
                                       {fmt(sel.originalAmt, invoiceCurrency)} + {fmt(markupAmt, invoiceCurrency)}
                                     </div>
-                                    <div className="font-semibold text-amber-300 text-sm mt-0.5">
+                                    <div className="font-semibold text-amber-700 dark:text-amber-300 text-sm mt-0.5">
                                       = {fmt(billing, invoiceCurrency)}
                                     </div>
                                   </div>

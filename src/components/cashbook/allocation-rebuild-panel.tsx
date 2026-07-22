@@ -598,7 +598,7 @@ export default function AllocationRebuildPanel() {
         {/* Unmatched / Ambiguous warnings */}
         {preview.unmatched.length > 0 && (
           <div className="border border-amber-500/30 rounded-xl overflow-hidden">
-            <div className="px-4 py-2 bg-amber-500/10 text-xs font-medium text-amber-300 flex items-center gap-2">
+            <div className="px-4 py-2 bg-amber-500/10 text-xs font-medium text-amber-700 dark:text-amber-300 flex items-center gap-2">
               <AlertTriangle className="w-3.5 h-3.5" />
               {preview.unmatched.length} payment{preview.unmatched.length !== 1 ? 's' : ''} excluded (no client tagged)
             </div>
@@ -735,11 +735,11 @@ export default function AllocationRebuildPanel() {
           </div>
         </div>
 
-        <div className="flex items-start gap-3 p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-300">
+        <div className="flex items-start gap-3 p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-700 dark:text-red-300">
           <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5 text-red-400" />
           <div>
             <p className="font-bold text-red-400 mb-1">This action will modify production data.</p>
-            <ul className="space-y-0.5 text-red-300/80 list-disc list-inside">
+            <ul className="space-y-0.5 text-red-700 dark:text-red-300/80 list-disc list-inside">
               <li>All active cashbook invoice allocations will be soft-deleted.</li>
               <li>All invoice paid_amounts and statuses will be reset to 0 by the DB trigger.</li>
               <li>New allocations will be inserted per the FIFO preview above.</li>
