@@ -24,7 +24,7 @@ export default async function AICenterPage() {
         </div>
         <div className="px-4 py-2 bg-indigo-50 dark:bg-indigo-900/30 rounded-full flex items-center border border-indigo-100 dark:border-indigo-800">
           <Sparkles className="w-4 h-4 text-indigo-500 mr-2" />
-          <span className="text-sm font-medium text-indigo-700 dark:text-indigo-300">
+          <span className="text-sm font-medium text-indigo-700 dark:text-indigo-700 dark:text-indigo-300">
             {recommendations.length} Active Insights
           </span>
         </div>
@@ -32,7 +32,7 @@ export default async function AICenterPage() {
 
       {recommendations.length === 0 ? (
         <div className="flex flex-col items-center justify-center p-12 bg-white dark:bg-slate-900 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
-          <Bot className="w-12 h-12 text-slate-300 mb-4" />
+          <Bot className="w-12 h-12 text-slate-700 dark:text-slate-300 mb-4" />
           <h3 className="text-lg font-medium text-slate-900 dark:text-slate-100">You're all caught up!</h3>
           <p className="text-slate-500 mt-1">Our AI is monitoring your campaigns. We'll alert you when there are new recommendations.</p>
         </div>

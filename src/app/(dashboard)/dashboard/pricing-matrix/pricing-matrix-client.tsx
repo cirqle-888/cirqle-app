@@ -144,7 +144,7 @@ export default function PricingMatrixClient({ clients, services }: Props) {
               <Users2 className="w-4 h-4" /> Clients
             </Link>
             <button type="button" onClick={() => setShowRecalcModal(true)} title="Apply the current Pricing Matrix to existing tasks (one-time / on-demand maintenance)"
-              className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg border border-violet-500/30 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20 shrink-0">
+              className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg border border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-200 hover:bg-violet-500/20 shrink-0">
               <RefreshCw className="w-3.5 h-3.5" />
               Recalculate Task Billing
             </button>

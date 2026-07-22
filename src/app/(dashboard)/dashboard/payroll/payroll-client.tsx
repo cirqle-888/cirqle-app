@@ -798,12 +798,12 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                 <div className="flex items-start gap-3">
                   <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0 dark:text-amber-400" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-amber-700 mb-2 dark:text-amber-300">
+                    <p className="text-sm font-semibold text-amber-700 mb-2 dark:text-amber-700 dark:text-amber-300">
                       {missingContribTasks.length} completed task{missingContribTasks.length !== 1 ? 's' : ''} missing contribution scores in {MONTHS[viewMonth - 1]}
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 mb-3">
                       {missingContribTasks.slice(0, 6).map(t => (
-                        <div key={t.id} className="flex items-center gap-2 text-xs text-amber-800/80 dark:text-amber-200/60">
+                        <div key={t.id} className="flex items-center gap-2 text-xs text-amber-800/80 dark:text-amber-700 dark:text-amber-200/60">
                           <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0 dark:bg-amber-500/50" />
                           <span className="truncate">{t.title}</span>
                           <span className="text-amber-700/70 shrink-0 ml-auto dark:text-amber-500/50">{t.task_date}</span>
@@ -1601,7 +1601,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                       return (
                         <div key={d} title={`${d} ${MONTHS[viewMonth - 1]}`}
                           className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-medium border transition-all
-                            ${worked   ? 'bg-green-500/20 text-green-300 border-green-500/30' :
+                            ${worked   ? 'bg-green-500/20 text-green-700 dark:text-green-300 border-green-500/30' :
                               isToday  ? 'bg-blue-500/15 text-blue-400 border-blue-500/20' :
                                          'bg-foreground/[0.02] text-muted-foreground/30 border-foreground/[0.04]'}`}>
                           {d}

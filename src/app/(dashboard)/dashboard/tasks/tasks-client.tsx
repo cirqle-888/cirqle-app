@@ -2458,14 +2458,14 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
 
           {/* ── DB mode banner ── */}
           {dbMode && (
-            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-violet-500/10 border border-violet-500/20 text-xs text-violet-300">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-violet-500/10 border border-violet-500/20 text-xs text-violet-700 dark:text-violet-300">
               <Search size={12} className="shrink-0" />
               <span>
                 <strong>Database search active</strong> — showing results directly from Supabase.
                 {dbModeTotal != null && ` Found ${dbModeTotal} task${dbModeTotal !== 1 ? 's' : ''} matching your filters.`}
                 {dbModeTotal != null && dbModeTotal > DB_PAGE_SIZE && ` Showing ${DB_PAGE_SIZE} per page.`}
               </span>
-              <button onClick={exitDbMode} className="ml-auto flex items-center gap-1 text-violet-400 hover:text-violet-200 transition-colors shrink-0">
+              <button onClick={exitDbMode} className="ml-auto flex items-center gap-1 text-violet-400 hover:text-violet-700 dark:text-violet-200 transition-colors shrink-0">
                 <X size={11} /> Back to loaded
               </button>
             </div>
@@ -2575,7 +2575,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                     <button
                       onClick={() => runDbSearch(0)}
                       disabled={dbModeLoading}
-                      className="inline-flex items-center gap-1.5 text-xs text-violet-400 hover:text-violet-300 border border-violet-500/30 hover:border-violet-500/50 rounded-lg px-3 py-1.5 transition-colors bg-violet-500/5 hover:bg-violet-500/10 disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 text-xs text-violet-400 hover:text-violet-700 dark:text-violet-300 border border-violet-500/30 hover:border-violet-500/50 rounded-lg px-3 py-1.5 transition-colors bg-violet-500/5 hover:bg-violet-500/10 disabled:opacity-50"
                     >
                       <Search size={12} />
                       {dbModeLoading ? 'Searching database…' : 'Search entire database with these filters'}
@@ -2739,7 +2739,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                             )
                           })}
                           {taskParamIds.length > 0 && (
-                            <span className="inline-flex items-center gap-1 text-[10px] bg-purple-500/[0.07] text-purple-300/60 border border-purple-500/10 px-1.5 py-0.5 rounded-full">
+                            <span className="inline-flex items-center gap-1 text-[10px] bg-purple-500/[0.07] text-purple-700 dark:text-purple-300/60 border border-purple-500/10 px-1.5 py-0.5 rounded-full">
                               {taskParamIds.length} param{taskParamIds.length !== 1 ? 's' : ''}
                             </span>
                           )}
@@ -3133,7 +3133,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
             const statusOrder: { key: string; label: string; color: string; badge: string }[] = [
               { key: 'pending',     label: 'New',         color: 'bg-amber-500/15 border-amber-500/20 text-amber-400',  badge: '⋯' },
               { key: 'in_progress', label: 'In Progress', color: 'bg-blue-500/15 border-blue-500/20 text-blue-400',     badge: '▶' },
-              { key: 'delivered',   label: 'Delivered',   color: 'bg-violet-500/15 border-violet-500/20 text-violet-300', badge: '↗' },
+              { key: 'delivered',   label: 'Delivered',   color: 'bg-violet-500/15 border-violet-500/20 text-violet-700 dark:text-violet-300', badge: '↗' },
               { key: 'done',        label: 'Done',        color: 'bg-green-500/15 border-green-500/20 text-green-400',  badge: '✓' },
               { key: 'invoiced',    label: 'Invoiced',    color: 'bg-purple-500/15 border-purple-500/20 text-purple-400', badge: '$' },
               { key: 'cancelled',   label: 'Cancelled',   color: 'bg-red-500/15 border-red-500/20 text-red-400',         badge: '✗' },
@@ -3248,7 +3248,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                   </span>
                 )}
                 {paramCount > 0 && (
-                  <span className="text-[9px] bg-purple-500/[0.07] text-purple-300/60 border border-purple-500/10 px-1.5 py-0.5 rounded-full">
+                  <span className="text-[9px] bg-purple-500/[0.07] text-purple-700 dark:text-purple-300/60 border border-purple-500/10 px-1.5 py-0.5 rounded-full">
                     {paramCount}p
                   </span>
                 )}
@@ -3456,7 +3456,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                   return (
                     <div
                       key={i}
-                      className={`min-h-[100px] border-r border-b border-border/40 p-1.5 ${!cell.inMonth ? 'bg-black/20 opacity-40' : ''} ${(i+1) % 7 === 0 ? 'border-r-0' : ''} ${i >= 35 ? 'border-b-0' : ''}`}
+                      className={`min-h-[100px] border-r border-b border-border/40 p-1.5 ${!cell.inMonth ? 'bg-secondary/60 opacity-40' : ''} ${(i+1) % 7 === 0 ? 'border-r-0' : ''} ${i >= 35 ? 'border-b-0' : ''}`}
                     >
                       <div className={`flex items-center justify-between mb-1`}>
                         <span className={`text-[11px] font-medium ${isToday ? 'bg-blue-500 text-white rounded-full w-5 h-5 flex items-center justify-center' : 'text-muted-foreground'}`}>
@@ -3543,7 +3543,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                   ] as const).map(([val, emoji, label, desc]) => (
                     <button key={val}
                       onClick={() => setCancelForm(p => ({ ...p, cancelled_by: val }))}
-                      className={`flex flex-col items-center text-center gap-1 p-3 rounded-xl border text-xs transition-colors ${cancelForm.cancelled_by === val ? 'bg-red-500/15 border-red-500/40 text-red-300' : 'border-border/50 text-muted-foreground hover:border-border'}`}>
+                      className={`flex flex-col items-center text-center gap-1 p-3 rounded-xl border text-xs transition-colors ${cancelForm.cancelled_by === val ? 'bg-red-500/15 border-red-500/40 text-red-700 dark:text-red-300' : 'border-border/50 text-muted-foreground hover:border-border'}`}>
                       <span className="text-lg">{emoji}</span>
                       <span className="font-semibold">{label}</span>
                       <span className="text-[9px] opacity-70">{desc}</span>
@@ -3625,7 +3625,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                 {cancelForm.honor_contributions && parseFloat(cancelForm.loss_amount) > 0 && (
                   <div
                     onClick={() => setCancelForm(p => ({ ...p, record_cashbook: !p.record_cashbook }))}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer text-xs transition-colors ${cancelForm.record_cashbook ? 'bg-amber-500/10 border-amber-500/30 text-amber-300' : 'border-border/40 text-muted-foreground hover:border-border'}`}>
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer text-xs transition-colors ${cancelForm.record_cashbook ? 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300' : 'border-border/40 text-muted-foreground hover:border-border'}`}>
                     <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${cancelForm.record_cashbook ? 'bg-amber-500 border-amber-500' : 'border-border/60'}`}>
                       {cancelForm.record_cashbook && <span className="text-[10px] text-white font-bold">✓</span>}
                     </div>
@@ -3795,7 +3795,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
               <div className="flex items-start gap-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3.5 py-3">
                 <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
                 <div>
-                  <p className="text-sm font-semibold text-amber-300">This task has contribution scores</p>
+                  <p className="text-sm font-semibold text-amber-700 dark:text-amber-300">This task has contribution scores</p>
                   <p className="text-xs text-amber-400/80 mt-0.5">
                     Employee earnings and payroll linked to this task will be recalculated and may decrease.
                   </p>
@@ -3869,7 +3869,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                             })}
                             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border transition-all ${
                               on
-                                ? 'bg-blue-500/15 border-blue-500/40 text-blue-300'
+                                ? 'bg-blue-500/15 border-blue-500/40 text-blue-700 dark:text-blue-300'
                                 : 'bg-foreground/[0.04] border-foreground/15 text-muted-foreground hover:border-foreground/20 hover:text-foreground'
                             }`}
                           >
@@ -3946,7 +3946,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                             </button>
 
                             {isExpanded && (
-                              <div className="border-t border-foreground/[0.07] bg-black/20 px-3 py-3 space-y-3">
+                              <div className="border-t border-foreground/[0.07] bg-secondary/60 px-3 py-3 space-y-3">
 
                                 {/* GROUPS */}
                                 <div>
@@ -3958,7 +3958,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                                       const g = groups.find(x => x.id === gId)
                                       if (!g) return null
                                       return (
-                                        <span key={gId} className="inline-flex items-center gap-1 text-xs bg-purple-500/15 text-purple-300 border border-purple-500/25 px-2 py-1 rounded-full">
+                                        <span key={gId} className="inline-flex items-center gap-1 text-xs bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/25 px-2 py-1 rounded-full">
                                           <Layers className="w-3 h-3" />
                                           {g.name}
                                           <button
@@ -3978,7 +3978,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                                               })
                                               return next
                                             })}
-                                            className="ml-0.5 hover:text-white"
+                                            className="ml-0.5 hover:text-foreground"
                                           >
                                             <X className="w-3 h-3" />
                                           </button>
@@ -4027,7 +4027,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                                         if (!p) return null
                                         const g = groups.find(x => x.id === p.group_id)
                                         return (
-                                          <span key={pId} className="inline-flex items-center gap-1 text-xs bg-purple-500/10 text-purple-300/90 border border-purple-500/20 px-2 py-1 rounded-full">
+                                          <span key={pId} className="inline-flex items-center gap-1 text-xs bg-purple-500/10 text-purple-700 dark:text-purple-300/90 border border-purple-500/20 px-2 py-1 rounded-full">
                                             {p.name}
                                             {g && <span className="text-[9px] opacity-50">·{g.name.replace(' Group', '')}</span>}
                                             <span className="text-[9px] opacity-50">×{p.weight}</span>
@@ -4040,7 +4040,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                                                 next[empId] = set
                                                 return next
                                               })}
-                                              className="ml-0.5 hover:text-white"
+                                              className="ml-0.5 hover:text-foreground"
                                             >
                                               <X className="w-3 h-3" />
                                             </button>
@@ -4461,7 +4461,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                                 onClick={() => setForm(p => ({ ...p, billing_mode: opt.v, billing_override: false }))}
                                 className={`flex-1 px-2 py-1.5 rounded-md border transition-colors ${
                                   form.billing_mode === opt.v
-                                    ? 'bg-violet-500/15 border-violet-500/40 text-violet-200'
+                                    ? 'bg-violet-500/15 border-violet-500/40 text-violet-700 dark:text-violet-200'
                                     : 'border-foreground/15 text-muted-foreground hover:text-foreground hover:border-foreground/20'
                                 }`}
                               >
@@ -4500,7 +4500,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                           <div className="space-y-3">
                             {groups.length === 0 ? (
                               <p className="text-[11px] text-muted-foreground bg-foreground/[0.02] border border-foreground/15 rounded-lg px-3 py-2">
-                                No contribution groups exist yet. Set them up in <span className="text-violet-300">Settings → Groups &amp; Params</span> first.
+                                No contribution groups exist yet. Set them up in <span className="text-violet-700 dark:text-violet-300">Settings → Groups &amp; Params</span> first.
                               </p>
                             ) : (
                               <>
@@ -4564,8 +4564,8 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                                       {/* Group header */}
                                       <div className="flex items-center gap-2 px-2.5 py-1.5 bg-foreground/[0.03] border-b border-foreground/[0.05]">
                                         <span className="text-[11px] font-semibold text-foreground">{g.name}</span>
-                                        <span className="text-[9px] font-mono text-blue-300 bg-blue-500/10 border border-blue-500/20 rounded px-1.5 py-0.5">{groupPct.toFixed(2).replace(/\.?0+$/, '')}% of task</span>
-                                        <span className="ml-auto text-[10px] font-mono text-violet-300/80">
+                                        <span className="text-[9px] font-mono text-blue-700 dark:text-blue-300 bg-blue-500/10 border border-blue-500/20 rounded px-1.5 py-0.5">{groupPct.toFixed(2).replace(/\.?0+$/, '')}% of task</span>
+                                        <span className="ml-auto text-[10px] font-mono text-violet-700 dark:text-violet-300/80">
                                           → {groupContrib.toFixed(2).replace(/\.?0+$/, '')}% of parent
                                         </span>
                                       </div>
@@ -4587,9 +4587,9 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                                               />
                                               <span className="flex-1 text-xs">
                                                 {masterParam.name}
-                                                <span className="ml-1.5 text-[9px] uppercase tracking-wider text-amber-300/80">master</span>
+                                                <span className="ml-1.5 text-[9px] uppercase tracking-wider text-amber-700 dark:text-amber-300/80">master</span>
                                               </span>
-                                              <span className="text-[10px] font-mono text-violet-300 bg-violet-500/10 border border-violet-500/20 rounded px-1.5 py-0.5">
+                                              <span className="text-[10px] font-mono text-violet-700 dark:text-violet-300 bg-violet-500/10 border border-violet-500/20 rounded px-1.5 py-0.5">
                                                 {(masterParam.weight * 100).toFixed(2).replace(/\.?0+$/, '')}%{isPercent ? ' max' : '/each'}
                                               </span>
                                             </div>
@@ -4611,7 +4611,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                                                   className="w-20 bg-secondary border border-border rounded px-2 py-0.5 text-xs focus:outline-none focus:border-violet-500/50"
                                                 />
                                                 <span className="text-[10px] text-muted-foreground/60">{isPercent ? '%' : 'units'}</span>
-                                                <span className="text-[10px] font-mono text-violet-300/80 ml-auto">
+                                                <span className="text-[10px] font-mono text-violet-700 dark:text-violet-300/80 ml-auto">
                                                   → {effective.toFixed(2).replace(/\.?0+$/, '')}% of group
                                                 </span>
                                               </div>
@@ -4625,7 +4625,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                                         <details className="border-t border-foreground/[0.04]" open={anySubSelected}>
                                           <summary className={`cursor-pointer select-none px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/70 hover:text-foreground flex items-center gap-1.5 ${masterSelected ? 'opacity-40' : ''}`}>
                                             <span>Show sub-parameters ({subParams.length})</span>
-                                            {anySubSelected && <span className="text-[9px] text-violet-300/80 normal-case tracking-normal">· {subParams.filter(p => variantParamIds.has(p.id)).length} active</span>}
+                                            {anySubSelected && <span className="text-[9px] text-violet-700 dark:text-violet-300/80 normal-case tracking-normal">· {subParams.filter(p => variantParamIds.has(p.id)).length} active</span>}
                                           </summary>
                                           <div className={`divide-y divide-white/[0.04] ${masterSelected ? 'opacity-40' : ''}`}>
                                             {subParams.map(p => {
@@ -4646,11 +4646,11 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                                                     />
                                                     <span className={`flex-1 text-xs ${linked ? '' : 'text-muted-foreground/70'}`}>{p.name}</span>
                                                     {linked && (
-                                                      <span className="text-[9px] uppercase tracking-wider text-blue-300/80 bg-blue-500/10 border border-blue-500/20 rounded px-1 py-0.5">
+                                                      <span className="text-[9px] uppercase tracking-wider text-blue-700 dark:text-blue-300/80 bg-blue-500/10 border border-blue-500/20 rounded px-1 py-0.5">
                                                         for this service
                                                       </span>
                                                     )}
-                                                    <span className="text-[10px] font-mono text-violet-300 bg-violet-500/10 border border-violet-500/20 rounded px-1.5 py-0.5">
+                                                    <span className="text-[10px] font-mono text-violet-700 dark:text-violet-300 bg-violet-500/10 border border-violet-500/20 rounded px-1.5 py-0.5">
                                                       {(p.weight * 100).toFixed(2).replace(/\.?0+$/, '')}%{isPercent ? ' max' : '/each'}
                                                     </span>
                                                   </div>
@@ -4672,7 +4672,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                                                         className="w-20 bg-secondary border border-border rounded px-2 py-0.5 text-xs focus:outline-none focus:border-violet-500/50"
                                                       />
                                                       <span className="text-[10px] text-muted-foreground/60">{isPercent ? '%' : 'units'}</span>
-                                                      <span className="text-[10px] font-mono text-violet-300/80 ml-auto">
+                                                      <span className="text-[10px] font-mono text-violet-700 dark:text-violet-300/80 ml-auto">
                                                         → {effective.toFixed(2).replace(/\.?0+$/, '')}% of group
                                                       </span>
                                                     </div>
@@ -4695,7 +4695,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                                       <div className="text-[11px] font-mono">
                                         ₹{parentTask.billing_amount_inr.toLocaleString('en-IN')} × {totalPct}% = <span className="font-bold">₹{computedAmount.toLocaleString('en-IN')}</span>
                                       </div>
-                                      <div className="text-[10px] text-violet-200/70 mt-0.5">
+                                      <div className="text-[10px] text-violet-700 dark:text-violet-200/70 mt-0.5">
                                         Group-normalized · cannot exceed 100% of parent
                                       </div>
                                     </div>
@@ -4753,7 +4753,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                     { label: 'Yesterday', date: new Date(Date.now() - 864e5).toISOString().split('T')[0] },
                   ].map(q => (
                     <button key={q.label} type="button" onClick={() => setForm(p => ({ ...p, task_date: q.date }))}
-                      className={`px-2.5 py-1 text-[10px] rounded-lg border transition-colors ${form.task_date === q.date ? 'bg-violet-500/20 border-violet-500/40 text-violet-300' : 'border-foreground/15 text-muted-foreground hover:border-foreground/20'}`}>
+                      className={`px-2.5 py-1 text-[10px] rounded-lg border transition-colors ${form.task_date === q.date ? 'bg-violet-500/20 border-violet-500/40 text-violet-700 dark:text-violet-300' : 'border-foreground/15 text-muted-foreground hover:border-foreground/20'}`}>
                       {q.label}
                     </button>
                   ))}
@@ -5135,7 +5135,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                   )}
                   {can('requests.view') && (
                     <a href={`/dashboard/requests?focus=${requestBrief.data.id}`}
-                      className="inline-flex items-center gap-1.5 text-xs text-violet-400 hover:text-violet-300 transition-colors">
+                      className="inline-flex items-center gap-1.5 text-xs text-violet-400 hover:text-violet-700 dark:text-violet-300 transition-colors">
                       Open in Requests inbox →
                     </a>
                   )}

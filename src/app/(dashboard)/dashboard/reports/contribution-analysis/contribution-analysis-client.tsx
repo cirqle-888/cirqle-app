@@ -177,10 +177,10 @@ function buildColumns(employees: EmployeeColumn[], dp: number): Col[] {
         return (
           <span className="inline-flex items-center gap-1 justify-end">
             {c.source === 'agreement' && (
-              <span title="Employee commission agreement" className="text-[8px] font-bold leading-none px-1 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/25">A</span>
+              <span title="Employee commission agreement" className="text-[8px] font-bold leading-none px-1 py-0.5 rounded bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/25">A</span>
             )}
             {c.source === 'manual_override' && (
-              <span title="Manual override" className="text-[8px] font-bold leading-none px-1 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/25">M</span>
+              <span title="Manual override" className="text-[8px] font-bold leading-none px-1 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/25">M</span>
             )}
             {inr(c.earn, dp)}
           </span>
@@ -317,10 +317,10 @@ function MultiSelect({ label, options, selected, onChange, sortKey }: {
         </div>
       </div>
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/50">
-        <button onClick={toggleAll} className="text-[11px] text-purple-400 hover:text-purple-300 font-medium">
+        <button onClick={toggleAll} className="text-[11px] text-purple-400 hover:text-purple-700 dark:text-purple-300 font-medium">
           {allFilteredSelected ? 'Deselect all' : 'Select all'}{query ? ` (${filtered.length})` : ''}
         </button>
-        {selected.length > 0 && <button onClick={() => onChange([])} className="text-[11px] text-red-400 hover:text-red-300">Clear</button>}
+        {selected.length > 0 && <button onClick={() => onChange([])} className="text-[11px] text-red-400 hover:text-red-700 dark:text-red-300">Clear</button>}
       </div>
       <div className="overflow-y-auto max-h-56 p-1 overscroll-contain">
         {filtered.length === 0
@@ -328,7 +328,7 @@ function MultiSelect({ label, options, selected, onChange, sortKey }: {
           : filtered.map(o => {
               const checked = selected.includes(o.id)
               return (
-                <label key={o.id} className={`flex items-center gap-2 px-2 py-1.5 text-xs rounded-lg cursor-pointer transition-colors ${checked ? 'bg-purple-500/10 text-purple-200' : 'hover:bg-secondary text-foreground'}`}>
+                <label key={o.id} className={`flex items-center gap-2 px-2 py-1.5 text-xs rounded-lg cursor-pointer transition-colors ${checked ? 'bg-purple-500/10 text-purple-700 dark:text-purple-200' : 'hover:bg-secondary text-foreground'}`}>
                   <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${checked ? 'bg-purple-500 border-purple-500' : 'border-border'}`}>
                     {checked && <Check className="w-2.5 h-2.5 text-white" />}
                   </span>
@@ -977,7 +977,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
               value={quickSort}
               onChange={e => setQuickSort(e.target.value as typeof quickSort)}
               className={`h-[34px] pl-2.5 pr-6 rounded-lg text-xs font-medium border appearance-none cursor-pointer transition-colors focus:outline-none ${
-                quickSort ? 'bg-violet-500/15 border-violet-500/40 text-violet-300' : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
+                quickSort ? 'bg-violet-500/15 border-violet-500/40 text-violet-700 dark:text-violet-300' : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
               }`}
             >
               <option value="">Sort by</option>
@@ -988,7 +988,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
             </select>
             <ChevronDown className="w-3 h-3 absolute right-2 pointer-events-none text-muted-foreground" />
             {quickSort && (
-              <button onClick={() => setQuickSort('')} className="ml-1 text-violet-400 hover:text-violet-300">
+              <button onClick={() => setQuickSort('')} className="ml-1 text-violet-400 hover:text-violet-700 dark:text-violet-300">
                 <X className="w-3.5 h-3.5" />
               </button>
             )}
@@ -1325,7 +1325,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
                         title={isFrozen ? 'Unfreeze column' : 'Freeze column'}
                         className={`absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover/hdr:flex w-5 h-5 items-center justify-center rounded transition-colors cursor-pointer z-10 ${
                           isFrozen
-                            ? 'text-purple-400 hover:text-purple-300 bg-secondary/80'
+                            ? 'text-purple-400 hover:text-purple-700 dark:text-purple-300 bg-secondary/80'
                             : 'text-muted-foreground/50 hover:text-foreground bg-secondary/60'
                         }`}
                       >
@@ -1375,7 +1375,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
                         gridColumn: `${ci + 1} / ${ci + 2}`, gridRow: '3 / 4',
                         ...(isFrozen ? { left: frozenLeft } : {}),
                       }}
-                      className={`flex items-center px-2 py-1.5 text-[11px] font-bold whitespace-nowrap bg-secondary border-t-2 border-purple-500/40 text-purple-300 ${
+                      className={`flex items-center px-2 py-1.5 text-[11px] font-bold whitespace-nowrap bg-secondary border-t-2 border-purple-500/40 text-purple-700 dark:text-purple-300 ${
                         c.align === 'right' ? 'justify-end' : c.align === 'center' ? 'justify-center' : 'justify-start'
                       } ${isFrozen ? 'sticky z-30 bg-secondary' : ''} ${isLast ? 'border-r-2 border-purple-500/30' : ''}`}
                     >

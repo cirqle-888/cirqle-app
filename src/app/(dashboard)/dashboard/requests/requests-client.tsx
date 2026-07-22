@@ -123,7 +123,7 @@ const ago = (d: string) => {
 
 const VIS_CHIP: Record<string, string> = {
   internal: 'bg-secondary text-muted-foreground border-border',
-  client:   'bg-violet-500/12 text-violet-300 border-violet-500/25',
+  client:   'bg-violet-500/12 text-violet-700 dark:text-violet-300 border-violet-500/25',
   agency:   'bg-blue-500/12 text-blue-400 border-blue-500/25',
 }
 
@@ -711,7 +711,7 @@ export default function RequestsClient({
       {!migrated && (
         <div className="mt-4 flex items-start gap-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3">
           <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
-          <p className="text-sm text-amber-300">
+          <p className="text-sm text-amber-700 dark:text-amber-300">
             Run <code className="font-mono text-xs">supabase/migrations/20260610120000_request_portal.sql</code> in the Supabase SQL editor to activate the Request Portal.
           </p>
         </div>
@@ -886,7 +886,7 @@ export default function RequestsClient({
                       {pending > 0 && (active > 0 || done > 0) && ' · '}
                       {active > 0 && <span className="text-green-400">{active} started</span>}
                       {active > 0 && done > 0 && ' · '}
-                      {done > 0 && <span className="text-emerald-300">{done} done</span>}
+                      {done > 0 && <span className="text-emerald-700 dark:text-emerald-300">{done} done</span>}
                     </p>
                   )}
                 </div>
@@ -906,7 +906,7 @@ export default function RequestsClient({
                           ? <span className="text-[10px] text-muted-foreground truncate max-w-[140px]">{requesterOf(r)}</span>
                           : <span className={`text-[9px] px-1.5 py-0.5 rounded-full border ${STATUS_CHIP[r.status] || ''}`}>{STATUS_LABEL[r.status] || r.status}</span>}
                         {r.assigned_employee?.name && (
-                          <span className="flex items-center gap-0.5 text-[10px] text-violet-300/80"><UserRound className="w-2.5 h-2.5" />{dn(r.assigned_employee).split(' ')[0]}</span>
+                          <span className="flex items-center gap-0.5 text-[10px] text-violet-700 dark:text-violet-300/80"><UserRound className="w-2.5 h-2.5" />{dn(r.assigned_employee).split(' ')[0]}</span>
                         )}
                         {r.promoted_task?.task_number != null && (
                           <span className="text-[10px] font-mono text-green-400/80">#{r.promoted_task.task_number}</span>
@@ -1037,7 +1037,7 @@ export default function RequestsClient({
                           <span>{ago(r.created_at)}</span>
                           {r.service?.name && <span className="text-cyan-700 dark:text-cyan-400/70">{r.service.name}</span>}
                           {r.assigned_employee?.name && (
-                            <span className="flex items-center gap-1 text-violet-700 dark:text-violet-300/80"><UserRound className="w-3 h-3" />{dn(r.assigned_employee)}</span>
+                            <span className="flex items-center gap-1 text-violet-700 dark:text-violet-700 dark:text-violet-300/80"><UserRound className="w-3 h-3" />{dn(r.assigned_employee)}</span>
                           )}
                           {r.promoted_task?.task_number != null && (
                             <span className="font-mono text-green-700 dark:text-green-400/80" title={`Linked task: ${r.promoted_task.title}`}>Task #{r.promoted_task.task_number}</span>
@@ -1419,7 +1419,7 @@ export default function RequestsClient({
                 ))}
                 {newForm.extraLinks.length < 10 && (
                   <button onClick={() => setNewForm(f => ({ ...f, extraLinks: [...f.extraLinks, { label: '', url: '' }] }))}
-                    className="mt-1.5 flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300 transition-colors">
+                    className="mt-1.5 flex items-center gap-1 text-xs text-violet-400 hover:text-violet-700 dark:text-violet-300 transition-colors">
                     <Plus className="w-3 h-3" /> Add link
                   </button>
                 )}

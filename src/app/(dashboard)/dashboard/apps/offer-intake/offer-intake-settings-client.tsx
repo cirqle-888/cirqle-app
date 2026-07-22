@@ -258,7 +258,7 @@ function ClientCard({
           {msg && (
             <div className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm ${
               msg.type === 'ok'
-                ? 'bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 dark:text-emerald-300'
+                ? 'bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 dark:text-emerald-700 dark:text-emerald-300'
                 : 'bg-red-500/10 border border-red-500/25 text-red-400'
             }`}>
               {msg.type === 'ok' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
@@ -484,7 +484,7 @@ function ClientCard({
                 ) : (
                   <div className="flex items-center gap-3 bg-amber-500/5 border border-amber-500/20 rounded-xl px-4 py-3">
                     <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-                    <p className="text-sm text-amber-600 dark:text-amber-300 flex-1">No intake link yet</p>
+                    <p className="text-sm text-amber-600 dark:text-amber-700 dark:text-amber-300 flex-1">No intake link yet</p>
                     <button
                       onClick={handleGenerateToken}
                       disabled={generating}
@@ -535,7 +535,7 @@ function ClientCard({
                 {!globalConfigured && !hasWebhook && (
                   <div className="flex items-center gap-2 bg-amber-500/5 border border-amber-500/20 rounded-xl px-3 py-2.5 mb-3">
                     <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-                    <p className="text-xs text-amber-600 dark:text-amber-300">Connect the shared sync script once (top of this page), then just paste each client’s Sheet link here.</p>
+                    <p className="text-xs text-amber-600 dark:text-amber-700 dark:text-amber-300">Connect the shared sync script once (top of this page), then just paste each client’s Sheet link here.</p>
                   </div>
                 )}
 
@@ -709,7 +709,7 @@ function GlobalSyncCard({ initial }: { initial: { webhookUrl: string; secret: st
       {open && (
         <div className="border-t border-border px-5 py-5 space-y-4">
           {msg && (
-            <div className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm ${msg.type === 'ok' ? 'bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 dark:text-emerald-300' : 'bg-red-500/10 border border-red-500/25 text-red-400'}`}>
+            <div className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm ${msg.type === 'ok' ? 'bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 dark:text-emerald-700 dark:text-emerald-300' : 'bg-red-500/10 border border-red-500/25 text-red-400'}`}>
               {msg.type === 'ok' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
               {msg.text}
             </div>
@@ -854,8 +854,8 @@ export default function OfferIntakeSettingsClient({
               <p className="text-xs text-muted-foreground max-w-sm mx-auto">
                 A client appears here once you assign them a service whose Intake Kind is{' '}
                 <span className="text-foreground font-medium">Offer Intake</span> — set the kind in{' '}
-                <Link href="/dashboard/settings?tab=services" className="text-violet-400 hover:text-violet-700 dark:text-violet-300 underline underline-offset-2">Settings → Services</Link>, then add that service to the client in{' '}
-                <Link href="/dashboard/clients" className="text-violet-400 hover:text-violet-700 dark:text-violet-300 underline underline-offset-2">Clients</Link>.
+                <Link href="/dashboard/settings?tab=services" className="text-violet-400 hover:text-violet-700 dark:text-violet-700 dark:text-violet-300 underline underline-offset-2">Settings → Services</Link>, then add that service to the client in{' '}
+                <Link href="/dashboard/clients" className="text-violet-400 hover:text-violet-700 dark:text-violet-700 dark:text-violet-300 underline underline-offset-2">Clients</Link>.
               </p>
             )}
           </div>

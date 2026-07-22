@@ -473,7 +473,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
           <span>{toast.message}</span>
           <button
             onClick={() => router.push('/dashboard/invoices')}
-            className="ml-2 flex items-center gap-1 text-violet-400 hover:text-violet-300 transition-colors"
+            className="ml-2 flex items-center gap-1 text-violet-400 hover:text-violet-700 dark:text-violet-300 transition-colors"
           >
             View Invoices <ArrowRight className="w-3.5 h-3.5" />
           </button>
@@ -800,7 +800,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                     <button
                       type="button"
                       onClick={() => setShowNewClient(true)}
-                      className="mt-1.5 text-xs text-violet-400 hover:text-violet-300 transition-colors"
+                      className="mt-1.5 text-xs text-violet-400 hover:text-violet-700 dark:text-violet-300 transition-colors"
                     >
                       + New Client
                     </button>
@@ -954,7 +954,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                         items: [...p.items, { description: '', quantity: 1, unit_price: 0, total: 0 }],
                       }))
                     }
-                    className="text-xs text-violet-400 hover:text-violet-300 transition-colors font-medium"
+                    className="text-xs text-violet-400 hover:text-violet-700 dark:text-violet-300 transition-colors font-medium"
                   >
                     + Add line
                   </button>

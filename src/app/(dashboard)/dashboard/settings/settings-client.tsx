@@ -937,7 +937,7 @@ export default function SettingsClient(props: Props) {
                         {/* Preview on white — this is the light-mode logo */}
                         <img src={companySettings['logo_url']} alt="Light logo preview" className="h-10 object-contain rounded-lg border border-border bg-white p-1.5" />
                         <button type="button" onClick={() => setCompanySettings(p => ({ ...p, logo_url: '' }))}
-                          className="text-xs text-red-400 hover:text-red-300 transition-colors">Remove</button>
+                          className="text-xs text-red-400 hover:text-red-700 dark:text-red-300 transition-colors">Remove</button>
                       </div>
                     )}
                   </div>
@@ -976,7 +976,7 @@ export default function SettingsClient(props: Props) {
                         {/* Preview on dark bg — this is the dark-mode logo */}
                         <img src={companySettings['logo_url_dark']} alt="Dark logo preview" className="h-10 object-contain rounded-lg border border-border bg-[#0b1120] p-1.5" />
                         <button type="button" onClick={() => setCompanySettings(p => ({ ...p, logo_url_dark: '' }))}
-                          className="text-xs text-red-400 hover:text-red-300 transition-colors">Remove</button>
+                          className="text-xs text-red-400 hover:text-red-700 dark:text-red-300 transition-colors">Remove</button>
                       </div>
                     ) : (
                       <p className="mt-1.5 text-[11px] text-muted-foreground/50">
@@ -1028,7 +1028,7 @@ export default function SettingsClient(props: Props) {
                       </div>
                       <span className="text-xs text-muted-foreground">Preview (32×32)</span>
                       <button type="button" onClick={() => setCompanySettings(p => ({ ...p, favicon_url: '' }))}
-                        className="text-xs text-red-400 hover:text-red-300 ml-2 transition-colors">Remove</button>
+                        className="text-xs text-red-400 hover:text-red-700 dark:text-red-300 ml-2 transition-colors">Remove</button>
                     </div>
                   )}
                 </div>
@@ -1108,7 +1108,7 @@ export default function SettingsClient(props: Props) {
                     <div className="mt-2 flex items-center gap-2">
                       <img src={companySettings['invoice_qr_image_url']} alt="QR preview" className="h-16 object-contain rounded border border-border bg-white p-1" />
                       <button type="button" onClick={() => setCompanySettings(p => ({ ...p, invoice_qr_image_url: '' }))}
-                        className="text-xs text-red-400 hover:text-red-300 transition-colors">Remove</button>
+                        className="text-xs text-red-400 hover:text-red-700 dark:text-red-300 transition-colors">Remove</button>
                     </div>
                   )}
                   <p className="text-[10px] text-muted-foreground mt-1">If provided, this image will be used instead of auto-generating a QR code.</p>
@@ -1413,7 +1413,7 @@ export default function SettingsClient(props: Props) {
                           {companySettings['invoice_bg_image_top_url'] && (
                             <div className="mt-2 flex items-center justify-between">
                               <img src={companySettings['invoice_bg_image_top_url']} alt="Top preview" className="h-10 object-contain rounded border border-border bg-white" />
-                              <button type="button" onClick={() => setCompanySettings(p => ({ ...p, invoice_bg_image_top_url: '' }))} className="text-[10px] text-red-400 hover:text-red-300">Remove</button>
+                              <button type="button" onClick={() => setCompanySettings(p => ({ ...p, invoice_bg_image_top_url: '' }))} className="text-[10px] text-red-400 hover:text-red-700 dark:text-red-300">Remove</button>
                             </div>
                           )}
                         </div>
@@ -1432,7 +1432,7 @@ export default function SettingsClient(props: Props) {
                           {companySettings['invoice_bg_image_bottom_url'] && (
                             <div className="mt-2 flex items-center justify-between">
                               <img src={companySettings['invoice_bg_image_bottom_url']} alt="Bottom preview" className="h-10 object-contain rounded border border-border bg-white" />
-                              <button type="button" onClick={() => setCompanySettings(p => ({ ...p, invoice_bg_image_bottom_url: '' }))} className="text-[10px] text-red-400 hover:text-red-300">Remove</button>
+                              <button type="button" onClick={() => setCompanySettings(p => ({ ...p, invoice_bg_image_bottom_url: '' }))} className="text-[10px] text-red-400 hover:text-red-700 dark:text-red-300">Remove</button>
                             </div>
                           )}
                         </div>
@@ -2438,7 +2438,7 @@ export default function SettingsClient(props: Props) {
                     type="button"
                     onClick={handleSyncRates}
                     disabled={syncing}
-                    className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg border border-violet-500/30 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20 shrink-0 disabled:opacity-50"
+                    className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg border border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-200 hover:bg-violet-500/20 shrink-0 disabled:opacity-50"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
                     {syncing ? 'Syncing…' : 'Sync now'}
@@ -2479,7 +2479,7 @@ export default function SettingsClient(props: Props) {
                         <div className="w-24 text-right shrink-0">
                           {existing ? (
                             <>
-                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${existing.rate_source === 'api' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'}`}>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${existing.rate_source === 'api' ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'}`}>
                                 {existing.rate_source === 'api' ? 'API' : 'Manual'}
                               </span>
                               {existing.rate_date && <div className="text-[10px] text-muted-foreground mt-0.5">{existing.rate_date}</div>}
@@ -3340,7 +3340,7 @@ export default function SettingsClient(props: Props) {
                         onClick={() => setForm((p: any) => ({ ...p, is_master: !p.is_master }))}
                         className={`w-full flex items-center justify-between px-3 py-2 rounded-lg border text-sm font-medium transition-all ${
                           form.is_master
-                            ? 'bg-purple-500/15 border-purple-500/30 text-purple-300'
+                            ? 'bg-purple-500/15 border-purple-500/30 text-purple-700 dark:text-purple-300'
                             : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
                         }`}>
                         <span>{form.is_master ? '✓ Yes — Master' : 'No — Sub-param'}</span>
@@ -3356,7 +3356,7 @@ export default function SettingsClient(props: Props) {
                           onClick={() => setForm((p: any) => ({ ...p, input_type: 'percentage' }))}
                           className={`flex-1 py-2 rounded-lg border text-sm font-medium transition-all ${
                             (form.input_type || 'count') === 'percentage'
-                              ? 'bg-blue-500/15 border-blue-500/30 text-blue-300'
+                              ? 'bg-blue-500/15 border-blue-500/30 text-blue-700 dark:text-blue-300'
                               : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
                           }`}>
                           % Percentage

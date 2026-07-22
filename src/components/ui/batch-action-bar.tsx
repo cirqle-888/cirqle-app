@@ -15,7 +15,7 @@ export interface BatchAction {
 
 const TINTS: Record<BatchActionTint, string> = {
   emerald: 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border-emerald-500/20',
-  violet:  'bg-violet-500/15 text-violet-300 hover:bg-violet-500/25 border-violet-500/20',
+  violet:  'bg-violet-500/15 text-violet-700 dark:text-violet-300 hover:bg-violet-500/25 border-violet-500/20',
   blue:    'bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 border-blue-500/20',
   yellow:  'bg-yellow-500/15 text-yellow-400 hover:bg-yellow-500/25 border-yellow-500/20',
   red:     'bg-red-500/15 text-red-400 hover:bg-red-500/25 border-red-500/20',

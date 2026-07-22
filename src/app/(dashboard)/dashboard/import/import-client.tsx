@@ -1940,7 +1940,7 @@ export default function ImportClient({ clients, services, employees, groups, par
         <th className={thCls}>Email</th><th className={thCls}>Role</th><th className={thCls}>Active</th>
       </tr></thead><tbody>{cleanupRecords.map((r: any) => (
         <tr key={r.id} className={selCls(r.id)} onClick={() => toggleSelect(r.id)}>
-          <CheckTd id={r.id}/><td className={tdCls+' font-mono text-violet-300'}>{r.cqid}</td>
+          <CheckTd id={r.id}/><td className={tdCls+' font-mono text-violet-700 dark:text-violet-300'}>{r.cqid}</td>
           <td className={tdCls+' font-medium'}>{r.name}</td>
           <td className={tdCls+' text-muted-foreground'}>{r.email}</td>
           <td className={tdCls}>{r.role}</td>
@@ -1954,7 +1954,7 @@ export default function ImportClient({ clients, services, employees, groups, par
         <th className={thCls}>Contact</th><th className={thCls}>Phone</th><th className={thCls}>Active</th>
       </tr></thead><tbody>{cleanupRecords.map((r: any) => (
         <tr key={r.id} className={selCls(r.id)} onClick={() => toggleSelect(r.id)}>
-          <CheckTd id={r.id}/><td className={tdCls+' font-mono text-violet-300'}>{r.code}</td>
+          <CheckTd id={r.id}/><td className={tdCls+' font-mono text-violet-700 dark:text-violet-300'}>{r.code}</td>
           <td className={tdCls+' font-medium'}>{r.name}</td>
           <td className={tdCls+' text-muted-foreground'}>{r.contact_name || '—'}</td>
           <td className={tdCls}>{r.phone || '—'}</td>
@@ -2025,7 +2025,7 @@ export default function ImportClient({ clients, services, employees, groups, par
           <td className={tdCls+' text-muted-foreground'}>{(r.services as any)?.name || '—'}</td>
           <td className={tdCls+' text-right font-mono'}>{r.price ? `₹${Number(r.price).toLocaleString('en-IN')}` : '—'}</td>
           <td className={tdCls+' text-right font-mono'}>{r.percentage_rate ? `${r.percentage_rate}%` : '—'}</td>
-          <td className={tdCls+' text-right font-mono text-violet-300'}>{r.commission_percentage}%</td>
+          <td className={tdCls+' text-right font-mono text-violet-700 dark:text-violet-300'}>{r.commission_percentage}%</td>
           <td className={tdCls}>{r.currency}</td>
           <td className={tdCls}>{r.is_active ? <span className="text-green-400 text-[10px]">Active</span> : <span className="text-red-400 text-[10px]">Inactive</span>}</td>
         </tr>))}</tbody></table>
@@ -2068,7 +2068,7 @@ export default function ImportClient({ clients, services, employees, groups, par
       </tr></thead><tbody>{cleanupRecords.map((r: any) => (
         <tr key={r.id} className={selCls(r.id)} onClick={() => toggleSelect(r.id)}>
           <CheckTd id={r.id}/>
-          <td className={tdCls+' font-mono text-violet-300'}>{r.invoice_number}</td>
+          <td className={tdCls+' font-mono text-violet-700 dark:text-violet-300'}>{r.invoice_number}</td>
           <td className={tdCls+' font-mono'}>{r.issue_date}</td>
           <td className={tdCls}>{r.status}</td>
           <td className={tdCls+' text-right font-mono'}>₹{r.total_amount?.toLocaleString('en-IN')}</td>
@@ -2111,7 +2111,7 @@ export default function ImportClient({ clients, services, employees, groups, par
         <tr key={r._line} className={`border-b border-border/40 ${r.status==='error'?'bg-red-500/5':r.status==='warn'?'bg-yellow-500/5':''}`}>
           <td className={tdCls+' text-muted-foreground'}>{r._line}</td>
           <td className={tdCls}><StatusBadge status={r.status}/></td>
-          <td className={tdCls+' font-mono text-violet-300'}>{r.cqid}</td>
+          <td className={tdCls+' font-mono text-violet-700 dark:text-violet-300'}>{r.cqid}</td>
           <td className={tdCls+' font-medium'}>{r.name}</td>
           <td className={tdCls+' text-muted-foreground'}>{r.email}</td>
           <td className={tdCls}>{r.role}</td>
@@ -2130,7 +2130,7 @@ export default function ImportClient({ clients, services, employees, groups, par
         <tr key={r._line} className={`border-b border-border/40 ${r.status==='error'?'bg-red-500/5':r.status==='warn'?'bg-yellow-500/5':''}`}>
           <td className={tdCls+' text-muted-foreground'}>{r._line}</td>
           <td className={tdCls}><StatusBadge status={r.status}/></td>
-          <td className={tdCls+' font-mono text-violet-300'}>{r.code}</td>
+          <td className={tdCls+' font-mono text-violet-700 dark:text-violet-300'}>{r.code}</td>
           <td className={tdCls+' font-medium'}>{r.name}</td>
           <td className={tdCls+' text-muted-foreground'}>{r.contact_name}</td>
           <td className={tdCls}>{r.phone}</td>
@@ -2214,7 +2214,7 @@ export default function ImportClient({ clients, services, employees, groups, par
           <td className={tdCls}>{r.service_id?<span className="text-green-400">{r.service_ref}</span>:<span className="text-red-400">{r.service_ref}</span>}</td>
           <td className={tdCls+' text-right font-mono'}>{r.price?`₹${parseFloat(r.price).toLocaleString('en-IN')}`:'—'}</td>
           <td className={tdCls+' text-right font-mono'}>{r.percentage_rate?`${r.percentage_rate}%`:'—'}</td>
-          <td className={tdCls+' text-right font-mono text-violet-300'}>{r.commission_percentage?`${r.commission_percentage}%`:'—'}</td>
+          <td className={tdCls+' text-right font-mono text-violet-700 dark:text-violet-300'}>{r.commission_percentage?`${r.commission_percentage}%`:'—'}</td>
           <td className={tdCls}>{r.currency}</td>
           <IssueCell row={r}/>
         </tr>))}</tbody></table>
@@ -2267,7 +2267,7 @@ export default function ImportClient({ clients, services, employees, groups, par
         <tr key={r._line} className={`border-b border-border/40 ${r.status==='error'?'bg-red-500/5':r.status==='warn'?'bg-yellow-500/5':''}`}>
           <td className={tdCls+' text-muted-foreground'}>{r._line}</td>
           <td className={tdCls}><StatusBadge status={r.status}/></td>
-          <td className={tdCls+' font-mono text-violet-300'}>{r.invoice_number}</td>
+          <td className={tdCls+' font-mono text-violet-700 dark:text-violet-300'}>{r.invoice_number}</td>
           <td className={tdCls}>{r.client_id?<span className="text-green-400">{r.client_ref}</span>:<span className="text-red-400">{r.client_ref||'missing'}</span>}</td>
           <td className={tdCls+' font-mono'}>{r.issue_date}</td>
           <td className={tdCls+' text-right font-mono'}>{r.subtotal?`₹${parseFloat(r.subtotal).toLocaleString('en-IN')}`:'—'}</td>
@@ -2508,10 +2508,10 @@ export default function ImportClient({ clients, services, employees, groups, par
                 <button onClick={() => setOperation('insert')} className={`px-3 text-xs flex items-center gap-1.5 transition-colors h-full ${operation === 'insert' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
                   + Insert new
                 </button>
-                <button onClick={() => setOperation('update')} className={`px-3 text-xs flex items-center gap-1.5 transition-colors border-l border-foreground/15 h-full ${operation === 'update' ? 'bg-amber-500/15 text-amber-300' : 'text-muted-foreground hover:text-foreground'}`}>
+                <button onClick={() => setOperation('update')} className={`px-3 text-xs flex items-center gap-1.5 transition-colors border-l border-foreground/15 h-full ${operation === 'update' ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300' : 'text-muted-foreground hover:text-foreground'}`}>
                   ✎ Update existing
                 </button>
-                <button onClick={() => setOperation('delete')} className={`px-3 text-xs flex items-center gap-1.5 transition-colors border-l border-foreground/15 ${operation === 'delete' ? 'bg-red-500/15 text-red-300' : 'text-muted-foreground hover:text-foreground'}`}>
+                <button onClick={() => setOperation('delete')} className={`px-3 text-xs flex items-center gap-1.5 transition-colors border-l border-foreground/15 ${operation === 'delete' ? 'bg-red-500/15 text-red-700 dark:text-red-300' : 'text-muted-foreground hover:text-foreground'}`}>
                   🗑 Delete
                 </button>
               </div>
@@ -2548,7 +2548,7 @@ export default function ImportClient({ clients, services, employees, groups, par
               <p className="text-sm font-semibold mb-2">1. Download the template</p>
               <button
                 onClick={() => downloadTemplate(mode)}
-                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-600/20 border border-violet-500/30 text-violet-300 text-sm font-medium hover:bg-violet-600/30 transition-colors"
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-600/20 border border-violet-500/30 text-violet-700 dark:text-violet-300 text-sm font-medium hover:bg-violet-600/30 transition-colors"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                 Download {MODES.find(m => m.key === mode)?.label} Template
@@ -2574,7 +2574,7 @@ export default function ImportClient({ clients, services, employees, groups, par
                 <tbody>
                   {COLUMNS[mode].map(({ col, req, notes }) => (
                     <tr key={col} className="border-b border-border/30">
-                      <td className="py-1 pr-2 font-mono text-[11px] text-violet-300">{col}</td>
+                      <td className="py-1 pr-2 font-mono text-[11px] text-violet-700 dark:text-violet-300">{col}</td>
                       <td className="py-1 pr-2 text-center text-[11px]">{req ? '✓' : ''}</td>
                       <td className="py-1 text-[11px] text-muted-foreground">{notes}</td>
                     </tr>
@@ -2624,7 +2624,7 @@ export default function ImportClient({ clients, services, employees, groups, par
                     a.click()
                     URL.revokeObjectURL(a.href)
                   }}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-600/20 border border-violet-500/30 text-violet-300 text-xs font-medium hover:bg-violet-600/30 transition-colors"
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-600/20 border border-violet-500/30 text-violet-700 dark:text-violet-300 text-xs font-medium hover:bg-violet-600/30 transition-colors"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                   Download {contribSubMode === 'earnings_only' ? 'Earnings-Only' : contribSubMode === 'score_pct' ? 'Score %' : 'Parameter Detail'} Template
@@ -2694,7 +2694,7 @@ export default function ImportClient({ clients, services, employees, groups, par
           {result.errors.length > 0 && (
             <div className="text-left bg-red-500/10 border border-red-500/30 rounded-lg p-3 space-y-1">
               <p className="text-xs font-semibold text-red-400">Errors:</p>
-              {result.errors.map((e, i) => <p key={i} className="text-xs text-red-300">{e}</p>)}
+              {result.errors.map((e, i) => <p key={i} className="text-xs text-red-700 dark:text-red-300">{e}</p>)}
             </div>
           )}
           <div className="flex gap-3 justify-center">

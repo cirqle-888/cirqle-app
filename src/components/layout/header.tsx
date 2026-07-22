@@ -140,7 +140,7 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
         type="button"
         onClick={() => void openAiCapture()}
         title="AI Capture — paste any WhatsApp message, email, product list, or request"
-        className="inline-flex items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-2 text-xs font-semibold text-violet-600 hover:bg-violet-500/15 dark:text-violet-300 transition-colors"
+        className="inline-flex items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-2 text-xs font-semibold text-violet-600 hover:bg-violet-500/15 dark:text-violet-700 dark:text-violet-300 transition-colors"
       >
         <Sparkles className="h-3.5 w-3.5" />
         <span className="hidden lg:inline">AI Capture</span>

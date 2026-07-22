@@ -1334,7 +1334,7 @@ export default function ContributionsClient({
                       title={allSelected ? 'Deselect all visible tasks' : 'Select all visible tasks'}
                       className={`h-[34px] px-3 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer ${
                         allSelected
-                          ? 'bg-violet-500/20 border border-violet-500/40 text-violet-200'
+                          ? 'bg-violet-500/20 border border-violet-500/40 text-violet-700 dark:text-violet-200'
                           : 'bg-secondary border border-border text-foreground hover:bg-secondary/60'
                       }`}
                     >
@@ -1565,13 +1565,13 @@ export default function ContributionsClient({
                   className={`hidden sm:flex h-[34px] px-3 rounded-xl text-xs font-medium transition-colors items-center gap-1.5 cursor-pointer shrink-0 ${
                     statusFilter === key
                       ? key === 'missing'
-                        ? 'bg-orange-500/20 text-orange-300 border border-orange-500/30'
+                        ? 'bg-orange-500/20 text-orange-700 dark:text-orange-300 border border-orange-500/30'
                         : 'gradient-bg text-white'
                       : 'bg-secondary text-muted-foreground hover:text-foreground'
                   }`}>
                   {label}
                   <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
-                    statusFilter === key && key === 'missing' ? 'bg-orange-500/30 text-orange-300' :
+                    statusFilter === key && key === 'missing' ? 'bg-orange-500/30 text-orange-700 dark:text-orange-300' :
                     statusFilter === key ? 'bg-foreground/20 text-white' : 'bg-border/50 opacity-60'
                   }`}>{count}</span>
                   {key === 'missing' && count > 0 && statusFilter !== 'missing' && (
@@ -1610,7 +1610,7 @@ export default function ContributionsClient({
           />
 
           {/* ── Missing-scores toast (bottom-right) — list view only ──
-              text-orange-300/400 read fine on the dark theme's near-black backdrop
+              text-orange-700 dark:text-orange-300/400 read fine on the dark theme's near-black backdrop
               but are far too pale against the light theme's white backdrop (same
               20%-opacity tinted background reads as pale-on-pale either way) —
               darker/more saturated base shades for light mode, original pale
@@ -1618,11 +1618,11 @@ export default function ContributionsClient({
           {missingCount > 0 && listViewMode === 'list' && showMissingBanner && (
             <div className="fixed bottom-6 right-6 z-40 bg-orange-50 dark:bg-orange-950/90 backdrop-blur-md border border-orange-500/40 rounded-lg px-4 py-3 flex items-center gap-3 max-w-sm shadow-2xl">
               <AlertCircle className="w-4 h-4 text-orange-700 dark:text-orange-400 shrink-0" />
-              <p className="text-xs text-orange-900 dark:text-orange-300 leading-relaxed flex-1">
+              <p className="text-xs text-orange-900 dark:text-orange-700 dark:text-orange-300 leading-relaxed flex-1">
                 <span className="font-semibold">{missingCount} task{missingCount === 1 ? '' : 's'}</span> need scoring.{' '}
-                <button onClick={() => setStatusFilter('missing')} className="underline hover:text-orange-700 dark:hover:text-orange-200 font-semibold">View</button>
+                <button onClick={() => setStatusFilter('missing')} className="underline hover:text-orange-700 dark:hover:text-orange-700 dark:text-orange-200 font-semibold">View</button>
               </p>
-              <button onClick={() => setShowMissingBanner(false)} className="shrink-0 text-orange-700 hover:text-orange-900 dark:text-orange-400 dark:hover:text-orange-300">
+              <button onClick={() => setShowMissingBanner(false)} className="shrink-0 text-orange-700 hover:text-orange-900 dark:text-orange-400 dark:hover:text-orange-700 dark:text-orange-300">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -1633,10 +1633,10 @@ export default function ContributionsClient({
             <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 flex items-start gap-3">
               <Users className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-semibold text-amber-300">No employees found</p>
+                <p className="text-sm font-semibold text-amber-700 dark:text-amber-300">No employees found</p>
                 <p className="text-xs text-amber-400/70 mt-0.5">
                   Add employees in{' '}
-                  <Link href="/dashboard/payroll" className="underline hover:text-amber-300">HR &amp; Payroll</Link>
+                  <Link href="/dashboard/payroll" className="underline hover:text-amber-700 dark:text-amber-300">HR &amp; Payroll</Link>
                   {' '}before recording contributions.
                 </p>
               </div>
@@ -1772,7 +1772,7 @@ export default function ContributionsClient({
                                           <span className="font-semibold">
                                             {scoreDetail.pct.toFixed(0)}%
                                             {canSeeFinancials && showFinancials && scoreDetail.earnings !== null && (
-                                              <span className="ml-0.5 text-green-600 dark:text-green-300">₹{Math.round(scoreDetail.earnings).toLocaleString('en-IN')}</span>
+                                              <span className="ml-0.5 text-green-600 dark:text-green-700 dark:text-green-300">₹{Math.round(scoreDetail.earnings).toLocaleString('en-IN')}</span>
                                             )}
                                           </span>
                                         )}
@@ -1880,17 +1880,17 @@ export default function ContributionsClient({
                   allIds.forEach(eId => {
                     const emp = employees.find(e => e.id === eId)
                     const title = emp ? dn(emp) : 'Unknown'
-                    pushTo(eId, title, 'bg-violet-500/15 border-violet-500/20 text-violet-300', emp?.cqid || '•', t)
+                    pushTo(eId, title, 'bg-violet-500/15 border-violet-500/20 text-violet-700 dark:text-violet-300', emp?.cqid || '•', t)
                   })
                 }
               } else if (boardGroupBy === 'client') {
                 const key = t.client?.id || 'unclient'
                 const title = t.client?.name || 'No Client'
-                pushTo(key, title, 'bg-cyan-500/15 border-cyan-500/20 text-cyan-300', '•', t)
+                pushTo(key, title, 'bg-cyan-500/15 border-cyan-500/20 text-cyan-700 dark:text-cyan-300', '•', t)
               } else if (boardGroupBy === 'service') {
                 const key = t.service_id || 'noservice'
                 const title = t.service?.name || 'No Service'
-                pushTo(key, title, 'bg-emerald-500/15 border-emerald-500/20 text-emerald-300', '•', t)
+                pushTo(key, title, 'bg-emerald-500/15 border-emerald-500/20 text-emerald-700 dark:text-emerald-300', '•', t)
               } else if (boardGroupBy === 'status') {
                 // Default: scoring-status (pending / partial / scored / missing)
                 const scored = taskScoredSet.has(t.id)
@@ -1913,21 +1913,21 @@ export default function ContributionsClient({
                   const todayD = new Date(); todayD.setHours(0, 0, 0, 0)
                   const taskD = new Date(t.task_date + 'T00:00:00'); taskD.setHours(0, 0, 0, 0)
                   const diff = Math.floor((taskD.getTime() - todayD.getTime()) / 86400000)
-                  if (diff === 0) pushTo('today', 'Today', 'bg-violet-500/15 border-violet-500/20 text-violet-300', '★', t)
+                  if (diff === 0) pushTo('today', 'Today', 'bg-violet-500/15 border-violet-500/20 text-violet-700 dark:text-violet-300', '★', t)
                   else if (diff > 0 && diff <= 7) pushTo('week', 'This Week', 'bg-blue-500/15 border-blue-500/20 text-blue-400', '⋯', t)
                   else if (diff > 7) pushTo('later', 'Later', 'bg-secondary border-border text-muted-foreground', '→', t)
                   else pushTo('past', 'Past', 'bg-secondary border-border text-muted-foreground', '·', t)
                 } else if (boardDateGranularity === 'daily') {
-                  pushTo(t.task_date, fmt(t.task_date), 'bg-cyan-500/15 border-cyan-500/20 text-cyan-300', '·', t)
+                  pushTo(t.task_date, fmt(t.task_date), 'bg-cyan-500/15 border-cyan-500/20 text-cyan-700 dark:text-cyan-300', '·', t)
                 } else if (boardDateGranularity === 'weekly') {
                   const d = new Date(t.task_date + 'T00:00:00')
                   const ws = new Date(d); ws.setDate(d.getDate() - d.getDay())
                   const key = ws.toISOString().split('T')[0]
-                  pushTo(key, `Week of ${fmt(key)}`, 'bg-blue-500/15 border-blue-500/20 text-blue-300', 'W', t)
+                  pushTo(key, `Week of ${fmt(key)}`, 'bg-blue-500/15 border-blue-500/20 text-blue-700 dark:text-blue-300', 'W', t)
                 } else if (boardDateGranularity === 'monthly') {
                   const key = t.task_date.substring(0, 7)
                   const title = new Date(t.task_date + 'T00:00:00').toLocaleString('en-US', { month: 'long', year: 'numeric' })
-                  pushTo(key, title, 'bg-emerald-500/15 border-emerald-500/20 text-emerald-300', 'M', t)
+                  pushTo(key, title, 'bg-emerald-500/15 border-emerald-500/20 text-emerald-700 dark:text-emerald-300', 'M', t)
                 }
               }
             })
@@ -2565,7 +2565,7 @@ export default function ContributionsClient({
                   <button key={tool.id} type="button"
                     onClick={() => setToolsUsed(prev => ({ ...prev, [tool.id]: !prev[tool.id] }))}
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border transition-all ${
-                      used ? 'bg-purple-500/15 border-purple-500/30 text-purple-300' : 'bg-secondary border-transparent text-muted-foreground hover:border-border'
+                      used ? 'bg-purple-500/15 border-purple-500/30 text-purple-700 dark:text-purple-300' : 'bg-secondary border-transparent text-muted-foreground hover:border-border'
                     }`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${used ? 'bg-purple-400' : 'bg-muted-foreground/40'}`} />
                     {tool.name}
@@ -2719,7 +2719,7 @@ export default function ContributionsClient({
                                     {group.name}
                                   </p>
                                   {isMostUsed && (
-                                    <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-300 border border-blue-500/25 whitespace-nowrap">
+                                    <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-700 dark:text-blue-300 border border-blue-500/25 whitespace-nowrap">
                                       🔥 Most Used
                                     </span>
                                   )}
