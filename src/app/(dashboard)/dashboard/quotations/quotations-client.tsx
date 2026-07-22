@@ -468,7 +468,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
 
       {/* ── Toast notification ────────────────────────────────────────────── */}
       {toast.show && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-[#1a1f2e] border border-foreground/15 rounded-2xl px-5 py-3 shadow-2xl text-sm font-medium animate-in fade-in slide-in-from-bottom-3">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-card text-foreground border border-foreground/15 rounded-2xl px-5 py-3 shadow-2xl text-sm font-medium animate-in fade-in slide-in-from-bottom-3">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{toast.message}</span>
           <button

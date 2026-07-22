@@ -570,7 +570,7 @@ export default function ImportClient() {
             {importResult.errors.length > 0 && (
               <div className="mb-6 text-left w-full max-w-md bg-red-500/5 border border-red-500/20 rounded-xl p-4">
                 <p className="text-xs font-semibold text-red-400 mb-2">Errors</p>
-                {importResult.errors.map((e, i) => <p key={i} className="text-xs text-red-300/70">{e}</p>)}
+                {importResult.errors.map((e, i) => <p key={i} className="text-xs text-red-600/80 dark:text-red-300/70">{e}</p>)}
               </div>
             )}
             <div className="flex gap-3">

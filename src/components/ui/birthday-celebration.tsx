@@ -59,17 +59,17 @@ export function BirthdayCelebration({ employeeId, name, cqid }: Props) {
           <button
             onClick={dismiss}
             aria-label="Dismiss"
-            className="absolute top-2 right-2 p-1 rounded-md hover:bg-foreground/10 transition-colors text-white/60 hover:text-white"
+            className="absolute top-2 right-2 p-1 rounded-md hover:bg-foreground/10 transition-colors text-muted-foreground hover:text-foreground"
           >
             <X className="w-3.5 h-3.5" />
           </button>
           <div className="flex items-center gap-3">
             <div className="text-3xl">🎂</div>
             <div className="flex-1 min-w-0">
-              <div className="font-semibold text-white">
+              <div className="font-semibold text-foreground">
                 Happy Birthday, {name || cqid}!
               </div>
-              <div className="text-xs text-white/80">
+              <div className="text-xs text-muted-foreground">
                 Wishing you an incredible year ahead from the whole Cirqle team 🎉
               </div>
             </div>

@@ -37,22 +37,22 @@ interface Result {
 
 function taskBadgeColor(status: string) {
   switch (status) {
-    case 'done':        return 'bg-emerald-500/15 text-emerald-400'
-    case 'in_progress': return 'bg-blue-500/15 text-blue-400'
-    case 'pending':     return 'bg-yellow-500/15 text-yellow-400'
-    case 'invoiced':    return 'bg-violet-500/15 text-violet-400'
-    case 'cancelled':   return 'bg-red-500/15 text-red-400'
-    default:            return 'bg-gray-500/15 text-gray-400'
+    case 'done':        return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+    case 'in_progress': return 'bg-blue-500/15 text-blue-700 dark:text-blue-400'
+    case 'pending':     return 'bg-yellow-500/15 text-yellow-700 dark:text-yellow-400'
+    case 'invoiced':    return 'bg-violet-500/15 text-violet-700 dark:text-violet-400'
+    case 'cancelled':   return 'bg-red-500/15 text-red-700 dark:text-red-400'
+    default:            return 'bg-gray-500/15 text-muted-foreground dark:text-gray-400'
   }
 }
 
 function invoiceBadgeColor(status: string) {
   switch (status) {
-    case 'paid':        return 'bg-emerald-500/15 text-emerald-400'
-    case 'partial':     return 'bg-blue-500/15 text-blue-400'
-    case 'unpaid':      return 'bg-yellow-500/15 text-yellow-400'
-    case 'overdue':     return 'bg-red-500/15 text-red-400'
-    default:            return 'bg-gray-500/15 text-gray-400'
+    case 'paid':        return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+    case 'partial':     return 'bg-blue-500/15 text-blue-700 dark:text-blue-400'
+    case 'unpaid':      return 'bg-yellow-500/15 text-yellow-700 dark:text-yellow-400'
+    case 'overdue':     return 'bg-red-500/15 text-red-700 dark:text-red-400'
+    default:            return 'bg-gray-500/15 text-muted-foreground dark:text-gray-400'
   }
 }
 

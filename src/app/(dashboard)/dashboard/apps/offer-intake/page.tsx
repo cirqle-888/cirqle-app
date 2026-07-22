@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { selectWithOptionalColumns } from '@/lib/offer-columns'
-import { resolveCurrentEmployeeId } from '@/lib/auth/enforce'
+import { resolveCurrentEmployeeId, requireAdmin } from '@/lib/auth/enforce'
 import { getIntakeKindsByClient } from '@/lib/services/intake-server'
 import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
@@ -11,6 +11,15 @@ export const dynamic = 'force-dynamic'
 export default async function OfferIntakeSettingsPage() {
   const employeeId = await resolveCurrentEmployeeId()
   if (!employeeId) redirect('/login')
+
+  // Every action on this page already calls requireAdmin(), but the PAGE only
+  // checked "is signed in" while loading its data with the service-role client.
+  // That made it a read-only bypass: any employee could open it and read the
+  // workspace-wide Apps Script shared secret, which is rendered into an input
+  // below and is the only thing protecting the sync endpoint that writes to
+  // every client's Google Sheet. Gate the route to match the actions.
+  const guard = await requireAdmin()
+  if (!guard.ok) redirect('/dashboard')
 
   const admin = createAdminClient()
 

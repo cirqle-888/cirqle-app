@@ -6029,7 +6029,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
       {editReasonModal && (
         <ModalOverlay onClose={() => { setEditReasonModal(null); setEditReasonInput('') }}>
-          <div className="bg-[#111827] border border-border/60 rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4 max-h-[90dvh] overflow-y-auto">
+          <div className="bg-card border border-border/60 rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4 max-h-[90dvh] overflow-y-auto">
             <div className="flex items-start gap-3 mb-4">
               <div className="w-9 h-9 rounded-xl bg-amber-500/20 flex items-center justify-center shrink-0">
                 <Edit2 className="w-4 h-4 text-amber-400" />
