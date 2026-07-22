@@ -69,11 +69,19 @@ const FLASH_CLS: Record<Flash, string> = {
 
 type FlowMode = 'push' | 'pull' | 'manual'
 
-const FLOW_LABEL: Record<FlowMode, string> = { push: 'Push', pull: 'Pull', manual: 'Manual' }
+// Labels say what HAPPENS. "Push"/"Pull" describe the plumbing's direction,
+// which only makes sense once you already know the plumbing.
+const FLOW_LABEL: Record<FlowMode, string> = {
+  push: 'Cirqle writes the sheet',
+  pull: "Client owns the sheet",
+  manual: 'No sheet',
+}
+/** Short form for chips and the status row, where the full label won't fit. */
+const FLOW_SHORT: Record<FlowMode, string> = { push: 'Push', pull: 'Pull', manual: 'Manual' }
 
 const FLOW_HELP: Record<FlowMode, string> = {
   push: 'Cirqle writes the designer Google Sheet from the offer list collected here.',
-  pull: 'The client maintains their own Google Sheet. Cirqle only reads it — never writes — so their IMPORTRANGE feeds and photo automation stay intact.',
+  pull: 'The client keeps their own Google Sheet. Cirqle only reads it and never writes, so any formulas or photo automation they have built keep working.',
   manual: 'No sheet sync at all. The flyer is built by hand in Figma.',
 }
 
@@ -147,7 +155,7 @@ function ClientCard({
     setFlowSaving(true)
     const res = await saveClientFlowMode(client.id, next)
     setFlowSaving(false)
-    if (res.ok) { setFlowMode(next); flash('ok', `Flow mode set to ${FLOW_LABEL[next]} ✓`) }
+    if (res.ok) { setFlowMode(next); flash('ok', `Saved — ${FLOW_LABEL[next]} ✓`) }
     else flash('err', res.error || 'Could not change flow mode')
   }
 
@@ -187,7 +195,7 @@ function ClientCard({
   }
 
   async function handleResetToken() {
-    if (!confirm('Reset token? The old intake link will stop working immediately.')) return
+    if (!confirm('Replace this client link? The old one stops working immediately and you will need to send them the new one.')) return
     setResetting(true)
     const res = await resetOfferToken(client.id)
     setResetting(false)
@@ -282,7 +290,7 @@ function ClientCard({
               expensive: pushing to a client-maintained sheet destroys their own
               IMPORTRANGE feeds, so the choice is explicit rather than inferred. */}
           <div>
-            <p className="text-xs font-semibold text-foreground mb-2">Flow mode</p>
+            <p className="text-xs font-semibold text-foreground mb-2">How is the designer sheet made?</p>
             <div className="flex items-center gap-1.5 mb-2">
               {(['push', 'pull', 'manual'] as FlowMode[]).map(mode => (
                 <button
@@ -318,7 +326,7 @@ function ClientCard({
                     href={client.offer_master_sheet_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    title="Open the client's master sheet"
+                    title="Open the client's own sheet"
                     className="shrink-0 p-2 rounded-xl bg-secondary border border-border text-muted-foreground hover:text-foreground transition-colors"
                   >
                     <ExternalLink className="w-4 h-4" />
@@ -338,53 +346,6 @@ function ClientCard({
             </div>
           )}
 
-          {/* ── Figma file ─────────────────────────────────────────────────
-              The client's main design file. Categories carry their own link,
-              but most clients have no categories, so this is where the link
-              lives for them — and it puts the design one click from the
-              offer list instead of hunting through Figma's file browser. */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-semibold text-foreground">Figma file</p>
-              <FigmaBindingHelp />
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                value={figmaDraft}
-                onChange={e => setFigmaDraft(e.target.value)}
-                placeholder="https://www.figma.com/design/…"
-                className={inputCls + ' flex-1'}
-              />
-              {client.integrations?.figma?.file_url && (
-                <FigmaLink
-                  url={client.integrations.figma.file_url}
-                  title="Open in the Figma desktop app"
-                  className="shrink-0 p-2 rounded-xl bg-secondary border border-border text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <ExternalLink className="w-4 h-4" />
-                </FigmaLink>
-              )}
-              <button
-                onClick={() => void handleSaveFigma()}
-                disabled={figmaSaving}
-                className="px-3 py-2 rounded-xl text-xs font-semibold bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-40 transition-colors shrink-0"
-              >
-                {figmaSaving ? 'Saving…' : 'Save link'}
-              </button>
-            </div>
-            <p className="text-[11px] text-muted-foreground mt-1.5">
-              Shows an “Open in Figma” shortcut on this client’s card in Prepare Offer.
-            </p>
-          </div>
-
-          {/* ── Categories ─────────────────────────────────────────────────── */}
-          <OfferGroupsPanel
-            clientId={client.id}
-            flowMode={flowMode}
-            groups={groups}
-            onChanged={setGroups}
-          />
-
           {/* ── Integration health ─────────────────────────────────────────
               All derived, nothing stored. Sea Star's sheet sat contaminated for
               a day and Goodwill's Figma file quietly lost its binding — both
@@ -392,7 +353,7 @@ function ClientCard({
           <div className="rounded-xl bg-secondary/40 border border-border p-3">
             <p className="text-xs font-semibold text-foreground mb-2">Integration status</p>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
-              <HealthRow label="Flow mode" value={FLOW_LABEL[flowMode]} ok />
+              <HealthRow label="Sheet mode" value={FLOW_SHORT[flowMode]} ok />
               <HealthRow label="Intake link" value={hasToken ? 'Created' : 'Not created'} ok={hasToken} />
               {flowMode === 'pull' ? (
                 <>
@@ -407,7 +368,7 @@ function ClientCard({
                 <>
                   <HealthRow label="Google Sheet" value={hasSheetLink ? 'Linked' : hasWebhook ? 'Via bound script' : 'Not linked'} ok={hasSheetDestination} />
                   <HealthRow
-                    label="Apps Script"
+                    label="Sync script"
                     value={hasWebhook ? 'Per-client' : globalConfigured ? 'Shared' : 'Not connected'}
                     ok={hasWebhook || globalConfigured}
                   />
@@ -442,29 +403,6 @@ function ClientCard({
             </Link>
           </div>
 
-              {/* ── Product catalog shortcut ── */}
-              <div className="flex items-center gap-3 p-4 bg-violet-500/5 border border-violet-500/15 rounded-xl">
-                <Package className="w-5 h-5 text-violet-400 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold">Product Catalog</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">Manage global products · bulk import from Excel · upload images</p>
-                </div>
-                <div className="flex gap-2 shrink-0">
-                  <Link
-                    href="/dashboard/catalog/import"
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-secondary border border-border hover:bg-secondary/70 text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <Upload className="w-3 h-3" /> Import
-                  </Link>
-                  <Link
-                    href="/dashboard/catalog"
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg gradient-bg text-white hover:opacity-90 transition-opacity"
-                  >
-                    <Package className="w-3 h-3" /> Open catalog
-                  </Link>
-                </div>
-              </div>
-
               {/* ── Section 1: Intake link ── */}
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/60 mb-3 flex items-center gap-1.5">
@@ -487,7 +425,7 @@ function ClientCard({
                         className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors disabled:opacity-50"
                       >
                         {resetting ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShieldAlert className="w-3 h-3" />}
-                        Reset token (old link dies)
+                        Replace link (old one stops working)
                       </button>
                       <p className="text-[11px] text-muted-foreground/50">Use only if the link is compromised</p>
                     </div>
@@ -601,12 +539,12 @@ function ClientCard({
                     className="text-[11px] text-muted-foreground/60 hover:text-muted-foreground flex items-center gap-1"
                   >
                     {advancedOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                    Advanced: per-client script override
+                    Advanced: use a different sync script for this client
                   </button>
                   {advancedOpen && (
                     <div className="space-y-2 mt-2 pl-3 border-l border-border">
                       <div>
-                        <label className={labelCls}>Apps Script Web App URL (per-client override)</label>
+                        <label className={labelCls}>Sync script URL <span className="text-muted-foreground/60 font-normal">(Google Apps Script Web App)</span></label>
                         <input
                           value={webhookDraft}
                           onChange={e => setWebhookDraft(e.target.value)}
@@ -661,6 +599,59 @@ function ClientCard({
               </div>
 
               )}
+
+          {/* ── Design ──────────────────────────────────────────────
+              Moved below the sheet and link setup: these are per-client
+              design details, not part of getting a client working, and
+              they used to sit between choosing a mode and connecting the
+              sheet — interrupting the one sequence staff follow. */}
+          {/* ── Figma file ─────────────────────────────────────────────────
+              The client's main design file. Categories carry their own link,
+              but most clients have no categories, so this is where the link
+              lives for them — and it puts the design one click from the
+              offer list instead of hunting through Figma's file browser. */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-foreground">Figma file</p>
+              <FigmaBindingHelp />
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                value={figmaDraft}
+                onChange={e => setFigmaDraft(e.target.value)}
+                placeholder="https://www.figma.com/design/…"
+                className={inputCls + ' flex-1'}
+              />
+              {client.integrations?.figma?.file_url && (
+                <FigmaLink
+                  url={client.integrations.figma.file_url}
+                  title="Open in the Figma desktop app"
+                  className="shrink-0 p-2 rounded-xl bg-secondary border border-border text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                </FigmaLink>
+              )}
+              <button
+                onClick={() => void handleSaveFigma()}
+                disabled={figmaSaving}
+                className="px-3 py-2 rounded-xl text-xs font-semibold bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-40 transition-colors shrink-0"
+              >
+                {figmaSaving ? 'Saving…' : 'Save link'}
+              </button>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1.5">
+              Adds an “Open in Figma” shortcut to this client’s card in Offer Intake.
+            </p>
+          </div>
+
+          {/* ── Categories ─────────────────────────────────────────────────── */}
+          <OfferGroupsPanel
+            clientId={client.id}
+            flowMode={flowMode}
+            groups={groups}
+            onChanged={setGroups}
+          />
+
 
               {/* ── Onboarding checklist ──
                   Steps differ per mode: a pull client never needs a Cirqle-owned
@@ -837,7 +828,7 @@ export default function OfferIntakeSettingsClient({
           <Tag className="w-4.5 h-4.5 text-primary" />
         </div>
         <div>
-          <h1 className="text-lg font-bold">Offer Intake Configuration</h1>
+          <h1 className="text-lg font-bold">Offer Intake settings</h1>
           <p className="text-xs text-muted-foreground">Clients with an Offer Intake service · manage intake links, catalog, and sheet sync.</p>
         </div>
       </div>

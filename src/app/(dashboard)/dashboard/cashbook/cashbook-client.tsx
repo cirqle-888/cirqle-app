@@ -1898,7 +1898,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                                     const fx = fxFor(newAmount, p.currency)
                                     return { ...p, fully_paid: false, amount: newAmount, rate: fx.rate, amountInr: fx.amountInr, rateSource: fx.rateSource }
                                   })}
-                                  className={`text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${parseFloat(form.amount) === v ? 'bg-violet-500/20 border-violet-500/50 text-violet-300' : 'bg-secondary border-transparent hover:border-border'}`}>
+                                  className={`text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${parseFloat(form.amount) === v ? 'bg-violet-500/20 border-violet-500/50 text-violet-700 dark:text-violet-300' : 'bg-secondary border-transparent hover:border-border'}`}>
                                   {i === 0 ? 'Full' : 'Half'} {invCur === 'INR' ? '₹' : invCur + ' '}{v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </button>
                               ))}

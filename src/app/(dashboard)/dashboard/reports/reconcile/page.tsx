@@ -99,7 +99,7 @@ export default async function ReconcilePage() {
         {allClear && (
           <div className="flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
             <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-            <p className="text-sm text-emerald-300">Everything reconciles — no orphan tasks, no amount drift, no unbilled client expenses.</p>
+            <p className="text-sm text-emerald-700 dark:text-emerald-300">Everything reconciles — no orphan tasks, no amount drift, no unbilled client expenses.</p>
           </div>
         )}
 
@@ -183,7 +183,7 @@ function SummaryCard({ icon, label, count, sub, tone }: { icon: React.ReactNode;
     <div className={`rounded-xl border p-4 ${tone === 'warn' ? 'border-amber-500/30 bg-amber-500/5' : 'border-border bg-card'}`}>
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">{icon}{label}</div>
       <div className="mt-1 flex items-baseline gap-2">
-        <span className={`text-2xl font-bold ${tone === 'warn' ? 'text-amber-300' : 'text-foreground'}`}>{count}</span>
+        <span className={`text-2xl font-bold ${tone === 'warn' ? 'text-amber-700 dark:text-amber-300' : 'text-foreground'}`}>{count}</span>
         <span className="text-xs text-muted-foreground">{sub}</span>
       </div>
     </div>

@@ -130,7 +130,7 @@ export const navSections: NavSection[] = [
       // Offer Flyer: internal weekly-offer preparation (paste WhatsApp list →
       // review → designer Google Sheet). Gated by the dedicated offer.prepare
       // permission; admins always see it.
-      { label: 'Offer Flyer', href: '/dashboard/offer-prepare', icon: BadgePercent, requiredPerm: 'offer.prepare', keywords: ['prepare offer', 'weekly offer', 'sheet', 'whatsapp list', 'supermarket'] },
+      { label: 'Offer Intake', href: '/dashboard/offer-prepare', icon: BadgePercent, requiredPerm: 'offer.prepare', keywords: ['prepare offer', 'weekly offer', 'sheet', 'whatsapp list', 'supermarket'] },
       // Social Calendar: plan a client's content month, push items into the
       // Requests inbox (social_meta pattern — see docs in the migration).
       { label: 'Social Calendar', href: '/dashboard/social-calendar', icon: CalendarDays, requiredPerm: 'social.view', keywords: ['content', 'planner', 'posts', 'instagram', 'social media'] },

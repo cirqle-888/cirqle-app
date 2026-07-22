@@ -156,9 +156,9 @@ export function ProfileActions({
           ) : theme === 'light' ? (
             <Sun className="w-4 h-4 text-amber-500" />
           ) : theme === 'dark' ? (
-            <Moon className="w-4 h-4 text-blue-300" />
+            <Moon className="w-4 h-4 text-blue-700 dark:text-blue-300" />
           ) : (
-            <Monitor className="w-4 h-4 text-violet-300" />
+            <Monitor className="w-4 h-4 text-violet-700 dark:text-violet-300" />
           )}
         </span>
         <span className="truncate whitespace-nowrap">
@@ -174,7 +174,7 @@ export function ProfileActions({
         onClick={isUnlocked ? lock : openUnlockModal}
         className={`${itemCls} ${
           isUnlocked
-            ? 'text-green-400 hover:bg-green-500/10 hover:text-green-300'
+            ? 'text-green-400 hover:bg-green-500/10 hover:text-green-700 dark:text-green-300'
             : 'text-muted-foreground hover:bg-sidebar-accent hover:text-amber-400'
         }`}
       >

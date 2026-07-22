@@ -81,7 +81,7 @@ export function QuickCreateClientModal({
           {!canSeePricing && (
             <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/25 rounded-lg px-3 py-2.5">
               <AlertTriangle className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
-              <p className="text-[11px] text-amber-300/90">An admin will set this client's pricing — it'll be flagged <b>Needs pricing</b> until then.</p>
+              <p className="text-[11px] text-amber-700 dark:text-amber-300/90">An admin will set this client's pricing — it'll be flagged <b>Needs pricing</b> until then.</p>
             </div>
           )}
           {error && <p className="text-xs text-red-400">{error}</p>}
@@ -174,7 +174,7 @@ export function QuickCreateServiceModal({
           ) : (
             <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/25 rounded-lg px-3 py-2.5">
               <AlertTriangle className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
-              <p className="text-[11px] text-amber-300/90">An admin will set this service's pricing — it'll be flagged <b>Needs pricing</b> until then.</p>
+              <p className="text-[11px] text-amber-700 dark:text-amber-300/90">An admin will set this service's pricing — it'll be flagged <b>Needs pricing</b> until then.</p>
             </div>
           )}
           {error && <p className="text-xs text-red-400">{error}</p>}

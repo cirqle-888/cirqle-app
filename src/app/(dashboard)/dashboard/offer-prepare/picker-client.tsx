@@ -52,10 +52,16 @@ export default function OfferPrepareClientPicker({ clients }: { clients: PickerC
         : <p className="text-xs text-amber-600 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> No master sheet linked</p>
     }
     if (!c.hasToken) {
-      return <p className="text-xs text-amber-600 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> No intake token — set up in Offer Intake settings</p>
+      return <p className="text-xs text-amber-600 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> No client link yet — finish setup first</p>
     }
     if (!c.hasWebhook) {
-      return <p className="text-xs text-amber-600 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> No Google Sheet linked — sheet sync won&apos;t run</p>
+      // Previously a dead end: it named the problem, but the card links to the
+      // EDITOR, so following it led somewhere that cannot fix this.
+      return (
+        <p className="text-xs text-amber-600 flex items-center gap-1">
+          <AlertTriangle className="w-3 h-3" /> No Google Sheet connected — offers won&apos;t reach the designer
+        </p>
+      )
     }
     return <p className="text-xs text-muted-foreground">Ready</p>
   }
@@ -63,7 +69,7 @@ export default function OfferPrepareClientPicker({ clients }: { clients: PickerC
   return (
     <div>
       <Header
-        title="Prepare Offer"
+        title="Offer Intake"
         subtitle="Paste a client's WhatsApp offer list and generate their designer sheet"
       />
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">

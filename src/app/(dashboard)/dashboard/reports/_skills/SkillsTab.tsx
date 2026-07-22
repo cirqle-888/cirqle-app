@@ -49,10 +49,10 @@ interface Props {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const BAND_COLORS: Record<StrengthBand, { bg: string; text: string; dot: string }> = {
-  Expert:       { bg: 'bg-emerald-500/20', text: 'text-emerald-300', dot: '#34d399' },
-  Strong:       { bg: 'bg-blue-500/20',    text: 'text-blue-300',    dot: '#60a5fa' },
-  Developing:   { bg: 'bg-amber-500/20',   text: 'text-amber-300',   dot: '#fbbf24' },
-  Learning:     { bg: 'bg-red-500/15',     text: 'text-red-300',     dot: '#f87171' },
+  Expert:       { bg: 'bg-emerald-500/20', text: 'text-emerald-700 dark:text-emerald-300', dot: '#34d399' },
+  Strong:       { bg: 'bg-blue-500/20',    text: 'text-blue-700 dark:text-blue-300',    dot: '#60a5fa' },
+  Developing:   { bg: 'bg-amber-500/20',   text: 'text-amber-700 dark:text-amber-300',   dot: '#fbbf24' },
+  Learning:     { bg: 'bg-red-500/15',     text: 'text-red-700 dark:text-red-300',     dot: '#f87171' },
   Insufficient: { bg: 'bg-secondary/40',   text: 'text-muted-foreground', dot: '#4b5563' },
 }
 

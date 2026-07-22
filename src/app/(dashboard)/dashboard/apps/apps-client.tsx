@@ -209,7 +209,7 @@ function ClientPortalCard({
 const INTERNAL_MODULES = [
   // The staff-side twin of the Offer Campaign Intake portal above: same editor,
   // reached by client instead of token. Gated at the route by offer.prepare.
-  { label: 'Offer Flyer Studio', description: 'Prepare weekly offer sheets — paste a WhatsApp list, review, sync to the designer Google Sheet.', href: '/dashboard/offer-prepare', icon: BadgePercent },
+  { label: 'Offer Intake', description: 'Prepare weekly offer sheets — paste a WhatsApp list, review, sync to the designer Google Sheet.', href: '/dashboard/offer-prepare', icon: BadgePercent },
   { label: 'Advertising ERP', description: 'Internal campaign management, budget tracking, and meta integration.', href: '/dashboard/advertising', icon: BarChart3 },
   { label: 'Internal Operations', description: 'Task routing, billing, and internal project state.', href: '/dashboard/tasks', icon: Briefcase },
   { label: 'Admin Modules', description: 'User management, permissions, and internal configuration.', href: '/dashboard/settings', icon: Shield },
@@ -282,7 +282,7 @@ export default function AppsClient({ clientCounts, multiServiceClients = [] }: {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <ClientPortalCard
-               title="Offer Campaign Intake"
+               title="Offer Intake"
                description={INTAKE_KIND_META['offer_intake']?.description || 'Supermarket / retail clients submit their offer lists securely.'}
                icon={Tag}
                configHref="/dashboard/apps/offer-intake"

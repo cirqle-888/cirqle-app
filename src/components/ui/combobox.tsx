@@ -169,7 +169,7 @@ export default function Combobox({
           onClick={() => select(o.id)}
           className={`w-full text-left px-3 py-2.5 text-sm transition-colors flex items-center justify-between gap-2
             ${o.id === value
-              ? 'bg-violet-500/15 text-violet-300'
+              ? 'bg-violet-500/15 text-violet-700 dark:text-violet-300'
               : 'text-foreground hover:bg-foreground/[0.06]'
             }`}
         >
