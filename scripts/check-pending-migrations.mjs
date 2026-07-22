@@ -109,6 +109,7 @@ const PROBES = [
   { m: '20260716100000_offer_prepare_permission', kind: 'row', table: 'permissions', col: 'key', eq: 'offer.prepare' },
   { m: '20260716110000_offer_campaign_lifecycle', kind: 'column', table: 'offer_campaigns', col: 'completed_at' },
   { m: '20260716120000_social_calendar',      kind: 'table',  table: 'social_calendars', col: 'id' },
+  { m: '20260722120000_client_agreements',    kind: 'table',  table: 'client_agreements', col: 'id' },
 
   // ── loose (non-timestamped) files in supabase/migrations ────────────────
   { m: 'loose: backfill_foreign_task_billing_inr', kind: 'column', table: 'tasks', col: 'billing_exchange_rate' },
