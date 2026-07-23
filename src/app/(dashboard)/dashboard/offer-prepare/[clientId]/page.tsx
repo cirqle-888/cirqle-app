@@ -28,7 +28,7 @@ export default async function OfferPrepareForClientPage({ params }: {
   const admin = createAdminClient()
   const { data: client } = await admin
     .from('clients')
-    .select('id, name, offer_intake_token')
+    .select('id, name, offer_intake_token, offer_flow_mode')
     .eq('id', clientId)
     .eq('is_active', true)
     .maybeSingle()
@@ -53,6 +53,7 @@ export default async function OfferPrepareForClientPage({ params }: {
         <span className="text-xs text-white/70 font-medium truncate">Preparing offer for {client.name}</span>
       </div>
       <OfferIntakeClient
+        flowMode={((client as { offer_flow_mode?: string }).offer_flow_mode as 'push' | 'pull' | 'manual') || 'push'}
         token={client.offer_intake_token}
         client={{ id: client.id, name: client.name }}
         campaign={campaign}

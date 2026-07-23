@@ -298,7 +298,7 @@ export default function ActivityPanel({ entityType, entityId, canNote, title = '
 
                   {/* Note text */}
                   {row.note && (
-                    <p className="text-[12px] text-amber-600 dark:text-amber-700 dark:text-amber-300 mt-0.5 italic">“{row.note}”</p>
+                    <p className="text-[12px] text-amber-600 dark:text-amber-300 mt-0.5 italic">“{row.note}”</p>
                   )}
 
                   {/* Detail line */}

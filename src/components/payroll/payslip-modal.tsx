@@ -108,7 +108,7 @@ export function PayslipModal({ employeeId, month, year, monthLabel, onClose, onS
                 <div className="flex items-start gap-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3.5 py-3">
                   <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
                   <div>
-                    <p className="text-sm font-semibold text-amber-300">Email not configured</p>
+                    <p className="text-sm font-semibold text-amber-700 dark:text-amber-300">Email not configured</p>
                     <p className="text-xs text-amber-400/80 mt-0.5">Set <code>RESEND_API_KEY</code> and verify your sending domain to enable sending.</p>
                   </div>
                 </div>

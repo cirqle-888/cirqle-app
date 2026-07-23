@@ -1618,7 +1618,7 @@ export default function ContributionsClient({
           {missingCount > 0 && listViewMode === 'list' && showMissingBanner && (
             <div className="fixed bottom-6 right-6 z-40 bg-orange-50 dark:bg-orange-950/90 backdrop-blur-md border border-orange-500/40 rounded-lg px-4 py-3 flex items-center gap-3 max-w-sm shadow-2xl">
               <AlertCircle className="w-4 h-4 text-orange-700 dark:text-orange-400 shrink-0" />
-              <p className="text-xs text-orange-900 dark:text-orange-700 dark:text-orange-300 leading-relaxed flex-1">
+              <p className="text-xs text-orange-900 dark:text-orange-300 leading-relaxed flex-1">
                 <span className="font-semibold">{missingCount} task{missingCount === 1 ? '' : 's'}</span> need scoring.{' '}
                 <button onClick={() => setStatusFilter('missing')} className="underline hover:text-orange-700 dark:hover:text-orange-700 dark:text-orange-200 font-semibold">View</button>
               </p>
@@ -1772,7 +1772,7 @@ export default function ContributionsClient({
                                           <span className="font-semibold">
                                             {scoreDetail.pct.toFixed(0)}%
                                             {canSeeFinancials && showFinancials && scoreDetail.earnings !== null && (
-                                              <span className="ml-0.5 text-green-600 dark:text-green-700 dark:text-green-300">₹{Math.round(scoreDetail.earnings).toLocaleString('en-IN')}</span>
+                                              <span className="ml-0.5 text-green-600 dark:text-green-300">₹{Math.round(scoreDetail.earnings).toLocaleString('en-IN')}</span>
                                             )}
                                           </span>
                                         )}
@@ -2719,7 +2719,7 @@ export default function ContributionsClient({
                                     {group.name}
                                   </p>
                                   {isMostUsed && (
-                                    <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-700 dark:text-blue-300 border border-blue-500/25 whitespace-nowrap">
+                                    <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-300 border border-blue-500/25 whitespace-nowrap">
                                       🔥 Most Used
                                     </span>
                                   )}

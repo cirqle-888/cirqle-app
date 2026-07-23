@@ -258,7 +258,7 @@ export function CampaignCard({
                 {unacknowledged.map((log: any) => (
                   <div key={log.id} className="flex items-start gap-3 bg-amber-500/5 border border-amber-500/20 rounded-xl px-3 py-2.5">
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-amber-300">{LOG_TYPE_LABEL[log.log_type] || log.log_type}</p>
+                      <p className="text-xs font-medium text-amber-700 dark:text-amber-300">{LOG_TYPE_LABEL[log.log_type] || log.log_type}</p>
                       {log.product_name && <p className="text-xs text-foreground/80 mt-0.5">{log.product_name}</p>}
                       {log.field && (
                         <p className="text-xs text-muted-foreground mt-0.5">

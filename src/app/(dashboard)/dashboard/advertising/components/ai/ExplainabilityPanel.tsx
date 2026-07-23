@@ -35,7 +35,7 @@ export function ExplainabilityPanel({ rec, onClose }: ExplainabilityPanelProps) 
           <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2 flex items-center">
             <Target className="w-4 h-4 mr-1 text-blue-500" /> Suggested Action
           </h4>
-          <p className="text-slate-700 dark:text-slate-700 dark:text-slate-300">
+          <p className="text-slate-700 dark:text-slate-300">
             {rec.suggested_action || 'Review and apply changes via the campaign manager.'}
           </p>
         </section>
@@ -47,11 +47,11 @@ export function ExplainabilityPanel({ rec, onClose }: ExplainabilityPanelProps) 
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-md border border-slate-100 dark:border-slate-800">
               <span className="block text-xs text-slate-500 mb-1">Impact</span>
-              <span className="font-medium text-slate-800 dark:text-slate-700 dark:text-slate-200">{rec.business_impact || 'Moderate'}</span>
+              <span className="font-medium text-slate-800 dark:text-slate-200">{rec.business_impact || 'Moderate'}</span>
             </div>
             <div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-md border border-slate-100 dark:border-slate-800">
               <span className="block text-xs text-slate-500 mb-1">AI Confidence</span>
-              <span className="font-medium text-slate-800 dark:text-slate-700 dark:text-slate-200">{rec.confidence || 0}%</span>
+              <span className="font-medium text-slate-800 dark:text-slate-200">{rec.confidence || 0}%</span>
             </div>
           </div>
         </section>

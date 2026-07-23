@@ -24,7 +24,7 @@ export default async function AICenterPage() {
         </div>
         <div className="px-4 py-2 bg-indigo-50 dark:bg-indigo-900/30 rounded-full flex items-center border border-indigo-100 dark:border-indigo-800">
           <Sparkles className="w-4 h-4 text-indigo-500 mr-2" />
-          <span className="text-sm font-medium text-indigo-700 dark:text-indigo-700 dark:text-indigo-300">
+          <span className="text-sm font-medium text-indigo-700 dark:text-indigo-300">
             {recommendations.length} Active Insights
           </span>
         </div>

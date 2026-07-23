@@ -197,6 +197,36 @@ export async function deleteOfferGroup(id: string): Promise<ActionResult> {
 
 // ── Flow mode + master sheet (pull-mode clients) ─────────────────────────────
 
+/**
+ * The sync mode a client is currently in, read fresh from the database.
+ *
+ * The UI hides push-only controls outside push mode, but hiding is not
+ * enforcement: a stale tab, a double-submit, or a direct action call would
+ * still write a Google Sheet destination onto a client whose sheet Cirqle must
+ * never touch. Every push-only write checks this first.
+ */
+async function currentFlowMode(
+  admin: ReturnType<typeof createAdminClient>,
+  clientId: string,
+): Promise<'push' | 'pull' | 'manual'> {
+  const { data, error } = await admin
+    .from('clients').select('offer_flow_mode').eq('id', clientId).maybeSingle()
+  // Pre-migration the column may not exist; push is the historical default.
+  if (error || !data) return 'push'
+  return ((data as { offer_flow_mode?: string }).offer_flow_mode as 'push' | 'pull' | 'manual') || 'push'
+}
+
+/** Refuse a push-only write, naming the mode so the message is actionable. */
+function pushOnly(mode: 'push' | 'pull' | 'manual'): ActionResult | null {
+  if (mode === 'push') return null
+  return {
+    ok: false,
+    error: mode === 'pull'
+      ? 'This client is in Pull mode — Cirqle only reads their sheet and never writes to it. Switch to Push first if Cirqle should own the designer sheet.'
+      : 'This client is in Manual mode — there is no sheet sync. Switch to Push first if Cirqle should write a designer sheet.',
+  }
+}
+
 export async function saveClientFlowMode(
   clientId: string,
   mode: 'push' | 'pull' | 'manual',
@@ -204,7 +234,14 @@ export async function saveClientFlowMode(
   const _guard = await requireAdmin(); if (!_guard.ok) return { ok: false, error: _guard.error }
   if (!['push', 'pull', 'manual'].includes(mode)) return { ok: false, error: 'Unknown flow mode.' }
   const admin = createAdminClient()
-  const { error } = await admin.from('clients').update({ offer_flow_mode: mode }).eq('id', clientId)
+
+  // Leaving push clears the destination Cirqle would have written to. Without
+  // this the value survives invisibly — the UI that edits it is now hidden
+  // outside push — and a later switch back silently re-points at a stale sheet.
+  const update: Record<string, unknown> = { offer_flow_mode: mode }
+  if (mode !== 'push') update.offer_sheet_url = null
+
+  const { error } = await admin.from('clients').update(update).eq('id', clientId)
   if (error) return { ok: false, error: error.message }
   revalidatePath('/dashboard/apps/offer-intake')
   revalidatePath('/dashboard/offer-prepare')
@@ -270,6 +307,14 @@ export async function saveOfferSheetUrl(
   const admin = createAdminClient()
   const trimmed = url.trim()
 
+  // Push-only: this is the sheet Cirqle WRITES. Setting it on a pull client
+  // would point the writer at a sheet the client owns. Clearing is always
+  // allowed so a stale value can be removed whatever the mode.
+  if (trimmed) {
+    const blocked = pushOnly(await currentFlowMode(admin, clientId))
+    if (blocked) return blocked
+  }
+
   // Reject anything we can't extract a spreadsheet ID from — otherwise the sync
   // would fail later with a confusing error. Empty clears the link.
   if (trimmed && !extractSheetId(trimmed)) {
@@ -295,6 +340,13 @@ export async function saveWebhookUrl(
   const _guard = await requireAdmin(); if (!_guard.ok) return { ok: false, error: _guard.error }
   const admin = createAdminClient()
   const url = webhookUrl.trim()
+
+  // Same rule as the sheet link: a per-client write script only means anything
+  // in push mode. Clearing stays allowed in every mode.
+  if (url) {
+    const blocked = pushOnly(await currentFlowMode(admin, clientId))
+    if (blocked) return blocked
+  }
 
   if (url && !url.startsWith('https://script.google.com/macros/s/')) {
     return { ok: false, error: 'URL must be a Google Apps Script Web App URL (starts with https://script.google.com/macros/s/)' }
@@ -331,9 +383,42 @@ export async function resetOfferToken(clientId: string): Promise<ActionResult<{ 
 
 // ── Test sheet sync (uses most recent active campaign) ───────────────────────
 
-export async function testSheetSync(clientId: string): Promise<ActionResult<{ message: string; sheetUrl?: string }>> {
+/**
+ * What actually happened, rather than merely whether the call threw.
+ *
+ * `ok` used to mean "nothing errored", which is not the same as "the sheet was
+ * written" — syncCampaignToSheet returns `{ ok: true, skipped: true }` outside
+ * push mode, and the old code reported "Sheet synced successfully ✓" for it.
+ * Staff were told a sheet had been written when Cirqle had deliberately not
+ * touched it.
+ */
+export type SyncOutcome = 'success' | 'skipped' | 'blocked' | 'failed'
+
+export interface TestSyncResult {
+  status: SyncOutcome
+  message: string
+  /** Only ever set when rows actually reached a sheet. */
+  sheetUrl?: string
+}
+
+export async function testSheetSync(clientId: string): Promise<ActionResult<TestSyncResult>> {
   const _guard = await requireAdmin(); if (!_guard.ok) return { ok: false, error: _guard.error }
   const admin = createAdminClient()
+
+  // BLOCKED — the mode itself forbids writing. Distinct from "tried and failed":
+  // nothing is wrong, this client's sheet is simply not Cirqle's to write.
+  const mode = await currentFlowMode(admin, clientId)
+  if (mode !== 'push') {
+    return {
+      ok: true,
+      data: {
+        status: 'blocked',
+        message: mode === 'pull'
+          ? 'Nothing was written. This client is in Pull mode — Cirqle only reads their sheet.'
+          : 'Nothing was written. This client is in Manual mode — sheet sync is off.',
+      },
+    }
+  }
 
   // Find the most recent active campaign for this client
   const { data: campaign } = await admin
@@ -345,16 +430,39 @@ export async function testSheetSync(clientId: string): Promise<ActionResult<{ me
     .limit(1)
     .maybeSingle()
 
+  // SKIPPED — a legitimate no-op. There is simply nothing to send yet.
   if (!campaign) {
     return {
-      ok: false,
-      error: 'No active campaign found for this client. Have them submit their offer list first.',
+      ok: true,
+      data: {
+        status: 'skipped',
+        message: 'Nothing to sync — this client has no active offer list yet. Ask them to submit one, then test again.',
+      },
     }
   }
 
   const result = await syncCampaignToSheet(admin, campaign.id, clientId)
-  if (!result.ok) return { ok: false, error: result.error }
-  return { ok: true, data: { message: 'Sheet synced successfully ✓', sheetUrl: result.sheetUrl } }
+
+  if (!result.ok) {
+    return { ok: true, data: { status: 'failed', message: result.error || 'The sync failed.' } }
+  }
+
+  // The engine refused for its own reasons (mode changed under us, no
+  // destination). Reporting this as success is the bug being fixed.
+  if (result.skipped) {
+    return {
+      ok: true,
+      data: {
+        status: 'skipped',
+        message: 'Nothing was written — the sync was skipped. Check the Google Sheet link and sync mode below.',
+      },
+    }
+  }
+
+  return {
+    ok: true,
+    data: { status: 'success', message: 'Sheet updated ✓', sheetUrl: result.sheetUrl },
+  }
 }
 
 // NOTE: there is no toggleOfferFlyerService action any more. Offer-intake
