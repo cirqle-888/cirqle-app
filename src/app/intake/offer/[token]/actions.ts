@@ -198,6 +198,33 @@ export interface CampaignInput {
   products: ProductInput[]
 }
 
+/**
+ * A save failure that can actually be diagnosed.
+ *
+ * The six DB steps inside saveCampaign each used to return the same blind
+ * "Could not save the offer. Please try again." and log nothing — so an
+ * intermittent failure on a 22-product list (~130 sequential round-trips) left
+ * no trace of WHICH row or WHICH step broke, or what Postgres actually said.
+ *
+ * This logs the real error server-side with context, and returns a message
+ * that still reassures the client but names the step for staff reading it back.
+ */
+function saveFailed(
+  step: string,
+  err: { message?: string; code?: string; details?: string } | null,
+  ctx?: { product?: string; index?: number; total?: number },
+): ActionResult<never> {
+  const where = ctx?.product ? ` [${ctx.index}/${ctx.total}: ${ctx.product}]` : ''
+  console.error(
+    `[saveCampaign] ${step} failed${where}: ${err?.code || ''} ${err?.message || 'unknown'}` +
+    (err?.details ? ` — ${err.details}` : ''),
+  )
+  return {
+    ok: false,
+    error: `Could not save the offer (step: ${step}). Please try again — if it keeps happening, tell the Cirqle team which product it stopped on.`,
+  }
+}
+
 export async function saveCampaign(
   token: string,
   input: CampaignInput,
@@ -295,7 +322,7 @@ export async function saveCampaign(
   const removedProducts = (prevProducts || []).filter((p: any) => !newIds.has(p.id))
   for (const p of removedProducts) {
     const { error: delErr } = await admin.from('offer_products').delete().eq('id', p.id)
-    if (delErr) return { ok: false, error: 'Could not save the offer. Please try again.' }
+    if (delErr) return saveFailed('delete-removed', delErr, { product: p.name })
     await admin.from('offer_change_logs').insert({
       campaign_id: campaign.id,
       log_type: 'product_removed',
@@ -313,10 +340,36 @@ export async function saveCampaign(
   // staff read to see what the client actually altered) with pure noise.
   const productIds: (string | null)[] = []
 
-  for (const p of input.products) {
+  // offer_products.catalog_id has a FK to client_product_catalog. Since the
+  // picker started also offering SHARED catalog products (product_catalog),
+  // a picked shared product arrives with a product_catalog id here — a value
+  // that is NOT a client_product_catalog row, so the insert blew up with a
+  // 23503 FK violation and failed the whole save (only when the offer happened
+  // to include a matched shared product, which is why it looked intermittent).
+  //
+  // Resolve it once, up front: keep catalog_id only where it is a real
+  // client_product_catalog row for THIS client; null the rest. The by-name
+  // sync below then creates/links the client's own row, so nothing is lost.
+  const candidateCatalogIds = [...new Set(
+    input.products.map(p => p.catalog_id).filter((v): v is string => !!v),
+  )]
+  const validClientCatalogIds = new Set<string>()
+  if (candidateCatalogIds.length) {
+    const { data: ownRows } = await admin
+      .from('client_product_catalog')
+      .select('id')
+      .eq('client_id', client.id)
+      .in('id', candidateCatalogIds)
+    for (const r of ownRows || []) validClientCatalogIds.add((r as { id: string }).id)
+  }
+
+  for (let pIdx = 0; pIdx < input.products.length; pIdx++) {
+    const p = input.products[pIdx]
+    const pctx = { product: p.name, index: pIdx + 1, total: input.products.length }
+    const safeCatalogId = p.catalog_id && validClientCatalogIds.has(p.catalog_id) ? p.catalog_id : null
     const payload = {
       campaign_id: campaign.id,
-      catalog_id: p.catalog_id || null,
+      catalog_id: safeCatalogId,
       group_id: p.group_id || null,
       name: p.name.trim(),
       weight: p.weight?.trim() || null,
@@ -338,7 +391,7 @@ export async function saveCampaign(
       const { error: updErr } = await admin.from('offer_products').update(payload).eq('id', p.id)
       // Previously discarded — a failed update returned ok:true and the editor
       // showed "Saved ✓" over data that never reached the database.
-      if (updErr) return { ok: false, error: 'Could not save the offer. Please try again.' }
+      if (updErr) return saveFailed('update-product', updErr, pctx)
 
       const DIFF_FIELDS: [string, string][] = [
         ['name', 'Product name'],
@@ -377,7 +430,7 @@ export async function saveCampaign(
       // New product
       const { data: newProd, error: insErr } = await admin.from('offer_products')
         .insert(payload).select('id').single()
-      if (insErr || !newProd?.id) return { ok: false, error: 'Could not save the offer. Please try again.' }
+      if (insErr || !newProd?.id) return saveFailed('insert-product', insErr, pctx)
       productId = newProd.id
       changeLogs.push({
         campaign_id: campaign.id,
@@ -429,7 +482,7 @@ export async function saveCampaign(
     // small per-product badge count).
     if (productId) {
       const { error: badgeDelErr } = await admin.from('offer_product_badges').delete().eq('product_id', productId)
-      if (badgeDelErr) return { ok: false, error: 'Could not save the offer. Please try again.' }
+      if (badgeDelErr) return saveFailed('clear-badges', badgeDelErr, pctx)
       const badgeRows = (p.badges || []).map((b, i) => ({
         product_id: productId,
         badge_id: b.badge_id || null,
@@ -439,7 +492,7 @@ export async function saveCampaign(
       })).filter(b => b.badge_id || b.custom_label)
       if (badgeRows.length) {
         const { error: badgeInsErr } = await admin.from('offer_product_badges').insert(badgeRows)
-        if (badgeInsErr) return { ok: false, error: 'Could not save the offer. Please try again.' }
+        if (badgeInsErr) return saveFailed('insert-badges', badgeInsErr, pctx)
       }
     }
 
