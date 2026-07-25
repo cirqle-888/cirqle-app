@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root { font-family: Inter, -apple-system, system-ui, sans-serif; font-size: 12px; }
+  body {
+    margin: 0; padding: 0;
+    background: var(--figma-color-bg, #fff);
+    color: var(--figma-color-text, #111);
+  }
+  .tabs { display: flex; border-bottom: 1px solid var(--figma-color-border, #e5e5e5); position: sticky; top: 0; background: inherit; z-index: 2; }
+  .tab { flex: 1; padding: 10px 8px; text-align: center; cursor: pointer; color: var(--figma-color-text-secondary, #777); border-bottom: 2px solid transparent; user-select: none; }
+  .tab.active { color: var(--figma-color-text, #111); border-bottom-color: #7c3aed; font-weight: 600; }
+  .panel { display: none; padding: 14px; }
+  .panel.active { display: block; }
+  h3 { margin: 0 0 4px; font-size: 12px; }
+  p.hint { margin: 0 0 12px; color: var(--figma-color-text-secondary, #777); line-height: 1.45; }
+  textarea, input[type=text], input[type=number] {
+    width: 100%; box-sizing: border-box; padding: 8px;
+    border: 1px solid var(--figma-color-border, #ddd); border-radius: 6px;
+    background: var(--figma-color-bg-secondary, #fafafa);
+    color: var(--figma-color-text, #111);
+    font-family: ui-monospace, Menlo, monospace; font-size: 11px;
+  }
+  textarea { height: 130px; resize: vertical; white-space: pre; }
+  button {
+    width: 100%; padding: 9px 12px; margin-top: 8px;
+    border: 0; border-radius: 6px; cursor: pointer;
+    background: #7c3aed; color: #fff; font-weight: 600; font-size: 12px;
+  }
+  button.secondary { background: var(--figma-color-bg-secondary, #f0f0f0); color: var(--figma-color-text, #111); border: 1px solid var(--figma-color-border, #ddd); }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .row label { flex: 1; }
+  .row input[type=number] { width: 70px; flex: 0 0 70px; }
+  .status { margin-top: 10px; padding: 8px; border-radius: 6px; background: var(--figma-color-bg-secondary, #f6f6f6); max-height: 170px; overflow: auto; font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; line-height: 1.55; white-space: pre-wrap; }
+  .sel { padding: 7px 9px; border-radius: 6px; background: var(--figma-color-bg-secondary, #f6f6f6); margin-bottom: 10px; }
+  .err { color: #dc2626; }
+  .ok { color: #059669; }
+  label.check { display: flex; gap: 7px; align-items: center; margin-bottom: 8px; cursor: pointer; }
+  .bar { height: 4px; border-radius: 2px; background: var(--figma-color-bg-secondary, #eee); overflow: hidden; margin-top: 8px; }
+  .bar > i { display: block; height: 100%; width: 0; background: #7c3aed; transition: width .18s; }
+  code { background: var(--figma-color-bg-secondary, #f0f0f0); padding: 1px 4px; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div class="tabs">
+  <div class="tab active" data-panel="live">Live</div>
+  <div class="tab" data-panel="flyer">Paste</div>
+  <div class="tab" data-panel="bg">Remove BG</div>
+  <div class="tab" data-panel="settings">Settings</div>
+</div>
+
+<!-- ---------------------------------------------------------------- -->
+<div class="panel active" id="p-live">
+  <div class="sel" id="sel-live">Nothing selected</div>
+
+  <h3>Pull offers from Cirqle</h3>
+  <p class="hint">
+    Connects straight to the app — no copy, no paste, no Google Sheet.
+    Needs the companion endpoint deployed in Cirqle (see <code>server/README</code>);
+    until then, use the Paste tab.
+  </p>
+
+  <div class="row"><label>Cirqle URL</label></div>
+  <input type="text" id="live-url" value="https://app.cirqle.work">
+  <div class="row" style="margin-top:8px"><label>API secret</label></div>
+  <input type="text" id="live-secret" placeholder="offer sheet secret from Settings → Offer Intake">
+
+  <button class="secondary" id="live-load">Load offers</button>
+  <select id="live-campaigns" style="width:100%;margin-top:8px;padding:8px;border-radius:6px;display:none"></select>
+
+  <label class="check" style="margin-top:10px"><input type="checkbox" id="live-cut"> Remove background from product images</label>
+  <label class="check"><input type="checkbox" id="live-export" checked> Export PNG after building</label>
+
+  <button id="live-build" disabled>Pull &amp; build</button>
+
+  <div style="border-top:1px solid var(--figma-color-border,#e5e5e5);margin:14px 0 10px"></div>
+
+  <h3>Watch mode</h3>
+  <p class="hint">
+    Arm it with your card template selected, then walk away. The plugin checks
+    Cirqle every minute; when the selected client's offer changes, it rebuilds
+    the cards automatically — and exports the PNG if enabled above.
+  </p>
+  <button class="secondary" id="live-watch">Arm watch mode</button>
+
+  <div class="bar"><i id="bar-live"></i></div>
+  <div class="status" id="log-live">Not connected.</div>
+</div>
+
+<!-- ---------------------------------------------------------------- -->
+<div class="panel" id="p-flyer">
+  <div class="sel" id="sel-flyer">Nothing selected</div>
+
+  <h3>Offer table</h3>
+  <p class="hint">
+    In Cirqle, open the offer and hit <b>Copy table</b>, then paste here.
+    Select <b>one</b> card to use as a template (the plugin clones it per product),
+    or select <b>several</b> existing cards to fill them in place.
+  </p>
+  <textarea id="tsv" placeholder="Page Number&#9;Display Order&#9;Product&#9;…"></textarea>
+
+  <label class="check"><input type="checkbox" id="pull-images" checked> Download product images</label>
+  <label class="check"><input type="checkbox" id="cut-images"> Remove background from each product image</label>
+  <label class="check"><input type="checkbox" id="hide-empty" checked> Hide layers with no value</label>
+
+  <div class="row">
+    <label>Grid columns</label><input type="number" id="cols" value="4" min="1" max="20">
+    <label style="flex:0 0 auto">Gap</label><input type="number" id="gap" value="40" min="0" max="500">
+  </div>
+
+  <button id="run-flyer">Build cards</button>
+  <div class="bar"><i id="bar-flyer"></i></div>
+  <div class="status" id="log-flyer">Paste a table to begin.</div>
+</div>
+
+<!-- ---------------------------------------------------------------- -->
+<div class="panel" id="p-bg">
+  <div class="sel" id="sel-bg">Nothing selected</div>
+
+  <h3>Background removal</h3>
+  <p class="hint">
+    Select any layers that have image fills — product shots, a logo, a photo in
+    a frame — and cut the background out on-device. Nothing is uploaded and
+    there is no per-image cost. The first run downloads about 18&nbsp;MB of model
+    and runtime, then it is cached for the session.
+  </p>
+
+  <button id="run-bg">Remove background from selection</button>
+  <div class="bar"><i id="bar-bg"></i></div>
+  <div class="status" id="log-bg">Ready.</div>
+</div>
+
+<!-- ---------------------------------------------------------------- -->
+<div class="panel" id="p-settings">
+  <h3>Model</h3>
+  <p class="hint">
+    Pick the <code>u2netp.onnx</code> file from disk — this always works and needs
+    no deploy. It lives in your repo at <code>public/models/u2netp.onnx</code>.
+    Chosen once per session.
+  </p>
+  <input type="file" id="model-file" accept=".onnx">
+  <div id="model-file-state" class="hint" style="margin:6px 0 0"></div>
+
+  <p class="hint" style="margin-top:12px">
+    Or load it over the network. This needs
+    <code>Access-Control-Allow-Origin</code> on <code>/models/</code> —
+    see <code>cors-patch.md</code>. Without that header the browser blocks it.
+  </p>
+  <input type="text" id="model-url" value="https://app.cirqle.work/models/u2netp.onnx">
+
+  <h3 style="margin-top:14px">Runtime</h3>
+  <p class="hint">onnxruntime-web, pinned to the version Cirqle uses.</p>
+  <input type="text" id="ort-base" value="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/">
+
+  <h3 style="margin-top:14px">Image layer</h3>
+  <p class="hint">Layer name that receives the product photo.</p>
+  <input type="text" id="image-token" value="#imageurl">
+
+  <h3 style="margin-top:14px">Layer naming</h3>
+  <p class="hint">
+    Cirqle writes each sheet column to a layer named <code>#</code> + the column
+    name, lowercased with spaces removed — <code>#product</code>,
+    <code>#offerprice</code>, <code>#mrp</code>, <code>#price1</code>,
+    <code>#offerdatedisplay</code>. Same convention as the Google&nbsp;Sheets
+    plugin, so existing templates work unchanged.
+  </p>
+</div>
+
+<script>
+/* =================================================================== *
+ * Tabs
+ * =================================================================== */
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.onclick = () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'))
+    tab.classList.add('active')
+    document.getElementById('p-' + tab.dataset.panel).classList.add('active')
+  }
+})
+
+function post(msg) { parent.postMessage({ pluginMessage: msg }, '*') }
+
+function logTo(id, text, cls) {
+  const box = document.getElementById(id)
+  const line = document.createElement('div')
+  if (cls) line.className = cls
+  line.textContent = text
+  box.appendChild(line)
+  box.scrollTop = box.scrollHeight
+}
+function clearLog(id) { document.getElementById(id).textContent = '' }
+function setBar(id, frac) { document.getElementById(id).style.width = Math.round(frac * 100) + '%' }
+
+/* =================================================================== *
+ * Table parsing
+ *
+ * Cirqle's "Copy table" produces TSV; "Download CSV" produces quoted CSV.
+ * Accept both so staff can use whichever button they already know.
+ * =================================================================== */
+
+function parseDelimited(text) {
+  const rows = []
+  let row = [], cell = '', quoted = false
+  const delim = text.split('\n')[0].indexOf('\t') !== -1 ? '\t' : ','
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (quoted) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { cell += '"'; i++ } else { quoted = false }
+      } else cell += ch
+      continue
+    }
+    if (ch === '"') { quoted = true; continue }
+    if (ch === delim) { row.push(cell); cell = ''; continue }
+    if (ch === '\r') continue
+    if (ch === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; continue }
+    cell += ch
+  }
+  if (cell.length || row.length) { row.push(cell); rows.push(row) }
+  return rows.filter(r => r.some(c => String(c).trim() !== ''))
+}
+
+function headerToToken(header) {
+  return '#' + String(header).trim().toLowerCase().replace(/\s+/g, '')
+}
+
+function buildProducts(text) {
+  const rows = parseDelimited(text)
+  if (rows.length < 2) throw new Error('Need a header row and at least one product row.')
+  const headers = rows[0].map(h => String(h).trim())
+  const tokens = headers.map(headerToToken)
+
+  const imageIdx = headers.findIndex(h => h.toLowerCase() === 'image url')
+  const products = []
+
+  for (let r = 1; r < rows.length; r++) {
+    const cells = rows[r]
+    const fields = {}
+    for (let c = 0; c < tokens.length; c++) {
+      fields[tokens[c]] = (cells[c] === undefined ? '' : String(cells[c]).trim())
+    }
+    products.push({
+      fields: fields,
+      imageUrl: imageIdx >= 0 && cells[imageIdx] ? String(cells[imageIdx]).trim() : '',
+      image: null,
+    })
+  }
+  return { products: products, headers: headers }
+}
+
+/* =================================================================== *
+ * Background removal — u2netp via onnxruntime-web.
+ *
+ * A direct port of src/lib/images/remove-background.ts so a photo cut here
+ * matches one cut in the Cirqle catalog. The plugin UI is a normal browser
+ * iframe, so WebAssembly and canvas both work; the sandbox half cannot do
+ * either, which is why bytes travel back and forth.
+ * =================================================================== */
+
+const MODEL_SIZE = 320
+const MAX_DIM = 2000
+let sessionPromise = null
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script')
+    s.src = src
+    s.onload = resolve
+    s.onerror = () => reject(new Error('Could not load the runtime from ' + src))
+    document.head.appendChild(s)
+  })
+}
+
+function getSession(logId) {
+  if (!sessionPromise) {
+    sessionPromise = (async () => {
+      const base = document.getElementById('ort-base').value.trim()
+      const modelUrl = document.getElementById('model-url').value.trim()
+
+      if (!window.ort) {
+        logTo(logId, 'Loading runtime…')
+        await loadScript(base + 'ort.min.js')
+      }
+      if (!window.ort) throw new Error('onnxruntime-web did not initialise.')
+
+      ort.env.wasm.wasmPaths = base
+      // Multi-threading needs cross-origin isolation, which a plugin iframe
+      // does not have. u2netp is small enough to run single-threaded.
+      ort.env.wasm.numThreads = 1
+
+      logTo(logId, 'Loading model…')
+      let buf
+      const picked = document.getElementById('model-file').files[0]
+      if (picked) {
+        // Local file wins: no network, no CORS, works before anything is
+        // deployed. This is the path that always succeeds.
+        buf = new Uint8Array(await picked.arrayBuffer())
+      } else {
+        try {
+          const res = await fetch(modelUrl)
+          if (!res.ok) throw new Error('HTTP ' + res.status)
+          buf = new Uint8Array(await res.arrayBuffer())
+        } catch (e) {
+          // A cross-origin fetch that the server won't allow surfaces as an
+          // opaque TypeError, so name the actual cause instead of "failed to
+          // fetch" — otherwise this looks like the model is missing.
+          throw new Error(
+            'Could not load the model from ' + modelUrl + ' (' + e.message + ').\n' +
+            'Most likely CORS: /models/ needs an Access-Control-Allow-Origin header ' +
+            '(see cors-patch.md). Quick fix: go to Settings and pick u2netp.onnx from disk.'
+          )
+        }
+      }
+
+      const session = await ort.InferenceSession.create(buf, { executionProviders: ['wasm'] })
+      logTo(logId, 'Model ready.', 'ok')
+      return { ort: window.ort, session: session }
+    })()
+    sessionPromise.catch(() => { sessionPromise = null })
+  }
+  return sessionPromise
+}
+
+function makeCanvas(w, h) {
+  const canvas = document.createElement('canvas')
+  canvas.width = w; canvas.height = h
+  return { canvas: canvas, ctx: canvas.getContext('2d', { willReadFrequently: true }) }
+}
+
+async function removeBackground(blob, logId) {
+  const pair = await getSession(logId)
+  const session = pair.session
+  const bitmap = await createImageBitmap(blob)
+
+  const scale = Math.min(1, MAX_DIM / Math.max(bitmap.width, bitmap.height))
+  const outW = Math.max(1, Math.round(bitmap.width * scale))
+  const outH = Math.max(1, Math.round(bitmap.height * scale))
+
+  // 1. Resize to 320×320 and apply ImageNet normalisation — how the model
+  //    was trained, and how rembg feeds it.
+  const inC = makeCanvas(MODEL_SIZE, MODEL_SIZE)
+  inC.ctx.drawImage(bitmap, 0, 0, MODEL_SIZE, MODEL_SIZE)
+  const inData = inC.ctx.getImageData(0, 0, MODEL_SIZE, MODEL_SIZE).data
+
+  const plane = MODEL_SIZE * MODEL_SIZE
+  const input = new Float32Array(3 * plane)
+  for (let i = 0; i < plane; i++) {
+    input[i]             = (inData[i * 4]     / 255 - 0.485) / 0.229
+    input[plane + i]     = (inData[i * 4 + 1] / 255 - 0.456) / 0.224
+    input[2 * plane + i] = (inData[i * 4 + 2] / 255 - 0.406) / 0.225
+  }
+
+  // 2. First declared output (d0) is the fused saliency mask.
+  const tensor = new ort.Tensor('float32', input, [1, 3, MODEL_SIZE, MODEL_SIZE])
+  const feeds = {}
+  feeds[session.inputNames[0]] = tensor
+  const results = await session.run(feeds)
+  const mask = results[session.outputNames[0]].data
+
+  // 3. Min-max normalise to 0..255 alpha. The raw mask is unbounded, so a
+  //    fixed threshold would clip differently on every photo.
+  let min = Infinity, max = -Infinity
+  for (let i = 0; i < mask.length; i++) {
+    if (mask[i] < min) min = mask[i]
+    if (mask[i] > max) max = mask[i]
+  }
+  const range = (max - min) || 1
+
+  const mC = makeCanvas(MODEL_SIZE, MODEL_SIZE)
+  const mImg = mC.ctx.createImageData(MODEL_SIZE, MODEL_SIZE)
+  for (let i = 0; i < plane; i++) {
+    const a = Math.round(((mask[i] - min) / range) * 255)
+    mImg.data[i * 4] = 255
+    mImg.data[i * 4 + 1] = 255
+    mImg.data[i * 4 + 2] = 255
+    mImg.data[i * 4 + 3] = a
+  }
+  mC.ctx.putImageData(mImg, 0, 0)
+
+  // 4. Paint the original, then keep only what the mask says is subject.
+  const oC = makeCanvas(outW, outH)
+  oC.ctx.drawImage(bitmap, 0, 0, outW, outH)
+  oC.ctx.globalCompositeOperation = 'destination-in'
+  oC.ctx.drawImage(mC.canvas, 0, 0, outW, outH)
+  oC.ctx.globalCompositeOperation = 'source-over'
+  bitmap.close && bitmap.close()
+
+  const outBlob = await new Promise(res => oC.canvas.toBlob(res, 'image/png'))
+  if (!outBlob) throw new Error('Could not encode the cut-out.')
+  return new Uint8Array(await outBlob.arrayBuffer())
+}
+
+/* =================================================================== *
+ * Flyer build
+ * =================================================================== */
+
+document.getElementById('run-flyer').onclick = async () => {
+  const btn = document.getElementById('run-flyer')
+  clearLog('log-flyer'); setBar('bar-flyer', 0)
+  btn.disabled = true
+
+  try {
+    const parsed = buildProducts(document.getElementById('tsv').value)
+    const products = parsed.products
+    logTo('log-flyer', products.length + ' products, ' + parsed.headers.length + ' columns.')
+
+    const wantImages = document.getElementById('pull-images').checked
+    const wantCut = document.getElementById('cut-images').checked
+
+    if (wantImages) {
+      let withUrl = 0
+      for (let i = 0; i < products.length; i++) {
+        const p = products[i]
+        setBar('bar-flyer', (i + 1) / products.length)
+        if (!p.imageUrl) continue
+        withUrl++
+        try {
+          const res = await fetch(p.imageUrl)
+          if (!res.ok) throw new Error('HTTP ' + res.status)
+          const blob = await res.blob()
+          p.image = wantCut
+            ? await removeBackground(blob, 'log-flyer')
+            : new Uint8Array(await blob.arrayBuffer())
+        } catch (e) {
+          // One bad photo URL must not sink the whole flyer — note it and
+          // carry on; the card is still built with its text.
+          logTo('log-flyer', '· image failed: ' + (p.fields['#product'] || p.imageUrl) + ' — ' + e.message, 'err')
+        }
+      }
+      logTo('log-flyer', withUrl + ' of ' + products.length + ' rows had an image URL.')
+    }
+
+    post({
+      type: 'apply-products',
+      products: products.map(p => ({ fields: p.fields, image: p.image })),
+      hideEmpty: document.getElementById('hide-empty').checked,
+      imageToken: document.getElementById('image-token').value.trim() || '#imageurl',
+      columns: parseInt(document.getElementById('cols').value, 10) || 4,
+      gap: parseInt(document.getElementById('gap').value, 10) || 40,
+      title: products.length ? (products[0].fields['#offertitle'] || '') : '',
+    })
+  } catch (e) {
+    logTo('log-flyer', e.message, 'err')
+    btn.disabled = false
+  }
+}
+
+/* =================================================================== *
+ * Background tab
+ * =================================================================== */
+
+document.getElementById('run-bg').onclick = () => {
+  clearLog('log-bg'); setBar('bar-bg', 0)
+  document.getElementById('run-bg').disabled = true
+  post({ type: 'bg-collect' })
+}
+
+async function handleBgJobs(jobs) {
+  logTo('log-bg', jobs.length + ' image' + (jobs.length === 1 ? '' : 's') + ' found.')
+  let done = 0
+  for (const job of jobs) {
+    try {
+      const blob = new Blob([job.bytes])
+      const out = await removeBackground(blob, 'log-bg')
+      post({ type: 'bg-result', id: job.id, bytes: out })
+      done++
+      logTo('log-bg', '✓ ' + job.name, 'ok')
+    } catch (e) {
+      logTo('log-bg', '✗ ' + job.name + ' — ' + e.message, 'err')
+    }
+    setBar('bar-bg', (done + 1) / jobs.length)
+  }
+  setBar('bar-bg', 1)
+  post({ type: 'bg-finished', count: done })
+  logTo('log-bg', 'Finished: ' + done + ' of ' + jobs.length + '.')
+  document.getElementById('run-bg').disabled = false
+}
+
+/* =================================================================== *
+ * Messages from the sandbox
+ * =================================================================== */
+
+onmessage = (event) => {
+  const msg = event.data.pluginMessage
+  if (!msg) return
+
+  switch (msg.type) {
+    case 'selection': {
+      const text = msg.count === 0
+        ? 'Nothing selected'
+        : msg.count + ' selected: ' + msg.names.join(', ') + (msg.count > 3 ? '…' : '')
+      document.getElementById('sel-flyer').textContent = text
+      document.getElementById('sel-live').textContent = text
+      document.getElementById('sel-bg').textContent =
+        text + (msg.imageNodes ? ('  ·  ' + msg.imageNodes + ' image layer' + (msg.imageNodes === 1 ? '' : 's')) : '')
+      break
+    }
+    case 'settings':
+      if (msg.settings.url) document.getElementById('live-url').value = msg.settings.url
+      if (msg.settings.secret) document.getElementById('live-secret').value = msg.settings.secret
+      if (msg.settings.modelUrl) document.getElementById('model-url').value = msg.settings.modelUrl
+      break
+    case 'template-captured':
+      if (msg.ok) {
+        logTo('log-live', 'Template: ' + msg.name, 'ok')
+        startWatch()
+      } else {
+        logTo('log-live', msg.message, 'err')
+      }
+      break
+    case 'export-ready': {
+      const blob = new Blob([msg.bytes], { type: 'image/png' })
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = msg.name + '.png'
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000)
+      logTo(document.getElementById('p-live').classList.contains('active') ? 'log-live' : 'log-flyer',
+            'Exported ' + msg.name + '.png (2×).', 'ok')
+      break
+    }
+    case 'progress':
+      setBar('bar-flyer', msg.done / msg.total)
+      break
+    case 'bg-jobs':
+      handleBgJobs(msg.jobs)
+      break
+    case 'apply-done': {
+      const r = msg.report
+      setBar('bar-flyer', 1)
+      logTo('log-flyer', r.cards + ' cards, ' + r.filled + ' layers filled.', 'ok')
+      const missing = Object.keys(r.missing || {})
+      if (missing.length) {
+        logTo('log-flyer', 'No layer found for: ' + missing.join(', '), 'err')
+        logTo('log-flyer', 'Add text layers with those names to the template, or ignore if unused.')
+      }
+      if (r.overflow) logTo('log-flyer', r.overflow + ' products had no card to go in.', 'err')
+      document.getElementById('run-flyer').disabled = false
+      break
+    }
+    case 'notify':
+      logTo('log-bg', msg.message)
+      break
+    case 'error':
+      logTo(document.querySelector('.panel.active').id === 'p-bg' ? 'log-bg' : 'log-flyer', msg.message, 'err')
+      document.getElementById('run-flyer').disabled = false
+      document.getElementById('run-bg').disabled = false
+      break
+  }
+}
+
+/* =================================================================== *
+ * Live tab — pull offers straight from Cirqle, watch for changes.
+ *
+ * Contract with the companion endpoint (server/ folder):
+ *   GET /api/figma/offers            → { campaigns:[{token,client,title,updatedAt}] }
+ *   GET /api/figma/offers/:token     → { headers:[...], rows:[[...]] }
+ * Both authenticated with `Authorization: Bearer <offer_sheet_secret>` —
+ * the same secret the Sheets sync already uses, so there is no new
+ * credential to manage.
+ * =================================================================== */
+
+const live = { campaigns: [], watching: null, lastSeen: {} }
+
+function liveHeaders() {
+  return { 'Authorization': 'Bearer ' + document.getElementById('live-secret').value.trim() }
+}
+function liveBase() {
+  return document.getElementById('live-url').value.trim().replace(/\/+$/, '')
+}
+function saveSettings() {
+  post({ type: 'save-settings', settings: {
+    url: liveBase(),
+    secret: document.getElementById('live-secret').value.trim(),
+    modelUrl: document.getElementById('model-url').value.trim(),
+  } })
+}
+
+async function liveFetch(path) {
+  const res = await fetch(liveBase() + path, { headers: liveHeaders() })
+  if (res.status === 401) throw new Error('Unauthorized — check the API secret.')
+  if (!res.ok) throw new Error('HTTP ' + res.status + ' from ' + path)
+  return res.json()
+}
+
+document.getElementById('live-load').onclick = async () => {
+  clearLog('log-live')
+  try {
+    saveSettings()
+    const data = await liveFetch('/api/figma/offers')
+    live.campaigns = data.campaigns || []
+    const sel = document.getElementById('live-campaigns')
+    sel.innerHTML = ''
+    for (const c of live.campaigns) {
+      const opt = document.createElement('option')
+      opt.value = c.token
+      opt.textContent = c.client + (c.title ? ' — ' + c.title : '') + ' (' + (c.products || '?') + ' products)'
+      sel.appendChild(opt)
+    }
+    sel.style.display = live.campaigns.length ? 'block' : 'none'
+    document.getElementById('live-build').disabled = live.campaigns.length === 0
+    logTo('log-live', live.campaigns.length + ' active offer' + (live.campaigns.length === 1 ? '' : 's') + ' found.', 'ok')
+    if (!live.campaigns.length) logTo('log-live', 'No active campaigns right now.')
+  } catch (e) {
+    logTo('log-live', e.message, 'err')
+    if (/Failed to fetch/i.test(e.message)) {
+      logTo('log-live', 'If the URL is right, the endpoint may not be deployed yet — see server/README, or use the Paste tab.')
+    }
+  }
+}
+
+function rowsToProducts(headers, rows) {
+  const tokens = headers.map(headerToToken)
+  const imageIdx = headers.findIndex(h => String(h).toLowerCase() === 'image url')
+  return rows.map(cells => {
+    const fields = {}
+    for (let c = 0; c < tokens.length; c++) {
+      fields[tokens[c]] = (cells[c] === undefined || cells[c] === null) ? '' : String(cells[c]).trim()
+    }
+    return {
+      fields: fields,
+      imageUrl: imageIdx >= 0 && cells[imageIdx] ? String(cells[imageIdx]).trim() : '',
+      image: null,
+    }
+  })
+}
+
+async function livePullAndBuild(token, viaWatch) {
+  const data = await liveFetch('/api/figma/offers/' + encodeURIComponent(token))
+  const products = rowsToProducts(data.headers, data.rows)
+  logTo('log-live', products.length + ' products pulled.' + (viaWatch ? ' (watch)' : ''))
+
+  const wantCut = document.getElementById('live-cut').checked
+  let withUrl = 0
+  for (let i = 0; i < products.length; i++) {
+    const p = products[i]
+    setBar('bar-live', (i + 1) / products.length)
+    if (!p.imageUrl) continue
+    withUrl++
+    try {
+      const res = await fetch(p.imageUrl)
+      if (!res.ok) throw new Error('HTTP ' + res.status)
+      const blob = await res.blob()
+      p.image = wantCut ? await removeBackground(blob, 'log-live') : new Uint8Array(await blob.arrayBuffer())
+    } catch (e) {
+      logTo('log-live', '· image failed: ' + (p.fields['#product'] || p.imageUrl) + ' — ' + e.message, 'err')
+    }
+  }
+  if (withUrl) logTo('log-live', withUrl + ' images downloaded.')
+
+  post({
+    type: 'apply-products',
+    products: products.map(p => ({ fields: p.fields, image: p.image })),
+    hideEmpty: true,
+    imageToken: document.getElementById('image-token').value.trim() || '#imageurl',
+    columns: parseInt(document.getElementById('cols').value, 10) || 4,
+    gap: parseInt(document.getElementById('gap').value, 10) || 40,
+    title: products.length ? (products[0].fields['#offertitle'] || products[0].fields['#client'] || '') : '',
+    useTemplate: !!viaWatch,
+    autoExport: document.getElementById('live-export').checked,
+  })
+}
+
+document.getElementById('live-build').onclick = async () => {
+  clearLog('log-live'); setBar('bar-live', 0)
+  document.getElementById('live-build').disabled = true
+  try {
+    await livePullAndBuild(document.getElementById('live-campaigns').value, false)
+  } catch (e) {
+    logTo('log-live', e.message, 'err')
+  }
+  document.getElementById('live-build').disabled = false
+}
+
+/* --- watch mode ---------------------------------------------------- */
+
+const WATCH_INTERVAL_MS = 60000
+
+document.getElementById('live-watch').onclick = () => {
+  const btn = document.getElementById('live-watch')
+  if (live.watching) {
+    clearInterval(live.watching)
+    live.watching = null
+    btn.textContent = 'Arm watch mode'
+    logTo('log-live', 'Watch mode off.')
+    return
+  }
+  // The template is captured once at arming time, so later rebuilds don't
+  // depend on whatever happens to be selected when the timer fires.
+  post({ type: 'capture-template' })
+}
+
+function startWatch() {
+  const token = document.getElementById('live-campaigns').value
+  if (!token) { logTo('log-live', 'Load offers and pick a client first.', 'err'); return }
+  document.getElementById('live-watch').textContent = 'Stop watching'
+  logTo('log-live', 'Watching — checking every ' + (WATCH_INTERVAL_MS / 1000) + 's. Leave this window open.', 'ok')
+
+  live.watching = setInterval(async () => {
+    try {
+      const data = await liveFetch('/api/figma/offers')
+      const current = (data.campaigns || []).find(c => c.token === token)
+      if (!current) return
+      const seen = live.lastSeen[token]
+      if (seen && seen !== current.updatedAt) {
+        logTo('log-live', 'Offer changed — rebuilding…', 'ok')
+        await livePullAndBuild(token, true)
+      }
+      live.lastSeen[token] = current.updatedAt
+    } catch (e) {
+      // A transient network blip must not kill the watcher; log and retry
+      // on the next tick.
+      logTo('log-live', 'watch: ' + e.message, 'err')
+    }
+  }, WATCH_INTERVAL_MS)
+}
+
+// Picking a different model must invalidate the cached session, or the old
+// weights keep running and the change looks like it did nothing.
+document.getElementById('model-file').onchange = (e) => {
+  const file = e.target.files[0]
+  document.getElementById('model-file-state').textContent = file
+    ? ('Using ' + file.name + ' — ' + (file.size / 1048576).toFixed(1) + ' MB')
+    : ''
+  sessionPromise = null
+}
+
+post({ type: 'ready' })
+</script>
+</body>
+</html>

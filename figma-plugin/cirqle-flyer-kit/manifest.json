@@ -1,0 +1,13 @@
+{
+  "name": "Cirqle Flyer Kit",
+  "id": "cirqle-flyer-kit",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["*"],
+    "reasoning": "Loads the onnxruntime-web runtime from jsDelivr and the u2netp background-removal model from the Cirqle app, and downloads product photos whose URLs are entered by staff per offer. Those photo URLs are arbitrary (client uploads, Supabase storage, image hosts), so they cannot be enumerated in advance."
+  }
+}

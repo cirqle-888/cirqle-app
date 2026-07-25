@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root { font-family: Inter, -apple-system, system-ui, sans-serif; font-size: 12px; }
+  body { margin: 0; background: var(--figma-color-bg, #fff); color: var(--figma-color-text, #111); }
+  .wrap { padding: 12px 14px 16px; }
+  h1 { font-size: 13px; margin: 0 0 10px; display: flex; align-items: center; gap: 7px; }
+  h1 .dot { width: 9px; height: 9px; border-radius: 50%; background: #7c3aed; display: inline-block; }
+  label { display: block; margin: 8px 0 3px; color: var(--figma-color-text-secondary, #777); font-size: 11px; }
+  input, select {
+    width: 100%; box-sizing: border-box; padding: 7px 8px;
+    border: 1px solid var(--figma-color-border, #ddd); border-radius: 6px;
+    background: var(--figma-color-bg-secondary, #fafafa); color: var(--figma-color-text, #111);
+    font-size: 11.5px;
+  }
+  select:disabled, input:disabled { opacity: .55; }
+  button {
+    width: 100%; padding: 8px 10px; margin-top: 8px; border: 0; border-radius: 6px;
+    cursor: pointer; background: #7c3aed; color: #fff; font-weight: 600; font-size: 12px;
+  }
+  button.secondary { background: var(--figma-color-bg-secondary, #f0f0f0); color: var(--figma-color-text, #111); border: 1px solid var(--figma-color-border, #ddd); font-weight: 500; }
+  button:disabled { opacity: .45; cursor: default; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .grid2 button { margin-top: 8px; }
+  hr { border: 0; border-top: 1px solid var(--figma-color-border, #e5e5e5); margin: 12px 0; }
+  .chips { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
+  .chip { padding: 4px 9px; border-radius: 999px; font-size: 10.5px; font-weight: 600; background: var(--figma-color-bg-secondary, #f0f0f0); color: var(--figma-color-text-secondary, #777); }
+  .chip.on { background: #dcfce7; color: #166534; }
+  .chip.warn { background: #fef3c7; color: #92400e; }
+  .chip.err { background: #fee2e2; color: #991b1b; }
+  .bar { height: 4px; border-radius: 2px; background: var(--figma-color-bg-secondary, #eee); overflow: hidden; margin-top: 10px; }
+  .bar > i { display: block; height: 100%; width: 0; background: #7c3aed; transition: width .15s; }
+  .log { margin-top: 10px; padding: 8px; border-radius: 6px; background: var(--figma-color-bg-secondary, #f6f6f6);
+         max-height: 200px; overflow: auto; font-size: 11px; line-height: 1.5; }
+  .log .err { color: #dc2626; }
+  .log .warn { color: #b45309; }
+  .log .ok { color: #059669; }
+  .log .fix { color: var(--figma-color-text-secondary, #777); padding-left: 12px; }
+  .row2 { display: flex; gap: 8px; }
+  .row2 > div { flex: 1; }
+  table.preview { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+  table.preview td, table.preview th { padding: 2.5px 4px; border-bottom: 1px solid var(--figma-color-border, #e8e8e8); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><span class="dot"></span>Cirqle Studio</h1>
+
+  <label>Server URL</label>
+  <input type="text" id="url" value="https://app.cirqle.work" spellcheck="false">
+  <label>Authentication Token</label>
+  <input type="password" id="token" placeholder="shared secret (Apps → Offer Intake)" spellcheck="false">
+  <button id="connect">Connect</button>
+
+  <hr>
+
+  <label>Client</label>
+  <select id="client" disabled><option>— connect first —</option></select>
+  <label>Offer</label>
+  <select id="offer" disabled><option>—</option></select>
+  <label>Template <span id="template-hint" style="font-weight:400"></span></label>
+  <select id="template" disabled><option>— none found on this page —</option></select>
+  <label>Page</label>
+  <select id="page" disabled><option>All pages</option></select>
+
+  <div class="row2" style="margin-top:8px">
+    <div><label style="margin-top:0">Columns</label><input type="number" id="cols" value="4" min="1" max="12"></div>
+    <div><label style="margin-top:0">Gap</label><input type="number" id="gap" value="40" min="0" max="400"></div>
+  </div>
+
+  <hr>
+
+  <button class="secondary" id="load" disabled>Load Offers</button>
+  <div class="grid2">
+    <button class="secondary" id="preview" disabled>Preview</button>
+    <button class="secondary" id="validate" disabled>Validate</button>
+  </div>
+  <button id="build" disabled>Build Flyer</button>
+  <button class="secondary" id="refresh">Refresh</button>
+
+  <div class="chips">
+    <span class="chip" id="chip-conn">Offline</span>
+    <span class="chip" id="chip-count">—</span>
+    <span class="chip" id="chip-ready">—</span>
+  </div>
+
+  <div class="bar"><i id="bar"></i></div>
+  <div class="log" id="log">Enter the server URL and token, then Connect.</div>
+</div>
+
+<script>
+'use strict'
+
+/* ------------------------------------------------------------------ *
+ * State
+ * ------------------------------------------------------------------ */
+const state = {
+  offers: [],          // rows from /api/figma/offers
+  campaign: null,      // detail from /api/figma/campaign/:id
+  templates: [],       // from the sandbox
+  templateIssues: [],  // last template validation
+  templateTokens: [],
+  validated: false,
+}
+
+const $ = id => document.getElementById(id)
+function post(msg) { parent.postMessage({ pluginMessage: msg }, '*') }
+
+function log(text, cls) {
+  const line = document.createElement('div')
+  if (cls) line.className = cls
+  line.textContent = text
+  $('log').appendChild(line)
+  $('log').scrollTop = $('log').scrollHeight
+}
+function logFix(text) { log('↳ ' + text, 'fix') }
+function clearLog() { $('log').textContent = '' }
+function setBar(frac) { $('bar').style.width = Math.round(frac * 100) + '%' }
+
+function chip(id, text, cls) {
+  const el = $(id)
+  el.textContent = text
+  el.className = 'chip' + (cls ? ' ' + cls : '')
+}
+
+/**
+ * The three-part error contract: what failed, where, how to fix it.
+ * Every failure path in the UI funnels through here.
+ */
+function reportError(what, where, fix) {
+  log('✗ ' + what + '  [' + where + ']', 'err')
+  if (fix) logFix(fix)
+}
+
+/* ------------------------------------------------------------------ *
+ * API
+ * ------------------------------------------------------------------ */
+function base() { return $('url').value.trim().replace(/\/+$/, '') }
+
+async function api(path) {
+  let res
+  try {
+    res = await fetch(base() + path, {
+      headers: { 'Authorization': 'Bearer ' + $('token').value.trim() },
+    })
+  } catch (e) {
+    throw {
+      what: 'Could not reach the server.',
+      where: 'GET ' + path,
+      fix: 'Check the Server URL and your internet connection. If both are fine, the API routes may not be deployed yet (see README).',
+    }
+  }
+  let body = null
+  try { body = await res.json() } catch (e) { /* non-JSON error page */ }
+  if (res.status === 401) {
+    throw { what: 'Authentication failed.', where: 'GET ' + path, fix: (body && body.error) || 'Paste the shared secret from Apps → Offer Intake → Shared sync script.' }
+  }
+  if (!res.ok || !body || body.ok === false) {
+    throw { what: 'Server error (HTTP ' + res.status + ').', where: 'GET ' + path, fix: (body && body.error) || 'Check the server logs for this route.' }
+  }
+  return body
+}
+
+/* ------------------------------------------------------------------ *
+ * Connect / offers / campaign
+ * ------------------------------------------------------------------ */
+async function connect() {
+  clearLog(); setBar(0)
+  chip('chip-conn', 'Connecting…')
+  try {
+    post({ type: 'save-settings', settings: { url: base(), token: $('token').value.trim() } })
+    const data = await api('/api/figma/offers')
+    state.offers = data.offers || []
+    chip('chip-conn', 'Connected', 'on')
+    fillClientDropdown()
+    log('Connected. ' + state.offers.length + ' active offer' + (state.offers.length === 1 ? '' : 's') + '.', 'ok')
+    if (!state.offers.length) logFix('No active campaigns right now — save an offer in Cirqle first.')
+    $('load').disabled = state.offers.length === 0
+  } catch (e) {
+    chip('chip-conn', 'Offline', 'err')
+    reportError(e.what || String(e), e.where || 'Connect', e.fix)
+  }
+}
+
+function fillClientDropdown() {
+  const seen = new Map()
+  for (const o of state.offers) {
+    if (!seen.has(o.clientId)) seen.set(o.clientId, o.clientName)
+  }
+  const sel = $('client')
+  sel.innerHTML = ''
+  for (const [id, name] of seen) {
+    const opt = document.createElement('option')
+    opt.value = id
+    opt.textContent = name
+    sel.appendChild(opt)
+  }
+  sel.disabled = seen.size === 0
+  fillOfferDropdown()
+}
+
+function fillOfferDropdown() {
+  const clientId = $('client').value
+  const sel = $('offer')
+  sel.innerHTML = ''
+  for (const o of state.offers.filter(o => String(o.clientId) === String(clientId))) {
+    const opt = document.createElement('option')
+    opt.value = o.campaignId
+    opt.textContent = o.campaignName + ' · ' + o.productCount + ' products · ' + o.pageCount + ' page' + (o.pageCount === 1 ? '' : 's')
+    sel.appendChild(opt)
+  }
+  sel.disabled = sel.options.length === 0
+  // A different offer means the loaded campaign is stale.
+  state.campaign = null
+  state.validated = false
+  chip('chip-count', '—')
+  chip('chip-ready', '—')
+  updateButtons()
+}
+
+async function loadCampaign() {
+  clearLog(); setBar(0)
+  const id = $('offer').value
+  if (!id) { reportError('No offer selected.', 'Load Offers', 'Pick a client and an offer first.'); return }
+  try {
+    const data = await api('/api/figma/campaign/' + encodeURIComponent(id))
+    state.campaign = data
+    state.validated = false
+    chip('chip-count', data.campaign.productCount + ' Products', 'on')
+    chip('chip-ready', 'Not validated', 'warn')
+    fillPageDropdown(data.campaign.pageCount)
+    log('Loaded "' + data.campaign.name + '" — ' + data.campaign.clientName + ', ' +
+        data.campaign.productCount + ' products across ' + data.campaign.pageCount + ' page' +
+        (data.campaign.pageCount === 1 ? '' : 's') + '.', 'ok')
+    updateButtons()
+  } catch (e) {
+    reportError(e.what || String(e), e.where || 'Load Offers', e.fix)
+  }
+}
+
+function fillPageDropdown(pageCount) {
+  const sel = $('page')
+  sel.innerHTML = ''
+  const all = document.createElement('option')
+  all.value = ''
+  all.textContent = 'All pages'
+  sel.appendChild(all)
+  for (let p = 1; p <= pageCount; p++) {
+    const opt = document.createElement('option')
+    opt.value = String(p)
+    opt.textContent = 'Page ' + p
+    sel.appendChild(opt)
+  }
+  sel.disabled = false
+}
+
+function selectedProducts() {
+  if (!state.campaign) return []
+  const page = $('page').value
+  const all = state.campaign.products
+  return page === '' ? all : all.filter(p => String(p.page) === page)
+}
+
+/* ------------------------------------------------------------------ *
+ * Preview
+ * ------------------------------------------------------------------ */
+function preview() {
+  clearLog()
+  const products = selectedProducts()
+  if (!products.length) { reportError('Nothing to preview.', 'Preview', 'Load an offer first.'); return }
+  const table = document.createElement('table')
+  table.className = 'preview'
+  table.innerHTML = '<tr><th>Pg</th><th>Product</th><th>₹</th><th>MRP</th><th>Badge</th><th>Img</th></tr>'
+  for (const p of products) {
+    const tr = document.createElement('tr')
+    for (const value of [p.page, p.name, p.price ?? '', p.mrp ?? '', p.badge || '', p.imageUrl ? '✓' : '—']) {
+      const td = document.createElement('td')
+      td.textContent = String(value)
+      tr.appendChild(td)
+    }
+    table.appendChild(tr)
+  }
+  $('log').appendChild(table)
+  log(products.length + ' products on ' + ($('page').value ? 'page ' + $('page').value : 'all pages') + '.')
+}
+
+/* ------------------------------------------------------------------ *
+ * Validation — data checks here, template checks in the sandbox.
+ * ------------------------------------------------------------------ */
+function dataIssues(products) {
+  const issues = []
+  const push = (severity, message, fix) => issues.push({ severity, area: 'data', message, fix })
+
+  const noName = products.filter(p => !p.name || !p.name.trim())
+  if (noName.length) push('error', noName.length + ' product(s) have no name.', 'Fix them in Cirqle (Prepare Offer) and press Refresh.')
+
+  const noPrice = products.filter(p => p.price == null && p.offerType === 'price')
+  if (noPrice.length) push('warning', noPrice.length + ' price-type product(s) have no price: ' + noPrice.slice(0, 3).map(p => p.name).join(', ') + (noPrice.length > 3 ? '…' : ''), 'Set prices in Cirqle, or they print blank.')
+
+  const noImage = products.filter(p => !p.imageUrl)
+  if (noImage.length) push('warning', noImage.length + ' product(s) have no image — placeholders will be used.', 'Add photos in Cirqle (Missing images view), or continue with placeholders.')
+
+  const seen = new Map()
+  for (const p of products) {
+    const key = (p.name || '').trim().toLowerCase() + '|' + (p.weight || '').trim().toLowerCase()
+    seen.set(key, (seen.get(key) || 0) + 1)
+  }
+  const dupes = [...seen.entries()].filter(([, n]) => n > 1)
+  if (dupes.length) push('warning', 'Duplicate products: ' + dupes.map(([k, n]) => k.split('|')[0] + ' ×' + n).join(', '), 'Remove duplicates in Cirqle if unintended.')
+
+  return issues
+}
+
+function renderIssues(all) {
+  const errors = all.filter(i => i.severity === 'error')
+  const warnings = all.filter(i => i.severity === 'warning')
+  for (const issue of all) {
+    log((issue.severity === 'error' ? '✗ ' : '⚠ ') + '[' + issue.area + '] ' + issue.message, issue.severity === 'error' ? 'err' : 'warn')
+    if (issue.fix) logFix(issue.fix)
+  }
+  if (!all.length) log('✓ All checks passed.', 'ok')
+  chip('chip-ready', errors.length ? 'Blocked' : warnings.length ? 'Ready (warnings)' : 'Ready', errors.length ? 'err' : warnings.length ? 'warn' : 'on')
+  state.validated = errors.length === 0
+  updateButtons()
+}
+
+function validate() {
+  clearLog()
+  const products = selectedProducts()
+  if (!products.length) { reportError('Nothing to validate.', 'Validate', 'Load an offer first.'); return }
+  const templateId = $('template').value
+  if (!templateId) {
+    renderIssues([
+      ...dataIssues(products),
+      { severity: 'error', area: 'template', message: 'No template selected.', fix: 'Open the Figma page containing your product-card template (it needs #-named layers), press Refresh, then pick it.' },
+    ])
+    return
+  }
+  state._pendingDataIssues = dataIssues(products)
+  post({ type: 'validate-template', templateId })
+}
+
+function onTemplateValidated(msg) {
+  state.templateTokens = msg.tokens || []
+  const issues = [...(state._pendingDataIssues || []), ...(msg.issues || [])]
+
+  // Unknown #tokens: a layer named #procduct silently never fills — the
+  // designer deserves to hear about the typo instead of shipping a blank.
+  if (state.campaign && state.templateTokens.length) {
+    const known = new Set(state.campaign.bindings.layers)
+    const unknown = state.templateTokens.filter(t => !known.has(t) && t !== '#imageurl')
+    if (unknown.length) {
+      issues.push({
+        severity: 'warning', area: 'template',
+        message: 'Layer name(s) not matching any Cirqle column: ' + unknown.join(', '),
+        fix: 'Valid names: ' + state.campaign.bindings.layers.join(', ') + ' (plus aliases like #price, #image, #name).',
+      })
+    }
+  }
+  renderIssues(issues)
+}
+
+/* ------------------------------------------------------------------ *
+ * Build
+ * ------------------------------------------------------------------ */
+async function build() {
+  clearLog(); setBar(0)
+  const products = selectedProducts()
+  const templateId = $('template').value
+  if (!state.campaign) { reportError('No offer loaded.', 'Build Flyer', 'Press Load Offers first.'); return }
+  if (!templateId) { reportError('No template selected.', 'Build Flyer', 'Pick a template, or press Refresh to re-scan this page.'); return }
+  if (!products.length) { reportError('No products on this page selection.', 'Build Flyer', 'Choose another page.'); return }
+
+  $('build').disabled = true
+  try {
+    // Row i of bindings.rows aligns with campaign.products[i] — both are
+    // sorted by (page, display_order) server-side.
+    const layers = state.campaign.bindings.layers
+    const rows = state.campaign.bindings.rows
+    const allProducts = state.campaign.products
+    const pageFilter = $('page').value
+
+    const buildProducts = []
+    for (let i = 0; i < allProducts.length; i++) {
+      if (pageFilter !== '' && String(allProducts[i].page) !== pageFilter) continue
+      const fields = {}
+      for (let c = 0; c < layers.length; c++) fields[layers[c]] = String(rows[i][c] ?? '')
+      buildProducts.push({ fields, image: null, hasImageUrl: !!allProducts[i].imageUrl, _url: allProducts[i].imageUrl, _name: allProducts[i].name })
+    }
+
+    log('Downloading images…')
+    let downloaded = 0
+    for (let i = 0; i < buildProducts.length; i++) {
+      const bp = buildProducts[i]
+      setBar((i + 1) / buildProducts.length * 0.5)
+      if (!bp._url) continue
+      try {
+        const res = await fetch(bp._url)
+        if (!res.ok) throw new Error('HTTP ' + res.status)
+        bp.image = new Uint8Array(await (await res.blob()).arrayBuffer())
+        downloaded++
+      } catch (e) {
+        reportError('Image failed for "' + bp._name + '".', 'Image download', (e.message || e) + ' — a placeholder will be used; check the URL is public.')
+      }
+    }
+    log(downloaded + ' image(s) downloaded.')
+
+    const campaignInfo = state.campaign.campaign
+    post({
+      type: 'build',
+      templateId,
+      products: buildProducts.map(bp => ({ fields: bp.fields, image: bp.image, hasImageUrl: bp.hasImageUrl })),
+      columns: parseInt($('cols').value, 10) || 4,
+      gap: parseInt($('gap').value, 10) || 40,
+      frameName: campaignInfo.clientName + ' — ' + campaignInfo.name + (pageFilter ? ' — Page ' + pageFilter : ''),
+    })
+  } catch (e) {
+    reportError(e.what || (e.message || String(e)), e.where || 'Build Flyer', e.fix || 'Press Refresh and try again.')
+    $('build').disabled = false
+  }
+}
+
+function onBuildDone(report) {
+  setBar(1)
+  log('✓ ' + report.cards + ' cards built, ' + report.layersFilled + ' layers filled, ' +
+      report.imagesPlaced + ' images placed' + (report.placeholders ? ', ' + report.placeholders + ' placeholder(s)' : '') + '.', 'ok')
+  const missing = Object.keys(report.missingLayerCounts || {})
+  if (missing.length) {
+    log('⚠ Template has no layer for: ' + missing.join(', '), 'warn')
+    logFix('Add text layers with those #names to the template if you want that data on the card.')
+  }
+  chip('chip-ready', 'Built', 'on')
+  $('build').disabled = false
+}
+
+/* ------------------------------------------------------------------ *
+ * Templates & wiring
+ * ------------------------------------------------------------------ */
+function fillTemplateDropdown() {
+  const sel = $('template')
+  sel.innerHTML = ''
+  if (!state.templates.length) {
+    const opt = document.createElement('option')
+    opt.value = ''
+    opt.textContent = '— none found on this page —'
+    sel.appendChild(opt)
+    sel.disabled = true
+    $('template-hint').textContent = '(add #-named layers to a card)'
+    return
+  }
+  for (const t of state.templates) {
+    const opt = document.createElement('option')
+    opt.value = t.id
+    opt.textContent = t.name + ' (' + t.nodeType.toLowerCase() + ', ' + t.tokens.length + ' fields)'
+    sel.appendChild(opt)
+  }
+  sel.disabled = false
+  $('template-hint').textContent = ''
+}
+
+function updateButtons() {
+  const hasOffer = !!$('offer').value
+  const hasCampaign = !!state.campaign
+  $('load').disabled = !hasOffer
+  $('preview').disabled = !hasCampaign
+  $('validate').disabled = !hasCampaign
+  $('build').disabled = !hasCampaign
+}
+
+$('connect').onclick = connect
+$('load').onclick = loadCampaign
+$('preview').onclick = preview
+$('validate').onclick = validate
+$('build').onclick = build
+$('refresh').onclick = () => {
+  post({ type: 'scan-templates' })
+  if ($('token').value.trim()) connect()
+  if (state.campaign) loadCampaign()
+}
+$('client').onchange = fillOfferDropdown
+$('offer').onchange = () => { state.campaign = null; state.validated = false; chip('chip-count', '—'); chip('chip-ready', '—'); updateButtons() }
+$('page').onchange = () => { state.validated = false; chip('chip-ready', 'Not validated', 'warn') }
+
+onmessage = (event) => {
+  const msg = event.data.pluginMessage
+  if (!msg) return
+  switch (msg.type) {
+    case 'init':
+      if (msg.settings) {
+        if (msg.settings.url) $('url').value = msg.settings.url
+        if (msg.settings.token) $('token').value = msg.settings.token
+      }
+      break
+    case 'templates':
+      state.templates = msg.templates || []
+      fillTemplateDropdown()
+      break
+    case 'template-validated':
+      onTemplateValidated(msg)
+      break
+    case 'progress':
+      setBar(0.5 + (msg.done / msg.total) * 0.5)
+      break
+    case 'build-done':
+      onBuildDone(msg.report)
+      break
+    case 'error':
+      reportError(msg.what, msg.where, msg.fix)
+      $('build').disabled = !state.campaign
+      break
+  }
+}
+
+post({ type: 'ready' })
+</script>
+</body>
+</html>
