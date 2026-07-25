@@ -165,6 +165,12 @@ export async function updateSession(request: NextRequest) {
                                                          // request (including the original cleanup-product-images) was getting
                                                          // 307-redirected to /login before reaching the route's own auth check —
                                                          // i.e. silently never executing in production.
+                  || pathname.startsWith('/api/figma/') // Cirqle Studio Figma plugin — its own offer_sheet_secret bearer auth
+                                                         // (fail-closed in the routes). Same bug class as /api/cron/ above: the
+                                                         // plugin's iframe carries no session cookies, so without this exemption
+                                                         // its CORS preflight was 307-redirected to /login — and browsers reject
+                                                         // any redirected preflight ("Redirect is not allowed for a preflight
+                                                         // request"), making the API unreachable from Figma despite valid auth.
 
   if (!user && !isAuthPage && !isPublic) {
     // Server Action POSTs cannot follow an HTML redirect. `fetch` auto-follows
