@@ -100,6 +100,12 @@ export const PERMS = {
   SOCIAL_VIEW:   'social.view',
   SOCIAL_MANAGE: 'social.manage',
 
+  // Client Agreements — the parent commercial commitment record
+  // (CLIENT_AGREEMENTS_DESIGN.md; migration 20260722120000)
+  AGREEMENTS_VIEW:         'agreements.view',
+  AGREEMENTS_MANAGE:       'agreements.manage',
+  AGREEMENTS_VIEW_PRICING: 'agreements.view_pricing',
+
   // Service Scope — cross-module restriction (see src/lib/scope/service-scope.ts).
   // Dimension-qualified names so a future scope.by_branch sits beside these.
   /**
@@ -179,4 +185,5 @@ export const FINANCIAL_VISIBILITY_PERMS = [
   PERMS.BILLING_VIEW_AMOUNTS,
   PERMS.BILLING_VIEW_LINE_PRICING,
   PERMS.CASHBOOK_VIEW_AMOUNTS,
+  PERMS.AGREEMENTS_VIEW_PRICING,
 ] as const

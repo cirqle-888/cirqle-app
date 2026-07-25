@@ -76,6 +76,22 @@ export function stripTaskListPricing<T extends Record<string, any>>(tasks: T[], 
   return tasks.map(t => stripTaskPricing(t, false))
 }
 
+/**
+ * Client agreements: unit_price / extra_unit_price / currency.
+ * Committed quantities and progress stay visible — they are deliberately
+ * non-financial (same call the app already makes for tasks.quantity).
+ */
+export function stripAgreementItemPricing<T extends Record<string, any>>(item: T, canView: boolean): T {
+  if (canView || item == null) return item
+  const { unit_price, extra_unit_price, currency, ...rest } = item
+  void unit_price; void extra_unit_price; void currency
+  return rest as T
+}
+export function stripAgreementItemListPricing<T extends Record<string, any>>(items: T[], canView: boolean): T[] {
+  if (canView) return items
+  return items.map(i => stripAgreementItemPricing(i, false))
+}
+
 /** Contribution scores: earnings_inr */
 export function stripScoreEarnings<T extends Record<string, any>>(score: T, canView: boolean): T {
   if (canView || score == null) return score

@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["ES2017"],
+    "strict": true,
+    "module": "es2015",
+    "moduleResolution": "bundler",
+    "rootDir": "src",
+    "outDir": "dist",
+    "skipLibCheck": true,
+    "typeRoots": []
+  },
+  "include": ["src/**/*.ts"]
+}

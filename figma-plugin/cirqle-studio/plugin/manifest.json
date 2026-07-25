@@ -1,0 +1,13 @@
+{
+  "name": "Cirqle Studio",
+  "id": "cirqle-studio",
+  "api": "1.0.0",
+  "main": "dist/code.js",
+  "ui": "ui.html",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["*"],
+    "reasoning": "Connects to the workspace's own Cirqle server (self-hosted URL, entered by staff) to load offer campaigns, and downloads product photos whose URLs are stored per offer. Product image URLs are arbitrary (Supabase storage, client uploads, image hosts) and cannot be enumerated in advance."
+  }
+}

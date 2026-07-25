@@ -251,7 +251,7 @@ export default function AgreementsClient({
               {warnings.map((w, i) => (
                 <div key={i} className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/25 rounded-lg px-3 py-2">
                   <AlertTriangle className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
-                  <p className="text-xs text-amber-300/90">{w}</p>
+                  <p className="text-xs text-amber-700 dark:text-amber-300/90">{w}</p>
                 </div>
               ))}
             </div>
@@ -284,7 +284,7 @@ export default function AgreementsClient({
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-semibold text-sm">{value}</span>
-                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-purple-500/12 text-purple-300 border border-purple-500/25">{TYPE_LABEL[a.agreement_type]}</span>
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-purple-500/12 text-purple-700 dark:text-purple-300 border border-purple-500/25">{TYPE_LABEL[a.agreement_type]}</span>
                     {!a.is_active && <span className="text-[11px] px-2 py-0.5 rounded-full bg-secondary text-muted-foreground">Inactive</span>}
                   </div>
                   <p className="text-xs text-muted-foreground mt-0.5 truncate">{scope}</p>

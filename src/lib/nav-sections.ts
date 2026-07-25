@@ -12,7 +12,7 @@ import {
   Settings, TrendingUp, Upload, Inbox, PhoneCall, Award, Activity, Blocks, Megaphone, Handshake,
   SlidersHorizontal, MessageSquare, ClipboardCheck, NotebookPen, LayoutGrid,
   Briefcase, ClipboardList, CalendarClock, CalendarDays, BadgeCheck, PieChart, Building2, Tags, History, Sparkles,
-  BadgePercent,
+  BadgePercent, FileSignature,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -77,6 +77,8 @@ export const navSections: NavSection[] = [
     defaultOpen: true,
     items: [
       { label: 'Quotations',        href: '/dashboard/quotations', icon: BookOpen, requiredPerm: 'billing.view_quotations' },
+      // Commercial flow: Quotations → Agreements → Invoices (design §12 #7)
+      { label: 'Agreements',        href: '/dashboard/agreements', icon: FileSignature, requiredPerm: 'agreements.view', keywords: ['contract', 'retainer', 'commitment', 'package', 'promised'] },
       { label: 'Invoices',          href: '/dashboard/invoices',   icon: FileText, requiredPerm: 'billing.view_invoices' },
       { label: 'Follow-ups',        href: '/dashboard/invoices/follow-ups', icon: PhoneCall, requiredPerm: 'billing.view_invoices' },
       { label: 'Cash Book',         href: '/dashboard/cashbook',   icon: Wallet,   requiredPerm: 'cashbook.view', keywords: ['expenses', 'bank', 'transactions'] },
