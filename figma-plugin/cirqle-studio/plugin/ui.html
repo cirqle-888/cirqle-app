@@ -42,6 +42,28 @@
   .row2 > div { flex: 1; }
   table.preview { width: 100%; border-collapse: collapse; font-size: 10.5px; }
   table.preview td, table.preview th { padding: 2.5px 4px; border-bottom: 1px solid var(--figma-color-border, #e8e8e8); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px; }
+  .tabs { display: flex; gap: 4px; margin: 10px 0 4px; }
+  .tab { flex: 1; padding: 6px 8px; text-align: center; cursor: pointer; font-size: 11px; font-weight: 600;
+         border-radius: 6px; color: var(--figma-color-text-secondary, #777); background: var(--figma-color-bg-secondary, #f2f2f2);
+         border: 1px solid transparent; user-select: none; }
+  .tab.active { color: #fff; background: #7c3aed; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  textarea { width: 100%; box-sizing: border-box; height: 120px; resize: vertical; padding: 8px;
+             border: 1px solid var(--figma-color-border, #ddd); border-radius: 6px;
+             background: var(--figma-color-bg-secondary, #fafafa); color: var(--figma-color-text, #111);
+             font-family: ui-monospace, Menlo, monospace; font-size: 11px; white-space: pre; }
+  .rows { max-height: 210px; overflow: auto; margin-top: 8px; border: 1px solid var(--figma-color-border, #e5e5e5); border-radius: 6px; }
+  .row-item { display: grid; grid-template-columns: 1fr 52px 52px 58px; gap: 4px; padding: 4px 5px;
+              border-bottom: 1px solid var(--figma-color-border, #eee); align-items: center; }
+  .row-item:last-child { border-bottom: 0; }
+  .row-item input { padding: 3px 5px; font-size: 10.5px; font-family: inherit; }
+  .row-head { font-size: 10px; color: var(--figma-color-text-secondary, #888); font-weight: 600;
+              padding: 4px 5px; border-bottom: 1px solid var(--figma-color-border, #e5e5e5); display: grid;
+              grid-template-columns: 1fr 52px 52px 58px; gap: 4px; position: sticky; top: 0;
+              background: var(--figma-color-bg, #fff); z-index: 1; }
+  .day-sep { padding: 4px 6px; font-size: 10px; font-weight: 700; color: #7c3aed;
+             background: var(--figma-color-bg-secondary, #f6f2ff); border-bottom: 1px solid var(--figma-color-border, #eee); }
 </style>
 </head>
 <body>
@@ -58,6 +80,13 @@
 
   <label>Client</label>
   <select id="client" disabled><option>— connect first —</option></select>
+
+  <div class="tabs">
+    <div class="tab active" data-panel="build">Build</div>
+    <div class="tab" data-panel="paste">Paste offer</div>
+  </div>
+
+  <div class="panel active" id="p-build">
   <label>Offer</label>
   <select id="offer" disabled><option>—</option></select>
   <label>Template <span id="template-hint" style="font-weight:400"></span></label>
@@ -79,6 +108,27 @@
   </div>
   <button id="build" disabled>Build Flyer</button>
   <button class="secondary" id="refresh">Refresh</button>
+  </div><!-- /p-build -->
+
+  <div class="panel" id="p-paste">
+    <label>Client's WhatsApp offer message</label>
+    <textarea id="paste-text" placeholder="Sunday 100gm&#10;&#10;Cashew 240  93&#10;Pista 149&#10;...&#10;&#10;Sunday 3 page"></textarea>
+    <label>AI hint (optional)</label>
+    <input type="text" id="paste-hint" placeholder="e.g. the second number is MRP">
+    <button class="secondary" id="paste-parse">Parse with AI</button>
+
+    <div id="paste-review" style="display:none">
+      <div class="rows" id="paste-rows"></div>
+      <label>Offer title</label>
+      <input type="text" id="paste-title" placeholder="e.g. Sunday Shop Fest">
+      <label>Offer date</label>
+      <input type="date" id="paste-date">
+      <button id="paste-save">Save to Cirqle</button>
+      <p class="hint" style="font-size:10px;color:var(--figma-color-text-secondary,#888);margin:6px 0 0">
+        Saves into Cirqle first (change log, catalog, sheet sync), then loads it here ready to build.
+      </p>
+    </div>
+  </div>
 
   <div class="chips">
     <span class="chip" id="chip-conn">Offline</span>
@@ -139,28 +189,35 @@ function reportError(what, where, fix) {
  * ------------------------------------------------------------------ */
 function base() { return $('url').value.trim().replace(/\/+$/, '') }
 
-async function api(path) {
+async function api(path, body) {
   let res
   try {
     res = await fetch(base() + path, {
-      headers: { 'Authorization': 'Bearer ' + $('token').value.trim() },
+      method: body ? 'POST' : 'GET',
+      headers: Object.assign(
+        { 'Authorization': 'Bearer ' + $('token').value.trim() },
+        body ? { 'Content-Type': 'application/json' } : {},
+      ),
+      body: body ? JSON.stringify(body) : undefined,
     })
   } catch (e) {
     throw {
       what: 'Could not reach the server.',
-      where: 'GET ' + path,
-      fix: 'Check the Server URL and your internet connection. If both are fine, the API routes may not be deployed yet (see README).',
+      where: path,
+      fix: 'Check the Server URL and your connection. If both are fine, open Plugins → Development → Show console: '
+         + '"Redirect is not allowed for a preflight request" means /api/figma is being redirected to /login '
+         + '(the middleware needs the /api/figma exemption); a CSP error means the manifest networkAccess needs this domain.',
     }
   }
-  let body = null
-  try { body = await res.json() } catch (e) { /* non-JSON error page */ }
+  let data = null
+  try { data = await res.json() } catch (e) { /* non-JSON error page */ }
   if (res.status === 401) {
-    throw { what: 'Authentication failed.', where: 'GET ' + path, fix: (body && body.error) || 'Paste the shared secret from Apps → Offer Intake → Shared sync script.' }
+    throw { what: 'Authentication failed.', where: path, fix: (data && data.error) || 'Paste the shared secret from Apps → Offer Intake → Shared sync script.' }
   }
-  if (!res.ok || !body || body.ok === false) {
-    throw { what: 'Server error (HTTP ' + res.status + ').', where: 'GET ' + path, fix: (body && body.error) || 'Check the server logs for this route.' }
+  if (!res.ok || !data || data.ok === false) {
+    throw { what: 'Server error (HTTP ' + res.status + ').', where: path, fix: (data && data.error) || 'Check the server logs for this route.' }
   }
-  return body
+  return data
 }
 
 /* ------------------------------------------------------------------ *
@@ -467,6 +524,135 @@ function updateButtons() {
   $('preview').disabled = !hasCampaign
   $('validate').disabled = !hasCampaign
   $('build').disabled = !hasCampaign
+}
+
+/* ------------------------------------------------------------------ *
+ * Paste tab — WhatsApp message → AI parse → review → save to Cirqle.
+ *
+ * Save-then-build is deliberate: a list that only ever lived in a Figma file
+ * would have no change log, no catalog entry and no team visibility. Cirqle
+ * stays the source of truth; this tab just moves the typing out of it.
+ * ------------------------------------------------------------------ */
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.onclick = () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'))
+    tab.classList.add('active')
+    $('p-' + tab.dataset.panel).classList.add('active')
+  }
+})
+
+state.parsed = []
+
+function renderParsedRows() {
+  const box = $('paste-rows')
+  box.innerHTML = ''
+  const head = document.createElement('div')
+  head.className = 'row-head'
+  head.innerHTML = '<span>Product</span><span>Price</span><span>MRP</span><span>Weight</span>'
+  box.appendChild(head)
+
+  let lastDay = null
+  state.parsed.forEach((p, i) => {
+    // A two-day paste is the easiest thing to save wrong, so the day breaks
+    // are shown inline rather than left implicit.
+    if (p.day && p.day !== lastDay) {
+      const sep = document.createElement('div')
+      sep.className = 'day-sep'
+      sep.textContent = p.day
+      box.appendChild(sep)
+      lastDay = p.day
+    }
+    const row = document.createElement('div')
+    row.className = 'row-item'
+    const mk = (key, value, type) => {
+      const el = document.createElement('input')
+      el.type = type || 'text'
+      el.value = value == null ? '' : value
+      el.oninput = () => {
+        const v = el.value.trim()
+        state.parsed[i][key] = (type === 'number') ? (v === '' ? null : Number(v)) : v
+      }
+      return el
+    }
+    row.appendChild(mk('name', p.name))
+    row.appendChild(mk('price', p.price, 'number'))
+    row.appendChild(mk('mrp', p.mrp, 'number'))
+    row.appendChild(mk('weight', p.weight))
+    box.appendChild(row)
+  })
+  $('paste-review').style.display = state.parsed.length ? 'block' : 'none'
+}
+
+$('paste-parse').onclick = async () => {
+  clearLog()
+  const text = $('paste-text').value.trim()
+  if (!text) { reportError('Nothing pasted.', 'Parse', 'Paste the client\'s offer message first.'); return }
+  $('paste-parse').disabled = true
+  log('Parsing…')
+  try {
+    const data = await api('/api/figma/parse', { text, hint: $('paste-hint').value.trim() || undefined })
+    state.parsed = data.products || []
+    renderParsedRows()
+    log('✓ ' + data.summary, 'ok')
+    for (const w of (data.warnings || [])) log('⚠ ' + w, 'warn')
+    for (const s of (data.sections || [])) {
+      if (s.error) log('✗ section ' + (s.weight || '—') + ': ' + s.error, 'err')
+    }
+    if (!$('paste-date').value) $('paste-date').valueAsDate = new Date()
+    chip('chip-count', state.parsed.length + ' Parsed', 'on')
+  } catch (e) {
+    reportError(e.what || String(e), e.where || 'Parse', e.fix)
+  }
+  $('paste-parse').disabled = false
+}
+
+$('paste-save').onclick = async () => {
+  clearLog()
+  const clientId = $('client').value
+  if (!clientId) { reportError('No client selected.', 'Save', 'Pick a client at the top, then save.'); return }
+  if (!state.parsed.length) { reportError('Nothing to save.', 'Save', 'Parse a list first.'); return }
+
+  const days = [...new Set(state.parsed.map(p => p.day).filter(Boolean))]
+  if (days.length > 1) {
+    reportError(
+      'This paste covers ' + days.length + ' days (' + days.join(', ') + ').',
+      'Save',
+      'Cirqle stores one active offer per client, so save one day at a time — delete the other day\'s rows above, save, then paste again for the next day.',
+    )
+    return
+  }
+
+  $('paste-save').disabled = true
+  log('Saving to Cirqle…')
+  try {
+    const data = await api('/api/figma/campaign', {
+      clientId,
+      title: $('paste-title').value.trim() || undefined,
+      dateType: 'single',
+      offerDate: $('paste-date').value || undefined,
+      products: state.parsed.map(p => ({
+        name: p.name, price: p.price, mrp: p.mrp,
+        weight: p.weight, badge: p.badge, offerType: p.offerType,
+      })),
+    })
+    log('✓ ' + data.message, 'ok')
+    logFix('Reloading offers so you can build it now.')
+    // Pull the new campaign into the Build tab and select it, so the designer
+    // goes straight from paste to cards without hunting in a dropdown.
+    await connect()
+    const opt = [...$('offer').options].find(o => o.value === data.campaignId)
+    if (opt) {
+      $('offer').value = data.campaignId
+      await loadCampaign()
+      document.querySelector('.tab[data-panel="build"]').click()
+      log('Ready — pick a template and press Build Flyer.', 'ok')
+    }
+  } catch (e) {
+    reportError(e.what || String(e), e.where || 'Save', e.fix)
+  }
+  $('paste-save').disabled = false
 }
 
 $('connect').onclick = connect
