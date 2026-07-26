@@ -1,55 +1,69 @@
 # Known limitations
 
-Documented honestly, per the build instruction: where a limit comes from the
-Figma Plugin API or the Cirqle schema, it is stated here rather than worked
-around in ways that would change the product architecture.
+Documented honestly: where a limit comes from the Figma Plugin API, a provider
+quota, or the Cirqle schema, it is stated here rather than worked around in a
+way that would change the product architecture.
 
 ## Figma platform limits (cannot be engineered away)
 
-1. **No headless operation.** A Figma plugin runs only while Figma is open
-   with the file loaded and the plugin running. A human must click Build
-   Flyer. Anything more automatic than that would require rendering flyers
-   outside Figma, which the product guardrail ("Figma is the only design
-   environment") forbids.
-2. **No true login flow.** Figma plugin iframes can't complete a normal
-   cookie/session login against the app, so "Login to Cirqle" is implemented
-   as a bearer token (the workspace's existing shared secret). Phase 2 can
-   upgrade this to per-designer API keys without changing the plugin shape.
+1. **No headless operation.** A plugin runs only while Figma is open with the
+   file loaded. A human must click Build. Anything more automatic would mean
+   rendering flyers outside Figma, which the product guardrail ("Figma is the
+   only design environment") forbids.
+2. **No true login flow.** Plugin iframes can't complete a cookie/session
+   login, so auth is a bearer token (the workspace's existing shared secret).
+   Phase 2 upgrades this to per-designer keys without changing the shape.
 3. **Fonts must be installed.** Figma blocks text edits in fonts the machine
-   doesn't have. The plugin reports the font name in the error and continues
-   with the other cards.
-4. **CORS.** The plugin iframe has a `null` origin. The API routes therefore
-   send `Access-Control-Allow-Origin: *` — safe because the bearer token is
-   the real gate. Product-image hosts must also allow anonymous GETs (Supabase
-   public storage does).
-5. **Variants/auto-layout are respected but not managed.** Cards are placed on
-   a plain grid inside one new frame. If the template is a component, cards
-   are instances (design edits to the master propagate); if it's a frame,
-   cards are copies.
+   lacks. The plugin names the font in the error and continues with other cards.
+4. **CORS + middleware.** The plugin iframe has a `null` origin, so the API
+   sends `Access-Control-Allow-Origin: *` (the bearer token is the real gate).
+   `/api/figma/*` is also exempted from the session middleware in
+   `src/lib/supabase/middleware.ts` — without it, cookieless preflights get
+   307-redirected to `/login` and browsers reject redirected preflights
+   outright. Same bug class the codebase already fixed for `/api/cron/`.
+5. **Variants are respected, not managed.** Cards are instances when the
+   template is a component, copies when it's a frame. Automatic variant
+   selection by offer type is Phase 3.
+
+## Provider limits
+
+6. **Groq free-tier rate limit (12k tokens/minute).** Sections are parsed
+   **sequentially** for this reason — parallel calls reliably 429'd the middle
+   section of a three-section paste. A very large multi-day message can still
+   hit the ceiling; the affected section reports "AI rate limit hit — wait
+   ~30s and press Parse again" and the others still return. Splitting by day
+   (which the multi-day guard already encourages) avoids it, as does the Groq
+   Dev tier.
+7. **Paste caps.** 20,000 characters and 12 sections per parse; 300 products
+   per save. All three refuse with an explanation rather than truncating.
 
 ## Cirqle schema limits (returned as null, not faked)
 
-6. **`brand`** exists only on the GLOBAL catalog (`product_catalog.brand`);
+8. **`brand`** exists only on the global catalog (`product_catalog.brand`);
    `offer_products` references the per-client catalog, which has no brand
-   column. The API returns `brand: null`. Wiring it properly means linking
-   offer rows to the global catalog — a schema decision for the owner, not a
-   plugin workaround.
-7. **`sku`** exists nowhere in the schema. Nearest candidates are
+   column. Returned as `null`. Wiring it means linking offer rows to the global
+   catalog — an owner decision, not a plugin workaround.
+9. **`sku`** exists nowhere. Nearest candidates are
    `product_catalog.product_code` (PRD-XXXXXXXX) and `barcode`. Returned as
-   `sku: null` until the owner decides which of those (if either) *is* the SKU.
-8. **`category`** IS returned — via `offer_products.catalog_id →
-   client_product_catalog.category` — but is null for products typed free-form
-   into an offer without a catalog link.
+   `null` until the owner blesses one as the SKU.
+10. **`category`** IS returned, via `offer_products.catalog_id →
+    client_product_catalog.category`, but is null for products typed free-form
+    without a catalog link.
 
-## Scope limits (deliberate, Phase 1)
+## Behaviour worth knowing (deliberate, not defects)
 
-9. **Token auth is workspace-wide**, not per-designer; revoking one person
-   means rotating the shared secret (same blast radius the Sheets sync already
-   has).
-10. **Read-only.** The plugin never writes to Cirqle — no "mark as designed"
-    status flowing back yet (see ROADMAP).
-11. **One template per build.** Multi-template flyers (hero card + small card)
-    are built as two runs with the Page filter.
-12. **The Sheets pipeline is untouched.** Both pipelines run in parallel from
-    the same `buildOfferSheetRows` contract; retire the Sheet route whenever
-    confidence is earned, by simply not using it.
+11. **One active offer per client.** Saving a two-day paste is blocked with an
+    explanation rather than silently merging 60 products into one flyer.
+12. **Read-mostly.** The only write is `POST /api/figma/campaign`, which
+    delegates entirely to the existing `saveCampaign` server action. No
+    "mark as designed" status flows back yet (Phase 2).
+13. **Workspace-wide token.** Revoking one designer means rotating for
+    everyone — the same blast radius the Sheets sync already has.
+14. **Extra selected cards are never blanked** in Fill-selected mode. A stale
+    card is recoverable; wiped design work is not.
+15. **Title Case leaves digit-leading tokens lowercase** — `4PEC` → `4pec`.
+    Inherited verbatim from `format-product-name.ts` so Figma and Cirqle agree;
+    change it there if it should differ, and the plugin must be updated to match.
+16. **The Sheets pipeline is untouched.** Both consume the same
+    `buildOfferSheetRows` contract, so they can run in parallel indefinitely;
+    retire the Sheet route by simply not using it.

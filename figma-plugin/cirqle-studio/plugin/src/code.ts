@@ -216,6 +216,31 @@ async function validateTemplate(msg: { templateId: string }): Promise<void> {
       fix: 'Name the photo rectangle/frame "#imageurl" (aliases: #image, #photo).',
     })
   }
+
+  // Two-layer price designs pair #price1 (rupees) with #price2 (paise).
+  // Half a pair is worse than neither: ₹20.99 would print as a confident
+  // "20" with the paise silently dropped, and nothing on the flyer shows
+  // that anything is missing.
+  const hasP1 = tokens.has('#price1')
+  const hasP2 = tokens.has('#price2')
+  if (hasP1 !== hasP2) {
+    issues.push({
+      severity: 'warning', area: 'template',
+      message: hasP1
+        ? 'Template has #price1 but no #price2 — the paise of a price like ₹20.99 would be dropped silently.'
+        : 'Template has #price2 but no #price1 — the rupees of the price would be missing.',
+      fix: hasP1
+        ? 'Add a small text layer named "#price2" next to it, or use a single #offerprice layer instead.'
+        : 'Add a text layer named "#price1" for the rupees, or use a single #offerprice layer instead.',
+    })
+  }
+  if (hasP1 && hasP2 && tokens.has('#offerprice')) {
+    issues.push({
+      severity: 'warning', area: 'template',
+      message: 'Template has both #offerprice and the #price1/#price2 pair — the price will appear twice.',
+      fix: 'Keep whichever the design uses and rename the other (e.g. to "price-old") so it stops receiving data.',
+    })
+  }
   if (textTokens === 0) {
     issues.push({
       severity: 'error', area: 'template',
@@ -287,13 +312,81 @@ async function fillCard(card: SceneNode, product: BuildProduct): Promise<{ fille
   return { filled, missing, imageState }
 }
 
+/**
+ * Fill cards that are ALREADY on the page, in place — the Google Sheets Sync
+ * behaviour designers know: select the laid-out cards, run, and the data lands
+ * in them without anything moving.
+ *
+ * Selection order is unreliable in Figma (it follows click order, not layout),
+ * so cards are sorted the way a flyer reads: top row left-to-right, then down.
+ * Without this, product 1 could land in the card the designer clicked last.
+ */
+async function fillSelection(products: BuildProduct[]): Promise<void> {
+  const selection = [...figma.currentPage.selection]
+  if (selection.length === 0) {
+    fail('Nothing selected.', 'Fill selected cards',
+      'Select the cards you want filled, or untick "Fill selected cards" to build new ones.')
+    return
+  }
+
+  const ROW_TOLERANCE = 8 // px; cards nudged a few px apart are still one row
+  const cards = selection.slice().sort((a, b) =>
+    Math.abs(a.y - b.y) > ROW_TOLERANCE ? a.y - b.y : a.x - b.x
+  )
+
+  const report = {
+    cards: 0, layersFilled: 0, imagesPlaced: 0, placeholders: 0,
+    missingLayerCounts: {} as Record<string, number>,
+    filledInPlace: true as boolean,
+    overflow: 0,
+  }
+
+  const pairs = Math.min(cards.length, products.length)
+  for (let i = 0; i < pairs; i++) {
+    try {
+      const res = await fillCard(cards[i], products[i])
+      report.cards++
+      report.layersFilled += res.filled
+      if (res.imageState === 'placed') report.imagesPlaced++
+      if (res.imageState === 'placeholder') report.placeholders++
+      for (const token of res.missing) {
+        report.missingLayerCounts[token] = (report.missingLayerCounts[token] || 0) + 1
+      }
+    } catch (err) {
+      fail(
+        'Card ' + (i + 1) + ' (' + cards[i].name + ') could not be filled completely.',
+        'Fill selected cards',
+        (err instanceof Error ? err.message : String(err)) +
+          ' — if this mentions a font, install/enable that font and run again.',
+      )
+    }
+    figma.ui.postMessage({ type: 'progress', done: i + 1, total: pairs })
+  }
+
+  // Left-over cards are LEFT ALONE rather than blanked: wiping a designer's
+  // work because the list was short is unrecoverable, a stale card is not.
+  if (products.length > cards.length) report.overflow = products.length - cards.length
+
+  figma.ui.postMessage({ type: 'build-done', report })
+  figma.notify(
+    `Cirqle Studio: filled ${report.cards} selected card${report.cards === 1 ? '' : 's'}` +
+    (cards.length > products.length ? ` (${cards.length - products.length} left untouched)` : ''),
+  )
+}
+
 async function buildFlyer(msg: {
   templateId: string
   products: BuildProduct[]
   columns: number
   gap: number
   frameName: string
+  fillSelection?: boolean
 }): Promise<void> {
+  if (msg.fillSelection) {
+    await fillSelection(msg.products)
+    return
+  }
+
   const template = (await figma.getNodeByIdAsync(msg.templateId)) as SceneNode | null
   if (!template || template.removed) {
     fail(
@@ -398,6 +491,15 @@ figma.ui.onmessage = async (msg: any) => {
       }
       case 'save-settings':
         await figma.clientStorage.setAsync(SETTINGS_KEY, msg.settings)
+        break
+      case 'resize':
+        // The review table needs spreadsheet room; the build controls don't.
+        // Sizes are clamped so the panel can never end up off-screen or
+        // smaller than its own controls.
+        figma.ui.resize(
+          Math.max(320, Math.min(1200, Math.round(msg.width) || 380)),
+          Math.max(400, Math.min(900, Math.round(msg.height) || 720)),
+        )
         break
       case 'scan-templates':
         figma.ui.postMessage({ type: 'templates', templates: scanTemplates() })

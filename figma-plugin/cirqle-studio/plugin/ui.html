@@ -64,6 +64,33 @@
               background: var(--figma-color-bg, #fff); z-index: 1; }
   .day-sep { padding: 4px 6px; font-size: 10px; font-weight: 700; color: #7c3aed;
              background: var(--figma-color-bg-secondary, #f6f2ff); border-bottom: 1px solid var(--figma-color-border, #eee); }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; margin-top: 10px; }
+  .tool { width: auto; margin: 0; padding: 4px 7px; font-size: 10.5px; font-weight: 600; border-radius: 5px;
+          background: var(--figma-color-bg-secondary, #f0f0f0); color: var(--figma-color-text, #111);
+          border: 1px solid var(--figma-color-border, #ddd); cursor: pointer; }
+  .tool:hover { border-color: #7c3aed; }
+  .tool-sep { width: 1px; height: 16px; background: var(--figma-color-border, #ddd); margin: 0 3px; }
+  .colmap { display: flex; gap: 3px; margin-top: 6px; }
+  .colmap select { flex: 1; padding: 3px 4px; font-size: 10px; }
+  /* Proportions mirror the client's own review sheet: a wide Product column,
+     then narrow numeric columns. Row numbers included so a designer can call
+     out "row 14" the way they would in Sheets. */
+  .row-item { display: grid; grid-template-columns: 18px 26px 1fr 62px 62px 74px 66px; gap: 4px; padding: 3px 5px;
+              border-bottom: 1px solid var(--figma-color-border, #eee); align-items: center; }
+  .row-head { grid-template-columns: 18px 26px 1fr 62px 62px 74px 66px; }
+  /* Read-only mirror of the Price 1 / Price 2 columns the sheet contract
+     produces, so a two-layer price design can be checked before building. */
+  .split { font-size: 10px; font-family: ui-monospace, Menlo, monospace; text-align: center;
+           color: var(--figma-color-text-secondary, #999); }
+  .split b { color: #059669; font-weight: 600; }
+  .split i { color: #7c3aed; font-style: normal; font-weight: 600; }
+  .row-item input[type=checkbox] { width: 13px; height: 13px; margin: 0; padding: 0; }
+  .row-no { font-size: 9.5px; color: var(--figma-color-text-secondary, #999); text-align: right; padding-right: 2px; }
+  .rows { max-height: 420px; }
+  .row-item input[type=text], .row-item input[type=number] { font-size: 11px; padding: 3px 5px; }
+  /* The price the flyer actually shouts — worth being able to spot at a glance. */
+  .row-item input.sale { font-weight: 600; color: #059669; }
+  .wide-note { font-size: 10px; color: var(--figma-color-text-secondary, #888); margin: 6px 0 0; }
 </style>
 </head>
 <body>
@@ -99,6 +126,11 @@
     <div><label style="margin-top:0">Gap</label><input type="number" id="gap" value="40" min="0" max="400"></div>
   </div>
 
+  <label style="display:flex;gap:7px;align-items:center;margin-top:9px;cursor:pointer">
+    <input type="checkbox" id="fill-selection" style="width:13px;height:13px;margin:0">
+    <span>Fill selected cards (don't create new)</span>
+  </label>
+
   <hr>
 
   <button class="secondary" id="load" disabled>Load Offers</button>
@@ -111,14 +143,37 @@
   </div><!-- /p-build -->
 
   <div class="panel" id="p-paste">
-    <label>Client's WhatsApp offer message</label>
-    <textarea id="paste-text" placeholder="Sunday 100gm&#10;&#10;Cashew 240  93&#10;Pista 149&#10;...&#10;&#10;Sunday 3 page"></textarea>
-    <label>AI hint (optional)</label>
+    <label>Paste the offer list — WhatsApp, Google Sheets, Excel or CSV</label>
+    <textarea id="paste-text" placeholder="Paste straight from WhatsApp:&#10;Cashew 240  93&#10;Pista 149&#10;&#10;…or copy cells from Google Sheets / Excel:&#10;Product&#9;SALE&#9;MRP&#10;Cashew 240&#9;93&#9;120"></textarea>
+    <div class="grid2">
+      <button id="paste-split">Split to columns</button>
+      <button class="secondary" id="paste-parse">Parse with AI</button>
+    </div>
+    <p class="hint" style="font-size:10px;color:var(--figma-color-text-secondary,#888);margin:5px 0 0">
+      <b>Split</b> is the manual route — instant, no AI, nothing sent anywhere.
+      It reads spreadsheet cells (tabs), CSV, 2+ spaces and trailing prices, keeps
+      blank cells in place, and takes your column names from the header row if you copied one.
+      <b>Parse with AI</b> is only for loose WhatsApp text with "Sunday 100gm" style headers.
+    </p>
+    <label>AI hint (only used by Parse with AI)</label>
     <input type="text" id="paste-hint" placeholder="e.g. the second number is MRP">
-    <button class="secondary" id="paste-parse">Parse with AI</button>
 
     <div id="paste-review" style="display:none">
+      <div class="toolbar" id="paste-toolbar">
+        <button class="tool" data-case="upper" title="UPPERCASE">AA</button>
+        <button class="tool" data-case="sentence" title="First letter capital">Aa</button>
+        <button class="tool" data-case="title" title="Title Case">Aa Bc</button>
+        <span class="tool-sep"></span>
+        <button class="tool" id="tool-trim" title="Remove extra spaces">Trim</button>
+        <button class="tool" id="tool-swap" title="Swap SALE and MRP on all rows">⇄ SALE/MRP</button>
+        <button class="tool" id="tool-weight" title="Append the weight to the product name, e.g. Cashew 240 → Cashew 240 100 gm">+ Weight → name</button>
+        <span class="tool-sep"></span>
+        <button class="tool" id="tool-add" title="Add an empty row">+ Row</button>
+        <button class="tool" id="tool-del" title="Delete ticked rows">Delete</button>
+      </div>
+      <div id="paste-colmap" class="colmap"></div>
       <div class="rows" id="paste-rows"></div>
+      <div class="hint" id="paste-count" style="font-size:10px;color:var(--figma-color-text-secondary,#888);margin:6px 0 0"></div>
       <label>Offer title</label>
       <input type="text" id="paste-title" placeholder="e.g. Sunday Shop Fest">
       <label>Offer date</label>
@@ -426,8 +481,10 @@ async function build() {
   clearLog(); setBar(0)
   const products = selectedProducts()
   const templateId = $('template').value
+  const fillMode = $('fill-selection').checked
   if (!state.campaign) { reportError('No offer loaded.', 'Build Flyer', 'Press Load Offers first.'); return }
-  if (!templateId) { reportError('No template selected.', 'Build Flyer', 'Pick a template, or press Refresh to re-scan this page.'); return }
+  // In fill mode the cards already exist, so no template is needed.
+  if (!templateId && !fillMode) { reportError('No template selected.', 'Build Flyer', 'Pick a template, or press Refresh to re-scan this page.'); return }
   if (!products.length) { reportError('No products on this page selection.', 'Build Flyer', 'Choose another page.'); return }
 
   $('build').disabled = true
@@ -472,6 +529,7 @@ async function build() {
       columns: parseInt($('cols').value, 10) || 4,
       gap: parseInt($('gap').value, 10) || 40,
       frameName: campaignInfo.clientName + ' — ' + campaignInfo.name + (pageFilter ? ' — Page ' + pageFilter : ''),
+      fillSelection: fillMode,
     })
   } catch (e) {
     reportError(e.what || (e.message || String(e)), e.where || 'Build Flyer', e.fix || 'Press Refresh and try again.')
@@ -481,8 +539,17 @@ async function build() {
 
 function onBuildDone(report) {
   setBar(1)
-  log('✓ ' + report.cards + ' cards built, ' + report.layersFilled + ' layers filled, ' +
+  const verb = report.filledInPlace ? 'cards filled in place' : 'cards built'
+  log('✓ ' + report.cards + ' ' + verb + ', ' + report.layersFilled + ' layers filled, ' +
       report.imagesPlaced + ' images placed' + (report.placeholders ? ', ' + report.placeholders + ' placeholder(s)' : '') + '.', 'ok')
+  if (report.overflow) {
+    log('⚠ ' + report.overflow + ' product(s) had no card to go in.', 'warn')
+    logFix('Select that many more cards, or build new ones with the checkbox off.')
+  }
+  if (report.layersFilled === 0 && report.cards > 0) {
+    log('⚠ No layers were filled — the template has no #-named layers matching Cirqle columns.', 'warn')
+    logFix('Rename the card\'s text layers to #product, #offerprice, #mrp and the photo shape to #imageurl, then Refresh.')
+  }
   const missing = Object.keys(report.missingLayerCounts || {})
   if (missing.length) {
     log('⚠ Template has no layer for: ' + missing.join(', '), 'warn')
@@ -540,23 +607,341 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'))
     tab.classList.add('active')
     $('p-' + tab.dataset.panel).classList.add('active')
+    // Reviewing 60 rows in a 380px column is the difference between this
+    // replacing the spreadsheet and not. Widen for the table, shrink back
+    // for the build controls, so the panel is only ever as big as it needs.
+    post(tab.dataset.panel === 'paste'
+      ? { type: 'resize', width: 720, height: 760 }
+      : { type: 'resize', width: 380, height: 720 })
   }
 })
 
 state.parsed = []
+state.picked = new Set()      // row indices ticked for bulk tools
+state.colRoles = []           // role per split column, e.g. ['name','price','mrp']
 
-function renderParsedRows() {
+/* --- Casing -------------------------------------------------------- *
+ * Ported verbatim from src/lib/format-product-name.ts so a name cased in
+ * Figma matches one cased in the Cirqle editor exactly. A plugin bundle
+ * can't import from the app, so the rules are duplicated deliberately —
+ * keep the two in step if that file ever changes.
+ * ------------------------------------------------------------------- */
+/* --- Price 1 / Price 2 ---------------------------------------------- *
+ * Ported verbatim from splitPrice() in src/lib/offer-sheet.ts, which is
+ * what actually fills the #price1 / #price2 layers server-side. Shown in
+ * the table purely so the split can be checked BEFORE building:
+ *   20.99 → 20 · 99   ·   20.5 → 20 · 50   ·   305 → 305 · (none)
+ * Whole rupees deliberately leave the paise blank so the small design
+ * layer stays empty rather than printing "00".
+ * -------------------------------------------------------------------- */
+function splitPrice(value) {
+  if (value == null || value === '') return ['', '']
+  const n = Number(value)
+  if (!Number.isFinite(n)) return ['', '']
+  const whole = Math.trunc(n)
+  const paise = Math.round((n - whole) * 100)
+  if (paise === 0) return [String(whole), '']
+  return [String(whole), String(paise).padStart(2, '0')]
+}
+
+const TITLE_SMALL_WORDS = new Set(['a','an','and','as','at','but','by','for','in','of','on','or','per','the','to','with'])
+const UNIT_TOKEN = /^\d+(?:\.\d+)?(?:gm|g|kg|mg|ml|l|ltr|litre|pcs|pc|nos|no|pack|pkt)$/i
+
+function formatProductName(name, mode) {
+  const clean = String(name || '').replace(/\s+/g, ' ').trim()
+  if (!clean) return name
+  if (mode === 'upper') return clean.toUpperCase()
+  if (mode === 'sentence') {
+    const lower = clean.toLowerCase()
+    return lower.charAt(0).toUpperCase() + lower.slice(1)
+  }
+  return clean.split(' ').map((word, i) => {
+    const lower = word.toLowerCase()
+    if (UNIT_TOKEN.test(lower)) return lower
+    if (i > 0 && TITLE_SMALL_WORDS.has(lower)) return lower
+    return lower.replace(/(^|[-/(&.])([a-z])/g, (_, sep, ch) => sep + ch.toUpperCase())
+  }).join(' ')
+}
+
+/* --- Split to columns (deterministic, no AI) ------------------------ *
+ * Delimiter is detected per line, strongest signal first, because one
+ * WhatsApp message routinely mixes styles:
+ *   "MAMYPOKO XL22/L28    305    399"  → 2+ spaces  → 3 columns
+ *   "Kismiss Black Seed  49"           → 2+ spaces  → 2 columns
+ *   "Pista 149"                        → single space, trailing number
+ * A single space is NOT a delimiter on its own — product names contain
+ * spaces — so the last case pulls trailing numbers off the end instead.
+ * ------------------------------------------------------------------- */
+/**
+ * One CSV line, respecting quotes: `"Rice, broken",44,60` is three cells, not
+ * four. Doubled quotes inside a quoted cell are an escaped quote.
+ */
+function parseCsvLine(line) {
+  const out = []
+  let cell = '', quoted = false
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (quoted) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cell += '"'; i++ } else quoted = false
+      } else cell += ch
+      continue
+    }
+    if (ch === '"') { quoted = true; continue }
+    if (ch === ',') { out.push(cell.trim()); cell = ''; continue }
+    cell += ch
+  }
+  out.push(cell.trim())
+  return out
+}
+
+/**
+ * What delimiter does the WHOLE paste use? Looking at every line at once
+ * settles cases a single line can't. "Cashew 240,93,120" is three columns;
+ * "Rice 1,250" is one product at twelve-fifty — identical shapes, and only
+ * the surrounding rows say which is which.
+ */
+function detectBlockDelimiter(lines) {
+  const rows = lines.filter(l => l.trim())
+  if (!rows.length) return null
+  // Sheets and Excel always put tabs on the clipboard, for every copied range.
+  if (rows.some(l => l.includes('\t'))) return 'tab'
+  const counts = rows.map(l => (l.match(/,/g) || []).length)
+  const n = counts[0]
+  if (n < 1 || !counts.every(c => c === n)) return null   // uneven → loose text
+  if (n >= 2) return 'csv'
+  // Exactly one comma on every line is genuinely ambiguous: "Product,SALE" is
+  // a two-column CSV, "Rice Ponni 11,50" is a comma-decimal price. A header
+  // row settles it. Without one, read it as WhatsApp text — that's the daily
+  // case, and mis-splitting a price is the more expensive mistake.
+  return looksLikeHeader(parseCsvLine(rows[0])) ? 'csv' : null
+}
+
+function splitLine(line, forced) {
+  const s = line.trim()
+  if (!s) return null
+
+  // 1 · Tab-separated. Empty cells are KEPT: in a structured paste position IS
+  // meaning, so dropping a blank column shifts every value after it into the
+  // wrong role (their own review sheet has an empty "price A" column).
+  if (forced === 'tab' || line.includes('\t')) return line.split('\t').map(c => c.trim())
+
+  // 2 · CSV — either the whole block is one (detected above) or this line
+  // carries a quote, which only appears in a real export and only because a
+  // cell contains a comma: "Rice, broken",44,60 → 3 cells, not 4.
+  if (forced === 'csv') return parseCsvLine(line)
+  if (s.includes('"') && s.includes(',')) return parseCsvLine(line)
+
+  // 3 · Two-or-more spaces — the WhatsApp column style. Checked BEFORE plain
+  // commas so "Rice, Ponni   44   60" keeps the comma inside the name instead
+  // of being torn into ["Rice", "Ponni 44 60"].
+  if (/ {2,}/.test(s)) return s.split(/ {2,}/).map(c => c.trim()).filter(Boolean)
+
+  // 4 · Plain CSV. A comma BETWEEN digits belongs to the number — "1,250" is
+  // twelve-fifty, "11,50" is a comma-decimal — so it must never split the
+  // line. Splitting there silently turned "Rice 1,250" into the product
+  // "Rice 1" priced 250. Only a comma that ends a field (followed by a space,
+  // preceded by a non-digit, or leading) is a real delimiter.
+  if (/,(?=\s)|[^\d],|^,/.test(s)) return parseCsvLine(line)
+
+  // 5 · Trailing prices: "Pista 149" → ["Pista","149"]; "Blue Wash 103 120"
+  // → 3 parts. Digits may carry commas ("1,250", "11,50") — parsePrice decides
+  // later whether a comma is a thousands separator or a decimal point. The
+  // name must not END in a comma, or "Rice Ponni 11," would become the name.
+  const m = /^(.*?[^\d\s,])\s+((?:[\d,]+(?:\.\d+)?\s+)*[\d,]+(?:\.\d+)?)$/.exec(s)
+  if (m) return [m[1].trim(), ...m[2].split(/\s+/)]
+  return [s]
+}
+
+const ROLES = ['name', 'price', 'mrp', 'weight', 'badge', 'ignore']
+const ROLE_LABEL = { name: 'Product', price: 'Price', mrp: 'MRP', weight: 'Weight', badge: 'Badge', ignore: 'Ignore' }
+
+/** Sensible default roles for N detected columns. */
+function defaultRoles(count) {
+  if (count <= 1) return ['name']
+  if (count === 2) return ['name', 'price']
+  if (count === 3) return ['name', 'price', 'mrp']
+  return ['name', 'price', 'mrp', 'weight'].concat(Array(Math.max(0, count - 4)).fill('ignore'))
+}
+
+/* --- Header row ------------------------------------------------------ *
+ * A paste out of Google Sheets or Excel usually brings its header row with
+ * it. Reading it is strictly better than guessing by position: the client's
+ * own review sheet is Product · SALE · price A · MRP, where blind defaults
+ * would call the empty "price A" the MRP and drop the real one.
+ *
+ * MRP is tested before Price on purpose — a column headed "MRP Price" is an
+ * MRP. Once a role is taken the next claimant becomes Ignore, which is what
+ * turns that duplicate "price A" into a column you can see but that changes
+ * nothing until you say otherwise.
+ * -------------------------------------------------------------------- */
+const HEADER_PATTERNS = [
+  ['mrp',    /\b(mrp|m\.?r\.?p|old\s*price|was|market\s*price|retail|rrp|regular)\b/i],
+  ['price',  /\b(sale|offer(?!\s*type)|price|rate|sp|selling|deal|amount|our\s*price)\b/i],
+  ['weight', /\b(weight|wt|qty|quantity|size|pack|packing|unit|volume|grams?)\b/i],
+  ['badge',  /\b(badge|tag|label|offer\s*type|type|note|remark)\b/i],
+  ['name',   /\b(product|item|description|particulars?|name|goods|article)\b/i],
+]
+
+/** The role a header cell asks for, or null if it names nothing we handle. */
+function roleFromHeaderCell(cell) {
+  const s = String(cell || '').trim()
+  if (!s) return null
+  for (const [role, re] of HEADER_PATTERNS) if (re.test(s)) return role
+  return null
+}
+
+/**
+ * Is this first row a header rather than a product? Two independent signals
+ * must agree: at least two cells name a column we understand, and no cell is
+ * a bare number. Without the second test "Cashew 240 93" — a real product —
+ * would be eaten as a header the moment someone named a column "Cashew".
+ */
+function looksLikeHeader(cells) {
+  if (!cells || cells.length < 2) return false
+  const named = cells.filter(c => roleFromHeaderCell(c)).length
+  const numeric = cells.filter(c => String(c || '').trim() !== '' && /^[₹\s]*[\d,]+(?:\.\d+)?\s*$/.test(String(c))).length
+  return named >= 2 && numeric === 0
+}
+
+/** Roles for every column, read off the header, duplicates demoted to Ignore. */
+function rolesFromHeader(cells, count) {
+  const taken = new Set()
+  const roles = []
+  for (let i = 0; i < count; i++) {
+    const role = roleFromHeaderCell(cells[i])
+    if (role && !taken.has(role)) { taken.add(role); roles.push(role) }
+    else roles.push('ignore')
+  }
+  // Every row needs a product name. If the header used a word we don't know
+  // for it ("Particulars" we handle, "Col1" we don't), give the job to the
+  // first unclaimed column — the same guess defaults would have made, but
+  // keeping everything else the header did tell us.
+  if (!taken.has('name')) {
+    const spare = roles.indexOf('ignore')
+    if (spare < 0) return null
+    roles[spare] = 'name'
+  }
+  return roles
+}
+
+function splitToTable() {
+  const lines = $('paste-text').value.split(/\r?\n/)
+  const delim = detectBlockDelimiter(lines)
+  let rowsRaw = lines.map(l => splitLine(l, delim)).filter(Boolean)
+  if (!rowsRaw.length) {
+    reportError('Nothing to split.', 'Split to columns', 'Paste the offer text above first.')
+    return
+  }
+  let maxCols = Math.max(...rowsRaw.map(r => r.length))
+
+  let header = null
+  if (looksLikeHeader(rowsRaw[0])) {
+    const roles = rolesFromHeader(rowsRaw[0], maxCols)
+    if (roles) {
+      header = rowsRaw[0]
+      state.colRoles = roles
+      rowsRaw = rowsRaw.slice(1)
+      maxCols = rowsRaw.length ? Math.max(...rowsRaw.map(r => r.length)) : maxCols
+    }
+  }
+  if (!header) state.colRoles = defaultRoles(maxCols)
+
+  if (!rowsRaw.length) {
+    reportError('Only a header row was pasted.', 'Split to columns', 'Copy the product rows as well, not just the column titles.')
+    return
+  }
+
+  state.rawRows = rowsRaw
+  applyRoles()
+  log(
+    'Split ' + rowsRaw.length + ' row(s) into ' + state.colRoles.length + ' column(s).' +
+    (header ? ' Columns read from your header row (' + header.filter(Boolean).join(' · ') + ').' : ' Check the column roles below.'),
+    'ok'
+  )
+}
+
+/** Re-derive products from the raw split cells using the current roles. */
+/**
+ * Read a price the way clients actually write them.
+ *
+ * Handles "₹350", "265/-", "@ 145", "35rs" — and, critically, commas:
+ *   "1,250"  → 1250   (thousands separator; 3 digits after the comma)
+ *   "11,50"  → 11.5   (comma used as the decimal point; 1-2 digits after)
+ * Getting that wrong is expensive in both directions — ₹1,250 printed as
+ * ₹250, or ₹11,50 printed as ₹1150 — so the digit count decides.
+ */
+function parsePrice(v) {
+  if (v == null) return null
+  let s = String(v).trim()
+  if (!s) return null
+  // Comma-decimal ("11,50") only when 1-2 digits follow and no period is present.
+  if (!s.includes('.') && /,\d{1,2}(?!\d)/.test(s)) s = s.replace(/,(\d{1,2})(?!\d)/, '.$1')
+  s = s.replace(/,/g, '')            // any remaining commas are thousands separators
+  s = s.replace(/[^\d.]/g, '')       // strip ₹, rs, /-, @ and stray text
+  const n = parseFloat(s)
+  return Number.isFinite(n) ? n : null
+}
+
+/**
+ * Display form: whole rupees stay whole, fractions always show both digits.
+ * 11.5 → "11.50" so a half-rupee price can never be misread as 11.05 on the
+ * way past — the value itself is untouched, only how it's shown.
+ */
+function displayPrice(n) {
+  if (n == null || n === '') return ''
+  const num = Number(n)
+  if (!Number.isFinite(num)) return ''
+  return Number.isInteger(num) ? String(num) : num.toFixed(2)
+}
+
+function applyRoles() {
+  const num = parsePrice
+  state.parsed = (state.rawRows || []).map(cells => {
+    const p = { name: '', price: null, mrp: null, weight: null, badge: null, day: null, offerType: 'price' }
+    state.colRoles.forEach((role, i) => {
+      const cell = cells[i]
+      if (cell === undefined || role === 'ignore') return
+      if (role === 'price' || role === 'mrp') p[role] = num(cell)
+      else if (role === 'name') p.name = p.name ? (p.name + ' ' + cell) : cell
+      else p[role] = String(cell).trim()
+    })
+    if (/buy\s*1\s*get\s*1|b1g1|bogo/i.test(p.badge || '')) p.offerType = 'bogo'
+    return p
+  }).filter(p => p.name)
+  renderTable()
+}
+
+function renderColMap() {
+  const box = $('paste-colmap')
+  box.innerHTML = ''
+  if (!state.rawRows || !state.colRoles.length) return
+  state.colRoles.forEach((role, i) => {
+    const sel = document.createElement('select')
+    ROLES.forEach(r => {
+      const o = document.createElement('option')
+      o.value = r; o.textContent = ROLE_LABEL[r]; o.selected = r === role
+      sel.appendChild(o)
+    })
+    sel.onchange = () => { state.colRoles[i] = sel.value; applyRoles() }
+    box.appendChild(sel)
+  })
+}
+
+function renderTable() {
   const box = $('paste-rows')
   box.innerHTML = ''
   const head = document.createElement('div')
   head.className = 'row-head'
-  head.innerHTML = '<span>Product</span><span>Price</span><span>MRP</span><span>Weight</span>'
+  // Column names follow the client's own review sheet (Product · SALE · MRP)
+  // so the two read the same when they're compared side by side.
+  head.innerHTML = '<span></span><span>#</span><span>Product</span><span>SALE</span><span>MRP</span><span>Weight</span><span title="What #price1 and #price2 will receive">P1·P2</span>'
   box.appendChild(head)
 
   let lastDay = null
   state.parsed.forEach((p, i) => {
-    // A two-day paste is the easiest thing to save wrong, so the day breaks
-    // are shown inline rather than left implicit.
+    // Day breaks are shown inline — a two-day paste is the easiest thing to
+    // save wrong, and Cirqle holds one active offer per client.
     if (p.day && p.day !== lastDay) {
       const sep = document.createElement('div')
       sep.className = 'day-sep'
@@ -566,24 +951,167 @@ function renderParsedRows() {
     }
     const row = document.createElement('div')
     row.className = 'row-item'
+
+    const tick = document.createElement('input')
+    tick.type = 'checkbox'
+    tick.checked = state.picked.has(i)
+    tick.onchange = () => { tick.checked ? state.picked.add(i) : state.picked.delete(i); updateCount() }
+    row.appendChild(tick)
+
+    const no = document.createElement('div')
+    no.className = 'row-no'
+    no.textContent = String(i + 1)
+    row.appendChild(no)
+
     const mk = (key, value, type) => {
       const el = document.createElement('input')
       el.type = type || 'text'
-      el.value = value == null ? '' : value
+      if (type === 'number') {
+        // Without this a browser treats 20.99 as invalid (default step is 1)
+        // and the arrow keys jump by whole rupees — which would quietly break
+        // every paise price, the only case Price 1 / Price 2 exists for.
+        el.step = '0.01'
+        el.min = '0'
+      }
+      el.value = (type === 'number') ? displayPrice(value) : (value == null ? '' : value)
       el.oninput = () => {
         const v = el.value.trim()
         state.parsed[i][key] = (type === 'number') ? (v === '' ? null : Number(v)) : v
       }
+      if (type === 'number') {
+        // Normalise once the field is left, never mid-typing: "11.5" settles
+        // to "11.50" so a half rupee reads unambiguously, and "1,250" or
+        // "₹350" typed by hand are accepted rather than silently dropped.
+        el.onblur = () => {
+          const parsed = parsePrice(el.value)
+          state.parsed[i][key] = parsed
+          el.value = displayPrice(parsed)
+          renderSplit(i)
+        }
+      }
+      // Enter moves down the same column — the spreadsheet reflex.
+      el.onkeydown = (ev) => {
+        if (ev.key !== 'Enter') return
+        ev.preventDefault()
+        const rows = [...box.querySelectorAll('.row-item')]
+        const col = [...row.children].indexOf(el)
+        const next = rows[rows.indexOf(row) + 1]
+        if (next && next.children[col]) next.children[col].focus()
+      }
       return el
     }
     row.appendChild(mk('name', p.name))
-    row.appendChild(mk('price', p.price, 'number'))
+    const sale = mk('price', p.price, 'number')
+    sale.className = 'sale'
+    row.appendChild(sale)
     row.appendChild(mk('mrp', p.mrp, 'number'))
     row.appendChild(mk('weight', p.weight))
+
+    // Live mirror of what the sheet contract will hand #price1 / #price2.
+    const split = document.createElement('div')
+    split.className = 'split'
+    split.dataset.row = String(i)
+    const paint = () => {
+      const [whole, paise] = splitPrice(state.parsed[i].price)
+      split.innerHTML = whole === ''
+        ? '<span style="opacity:.4">—</span>'
+        : '<b>' + whole + '</b>' + (paise ? '·<i>' + paise + '</i>' : '<span style="opacity:.4">·—</span>')
+    }
+    paint()
+    sale.addEventListener('input', paint)
+    row.appendChild(split)
     box.appendChild(row)
   })
+
+  renderColMap()
+  updateCount()
   $('paste-review').style.display = state.parsed.length ? 'block' : 'none'
 }
+
+/** Repaint one row's P1·P2 cell after its price was normalised on blur. */
+function renderSplit(i) {
+  const cell = $('paste-rows').querySelector('.split[data-row="' + i + '"]')
+  if (!cell) return
+  const [whole, paise] = splitPrice(state.parsed[i].price)
+  cell.innerHTML = whole === ''
+    ? '<span style="opacity:.4">—</span>'
+    : '<b>' + whole + '</b>' + (paise ? '·<i>' + paise + '</i>' : '<span style="opacity:.4">·—</span>')
+}
+
+function updateCount() {
+  const missing = state.parsed.filter(p => p.price == null).length
+  $('paste-count').textContent =
+    state.parsed.length + ' rows · ' + state.picked.size + ' ticked' +
+    (missing ? ' · ' + missing + ' with no price' : '')
+}
+
+/** Bulk tools act on ticked rows, or on everything when nothing is ticked. */
+function targetRows() {
+  return state.picked.size ? [...state.picked] : state.parsed.map((_, i) => i)
+}
+
+document.querySelectorAll('.tool[data-case]').forEach(btn => {
+  btn.onclick = () => {
+    const mode = btn.dataset.case
+    targetRows().forEach(i => { state.parsed[i].name = formatProductName(state.parsed[i].name, mode) })
+    renderTable()
+    log('Re-cased ' + targetRows().length + ' name(s).', 'ok')
+  }
+})
+
+$('tool-trim').onclick = () => {
+  targetRows().forEach(i => {
+    const p = state.parsed[i]
+    p.name = String(p.name || '').replace(/\s+/g, ' ').trim()
+    if (p.weight) p.weight = String(p.weight).replace(/\s+/g, '').trim()
+  })
+  renderTable()
+}
+
+$('tool-swap').onclick = () => {
+  targetRows().forEach(i => {
+    const p = state.parsed[i]
+    const t = p.price; p.price = p.mrp; p.mrp = t
+  })
+  renderTable()
+  log('Swapped Price and MRP.', 'ok')
+}
+
+/**
+ * Fold the pack size into the product name — "Cashew 240" + "100gm" →
+ * "Cashew 240 100 gm" — matching how the client's own review sheet reads.
+ * The spacing ("100 gm", not "100gm") is theirs, kept so the two look the same.
+ * Idempotent: a name that already ends in its weight is left alone.
+ */
+$('tool-weight').onclick = () => {
+  let changed = 0
+  targetRows().forEach(i => {
+    const p = state.parsed[i]
+    if (!p.weight) return
+    const pretty = String(p.weight).replace(/^(\d+(?:\.\d+)?)\s*([a-z]+)$/i, '$1 $2')
+    const bare = pretty.replace(/\s+/g, '').toLowerCase()
+    const nameBare = String(p.name || '').replace(/\s+/g, '').toLowerCase()
+    if (nameBare.endsWith(bare)) return   // already there
+    p.name = (String(p.name || '').trim() + ' ' + pretty).trim()
+    changed++
+  })
+  renderTable()
+  log(changed ? ('Added weight to ' + changed + ' name(s).') : 'All targeted names already carry their weight.', 'ok')
+}
+
+$('tool-add').onclick = () => {
+  state.parsed.push({ name: '', price: null, mrp: null, weight: null, badge: null, day: null, offerType: 'price' })
+  renderTable()
+}
+
+$('tool-del').onclick = () => {
+  if (!state.picked.size) { reportError('Nothing ticked.', 'Delete', 'Tick the rows you want to remove first.'); return }
+  state.parsed = state.parsed.filter((_, i) => !state.picked.has(i))
+  state.picked.clear()
+  renderTable()
+}
+
+$('paste-split').onclick = splitToTable
 
 $('paste-parse').onclick = async () => {
   clearLog()
@@ -594,7 +1122,10 @@ $('paste-parse').onclick = async () => {
   try {
     const data = await api('/api/figma/parse', { text, hint: $('paste-hint').value.trim() || undefined })
     state.parsed = data.products || []
-    renderParsedRows()
+    state.rawRows = null   // AI results aren't column-split, so hide the role mapper
+    state.colRoles = []
+    state.picked.clear()
+    renderTable()
     log('✓ ' + data.summary, 'ok')
     for (const w of (data.warnings || [])) log('⚠ ' + w, 'warn')
     for (const s of (data.sections || [])) {

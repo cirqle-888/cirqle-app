@@ -103,6 +103,7 @@ interface ClientStorageAPI {
 interface UIAPI {
   postMessage(msg: unknown): void
   onmessage: ((msg: any) => void) | undefined
+  resize(width: number, height: number): void
 }
 
 interface PluginAPI {
