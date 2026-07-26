@@ -1161,12 +1161,30 @@ function targetRows() {
   return state.picked.size ? [...state.picked] : state.parsed.map((_, i) => i)
 }
 
+/**
+ * "100gm" → "100 gm", "500  GMS" → "500 gms" — the number and the unit split
+ * apart so casing can reach the unit. Left alone if it isn't a plain
+ * number+unit ("1+1", "XL22/L28").
+ */
+function prettyWeight(value) {
+  const s = String(value == null ? '' : value).trim().replace(/\s+/g, ' ')
+  if (!s) return s
+  return s.replace(/^(\d+(?:\.\d+)?)\s*([a-zA-Z]+)$/, '$1 $2')
+}
+
 document.querySelectorAll('.tool[data-case]').forEach(btn => {
   btn.onclick = () => {
     const mode = btn.dataset.case
-    targetRows().forEach(i => { state.parsed[i].name = formatProductName(state.parsed[i].name, mode) })
+    targetRows().forEach(i => {
+      const p = state.parsed[i]
+      p.name = formatProductName(p.name, mode)
+      // The pack size gets cased too, so a #weight layer prints "100 Gm"
+      // rather than the raw "100gm" a section header produced. Spacing first,
+      // because "100gm" reads as one unit token and would stay lowercase.
+      if (p.weight) p.weight = formatProductName(prettyWeight(p.weight), mode)
+    })
     renderTable()
-    log('Re-cased ' + targetRows().length + ' name(s).', 'ok')
+    log('Re-cased ' + targetRows().length + ' row(s) — name and weight.', 'ok')
   }
 })
 
@@ -1199,7 +1217,7 @@ $('tool-weight').onclick = () => {
   targetRows().forEach(i => {
     const p = state.parsed[i]
     if (!p.weight) return
-    const pretty = String(p.weight).replace(/^(\d+(?:\.\d+)?)\s*([a-z]+)$/i, '$1 $2')
+    const pretty = prettyWeight(p.weight)
     const bare = pretty.replace(/\s+/g, '').toLowerCase()
     const nameBare = String(p.name || '').replace(/\s+/g, '').toLowerCase()
     if (nameBare.endsWith(bare)) return   // already there

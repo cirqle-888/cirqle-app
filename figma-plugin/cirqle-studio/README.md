@@ -160,10 +160,10 @@ sheet: `#` · Product · **SALE** · MRP · Weight · **P1·P2**.
 
 | Tool | What it does |
 |---|---|
-| **AA / Aa / Aa Bc** | UPPERCASE · First letter capital · Title Case. Byte-identical to `src/lib/format-product-name.ts`. |
+| **AA / Aa / Aa Bc** | UPPERCASE · First letter capital · Title Case. Names use rules byte-identical to `src/lib/format-product-name.ts`; the weight is cased too, so `100gm` prints as `100 Gm` instead of raw. |
 | **Trim** | Collapse repeated spaces. |
 | **⇄ SALE/MRP** | Swap the two columns when a client sends them the other way round. |
-| **+ Weight → name** | `Cashew 240` + `100gm` → `Cashew 240 100 gm`. Idempotent. |
+| **+ Weight → name** | `Cashew 240` + `100gm` → `Cashew 240 100 gm`. Idempotent. Press **Aa Bc** *after* this to get `Cashew 240 100 Gm` — the order matters, since casing first leaves the appended unit lowercase. |
 | **+ Row / Delete** | Add a blank row; delete ticked rows. |
 | Column dropdowns | Re-map which split column is Product / Price / MRP / Weight / Badge / Ignore. |
 
