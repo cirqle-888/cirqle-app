@@ -89,6 +89,15 @@ rows say which is which.
 | Trailing numbers | `Pista 149` → name + price. |
 | A comma between digits | Never a delimiter. `1,250` → 1250, `11,50` → 11.50. |
 
+**Section headers are handled without AI.** A line that is only a day
+(`Monday`), only a pack size (`500gm`, `500 GMS`), or both (`Sunday 100gm`,
+either order) is treated as a heading, not a product: it is removed from the
+list and its pack size sticks to every line beneath it until the next header.
+So a message with `Monday / 500gm / …22 items… / Monday / 100gm / …22 items…`
+splits into 44 products with the right weight on each, and a multi-day paste
+is flagged before you save. A real Weight column always wins over the header.
+Spreadsheet pastes skip this entirely — a cell reading "Monday" is data.
+
 **Header rows are read.** Paste your sheet *with* its header and the column
 roles configure themselves: `Product · SALE · price A · MRP` becomes
 Product / Price / **Ignore** / MRP — the duplicate empty `price A` claims
@@ -96,6 +105,53 @@ nothing, so the real MRP still lands in MRP. MRP is matched before Price
 (a column headed "MRP Price" is an MRP), and the header row itself is never
 saved as a product. Every dropdown stays editable; nothing is guessed
 irreversibly.
+
+## When a layer isn't inside the card
+
+Names, photos, prices — any of them can be pulled out of the card into their
+own component so they can be moved freely. Layers found outside the cards bind
+two ways, and the two can be mixed on one page:
+
+| | How it binds |
+|---|---|
+| `#product`, `#imageurl`, … | **Reading order.** 1st on the page → product 1, 2nd → product 2. Each layer name is ordered on its own, so photos in one container and names in another still line up. Layer-panel order is ignored; only canvas position counts. |
+| `#product-3`, `#imageurl-3` | **That exact product.** Also `#product_3` or `#product 3`. Position is irrelevant — move it anywhere. |
+
+A name appearing exactly once (`#offertitle`, `#client`, `#offerdate`) is read
+as a page heading and filled once, not per product.
+
+How many products fit on a page is decided by whichever layer name repeats
+most — normally `#product`, but if the names are pulled out it falls to
+`#imageurl`, then `#price1`. So a page whose only repeated layer is the photo
+is still read as an N-slot page rather than duplicated N times.
+
+`#price1` and `#price2` are unaffected — the separator is required, so they
+stay the rupee/paise pair rather than becoming "`#price` number 1 and 2".
+
+## Starting a template — ＋ New card template
+
+The Build tab can generate one. It creates a component set, **Cirqle Product
+Card**, on the current page with 12 variants:
+
+| Property | Values |
+|---|---|
+| `Offer` | `Price` · `B1G1` · `Percent` |
+| `Shape` | `Circle` · `Pill` |
+| `Price` | `Whole` · `Paise` |
+
+Modelled on the real flyers, not on a generic web card: no container box (the
+card sits on the flyer background), a cut-out photo, the price badge
+overlapping its bottom-right, the struck `#mrp` **inside** that badge above
+the price, and `#product` / `#weight` in bold underneath.
+
+Nothing is fixed-width — the badge hugs its text, so a circle becomes an oval
+at ₹2359.50 rather than clipping, and the decimal point sits inside the price
+group so it vanishes with `#price2`. Restyle everything: colours, radius,
+fonts, photo shape. The plugin only reads the `#` names.
+
+Generating one takes a Figma **desktop** session (development plugins don't run
+in the browser), but the component then lives in the file and can be used
+anywhere afterwards.
 
 ## The review table
 

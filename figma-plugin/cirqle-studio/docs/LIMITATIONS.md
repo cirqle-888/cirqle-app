@@ -25,6 +25,54 @@ way that would change the product architecture.
    template is a component, copies when it's a frame. Automatic variant
    selection by offer type is Phase 3.
 
+## Template shape (read this before the first build)
+
+A template is either a **single product card** or a **whole page** already
+laid out with N product cards. The plugin counts `#product` layers to tell
+which, and the dropdown says so: "1 card" or "22 product slots".
+
+- **1 card** → one copy per product, arranged in the Columns/Gap grid.
+- **N slots** → one page per N products, filled top-left to bottom-right.
+  Offer-level layers outside the cards (`#offertitle`, `#offerdate`,
+  `#client`, `#pagenumber`) are filled once per page. Leftover slots on the
+  last page are **hidden**, not deleted or left showing sample data.
+
+Slot boundaries are found by climbing from each `#product` layer until the
+next step up would swallow a second product — no naming convention beyond
+the `#` layers already in use. Reading order uses absolute position, so
+groups nested at different depths still sort correctly.
+
+### When a layer lives outside its card
+
+Designers pull parts out of the card into their own component so they can be
+nudged around freely — the name, the photo, or both. Any `#` layer found
+outside the cards is bound in one of two ways:
+
+- **By reading order.** The 1st `#product` on the page takes product 1, the
+  2nd takes product 2, and so on. Each layer name is ordered independently, so
+  photos in one container and names in another still line up. Layer-panel order
+  is irrelevant — only position on the canvas counts.
+- **By an explicit number** — `#product-3`, `#imageurl-3` (also `_3` or ` 3`)
+  always takes product 3, wherever it sits. Use this when reading order isn't
+  what you mean.
+
+The slot count comes from whichever anchor layer repeats most: `#product`,
+then `#imageurl`, `#price1`, `#offerprice`, `#mrp`, `#weight`. `#product` wins
+ties, so nothing changes for ordinary card templates — but a page whose only
+repeated layer is the photo is still recognised as an N-slot page instead of
+being duplicated N times.
+
+A name that appears exactly **once** is treated as a heading for the page —
+`#offertitle`, `#client`, `#offerdate` — and filled from the first product on
+that page rather than repeated per product.
+
+The separator is required, which is what keeps `#price1` and `#price2` reading
+as the rupee/paise pair rather than as "`#price` number 1" and "number 2".
+
+This was the first real-run failure: an A4 page with 22 `#product` layers
+was treated as one card, so the page was duplicated 22 times with the same
+name stamped into all 22 of its slots. 484 layers filled, every one wrong.
+
 ## Provider limits
 
 6. **Groq free-tier rate limit (12k tokens/minute).** Sections are parsed

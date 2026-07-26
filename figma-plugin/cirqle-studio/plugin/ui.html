@@ -118,6 +118,11 @@
   <select id="offer" disabled><option>—</option></select>
   <label>Template <span id="template-hint" style="font-weight:400"></span></label>
   <select id="template" disabled><option>— none found on this page —</option></select>
+  <button class="secondary" id="new-template" style="margin-top:5px">＋ New card template</button>
+  <p class="hint" style="font-size:10px;color:var(--figma-color-text-secondary,#888);margin:4px 0 0">
+    Builds a component set on this page with 6 variants (Price / BOGO / % off × whole / paise)
+    and the layer names already correct. Restyle it however you like afterwards.
+  </p>
   <label>Page</label>
   <select id="page" disabled><option>All pages</option></select>
 
@@ -425,11 +430,17 @@ function dataIssues(products) {
   return issues
 }
 
+const ISSUE_MARK = { error: '✗ ', warning: '⚠ ', info: '· ' }
+const ISSUE_STYLE = { error: 'err', warning: 'warn', info: 'ok' }
+
 function renderIssues(all) {
   const errors = all.filter(i => i.severity === 'error')
+  // 'info' is neither — it explains what the build will do (e.g. a page
+  // template's slot count) and must not colour the chip as a problem.
   const warnings = all.filter(i => i.severity === 'warning')
   for (const issue of all) {
-    log((issue.severity === 'error' ? '✗ ' : '⚠ ') + '[' + issue.area + '] ' + issue.message, issue.severity === 'error' ? 'err' : 'warn')
+    log((ISSUE_MARK[issue.severity] || '⚠ ') + '[' + issue.area + '] ' + issue.message,
+        ISSUE_STYLE[issue.severity] || 'warn')
     if (issue.fix) logFix(issue.fix)
   }
   if (!all.length) log('✓ All checks passed.', 'ok')
@@ -540,8 +551,19 @@ async function build() {
 function onBuildDone(report) {
   setBar(1)
   const verb = report.filledInPlace ? 'cards filled in place' : 'cards built'
-  log('✓ ' + report.cards + ' ' + verb + ', ' + report.layersFilled + ' layers filled, ' +
+  const head = report.pages
+    ? '✓ ' + report.pages + ' page(s) built · ' + report.cards + ' products placed (' +
+      report.slotsPerPage + ' slots per page)'
+    : '✓ ' + report.cards + ' ' + verb
+  log(head + ', ' + report.layersFilled + ' layers filled, ' +
       report.imagesPlaced + ' images placed' + (report.placeholders ? ', ' + report.placeholders + ' placeholder(s)' : '') + '.', 'ok')
+  if (report.looseLayers) {
+    log('· ' + report.looseLayers + ' layer(s) outside the cards were matched too.', 'ok')
+  }
+  if (report.unusedSlots) {
+    log('· ' + report.unusedSlots + ' empty slot(s) on the last page were hidden.', 'warn')
+    logFix('They still exist — untick "visible" in the Layers panel to bring one back.')
+  }
   if (report.overflow) {
     log('⚠ ' + report.overflow + ' product(s) had no card to go in.', 'warn')
     logFix('Select that many more cards, or build new ones with the checkbox off.')
@@ -577,11 +599,19 @@ function fillTemplateDropdown() {
   for (const t of state.templates) {
     const opt = document.createElement('option')
     opt.value = t.id
-    opt.textContent = t.name + ' (' + t.nodeType.toLowerCase() + ', ' + t.tokens.length + ' fields)'
+    // Slot count is the thing a designer most needs to see before building:
+    // "22 product slots" means a whole page, "1 card" means one per product.
+    opt.textContent = t.name + ' (' + t.nodeType.toLowerCase() + ', ' +
+      (t.slots > 1 ? t.slots + ' product slots' : '1 card') + ', ' + t.tokens.length + ' fields)'
     sel.appendChild(opt)
   }
   sel.disabled = false
   $('template-hint').textContent = ''
+  // A template created moments ago is the one they meant to use.
+  if (state._selectTemplateId && [...sel.options].some(o => o.value === state._selectTemplateId)) {
+    sel.value = state._selectTemplateId
+    state._selectTemplateId = null
+  }
 }
 
 function updateButtons() {
@@ -753,6 +783,50 @@ function splitLine(line, forced) {
   return [s]
 }
 
+/* --- Section headers, without AI ------------------------------------- *
+ * A WhatsApp list is not a flat list. Clients write:
+ *     Monday
+ *     500gm
+ *     Kadala   45
+ *     …
+ *     Monday
+ *     100gm
+ *     Kaduku 11
+ * The pack size is sticky — it applies to every line until the next header —
+ * and the header lines themselves are not products. Split to columns used to
+ * turn each of them into a nameless row the designer had to spot and delete.
+ *
+ * These are the same rules as src/lib/ai/offer-sections.ts, which the AI path
+ * uses as its pre-pass, so both routes group a message identically. Purely
+ * deterministic: a fixed list of day names and a unit-suffixed number.
+ * -------------------------------------------------------------------- */
+const DAY_RE = /^(sun|mon|tues?|wednes?|thurs?|fri|satur)day$/i
+const WEIGHT_RE = /^(\d+(?:\.\d+)?)\s*(gms?|gm|g|kgs?|kg|mgs?|ml|mls|ltrs?|ltr|lt|l|litres?|nos?|pcs?|pieces?|pkts?|pkt|pack)$/i
+const PAGE_HINT_RE = /^[a-z]+\s+\d+\s*pages?$/i
+
+/**
+ * Is this line a section header rather than a product? Returns what it says
+ * ({ day, weight }), or null for a normal line. Both orders are accepted
+ * because clients write "Sunday 100gm" and "100gm Sunday" interchangeably.
+ */
+function asSectionHeader(line) {
+  const s = String(line || '').trim().replace(/[:\-–—]+$/, '').trim()
+  if (!s) return null
+  if (PAGE_HINT_RE.test(s)) return { day: null, weight: null }     // "Sunday 3 page"
+  // Whole-line weight first, so a spaced "500 GMS" is seen as one weight
+  // rather than the word "500" followed by the word "GMS".
+  const whole = WEIGHT_RE.exec(s)
+  if (whole) return { day: null, weight: whole[1] + whole[2].toLowerCase() }
+  if (DAY_RE.test(s)) return { day: s.replace(/^./, c => c.toUpperCase()).toLowerCase().replace(/^./, c => c.toUpperCase()), weight: null }
+  const parts = s.split(/\s+/)
+  if (parts.length === 2) {
+    const [a, b] = parts
+    if (DAY_RE.test(a) && WEIGHT_RE.test(b)) return { day: a.toLowerCase().replace(/^./, c => c.toUpperCase()), weight: b.toLowerCase() }
+    if (DAY_RE.test(b) && WEIGHT_RE.test(a)) return { day: b.toLowerCase().replace(/^./, c => c.toUpperCase()), weight: a.toLowerCase() }
+  }
+  return null
+}
+
 const ROLES = ['name', 'price', 'mrp', 'weight', 'badge', 'ignore']
 const ROLE_LABEL = { name: 'Product', price: 'Price', mrp: 'MRP', weight: 'Weight', badge: 'Badge', ignore: 'Ignore' }
 
@@ -828,7 +902,30 @@ function rolesFromHeader(cells, count) {
 function splitToTable() {
   const lines = $('paste-text').value.split(/\r?\n/)
   const delim = detectBlockDelimiter(lines)
-  let rowsRaw = lines.map(l => splitLine(l, delim)).filter(Boolean)
+
+  // Pass 1 — peel off section headers and carry their pack size / day down
+  // the lines that follow, exactly as the AI path's pre-pass does.
+  let rowsRaw = []
+  let meta = []
+  let curWeight = null, curDay = null
+  const sections = []
+  for (const line of lines) {
+    if (!line.trim()) continue
+    // A structured paste from a spreadsheet has no section headers, and a
+    // one-word cell like "Monday" there is data, not a heading.
+    const head = delim ? null : asSectionHeader(line)
+    if (head) {
+      if (head.day) curDay = head.day
+      if (head.weight) curWeight = head.weight
+      if (head.day || head.weight) sections.push((head.day || '') + (head.day && head.weight ? ' ' : '') + (head.weight || ''))
+      continue
+    }
+    const cells = splitLine(line, delim)
+    if (!cells) continue
+    rowsRaw.push(cells)
+    meta.push({ weight: curWeight, day: curDay })
+  }
+
   if (!rowsRaw.length) {
     reportError('Nothing to split.', 'Split to columns', 'Paste the offer text above first.')
     return
@@ -842,6 +939,7 @@ function splitToTable() {
       header = rowsRaw[0]
       state.colRoles = roles
       rowsRaw = rowsRaw.slice(1)
+      meta = meta.slice(1)
       maxCols = rowsRaw.length ? Math.max(...rowsRaw.map(r => r.length)) : maxCols
     }
   }
@@ -853,12 +951,19 @@ function splitToTable() {
   }
 
   state.rawRows = rowsRaw
+  state.rawMeta = meta
   applyRoles()
   log(
     'Split ' + rowsRaw.length + ' row(s) into ' + state.colRoles.length + ' column(s).' +
-    (header ? ' Columns read from your header row (' + header.filter(Boolean).join(' · ') + ').' : ' Check the column roles below.'),
+    (header ? ' Columns read from your header row (' + header.filter(Boolean).join(' · ') + ').' : '') +
+    (sections.length ? ' Sections: ' + sections.join(' · ') + '.' : ''),
     'ok'
   )
+  const days = [...new Set(meta.map(m => m.day).filter(Boolean))]
+  if (days.length > 1) {
+    log('⚠ This paste covers ' + days.length + ' days (' + days.join(', ') + ').', 'warn')
+    logFix('Cirqle holds one active offer per client — save one day at a time.')
+  }
 }
 
 /** Re-derive products from the raw split cells using the current roles. */
@@ -897,7 +1002,7 @@ function displayPrice(n) {
 
 function applyRoles() {
   const num = parsePrice
-  state.parsed = (state.rawRows || []).map(cells => {
+  state.parsed = (state.rawRows || []).map((cells, r) => {
     const p = { name: '', price: null, mrp: null, weight: null, badge: null, day: null, offerType: 'price' }
     state.colRoles.forEach((role, i) => {
       const cell = cells[i]
@@ -906,6 +1011,12 @@ function applyRoles() {
       else if (role === 'name') p.name = p.name ? (p.name + ' ' + cell) : cell
       else p[role] = String(cell).trim()
     })
+    // A real Weight column always wins; the section header only fills the gap.
+    const m = (state.rawMeta || [])[r]
+    if (m) {
+      if (!p.weight && m.weight) p.weight = m.weight
+      if (!p.day && m.day) p.day = m.day
+    }
     if (/buy\s*1\s*get\s*1|b1g1|bogo/i.test(p.badge || '')) p.offerType = 'bogo'
     return p
   }).filter(p => p.name)
@@ -1196,6 +1307,13 @@ $('refresh').onclick = () => {
   if ($('token').value.trim()) connect()
   if (state.campaign) loadCampaign()
 }
+$('new-template').onclick = () => {
+  clearLog()
+  $('new-template').disabled = true
+  log('Building the card template…')
+  post({ type: 'create-template' })
+}
+
 $('client').onchange = fillOfferDropdown
 $('offer').onchange = () => { state.campaign = null; state.validated = false; chip('chip-count', '—'); chip('chip-ready', '—'); updateButtons() }
 $('page').onchange = () => { state.validated = false; chip('chip-ready', 'Not validated', 'warn') }
@@ -1223,9 +1341,19 @@ onmessage = (event) => {
     case 'build-done':
       onBuildDone(msg.report)
       break
+    case 'template-created':
+      setBar(1)
+      $('new-template').disabled = false
+      log('✓ "' + msg.name + '" created with ' + msg.variants + ' variants and selected on this page.', 'ok')
+      logFix('Restyle it however you like — only the #layer names matter. Pick it in Template above to build with it.')
+      // Select it straight away: the template that was just made is almost
+      // certainly the one they want to use.
+      state._selectTemplateId = msg.id
+      break
     case 'error':
       reportError(msg.what, msg.where, msg.fix)
       $('build').disabled = !state.campaign
+      $('new-template').disabled = false
       break
   }
 }
