@@ -45,6 +45,11 @@ export interface ReceiptInput {
   companyName?: string
   companyPhone?: string
   companyWebsite?: string
+  /** 
+   * The customer's total outstanding balance across all unpaid invoices.
+   * Enables the 'Show overall outstanding balance' toggle in the UI. 
+   */
+  customerTotalOutstanding?: number
 }
 
 interface Props {
@@ -92,7 +97,7 @@ function loadImage(src: string): Promise<HTMLImageElement | null> {
  */
 export async function renderReceiptCanvas(
   input: ReceiptInput,
-  opts: { clientName: string; note: string },
+  opts: { clientName: string; note: string; showOverallBalance: boolean },
 ): Promise<HTMLCanvasElement> {
   const canvas = document.createElement('canvas')
   canvas.width = Math.round(CARD_W * CAPTURE_SCALE)
@@ -112,15 +117,22 @@ export async function renderReceiptCanvas(
 function drawReceipt(
   ctx: CanvasRenderingContext2D,
   input: ReceiptInput,
-  opts: { clientName: string; note: string },
+  opts: { clientName: string; note: string; showOverallBalance: boolean },
   logoImg: HTMLImageElement | null,
 ) {
   const W = CARD_W
   const H = CARD_H
   const clientName = opts.clientName
   const note = opts.note
-  const balanceDue = input.invoices.reduce((s, i) => s + Math.max(0, i.outstanding ?? 0), 0)
-  const invoiceLabel = input.invoices.length ? input.invoices.map(i => i.number).join(', ') : '—'
+  
+  const balanceDue = opts.showOverallBalance && input.customerTotalOutstanding !== undefined 
+    ? input.customerTotalOutstanding 
+    : input.invoices.reduce((s, i) => s + Math.max(0, i.outstanding ?? 0), 0)
+    
+  const invoiceLabel = opts.showOverallBalance 
+    ? `Allocated to ${input.invoices.length} invoice${input.invoices.length === 1 ? '' : 's'}`
+    : (input.invoices.length ? input.invoices.map(i => i.number).join(', ') : '—')
+    
   const dateLabel = input.dateISO
     ? new Date(input.dateISO).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
     : ''
@@ -283,8 +295,16 @@ function drawReceipt(
   const divY2 = footY - 12
   ctx.strokeStyle = 'rgba(255,255,255,0.07)'; ctx.lineWidth = 1
   ctx.beginPath(); ctx.moveTo(32, divY2); ctx.lineTo(400, divY2); ctx.stroke()
-  ctx.textAlign = 'center'; ctx.fillStyle = '#c4b5fd'; ctx.font = `500 12.5px ${FONT}`
-  ctx.fillText(truncate(note || 'Thank you for your payment!', 360), 216, divY2 - 27)
+  
+  if (opts.showOverallBalance) {
+    ctx.textAlign = 'center'; ctx.fillStyle = '#94a3b8'; ctx.font = `400 10px ${FONT}`
+    ctx.fillText('Outstanding balance includes all unpaid invoices for this customer as of the receipt date.', 216, divY2 - 16)
+    ctx.textAlign = 'center'; ctx.fillStyle = '#c4b5fd'; ctx.font = `500 12.5px ${FONT}`
+    ctx.fillText(truncate(note || 'Thank you for your payment!', 360), 216, divY2 - 34)
+  } else {
+    ctx.textAlign = 'center'; ctx.fillStyle = '#c4b5fd'; ctx.font = `500 12.5px ${FONT}`
+    ctx.fillText(truncate(note || 'Thank you for your payment!', 360), 216, divY2 - 27)
+  }
 }
 
 export default function ReceiptModal({ input, onClose }: Props) {
@@ -296,6 +316,7 @@ export default function ReceiptModal({ input, onClose }: Props) {
   const [previewScale, setPreviewScale] = useState(1)
   const [clientName, setClientName] = useState(input.defaultClientName || '')
   const [note, setNote] = useState('')
+  const [showOverallBalance, setShowOverallBalance] = useState(false)
   const [busy, setBusy] = useState<'png' | 'share' | 'pdf' | null>(null)
   const [done, setDone] = useState(false)
   const [error, setError] = useState('')
@@ -319,16 +340,18 @@ export default function ReceiptModal({ input, onClose }: Props) {
     return () => obs.disconnect()
   }, [])
 
-  const balanceDue = input.invoices.reduce((s, i) => s + Math.max(0, i.outstanding ?? 0), 0)
-  const invoiceLabel = input.invoices.length
-    ? input.invoices.map(i => i.number).join(', ')
-    : '—'
+  const balanceDue = showOverallBalance && input.customerTotalOutstanding !== undefined
+    ? input.customerTotalOutstanding
+    : input.invoices.reduce((s, i) => s + Math.max(0, i.outstanding ?? 0), 0)
+  const invoiceLabel = showOverallBalance
+    ? `Allocated to ${input.invoices.length} invoice${input.invoices.length === 1 ? '' : 's'}`
+    : (input.invoices.length ? input.invoices.map(i => i.number).join(', ') : '—')
   const dateLabel = input.dateISO
     ? new Date(input.dateISO).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
     : ''
 
   function renderCanvas(): Promise<HTMLCanvasElement | null> {
-    return renderReceiptCanvas(input, { clientName, note })
+    return renderReceiptCanvas(input, { clientName, note, showOverallBalance })
   }
 
   function flashDone() {
@@ -455,6 +478,20 @@ export default function ReceiptModal({ input, onClose }: Props) {
                 className="mt-1 w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
               />
             </label>
+            
+            {input.customerTotalOutstanding !== undefined && (
+              <label className="flex items-center gap-2 mt-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showOverallBalance}
+                  onChange={e => setShowOverallBalance(e.target.checked)}
+                  className="rounded border-border text-primary focus:ring-primary/50 bg-secondary w-4 h-4"
+                />
+                <span className="text-[12px] font-medium text-foreground">
+                  Show overall outstanding balance
+                </span>
+              </label>
+            )}
           </div>
 
           {/* ── Live preview ──────────────────────────────────────────
@@ -594,6 +631,11 @@ export default function ReceiptModal({ input, onClose }: Props) {
 
                 {/* Thank-you / note + footer */}
                 <div style={{ marginTop: 'auto', paddingTop: 16 }}>
+                  {showOverallBalance && (
+                    <div style={{ fontSize: 10, color: '#94a3b8', textAlign: 'center', marginBottom: 6 }}>
+                      Outstanding balance includes all unpaid invoices for this customer as of the receipt date.
+                    </div>
+                  )}
                   <div style={{ fontSize: 12.5, color: '#c4b5fd', textAlign: 'center', fontWeight: 500 }}>
                     {note || 'Thank you for your payment!'}
                   </div>
