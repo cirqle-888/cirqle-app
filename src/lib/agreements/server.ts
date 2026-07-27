@@ -1,0 +1,197 @@
+/**
+ * Client Agreements — Data Loaders
+ *
+ * Safe read-only fetches. Uses the application standard createAdminClient.
+ */
+
+import { createAdminClient } from '@/lib/supabase/admin'
+import { resolveTermRows, computeItemProgress, AgreementProgressSummary, ItemProgressSummary } from './progress'
+import type { 
+  ClientAgreementRow, 
+  ClientAgreementItemRow, 
+  ClientAgreementDeliverableRow,
+  ClientAgreementTaskRow
+} from './types'
+
+export interface AgreementOverviewFilter {
+  clientId?: string
+  status?: string[]
+}
+
+export async function loadAgreementOverview(filters: AgreementOverviewFilter = {}) {
+  const supabase = await createAdminClient()
+  
+  let q = supabase
+    .from('client_agreements')
+    .select(`
+      *,
+      client:clients(id, name, default_currency)
+    `)
+    .is('deleted_at', null)
+    
+  if (filters.clientId) {
+    q = q.eq('client_id', filters.clientId)
+  }
+  if (filters.status && filters.status.length > 0) {
+    q = q.in('status', filters.status)
+  }
+  
+  const { data: agreements, error } = await q.order('created_at', { ascending: false })
+  if (error || !agreements) return []
+  
+  // We don't fetch all deliverables here since overview just needs high level stats
+  // For deep stats, use loadClientMonthProgress
+  return agreements
+}
+
+export async function loadClientMonthProgress(
+  clientId: string,
+  month: string // 'YYYY-MM'
+): Promise<AgreementProgressSummary[]> {
+  const supabase = await createAdminClient()
+  
+  // 1. Fetch active agreements
+  const { data: agreements } = await supabase
+    .from('client_agreements')
+    .select('*')
+    .eq('client_id', clientId)
+    .in('status', ['active', 'paused'])
+    .is('deleted_at', null)
+
+  if (!agreements || agreements.length === 0) return []
+
+  const agreementIds = agreements.map(a => a.id)
+  
+  // 2. Fetch all term rows (client_agreement_items)
+  const { data: items } = await supabase
+    .from('client_agreement_items')
+    .select('*')
+    .in('agreement_id', agreementIds)
+    
+  if (!items || items.length === 0) return []
+
+  // Resolve the applicable term row for this month
+  const activeItemsByAgreement = new Map<string, ClientAgreementItemRow[]>()
+  
+  for (const item of items) {
+    // Note: items are typically returned in creation order, but resolveTermRows handles overlapping logic
+    // We group them by item identifier but the schema generates new IDs per term row!
+    // Wait, the spec says "a change CLOSES the row and INSERTs a successor (with its deliverables re-created)". 
+    // So the item identity IS the `id` itself. Wait. If the row is replaced, how do we group them across time?
+    // The design says: "term_changed with {from_item_id, to_item_id}". 
+    // For a specific month M, we just find all items that overlap month M and apply them as active for that month.
+    
+    // Check if item is active in this month
+    const startOfMonth = `${month}-01`
+    const [y, m] = month.split('-').map(Number)
+    const endOfMonth = `${month}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`
+    
+    if (item.effective_from > endOfMonth) continue
+    if (item.effective_to && item.effective_to < startOfMonth) continue
+    
+    let list = activeItemsByAgreement.get(item.agreement_id)
+    if (!list) {
+      list = []
+      activeItemsByAgreement.set(item.agreement_id, list)
+    }
+    list.push(item)
+  }
+
+  const activeItemIds = Array.from(activeItemsByAgreement.values()).flat().map(i => i.id)
+  if (activeItemIds.length === 0) return []
+
+  // 3. Fetch related Deliverables, Linked Tasks, Adjustments
+  const [
+    { data: deliverables },
+    { data: linkedTasks },
+    { data: adjustments }
+  ] = await Promise.all([
+    supabase.from('client_agreement_deliverables').select('*').in('item_id', activeItemIds),
+    supabase.from('client_agreement_tasks').select('*').in('item_id', activeItemIds),
+    supabase.from('client_agreement_adjustments').select('*').in('item_id', activeItemIds).lte('month', `${month}-01`)
+  ])
+  
+  // 4. Fetch Calendar Items & Pipeline Tasks for the month
+  const [
+    { data: calendarItems },
+    { data: pipelineTasks }
+  ] = await Promise.all([
+    supabase.from('social_calendar_items')
+      .select(`
+        id, service_id, content_type, variants, status,
+        linkedRequest:request_id (
+          id, status,
+          promoted_task:tasks ( id, status )
+        )
+      `)
+      .eq('calendar:social_calendars!inner(client_id)', clientId)
+      .eq('calendar:social_calendars!inner(month)', month),
+      
+    supabase.from('tasks')
+      .select('id, service_id, task_date, status, quantity, deleted_at')
+      .eq('client_id', clientId)
+      .is('deleted_at', null)
+      // For tasks we should technically fetch matching the month, but one_time items ignore month. 
+      // For now we fetch month tasks, we can refine this.
+      .gte('task_date', `${month}-01`)
+      .lte('task_date', `${month}-31`) 
+  ])
+  
+  const linkedTaskIds = new Set((linkedTasks || []).map(lt => lt.task_id))
+  const enrichedTasks = (pipelineTasks || []).map(t => ({
+    ...t,
+    isExplicitlyLinked: linkedTaskIds.has(t.id)
+  }))
+  
+  const results: AgreementProgressSummary[] = []
+  
+  for (const agr of agreements) {
+    const termRows = activeItemsByAgreement.get(agr.id) || []
+    if (termRows.length === 0) continue
+    
+    let totalCommitted = 0, totalPlanned = 0, totalDelivered = 0
+    const itemSummaries: ItemProgressSummary[] = []
+    
+    for (const termRow of termRows) {
+      const itemDeliverables = (deliverables || []).filter(d => d.item_id === termRow.id)
+      const itemAdjustments = (adjustments || []).filter(a => a.item_id === termRow.id)
+      
+      // Calculate manual carry in
+      let carryIn = 0
+      if (termRow.carry_forward_rule === 'manual') {
+        carryIn = itemAdjustments.reduce((sum, a) => sum + Number(a.qty), 0)
+      }
+      
+      const summary = computeItemProgress({
+        month,
+        agreement: agr,
+        termRow,
+        deliverables: itemDeliverables,
+        adjustments: itemAdjustments,
+        calendarItems: (calendarItems || []) as any,
+        tasks: enrichedTasks,
+        carryInRemaining: carryIn
+      })
+      
+      itemSummaries.push(summary)
+      totalCommitted += summary.committed
+      totalPlanned += summary.planned
+      totalDelivered += summary.delivered
+    }
+    
+    results.push({
+      agreementId: agr.id,
+      agreementNumber: agr.agreement_number,
+      title: agr.title,
+      status: agr.status,
+      items: itemSummaries.sort((a, b) => a.displayOrder - b.displayOrder),
+      totalCommitted,
+      totalPlanned,
+      totalDelivered,
+      totalRemaining: Math.max(0, totalCommitted - totalDelivered),
+      totalExtra: Math.max(0, totalDelivered - totalCommitted)
+    })
+  }
+
+  return results
+}

@@ -17,6 +17,7 @@ interface Props {
   services: { id: string; name: string; is_active: boolean }[]
   partner: { id: string; name: string; partner_code: string } | null
   showAmounts: boolean
+  agreements?: any[]
 }
 
 const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
@@ -43,7 +44,15 @@ const TASK_STATUS_STYLE: Record<string, string> = {
   cancelled:   'bg-red-500/10 text-red-400 border-red-500/25',
 }
 
-export default function ClientDetailClient({ client, invoices, tasks, pricing, services, partner, showAmounts }: Props) {
+const AGREEMENT_STATUS_CHIP: Record<string, string> = {
+  draft: 'bg-secondary text-muted-foreground border-border',
+  active: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/25',
+  paused: 'bg-amber-500/10 text-amber-500 border-amber-500/25',
+  completed: 'bg-blue-500/10 text-blue-500 border-blue-500/25',
+  cancelled: 'bg-red-500/10 text-red-500 border-red-500/25',
+}
+
+export default function ClientDetailClient({ client, invoices, tasks, pricing, services, partner, showAmounts, agreements }: Props) {
   const { ds } = usePrivacy()
 
   const kpi = useMemo(() => {
@@ -152,6 +161,30 @@ export default function ClientDetailClient({ client, invoices, tasks, pricing, s
                         <p className="text-[10px] text-muted-foreground">of {inr(inv.total_amount || 0)}</p>
                       </div>
                     </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {agreements && agreements.length > 0 && (
+              <div className="bg-card border border-border rounded-2xl overflow-hidden">
+                <div className="px-5 py-3.5 border-b border-border/60 flex items-center justify-between">
+                  <h2 className="text-sm font-semibold">Agreements & Packages</h2>
+                  <Link href="/dashboard/agreements" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
+                    Manage <ExternalLink className="w-3 h-3" />
+                  </Link>
+                </div>
+                <div className="divide-y divide-border/40">
+                  {agreements.map((agr: any) => (
+                    <Link key={agr.id} href={`/dashboard/agreements/${agr.id}`} className="px-5 py-3 flex items-center gap-3 hover:bg-secondary/40 transition-colors">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium truncate">{agr.title}</p>
+                        <p className="text-xs text-muted-foreground">{agr.agreement_number} · {agr.start_date} &rarr; {agr.end_date || 'Ongoing'}</p>
+                      </div>
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border capitalize shrink-0 ${AGREEMENT_STATUS_CHIP[agr.status] || AGREEMENT_STATUS_CHIP.draft}`}>
+                        {agr.status}
+                      </span>
+                    </Link>
                   ))}
                 </div>
               </div>

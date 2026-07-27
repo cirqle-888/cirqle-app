@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
+import { loadClientMonthProgress } from '@/lib/agreements/server'
 import SocialCalendarClient from './social-calendar-client'
 
 export const dynamic = 'force-dynamic'
@@ -112,6 +113,18 @@ export default async function SocialCalendarPage({
     }
   } catch { /* unset or malformed — keyword fallback covers it */ }
 
+  let agreementProgress: any[] = []
+  if (selectedId) {
+    const cal = calendars.find(c => c.id === selectedId)
+    if (cal) {
+      try {
+        agreementProgress = await loadClientMonthProgress(cal.client_id, cal.month.substring(0, 7))
+      } catch (e) {
+        console.error('Failed to load agreement progress', e)
+      }
+    }
+  }
+
   return (
     <SocialCalendarClient
       migrated={migrated}
@@ -123,6 +136,7 @@ export default async function SocialCalendarPage({
       serviceMap={serviceMap}
       companySettings={companySettings}
       canManage={isAdmin || hasPermission(me, PERMS.SOCIAL_MANAGE)}
+      agreementProgress={agreementProgress}
     />
   )
 }

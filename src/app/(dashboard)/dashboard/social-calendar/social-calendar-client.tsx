@@ -90,6 +90,7 @@ interface Props {
   /** Branding/company keys for the PDF export (same template family as invoices). */
   companySettings?: Record<string, string>
   canManage: boolean
+  agreementProgress?: any[]
 }
 
 // Service assignment is fully automatic (server-side, from the Service-defaults
@@ -908,10 +909,17 @@ export default function SocialCalendarClient({
             options={calendars.map(c => {
               const total = c.items?.length ?? 0
               const sent = c.items?.filter(i => i.request_id).length ?? 0
+              let sub = `${c.title ? c.title + ' · ' : ''}${total} items · ${sent} in requests${c.status === 'archived' ? ' · archived' : ''}`
+              if (c.id === selected?.id && props.agreementProgress && props.agreementProgress.length > 0) {
+                const totalCommitted = props.agreementProgress.reduce((sum, a) => sum + (a.totalCommitted || 0), 0)
+                const totalPlanned = props.agreementProgress.reduce((sum, a) => sum + (a.totalPlanned || 0), 0)
+                const totalDelivered = props.agreementProgress.reduce((sum, a) => sum + (a.totalDelivered || 0), 0)
+                sub = `${c.title ? c.title + ' · ' : ''}${totalPlanned}/${totalCommitted} Planned · ${totalDelivered} Delivered${c.status === 'archived' ? ' · archived' : ''}`
+              }
               return {
                 id: c.id,
                 label: `${c.client?.name ?? 'Client'} — ${monthLabel(c.month)}`,
-                sub: `${c.title ? c.title + ' · ' : ''}${total} items · ${sent} in requests${c.status === 'archived' ? ' · archived' : ''}`,
+                sub
               }
             })}
             value={selected?.id ?? ''}

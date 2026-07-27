@@ -3,6 +3,7 @@ import { createAdminClient, fetchAll } from '@/lib/supabase/server'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
+import { loadAgreementOverview } from '@/lib/agreements/server'
 import ClientDetailClient from './client-detail-client'
 
 export const dynamic = 'force-dynamic'
@@ -40,6 +41,13 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       ? supabase.from('business_partners').select('id, name, partner_code').eq('id', client.business_partner_id).maybeSingle()
       : Promise.resolve({ data: null }),
   ])
+  
+  let agreements: any[] = []
+  try {
+    agreements = await loadAgreementOverview({ clientId: id })
+  } catch (err) {
+    console.error('Failed to load agreements', err)
+  }
 
   return (
     <ClientDetailClient
@@ -50,6 +58,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       services={(servicesRes.data || []) as any[]}
       partner={partnerRes.data as any}
       showAmounts={showAmounts}
+      agreements={agreements}
     />
   )
 }
