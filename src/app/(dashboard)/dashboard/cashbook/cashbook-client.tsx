@@ -2277,6 +2277,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             })
             
             let firstClient = allocs.find(a => unwrap(unwrap(a.invoice)?.client)?.name)
+            let firstClientId = firstClient ? unwrap(unwrap(firstClient.invoice)?.client)?.id : undefined
             let firstClientName = firstClient ? unwrap(unwrap(firstClient.invoice)?.client)?.name : ''
             
             if (receiptInvoices.length === 0 && receiptEntry.direct_invoice) {
@@ -2285,7 +2286,19 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 number: directInv?.invoice_number || '—',
                 outstanding: directInv ? Number(directInv.total_amount) - Number(directInv.paid_amount || 0) : 0,
               }]
+              firstClientId = unwrap(directInv?.client)?.id || undefined
               firstClientName = unwrap(directInv?.client)?.name || ''
+            }
+
+            // Calculate total outstanding balance across all unpaid invoices for this customer
+            let customerTotalOutstanding: number | undefined = undefined
+            const clientId = receiptEntry.client_id || firstClientId
+            if (clientId) {
+              const clientInvoices = dueInvoices.filter(i => 
+                (i.client?.id === clientId || i.client_id === clientId) && 
+                i.currency === receiptEntry.currency
+              )
+              customerTotalOutstanding = clientInvoices.reduce((sum, inv) => sum + Math.max(0, Number(inv.total_amount) - Number(inv.paid_amount || 0)), 0)
             }
 
             // inflow entries). The UUID-derived fallback covers only outflow
@@ -2302,6 +2315,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               method: receiptEntry.bank_account?.name,
               reference: receiptEntry.reference,
               invoices: receiptInvoices,
+              customerTotalOutstanding,
               // Branding from Settings → Company. Missing keys leave the
               // receipt rendering its built-in Cirqle defaults.
               // Receipt has a dark background — use dark logo when available,
