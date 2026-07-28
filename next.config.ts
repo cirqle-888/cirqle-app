@@ -22,6 +22,19 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        // The background-removal model and its WASM runtime are static, public,
+        // non-secret assets. They are fetched by the Cirqle Figma plugin, whose
+        // iframe has a null origin, so they need an explicit CORS allow. Scoped
+        // to /models/ so nothing else in the app becomes cross-origin readable.
+        source: '/models/:path*',
+        headers: [
+          { key: 'Access-Control-Allow-Origin', value: '*' },
+          { key: 'Cross-Origin-Resource-Policy', value: 'cross-origin' },
+          // ~18MB that never changes — cache it hard.
+          { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+        ],
+      },
+      {
         source: '/(.*)',
         headers: [
           // Clickjacking protection — the app is never legitimately iframed.
