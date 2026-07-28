@@ -425,6 +425,7 @@ function DroppableZone({ id, className, activeClassName, disabled, children }: {
 
 export default function SocialCalendarClient({
   migrated, calendars, selectedId, initialItems, clients, services = [], serviceMap = {}, companySettings = {}, canManage,
+  agreementProgress,
 }: Props) {
   const router = useRouter()
   const toast = useToast()
@@ -910,10 +911,10 @@ export default function SocialCalendarClient({
               const total = c.items?.length ?? 0
               const sent = c.items?.filter(i => i.request_id).length ?? 0
               let sub = `${c.title ? c.title + ' · ' : ''}${total} items · ${sent} in requests${c.status === 'archived' ? ' · archived' : ''}`
-              if (c.id === selected?.id && props.agreementProgress && props.agreementProgress.length > 0) {
-                const totalCommitted = props.agreementProgress.reduce((sum, a) => sum + (a.totalCommitted || 0), 0)
-                const totalPlanned = props.agreementProgress.reduce((sum, a) => sum + (a.totalPlanned || 0), 0)
-                const totalDelivered = props.agreementProgress.reduce((sum, a) => sum + (a.totalDelivered || 0), 0)
+              if (c.id === selected?.id && agreementProgress && agreementProgress.length > 0) {
+                const totalCommitted = agreementProgress.reduce((sum, a) => sum + (a.totalCommitted || 0), 0)
+                const totalPlanned = agreementProgress.reduce((sum, a) => sum + (a.totalPlanned || 0), 0)
+                const totalDelivered = agreementProgress.reduce((sum, a) => sum + (a.totalDelivered || 0), 0)
                 sub = `${c.title ? c.title + ' · ' : ''}${totalPlanned}/${totalCommitted} Planned · ${totalDelivered} Delivered${c.status === 'archived' ? ' · archived' : ''}`
               }
               return {
