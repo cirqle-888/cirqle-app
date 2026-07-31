@@ -23,8 +23,13 @@ const SYSTEM_PROMPT =
   `- "/", "&", "+", "-", "," INSIDE a line are part of the product NAME, never a separator. ` +
   `e.g. "Sweet / Masala Number 63" is ONE product named "Sweet / Masala Number" priced 63.\n` +
   `- Keep the pack size / weight IN the name if present (e.g. "Bru Coffee 200g"), and also copy it to the weight field.\n` +
+  `- NEVER translate, transliterate or romanise a product name. Keep the ORIGINAL SCRIPT ` +
+  `character for character: Malayalam stays Malayalam, Hindi stays Hindi, Arabic stays Arabic. ` +
+  `"ചെറുപയർ 500GM" must come back as "ചെറുപയർ 500GM" — NOT "Cherupayar 500Gm". ` +
+  `This is a data-entry job, not a translation job.\n` +
   `For each line extract:\n` +
-  `- name: the product name, title-cased, INCLUDING any pack size, WITHOUT the price\n` +
+  `- name: the product name, INCLUDING any pack size, WITHOUT the price. ` +
+  `Title-case ONLY plain English names; leave every other script exactly as written\n` +
   `- weight: pack size / quantity if present (e.g. "500g", "1kg", "250ml"), else null\n` +
   `- price: the selling/offer price as a plain number (handles "109.90", "Rs 350", "265/-", "@ 145", "35rs"), else null\n` +
   `- mrp: a second, HIGHER "MRP"/"was"/original price if BOTH prices appear on the same line, else null. ` +

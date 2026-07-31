@@ -9,6 +9,7 @@ import AppSelect from '@/components/ui/app-select'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { refLabel } from '@/lib/requests/core'
+import { rollupAgreementProgress, type AgreementProgressSummary } from '@/lib/agreements/progress'
 import CaptionCanvasEditor from './caption-canvas'
 import {
   DndContext, PointerSensor, useSensor, useSensors, useDraggable, useDroppable,
@@ -34,7 +35,7 @@ import {
   Link2, Clipboard, PanelRightClose, PanelRightOpen,
   Bold, Italic, Underline, Strikethrough, List, ListOrdered, Heading2, Quote,
   Link as LinkIcon, Highlighter, Palette, Smile, Eraser,
-  AlignLeft, AlignCenter, AlignRight, CalendarRange,
+  AlignLeft, AlignCenter, AlignRight, CalendarRange, Handshake,
 } from 'lucide-react'
 
 // ─── Types (mirror the page's selects) ────────────────────────────────────────
@@ -90,7 +91,9 @@ interface Props {
   /** Branding/company keys for the PDF export (same template family as invoices). */
   companySettings?: Record<string, string>
   canManage: boolean
-  agreementProgress?: any[]
+  agreementProgress?: AgreementProgressSummary[]
+  /** Gates the whole agreements meter — hidden entirely without agreements.view. */
+  canViewAgreements?: boolean
 }
 
 // Service assignment is fully automatic (server-side, from the Service-defaults
@@ -425,13 +428,20 @@ function DroppableZone({ id, className, activeClassName, disabled, children }: {
 
 export default function SocialCalendarClient({
   migrated, calendars, selectedId, initialItems, clients, services = [], serviceMap = {}, companySettings = {}, canManage,
-  agreementProgress,
+  agreementProgress, canViewAgreements = false,
 }: Props) {
   const router = useRouter()
   const toast = useToast()
 
   const selected = calendars.find(c => c.id === selectedId) ?? null
   const items = initialItems
+
+  // Agreements meter rollup — reuses the shared pure helper (no duplicated math).
+  // `agreementProgress` is already scoped to the selected plan's client + month.
+  const agreementRollup = useMemo(
+    () => rollupAgreementProgress(agreementProgress ?? []),
+    [agreementProgress],
+  )
 
   // ── New-plan modal ──────────────────────────────────────────────────────────
   const [showNewPlan, setShowNewPlan] = useState(false)
@@ -1035,6 +1045,55 @@ export default function SocialCalendarClient({
                 ))}
             </div>
           </div>
+
+          {/* ── Agreements progress meter (hidden without agreements.view) ── */}
+          {canViewAgreements && agreementRollup.activeAgreements > 0 && (
+            <div className="rounded-xl border border-border bg-card px-4 py-3">
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <div className="flex items-center gap-2">
+                  <Handshake className="w-4 h-4 text-muted-foreground" />
+                  <span className="text-sm font-semibold">Agreements Progress</span>
+                  <span className="text-xs text-muted-foreground">
+                    · {agreementRollup.activeAgreements} Active Agreement{agreementRollup.activeAgreements === 1 ? '' : 's'}
+                  </span>
+                </div>
+                <span className="text-sm font-semibold tabular-nums">{agreementRollup.completionPct}%</span>
+              </div>
+
+              <div className="h-2 w-full rounded-full bg-secondary overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-emerald-500 transition-all"
+                  style={{ width: `${agreementRollup.completionPct}%` }}
+                />
+              </div>
+
+              <div className="mt-2.5 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs">
+                <span className="flex items-center gap-1.5">
+                  <span className="text-emerald-500">✓</span>
+                  <span className="text-muted-foreground">Delivered</span>
+                  <span className="font-semibold tabular-nums">{agreementRollup.delivered}</span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="text-blue-500">○</span>
+                  <span className="text-muted-foreground">Planned</span>
+                  <span className="font-semibold tabular-nums">{agreementRollup.planned}</span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="text-amber-500">◐</span>
+                  <span className="text-muted-foreground">Remaining</span>
+                  <span className="font-semibold tabular-nums">{agreementRollup.remaining}</span>
+                </span>
+                <span className="text-muted-foreground/70">
+                  of {agreementRollup.committed} committed
+                </span>
+                {agreementRollup.extra > 0 && (
+                  <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-violet-500/12 text-violet-600 dark:text-violet-300 border border-violet-500/25">
+                    +{agreementRollup.extra} extra
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* ── View toggle ── */}
           <div className="flex items-center gap-1 -mt-1">

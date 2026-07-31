@@ -9,7 +9,6 @@
  */
 
 import {
-  ItemProgress,
   resolveItemProgress,
   ContentType,
 } from '@/lib/social/plan'
@@ -59,6 +58,43 @@ export interface AgreementProgressSummary {
   totalExtra: number
 }
 
+/** Aggregate of one or more agreement summaries — powers headline meters/cards. */
+export interface AgreementProgressRollup {
+  /** Number of summaries with an `active` status (paused/others excluded). */
+  activeAgreements: number
+  committed: number
+  planned: number
+  delivered: number
+  remaining: number
+  extra: number
+  /** Delivered ÷ committed, 0–100 (0 when nothing is committed). */
+  completionPct: number
+}
+
+/**
+ * Sum a set of per-agreement summaries into a single rollup. Pure — no I/O — so
+ * both the Social Calendar meter and the Client-page card reuse one reduce
+ * instead of duplicating the arithmetic. Only `active` agreements contribute
+ * (paused agreements show no bars per the design); pass already-scoped input
+ * (e.g. one client's summaries) to scope the rollup.
+ */
+export function rollupAgreementProgress(
+  summaries: AgreementProgressSummary[],
+): AgreementProgressRollup {
+  const active = summaries.filter(s => s.status === 'active')
+  const committed = active.reduce((sum, s) => sum + (s.totalCommitted || 0), 0)
+  const delivered = active.reduce((sum, s) => sum + (s.totalDelivered || 0), 0)
+  return {
+    activeAgreements: active.length,
+    committed,
+    delivered,
+    planned: active.reduce((sum, s) => sum + (s.totalPlanned || 0), 0),
+    remaining: active.reduce((sum, s) => sum + (s.totalRemaining || 0), 0),
+    extra: active.reduce((sum, s) => sum + (s.totalExtra || 0), 0),
+    completionPct: committed > 0 ? Math.min(100, Math.round((delivered / committed) * 100)) : 0,
+  }
+}
+
 /** Matches a calendar item (planned) */
 export interface SourceCalendarItem {
   id: string
@@ -78,6 +114,8 @@ export interface SourceTask {
   quantity: number
   deleted_at: string | null
   isExplicitlyLinked?: boolean // true if joined via client_agreement_tasks
+  /** Agreement item the coverage engine linked this task to (tasks.retainer_item_id). */
+  retainer_item_id?: string | null
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -191,7 +229,6 @@ function matchDeliverable(
 
 export function computeItemProgress(ctx: ComputeContext): ItemProgressSummary {
   const { month, termRow, agreement, deliverables, calendarItems, tasks, carryInRemaining } = ctx
-  const isOneTime = termRow.commitment_type === 'one_time'
 
   // 1. Calculate committed baseline
   let baseCommitted = 0
@@ -262,6 +299,20 @@ export function computeItemProgress(ctx: ComputeContext): ItemProgressSummary {
     if (!isCompleted) continue
     
     if (processedCalendarTaskIds.has(task.id)) continue // skip double counting
+
+    // PREFERRED match: the coverage engine already stamped this task with the
+    // exact agreement item it belongs to (tasks.retainer_item_id). If it points
+    // at THIS term row, count it — regardless of how the task was created
+    // (manual, request, import, future integration) and regardless of service.
+    // This keeps Agreement Progress consistent with Billing coverage. `continue`
+    // avoids any double count with the service/link rules below. (Independent of
+    // bill_as_extra: extra work still counts toward progress AND bills.)
+    if (task.retainer_item_id && task.retainer_item_id === termRow.id) {
+      const match = matchDeliverable('other', task.service_id, deliverables, termRow.service_id)
+      if (match) delMap.get(match.id)!.delivered += task.quantity
+      else safetyNetDelivered += task.quantity
+      continue
+    }
 
     if (task.isExplicitlyLinked) {
       // Explicit links count fully towards the item/deliverable if possible

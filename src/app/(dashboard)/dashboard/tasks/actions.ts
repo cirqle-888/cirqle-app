@@ -20,6 +20,8 @@ import { logActivity } from '@/lib/activity/log'
 import { PERMS } from '@/lib/permissions/keys'
 import { revalidatePath } from 'next/cache'
 import { recalcTaskCommissions, syncDraftInvoices } from '@/lib/sync/integrity'
+import { getTaskCoverage, getRetainerCoverageInfo, type RetainerCoverageInfo } from '@/lib/agreements/coverage'
+import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { recalculatePayrollForMonth } from '@/app/(dashboard)/dashboard/payroll/actions'
 import { syncRequestStatusFromTask, syncRequestStatusFromTasks } from '@/lib/requests/task-sync'
 import { retryWithoutScope, withoutScope } from '@/lib/finance/classify'
@@ -341,6 +343,23 @@ export async function serverCancelTask(
   return { ok: true }
 }
 
+/**
+ * Live retainer-coverage lookup for the task modal. Returns the card figures
+ * when the client+service+date is covered by an active retainer, else null.
+ * Money fields are nulled for viewers without agreements.view_pricing.
+ */
+export async function fetchRetainerCoverage(
+  clientId: string | null,
+  serviceId: string | null,
+  taskDate: string | null,
+): Promise<RetainerCoverageInfo | null> {
+  const me = await loadCurrentUser().catch(() => null)
+  const isAdmin = me?.isAdmin ?? true
+  const pricingVisible = isAdmin || hasPermission(me, PERMS.AGREEMENTS_VIEW_PRICING)
+  const admin = createAdminClient()
+  return getRetainerCoverageInfo(admin, { clientId, serviceId, taskDate, pricingVisible })
+}
+
 export async function serverFillTaskBilling(
   taskId:    string,
   clientId:  string | null,
@@ -350,6 +369,16 @@ export async function serverFillTaskBilling(
   if (!serviceId) return
 
   const admin = createAdminClient()
+
+  // Retainer-covered tasks carry NO client amount — the monthly retainer is the
+  // charge. Zero any auto-filled amount and let the invoice sync strip any line.
+  const coverage = await getTaskCoverage(admin, taskId)
+  if (coverage.covered) {
+    await admin.from('tasks').update({ billing_amount: 0, billing_amount_inr: 0 }).eq('id', taskId)
+    await recalcTaskCommissions(taskId)
+    await syncDraftInvoices(taskId)
+    return
+  }
 
   const { data: svc } = await admin
     .from('services')

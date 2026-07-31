@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { loadClientMonthProgress } from '@/lib/agreements/server'
+import type { AgreementProgressSummary } from '@/lib/agreements/progress'
 import SocialCalendarClient from './social-calendar-client'
 
 export const dynamic = 'force-dynamic'
@@ -22,6 +23,7 @@ export default async function SocialCalendarPage({
   const isAdmin = me?.isAdmin ?? true
   const canView = isAdmin || hasPermission(me, PERMS.SOCIAL_VIEW)
   if (me && !canView) redirect('/dashboard')
+  const canViewAgreements = isAdmin || hasPermission(me, PERMS.AGREEMENTS_VIEW)
 
   const sp = searchParams ? await searchParams : undefined
   const requestedCalendarId = typeof sp?.calendar === 'string' ? sp.calendar : null
@@ -113,8 +115,10 @@ export default async function SocialCalendarPage({
     }
   } catch { /* unset or malformed — keyword fallback covers it */ }
 
-  let agreementProgress: any[] = []
-  if (selectedId) {
+  // Agreement meter data — a single per-client+month loader (no N+1), and only
+  // when the viewer may see agreements at all (otherwise the widget is hidden).
+  let agreementProgress: AgreementProgressSummary[] = []
+  if (selectedId && canViewAgreements) {
     const cal = calendars.find(c => c.id === selectedId)
     if (cal) {
       try {
@@ -137,6 +141,7 @@ export default async function SocialCalendarPage({
       companySettings={companySettings}
       canManage={isAdmin || hasPermission(me, PERMS.SOCIAL_MANAGE)}
       agreementProgress={agreementProgress}
+      canViewAgreements={canViewAgreements}
     />
   )
 }

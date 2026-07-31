@@ -5,13 +5,8 @@
  */
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveTermRows, computeItemProgress, AgreementProgressSummary, ItemProgressSummary } from './progress'
-import type { 
-  ClientAgreementRow, 
-  ClientAgreementItemRow, 
-  ClientAgreementDeliverableRow,
-  ClientAgreementTaskRow
-} from './types'
+import { computeItemProgress, AgreementProgressSummary, ItemProgressSummary } from './progress'
+import type { ClientAgreementItemRow } from './types'
 
 export interface AgreementOverviewFilter {
   clientId?: string
@@ -42,6 +37,59 @@ export async function loadAgreementOverview(filters: AgreementOverviewFilter = {
   // We don't fetch all deliverables here since overview just needs high level stats
   // For deep stats, use loadClientMonthProgress
   return agreements
+}
+
+/**
+ * Load one agreement's items with their nested deliverables + milestones,
+ * ordered for display. Returns [] on any read error (defensive: un-migrated
+ * environments simply show an empty editor).
+ */
+export async function loadAgreementItems(agreementId: string) {
+  const supabase = await createAdminClient()
+
+  const { data: items, error } = await supabase
+    .from('client_agreement_items')
+    .select('*')
+    .eq('agreement_id', agreementId)
+    .order('display_order', { ascending: true })
+    .order('effective_from', { ascending: true })
+
+  if (error || !items || items.length === 0) return []
+
+  const itemIds = items.map(i => i.id)
+  const [{ data: deliverables }, { data: milestones }, coveredServices] = await Promise.all([
+    supabase.from('client_agreement_deliverables').select('*').in('item_id', itemIds)
+      .order('display_order', { ascending: true }),
+    supabase.from('client_agreement_milestones').select('*').in('item_id', itemIds)
+      .order('display_order', { ascending: true }),
+    // Covered services (Phase 2b). Defensive: empty before the mapping migration.
+    supabase.from('agreement_item_services')
+      .select('agreement_item_id, service_id, service:services(id, name)')
+      .in('agreement_item_id', itemIds)
+      .then(r => r.data ?? [], () => []),
+  ])
+
+  return items.map(item => ({
+    ...item,
+    deliverables: (deliverables || []).filter(d => d.item_id === item.id),
+    milestones: (milestones || []).filter(m => m.item_id === item.id),
+    coveredServices: (coveredServices as any[])
+      .filter(s => s.agreement_item_id === item.id)
+      .map(s => ({ id: s.service_id as string, name: (s.service as { name?: string } | null)?.name ?? 'Service' })),
+  }))
+}
+
+/** Load an agreement's timeline events (newest first). Best-effort. */
+export async function loadAgreementEvents(agreementId: string, visibility?: 'internal' | 'client') {
+  const supabase = await createAdminClient()
+  let q = supabase
+    .from('client_agreement_events')
+    .select('*')
+    .eq('agreement_id', agreementId)
+  if (visibility) q = q.eq('visibility', visibility)
+  const { data, error } = await q.order('created_at', { ascending: false }).limit(200)
+  if (error || !data) return []
+  return data
 }
 
 export async function loadClientMonthProgress(
@@ -112,6 +160,12 @@ export async function loadClientMonthProgress(
   ])
   
   // 4. Fetch Calendar Items & Pipeline Tasks for the month
+  // task_date is a DATE column, so the upper bound must be the REAL last day —
+  // "${month}-31" is an invalid date for 30-day months / February and Postgres
+  // rejects the whole query (silently, via the caller's catch), zeroing all
+  // progress. Derive the last day the same way the item-window check does.
+  const [my, mm] = month.split('-').map(Number)
+  const monthEnd = `${month}-${String(new Date(my, mm, 0).getDate()).padStart(2, '0')}`
   const [
     { data: calendarItems },
     { data: pipelineTasks }
@@ -128,13 +182,13 @@ export async function loadClientMonthProgress(
       .eq('calendar:social_calendars!inner(month)', month),
       
     supabase.from('tasks')
-      .select('id, service_id, task_date, status, quantity, deleted_at')
+      .select('id, service_id, task_date, status, quantity, deleted_at, retainer_item_id')
       .eq('client_id', clientId)
       .is('deleted_at', null)
       // For tasks we should technically fetch matching the month, but one_time items ignore month. 
       // For now we fetch month tasks, we can refine this.
       .gte('task_date', `${month}-01`)
-      .lte('task_date', `${month}-31`) 
+      .lte('task_date', monthEnd)
   ])
   
   const linkedTaskIds = new Set((linkedTasks || []).map(lt => lt.task_id))

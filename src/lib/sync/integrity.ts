@@ -5,6 +5,7 @@ import { syncTaskAgreementEarnings } from '@/lib/sync/agreement-earnings'
 import { isTaskMonthProtected } from '@/lib/payroll/compute'
 import { getInvoiceDateForTaskMonth, toSequenceMonth } from '@/lib/invoices/numbering'
 import { fetchAll } from '@/lib/supabase/server'
+import { getTaskCoverage } from '@/lib/agreements/coverage'
 
 const r2 = (n: number) => Math.round(n * 100) / 100
 
@@ -255,12 +256,29 @@ export async function syncDraftInvoices(taskId: string) {
   
   if (!task) return { error: 'Task not found' }
 
+  // Retainer-covered tasks are NOT client-billable (the client pays the monthly
+  // retainer, not per covered post). Mirrors the DB invoice trigger's guard.
+  const coverage = await getTaskCoverage(supabase, taskId)
+
   // 1. Find all existing invoice items linked to this task
   const { data: items } = await supabase.from('invoice_items').select('id, invoice_id, quantity').eq('task_id', taskId)
   const taskAmt = task.billing_amount || 0
   const invoiceIdsToRecalculate = new Set<string>()
 
-    if (items && items.length > 0) {
+    if (coverage.covered) {
+      // Covered → strip any draft line this task carries, and never add one.
+      if (items && items.length > 0) {
+        const invoiceIds = Array.from(new Set(items.map(i => i.invoice_id).filter((id): id is string => id !== null)))
+        const { data: invoices } = await supabase.from('invoices').select('id').in('id', invoiceIds).eq('status', 'draft')
+        const draftInvoiceIds = new Set((invoices || []).map(inv => inv.id))
+        for (const item of items) {
+          if (item.invoice_id && draftInvoiceIds.has(item.invoice_id)) {
+            await supabase.from('invoice_items').delete().eq('id', item.id!)
+            invoiceIdsToRecalculate.add(item.invoice_id)
+          }
+        }
+      }
+    } else if (items && items.length > 0) {
       // Extract unique invoice IDs
       const invoiceIds = Array.from(new Set(items.map(i => i.invoice_id).filter((id): id is string => id !== null)))
   

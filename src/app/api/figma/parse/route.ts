@@ -87,23 +87,33 @@ export async function POST(req: NextRequest) {
 
     // Each section is parsed on its own so its day/pack size can be attached
     // without relying on the model to preserve line order across the whole
-    // message. Sections run in parallel — they're independent.
-    const parsed = await Promise.all(
-      sectioned.sections.map(async (section: OfferSection, index: number) => {
-        try {
-          const result = await aiParseOfferProducts(section.lines.join('\n'), body?.hint)
-          return { index, section, products: result.products, error: null as string | null }
-        } catch (err) {
-          // One failed section must not lose the others — report it inline.
-          return {
-            index,
-            section,
-            products: [],
-            error: err instanceof Error ? err.message : 'AI parsing failed for this section.',
-          }
-        }
-      }),
-    )
+    // message.
+    //
+    // SEQUENTIALLY, not in parallel. Groq's free tier caps tokens-per-minute
+    // (12k on on_demand), and this prompt is token-heavy: firing three sections
+    // at once reliably 429s the middle one — measured on a real three-section
+    // Sea Star paste, where section 2 died with "Limit 12000, Used 8282,
+    // Requested 4461". One at a time keeps each call inside the window, and
+    // callGroqJSON's own 429 backoff then absorbs any residual burst. The cost
+    // is a few seconds on multi-section pastes, which is the right trade for
+    // not silently dropping a third of the products.
+    const parsed: { index: number; section: OfferSection; products: Awaited<ReturnType<typeof aiParseOfferProducts>>['products']; error: string | null }[] = []
+    for (let index = 0; index < sectioned.sections.length; index++) {
+      const section = sectioned.sections[index]
+      try {
+        const result = await aiParseOfferProducts(section.lines.join('\n'), body?.hint)
+        parsed.push({ index, section, products: result.products, error: null })
+      } catch (err) {
+        // One failed section must not lose the others — report it inline and
+        // keep going, so a rate-limited middle section can't cost the rest.
+        parsed.push({
+          index,
+          section,
+          products: [],
+          error: err instanceof Error ? err.message : 'AI parsing failed for this section.',
+        })
+      }
+    }
 
     const products = parsed.flatMap(({ section, products: items }) =>
       items.map((p) => ({
@@ -139,7 +149,15 @@ export async function POST(req: NextRequest) {
         })),
         // Surfaced so the plugin can warn rather than silently under-deliver.
         warnings: [
-          ...failures.map(f => `Section ${f.index + 1}${f.section.weight ? ` (${f.section.weight})` : ''} failed: ${f.error}`),
+          ...failures.map(f => {
+            const label = `Section ${f.index + 1}${f.section.weight ? ` (${f.section.weight})` : ''}`
+            // A rate limit is transient and self-healing; say so, rather than
+            // leaving the user to read a raw provider error and assume the
+            // paste is broken.
+            return /rate limit|429/i.test(f.error || '')
+              ? `${label}: AI rate limit hit — wait ~30s and press Parse again. Its ${f.section.lines.length} products are missing from the list below.`
+              : `${label} failed: ${f.error}`
+          }),
           ...(sectioned.days.length > 1
             ? [`This message covers ${sectioned.days.length} days (${sectioned.days.join(', ')}) — save one campaign per day.`]
             : []),

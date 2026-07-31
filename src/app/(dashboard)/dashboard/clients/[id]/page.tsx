@@ -1,9 +1,11 @@
 import { redirect, notFound } from 'next/navigation'
 import { createAdminClient, fetchAll } from '@/lib/supabase/server'
-import { loadCurrentUser } from '@/lib/permissions/check'
+import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { financialVisibility } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
-import { loadAgreementOverview } from '@/lib/agreements/server'
+import { loadAgreementOverview, loadClientMonthProgress } from '@/lib/agreements/server'
+import type { AgreementProgressSummary } from '@/lib/agreements/progress'
+import { loadRetainerAnalytics, loadRetainerAnalyticsTrend, type RetainerAnalytics, type RetainerTrendPoint } from '@/lib/agreements/analytics'
 import ClientDetailClient from './client-detail-client'
 
 export const dynamic = 'force-dynamic'
@@ -42,11 +44,37 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       : Promise.resolve({ data: null }),
   ])
   
-  let agreements: any[] = []
-  try {
-    agreements = await loadAgreementOverview({ clientId: id })
-  } catch (err) {
-    console.error('Failed to load agreements', err)
+  const canViewAgreements = isAdmin || hasPermission(me, PERMS.AGREEMENTS_VIEW)
+  const canManageAgreements = isAdmin || hasPermission(me, PERMS.AGREEMENTS_MANAGE)
+  const canViewAgreementPricing = isAdmin || hasPermission(me, PERMS.AGREEMENTS_VIEW_PRICING)
+
+  // Overview + this-month progress + retainer analytics — per-client loaders,
+  // no N+1. All skipped when the viewer can't see agreements.
+  let agreements: Awaited<ReturnType<typeof loadAgreementOverview>> = []
+  let agreementProgress: AgreementProgressSummary[] = []
+  let retainerAnalytics: RetainerAnalytics[] = []
+  let retainerTrend: RetainerTrendPoint[] = []
+  if (canViewAgreements) {
+    const currentMonth = new Date().toISOString().slice(0, 7)
+    const [overview, progress, analytics, trend] = await Promise.all([
+      loadAgreementOverview({ clientId: id }).catch(err => {
+        console.error('Failed to load agreements', err)
+        return []
+      }),
+      loadClientMonthProgress(id, currentMonth).catch(err => {
+        console.error('Failed to load agreement progress', err)
+        return [] as AgreementProgressSummary[]
+      }),
+      loadRetainerAnalytics({ clientId: id, month: currentMonth, pricingVisible: canViewAgreementPricing }).catch(err => {
+        console.error('Failed to load retainer analytics', err)
+        return [] as RetainerAnalytics[]
+      }),
+      loadRetainerAnalyticsTrend({ clientId: id, endMonth: currentMonth, months: 6, pricingVisible: canViewAgreementPricing }).catch(() => [] as RetainerTrendPoint[]),
+    ])
+    agreements = overview
+    agreementProgress = progress
+    retainerAnalytics = analytics
+    retainerTrend = trend
   }
 
   return (
@@ -59,6 +87,11 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       partner={partnerRes.data as any}
       showAmounts={showAmounts}
       agreements={agreements}
+      agreementProgress={agreementProgress}
+      retainerAnalytics={retainerAnalytics}
+      retainerTrend={retainerTrend}
+      canViewAgreements={canViewAgreements}
+      canManageAgreements={canManageAgreements}
     />
   )
 }

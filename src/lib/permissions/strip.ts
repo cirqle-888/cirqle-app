@@ -83,8 +83,15 @@ export function stripTaskListPricing<T extends Record<string, any>>(tasks: T[], 
  */
 export function stripAgreementItemPricing<T extends Record<string, any>>(item: T, canView: boolean): T {
   if (canView || item == null) return item
-  const { unit_price, extra_unit_price, currency, ...rest } = item
+  // Strip client-facing pricing AND internal allocation money (operational, but
+  // still financial — must not leak to viewers without agreements.view_pricing).
+  const {
+    unit_price, extra_unit_price, currency,
+    creative_allocation_amount, management_allocation_amount, allocated_unit_value,
+    ...rest
+  } = item
   void unit_price; void extra_unit_price; void currency
+  void creative_allocation_amount; void management_allocation_amount; void allocated_unit_value
   return rest as T
 }
 export function stripAgreementItemListPricing<T extends Record<string, any>>(items: T[], canView: boolean): T[] {

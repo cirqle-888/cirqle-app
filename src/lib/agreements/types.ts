@@ -136,6 +136,14 @@ export interface ClientAgreementItemRow {
   extra_unit_price: number | null
   display_order: number
   notes: string | null
+  // Internal retainer allocation (never client-facing pricing; migration
+  // 20260728120000). unit_price is the monthly retainer; these split it
+  // internally for operational metrics only.
+  creative_allocation_amount: number | null
+  management_allocation_amount: number | null
+  included_quantity: number | null
+  /** DB-generated: creative_allocation_amount / included_quantity. Read-only. */
+  allocated_unit_value: number | null
   created_at: string
   updated_at: string
 }
