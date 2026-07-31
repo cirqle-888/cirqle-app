@@ -14,6 +14,19 @@ export default async function PartnerDetailPage({ params }: { params: Promise<{ 
   const partner = await getPartner(id)
   if (!partner) notFound()
 
+  let initialGreetingName = ''
+  if (me?.employeeId) {
+    try {
+      const { data } = await createAdminClient()
+        .from('employee_partner_preferences')
+        .select('greeting_name')
+        .eq('employee_id', me.employeeId)
+        .eq('business_partner_id', id)
+        .maybeSingle()
+      if (data?.greeting_name) initialGreetingName = data.greeting_name
+    } catch { /* ignore */ }
+  }
+
   const [dashboard, unlinkedClients, settingsRes, commissionPayments] = await Promise.all([
     getPartnerDashboard(id),
     listUnlinkedClients(),
@@ -30,6 +43,7 @@ export default async function PartnerDetailPage({ params }: { params: Promise<{ 
       dashboard={dashboard}
       unlinkedClients={unlinkedClients}
       commissionPayments={commissionPayments}
+      initialGreetingName={initialGreetingName}
       brand={{
         companyName: settings.company_name || 'Cirqle CRM',
         primaryColor: settings.invoice_primary_color || '#1a2744',

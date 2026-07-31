@@ -81,6 +81,18 @@ export default async function FollowUpsPage() {
   const companyName = settings.company_name || 'Cirqle Works'
   const templates = templatesFromSettings(settings)
 
+  // Load user greetings
+  const partnerGreetings: Record<string, string> = {}
+  if (me?.employeeId) {
+    try {
+      const { data } = await supabase
+        .from('employee_partner_preferences')
+        .select('business_partner_id, greeting_name')
+        .eq('employee_id', me.employeeId)
+      ;(data || []).forEach(r => { partnerGreetings[r.business_partner_id] = r.greeting_name })
+    } catch { /* ignored */ }
+  }
+
   // Shape the payload; strip ₹ figures when the user can't see billing amounts.
   const prepared = invoices.map(i => {
     const totalInr = i.total_amount_inr ?? i.total_amount ?? 0
@@ -117,6 +129,7 @@ export default async function FollowUpsPage() {
       showAmounts={!!showAmounts}
       setupNeeded={setupNeeded}
       templates={templates}
+      partnerGreetings={partnerGreetings}
     />
   )
 }

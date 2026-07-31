@@ -407,6 +407,357 @@ async function validateTemplate(msg) {
     }
     figma.ui.postMessage({ type: 'template-validated', issues, tokens: Array.from(tokens).sort(), slots: slotCount });
 }
+/* ================================================================== *
+ * Variant switching
+ * ================================================================== *
+ * A price sticker drawn for "44" is the wrong shape for "209", and a product
+ * name set in Latin type is the wrong style for a Malayalam one. Designers
+ * already solve this with variants; this picks the right one per product
+ * instead of leaving 22 cards to be switched by hand.
+ *
+ * Four facts are derived from the data. Each variant property in the template
+ * is matched to one of them by its name, once, and from then on every card
+ * switches itself. Anything auto-matching gets it wrong can be pinned to a
+ * fixed value from the panel — the mapping is remembered per workspace.
+ * ================================================================== */
+const MALAYALAM_RE = /[ഀ-ൿ]/;
+function productFacts(product) {
+    const f = product.fields;
+    const rupees = String(f['#price1'] || f['#offerprice'] || '').replace(/[^\d]/g, '');
+    const paise = String(f['#price2'] || '').replace(/[^\d]/g, '');
+    const name = String(f['#product'] || '');
+    const hasMalayalam = MALAYALAM_RE.test(name);
+    const hasLatin = /[A-Za-z]/.test(name);
+    const signal = (String(f['#offertype'] || '') + ' ' +
+        String(f['#badges'] || '') + ' ' +
+        String(f['#offertext'] || '')).toLowerCase();
+    let offer = 'price';
+    if (/bogo|b1g1|buy\s*\d*\s*get/.test(signal))
+        offer = 'bogo';
+    else if (/%|percent|flat\s*\d|\boff\b/.test(signal))
+        offer = 'percent';
+    // "50 % SALE" printed where the price normally goes, or a Buy-1-Get-1 ribbon
+    // with nothing to charge — these products genuinely have no number, and the
+    // card needs a different layout, not a sticker reading "₹0".
+    const hasPrice = rupees.length > 0;
+    return {
+        // Digit count of the RUPEES only — the paise are a separate layer and a
+        // separate variant axis, so they must not widen the main number.
+        digits: hasPrice ? String(Math.min(6, rupees.length)) : null,
+        paise: hasPrice ? (paise ? 'yes' : 'no') : null,
+        price: hasPrice ? 'yes' : 'no',
+        offer,
+        script: hasMalayalam && hasLatin ? 'mixed' : hasMalayalam ? 'malayalam' : 'latin',
+    };
+}
+/** Which fact a variant property is asking about, judged by its name. */
+const FACT_PATTERNS = [
+    { fact: 'digits', re: /digit|length|char|places|figures|width|count|mask|format/i },
+    { fact: 'paise', re: /paise|decimal|fraction|point|cents/i },
+    { fact: 'price', re: /(has|show|with|no)\s*price|price\s*(shown|visible|state|less)|^\s*price\s*\??\s*$|priced/i },
+    { fact: 'script', re: /script|lang|malayalam|english|regional|font/i },
+    { fact: 'offer', re: /offer|deal|promo|badge|type|mode/i },
+];
+function factForProperty(propertyName) {
+    for (const entry of FACT_PATTERNS)
+        if (entry.re.test(propertyName))
+            return entry.fact;
+    return null;
+}
+const VALUE_SYNONYMS = {
+    yes: ['yes', 'true', 'on', 'with', 'show', 'shown', 'visible', 'enabled'],
+    no: ['no', 'false', 'off', 'without', 'hide', 'hidden', 'none', 'disabled'],
+    bogo: ['bogo', 'b1g1', 'buy1get1', 'buy1get1free', '1plus1', 'free', 'buyonegetone'],
+    percent: ['percent', 'pct', 'percentage', 'off', 'flat', 'discount', 'flatoff', 'sale'],
+    price: ['price', 'normal', 'default', 'plain', 'rate', 'standard', 'regular'],
+    malayalam: ['malayalam', 'mal', 'ml', 'regional', 'local'],
+    latin: ['latin', 'english', 'eng', 'en', 'default', 'roman'],
+    mixed: ['mixed', 'both', 'bilingual', 'dual'],
+};
+/** Words that only make sense for one fact, so they can't collide elsewhere. */
+const FACT_VALUE_SYNONYMS = {
+    paise: {
+        yes: ['paise', 'decimal', 'fraction', 'withdecimal', 'hasdecimal', 'point', 'withpaise', 'twodecimal'],
+        no: ['whole', 'round', 'rounded', 'nodecimal', 'withoutdecimal', 'integer', 'rupeesonly', 'nopaise'],
+    },
+    price: {
+        yes: ['price', 'priced', 'hasprice', 'showprice', 'withprice', 'number', 'amount', 'rate'],
+        no: ['noprice', 'withoutprice', 'hideprice', 'priceless', 'text', 'saletext', 'offertext',
+            'badgeonly', 'textonly', 'free', 'offer'],
+    },
+};
+function synonymsFor(fact, want) {
+    const perFact = FACT_VALUE_SYNONYMS[fact] && FACT_VALUE_SYNONYMS[fact][want];
+    return (perFact || []).concat(VALUE_SYNONYMS[want] || []);
+}
+const flatten = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+/**
+ * A price mask written the way designers name these variants:
+ * `0.00` → 1 rupee digit with paise, `00000.00` → 5 with paise, `000` → 3
+ * without. `#` and `X` masks read the same way.
+ */
+function parseDigitMask(value) {
+    const m = /^\s*([0#xX]{1,8})(?:[.,]([0#xX]{1,4}))?\s*$/.exec(String(value || ''));
+    return m ? { digits: m[1].length, decimal: !!m[2] } : null;
+}
+/**
+ * How wide one variant value is, read three ways in order of confidence:
+ *   1. the whole value is a mask      — "000.00"
+ *   2. a run of zeros inside a name   — "Outline 000 Cut", "Outline 00"
+ *   3. a plain number or phrase       — "3", "3 digit"
+ * Step 2 matters because real templates name variants descriptively, and
+ * parseInt("000") is 0, which would have thrown those away.
+ */
+function digitWidthOf(value) {
+    const mask = parseDigitMask(value);
+    if (mask)
+        return { n: mask.digits, decimal: mask.decimal };
+    const embedded = /(?:^|[^0-9])(0+)(?:[.,](0+))?(?![0-9])/.exec(String(value || ''));
+    if (embedded)
+        return { n: embedded[1].length, decimal: !!embedded[2] };
+    const flat = flatten(value);
+    const found = flat.match(/\d+/);
+    if (!found)
+        return null;
+    return { n: parseInt(found[0], 10), decimal: /decimal|paise|point|fraction/.test(flat) };
+}
+/** Every value read as a width, smallest first. Values with no width drop out. */
+function digitCandidates(values) {
+    const out = [];
+    for (const value of values) {
+        const width = digitWidthOf(value);
+        if (width && width.n > 0)
+            out.push({ value, n: width.n, decimal: width.decimal });
+    }
+    return out.sort((a, b) => a.n - b.n);
+}
+/** The variant value that best expresses `want`, or null if none fits. */
+function matchVariantValue(fact, facts, values) {
+    const want = facts[fact];
+    if (want === null)
+        return null; // this product has no opinion
+    const target = flatten(want);
+    if (fact === 'digits') {
+        const wanted = parseInt(target, 10);
+        const wantDecimal = facts.paise === 'yes';
+        const candidates = digitCandidates(values);
+        if (!candidates.length)
+            return null;
+        // When a property offers both `00` and `00.00`, the paise decide which.
+        const pick = (list) => {
+            const matching = list.filter(entry => entry.decimal === wantDecimal);
+            return (matching.length ? matching[0] : list[0]).value;
+        };
+        const exact = candidates.filter(entry => entry.n === wanted);
+        if (exact.length)
+            return pick(exact);
+        const roomier = candidates.filter(entry => entry.n >= wanted);
+        if (roomier.length)
+            return pick(roomier);
+        // Wider than every variant: take the widest rather than clip the price.
+        const widest = candidates[candidates.length - 1].n;
+        return pick(candidates.filter(entry => entry.n === widest));
+    }
+    for (const value of values)
+        if (flatten(value) === target)
+            return value;
+    if (fact === 'paise') {
+        // A boolean written as a mask: `.00` / `00.00` means yes, `00` means no.
+        for (const value of values) {
+            const mask = parseDigitMask(value);
+            if (mask && mask.decimal === (target === 'yes'))
+                return value;
+        }
+    }
+    const synonyms = synonymsFor(fact, target);
+    for (const value of values)
+        if (synonyms.indexOf(flatten(value)) >= 0)
+            return value;
+    for (const value of values) {
+        for (const synonym of synonyms) {
+            if (synonym.length >= 4 && flatten(value).indexOf(synonym) >= 0)
+                return value;
+        }
+    }
+    return null;
+}
+/** The variant set an instance belongs to, or null when it isn't in one. */
+async function variantSetOf(node) {
+    if (node.type !== 'INSTANCE')
+        return null;
+    const main = await node.getMainComponentAsync();
+    if (!main || !main.parent || main.parent.type !== 'COMPONENT_SET')
+        return null;
+    const set = main.parent;
+    return set.variantGroupProperties ? set : null;
+}
+/**
+ * The key a choice is stored under. Component sets very often keep Figma's
+ * default "Property 1", so the set's own name has to be part of the key —
+ * otherwise one mapping would silently drive the price sticker AND the
+ * product-name set at once.
+ */
+const CHOICE_SEP = ' :: ';
+function choiceKey(setName, property) {
+    return setName + CHOICE_SEP + property;
+}
+/** Falls back to a bare property name so older saved mappings keep working. */
+function choiceFor(choices, setName, property) {
+    const scoped = choices[choiceKey(setName, property)];
+    if (scoped)
+        return scoped;
+    return choices[property] || 'auto';
+}
+const FACT_PREFIX = 'fact:';
+/** The states a fact can take, in the order they should be listed. */
+const FACT_STATES = {
+    digits: ['1', '2', '3', '4', '5', '6', 'none'],
+    paise: ['no', 'yes', 'none'],
+    price: ['yes', 'no'],
+    offer: ['price', 'bogo', 'percent'],
+    script: ['latin', 'malayalam', 'mixed'],
+};
+/** 'none' stands in for "this product has no opinion", so it can be mapped. */
+function stateOf(facts, fact) {
+    const value = facts[fact];
+    return value === null ? 'none' : value;
+}
+/**
+ * How the loaded offer breaks down — "3 digits: 6 products, 2 digits: 8,
+ * no price: 7". Shown in the panel so each group can be pointed at a variant
+ * deliberately rather than guessed at from variant names.
+ */
+function groupProducts(products) {
+    const counts = {};
+    for (const fact of Object.keys(FACT_STATES))
+        counts[fact] = {};
+    for (const product of products) {
+        const facts = productFacts(product);
+        for (const fact of Object.keys(FACT_STATES)) {
+            const state = stateOf(facts, fact);
+            counts[fact][state] = (counts[fact][state] || 0) + 1;
+        }
+    }
+    return counts;
+}
+/**
+ * Switch every variant instance in `card` to suit `product`.
+ *
+ * A choice is one of:
+ *   'auto'         — work the fact out from the property's name
+ *   'fact:digits'  — the property means this, whatever it happens to be called
+ *   'off'          — leave it exactly as the designer set it
+ *   any value      — pin it to that value for every product
+ */
+async function applyVariants(card, product, choices, maps) {
+    const facts = productFacts(product);
+    let switched = 0, failed = 0;
+    for (const node of descendantsOf(card)) {
+        const set = await variantSetOf(node);
+        if (!set)
+            continue;
+        const groups = set.variantGroupProperties;
+        const next = {};
+        for (const property of Object.keys(groups)) {
+            const values = (groups[property] && groups[property].values) || [];
+            const choice = choiceFor(choices, set.name, property);
+            if (choice === 'off')
+                continue;
+            let fact = null;
+            if (choice === 'auto') {
+                fact = factForProperty(property);
+            }
+            else if (choice.indexOf(FACT_PREFIX) === 0) {
+                fact = choice.slice(FACT_PREFIX.length);
+            }
+            else {
+                if (values.indexOf(choice) >= 0)
+                    next[property] = choice;
+                continue;
+            }
+            if (!fact)
+                continue;
+            // An explicit group → variant mapping wins: it is the designer saying
+            // "these 6 three-digit products use THIS sticker", which no amount of
+            // name matching should second-guess. It also reaches the "no price"
+            // group, which the automatic path deliberately leaves alone.
+            const mapped = (maps && (maps[choiceKey(set.name, property)] || maps[property])) || null;
+            const state = stateOf(facts, fact);
+            if (mapped && mapped[state] && values.indexOf(mapped[state]) >= 0) {
+                next[property] = mapped[state];
+                continue;
+            }
+            const value = matchVariantValue(fact, facts, values);
+            if (value)
+                next[property] = value;
+        }
+        if (Object.keys(next).length === 0)
+            continue;
+        try {
+            ;
+            node.setProperties(next);
+            switched++;
+        }
+        catch (err) {
+            // The combination doesn't exist in the set — the card keeps the variant
+            // it had, which is always better than a broken instance.
+            failed++;
+        }
+    }
+    return { switched, failed };
+}
+/** What a property's values could plausibly drive, judged on the values alone. */
+function suggestedFacts(values) {
+    const out = [];
+    const facts = { digits: '2', paise: 'yes', offer: 'price', script: 'latin', price: 'yes' };
+    if (digitCandidates(values).length >= 2)
+        out.push('digits');
+    for (const fact of ['paise', 'price', 'offer', 'script']) {
+        // A property serves a fact if at least two of that fact's states can be
+        // told apart in its values — one match could be a coincidence.
+        const states = fact === 'offer' ? ['price', 'bogo', 'percent']
+            : fact === 'script' ? ['latin', 'malayalam', 'mixed']
+                : ['yes', 'no'];
+        const hits = {};
+        for (const state of states) {
+            const probe = Object.assign({}, facts);
+            probe[fact] = state;
+            const match = matchVariantValue(fact, probe, values);
+            if (match)
+                hits[match] = true;
+        }
+        if (Object.keys(hits).length >= 2)
+            out.push(fact);
+    }
+    return out;
+}
+/** Every variant property in a template, for the panel that maps them. */
+async function scanVariants(template) {
+    const found = {};
+    for (const node of descendantsOf(template)) {
+        const set = await variantSetOf(node);
+        if (!set)
+            continue;
+        const groups = set.variantGroupProperties;
+        for (const property of Object.keys(groups)) {
+            const key = choiceKey(set.name, property);
+            if (!found[key]) {
+                const values = (groups[property] && groups[property].values) || [];
+                found[key] = {
+                    key,
+                    set: set.name,
+                    property,
+                    values,
+                    fact: factForProperty(property),
+                    suggests: suggestedFacts(values),
+                    instances: 0,
+                };
+            }
+            found[key].instances++;
+        }
+    }
+    return Object.keys(found).map(key => found[key]);
+}
 async function makeCard(template) {
     if (template.type === 'COMPONENT')
         return template.createInstance();
@@ -555,7 +906,7 @@ async function fillLooseLayers(root, products, firstIndex, skip, hideUnused) {
  * so cards are sorted the way a flyer reads: top row left-to-right, then down.
  * Without this, product 1 could land in the card the designer clicked last.
  */
-async function fillSelection(products) {
+async function fillSelection(products, variants, variantMaps) {
     const selection = [...figma.currentPage.selection];
     if (selection.length === 0) {
         fail('Nothing selected.', 'Fill selected cards', 'Select the cards you want filled, or untick "Fill selected cards" to build new ones.');
@@ -572,10 +923,17 @@ async function fillSelection(products) {
         filledInPlace: true,
         overflow: 0,
         looseLayers: 0,
+        variantsSwitched: 0,
+        variantsFailed: 0,
     };
     const pairs = Math.min(cards.length, products.length);
     for (let i = 0; i < pairs; i++) {
         try {
+            const swap = await applyVariants(cards[i], products[i], variants, variantMaps);
+            report.variantsSwitched += swap.switched;
+            report.variantsFailed += swap.failed;
+            // Variants FIRST: swapping an instance resets its text to the new
+            // variant's, so filling before switching would throw the data away.
             const res = await fillCard(cards[i], products[i]);
             report.cards++;
             report.layersFilled += res.filled;
@@ -613,7 +971,7 @@ async function fillSelection(products) {
 }
 async function buildFlyer(msg) {
     if (msg.fillSelection) {
-        await fillSelection(msg.products);
+        await fillSelection(msg.products, msg.variants || {}, msg.variantMaps || {});
         return;
     }
     const template = (await figma.getNodeByIdAsync(msg.templateId));
@@ -654,6 +1012,8 @@ async function buildFlyer(msg) {
         slotsPerPage: perPage > 1 ? perPage : 0,
         unusedSlots: 0,
         looseLayers: 0,
+        variantsSwitched: 0,
+        variantsFailed: 0,
     };
     const tally = (res) => {
         report.layersFilled += res.filled;
@@ -693,6 +1053,9 @@ async function buildFlyer(msg) {
                         report.unusedSlots++;
                         continue;
                     }
+                    const swap = await applyVariants(cardSlots[s], product, msg.variants || {}, msg.variantMaps || {});
+                    report.variantsSwitched += swap.switched;
+                    report.variantsFailed += swap.failed;
                     tally(await fillCard(cardSlots[s], product));
                     report.cards++;
                 }
@@ -707,6 +1070,9 @@ async function buildFlyer(msg) {
             else {
                 /* --- Single-card template: one copy per product ------------------ */
                 card.name = msg.products[copy].fields['#product'] || `Product ${copy + 1}`;
+                const swap = await applyVariants(card, msg.products[copy], msg.variants || {}, msg.variantMaps || {});
+                report.variantsSwitched += swap.switched;
+                report.variantsFailed += swap.failed;
                 tally(await fillCard(card, msg.products[copy]));
                 report.cards++;
             }
@@ -799,7 +1165,11 @@ const PHOTO_H = 150;
  */
 async function buildCardComponent(o) {
     const card = figma.createComponent();
-    card.name = 'Offer=' + o.offer + ', Shape=' + o.shape + ', Price=' + o.price;
+    // Property names chosen so applyVariants() recognises them without setup:
+    // "Offer" maps to the offer-type fact, "Paise" to the paise fact. "Shape" is
+    // a pure design choice with no data behind it, so it is left for the
+    // designer to pin in the Variants panel.
+    card.name = 'Offer=' + o.offer + ', Shape=' + o.shape + ', Paise=' + o.price;
     card.resize(CARD_W, 240);
     card.fills = []; // transparent — the flyer background shows through
     card.layoutMode = 'VERTICAL';
@@ -881,7 +1251,7 @@ async function buildCardComponent(o) {
     row.fills = [];
     badge.appendChild(row);
     row.appendChild(await label('₹', '₹', { size: 11, weight: 'Bold', color: COLOR.white }));
-    row.appendChild(await label('#price1', o.price === 'Whole' ? '305' : '45', { size: 26, weight: 'Extra Bold', color: COLOR.white }));
+    row.appendChild(await label('#price1', o.price === 'No' ? '305' : '45', { size: 26, weight: 'Extra Bold', color: COLOR.white }));
     // The dot and the paise exist in BOTH variants so no data can be lost by
     // picking the wrong one — they simply start hidden on the whole-rupee
     // variant. The plugin also hides #price2 by itself whenever a price has no
@@ -890,7 +1260,7 @@ async function buildCardComponent(o) {
     const paise = await label('#price2', '50', { size: 14, weight: 'Extra Bold', color: COLOR.white });
     row.appendChild(dot);
     row.appendChild(paise);
-    if (o.price === 'Whole') {
+    if (o.price === 'No') {
         dot.visible = false;
         paise.visible = false;
     }
@@ -924,7 +1294,7 @@ async function createCardTemplate() {
     const combos = [];
     for (const offer of ['Price', 'B1G1', 'Percent']) {
         for (const shape of ['Circle', 'Pill']) {
-            for (const price of ['Whole', 'Paise'])
+            for (const price of ['No', 'Yes'])
                 combos.push({ offer, shape, price });
         }
     }
@@ -979,6 +1349,22 @@ figma.ui.onmessage = async (msg) => {
                 // smaller than its own controls.
                 figma.ui.resize(Math.max(320, Math.min(1200, Math.round(msg.width) || 380)), Math.max(400, Math.min(900, Math.round(msg.height) || 720)));
                 break;
+            case 'scan-groups':
+                figma.ui.postMessage({
+                    type: 'groups',
+                    counts: groupProducts(msg.products || []),
+                    states: FACT_STATES,
+                    total: (msg.products || []).length,
+                });
+                break;
+            case 'scan-variants': {
+                const node = (await figma.getNodeByIdAsync(msg.templateId));
+                figma.ui.postMessage({
+                    type: 'variants',
+                    properties: node && !node.removed ? await scanVariants(node) : [],
+                });
+                break;
+            }
             case 'scan-templates':
                 figma.ui.postMessage({ type: 'templates', templates: scanTemplates() });
                 break;

@@ -1,0 +1,25 @@
+{
+  "name": "Cirqle Designer Toolkit",
+  "id": "cirqle-designer-toolkit",
+  "api": "1.0.0",
+  "main": "dist/code.js",
+  "ui": "dist/ui.html",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["none"]
+  },
+  "capabilities": [],
+  "permissions": ["currentuser"],
+  "parameters": [],
+  "menu": [
+    { "name": "Open Toolkit", "command": "open" },
+    { "separator": true },
+    { "name": "Bulk Rename", "command": "open-rename" },
+    { "name": "Cleaner", "command": "open-cleaner" },
+    { "name": "Accessibility Checker", "command": "open-accessibility" },
+    { "name": "Automator", "command": "open-automator" },
+    { "name": "Template Validator", "command": "open-template-validator" },
+    { "name": "Document Analytics", "command": "open-analytics" }
+  ]
+}

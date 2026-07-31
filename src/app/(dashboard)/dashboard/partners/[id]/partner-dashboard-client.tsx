@@ -7,7 +7,7 @@ import {
   Users2, Wallet, CheckCircle2, Clock, FileClock, TrendingUp, CircleSlash,
   Copy, Image as ImageIcon, Download, Mail, Link as LinkIcon, X,
 } from 'lucide-react'
-import { linkClientToPartner, fetchPartnerStatement, setClientPartnerSince } from '../actions'
+import { linkClientToPartner, fetchPartnerStatement, setClientPartnerSince, setPartnerGreeting } from '../actions'
 import { sendPartnerStatementEmail } from '@/lib/partners/send-email'
 import { buildPartnerStatementText, partnerWhatsappShareUrl } from '@/lib/partners/whatsapp'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -25,6 +25,7 @@ interface Props {
   dashboard: PartnerDashboardData
   unlinkedClients: UnlinkedClient[]
   commissionPayments: CommissionPayment[]
+  initialGreetingName: string
   brand: Brand
   canEdit: boolean
   canExport: boolean
@@ -38,7 +39,7 @@ const fmtDate = (s: string | null) => {
   return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-export default function PartnerDashboardClient({ partner, dashboard, unlinkedClients, commissionPayments, brand, canEdit, canExport, canViewProfit }: Props) {
+export default function PartnerDashboardClient({ partner, dashboard, unlinkedClients, commissionPayments, initialGreetingName, brand, canEdit, canExport, canViewProfit }: Props) {
   const hasDrafts = dashboard.draftInvoices > 0
   const hasHandover = dashboard.clients.some(c => c.partnerSince)
   const hasBadDebt = dashboard.totalBadDebt > 0
@@ -47,20 +48,17 @@ export default function PartnerDashboardClient({ partner, dashboard, unlinkedCli
   const [statement, setStatement] = useState<PartnerStatementData | null>(null)
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [actionMsg, setActionMsg] = useState<string | null>(null)
-  const [greetingName, setGreetingName] = useState('')
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem(`cirqle:partner-greeting:${partner.id}`)
-      if (saved) setGreetingName(saved)
-    }
-  }, [partner.id])
+  const [greetingName, setGreetingName] = useState(initialGreetingName)
 
   function handleGreetingChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const val = e.target.value
-    setGreetingName(val)
-    if (val) localStorage.setItem(`cirqle:partner-greeting:${partner.id}`, val)
-    else localStorage.removeItem(`cirqle:partner-greeting:${partner.id}`)
+    setGreetingName(e.target.value)
+  }
+
+  async function handleGreetingBlur() {
+    if (greetingName !== initialGreetingName) {
+      const res = await setPartnerGreeting(partner.id, greetingName || null)
+      if (!res.ok) setActionMsg(res.error || 'Could not save greeting name.')
+    }
   }
 
   async function ensureStatement(): Promise<PartnerStatementData | null> {
@@ -205,6 +203,7 @@ export default function PartnerDashboardClient({ partner, dashboard, unlinkedCli
                 placeholder={`e.g. Bro, Sir, ${partner.name}`}
                 value={greetingName}
                 onChange={handleGreetingChange}
+                onBlur={handleGreetingBlur}
                 className="w-full text-xs bg-background border border-border rounded-lg px-2.5 py-1.5 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
               />
             </div>

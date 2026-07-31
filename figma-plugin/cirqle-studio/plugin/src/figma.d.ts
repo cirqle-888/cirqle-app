@@ -113,9 +113,15 @@ interface ComponentSetNode extends SceneNode {
   type: 'COMPONENT_SET'
   description: string
   defaultVariant: ComponentNode
+  variantGroupProperties?: { [name: string]: { values: string[] } }
 }
 interface InstanceNode extends SceneNode {
   type: 'INSTANCE'
+  // The non-async `mainComponent` is unavailable under documentAccess:
+  // "dynamic-page", which this plugin uses — always the async form.
+  getMainComponentAsync(): Promise<ComponentNode | null>
+  setProperties(properties: { [name: string]: string }): void
+  componentProperties?: { [name: string]: { type: string; value: string } }
 }
 interface FrameNode extends SceneNode, ChildrenMixin, LayoutMixin {
   type: 'FRAME'

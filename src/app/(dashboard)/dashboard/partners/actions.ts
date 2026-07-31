@@ -284,3 +284,38 @@ export async function fetchPartnerStatement(partnerId: string): Promise<ActionRe
   if (!data) return { ok: false, error: 'Business partner not found.' }
   return { ok: true, data }
 }
+
+export async function setPartnerGreeting(partnerId: string, greetingName: string | null): Promise<ActionResult> {
+  const me = await loadCurrentUser().catch(() => null)
+  if (!me) return { ok: false, error: 'Not logged in' }
+
+  const admin = createAdminClient()
+  if (greetingName) {
+    const { error } = await admin
+      .from('employee_partner_preferences')
+      .upsert({
+        employee_id: me.employeeId,
+        business_partner_id: partnerId,
+        greeting_name: greetingName,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'employee_id, business_partner_id' })
+    if (error) {
+      return /relation|does not exist/i.test(error.message)
+        ? { ok: false, error: 'Apply migration 20260801000000_employee_partner_preferences.sql first.' }
+        : { ok: false, error: error.message }
+    }
+  } else {
+    const { error } = await admin
+      .from('employee_partner_preferences')
+      .delete()
+      .eq('employee_id', me.employeeId)
+      .eq('business_partner_id', partnerId)
+    if (error) {
+      return /relation|does not exist/i.test(error.message)
+        ? { ok: false, error: 'Apply migration 20260801000000_employee_partner_preferences.sql first.' }
+        : { ok: false, error: error.message }
+    }
+  }
+  return { ok: true }
+}
+

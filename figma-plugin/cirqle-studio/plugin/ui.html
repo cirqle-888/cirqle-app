@@ -3,110 +3,191 @@
 <head>
 <meta charset="utf-8">
 <style>
-  :root { font-family: Inter, -apple-system, system-ui, sans-serif; font-size: 12px; }
-  body { margin: 0; background: var(--figma-color-bg, #fff); color: var(--figma-color-text, #111); }
-  .wrap { padding: 12px 14px 16px; }
-  h1 { font-size: 13px; margin: 0 0 10px; display: flex; align-items: center; gap: 7px; }
-  h1 .dot { width: 9px; height: 9px; border-radius: 50%; background: #7c3aed; display: inline-block; }
-  label { display: block; margin: 8px 0 3px; color: var(--figma-color-text-secondary, #777); font-size: 11px; }
-  input, select {
-    width: 100%; box-sizing: border-box; padding: 7px 8px;
-    border: 1px solid var(--figma-color-border, #ddd); border-radius: 6px;
-    background: var(--figma-color-bg-secondary, #fafafa); color: var(--figma-color-text, #111);
-    font-size: 11.5px;
+  :root {
+    font-family: Inter, -apple-system, system-ui, sans-serif; font-size: 12px;
+    --accent: #7c3aed; --accent-soft: #ede9fe;
+    --bg: var(--figma-color-bg, #fff);
+    --bg2: var(--figma-color-bg-secondary, #f7f7f8);
+    --line: var(--figma-color-border, #e4e4e7);
+    --ink: var(--figma-color-text, #18181b);
+    --mut: var(--figma-color-text-secondary, #71717a);
+    --ok: #059669; --warn: #b45309; --err: #dc2626;
   }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); }
+  .wrap { padding: 10px 12px 14px; }
+
+  /* --- header ------------------------------------------------------ */
+  .hdr { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
+  .hdr .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--err); flex: 0 0 auto; }
+  .hdr .dot.on { background: var(--ok); }
+  .hdr b { font-size: 12.5px; }
+  .hdr .host { font-size: 10px; color: var(--mut); overflow: hidden; text-overflow: ellipsis;
+               white-space: nowrap; flex: 1; text-align: right; }
+  .iconbtn { width: auto; margin: 0; padding: 4px 8px; font-size: 10.5px; font-weight: 600;
+             background: var(--bg2); color: var(--ink); border: 1px solid var(--line);
+             border-radius: 5px; cursor: pointer; flex: 0 0 auto; }
+  .iconbtn:hover { border-color: var(--accent); }
+
+  /* --- sections ----------------------------------------------------- */
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px 11px;
+          margin-top: 8px; background: var(--bg); }
+  .sec { display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 700;
+         letter-spacing: .06em; text-transform: uppercase; color: var(--mut); margin-bottom: 2px; }
+  .sec .n { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px;
+            border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 9.5px; }
+  .sec .right { margin-left: auto; }
+
+  label { display: block; margin: 8px 0 3px; color: var(--mut); font-size: 11px; }
+  input, select {
+    width: 100%; padding: 6px 8px; height: 29px;
+    border: 1px solid var(--line); border-radius: 6px;
+    background: var(--bg2); color: var(--ink); font-size: 11.5px;
+  }
+  input:focus, select:focus, textarea:focus { outline: 1.5px solid var(--accent); outline-offset: -1px; }
   select:disabled, input:disabled { opacity: .55; }
   button {
     width: 100%; padding: 8px 10px; margin-top: 8px; border: 0; border-radius: 6px;
-    cursor: pointer; background: #7c3aed; color: #fff; font-weight: 600; font-size: 12px;
+    cursor: pointer; background: var(--accent); color: #fff; font-weight: 600; font-size: 12px;
   }
-  button.secondary { background: var(--figma-color-bg-secondary, #f0f0f0); color: var(--figma-color-text, #111); border: 1px solid var(--figma-color-border, #ddd); font-weight: 500; }
+  button.secondary { background: var(--bg2); color: var(--ink); border: 1px solid var(--line); font-weight: 500; }
   button:disabled { opacity: .45; cursor: default; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .grid2 button { margin-top: 8px; }
-  hr { border: 0; border-top: 1px solid var(--figma-color-border, #e5e5e5); margin: 12px 0; }
-  .chips { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
-  .chip { padding: 4px 9px; border-radius: 999px; font-size: 10.5px; font-weight: 600; background: var(--figma-color-bg-secondary, #f0f0f0); color: var(--figma-color-text-secondary, #777); }
+  .row2 { display: flex; gap: 8px; }
+  .row2 > div { flex: 1; }
+  .hint { font-size: 10px; color: var(--mut); margin: 5px 0 0; line-height: 1.5; }
+
+  /* --- tabs --------------------------------------------------------- */
+  .tabs { display: flex; gap: 4px; margin: 10px 0 0; }
+  .tab { flex: 1; padding: 6px 8px; text-align: center; cursor: pointer; font-size: 11px; font-weight: 600;
+         border-radius: 6px; color: var(--mut); background: var(--bg2);
+         border: 1px solid transparent; user-select: none; }
+  .tab.active { color: #fff; background: var(--accent); }
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* --- folds (collapsible option groups) ----------------------------- */
+  .fold-head { display: flex; align-items: center; gap: 5px; margin-top: 9px; cursor: pointer;
+               user-select: none; font-size: 10.5px; font-weight: 600; color: var(--mut); }
+  .fold-head:hover { color: var(--ink); }
+  .fold-head .chev { display: inline-block; transition: transform .12s; font-size: 9px; }
+  .fold-head.open .chev { transform: rotate(90deg); }
+  .fold-head .sum { font-weight: 400; overflow: hidden; text-overflow: ellipsis;
+                    white-space: nowrap; flex: 1; text-align: right; }
+
+  /* --- status / log ------------------------------------------------- */
+  .chips { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .chip { padding: 4px 9px; border-radius: 999px; font-size: 10.5px; font-weight: 600;
+          background: var(--bg2); color: var(--mut); }
   .chip.on { background: #dcfce7; color: #166534; }
   .chip.warn { background: #fef3c7; color: #92400e; }
   .chip.err { background: #fee2e2; color: #991b1b; }
-  .bar { height: 4px; border-radius: 2px; background: var(--figma-color-bg-secondary, #eee); overflow: hidden; margin-top: 10px; }
-  .bar > i { display: block; height: 100%; width: 0; background: #7c3aed; transition: width .15s; }
-  .log { margin-top: 10px; padding: 8px; border-radius: 6px; background: var(--figma-color-bg-secondary, #f6f6f6);
-         max-height: 200px; overflow: auto; font-size: 11px; line-height: 1.5; }
-  .log .err { color: #dc2626; }
-  .log .warn { color: #b45309; }
-  .log .ok { color: #059669; }
-  .log .fix { color: var(--figma-color-text-secondary, #777); padding-left: 12px; }
-  .row2 { display: flex; gap: 8px; }
-  .row2 > div { flex: 1; }
+  .bar { height: 4px; border-radius: 2px; background: var(--bg2); overflow: hidden; margin-top: 10px; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+  .log { margin-top: 4px; padding: 8px; border-radius: 6px; background: var(--bg2);
+         max-height: 190px; overflow: auto; font-size: 11px; line-height: 1.5; }
+  .log-mini { font-weight: 400; font-size: 10.5px; overflow: hidden; text-overflow: ellipsis;
+              white-space: nowrap; flex: 1; text-align: right; color: var(--mut); }
+  .log-mini.err { color: var(--err); } .log-mini.ok { color: var(--ok); } .log-mini.warn { color: var(--warn); }
+  .log .err { color: var(--err); }
+  .log .warn { color: var(--warn); }
+  .log .ok { color: var(--ok); }
+  .log .fix { color: var(--mut); padding-left: 12px; }
   table.preview { width: 100%; border-collapse: collapse; font-size: 10.5px; }
-  table.preview td, table.preview th { padding: 2.5px 4px; border-bottom: 1px solid var(--figma-color-border, #e8e8e8); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px; }
-  .tabs { display: flex; gap: 4px; margin: 10px 0 4px; }
-  .tab { flex: 1; padding: 6px 8px; text-align: center; cursor: pointer; font-size: 11px; font-weight: 600;
-         border-radius: 6px; color: var(--figma-color-text-secondary, #777); background: var(--figma-color-bg-secondary, #f2f2f2);
-         border: 1px solid transparent; user-select: none; }
-  .tab.active { color: #fff; background: #7c3aed; }
-  .panel { display: none; }
-  .panel.active { display: block; }
-  textarea { width: 100%; box-sizing: border-box; height: 120px; resize: vertical; padding: 8px;
-             border: 1px solid var(--figma-color-border, #ddd); border-radius: 6px;
-             background: var(--figma-color-bg-secondary, #fafafa); color: var(--figma-color-text, #111);
+  table.preview td, table.preview th { padding: 2.5px 4px; border-bottom: 1px solid var(--line);
+    text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px; }
+
+  /* --- paste -------------------------------------------------------- */
+  textarea { width: 100%; height: 110px; resize: vertical; padding: 8px;
+             border: 1px solid var(--line); border-radius: 6px;
+             background: var(--bg2); color: var(--ink);
              font-family: ui-monospace, Menlo, monospace; font-size: 11px; white-space: pre; }
-  .rows { max-height: 210px; overflow: auto; margin-top: 8px; border: 1px solid var(--figma-color-border, #e5e5e5); border-radius: 6px; }
-  .row-item { display: grid; grid-template-columns: 1fr 52px 52px 58px; gap: 4px; padding: 4px 5px;
-              border-bottom: 1px solid var(--figma-color-border, #eee); align-items: center; }
-  .row-item:last-child { border-bottom: 0; }
-  .row-item input { padding: 3px 5px; font-size: 10.5px; font-family: inherit; }
-  .row-head { font-size: 10px; color: var(--figma-color-text-secondary, #888); font-weight: 600;
-              padding: 4px 5px; border-bottom: 1px solid var(--figma-color-border, #e5e5e5); display: grid;
-              grid-template-columns: 1fr 52px 52px 58px; gap: 4px; position: sticky; top: 0;
-              background: var(--figma-color-bg, #fff); z-index: 1; }
-  .day-sep { padding: 4px 6px; font-size: 10px; font-weight: 700; color: #7c3aed;
-             background: var(--figma-color-bg-secondary, #f6f2ff); border-bottom: 1px solid var(--figma-color-border, #eee); }
-  .toolbar { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; margin-top: 10px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; margin-top: 8px; }
   .tool { width: auto; margin: 0; padding: 4px 7px; font-size: 10.5px; font-weight: 600; border-radius: 5px;
-          background: var(--figma-color-bg-secondary, #f0f0f0); color: var(--figma-color-text, #111);
-          border: 1px solid var(--figma-color-border, #ddd); cursor: pointer; }
-  .tool:hover { border-color: #7c3aed; }
-  .tool-sep { width: 1px; height: 16px; background: var(--figma-color-border, #ddd); margin: 0 3px; }
+          background: var(--bg2); color: var(--ink); border: 1px solid var(--line); cursor: pointer; }
+  .tool:hover { border-color: var(--accent); }
+  .tool-sep { width: 1px; height: 16px; background: var(--line); margin: 0 3px; }
   .colmap { display: flex; gap: 3px; margin-top: 6px; }
-  .colmap select { flex: 1; padding: 3px 4px; font-size: 10px; }
-  /* Proportions mirror the client's own review sheet: a wide Product column,
-     then narrow numeric columns. Row numbers included so a designer can call
-     out "row 14" the way they would in Sheets. */
-  .row-item { display: grid; grid-template-columns: 18px 26px 1fr 62px 62px 74px 66px; gap: 4px; padding: 3px 5px;
-              border-bottom: 1px solid var(--figma-color-border, #eee); align-items: center; }
-  .row-head { grid-template-columns: 18px 26px 1fr 62px 62px 74px 66px; }
-  /* Read-only mirror of the Price 1 / Price 2 columns the sheet contract
-     produces, so a two-layer price design can be checked before building. */
-  .split { font-size: 10px; font-family: ui-monospace, Menlo, monospace; text-align: center;
-           color: var(--figma-color-text-secondary, #999); }
-  .split b { color: #059669; font-weight: 600; }
-  .split i { color: #7c3aed; font-style: normal; font-weight: 600; }
-  .row-item input[type=checkbox] { width: 13px; height: 13px; margin: 0; padding: 0; }
-  .row-no { font-size: 9.5px; color: var(--figma-color-text-secondary, #999); text-align: right; padding-right: 2px; }
-  .rows { max-height: 420px; }
-  .row-item input[type=text], .row-item input[type=number] { font-size: 11px; padding: 3px 5px; }
-  /* The price the flyer actually shouts — worth being able to spot at a glance. */
-  .row-item input.sale { font-weight: 600; color: #059669; }
-  .wide-note { font-size: 10px; color: var(--figma-color-text-secondary, #888); margin: 6px 0 0; }
+  .colmap select { flex: 1; padding: 3px 4px; font-size: 10px; height: 24px; }
+
+  /* --- variants ----------------------------------------------------- */
+  .vrow { display: flex; gap: 6px; align-items: center; margin-top: 4px; }
+  .vrow .vname { flex: 0 0 96px; font-size: 10px; font-weight: 600; overflow: hidden;
+                 text-overflow: ellipsis; white-space: nowrap; }
+  .vrow select { flex: 1; padding: 3px 4px; font-size: 10px; min-width: 0; height: 24px; }
+  .vrow.vsub { margin-left: 10px; }
+  .vrow.vsub .vname { flex: 0 0 92px; font-weight: 400; }
+  .vcount { flex: 0 0 66px; font-size: 9px; text-align: right; color: var(--mut); }
+  .vhint { font-size: 9px; line-height: 1.45; margin: 1px 0 7px 102px; color: var(--mut); }
+  .vvals { font-size: 9px; line-height: 1.4; color: var(--mut); margin: 2px 0 6px 102px;
+           overflow: hidden; text-overflow: ellipsis; display: -webkit-box;
+           -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .row-sort { display: flex; gap: 5px; align-items: stretch; }
+  .row-sort select { flex: 1; min-width: 0; }
+  .row-sort .tool { flex: 0 0 30px; }
+
+  /* --- the sheet grid ------------------------------------------------
+     One CSS variable defines every column so header and body can never
+     drift apart. Rownum · Product · SALE · MRP · Weight · Badge · P1·P2. */
+  #paste-rows { --gcols: 34px minmax(150px, 1fr) 64px 64px 72px 80px 62px;
+                max-height: 470px; overflow: auto; margin-top: 8px;
+                border: 1px solid var(--line); border-radius: 6px; position: relative;
+                user-select: none; background: var(--bg); }
+  .g-row { display: grid; grid-template-columns: var(--gcols); }
+  .g-head { position: sticky; top: 0; z-index: 2; background: var(--bg2);
+            border-bottom: 1px solid var(--line); }
+  .g-head .g-cell { font-size: 10px; font-weight: 700; color: var(--mut); cursor: pointer; }
+  .g-cell { padding: 4px 6px; font-size: 11px; border-bottom: 1px solid var(--line);
+            border-right: 1px solid var(--line); overflow: hidden; text-overflow: ellipsis;
+            white-space: nowrap; cursor: cell; min-height: 24px; line-height: 16px; }
+  .g-cell:last-child { border-right: 0; }
+  .g-num { font-size: 9.5px; color: var(--mut); text-align: right; background: var(--bg2);
+           cursor: pointer; }
+  .g-sale { font-weight: 600; color: var(--ok); }
+  .g-ro { font-size: 10px; font-family: ui-monospace, Menlo, monospace; text-align: center;
+          color: var(--mut); background: var(--bg2); cursor: default; }
+  .g-ro b { color: var(--ok); font-weight: 600; }
+  .g-ro i { color: var(--accent); font-style: normal; font-weight: 600; }
+  .g-sel { background: var(--accent-soft); }
+  .g-anchor { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--bg); }
+  .g-cell input { width: 100%; height: 100%; border: 0; padding: 0; margin: 0; font-size: 11px;
+                  background: transparent; color: var(--ink); }
+  .g-cell input:focus { outline: none; }
+  .day-sep { padding: 4px 6px; font-size: 10px; font-weight: 700; color: var(--accent);
+             background: var(--accent-soft); border-bottom: 1px solid var(--line); }
+  .kbd-hint { font-size: 9.5px; color: var(--mut); margin-top: 5px; line-height: 1.5; }
+  .kbd-hint b { font-weight: 600; color: var(--ink); }
+  #grid-clip { position: absolute; left: -9999px; top: 0; width: 10px; height: 10px;
+               opacity: 0; resize: none; }
+  .ctx { position: fixed; z-index: 99; background: var(--bg); border: 1px solid var(--line);
+         border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.18); padding: 4px;
+         display: none; min-width: 176px; }
+  .ctx button { width: 100%; margin: 0; padding: 5px 8px; text-align: left; background: transparent;
+                border: 0; color: var(--ink); font-weight: 500; font-size: 11px; border-radius: 4px;
+                cursor: pointer; }
+  .ctx button:hover { background: var(--accent-soft); }
+  .ctx .sep { height: 1px; background: var(--line); margin: 3px 2px; }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1><span class="dot"></span>Cirqle Studio</h1>
 
-  <label>Server URL</label>
-  <input type="text" id="url" value="https://app.cirqle.work" spellcheck="false">
-  <label>Authentication Token</label>
-  <input type="password" id="token" placeholder="shared secret (Apps → Offer Intake)" spellcheck="false">
-  <button id="connect">Connect</button>
+  <div class="hdr">
+    <span class="dot" id="hdr-dot"></span><b>Cirqle Studio</b>
+    <span class="host" id="conn-host">Not connected</span>
+    <button class="iconbtn" id="settings-toggle" title="Connection settings">⚙</button>
+    <button class="iconbtn" id="refresh" title="Re-scan templates, reconnect, reload the offer">↻</button>
+  </div>
 
-  <hr>
-
-  <label>Client</label>
-  <select id="client" disabled><option>— connect first —</option></select>
+  <section class="card" id="setup">
+    <div class="sec">Connection</div>
+    <label>Server URL</label>
+    <input type="text" id="url" value="https://app.cirqle.work" spellcheck="false">
+    <label>Authentication Token</label>
+    <input type="password" id="token" placeholder="shared secret (Apps → Offer Intake)" spellcheck="false">
+    <button id="connect">Connect</button>
+  </section>
 
   <div class="tabs">
     <div class="tab active" data-panel="build">Build</div>
@@ -114,81 +195,135 @@
   </div>
 
   <div class="panel active" id="p-build">
-  <label>Offer</label>
-  <select id="offer" disabled><option>—</option></select>
-  <label>Template <span id="template-hint" style="font-weight:400"></span></label>
-  <select id="template" disabled><option>— none found on this page —</option></select>
-  <button class="secondary" id="new-template" style="margin-top:5px">＋ New card template</button>
-  <p class="hint" style="font-size:10px;color:var(--figma-color-text-secondary,#888);margin:4px 0 0">
-    Builds a component set on this page with 6 variants (Price / BOGO / % off × whole / paise)
-    and the layer names already correct. Restyle it however you like afterwards.
-  </p>
-  <label>Page</label>
-  <select id="page" disabled><option>All pages</option></select>
 
-  <div class="row2" style="margin-top:8px">
-    <div><label style="margin-top:0">Columns</label><input type="number" id="cols" value="4" min="1" max="12"></div>
-    <div><label style="margin-top:0">Gap</label><input type="number" id="gap" value="40" min="0" max="400"></div>
-  </div>
+  <section class="card">
+    <div class="sec"><span class="n">1</span>Offer</div>
+    <label>Client</label>
+    <select id="client" disabled><option>— connect first —</option></select>
+    <label>Offer</label>
+    <select id="offer" disabled><option>—</option></select>
+    <button class="secondary" id="load" disabled>Load Offers</button>
+  </section>
 
-  <label style="display:flex;gap:7px;align-items:center;margin-top:9px;cursor:pointer">
-    <input type="checkbox" id="fill-selection" style="width:13px;height:13px;margin:0">
-    <span>Fill selected cards (don't create new)</span>
-  </label>
+  <section class="card">
+    <div class="sec"><span class="n">2</span>Template &amp; layout</div>
+    <label>Template <span id="template-hint" style="font-weight:400"></span></label>
+    <select id="template" disabled><option>— none found on this page —</option></select>
+    <button class="secondary" id="new-template" style="margin-top:6px">＋ New card template</button>
+    <p class="hint" id="tpl-guide">12 ready-named variants (Price / B1G1 / % off × circle / pill × whole / paise). Restyle freely — only the #names matter.</p>
 
-  <hr>
+    <div id="variant-box" style="display:none">
+      <label>Variants — switched per product</label>
+      <div id="variant-map"></div>
+      <p class="hint">Auto reads each product: price digits, paise, has-a-price, offer type, name language.
+        For a property named “Property 1”, pick <b>Use: …</b> — ✓&nbsp;fits marks the ones whose values work.</p>
+    </div>
 
-  <button class="secondary" id="load" disabled>Load Offers</button>
-  <div class="grid2">
-    <button class="secondary" id="preview" disabled>Preview</button>
-    <button class="secondary" id="validate" disabled>Validate</button>
-  </div>
-  <button id="build" disabled>Build Flyer</button>
-  <button class="secondary" id="refresh">Refresh</button>
+    <div class="fold-head" id="layout-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="layout-body">
+      <span class="chev">▶</span>Layout<span class="sum" id="layout-sum"></span>
+    </div>
+    <div id="layout-body" style="display:none">
+      <div class="row2" style="margin-top:4px">
+        <div><label style="margin-top:0">Page</label><select id="page" disabled><option>All pages</option></select></div>
+        <div><label style="margin-top:0">Order</label>
+          <div class="row-sort">
+            <select id="sort">
+              <option value="">Cirqle order</option>
+              <option value="price-asc">Price — low → high</option>
+              <option value="price-desc">Price — high → low</option>
+              <option value="category">Category</option>
+              <option value="shuffle">Random shuffle</option>
+            </select>
+            <button class="tool" id="reshuffle" title="Shuffle again" disabled>↻</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="row2" style="margin-top:8px">
+        <div><label style="margin-top:0">Columns</label><input type="number" id="cols" value="4" min="1" max="12"></div>
+        <div><label style="margin-top:0">Gap</label><input type="number" id="gap" value="40" min="0" max="400"></div>
+      </div>
+
+      <label style="display:flex;gap:7px;align-items:center;margin-top:9px;cursor:pointer">
+        <input type="checkbox" id="fill-selection" style="width:13px;height:13px;margin:0">
+        <span>Fill selected cards (don't create new)</span>
+      </label>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="sec"><span class="n">3</span>Build</div>
+    <div class="grid2">
+      <button class="secondary" id="preview" disabled>Preview</button>
+      <button class="secondary" id="validate" disabled>Validate</button>
+    </div>
+    <button id="build" disabled>Build Flyer</button>
+  </section>
+
   </div><!-- /p-build -->
 
   <div class="panel" id="p-paste">
-    <label>Paste the offer list — WhatsApp, Google Sheets, Excel or CSV</label>
+
+  <section class="card">
+    <div class="sec"><span class="n">1</span>Paste</div>
+    <label>Offer list — WhatsApp, Google Sheets, Excel or CSV</label>
     <textarea id="paste-text" placeholder="Paste straight from WhatsApp:&#10;Cashew 240  93&#10;Pista 149&#10;&#10;…or copy cells from Google Sheets / Excel:&#10;Product&#9;SALE&#9;MRP&#10;Cashew 240&#9;93&#9;120"></textarea>
     <div class="grid2">
       <button id="paste-split">Split to columns</button>
-      <button class="secondary" id="paste-parse">Parse with AI</button>
+      <button class="secondary" id="paste-parse" title="Only for loose English WhatsApp text with 'Sunday 100gm' style headers. Non-English lists should use Split — it copies your text exactly.">Parse with AI</button>
     </div>
-    <p class="hint" style="font-size:10px;color:var(--figma-color-text-secondary,#888);margin:5px 0 0">
-      <b>Split</b> is the manual route — instant, no AI, nothing sent anywhere.
-      It reads spreadsheet cells (tabs), CSV, 2+ spaces and trailing prices, keeps
-      blank cells in place, and takes your column names from the header row if you copied one.
-      <b>Parse with AI</b> is only for loose WhatsApp text with "Sunday 100gm" style headers.
-    </p>
-    <label>AI hint (only used by Parse with AI)</label>
-    <input type="text" id="paste-hint" placeholder="e.g. the second number is MRP">
+    <p class="hint"><b>Split</b> — instant, no AI, copies your text exactly. Reads sheet cells, CSV, 2+ spaces, trailing prices and header rows.</p>
+    <div class="fold-head" id="ai-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ai-body">
+      <span class="chev">▶</span>AI options<span class="sum" id="ai-sum"></span>
+    </div>
+    <div id="ai-body" style="display:none">
+      <label style="margin-top:4px">AI hint (only used by Parse with AI)</label>
+      <input type="text" id="paste-hint" placeholder="e.g. the second number is MRP">
+    </div>
+  </section>
 
-    <div id="paste-review" style="display:none">
+  <div id="paste-review" style="display:none">
+    <section class="card">
+      <div class="sec"><span class="n">2</span>Review<span class="right" id="paste-count"></span></div>
       <div class="toolbar" id="paste-toolbar">
-        <button class="tool" data-case="upper" title="UPPERCASE">AA</button>
+        <button class="tool" data-case="upper" title="UPPERCASE — selected rows, or all">AA</button>
         <button class="tool" data-case="sentence" title="First letter capital">Aa</button>
         <button class="tool" data-case="title" title="Title Case">Aa Bc</button>
         <span class="tool-sep"></span>
         <button class="tool" id="tool-trim" title="Remove extra spaces">Trim</button>
-        <button class="tool" id="tool-swap" title="Swap SALE and MRP on all rows">⇄ SALE/MRP</button>
-        <button class="tool" id="tool-weight" title="Append the weight to the product name, e.g. Cashew 240 → Cashew 240 100 gm">+ Weight → name</button>
+        <button class="tool" id="tool-swap" title="Swap SALE and MRP">⇄ SALE/MRP</button>
+        <button class="tool" id="tool-weight" title="Append the weight to the product name">+ Weight → name</button>
         <span class="tool-sep"></span>
         <button class="tool" id="tool-add" title="Add an empty row">+ Row</button>
-        <button class="tool" id="tool-del" title="Delete ticked rows">Delete</button>
+        <button class="tool" id="tool-del" title="Delete selected rows">Delete</button>
+        <span class="tool-sep"></span>
+        <button class="tool" id="tool-addcol" title="Add a design-only column that fills a custom #layer, e.g. a second badge">+ Col</button>
+        <span id="custom-cols" style="display:contents"></span>
+      </div>
+      <div id="addcol-row" style="display:none;gap:5px;margin-top:6px;align-items:center">
+        <input type="text" id="addcol-name" placeholder="Column name — e.g. Badge 2 → fills #badge2" style="flex:1">
+        <button class="tool" id="addcol-ok" style="flex:0 0 auto">Add</button>
       </div>
       <div id="paste-colmap" class="colmap"></div>
-      <div class="rows" id="paste-rows"></div>
-      <div class="hint" id="paste-count" style="font-size:10px;color:var(--figma-color-text-secondary,#888);margin:6px 0 0"></div>
+      <div id="paste-rows"></div>
+      <textarea id="grid-clip" tabindex="-1" aria-hidden="true"></textarea>
+      <p class="kbd-hint">Works like a sheet: click a cell and <b>type</b> · <b>Enter</b> ↓ · <b>Tab</b> → ·
+        <b>⌘C / ⌘V</b> copy-paste ranges (to and from Google Sheets too) · <b>⌘Z</b> undo ·
+        <b>⌘D</b> fill down · click a row number or column name to select it.</p>
+    </section>
+
+    <section class="card">
+      <div class="sec"><span class="n">3</span>Save</div>
       <label>Offer title</label>
       <input type="text" id="paste-title" placeholder="e.g. Sunday Shop Fest">
       <label>Offer date</label>
       <input type="date" id="paste-date">
       <button id="paste-save">Save to Cirqle</button>
-      <p class="hint" style="font-size:10px;color:var(--figma-color-text-secondary,#888);margin:6px 0 0">
-        Saves into Cirqle first (change log, catalog, sheet sync), then loads it here ready to build.
-      </p>
-    </div>
+      <p class="hint">Saves into Cirqle first (change log, catalog, sheet sync), then loads it here ready to build.</p>
+    </section>
   </div>
+
+  </div><!-- /p-paste -->
 
   <div class="chips">
     <span class="chip" id="chip-conn">Offline</span>
@@ -197,8 +332,12 @@
   </div>
 
   <div class="bar"><i id="bar"></i></div>
-  <div class="log" id="log">Enter the server URL and token, then Connect.</div>
+  <div class="fold-head" id="log-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="log">
+    <span class="chev">▶</span>Activity<span class="log-mini" id="log-mini">Enter the server URL and token, then Connect.</span>
+  </div>
+  <div class="log" id="log" style="display:none">Enter the server URL and token, then Connect.</div>
 </div>
+<div class="ctx" id="ctx-menu"></div>
 
 <script>
 'use strict'
@@ -224,6 +363,11 @@ function log(text, cls) {
   line.textContent = text
   $('log').appendChild(line)
   $('log').scrollTop = $('log').scrollHeight
+  // The collapsed Activity row always mirrors the latest line, so the log
+  // can stay folded without hiding what just happened.
+  const mini = $('log-mini')
+  mini.textContent = text
+  mini.className = 'log-mini' + (cls && cls !== 'fix' ? ' ' + cls : '')
 }
 function logFix(text) { log('↳ ' + text, 'fix') }
 function clearLog() { $('log').textContent = '' }
@@ -242,6 +386,9 @@ function chip(id, text, cls) {
 function reportError(what, where, fix) {
   log('✗ ' + what + '  [' + where + ']', 'err')
   if (fix) logFix(fix)
+  // Errors always deserve the full story — pop the log open, but don't
+  // persist that as the user's preference.
+  setFold('log-toggle', 'log', true)
 }
 
 /* ------------------------------------------------------------------ *
@@ -280,23 +427,94 @@ async function api(path, body) {
   return data
 }
 
+function saveSettings() {
+  post({ type: 'save-settings', settings: {
+    url: base(),
+    token: $('token').value.trim(),
+    variantChoices: state.variantChoices,
+    variantMaps: state.variantMaps,
+    sort: $('sort').value,
+    customCols: state.customCols,
+    // Usage memory — the plugin reopens exactly where the designer left off,
+    // so the daily flow starts at "Build", not at re-entering everything.
+    activeTab: state.activeTab || 'build',
+    cols: $('cols').value,
+    gap: $('gap').value,
+    lastClientId: $('client').disabled ? state.lastClientId : $('client').value,
+    lastCampaignId: $('offer').disabled ? state.lastCampaignId : $('offer').value,
+    lastTemplateName: state.lastTemplateName || '',
+    layoutOpen: state.layoutOpen === true,
+    logOpen: state.logOpen === true,
+  } })
+}
+
 /* ------------------------------------------------------------------ *
  * Connect / offers / campaign
  * ------------------------------------------------------------------ */
+/** Collapse the connection card once it has done its job. */
+function foldSetup(folded) {
+  $('setup').style.display = folded ? 'none' : 'block'
+  const host = base().replace(/^https?:\/\//, '')
+  $('conn-host').textContent = folded ? host : 'Not connected'
+  $('hdr-dot').className = 'dot' + (folded ? ' on' : '')
+}
+
+$('settings-toggle').onclick = () => {
+  const hidden = $('setup').style.display === 'none'
+  $('setup').style.display = hidden ? 'block' : 'none'
+}
+
+/* ------------------------------------------------------------------ *
+ * Folds — the option groups that are set once and then just take up
+ * space. Collapsed they show a one-line summary; the choice persists.
+ * ------------------------------------------------------------------ */
+function setFold(headId, bodyId, open) {
+  const head = $(headId)
+  head.classList.toggle('open', open)
+  head.setAttribute('aria-expanded', String(open))
+  $(bodyId).style.display = open ? 'block' : 'none'
+}
+
+function wireFold(headId, bodyId, onToggle) {
+  const head = $(headId)
+  const toggle = () => {
+    const open = $(bodyId).style.display === 'none'
+    setFold(headId, bodyId, open)
+    if (onToggle) onToggle(open)
+  }
+  head.onclick = toggle
+  head.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle() } }
+}
+
+function layoutSummary() {
+  const page = $('page').disabled || !$('page').value ? 'All pages' : 'Page ' + $('page').value
+  const sortSel = $('sort')
+  const order = sortSel.options[sortSel.selectedIndex] ? sortSel.options[sortSel.selectedIndex].textContent : 'Cirqle order'
+  const fill = $('fill-selection').checked ? ' · fill selection' : ''
+  return $('cols').value + ' col · gap ' + $('gap').value + ' · ' + page + ' · ' + order + fill
+}
+function updateLayoutSummary() { $('layout-sum').textContent = layoutSummary() }
+
+wireFold('layout-toggle', 'layout-body', (open) => { state.layoutOpen = open; saveSettings() })
+wireFold('ai-toggle', 'ai-body', null)
+wireFold('log-toggle', 'log', (open) => { state.logOpen = open; saveSettings() })
+
 async function connect() {
   clearLog(); setBar(0)
   chip('chip-conn', 'Connecting…')
   try {
-    post({ type: 'save-settings', settings: { url: base(), token: $('token').value.trim() } })
+    saveSettings()
     const data = await api('/api/figma/offers')
     state.offers = data.offers || []
     chip('chip-conn', 'Connected', 'on')
+    foldSetup(true)
     fillClientDropdown()
     log('Connected. ' + state.offers.length + ' active offer' + (state.offers.length === 1 ? '' : 's') + '.', 'ok')
     if (!state.offers.length) logFix('No active campaigns right now — save an offer in Cirqle first.')
     $('load').disabled = state.offers.length === 0
   } catch (e) {
     chip('chip-conn', 'Offline', 'err')
+    foldSetup(false)   // the fields are what needs fixing — reopen them
     reportError(e.what || String(e), e.where || 'Connect', e.fix)
   }
 }
@@ -315,6 +533,11 @@ function fillClientDropdown() {
     sel.appendChild(opt)
   }
   sel.disabled = seen.size === 0
+  // Reopening the plugin lands on the client you worked with last.
+  if (state._restoreClientId && [...sel.options].some(o => o.value === String(state._restoreClientId))) {
+    sel.value = String(state._restoreClientId)
+  }
+  state._restoreClientId = null
   fillOfferDropdown()
 }
 
@@ -335,6 +558,17 @@ function fillOfferDropdown() {
   chip('chip-count', '—')
   chip('chip-ready', '—')
   updateButtons()
+  // If the offer from last session is still active, pick it up and load it
+  // without being asked — the daily flow resumes exactly where it stopped.
+  if (state._restoreCampaignId) {
+    const id = String(state._restoreCampaignId)
+    state._restoreCampaignId = null
+    if ([...sel.options].some(o => o.value === id)) {
+      sel.value = id
+      log('Resuming last offer…', 'ok')
+      loadCampaign()
+    }
+  }
 }
 
 async function loadCampaign() {
@@ -352,6 +586,7 @@ async function loadCampaign() {
         data.campaign.productCount + ' products across ' + data.campaign.pageCount + ' page' +
         (data.campaign.pageCount === 1 ? '' : 's') + '.', 'ok')
     updateButtons()
+    requestGroups()   // fills the per-group rows in the Variants panel
   } catch (e) {
     reportError(e.what || String(e), e.where || 'Load Offers', e.fix)
   }
@@ -371,13 +606,96 @@ function fillPageDropdown(pageCount) {
     sel.appendChild(opt)
   }
   sel.disabled = false
+  updateLayoutSummary()
+}
+
+/* ------------------------------------------------------------------ *
+ * Build order
+ * ------------------------------------------------------------------ *
+ * Cirqle already offers these orderings, so the flyer can be laid out the
+ * same way without going back to the app. Everything downstream — preview,
+ * validation, the build, and Fill-selected's reading-order match — walks the
+ * SAME index list, so what Preview shows is exactly what gets built.
+ * ------------------------------------------------------------------ */
+
+/** Small seeded PRNG, so a shuffle previewed is the shuffle built. */
+function mulberry32(seed) {
+  let a = seed >>> 0
+  return function () {
+    a = (a + 0x6D2B79F5) | 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+function orderedIndices() {
+  if (!state.campaign) return []
+  const all = state.campaign.products
+  const page = $('page').value
+  const idx = []
+  for (let i = 0; i < all.length; i++) {
+    if (page !== '' && String(all[i].page) !== page) continue
+    idx.push(i)
+  }
+
+  const mode = $('sort').value
+  if (!mode) return idx
+
+  // Cirqle's own order is the tiebreak everywhere, so equal prices and
+  // same-category products stay in the sequence the client sent them.
+  const rank = {}
+  idx.forEach((v, k) => { rank[v] = k })
+  const priceOf = (i) => {
+    const v = all[i].price
+    return (v === null || v === undefined || v === '') ? null : Number(v)
+  }
+
+  if (mode === 'price-asc' || mode === 'price-desc') {
+    const dir = mode === 'price-asc' ? 1 : -1
+    return idx.slice().sort((a, b) => {
+      const pa = priceOf(a), pb = priceOf(b)
+      // Badge-only products (Buy 1 Get 1, 50% off) have no number to sort by.
+      // They always sit at the END rather than being treated as ₹0, which
+      // would bury the genuinely cheapest offers behind them.
+      if (pa === null && pb === null) return rank[a] - rank[b]
+      if (pa === null) return 1
+      if (pb === null) return -1
+      return (pa - pb) * dir || rank[a] - rank[b]
+    })
+  }
+
+  if (mode === 'category') {
+    return idx.slice().sort((a, b) => {
+      const ca = all[a].category || '', cb = all[b].category || ''
+      if (!ca && !cb) return rank[a] - rank[b]
+      if (!ca) return 1          // uncategorised products last
+      if (!cb) return -1
+      return (ca < cb ? -1 : ca > cb ? 1 : 0) || rank[a] - rank[b]
+    })
+  }
+
+  if (mode === 'shuffle') {
+    const rnd = mulberry32(state.shuffleSeed || 1)
+    const out = idx.slice()
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(rnd() * (i + 1))
+      const swap = out[i]; out[i] = out[j]; out[j] = swap
+    }
+    return out
+  }
+  return idx
 }
 
 function selectedProducts() {
   if (!state.campaign) return []
-  const page = $('page').value
   const all = state.campaign.products
-  return page === '' ? all : all.filter(p => String(p.page) === page)
+  return orderedIndices().map(i => all[i])
+}
+
+function orderLabel() {
+  const sel = $('sort')
+  return sel.value ? sel.options[sel.selectedIndex].textContent : ''
 }
 
 /* ------------------------------------------------------------------ *
@@ -473,6 +791,7 @@ function onTemplateValidated(msg) {
   // designer deserves to hear about the typo instead of shipping a blank.
   if (state.campaign && state.templateTokens.length) {
     const known = new Set(state.campaign.bindings.layers)
+    for (const cc of (state.customCols || [])) known.add(cc.token)
     const unknown = state.templateTokens.filter(t => !known.has(t) && t !== '#imageurl')
     if (unknown.length) {
       issues.push({
@@ -507,13 +826,23 @@ async function build() {
     const allProducts = state.campaign.products
     const pageFilter = $('page').value
 
+    // The same index list preview and validation used, so the cards come out
+    // in the order that was on screen.
     const buildProducts = []
-    for (let i = 0; i < allProducts.length; i++) {
-      if (pageFilter !== '' && String(allProducts[i].page) !== pageFilter) continue
+    // Custom design-only values ride along by row position — valid because
+    // saveCampaign stores rows in paste order and this campaign was just
+    // saved from that same table.
+    const extras = state.customRows && state.customRows.campaignId === $('offer').value
+      ? state.customRows.rows : null
+    for (const i of orderedIndices()) {
       const fields = {}
       for (let c = 0; c < layers.length; c++) fields[layers[c]] = String(rows[i][c] ?? '')
+      if (extras && extras[i]) {
+        for (const t in extras[i]) if (extras[i][t]) fields[t] = String(extras[i][t])
+      }
       buildProducts.push({ fields, image: null, hasImageUrl: !!allProducts[i].imageUrl, _url: allProducts[i].imageUrl, _name: allProducts[i].name })
     }
+    if (orderLabel()) log('Order: ' + orderLabel() + '.')
 
     log('Downloading images…')
     let downloaded = 0
@@ -541,6 +870,8 @@ async function build() {
       gap: parseInt($('gap').value, 10) || 40,
       frameName: campaignInfo.clientName + ' — ' + campaignInfo.name + (pageFilter ? ' — Page ' + pageFilter : ''),
       fillSelection: fillMode,
+      variants: state.variantChoices,
+      variantMaps: state.variantMaps,
     })
   } catch (e) {
     reportError(e.what || (e.message || String(e)), e.where || 'Build Flyer', e.fix || 'Press Refresh and try again.')
@@ -557,6 +888,13 @@ function onBuildDone(report) {
     : '✓ ' + report.cards + ' ' + verb
   log(head + ', ' + report.layersFilled + ' layers filled, ' +
       report.imagesPlaced + ' images placed' + (report.placeholders ? ', ' + report.placeholders + ' placeholder(s)' : '') + '.', 'ok')
+  if (report.variantsSwitched) {
+    log('· ' + report.variantsSwitched + ' variant instance(s) switched to match the data.', 'ok')
+  }
+  if (report.variantsFailed) {
+    log('⚠ ' + report.variantsFailed + ' instance(s) had no matching variant combination.', 'warn')
+    logFix('Add the missing combination to the component set, or pin that property to a fixed value in Variants.')
+  }
   if (report.looseLayers) {
     log('· ' + report.looseLayers + ' layer(s) outside the cards were matched too.', 'ok')
   }
@@ -587,6 +925,9 @@ function onBuildDone(report) {
 function fillTemplateDropdown() {
   const sel = $('template')
   sel.innerHTML = ''
+  // The what-is-a-template guidance matters exactly until a template
+  // exists — after that it's noise on every open.
+  $('tpl-guide').style.display = state.templates.length ? 'none' : 'block'
   if (!state.templates.length) {
     const opt = document.createElement('option')
     opt.value = ''
@@ -607,11 +948,201 @@ function fillTemplateDropdown() {
   }
   sel.disabled = false
   $('template-hint').textContent = ''
-  // A template created moments ago is the one they meant to use.
+  // A template created moments ago is the one they meant to use; failing
+  // that, the one they used last time (matched by name — node ids are
+  // per-file, names travel between files and re-scans).
   if (state._selectTemplateId && [...sel.options].some(o => o.value === state._selectTemplateId)) {
     sel.value = state._selectTemplateId
     state._selectTemplateId = null
+  } else if (state.lastTemplateName) {
+    const match = state.templates.find(t => t.name === state.lastTemplateName)
+    if (match) sel.value = match.id
   }
+  const chosen = state.templates.find(t => t.id === sel.value)
+  state.lastTemplateName = chosen ? chosen.name : state.lastTemplateName
+}
+
+/* ------------------------------------------------------------------ *
+ * Variants — chosen once, applied per product
+ * ------------------------------------------------------------------ */
+state.variantProps = []
+state.variantChoices = {}
+state.variantMaps = {}      // property key → { group state → variant value }
+state.groupCounts = null    // how the loaded offer breaks down, per fact
+
+const FACT_LABEL = {
+  digits: 'price digits',
+  paise: 'paise / decimal',
+  price: 'has a price',
+  offer: 'offer type',
+  script: 'name language',
+}
+
+function renderVariants() {
+  const box = $('variant-map')
+  box.innerHTML = ''
+  if (!state.variantProps.length) { $('variant-box').style.display = 'none'; return }
+  $('variant-box').style.display = 'block'
+
+  for (const prop of state.variantProps) {
+    const row = document.createElement('div')
+    row.className = 'vrow'
+
+    const name = document.createElement('span')
+    name.className = 'vname'
+    // Component sets usually keep Figma's default "Property 1", so the set's
+    // own name is what actually tells them apart in this list.
+    name.textContent = prop.set + ' · ' + prop.property
+    name.title = prop.set + ' · ' + prop.property + '\n' + prop.values.join('\n')
+    row.appendChild(name)
+
+    const sel = document.createElement('select')
+    const option = (value, text) => {
+      const o = document.createElement('option')
+      o.value = value; o.textContent = text
+      sel.appendChild(o)
+    }
+
+    option('auto', prop.fact ? 'Auto — ' + FACT_LABEL[prop.fact] : 'Auto — name not recognised')
+    // The escape hatch for "Property 1": say what it means, without renaming
+    // anything in Figma. Facts whose values look like they'd work are listed
+    // first and marked, so the likely answer is the obvious one.
+    const ordered = Object.keys(FACT_LABEL)
+      .sort((a, b) => (prop.suggests.indexOf(b) >= 0) - (prop.suggests.indexOf(a) >= 0))
+    for (const fact of ordered) {
+      option('fact:' + fact, 'Use: ' + FACT_LABEL[fact] + (prop.suggests.indexOf(fact) >= 0 ? '  ✓ fits' : ''))
+    }
+    option('off', 'Leave alone')
+    for (const value of prop.values) option(value, 'Always “' + value + '”')
+
+    const saved = state.variantChoices[prop.key] || state.variantChoices[prop.property]
+    sel.value = (saved && [...sel.options].some(o => o.value === saved)) ? saved : 'auto'
+    state.variantChoices[prop.key] = sel.value
+    sel.onchange = () => {
+      state.variantChoices[prop.key] = sel.value
+      saveSettings()
+      log('“' + prop.set + ' · ' + prop.property + '” → ' + sel.options[sel.selectedIndex].textContent, 'ok')
+    }
+    row.appendChild(sel)
+    box.appendChild(row)
+
+    // Show the values: without them there is no way to tell what "Variant7"
+    // is, and no way to know what to rename it to.
+    const values = document.createElement('div')
+    values.className = 'vvals'
+    values.textContent = prop.values.join(' · ')
+    values.title = prop.values.join('\n')
+    box.appendChild(values)
+
+    renderGroupRows(box, prop, sel.value)
+  }
+}
+
+/**
+ * One row per group that actually occurs in the loaded offer — "3 digits ·
+ * 6 products" — each pointing at a variant. This is the part that makes the
+ * mapping concrete: you can see that your list really is 8 two-digit, 6
+ * three-digit, 1 with paise and 7 badge-only, and aim each group by hand.
+ */
+function renderGroupRows(box, prop, choice) {
+  // Silence is the wrong answer here: when the groups don't appear it is
+  // always for one of a few knowable reasons, and the panel should say which.
+  const hint = (text) => {
+    const line = document.createElement('div')
+    line.className = 'vhint'
+    line.textContent = text
+    box.appendChild(line)
+  }
+
+  if (choice === 'off') { hint('Left exactly as you set it — no groups needed.'); return }
+  const fact = choice === 'auto' ? prop.fact
+    : choice.indexOf('fact:') === 0 ? choice.slice(5)
+    : null
+  if (!fact && choice !== 'auto') { hint('Pinned — every card uses this one value.'); return }
+  if (!fact) {
+    hint('Not mapped yet. Pick “Use: …” above — the ✓ fits one is usually right — and the product groups appear here.')
+    return
+  }
+  if (!state.groupCounts) {
+    hint('Press Load Offers, and this offer’s product groups appear here.')
+    return
+  }
+  const counts = state.groupCounts[fact] || {}
+  const order = (state.groupStates && state.groupStates[fact]) || Object.keys(counts)
+  const present = order.filter(st => counts[st])
+  if (!present.length) { hint('No product in this offer falls into a group for this.'); return }
+
+  if (!state.variantMaps[prop.key]) state.variantMaps[prop.key] = {}
+
+  for (const st of present) {
+    const row = document.createElement('div')
+    row.className = 'vrow vsub'
+
+    const label = document.createElement('span')
+    label.className = 'vname'
+    label.textContent = (STATE_LABEL[fact] && STATE_LABEL[fact][st]) || st
+    row.appendChild(label)
+
+    const count = document.createElement('span')
+    count.className = 'vcount'
+    count.textContent = counts[st] + (counts[st] === 1 ? ' product' : ' products')
+    row.appendChild(count)
+
+    const sel = document.createElement('select')
+    const option = (value, text) => {
+      const o = document.createElement('option')
+      o.value = value; o.textContent = text
+      sel.appendChild(o)
+    }
+    option('', 'Auto')
+    for (const value of prop.values) option(value, value)
+    const saved = state.variantMaps[prop.key][st]
+    sel.value = (saved && prop.values.indexOf(saved) >= 0) ? saved : ''
+    sel.onchange = () => {
+      if (sel.value) state.variantMaps[prop.key][st] = sel.value
+      else delete state.variantMaps[prop.key][st]
+      saveSettings()
+    }
+    row.appendChild(sel)
+    box.appendChild(row)
+  }
+}
+
+const STATE_LABEL = {
+  digits: { '1': '1 digit', '2': '2 digits', '3': '3 digits', '4': '4 digits',
+            '5': '5 digits', '6': '6 digits', none: 'no price' },
+  paise: { no: 'whole rupees', yes: 'has paise', none: 'no price' },
+  price: { yes: 'has a price', no: 'no price — badge or text' },
+  offer: { price: 'plain price', bogo: 'Buy 1 Get 1', percent: '% off' },
+  script: { latin: 'English', malayalam: 'Malayalam', mixed: 'both scripts' },
+}
+
+/** The same field payload the build sends, minus the images. */
+function productFieldsForScan() {
+  if (!state.campaign) return []
+  const layers = state.campaign.bindings.layers
+  const rows = state.campaign.bindings.rows
+  const all = state.campaign.products
+  const pageFilter = $('page').value
+  const out = []
+  for (let i = 0; i < all.length; i++) {
+    if (pageFilter !== '' && String(all[i].page) !== pageFilter) continue
+    const fields = {}
+    for (let c = 0; c < layers.length; c++) fields[layers[c]] = String(rows[i][c] ?? '')
+    out.push({ fields, image: null, hasImageUrl: !!all[i].imageUrl })
+  }
+  return out
+}
+
+function requestGroups() {
+  const products = productFieldsForScan()
+  if (products.length) post({ type: 'scan-groups', products })
+}
+
+function requestVariants() {
+  const id = $('template').value
+  if (!id) { state.variantProps = []; renderVariants(); return }
+  post({ type: 'scan-variants', templateId: id })
 }
 
 function updateButtons() {
@@ -641,13 +1172,19 @@ document.querySelectorAll('.tab').forEach(tab => {
     // replacing the spreadsheet and not. Widen for the table, shrink back
     // for the build controls, so the panel is only ever as big as it needs.
     post(tab.dataset.panel === 'paste'
-      ? { type: 'resize', width: 720, height: 760 }
-      : { type: 'resize', width: 380, height: 720 })
+      ? { type: 'resize', width: 780, height: 840 }
+      : { type: 'resize', width: 380, height: 780 })
+    if (state.activeTab !== tab.dataset.panel) {
+      state.activeTab = tab.dataset.panel
+      saveSettings()
+    }
   }
 })
 
 state.parsed = []
 state.picked = new Set()      // row indices ticked for bulk tools
+state.customCols = []         // design-only columns → custom #layers
+state.customRows = null       // { campaignId, rows } — values carried to the build
 state.colRoles = []           // role per split column, e.g. ['name','price','mrp']
 
 /* --- Casing -------------------------------------------------------- *
@@ -1039,20 +1576,358 @@ function renderColMap() {
   })
 }
 
+/* ================================================================== *
+ * The review grid — behaves like a sheet, because it replaces one.
+ *
+ * Model: state.parsed is the single source of truth; the grid renders it and
+ * writes back through setCellValue (prices via parsePrice, so "₹350" and
+ * "1,250" typed or pasted are read the same way the splitter reads them).
+ * Selection is an anchor + focus rectangle over the editable columns; a
+ * hidden textarea (#grid-clip) always holds the selection as TSV and keeps
+ * keyboard focus, which is what makes NATIVE ⌘C / ⌘V work — copy takes the
+ * textarea's contents, paste fires its paste event. The same TSV dialect
+ * Google Sheets uses, so ranges round-trip in both directions.
+ * ================================================================== */
+
+const BASE_COLS = [
+  { key: 'name',   label: 'Product', type: 'text'  },
+  { key: 'price',  label: 'SALE',    type: 'price' },
+  { key: 'mrp',    label: 'MRP',     type: 'price' },
+  { key: 'weight', label: 'Weight',  type: 'text'  },
+  { key: 'badge',  label: 'Badge',   type: 'text'  },
+]
+
+/* Custom columns — extra text the DESIGN carries that Cirqle has no field
+ * for: a second badge, a Malayalam tagline, a shelf code. Each one maps to a
+ * #layer in the template ("Badge 2" → #badge2) and its values ride along to
+ * the build. They are design-session data, deliberately NOT saved to Cirqle. */
+function gridCols() {
+  const cols = BASE_COLS.slice()
+  for (const cc of (state.customCols || [])) {
+    const col = { key: cc.token, label: cc.label, type: 'text', custom: true }
+    // pos is the display index chosen at insertion ("column left of SALE").
+    // Older saved columns have none and go to the end, exactly as before.
+    const at = (cc.pos == null) ? cols.length : Math.max(0, Math.min(cols.length, cc.pos))
+    cols.splice(at, 0, col)
+  }
+  return cols
+}
+function lastC() { return gridCols().length - 1 }
+
+let gridSel = null      // { ar, ac, fr, fc } anchor + focus, inclusive
+let gridEdit = null     // { r, c, input, before }
+let gridDrag = false
+let gridCells = []      // gridCells[r][c] → cell element (+ [r].p1p2)
+const undoStack = []
+const redoStack = []
+
+function selRect() {
+  if (!gridSel) return null
+  return {
+    r0: Math.min(gridSel.ar, gridSel.fr), r1: Math.max(gridSel.ar, gridSel.fr),
+    c0: Math.min(gridSel.ac, gridSel.fc), c1: Math.max(gridSel.ac, gridSel.fc),
+  }
+}
+
+function cellValue(r, c) {
+  const p = state.parsed[r]
+  if (!p) return ''
+  const col = gridCols()[c]
+  if (!col) return ''
+  const v = col.custom ? (p.custom || {})[col.key] : p[col.key]
+  if (col.type === 'price') return displayPrice(v)
+  return v == null ? '' : String(v)
+}
+
+function setCellValue(r, c, raw) {
+  const p = state.parsed[r]
+  const col = gridCols()[c]
+  if (!p || !col) return
+  if (col.custom) {
+    if (!p.custom) p.custom = {}
+    p.custom[col.key] = String(raw == null ? '' : raw)
+    return
+  }
+  if (col.type === 'price') {
+    const v = String(raw == null ? '' : raw).trim()
+    p[col.key] = v === '' ? null : parsePrice(v)
+  } else {
+    p[col.key] = String(raw == null ? '' : raw)
+  }
+  if (col.key === 'badge') {
+    p.offerType = /buy\s*1\s*get\s*1|b1g1|bogo/i.test(p.badge || '') ? 'bogo' : 'price'
+  }
+}
+
+/* --- undo ----------------------------------------------------------- */
+function pushUndo() {
+  undoStack.push(JSON.stringify(state.parsed))
+  if (undoStack.length > 100) undoStack.shift()
+  redoStack.length = 0
+}
+function gridUndo() {
+  if (!undoStack.length) return
+  redoStack.push(JSON.stringify(state.parsed))
+  state.parsed = JSON.parse(undoStack.pop())
+  renderTable()
+}
+function gridRedo() {
+  if (!redoStack.length) return
+  undoStack.push(JSON.stringify(state.parsed))
+  state.parsed = JSON.parse(redoStack.pop())
+  renderTable()
+}
+
+/* --- selection ------------------------------------------------------ */
+function gridSelect(r, c, opts) {
+  const o = opts || {}
+  if (!state.parsed.length) { gridSel = null; return }
+  r = Math.max(0, Math.min(state.parsed.length - 1, r))
+  c = Math.max(0, Math.min(lastC(), c))
+  if (o.extend && gridSel) { gridSel.fr = r; gridSel.fc = c }
+  else gridSel = { ar: r, ac: c, fr: r, fc: c }
+  syncPicked()
+  paintSel()
+  syncClip(o.focus !== false)
+  updateCount()
+}
+function gridSelectRow(r, opts) {
+  gridSelect(r, 0, opts)
+  if (!gridSel) return
+  gridSel.fc = lastC()        // widen to the full row; anchor keeps column 0
+  syncPicked(); paintSel(); syncClip(true); updateCount()
+}
+function gridSelectCol(c) {
+  if (!state.parsed.length) return
+  gridSel = { ar: 0, ac: c, fr: state.parsed.length - 1, fc: c }
+  syncPicked(); paintSel(); syncClip(true); updateCount()
+}
+function gridSelectAll() {
+  if (!state.parsed.length) return
+  gridSel = { ar: 0, ac: 0, fr: state.parsed.length - 1, fc: lastC() }
+  syncPicked(); paintSel(); syncClip(true); updateCount()
+}
+
+/** state.picked mirrors the selected ROWS so bulk tools stay one code path. */
+function syncPicked() {
+  state.picked.clear()
+  const rect = selRect()
+  if (!rect) return
+  for (let r = rect.r0; r <= rect.r1; r++) state.picked.add(r)
+}
+
+function paintSel() {
+  const rect = selRect()
+  for (let r = 0; r < gridCells.length; r++) {
+    const rowCells = gridCells[r]
+    if (!rowCells) continue
+    const cols = gridCols()
+    for (let c = 0; c < cols.length; c++) {
+      const el = rowCells[c]
+      if (!el) continue
+      let cls = 'g-cell' + (cols[c].type === 'price' ? ' g-sale' : '')
+      if (rect && r >= rect.r0 && r <= rect.r1 && c >= rect.c0 && c <= rect.c1) cls += ' g-sel'
+      if (gridSel && r === gridSel.fr && c === gridSel.fc) cls += ' g-anchor'
+      el.className = cls
+    }
+  }
+}
+
+/* --- clipboard ------------------------------------------------------ */
+function copySelectionTSV() {
+  const rect = selRect()
+  if (!rect) return ''
+  const lines = []
+  for (let r = rect.r0; r <= rect.r1; r++) {
+    const cells = []
+    for (let c = rect.c0; c <= rect.c1; c++) cells.push(cellValue(r, c))
+    lines.push(cells.join('\t'))
+  }
+  return lines.join('\n')
+}
+
+function syncClip(focus) {
+  const clip = $('grid-clip')
+  clip.value = copySelectionTSV()
+  if (focus) {
+    if (clip.focus) clip.focus()
+    if (clip.select) clip.select()
+  }
+}
+
+/**
+ * Paste starting at the selection's top-left. New rows are created when the
+ * pasted block runs past the end — pasting 30 rows into a 10-row table gives
+ * 30 rows, the same as Sheets. A single copied cell fills the whole selected
+ * range, also the same as Sheets.
+ */
+function gridPasteTSV(text) {
+  const rect = selRect()
+  if (!rect) return
+  let rows = String(text == null ? '' : text).replace(/\r/g, '').split('\n').map(l => l.split('\t'))
+  while (rows.length > 1 && rows[rows.length - 1].length === 1 && rows[rows.length - 1][0] === '') rows.pop()
+  if (!rows.length) return
+  pushUndo()
+
+  if (rows.length === 1 && rows[0].length === 1) {
+    for (let r = rect.r0; r <= rect.r1; r++)
+      for (let c = rect.c0; c <= rect.c1; c++) setCellValue(r, c, rows[0][0])
+  } else {
+    for (let dr = 0; dr < rows.length; dr++) {
+      const r = rect.r0 + dr
+      while (r >= state.parsed.length) state.parsed.push(blankRow())
+      for (let dc = 0; dc < rows[dr].length; dc++) {
+        const c = rect.c0 + dc
+        if (c > lastC()) break
+        setCellValue(r, c, rows[dr][dc])
+      }
+    }
+    gridSel = {
+      ar: rect.r0, ac: rect.c0,
+      fr: Math.min(state.parsed.length - 1, rect.r0 + rows.length - 1),
+      fc: Math.min(lastC(), rect.c0 + rows[0].length - 1),
+    }
+  }
+  renderTable()
+}
+
+function gridClearSelection() {
+  const rect = selRect()
+  if (!rect) return
+  pushUndo()
+  for (let r = rect.r0; r <= rect.r1; r++)
+    for (let c = rect.c0; c <= rect.c1; c++) setCellValue(r, c, '')
+  renderTable()
+}
+
+/** ⌘D — the first selected row's values flow down through the selection. */
+function gridFillDown() {
+  const rect = selRect()
+  if (!rect || rect.r1 === rect.r0) return
+  pushUndo()
+  for (let c = rect.c0; c <= rect.c1; c++) {
+    const top = cellValue(rect.r0, c)
+    for (let r = rect.r0 + 1; r <= rect.r1; r++) setCellValue(r, c, top)
+  }
+  renderTable()
+}
+
+/* --- editing -------------------------------------------------------- */
+function gridBeginEdit(startChar) {
+  if (!gridSel) return
+  const r = gridSel.fr, c = gridSel.fc
+  const cell = gridCells[r] && gridCells[r][c]
+  if (!cell) return
+  gridCancelEdit()
+  const input = document.createElement('input')
+  input.type = 'text'
+  input.value = startChar != null ? startChar : cellValue(r, c)
+  gridEdit = { r, c, input, before: cellValue(r, c) }
+  cell.textContent = ''
+  cell.appendChild(input)
+  if (input.focus) input.focus()
+  input.onkeydown = (ev) => {
+    if (ev.key === 'Enter') { ev.preventDefault(); gridCommitEdit(); gridMove(1, 0) }
+    else if (ev.key === 'Tab') { ev.preventDefault(); gridCommitEdit(); gridMove(0, ev.shiftKey ? -1 : 1) }
+    else if (ev.key === 'Escape') { ev.preventDefault(); gridCancelEdit(); renderTable() }
+    ev.stopPropagation && ev.stopPropagation()
+  }
+  input.onblur = () => { if (gridEdit && gridEdit.input === input) { gridCommitEdit({ keepFocus: false }) } }
+}
+
+function gridCommitEdit(opts, forcedValue) {
+  if (!gridEdit) return
+  const { r, c, input, before } = gridEdit
+  const value = forcedValue !== undefined ? forcedValue : input.value
+  gridEdit = null
+  if (String(value) !== String(before)) {
+    pushUndo()
+    setCellValue(r, c, value)
+  }
+  renderTable()
+  if (!opts || opts.keepFocus !== false) syncClip(true)
+}
+
+function gridCancelEdit() { gridEdit = null }
+
+function gridMove(dr, dc, extend) {
+  if (!gridSel) { gridSelect(0, 0); return }
+  gridSelect(gridSel.fr + dr, gridSel.fc + dc, { extend })
+}
+
+/* --- keyboard, on the hidden clipboard textarea ---------------------- */
+function gridKeydown(ev) {
+  if (gridEdit) return
+  const meta = ev.metaKey || ev.ctrlKey
+  const k = ev.key
+  const stop = () => { ev.preventDefault && ev.preventDefault() }
+
+  if (meta) {
+    const low = (k || '').toLowerCase()
+    if (low === 'c') return                       // native copy of the TSV textarea
+    if (low === 'x') { setTimeout(() => gridClearSelection(), 0); return }
+    if (low === 'v') return                       // the paste event handles it
+    if (low === 'z') { stop(); ev.shiftKey ? gridRedo() : gridUndo(); return }
+    if (low === 'y') { stop(); gridRedo(); return }
+    if (low === 'd') { stop(); gridFillDown(); return }
+    if (low === 'a') { stop(); gridSelectAll(); return }
+    return
+  }
+  if (k === 'ArrowDown') { stop(); gridMove(1, 0, ev.shiftKey); return }
+  if (k === 'ArrowUp') { stop(); gridMove(-1, 0, ev.shiftKey); return }
+  if (k === 'ArrowRight') { stop(); gridMove(0, 1, ev.shiftKey); return }
+  if (k === 'ArrowLeft') { stop(); gridMove(0, -1, ev.shiftKey); return }
+  if (k === 'Tab') { stop(); gridMove(0, ev.shiftKey ? -1 : 1); return }
+  if (k === 'Enter' || k === 'F2') { stop(); gridBeginEdit(); return }
+  if (k === 'Delete' || k === 'Backspace') { stop(); gridClearSelection(); return }
+  if (k === 'Escape') { hideCtx(); gridSel = null; state.picked.clear(); paintSel(); updateCount(); return }
+  if (k && k.length === 1) { stop(); gridBeginEdit(k) }   // type to replace
+}
+
+/* --- render --------------------------------------------------------- */
 function renderTable() {
   const box = $('paste-rows')
+  const keepScroll = box.scrollTop
   box.innerHTML = ''
+  gridCells = []
+  const COLS = gridCols()
+
+  // Column widths follow the interleaved display order.
+  const W = { name: 'minmax(150px, 1fr)', price: '64px', mrp: '64px', weight: '72px', badge: '80px' }
+  const widths = '34px ' + COLS.map(col => col.custom ? '84px' : W[col.key]).join(' ') + ' 62px'
+  if (box.style) {
+    if (box.style.setProperty) box.style.setProperty('--gcols', widths)
+    else box.style['--gcols'] = widths
+  }
+
+  // Header — click a column name to select the whole column.
   const head = document.createElement('div')
-  head.className = 'row-head'
-  // Column names follow the client's own review sheet (Product · SALE · MRP)
-  // so the two read the same when they're compared side by side.
-  head.innerHTML = '<span></span><span>#</span><span>Product</span><span>SALE</span><span>MRP</span><span>Weight</span><span title="What #price1 and #price2 will receive">P1·P2</span>'
+  head.className = 'g-row g-head'
+  const corner = document.createElement('div')
+  corner.className = 'g-cell g-num'
+  corner.textContent = '#'
+  corner.onmousedown = (e) => { e.preventDefault && e.preventDefault(); gridSelectAll() }
+  head.appendChild(corner)
+  COLS.forEach((col, c) => {
+    const h = document.createElement('div')
+    h.className = 'g-cell'
+    h.textContent = col.label
+    if (col.custom) h.title = 'Custom column — fills the layer named ' + col.key
+    h.onmousedown = (e) => { e.preventDefault && e.preventDefault(); gridSelectCol(c) }
+    h.oncontextmenu = (e) => showCtxMenu(e, null, c)
+    head.appendChild(h)
+  })
+  const hp = document.createElement('div')
+  hp.className = 'g-cell g-ro'
+  hp.title = 'What #price1 and #price2 will receive'
+  hp.textContent = 'P1·P2'
+  head.appendChild(hp)
   box.appendChild(head)
 
   let lastDay = null
-  state.parsed.forEach((p, i) => {
-    // Day breaks are shown inline — a two-day paste is the easiest thing to
-    // save wrong, and Cirqle holds one active offer per client.
+  state.parsed.forEach((p, r) => {
+    // Day breaks shown inline — a two-day paste is the easiest thing to save
+    // wrong, and Cirqle holds one active offer per client.
     if (p.day && p.day !== lastDay) {
       const sep = document.createElement('div')
       sep.className = 'day-sep'
@@ -1061,102 +1936,245 @@ function renderTable() {
       lastDay = p.day
     }
     const row = document.createElement('div')
-    row.className = 'row-item'
+    row.className = 'g-row'
+    gridCells[r] = []
 
-    const tick = document.createElement('input')
-    tick.type = 'checkbox'
-    tick.checked = state.picked.has(i)
-    tick.onchange = () => { tick.checked ? state.picked.add(i) : state.picked.delete(i); updateCount() }
-    row.appendChild(tick)
+    const num = document.createElement('div')
+    num.className = 'g-cell g-num'
+    num.textContent = String(r + 1)
+    num.onmousedown = (e) => { e.preventDefault && e.preventDefault(); gridSelectRow(r, { extend: e.shiftKey }) }
+    num.oncontextmenu = (e) => { gridSelectRow(r); showCtxMenu(e, r, 0) }
+    row.appendChild(num)
 
-    const no = document.createElement('div')
-    no.className = 'row-no'
-    no.textContent = String(i + 1)
-    row.appendChild(no)
+    COLS.forEach((col, c) => {
+      const cell = document.createElement('div')
+      cell.className = 'g-cell' + (col.type === 'price' ? ' g-sale' : '')
+      cell.textContent = cellValue(r, c)
+      cell.onmousedown = (e) => {
+        e.preventDefault && e.preventDefault()
+        if (gridEdit) gridCommitEdit()
+        gridDrag = true
+        gridSelect(r, c, { extend: e.shiftKey })
+      }
+      cell.onmouseenter = () => { if (gridDrag) gridSelect(r, c, { extend: true, focus: false }) }
+      cell.ondblclick = () => { gridSelect(r, c); gridBeginEdit() }
+      cell.oncontextmenu = (e) => showCtxMenu(e, r, c)
+      row.appendChild(cell)
+      gridCells[r][c] = cell
+    })
 
-    const mk = (key, value, type) => {
-      const el = document.createElement('input')
-      el.type = type || 'text'
-      if (type === 'number') {
-        // Without this a browser treats 20.99 as invalid (default step is 1)
-        // and the arrow keys jump by whole rupees — which would quietly break
-        // every paise price, the only case Price 1 / Price 2 exists for.
-        el.step = '0.01'
-        el.min = '0'
-      }
-      el.value = (type === 'number') ? displayPrice(value) : (value == null ? '' : value)
-      el.oninput = () => {
-        const v = el.value.trim()
-        state.parsed[i][key] = (type === 'number') ? (v === '' ? null : Number(v)) : v
-      }
-      if (type === 'number') {
-        // Normalise once the field is left, never mid-typing: "11.5" settles
-        // to "11.50" so a half rupee reads unambiguously, and "1,250" or
-        // "₹350" typed by hand are accepted rather than silently dropped.
-        el.onblur = () => {
-          const parsed = parsePrice(el.value)
-          state.parsed[i][key] = parsed
-          el.value = displayPrice(parsed)
-          renderSplit(i)
-        }
-      }
-      // Enter moves down the same column — the spreadsheet reflex.
-      el.onkeydown = (ev) => {
-        if (ev.key !== 'Enter') return
-        ev.preventDefault()
-        const rows = [...box.querySelectorAll('.row-item')]
-        const col = [...row.children].indexOf(el)
-        const next = rows[rows.indexOf(row) + 1]
-        if (next && next.children[col]) next.children[col].focus()
-      }
-      return el
-    }
-    row.appendChild(mk('name', p.name))
-    const sale = mk('price', p.price, 'number')
-    sale.className = 'sale'
-    row.appendChild(sale)
-    row.appendChild(mk('mrp', p.mrp, 'number'))
-    row.appendChild(mk('weight', p.weight))
+    // Read-only mirror of Price 1 / Price 2 — checkable before building.
+    const p1p2 = document.createElement('div')
+    p1p2.className = 'g-cell g-ro'
+    paintP1P2(p1p2, r)
+    row.appendChild(p1p2)
+    gridCells[r].p1p2 = p1p2
 
-    // Live mirror of what the sheet contract will hand #price1 / #price2.
-    const split = document.createElement('div')
-    split.className = 'split'
-    split.dataset.row = String(i)
-    const paint = () => {
-      const [whole, paise] = splitPrice(state.parsed[i].price)
-      split.innerHTML = whole === ''
-        ? '<span style="opacity:.4">—</span>'
-        : '<b>' + whole + '</b>' + (paise ? '·<i>' + paise + '</i>' : '<span style="opacity:.4">·—</span>')
-    }
-    paint()
-    sale.addEventListener('input', paint)
-    row.appendChild(split)
     box.appendChild(row)
   })
+
+  document.onmouseup = () => { gridDrag = false }
+  document.onclick = hideCtx
+  const clip = $('grid-clip')
+  clip.onkeydown = gridKeydown
+  clip.onpaste = (e) => {
+    const text = e.clipboardData && e.clipboardData.getData ? e.clipboardData.getData('text/plain') : null
+    e.preventDefault && e.preventDefault()
+    if (text != null) gridPasteTSV(text)
+  }
+
+  // Clamp a selection that outlived its rows (undo, delete, re-split).
+  if (gridSel) {
+    if (!state.parsed.length) gridSel = null
+    else {
+      gridSel.ar = Math.min(gridSel.ar, state.parsed.length - 1)
+      gridSel.fr = Math.min(gridSel.fr, state.parsed.length - 1)
+    }
+    syncPicked()
+  }
+  paintSel()
+  syncClip(false)
+  box.scrollTop = keepScroll
 
   renderColMap()
   updateCount()
   $('paste-review').style.display = state.parsed.length ? 'block' : 'none'
 }
 
-/** Repaint one row's P1·P2 cell after its price was normalised on blur. */
-function renderSplit(i) {
-  const cell = $('paste-rows').querySelector('.split[data-row="' + i + '"]')
-  if (!cell) return
-  const [whole, paise] = splitPrice(state.parsed[i].price)
+function paintP1P2(cell, r) {
+  const [whole, paise] = splitPrice(state.parsed[r] ? state.parsed[r].price : null)
   cell.innerHTML = whole === ''
     ? '<span style="opacity:.4">—</span>'
     : '<b>' + whole + '</b>' + (paise ? '·<i>' + paise + '</i>' : '<span style="opacity:.4">·—</span>')
 }
 
+/** Repaint one row's P1·P2 cell after its price changed. */
+function renderSplit(i) {
+  const cell = gridCells[i] && gridCells[i].p1p2
+  if (cell) paintP1P2(cell, i)
+}
+
 function updateCount() {
   const missing = state.parsed.filter(p => p.price == null).length
+  const rect = selRect()
+  const selText = rect
+    ? (rect.r0 === rect.r1 && rect.c0 === rect.c1
+        ? 'R' + (rect.r0 + 1)
+        : (rect.r1 - rect.r0 + 1) + '×' + (rect.c1 - rect.c0 + 1) + ' selected')
+    : ''
   $('paste-count').textContent =
-    state.parsed.length + ' rows · ' + state.picked.size + ' ticked' +
+    state.parsed.length + ' rows' + (selText ? ' · ' + selText : '') +
     (missing ? ' · ' + missing + ' with no price' : '')
 }
 
-/** Bulk tools act on ticked rows, or on everything when nothing is ticked. */
+/* --- custom columns -------------------------------------------------- */
+const RESERVED_TOKENS = {
+  '#product': 'Product', '#name': 'Product', '#productname': 'Product',
+  '#offerprice': 'SALE', '#price': 'SALE', '#saleprice': 'SALE', '#sellingprice': 'SALE',
+  '#mrp': 'MRP', '#oldprice': 'MRP', '#strikeprice': 'MRP', '#originalprice': 'MRP',
+  '#weight': 'Weight', '#size': 'Weight', '#qty': 'Weight',
+  '#badges': 'Badge', '#badge': 'Badge',
+  '#price1': 'SALE (rupees half)', '#price2': 'SALE (paise half)',
+  '#imageurl': 'the product photo', '#image': 'the product photo', '#photo': 'the product photo',
+  '#offertitle': "Cirqle's Offer Title", '#offertext': "Cirqle's Offer Text",
+  '#offerdate': "Cirqle's Offer Date", '#offerdatedisplay': "Cirqle's Offer Date",
+  '#offerdatetext': "Cirqle's Offer Date", '#client': "Cirqle's Client name",
+  '#pagenumber': 'the page number', '#displayorder': 'the display order', '#offertype': 'the offer type',
+}
+
+function addCustomColumn(label, pos) {
+  const clean = String(label || '').replace(/\s+/g, ' ').trim()
+  if (!clean) { reportError('The column needs a name.', 'Add column', 'e.g. "Badge 2" — it will fill the layer #badge2.'); return false }
+  const token = '#' + clean.toLowerCase().replace(/[^a-z0-9]/g, '')
+  if (token === '#') { reportError('That name has no letters or digits in it.', 'Add column', 'Layer names come out as # + letters/digits, so it needs at least one.'); return false }
+  if (RESERVED_TOKENS[token]) {
+    reportError('"' + clean + '" is already the ' + RESERVED_TOKENS[token] + ' column.', 'Add column',
+      'Use that column directly — a custom copy would fight it for the same layer.')
+    return false
+  }
+  if ((state.customCols || []).some(cc => cc.token === token)) {
+    reportError('"' + clean + '" already exists.', 'Add column', 'It fills ' + token + '.')
+    return false
+  }
+  if ((state.customCols || []).length >= 4) {
+    reportError('Four custom columns is the ceiling.', 'Add column', 'Remove one first — the grid has to stay readable.')
+    return false
+  }
+  state.customCols.push(pos == null ? { label: clean, token } : { label: clean, token, pos })
+  gridSel = null
+  saveSettings()
+  renderTable()
+  renderCustomChips()
+  log('Column "' + clean + '" added. Name a TEXT layer ' + token + ' in the template and it fills at build.', 'ok')
+  return true
+}
+
+function removeCustomColumn(token) {
+  state.customCols = (state.customCols || []).filter(cc => cc.token !== token)
+  gridSel = null
+  saveSettings()
+  renderTable()
+  renderCustomChips()
+  log('Column removed. Its values are kept on the rows — add the same name back to see them again.', 'ok')
+}
+
+function renderCustomChips() {
+  const box = $('custom-cols')
+  box.innerHTML = ''
+  for (const cc of (state.customCols || [])) {
+    const chip = document.createElement('button')
+    chip.className = 'tool'
+    chip.textContent = cc.label + ' ✕'
+    chip.title = 'Remove the "' + cc.label + '" column (' + cc.token + '). Values stay on the rows.'
+    chip.onclick = () => removeCustomColumn(cc.token)
+    box.appendChild(chip)
+  }
+}
+
+function showAddCol(pos) {
+  state._pendingColPos = pos == null ? null : pos
+  $('addcol-row').style.display = 'flex'
+  if ($('addcol-name').focus) $('addcol-name').focus()
+}
+
+$('tool-addcol').onclick = () => {
+  const row = $('addcol-row')
+  if (row.style.display === 'none') showAddCol(null)
+  else { row.style.display = 'none'; state._pendingColPos = null }
+}
+$('addcol-ok').onclick = () => {
+  if (addCustomColumn($('addcol-name').value, state._pendingColPos)) {
+    $('addcol-name').value = ''
+    $('addcol-row').style.display = 'none'
+    state._pendingColPos = null
+  }
+}
+$('addcol-name').onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault && ev.preventDefault(); $('addcol-ok').onclick() } }
+
+/* --- right-click menu — the Sheets reflex for structure edits -------- */
+/**
+ * The items for a right-click at (r, c). r === null means a header click.
+ * Pure: returns { label, run } pairs, so the behaviour is testable without
+ * a browser. `sep: true` entries draw a divider.
+ */
+function ctxItems(r, c) {
+  const items = []
+  const rect = selRect()
+  if (r !== null) {
+    const n = rect ? rect.r1 - rect.r0 + 1 : 1
+    const rows = n === 1 ? '1 row' : n + ' rows'
+    const top = rect ? rect.r0 : r
+    const bottom = rect ? rect.r1 : r
+    items.push({ label: 'Insert ' + rows + ' above', run: () => insertRows(top, n) })
+    items.push({ label: 'Insert ' + rows + ' below', run: () => insertRows(bottom + 1, n) })
+    items.push({ label: 'Delete ' + rows, run: () => {
+      pushUndo()
+      const kill = new Set()
+      for (let i = top; i <= bottom; i++) kill.add(i)
+      state.parsed = state.parsed.filter((_, i) => !kill.has(i))
+      state.picked.clear(); gridSel = null
+      renderTable()
+    } })
+    items.push({ sep: true })
+  }
+  items.push({ label: 'Insert column left', run: () => showAddCol(c) })
+  items.push({ label: 'Insert column right', run: () => showAddCol(c + 1) })
+  const col = gridCols()[c]
+  if (col && col.custom) {
+    items.push({ label: 'Remove column “' + col.label + '”', run: () => removeCustomColumn(col.key) })
+  }
+  return items
+}
+
+function hideCtx() { $('ctx-menu').style.display = 'none' }
+
+function showCtxMenu(ev, r, c) {
+  ev.preventDefault && ev.preventDefault()
+  // Right-clicking outside the selection moves it there first — Sheets does.
+  const rect = selRect()
+  if (r !== null && (!rect || r < rect.r0 || r > rect.r1 || c < rect.c0 || c > rect.c1)) {
+    gridSelect(r, c)
+  }
+  const menu = $('ctx-menu')
+  menu.innerHTML = ''
+  for (const item of ctxItems(r, c)) {
+    if (item.sep) {
+      const d = document.createElement('div')
+      d.className = 'sep'
+      menu.appendChild(d)
+      continue
+    }
+    const b = document.createElement('button')
+    b.textContent = item.label
+    b.onclick = () => { hideCtx(); item.run() }
+    menu.appendChild(b)
+  }
+  menu.style.display = 'block'
+  menu.style.left = ((ev.clientX || 40)) + 'px'
+  menu.style.top = ((ev.clientY || 40)) + 'px'
+}
+
+/** Bulk tools act on the selected rows, or on everything when nothing is. */
 function targetRows() {
   return state.picked.size ? [...state.picked] : state.parsed.map((_, i) => i)
 }
@@ -1174,6 +2192,7 @@ function prettyWeight(value) {
 
 document.querySelectorAll('.tool[data-case]').forEach(btn => {
   btn.onclick = () => {
+    pushUndo()
     const mode = btn.dataset.case
     targetRows().forEach(i => {
       const p = state.parsed[i]
@@ -1189,6 +2208,7 @@ document.querySelectorAll('.tool[data-case]').forEach(btn => {
 })
 
 $('tool-trim').onclick = () => {
+  pushUndo()
   targetRows().forEach(i => {
     const p = state.parsed[i]
     p.name = String(p.name || '').replace(/\s+/g, ' ').trim()
@@ -1198,6 +2218,7 @@ $('tool-trim').onclick = () => {
 }
 
 $('tool-swap').onclick = () => {
+  pushUndo()
   targetRows().forEach(i => {
     const p = state.parsed[i]
     const t = p.price; p.price = p.mrp; p.mrp = t
@@ -1213,6 +2234,7 @@ $('tool-swap').onclick = () => {
  * Idempotent: a name that already ends in its weight is left alone.
  */
 $('tool-weight').onclick = () => {
+  pushUndo()
   let changed = 0
   targetRows().forEach(i => {
     const p = state.parsed[i]
@@ -1228,24 +2250,72 @@ $('tool-weight').onclick = () => {
   log(changed ? ('Added weight to ' + changed + ' name(s).') : 'All targeted names already carry their weight.', 'ok')
 }
 
-$('tool-add').onclick = () => {
-  state.parsed.push({ name: '', price: null, mrp: null, weight: null, badge: null, day: null, offerType: 'price' })
+function blankRow() {
+  return { name: '', price: null, mrp: null, weight: null, badge: null, day: null, offerType: 'price' }
+}
+
+/** Insert `count` blank rows AT index `at` — everything from `at` moves down. */
+function insertRows(at, count) {
+  pushUndo()
+  at = Math.max(0, Math.min(state.parsed.length, at))
+  const rows = []
+  for (let i = 0; i < (count || 1); i++) rows.push(blankRow())
+  state.parsed.splice(at, 0, ...rows)
   renderTable()
+  gridSelect(at, 0)   // land on the first new row, ready to type
+}
+
+$('tool-add').onclick = () => {
+  // Below the selection when there is one — that is where "add a row between
+  // these two" points. At the end otherwise, as before.
+  const rect = selRect()
+  insertRows(rect ? rect.r1 + 1 : state.parsed.length, 1)
 }
 
 $('tool-del').onclick = () => {
-  if (!state.picked.size) { reportError('Nothing ticked.', 'Delete', 'Tick the rows you want to remove first.'); return }
+  if (!state.picked.size) {
+    reportError('Nothing selected.', 'Delete', 'Click a row number (drag or shift-click for several), then Delete. ⌘Z brings rows back.')
+    return
+  }
+  pushUndo()
   state.parsed = state.parsed.filter((_, i) => !state.picked.has(i))
   state.picked.clear()
+  gridSel = null
   renderTable()
 }
 
 $('paste-split').onclick = splitToTable
 
+/**
+ * Malayalam, Hindi, Arabic, Thai. Anything here means the text must not be
+ * handed to a language model without the designer knowing: asked to tidy a
+ * name, an LLM rewrites "ചെറുപയർ 500GM" as "Cherupayar 500Gm" and the whole
+ * flyer prints in the wrong language.
+ */
+const NON_LATIN_SCRIPT = /[\u0600-\u06FF\u0900-\u0DFF\u0E00-\u0E7F]/
+
+// Re-arm the guard whenever the pasted text changes.
+$('paste-text').addEventListener('input', () => { state.aiScriptConfirmed = false })
+
 $('paste-parse').onclick = async () => {
   clearLog()
   const text = $('paste-text').value.trim()
   if (!text) { reportError('Nothing pasted.', 'Parse', 'Paste the client\'s offer message first.'); return }
+
+  // Stop before the call, not after: once the model has rewritten the names
+  // the originals are gone, and Split does this list perfectly anyway.
+  if (NON_LATIN_SCRIPT.test(text) && !state.aiScriptConfirmed) {
+    state.aiScriptConfirmed = true
+    reportError(
+      'This list is not written in English letters.',
+      'Parse with AI',
+      'The AI rewrites non-Latin names in English — "ചെറുപയർ 500GM" comes back as "Cherupayar 500Gm". ' +
+      'Press "Split to columns" instead: it is the manual route and copies your text exactly. ' +
+      'If you genuinely want the AI here, press Parse with AI once more.',
+    )
+    return
+  }
+
   $('paste-parse').disabled = true
   log('Parsing…')
   try {
@@ -1256,6 +2326,17 @@ $('paste-parse').onclick = async () => {
     state.picked.clear()
     renderTable()
     log('✓ ' + data.summary, 'ok')
+    // Last line of defence. The prompt forbids it and the guard above asked
+    // first, but an LLM instruction is not a guarantee — so if the names came
+    // back romanised anyway, throw the result away and split the original text
+    // instead. Better a table to re-check than a flyer in the wrong language.
+    if (NON_LATIN_SCRIPT.test(text) && !state.parsed.some(p => NON_LATIN_SCRIPT.test(p.name || ''))) {
+      log('⚠ The AI rewrote every name in English letters, losing the original script.', 'warn')
+      logFix('Discarded that and used Split to columns instead, which copies your text exactly — check the prices below.')
+      splitToTable()
+      $('paste-parse').disabled = false
+      return
+    }
     for (const w of (data.warnings || [])) log('⚠ ' + w, 'warn')
     for (const s of (data.sections || [])) {
       if (s.error) log('✗ section ' + (s.weight || '—') + ': ' + s.error, 'err')
@@ -1298,6 +2379,14 @@ $('paste-save').onclick = async () => {
       })),
     })
     log('✓ ' + data.message, 'ok')
+    // Custom columns have no home in Cirqle — by design. Their values are
+    // pinned to this campaign for the session so the build can still use them.
+    const hasCustom = (state.customCols || []).length &&
+      state.parsed.some(p => p.custom && state.customCols.some(cc => p.custom[cc.token]))
+    if (hasCustom) {
+      state.customRows = { campaignId: data.campaignId, rows: state.parsed.map(p => Object.assign({}, p.custom || {})) }
+      log('· Custom column values (' + state.customCols.map(c => c.label).join(', ') + ') will fill their #layers when you Build — they are not stored in Cirqle.', 'ok')
+    }
     logFix('Reloading offers so you can build it now.')
     // Pull the new campaign into the Build tab and select it, so the designer
     // goes straight from paste to cards without hunting in a dropdown.
@@ -1332,9 +2421,46 @@ $('new-template').onclick = () => {
   post({ type: 'create-template' })
 }
 
-$('client').onchange = fillOfferDropdown
-$('offer').onchange = () => { state.campaign = null; state.validated = false; chip('chip-count', '—'); chip('chip-ready', '—'); updateButtons() }
-$('page').onchange = () => { state.validated = false; chip('chip-ready', 'Not validated', 'warn') }
+function reseedShuffle() {
+  // A fresh permutation each time it is asked for, but fixed once rolled so
+  // Preview and Build agree.
+  state.shuffleSeed = Math.floor(Math.random() * 0xFFFFFFFF) || 1
+}
+
+$('sort').onchange = () => {
+  const shuffling = $('sort').value === 'shuffle'
+  $('reshuffle').disabled = !shuffling
+  if (shuffling) reseedShuffle()
+  state.validated = false
+  chip('chip-ready', 'Not validated', 'warn')
+  saveSettings()
+  updateLayoutSummary()
+  if (state.campaign) log('Order: ' + (orderLabel() || 'Cirqle order') + '. Press Preview to check it.', 'ok')
+  updateButtons()
+}
+
+$('reshuffle').onclick = () => {
+  if ($('sort').value !== 'shuffle') return
+  reseedShuffle()
+  state.validated = false
+  log('Shuffled again. Press Preview to see the new order.', 'ok')
+  updateButtons()
+}
+
+$('template').onchange = () => {
+  const t = state.templates.find(x => x.id === $('template').value)
+  state.lastTemplateName = t ? t.name : ''
+  saveSettings()
+  requestVariants()
+}
+$('page').addEventListener('change', requestGroups)
+$('client').onchange = () => { fillOfferDropdown(); saveSettings() }
+$('offer').onchange = () => { state.campaign = null; state.validated = false; chip('chip-count', '—'); chip('chip-ready', '—'); updateButtons(); saveSettings() }
+$('page').onchange = () => { state.validated = false; chip('chip-ready', 'Not validated', 'warn'); updateLayoutSummary() }
+$('cols').onchange = () => { updateLayoutSummary(); saveSettings() }
+$('gap').onchange = () => { updateLayoutSummary(); saveSettings() }
+$('fill-selection').onchange = updateLayoutSummary
+updateLayoutSummary()
 
 onmessage = (event) => {
   const msg = event.data.pluginMessage
@@ -1344,11 +2470,49 @@ onmessage = (event) => {
       if (msg.settings) {
         if (msg.settings.url) $('url').value = msg.settings.url
         if (msg.settings.token) $('token').value = msg.settings.token
+        if (msg.settings.variantChoices) state.variantChoices = msg.settings.variantChoices
+        if (msg.settings.variantMaps) state.variantMaps = msg.settings.variantMaps
+        if (msg.settings.customCols) { state.customCols = msg.settings.customCols; renderCustomChips() }
+        if (msg.settings.sort) {
+          $('sort').value = msg.settings.sort
+          $('reshuffle').disabled = msg.settings.sort !== 'shuffle'
+          if (msg.settings.sort === 'shuffle') reseedShuffle()
+        }
+        // Usage memory: reopen looking the way it was left.
+        if (msg.settings.cols != null && msg.settings.cols !== '') $('cols').value = msg.settings.cols
+        if (msg.settings.gap != null && msg.settings.gap !== '') $('gap').value = msg.settings.gap
+        state.lastTemplateName = msg.settings.lastTemplateName || ''
+        state.lastClientId = msg.settings.lastClientId || null
+        state.lastCampaignId = msg.settings.lastCampaignId || null
+        state._restoreClientId = state.lastClientId
+        state._restoreCampaignId = state.lastCampaignId
+        state.layoutOpen = msg.settings.layoutOpen === true
+        state.logOpen = msg.settings.logOpen === true
+        setFold('layout-toggle', 'layout-body', state.layoutOpen)
+        setFold('log-toggle', 'log', state.logOpen)
+        if (msg.settings.activeTab === 'paste') document.querySelector('.tab[data-panel="paste"]').click()
+        updateLayoutSummary()
+        // A saved connection means the setup step is already done — connect
+        // straight away instead of asking for a click on every open.
+        if (msg.settings.url && msg.settings.token) {
+          log('Saved connection found — connecting…')
+          connect()
+        }
       }
       break
     case 'templates':
       state.templates = msg.templates || []
       fillTemplateDropdown()
+      requestVariants()
+      break
+    case 'variants':
+      state.variantProps = msg.properties || []
+      renderVariants()
+      break
+    case 'groups':
+      state.groupCounts = msg.counts || null
+      state.groupStates = msg.states || null
+      renderVariants()
       break
     case 'template-validated':
       onTemplateValidated(msg)

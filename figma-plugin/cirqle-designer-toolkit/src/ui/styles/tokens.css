@@ -1,0 +1,60 @@
+/**
+ * Design tokens. `--figma-color-*` variables are injected automatically by
+ * Figma into the plugin iframe when the main thread calls
+ * `figma.showUI(html, { themeColors: true })` — they already track the
+ * user's actual Figma theme (including any custom theme). We read those
+ * first and fall back to hand-picked values so the UI still looks right
+ * when previewed outside Figma (e.g. `vite dev`) where those vars don't exist.
+ */
+:root {
+  --cdt-bg: var(--figma-color-bg, #ffffff);
+  --cdt-bg-secondary: var(--figma-color-bg-secondary, #f5f5f5);
+  --cdt-bg-hover: var(--figma-color-bg-hover, #f0f0f0);
+  --cdt-bg-selected: var(--figma-color-bg-selected, #e5f4ff);
+  --cdt-bg-brand: var(--figma-color-bg-brand, #0d99ff);
+  --cdt-bg-danger: var(--figma-color-bg-danger, #f24822);
+  --cdt-bg-danger-secondary: var(--figma-color-bg-danger-secondary, #fdf1ef);
+  --cdt-bg-success: var(--figma-color-bg-success, #1bc47d);
+  --cdt-bg-warning: var(--figma-color-bg-warning, #ffcd29);
+
+  --cdt-text: var(--figma-color-text, #1e1e1e);
+  --cdt-text-secondary: var(--figma-color-text-secondary, #6e6e6e);
+  --cdt-text-tertiary: var(--figma-color-text-tertiary, #b3b3b3);
+  --cdt-text-onbrand: var(--figma-color-text-onbrand, #ffffff);
+  --cdt-text-danger: var(--figma-color-text-danger, #f24822);
+  --cdt-text-success: var(--figma-color-text-success, #14804a);
+  --cdt-text-warning: var(--figma-color-text-warning, #997a00);
+
+  --cdt-border: var(--figma-color-border, #e6e6e6);
+  --cdt-border-strong: var(--figma-color-border-strong, #b3b3b3);
+
+  --cdt-icon: var(--figma-color-icon, #1e1e1e);
+  --cdt-icon-secondary: var(--figma-color-icon-secondary, #6e6e6e);
+  --cdt-icon-brand: var(--figma-color-icon-brand, #0d99ff);
+  --cdt-icon-onbrand: var(--figma-color-icon-onbrand, #ffffff);
+
+  --cdt-radius-sm: 4px;
+  --cdt-radius-md: 6px;
+  --cdt-radius-lg: 10px;
+  --cdt-space-1: 4px;
+  --cdt-space-2: 8px;
+  --cdt-space-3: 12px;
+  --cdt-space-4: 16px;
+  --cdt-space-5: 24px;
+  --cdt-font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  --cdt-shadow-menu: 0 4px 16px rgba(0, 0, 0, 0.16), 0 0 1px rgba(0, 0, 0, 0.24);
+}
+
+[data-theme='dark'] {
+  --cdt-bg: var(--figma-color-bg, #2c2c2c);
+  --cdt-bg-secondary: var(--figma-color-bg-secondary, #1e1e1e);
+  --cdt-bg-hover: var(--figma-color-bg-hover, #383838);
+  --cdt-bg-selected: var(--figma-color-bg-selected, #163356);
+  --cdt-text: var(--figma-color-text, #ffffff);
+  --cdt-text-secondary: var(--figma-color-text-secondary, #b3b3b3);
+  --cdt-text-tertiary: var(--figma-color-text-tertiary, #8c8c8c);
+  --cdt-border: var(--figma-color-border, #3a3a3a);
+  --cdt-border-strong: var(--figma-color-border-strong, #545454);
+  --cdt-icon: var(--figma-color-icon, #ffffff);
+  --cdt-icon-secondary: var(--figma-color-icon-secondary, #b3b3b3);
+}

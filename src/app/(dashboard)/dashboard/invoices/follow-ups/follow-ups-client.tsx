@@ -13,9 +13,10 @@ import {
   type FollowupRow, type FollowupGroup,
 } from '@/lib/followups/grouping'
 import { logFollowup, markInvoiceSent, deleteFollowup, recordPayment } from './actions'
-import { publicInvoiceUrl, buildInvoiceShareText, whatsappShareUrl } from '@/lib/invoices/share'
+import { buildInvoiceShareText, whatsappShareUrl, publicInvoiceUrl } from '@/lib/invoices/share'
 import { buildPartnerStatementTextFromLines } from '@/lib/partners/whatsapp'
 import { copyToClipboard } from '@/lib/clipboard'
+import { setPartnerGreeting } from '@/app/(dashboard)/dashboard/partners/actions'
 import type { MessageTemplates } from '@/lib/messaging/templates'
 import {
   PhoneCall, MessageCircle, Send, Clock, AlertTriangle, CalendarClock,
@@ -53,6 +54,7 @@ interface Props {
   showAmounts: boolean
   setupNeeded: boolean
   templates:   MessageTemplates
+  partnerGreetings: Record<string, string>
 }
 
 // ── Outcome metadata ─────────────────────────────────────────────────
@@ -162,10 +164,11 @@ function clusterInvoices(list: FUInvoice[], mode: ViewMode): Cluster[] {
   return [...map.values()].sort((a, b) => a.order - b.order)
 }
 
-export default function FollowUpsClient({ invoices, followups, companyName, showAmounts, setupNeeded, templates }: Props) {
+export default function FollowUpsClient({ invoices, followups, companyName, showAmounts, setupNeeded, templates, partnerGreetings: initialPartnerGreetings }: Props) {
   const router = useRouter()
   const { toasts, dismiss, success, error: toastError, info } = useToast()
 
+  const [partnerGreetings, setPartnerGreetings] = useState(initialPartnerGreetings)
   const [openForm, setOpenForm]       = useState<string | null>(null)
   const [openHistory, setOpenHistory] = useState<Set<string>>(new Set())
   const [waInvoice, setWaInvoice]     = useState<string | null>(null) // invoice id whose WhatsApp popover is open
@@ -406,13 +409,9 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
         pending:       inv.outstanding ?? 0,
         status:        inv.status,
       }))
-    const total = lines.reduce((s, l) => s + l.pending, 0)
-    let greetingName = overrideGreeting
-    if (greetingName === undefined && typeof window !== 'undefined') {
-      greetingName = localStorage.getItem(`cirqle:partner-greeting:${partner.id}`) || ''
-    }
+    let greetingName = overrideGreeting !== undefined ? overrideGreeting : partnerGreetings[partner.id]
     return buildPartnerStatementTextFromLines(partner.name, lines, total, templates, greetingName || undefined)
-  }, [pendingByPartner, templates])
+  }, [pendingByPartner, templates, partnerGreetings])
 
   const openPartnerStatement = (clusterId: string, partner: FUPartner) => {
     if (bpCluster === clusterId) { setBpCluster(null); return }
@@ -602,12 +601,18 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
                                       <input
                                         type="text"
                                         placeholder={`Name (e.g. Bro, Sir, ${partner.name})`}
-                                        defaultValue={typeof window !== 'undefined' ? (localStorage.getItem(`cirqle:partner-greeting:${partner.id}`) || '') : ''}
+                                        value={partnerGreetings[partner.id] || ''}
                                         onChange={e => {
                                           const val = e.target.value
-                                          if (val) localStorage.setItem(`cirqle:partner-greeting:${partner.id}`, val)
-                                          else localStorage.removeItem(`cirqle:partner-greeting:${partner.id}`)
+                                          setPartnerGreetings(prev => ({ ...prev, [partner.id]: val }))
                                           setBpText(partnerStatementText(partner, val))
+                                        }}
+                                        onBlur={async () => {
+                                          const val = partnerGreetings[partner.id]
+                                          if (val !== initialPartnerGreetings[partner.id]) {
+                                            const res = await setPartnerGreeting(partner.id, val || null)
+                                            if (!res.ok) toastError('Could not save greeting', res.error)
+                                          }
                                         }}
                                         className="text-[10px] bg-background/50 border border-violet-500/30 rounded px-2 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/40 w-full sm:w-auto min-w-[120px]"
                                       />

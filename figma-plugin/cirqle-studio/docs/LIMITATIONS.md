@@ -21,9 +21,17 @@ way that would change the product architecture.
    `src/lib/supabase/middleware.ts` — without it, cookieless preflights get
    307-redirected to `/login` and browsers reject redirected preflights
    outright. Same bug class the codebase already fixed for `/api/cron/`.
-5. **Variants are respected, not managed.** Cards are instances when the
-   template is a component, copies when it's a frame. Automatic variant
-   selection by offer type is Phase 3.
+5. **Variants are switched from the data, within limits.** Cards are instances
+   when the template is a component, copies when it's a frame. A variant
+   property is matched to one of five facts (price digits, paise, has-a-price,
+   offer type, name language) by its *name*; anything else is left alone unless
+   pinned in the Variants panel. Digit variants may be named as masks
+   (`000.00`), plain numbers (`3`) or phrases (`3 digit`). The plugin never
+   creates a missing variant — if the combination doesn't exist in the set, the
+   card keeps what it had and the count is reported. A price wider than every
+   variant takes the widest one rather than being clipped. A product with no
+   price expresses no opinion about digits or paise, so those properties are
+   left as the designer set them instead of being guessed from an absent number.
 
 ## Template shape (read this before the first build)
 
@@ -84,6 +92,12 @@ name stamped into all 22 of its slots. 484 layers filled, every one wrong.
    Dev tier.
 7. **Paste caps.** 20,000 characters and 12 sections per parse; 300 products
    per save. All three refuse with an explanation rather than truncating.
+8. **The AI can romanise non-Latin names.** Asked to parse a Malayalam list it
+   returned `Cherupayar 500Gm` for `ചെറുപയർ 500GM` — an LLM told to "title-case"
+   a name will transliterate it. `src/lib/ai/offer-capture.ts` now forbids
+   translation explicitly, and the plugin flags a non-Latin paste that comes
+   back entirely in Latin. Neither is a guarantee: **Split to columns** is the
+   only path that cannot alter the text, because no model sees it.
 
 ## Cirqle schema limits (returned as null, not faked)
 
@@ -112,6 +126,13 @@ name stamped into all 22 of its slots. 484 layers filled, every one wrong.
 15. **Title Case leaves digit-leading tokens lowercase** — `4PEC` → `4pec`.
     Inherited verbatim from `format-product-name.ts` so Figma and Cirqle agree;
     change it there if it should differ, and the plugin must be updated to match.
-16. **The Sheets pipeline is untouched.** Both consume the same
+16. **Custom columns are design-session data.** A "+ Col" column (a second
+    badge, a tagline) fills its `#layer` at build time but is never written to
+    Cirqle — the schema stays untouched. Values survive the Save → Build hop
+    by row position within the session; close the plugin and rebuild the same
+    campaign later and the custom text must be re-entered (or pasted back in
+    from the design). Making them permanent means a Cirqle schema change — an
+    owner decision, listed for Phase 2 consideration.
+17. **The Sheets pipeline is untouched.** Both consume the same
     `buildOfferSheetRows` contract, so they can run in parallel indefinitely;
     retire the Sheet route by simply not using it.

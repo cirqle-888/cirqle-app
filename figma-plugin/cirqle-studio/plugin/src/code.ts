@@ -436,6 +436,401 @@ async function validateTemplate(msg: { templateId: string }): Promise<void> {
 }
 
 /* ================================================================== *
+ * Variant switching
+ * ================================================================== *
+ * A price sticker drawn for "44" is the wrong shape for "209", and a product
+ * name set in Latin type is the wrong style for a Malayalam one. Designers
+ * already solve this with variants; this picks the right one per product
+ * instead of leaving 22 cards to be switched by hand.
+ *
+ * Four facts are derived from the data. Each variant property in the template
+ * is matched to one of them by its name, once, and from then on every card
+ * switches itself. Anything auto-matching gets it wrong can be pinned to a
+ * fixed value from the panel — the mapping is remembered per workspace.
+ * ================================================================== */
+
+const MALAYALAM_RE = /[ഀ-ൿ]/
+
+type FactName = 'digits' | 'paise' | 'offer' | 'script' | 'price'
+
+/**
+ * `null` means "this product says nothing about that property" — a Buy-1-Get-1
+ * with no price has no opinion about how many digits the sticker needs, so the
+ * digits property is left exactly as the designer set it.
+ */
+type ProductFacts = {
+  digits: string | null
+  paise: string | null
+  offer: string
+  script: string
+  price: string
+}
+
+function productFacts(product: BuildProduct): ProductFacts {
+  const f = product.fields
+  const rupees = String(f['#price1'] || f['#offerprice'] || '').replace(/[^\d]/g, '')
+  const paise = String(f['#price2'] || '').replace(/[^\d]/g, '')
+  const name = String(f['#product'] || '')
+  const hasMalayalam = MALAYALAM_RE.test(name)
+  const hasLatin = /[A-Za-z]/.test(name)
+  const signal = (
+    String(f['#offertype'] || '') + ' ' +
+    String(f['#badges'] || '') + ' ' +
+    String(f['#offertext'] || '')
+  ).toLowerCase()
+
+  let offer = 'price'
+  if (/bogo|b1g1|buy\s*\d*\s*get/.test(signal)) offer = 'bogo'
+  else if (/%|percent|flat\s*\d|\boff\b/.test(signal)) offer = 'percent'
+
+  // "50 % SALE" printed where the price normally goes, or a Buy-1-Get-1 ribbon
+  // with nothing to charge — these products genuinely have no number, and the
+  // card needs a different layout, not a sticker reading "₹0".
+  const hasPrice = rupees.length > 0
+
+  return {
+    // Digit count of the RUPEES only — the paise are a separate layer and a
+    // separate variant axis, so they must not widen the main number.
+    digits: hasPrice ? String(Math.min(6, rupees.length)) : null,
+    paise: hasPrice ? (paise ? 'yes' : 'no') : null,
+    price: hasPrice ? 'yes' : 'no',
+    offer,
+    script: hasMalayalam && hasLatin ? 'mixed' : hasMalayalam ? 'malayalam' : 'latin',
+  }
+}
+
+/** Which fact a variant property is asking about, judged by its name. */
+const FACT_PATTERNS: { fact: FactName; re: RegExp }[] = [
+  { fact: 'digits', re: /digit|length|char|places|figures|width|count|mask|format/i },
+  { fact: 'paise', re: /paise|decimal|fraction|point|cents/i },
+  { fact: 'price', re: /(has|show|with|no)\s*price|price\s*(shown|visible|state|less)|^\s*price\s*\??\s*$|priced/i },
+  { fact: 'script', re: /script|lang|malayalam|english|regional|font/i },
+  { fact: 'offer', re: /offer|deal|promo|badge|type|mode/i },
+]
+
+function factForProperty(propertyName: string): FactName | null {
+  for (const entry of FACT_PATTERNS) if (entry.re.test(propertyName)) return entry.fact
+  return null
+}
+
+const VALUE_SYNONYMS: Record<string, string[]> = {
+  yes: ['yes', 'true', 'on', 'with', 'show', 'shown', 'visible', 'enabled'],
+  no: ['no', 'false', 'off', 'without', 'hide', 'hidden', 'none', 'disabled'],
+  bogo: ['bogo', 'b1g1', 'buy1get1', 'buy1get1free', '1plus1', 'free', 'buyonegetone'],
+  percent: ['percent', 'pct', 'percentage', 'off', 'flat', 'discount', 'flatoff', 'sale'],
+  price: ['price', 'normal', 'default', 'plain', 'rate', 'standard', 'regular'],
+  malayalam: ['malayalam', 'mal', 'ml', 'regional', 'local'],
+  latin: ['latin', 'english', 'eng', 'en', 'default', 'roman'],
+  mixed: ['mixed', 'both', 'bilingual', 'dual'],
+}
+
+/** Words that only make sense for one fact, so they can't collide elsewhere. */
+const FACT_VALUE_SYNONYMS: Record<string, Record<string, string[]>> = {
+  paise: {
+    yes: ['paise', 'decimal', 'fraction', 'withdecimal', 'hasdecimal', 'point', 'withpaise', 'twodecimal'],
+    no: ['whole', 'round', 'rounded', 'nodecimal', 'withoutdecimal', 'integer', 'rupeesonly', 'nopaise'],
+  },
+  price: {
+    yes: ['price', 'priced', 'hasprice', 'showprice', 'withprice', 'number', 'amount', 'rate'],
+    no: ['noprice', 'withoutprice', 'hideprice', 'priceless', 'text', 'saletext', 'offertext',
+         'badgeonly', 'textonly', 'free', 'offer'],
+  },
+}
+
+function synonymsFor(fact: FactName, want: string): string[] {
+  const perFact = FACT_VALUE_SYNONYMS[fact] && FACT_VALUE_SYNONYMS[fact][want]
+  return (perFact || []).concat(VALUE_SYNONYMS[want] || [])
+}
+
+const flatten = (s: string) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+
+/**
+ * A price mask written the way designers name these variants:
+ * `0.00` → 1 rupee digit with paise, `00000.00` → 5 with paise, `000` → 3
+ * without. `#` and `X` masks read the same way.
+ */
+function parseDigitMask(value: string): { digits: number; decimal: boolean } | null {
+  const m = /^\s*([0#xX]{1,8})(?:[.,]([0#xX]{1,4}))?\s*$/.exec(String(value || ''))
+  return m ? { digits: m[1].length, decimal: !!m[2] } : null
+}
+
+/**
+ * How wide one variant value is, read three ways in order of confidence:
+ *   1. the whole value is a mask      — "000.00"
+ *   2. a run of zeros inside a name   — "Outline 000 Cut", "Outline 00"
+ *   3. a plain number or phrase       — "3", "3 digit"
+ * Step 2 matters because real templates name variants descriptively, and
+ * parseInt("000") is 0, which would have thrown those away.
+ */
+function digitWidthOf(value: string): { n: number; decimal: boolean } | null {
+  const mask = parseDigitMask(value)
+  if (mask) return { n: mask.digits, decimal: mask.decimal }
+
+  const embedded = /(?:^|[^0-9])(0+)(?:[.,](0+))?(?![0-9])/.exec(String(value || ''))
+  if (embedded) return { n: embedded[1].length, decimal: !!embedded[2] }
+
+  const flat = flatten(value)
+  const found = flat.match(/\d+/)
+  if (!found) return null
+  return { n: parseInt(found[0], 10), decimal: /decimal|paise|point|fraction/.test(flat) }
+}
+
+/** Every value read as a width, smallest first. Values with no width drop out. */
+function digitCandidates(values: string[]): { value: string; n: number; decimal: boolean }[] {
+  const out: { value: string; n: number; decimal: boolean }[] = []
+  for (const value of values) {
+    const width = digitWidthOf(value)
+    if (width && width.n > 0) out.push({ value, n: width.n, decimal: width.decimal })
+  }
+  return out.sort((a, b) => a.n - b.n)
+}
+
+/** The variant value that best expresses `want`, or null if none fits. */
+function matchVariantValue(fact: FactName, facts: ProductFacts, values: string[]): string | null {
+  const want = facts[fact]
+  if (want === null) return null            // this product has no opinion
+  const target = flatten(want)
+
+  if (fact === 'digits') {
+    const wanted = parseInt(target, 10)
+    const wantDecimal = facts.paise === 'yes'
+    const candidates = digitCandidates(values)
+    if (!candidates.length) return null
+    // When a property offers both `00` and `00.00`, the paise decide which.
+    const pick = (list: typeof candidates) => {
+      const matching = list.filter(entry => entry.decimal === wantDecimal)
+      return (matching.length ? matching[0] : list[0]).value
+    }
+    const exact = candidates.filter(entry => entry.n === wanted)
+    if (exact.length) return pick(exact)
+    const roomier = candidates.filter(entry => entry.n >= wanted)
+    if (roomier.length) return pick(roomier)
+    // Wider than every variant: take the widest rather than clip the price.
+    const widest = candidates[candidates.length - 1].n
+    return pick(candidates.filter(entry => entry.n === widest))
+  }
+
+  for (const value of values) if (flatten(value) === target) return value
+
+  if (fact === 'paise') {
+    // A boolean written as a mask: `.00` / `00.00` means yes, `00` means no.
+    for (const value of values) {
+      const mask = parseDigitMask(value)
+      if (mask && mask.decimal === (target === 'yes')) return value
+    }
+  }
+
+  const synonyms = synonymsFor(fact, target)
+  for (const value of values) if (synonyms.indexOf(flatten(value)) >= 0) return value
+  for (const value of values) {
+    for (const synonym of synonyms) {
+      if (synonym.length >= 4 && flatten(value).indexOf(synonym) >= 0) return value
+    }
+  }
+  return null
+}
+
+/** The variant set an instance belongs to, or null when it isn't in one. */
+async function variantSetOf(node: SceneNode): Promise<ComponentSetNode | null> {
+  if (node.type !== 'INSTANCE') return null
+  const main = await (node as InstanceNode).getMainComponentAsync()
+  if (!main || !main.parent || main.parent.type !== 'COMPONENT_SET') return null
+  const set = main.parent as unknown as ComponentSetNode
+  return set.variantGroupProperties ? set : null
+}
+
+// NOT exported: a single `export` anywhere makes tsc emit `export {}`, which
+// turns the bundle into an ES module and the Figma sandbox refuses to run it.
+type VariantChoice = 'auto' | 'off' | string
+
+/**
+ * The key a choice is stored under. Component sets very often keep Figma's
+ * default "Property 1", so the set's own name has to be part of the key —
+ * otherwise one mapping would silently drive the price sticker AND the
+ * product-name set at once.
+ */
+const CHOICE_SEP = ' :: '
+function choiceKey(setName: string, property: string): string {
+  return setName + CHOICE_SEP + property
+}
+
+/** Falls back to a bare property name so older saved mappings keep working. */
+function choiceFor(
+  choices: Record<string, VariantChoice>,
+  setName: string,
+  property: string,
+): VariantChoice {
+  const scoped = choices[choiceKey(setName, property)]
+  if (scoped) return scoped
+  return choices[property] || 'auto'
+}
+
+const FACT_PREFIX = 'fact:'
+
+/** The states a fact can take, in the order they should be listed. */
+const FACT_STATES: Record<FactName, string[]> = {
+  digits: ['1', '2', '3', '4', '5', '6', 'none'],
+  paise: ['no', 'yes', 'none'],
+  price: ['yes', 'no'],
+  offer: ['price', 'bogo', 'percent'],
+  script: ['latin', 'malayalam', 'mixed'],
+}
+
+/** 'none' stands in for "this product has no opinion", so it can be mapped. */
+function stateOf(facts: ProductFacts, fact: FactName): string {
+  const value = facts[fact]
+  return value === null ? 'none' : value
+}
+
+/**
+ * How the loaded offer breaks down — "3 digits: 6 products, 2 digits: 8,
+ * no price: 7". Shown in the panel so each group can be pointed at a variant
+ * deliberately rather than guessed at from variant names.
+ */
+function groupProducts(products: BuildProduct[]): Record<string, Record<string, number>> {
+  const counts: Record<string, Record<string, number>> = {}
+  for (const fact of Object.keys(FACT_STATES) as FactName[]) counts[fact] = {}
+  for (const product of products) {
+    const facts = productFacts(product)
+    for (const fact of Object.keys(FACT_STATES) as FactName[]) {
+      const state = stateOf(facts, fact)
+      counts[fact][state] = (counts[fact][state] || 0) + 1
+    }
+  }
+  return counts
+}
+
+/**
+ * Switch every variant instance in `card` to suit `product`.
+ *
+ * A choice is one of:
+ *   'auto'         — work the fact out from the property's name
+ *   'fact:digits'  — the property means this, whatever it happens to be called
+ *   'off'          — leave it exactly as the designer set it
+ *   any value      — pin it to that value for every product
+ */
+async function applyVariants(
+  card: SceneNode,
+  product: BuildProduct,
+  choices: Record<string, VariantChoice>,
+  maps?: Record<string, Record<string, string>>,
+): Promise<{ switched: number; failed: number }> {
+  const facts = productFacts(product)
+  let switched = 0, failed = 0
+
+  for (const node of descendantsOf(card)) {
+    const set = await variantSetOf(node)
+    if (!set) continue
+    const groups = set.variantGroupProperties as { [name: string]: { values: string[] } }
+    const next: { [name: string]: string } = {}
+
+    for (const property of Object.keys(groups)) {
+      const values = (groups[property] && groups[property].values) || []
+      const choice = choiceFor(choices, set.name, property)
+      if (choice === 'off') continue
+
+      let fact: FactName | null = null
+      if (choice === 'auto') {
+        fact = factForProperty(property)
+      } else if (choice.indexOf(FACT_PREFIX) === 0) {
+        fact = choice.slice(FACT_PREFIX.length) as FactName
+      } else {
+        if (values.indexOf(choice) >= 0) next[property] = choice
+        continue
+      }
+
+      if (!fact) continue
+
+      // An explicit group → variant mapping wins: it is the designer saying
+      // "these 6 three-digit products use THIS sticker", which no amount of
+      // name matching should second-guess. It also reaches the "no price"
+      // group, which the automatic path deliberately leaves alone.
+      const mapped = (maps && (maps[choiceKey(set.name, property)] || maps[property])) || null
+      const state = stateOf(facts, fact)
+      if (mapped && mapped[state] && values.indexOf(mapped[state]) >= 0) {
+        next[property] = mapped[state]
+        continue
+      }
+
+      const value = matchVariantValue(fact, facts, values)
+      if (value) next[property] = value
+    }
+
+    if (Object.keys(next).length === 0) continue
+    try {
+      ;(node as InstanceNode).setProperties(next)
+      switched++
+    } catch (err) {
+      // The combination doesn't exist in the set — the card keeps the variant
+      // it had, which is always better than a broken instance.
+      failed++
+    }
+  }
+  return { switched, failed }
+}
+
+type VariantInfo = {
+  key: string
+  set: string
+  property: string
+  values: string[]
+  fact: FactName | null
+  /** Facts this property's VALUES look like they could serve, name aside. */
+  suggests: FactName[]
+  instances: number
+}
+
+/** What a property's values could plausibly drive, judged on the values alone. */
+function suggestedFacts(values: string[]): FactName[] {
+  const out: FactName[] = []
+  const facts: ProductFacts = { digits: '2', paise: 'yes', offer: 'price', script: 'latin', price: 'yes' }
+  if (digitCandidates(values).length >= 2) out.push('digits')
+  for (const fact of ['paise', 'price', 'offer', 'script'] as FactName[]) {
+    // A property serves a fact if at least two of that fact's states can be
+    // told apart in its values — one match could be a coincidence.
+    const states = fact === 'offer' ? ['price', 'bogo', 'percent']
+      : fact === 'script' ? ['latin', 'malayalam', 'mixed']
+      : ['yes', 'no']
+    const hits: Record<string, boolean> = {}
+    for (const state of states) {
+      const probe = Object.assign({}, facts) as ProductFacts
+      ;(probe as unknown as Record<string, string>)[fact] = state
+      const match = matchVariantValue(fact, probe, values)
+      if (match) hits[match] = true
+    }
+    if (Object.keys(hits).length >= 2) out.push(fact)
+  }
+  return out
+}
+
+/** Every variant property in a template, for the panel that maps them. */
+async function scanVariants(template: SceneNode): Promise<VariantInfo[]> {
+  const found: Record<string, VariantInfo> = {}
+  for (const node of descendantsOf(template)) {
+    const set = await variantSetOf(node)
+    if (!set) continue
+    const groups = set.variantGroupProperties as { [name: string]: { values: string[] } }
+    for (const property of Object.keys(groups)) {
+      const key = choiceKey(set.name, property)
+      if (!found[key]) {
+        const values = (groups[property] && groups[property].values) || []
+        found[key] = {
+          key,
+          set: set.name,
+          property,
+          values,
+          fact: factForProperty(property),
+          suggests: suggestedFacts(values),
+          instances: 0,
+        }
+      }
+      found[key].instances++
+    }
+  }
+  return Object.keys(found).map(key => found[key])
+}
+
+/* ================================================================== *
  * Build
  * ================================================================== */
 
@@ -585,7 +980,11 @@ async function fillLooseLayers(
  * so cards are sorted the way a flyer reads: top row left-to-right, then down.
  * Without this, product 1 could land in the card the designer clicked last.
  */
-async function fillSelection(products: BuildProduct[]): Promise<void> {
+async function fillSelection(
+  products: BuildProduct[],
+  variants: Record<string, VariantChoice>,
+  variantMaps: Record<string, Record<string, string>>,
+): Promise<void> {
   const selection = [...figma.currentPage.selection]
   if (selection.length === 0) {
     fail('Nothing selected.', 'Fill selected cards',
@@ -605,11 +1004,18 @@ async function fillSelection(products: BuildProduct[]): Promise<void> {
     filledInPlace: true as boolean,
     overflow: 0,
     looseLayers: 0,
+    variantsSwitched: 0,
+    variantsFailed: 0,
   }
 
   const pairs = Math.min(cards.length, products.length)
   for (let i = 0; i < pairs; i++) {
     try {
+      const swap = await applyVariants(cards[i], products[i], variants, variantMaps)
+      report.variantsSwitched += swap.switched
+      report.variantsFailed += swap.failed
+      // Variants FIRST: swapping an instance resets its text to the new
+      // variant's, so filling before switching would throw the data away.
       const res = await fillCard(cards[i], products[i])
       report.cards++
       report.layersFilled += res.filled
@@ -658,9 +1064,11 @@ async function buildFlyer(msg: {
   gap: number
   frameName: string
   fillSelection?: boolean
+  variants?: Record<string, VariantChoice>
+  variantMaps?: Record<string, Record<string, string>>
 }): Promise<void> {
   if (msg.fillSelection) {
-    await fillSelection(msg.products)
+    await fillSelection(msg.products, msg.variants || {}, msg.variantMaps || {})
     return
   }
 
@@ -713,6 +1121,8 @@ async function buildFlyer(msg: {
     slotsPerPage: perPage > 1 ? perPage : 0,
     unusedSlots: 0,
     looseLayers: 0,
+    variantsSwitched: 0,
+    variantsFailed: 0,
   }
 
   const tally = (res: { filled: number; missing: string[]; imageState: string }) => {
@@ -757,6 +1167,9 @@ async function buildFlyer(msg: {
             report.unusedSlots++
             continue
           }
+          const swap = await applyVariants(cardSlots[s], product, msg.variants || {}, msg.variantMaps || {})
+          report.variantsSwitched += swap.switched
+          report.variantsFailed += swap.failed
           tally(await fillCard(cardSlots[s], product))
           report.cards++
         }
@@ -771,6 +1184,9 @@ async function buildFlyer(msg: {
       } else {
         /* --- Single-card template: one copy per product ------------------ */
         card.name = msg.products[copy].fields['#product'] || `Product ${copy + 1}`
+        const swap = await applyVariants(card, msg.products[copy], msg.variants || {}, msg.variantMaps || {})
+        report.variantsSwitched += swap.switched
+        report.variantsFailed += swap.failed
         tally(await fillCard(card, msg.products[copy]))
         report.cards++
       }
@@ -879,7 +1295,7 @@ const PHOTO_H = 150
 type CardOpts = {
   offer: 'Price' | 'B1G1' | 'Percent'
   shape: 'Circle' | 'Pill'
-  price: 'Whole' | 'Paise'
+  price: 'No' | 'Yes'   // "Paise" — named so the auto variant switcher reads it
 }
 
 /**
@@ -891,7 +1307,11 @@ type CardOpts = {
  */
 async function buildCardComponent(o: CardOpts): Promise<ComponentNode> {
   const card = figma.createComponent()
-  card.name = 'Offer=' + o.offer + ', Shape=' + o.shape + ', Price=' + o.price
+  // Property names chosen so applyVariants() recognises them without setup:
+  // "Offer" maps to the offer-type fact, "Paise" to the paise fact. "Shape" is
+  // a pure design choice with no data behind it, so it is left for the
+  // designer to pin in the Variants panel.
+  card.name = 'Offer=' + o.offer + ', Shape=' + o.shape + ', Paise=' + o.price
   card.resize(CARD_W, 240)
   card.fills = []              // transparent — the flyer background shows through
   card.layoutMode = 'VERTICAL'
@@ -980,7 +1400,7 @@ async function buildCardComponent(o: CardOpts): Promise<ComponentNode> {
   badge.appendChild(row)
 
   row.appendChild(await label('₹', '₹', { size: 11, weight: 'Bold', color: COLOR.white }))
-  row.appendChild(await label('#price1', o.price === 'Whole' ? '305' : '45',
+  row.appendChild(await label('#price1', o.price === 'No' ? '305' : '45',
     { size: 26, weight: 'Extra Bold', color: COLOR.white }))
 
   // The dot and the paise exist in BOTH variants so no data can be lost by
@@ -991,7 +1411,7 @@ async function buildCardComponent(o: CardOpts): Promise<ComponentNode> {
   const paise = await label('#price2', '50', { size: 14, weight: 'Extra Bold', color: COLOR.white })
   row.appendChild(dot)
   row.appendChild(paise)
-  if (o.price === 'Whole') { dot.visible = false; paise.visible = false }
+  if (o.price === 'No') { dot.visible = false; paise.visible = false }
 
   badge.x = PHOTO_W - badge.width + 6
   badge.y = PHOTO_H - badge.height + 4
@@ -1027,7 +1447,7 @@ async function createCardTemplate(): Promise<void> {
   const combos: CardOpts[] = []
   for (const offer of ['Price', 'B1G1', 'Percent'] as const) {
     for (const shape of ['Circle', 'Pill'] as const) {
-      for (const price of ['Whole', 'Paise'] as const) combos.push({ offer, shape, price })
+      for (const price of ['No', 'Yes'] as const) combos.push({ offer, shape, price })
     }
   }
 
@@ -1091,6 +1511,22 @@ figma.ui.onmessage = async (msg: any) => {
           Math.max(400, Math.min(900, Math.round(msg.height) || 720)),
         )
         break
+      case 'scan-groups':
+        figma.ui.postMessage({
+          type: 'groups',
+          counts: groupProducts(msg.products || []),
+          states: FACT_STATES,
+          total: (msg.products || []).length,
+        })
+        break
+      case 'scan-variants': {
+        const node = (await figma.getNodeByIdAsync(msg.templateId)) as SceneNode | null
+        figma.ui.postMessage({
+          type: 'variants',
+          properties: node && !node.removed ? await scanVariants(node) : [],
+        })
+        break
+      }
       case 'scan-templates':
         figma.ui.postMessage({ type: 'templates', templates: scanTemplates() })
         break
