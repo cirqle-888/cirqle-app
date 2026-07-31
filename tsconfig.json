@@ -30,5 +30,15 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "_archive", ".claude", "**/*.test.ts", "**/*.test.tsx", "vitest.config.ts"]
+  "exclude": [
+    "node_modules",
+    "_archive",
+    ".claude",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "vitest.config.ts",
+    "figma-plugin",
+    "scripts",
+    "test_fetch.ts"
+  ]
 }
