@@ -4487,8 +4487,8 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                               placeholder={form.variant_type === 'size' ? 'e.g. Story' : form.variant_type === 'concept' ? 'e.g. Concept 2' : 'e.g. May date update'}
                             />
                             <datalist id="past-labels">
-                              {Array.from(new Set(tasks.map(t => t.variant_label).filter(Boolean))).map(label => (
-                                <option key={label} value={label} />
+                              {Array.from(new Set(tasks.map(t => t.variant_label).filter(l => typeof l === 'string' && l.trim().length > 0))).map(label => (
+                                <option key={label as string} value={label as string} />
                               ))}
                             </datalist>
                             {form.variant_type && (() => {
