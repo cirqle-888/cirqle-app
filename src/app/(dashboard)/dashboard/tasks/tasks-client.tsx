@@ -50,7 +50,9 @@ import {
   logTaskAssignment,
   serverInlineTaskUpdate,
   checkPossibleDuplicateTask,
+  fetchRetainerCoverage,
 } from './actions'
+import type { RetainerCoverageInfo } from '@/lib/agreements/coverage'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { BatchActionBar, type BatchAction } from '@/components/ui/batch-action-bar'
 import { formatTaskDate, fullTaskDate } from '@/lib/utils/format-date'
@@ -121,6 +123,8 @@ interface Task {
   billing_percent?: number | null
   billing_override?: boolean
   is_billable?: boolean
+  retainer_item_id?: string | null   // set by DB coverage trigger (Phase 2)
+  bill_as_extra?: boolean            // covered task billed as extra work
   client?: { id: string; name: string; code: string }
   service?: { id: string; name: string }
 }
@@ -228,6 +232,7 @@ const EMPTY_FORM = {
   billing_override: false,                                                       // true when user types a custom amount
   is_billable: true,                                                             // false = internal/non-billable concept
   manual_billing_amount: '',                                                     // user-typed override amount
+  bill_as_extra: false,                                                          // retainer-covered task billed as extra work
 }
 
 // ── Reorderable column system ─────────────────────────────────────────────────
@@ -777,6 +782,20 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
   const selectedService = services.find(s => s.id === form.service_id)
   const pricingType = selectedService?.pricing_type || 'fixed_per_creative'
 
+  // Retainer coverage — is this client+service+date covered by an active
+  // retainer? If so we hide the client-price card and show the retainer card
+  // (unless flagged as extra work). Fetched live when those inputs change.
+  const [coverage, setCoverage] = useState<RetainerCoverageInfo | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    if (!form.client_id || !form.service_id) { setCoverage(null); return }
+    fetchRetainerCoverage(form.client_id, form.service_id, form.task_date)
+      .then(c => { if (!cancelled) setCoverage(c) })
+      .catch(() => { if (!cancelled) setCoverage(null) })
+    return () => { cancelled = true }
+  }, [form.client_id, form.service_id, form.task_date])
+  const suppressBilling = !!coverage && !form.bill_as_extra
+
   // Derived: unit price — client-specific first, then service default
   const clientPrice = clientPricings.find(p => p.client_id === form.client_id && p.service_id === form.service_id)
   const unitPrice = clientPrice?.price ?? selectedService?.default_price ?? 0
@@ -902,17 +921,25 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
     // Variant of a parent task
     if (parentTask) {
       const parentBilling = parentTask.billing_amount_inr || 0
+      let baseVariantAmount = 0
       if (form.billing_mode === 'percent_of_parent') {
         const pct = parseFloat(form.billing_percent) || 0
-        return Math.round((parentBilling * pct / 100) * 100) / 100
-      }
-      if (form.billing_mode === 'parameter_driven') {
+        baseVariantAmount = Math.round((parentBilling * pct / 100) * 100) / 100
+      } else if (form.billing_mode === 'parameter_driven') {
         // Phase 1: surfaced as percent input; Phase 2 will sum parameter weights from contributions
         const pct = parseFloat(form.billing_percent) || 0
-        return Math.round((parentBilling * pct / 100) * 100) / 100
+        baseVariantAmount = Math.round((parentBilling * pct / 100) * 100) / 100
+      } else {
+        // billing_mode === 'fixed' on a variant: user enters manual amount via manual_billing_amount
+        baseVariantAmount = parseFloat(form.manual_billing_amount) || 0
       }
-      // billing_mode === 'fixed' on a variant: user enters manual amount via manual_billing_amount
-      return parseFloat(form.manual_billing_amount) || 0
+
+      // Apply standard quantity scaling based on service type
+      if (pricingType === 'fixed_per_creative') return baseVariantAmount * (parseFloat(form.quantity) || 1)
+      if (pricingType === 'hourly') return baseVariantAmount * (parseFloat(form.hours) || 1)
+      if (pricingType === 'percentage_of_spend') return baseVariantAmount * (parseFloat(form.spend) || 0)
+      
+      return baseVariantAmount
     }
 
     // Standard pricing-matrix calculation (original task)
@@ -1002,6 +1029,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       billing_override:  !!task.billing_override,
       is_billable:       task.is_billable !== false,
       manual_billing_amount: task.billing_amount_inr != null ? String(task.billing_amount_inr) : '',
+      bill_as_extra:     !!task.bill_as_extra,
     })
     setQuickSet(null)
   }
@@ -1271,10 +1299,13 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       scope: deriveWorkScope(form.client_id && form.client_id !== INTERNAL_CLIENT ? form.client_id : null),
       service_id: form.service_id,
       status: form.status,
-      billing_amount: computedAmount,
-      billing_amount_inr: computedAmount,
+      // Retainer-covered (not extra) → no client amount; the retainer is the charge.
+      billing_amount: suppressBilling ? 0 : computedAmount,
+      billing_amount_inr: suppressBilling ? 0 : computedAmount,
       quantity: qty,
       currency: unitCurrency,
+      // Only sent once the coverage migration exists (coverage != null proves it).
+      ...(coverage || form.bill_as_extra ? { bill_as_extra: form.bill_as_extra } : {}),
       task_date: form.task_date,
       is_recurring: form.is_recurring,
       recurring_interval: form.is_recurring ? form.recurring_interval : null,
@@ -4693,7 +4724,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                                   return (
                                     <div className="bg-violet-500/[0.08] border border-violet-500/30 rounded-lg px-2.5 py-2 text-violet-100">
                                       <div className="text-[11px] font-mono">
-                                        ₹{parentTask.billing_amount_inr.toLocaleString('en-IN')} × {totalPct}% = <span className="font-bold">₹{computedAmount.toLocaleString('en-IN')}</span>
+                                        ₹{parentTask.billing_amount_inr.toLocaleString('en-IN')} × {totalPct}% = <span className="font-bold">₹{Math.round(parentTask.billing_amount_inr * totalPct / 100).toLocaleString('en-IN')}</span> {pricingType === 'fixed_per_creative' ? '/ creative' : pricingType === 'hourly' ? '/ hr' : ''}
                                       </div>
                                       <div className="text-[10px] text-violet-700 dark:text-violet-200/70 mt-0.5">
                                         Group-normalized · cannot exceed 100% of parent
@@ -4760,8 +4791,62 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                 </div>
               </div>
 
+              {/* Retainer coverage card (Phase 2b) — replaces the price card when
+                  the task is covered by an active retainer and not flagged extra. */}
+              {coverage && suppressBilling && (
+                <div className="rounded-xl border border-green-500/30 bg-green-500/5 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="w-4 h-4 text-green-500" />
+                      <span className="text-xs font-semibold uppercase tracking-wide text-green-600 dark:text-green-400">Covered by Retainer</span>
+                    </div>
+                    <Link href={`/dashboard/agreements/${coverage.agreementId}`} target="_blank"
+                      className="text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+                      {coverage.agreementNumber} <ExternalLink className="w-3 h-3" />
+                    </Link>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {coverage.monthlyRetainer != null && (
+                      <div><div className="text-[10px] text-muted-foreground">Monthly retainer</div><div className="font-semibold text-sm">{coverage.currency} {coverage.monthlyRetainer}</div></div>
+                    )}
+                    {coverage.creativeAllocation != null && (
+                      <div><div className="text-[10px] text-muted-foreground">Creative allocation</div><div className="font-semibold text-sm">{coverage.currency} {coverage.creativeAllocation}</div></div>
+                    )}
+                    {coverage.allocatedUnitValue != null && (
+                      <div><div className="text-[10px] text-muted-foreground">Allocated unit value</div><div className="font-semibold text-sm">{coverage.currency} {coverage.allocatedUnitValue}<span className="text-[10px] text-muted-foreground font-normal"> /unit</span></div></div>
+                    )}
+                    <div><div className="text-[10px] text-muted-foreground">Usage</div><div className="font-semibold text-sm">{coverage.delivered} of {coverage.includedQuantity ?? '—'}<span className="text-[10px] text-muted-foreground font-normal"> · {coverage.remaining} left</span></div></div>
+                  </div>
+                  {selectedService && pricingType === 'fixed_per_creative' && (
+                    <div className="max-w-[180px]">
+                      <label className="block text-[11px] text-muted-foreground mb-1">Number of creatives</label>
+                      <input type="number" min="1" step="1" value={form.quantity}
+                        onChange={e => setForm(p => ({ ...p, quantity: e.target.value }))} className={inputCls} placeholder="1" />
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between pt-1 border-t border-green-500/15">
+                    <p className="text-[11px] text-muted-foreground">No client charge — the monthly retainer is the invoice.</p>
+                    <button type="button" onClick={() => setForm(p => ({ ...p, bill_as_extra: true }))}
+                      className="text-[11px] font-medium text-amber-600 dark:text-amber-400 hover:underline whitespace-nowrap">
+                      Bill as extra work →
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Extra-work banner when a covered task is flagged billable */}
+              {coverage && form.bill_as_extra && (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-2.5 flex items-center justify-between gap-3">
+                  <p className="text-xs text-amber-700 dark:text-amber-300">
+                    Extra work beyond the {coverage.includedQuantity ?? ''} included — this task bills the client normally.
+                  </p>
+                  <button type="button" onClick={() => setForm(p => ({ ...p, bill_as_extra: false }))}
+                    className="text-[11px] font-medium text-muted-foreground hover:text-foreground whitespace-nowrap">Back to retainer</button>
+                </div>
+              )}
+
               {/* Smart billing section — only shown to users with pricing access */}
-              {showBilling && selectedService && (
+              {!suppressBilling && showBilling && selectedService && (
                 <div className={`rounded-xl border p-4 space-y-3 ${
                   pricingType === 'fixed_per_creative' ? 'bg-blue-500/5 border-blue-500/20' :
                   pricingType === 'retainer'           ? 'bg-green-500/5 border-green-500/20' :
@@ -4916,7 +5001,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                   Shown only when the billing section above is hidden, so
                   non-admin users can still record how many creatives/hours
                   they worked. No price or total is revealed here. */}
-              {!showBilling && selectedService && (
+              {!suppressBilling && !showBilling && selectedService && (
                 pricingType === 'fixed_per_creative' ? (
                   <div>
                     <label className="block text-xs font-medium text-muted-foreground mb-1.5">
