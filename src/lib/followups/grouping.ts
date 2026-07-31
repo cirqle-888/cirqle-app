@@ -195,8 +195,9 @@ export function buildReminderText(opts: {
   showAmounts:     boolean
   currencySymbol?: string
   templates?:      MessageTemplates   // editable overrides from Settings → Message Templates
+  clientGreeting?: string
 }): string {
-  const { clientName, companyName, invoices, showAmounts } = opts
+  const { clientName, companyName, invoices, showAmounts, clientGreeting } = opts
   const tpl = opts.templates ?? DEFAULT_TEMPLATES
   const sym = opts.currencySymbol ?? '₹'
   const fmtAmt  = (n: number) => `${sym}${Math.round(n).toLocaleString('en-IN')}`
@@ -211,7 +212,7 @@ export function buildReminderText(opts: {
   if (invoices.length === 1) {
     const inv = invoices[0]
     return renderTemplate(tpl.reminderSingle, {
-      client_name:    clientName || 'there',
+      client_name:    clientGreeting || clientName || 'there',
       company_name:   companyName,
       invoice_number: inv.invoice_number,
       amount_suffix:  showAmounts ? ` — due *${fmtAmt(inv.outstanding)}*` : '',
@@ -229,7 +230,7 @@ export function buildReminderText(opts: {
 
   const total = invoices.reduce((s, i) => s + i.outstanding, 0)
   return renderTemplate(tpl.reminderMulti, {
-    client_name:   clientName || 'there',
+    client_name:   clientGreeting || clientName || 'there',
     company_name:  companyName,
     items_block:   itemsBlock,
     count:         String(invoices.length),

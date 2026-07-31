@@ -236,3 +236,30 @@ export async function recordPayment(
     return { ok: false, error: e?.message ?? 'Failed to record payment' }
   }
 }
+
+export async function setClientGreeting(clientId: string, greetingName: string | null) {
+  const supabase = createAdminClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { ok: false, error: 'Unauthorized' }
+
+  if (!greetingName) {
+    const { error } = await supabase
+      .from('employee_client_preferences')
+      .delete()
+      .match({ employee_id: user.id, client_id: clientId })
+
+    if (error) return { ok: false, error: error.message }
+  } else {
+    const { error } = await supabase
+      .from('employee_client_preferences')
+      .upsert({
+        employee_id: user.id,
+        client_id: clientId,
+        greeting_name: greetingName,
+      })
+
+    if (error) return { ok: false, error: error.message }
+  }
+
+  return { ok: true }
+}

@@ -83,6 +83,7 @@ export default async function FollowUpsPage() {
 
   // Load user greetings
   const partnerGreetings: Record<string, string> = {}
+  const clientGreetings: Record<string, string> = {}
   if (me?.employeeId) {
     try {
       const { data } = await supabase
@@ -90,6 +91,13 @@ export default async function FollowUpsPage() {
         .select('business_partner_id, greeting_name')
         .eq('employee_id', me.employeeId)
       ;(data || []).forEach(r => { partnerGreetings[r.business_partner_id] = r.greeting_name })
+    } catch { /* ignored */ }
+    try {
+      const { data } = await supabase
+        .from('employee_client_preferences')
+        .select('client_id, greeting_name')
+        .eq('employee_id', me.employeeId)
+      ;(data || []).forEach(r => { clientGreetings[r.client_id] = r.greeting_name })
     } catch { /* ignored */ }
   }
 
@@ -130,6 +138,7 @@ export default async function FollowUpsPage() {
       setupNeeded={setupNeeded}
       templates={templates}
       partnerGreetings={partnerGreetings}
+      clientGreetings={clientGreetings}
     />
   )
 }

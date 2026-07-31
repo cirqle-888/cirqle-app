@@ -17,6 +17,7 @@ import { buildInvoiceShareText, whatsappShareUrl, publicInvoiceUrl } from '@/lib
 import { buildPartnerStatementTextFromLines } from '@/lib/partners/whatsapp'
 import { copyToClipboard } from '@/lib/clipboard'
 import { setPartnerGreeting } from '@/app/(dashboard)/dashboard/partners/actions'
+import { setClientGreeting } from '@/app/(dashboard)/dashboard/invoices/follow-ups/actions'
 import type { MessageTemplates } from '@/lib/messaging/templates'
 import {
   PhoneCall, MessageCircle, Send, Clock, AlertTriangle, CalendarClock,
@@ -164,11 +165,12 @@ function clusterInvoices(list: FUInvoice[], mode: ViewMode): Cluster[] {
   return [...map.values()].sort((a, b) => a.order - b.order)
 }
 
-export default function FollowUpsClient({ invoices, followups, companyName, showAmounts, setupNeeded, templates, partnerGreetings: initialPartnerGreetings }: Props) {
+export default function FollowUpsClient({ invoices, followups, companyName, showAmounts, setupNeeded, templates, partnerGreetings: initialPartnerGreetings, clientGreetings: initialClientGreetings }: Props) {
   const router = useRouter()
   const { toasts, dismiss, success, error: toastError, info } = useToast()
 
   const [partnerGreetings, setPartnerGreetings] = useState(initialPartnerGreetings)
+  const [clientGreetings, setClientGreetings] = useState(initialClientGreetings)
   const [openForm, setOpenForm]       = useState<string | null>(null)
   const [openHistory, setOpenHistory] = useState<Set<string>>(new Set())
   const [waInvoice, setWaInvoice]     = useState<string | null>(null) // invoice id whose WhatsApp popover is open
@@ -350,11 +352,9 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
     return true
   }, [router, success, toastError])
 
-  // ── WhatsApp reminder ──────────────────────────────────────────────
-  const openWa = (inv: FUInvoice) => {
-    if (waInvoice === inv.id) { setWaInvoice(null); return }
+  const clientReminderText = useCallback((inv: FUInvoice, overrideGreeting?: string) => {
     const clientInvoices = inv.client ? (pendingByClient.get(inv.client.id) ?? [inv]) : [inv]
-    const text = buildReminderText({
+    return buildReminderText({
       clientName:  inv.client?.name ?? 'there',
       companyName,
       invoices:    clientInvoices.map(ci => ({
@@ -365,8 +365,13 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
       })),
       showAmounts,
       templates,
+      clientGreeting: overrideGreeting !== undefined ? overrideGreeting : (inv.client ? clientGreetings[inv.client.id] : undefined),
     })
-    setWaText(text)
+  }, [pendingByClient, companyName, showAmounts, templates, clientGreetings])
+
+  const openWa = (inv: FUInvoice) => {
+    if (waInvoice === inv.id) { setWaInvoice(null); return }
+    setWaText(clientReminderText(inv))
     setWaInvoice(inv.id)
   }
 
@@ -672,6 +677,23 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
                                     waOpen={waInvoice === inv.id}
                                     waText={waText}
                                     setWaText={setWaText}
+                                    clientGreeting={inv.client ? clientGreetings[inv.client.id] : undefined}
+                                    initialClientGreeting={inv.client ? initialClientGreetings[inv.client.id] : undefined}
+                                    onClientGreetingChange={(val) => {
+                                      if (inv.client) {
+                                        setClientGreetings(prev => ({ ...prev, [inv.client!.id]: val }))
+                                        setWaText(clientReminderText(inv, val))
+                                      }
+                                    }}
+                                    onClientGreetingBlur={async () => {
+                                      if (inv.client) {
+                                        const val = clientGreetings[inv.client.id]
+                                        if (val !== initialClientGreetings[inv.client.id]) {
+                                          const res = await setClientGreeting(inv.client.id, val || null)
+                                          if (!res.ok) toastError('Could not save greeting', res.error)
+                                        }
+                                      }
+                                    }}
                                     onToggleForm={() => toggleForm(inv.id)}
                                     onToggleHistory={() => toggleHistory(inv.id)}
                                     onToggleWa={() => openWa(inv)}
@@ -740,6 +762,10 @@ interface CardProps {
   waOpen:         boolean
   waText:         string
   setWaText:      (s: string) => void
+  clientGreeting?: string
+  initialClientGreeting?: string
+  onClientGreetingChange?: (val: string) => void
+  onClientGreetingBlur?: () => void
   onToggleForm:   () => void
   onToggleHistory:() => void
   onToggleWa:     () => void
@@ -955,9 +981,19 @@ function InvoiceCard(p: CardProps) {
         {/* WhatsApp reminder popover */}
         {p.waOpen && (
           <div className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 mb-2">
-              <MessageCircle className="w-3.5 h-3.5" /> Reminder message
-              <span className="text-muted-foreground font-normal">(edit before sending)</span>
+            <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                <MessageCircle className="w-3.5 h-3.5" /> Reminder message
+                <span className="text-muted-foreground font-normal hidden sm:inline">(edit before sending)</span>
+              </div>
+              <input
+                type="text"
+                placeholder={`Name (e.g. Bro, Sir, ${inv.client?.name || ''})`}
+                value={p.clientGreeting || ''}
+                onChange={e => p.onClientGreetingChange?.(e.target.value)}
+                onBlur={p.onClientGreetingBlur}
+                className="text-[10px] bg-background/50 border border-emerald-500/30 rounded px-2 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-emerald-500/40 w-full sm:w-auto min-w-[120px]"
+              />
             </div>
             <textarea
               value={p.waText}
