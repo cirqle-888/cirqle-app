@@ -952,6 +952,16 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       parentTask, form.parent_task_id, form.is_billable, form.billing_mode, form.billing_percent,
       form.billing_override, form.manual_billing_amount])
 
+  const displayUnitPrice = useMemo(() => {
+    if (parentTask && !form.billing_override && form.is_billable !== false) {
+      if (pricingType === 'fixed_per_creative') return computedAmount / (parseFloat(form.quantity) || 1)
+      if (pricingType === 'hourly') return computedAmount / (parseFloat(form.hours) || 1)
+      if (pricingType === 'percentage_of_spend') return computedAmount / (parseFloat(form.spend) || 1)
+      return computedAmount
+    }
+    return unitPrice
+  }, [parentTask, form.billing_override, form.is_billable, pricingType, computedAmount, form.quantity, form.hours, form.spend, unitPrice])
+
   // When client or service changes, update currency
   function handleClientChange(clientId: string) {
     const cp = clientPricings.find(p => p.client_id === clientId && p.service_id === form.service_id)
@@ -4470,11 +4480,36 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                           <div>
                             <label className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-1">Label</label>
                             <input
+                              list="past-labels"
                               value={form.variant_label}
                               onChange={e => setForm(p => ({ ...p, variant_label: e.target.value }))}
                               className={inputCls}
                               placeholder={form.variant_type === 'size' ? 'e.g. Story' : form.variant_type === 'concept' ? 'e.g. Concept 2' : 'e.g. May date update'}
                             />
+                            <datalist id="past-labels">
+                              {Array.from(new Set(tasks.map(t => t.variant_label).filter(Boolean))).map(label => (
+                                <option key={label} value={label} />
+                              ))}
+                            </datalist>
+                            {form.variant_type && (() => {
+                              const chips = form.variant_type === 'size' ? ['Instagram', 'Facebook', 'Story', 'Reel', 'A4', 'A5'] 
+                                : form.variant_type === 'concept' ? ['Concept 1', 'Concept 2', 'Option A', 'Option B']
+                                : ['Client Feedback', 'Internal Feedback', 'Minor Tweak']
+                              return (
+                                <div className="flex flex-wrap gap-1.5 mt-2">
+                                  {chips.map(chip => (
+                                    <button
+                                      key={chip}
+                                      type="button"
+                                      onClick={() => setForm(p => ({ ...p, variant_label: chip }))}
+                                      className={`px-2 py-0.5 text-[10px] font-medium rounded-full border transition-colors ${form.variant_label === chip ? 'bg-primary/10 text-primary border-primary/20' : 'bg-secondary/40 text-muted-foreground border-border hover:bg-secondary hover:text-foreground'}`}
+                                    >
+                                      {chip}
+                                    </button>
+                                  ))}
+                                </div>
+                              )
+                            })()}
                           </div>
                         </div>
 
@@ -4872,10 +4907,10 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                     </div>
                     <span className="text-xs text-muted-foreground">
                       {pricingType === 'percentage_of_spend'
-                        ? unitPrice > 0 ? `Your rate: ${unitPrice}%` : 'No % set'
+                        ? displayUnitPrice > 0 ? `Your rate: ${displayUnitPrice}%` : 'No % set'
                         : clientPrice
-                          ? `Client price: ${unitCurrency} ${unitPrice}`
-                          : unitPrice > 0 ? `Default: ${unitCurrency} ${unitPrice}` : 'No price set'}
+                          ? `Client price: ${unitCurrency} ${displayUnitPrice}`
+                          : displayUnitPrice > 0 ? `Default: ${unitCurrency} ${displayUnitPrice}` : 'No price set'}
                     </span>
                   </div>
 
@@ -4889,7 +4924,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                           className={inputCls} placeholder="1" />
                       </div>
                       <div className="text-right pb-2">
-                        <p className="text-xs text-muted-foreground">{unitPrice} × {form.quantity || 1}</p>
+                        <p className="text-xs text-muted-foreground">{displayUnitPrice} × {form.quantity || 1}</p>
                         <p className="text-lg font-bold">{unitCurrency} {computedAmount.toLocaleString()}</p>
                       </div>
                     </div>
@@ -4905,7 +4940,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                           className={inputCls} placeholder="e.g. 1000" />
                       </div>
                       <div className="text-right pb-2">
-                        <p className="text-xs text-muted-foreground">{unitPrice}% of {form.spend || 0}</p>
+                        <p className="text-xs text-muted-foreground">{displayUnitPrice}% of {form.spend || 0}</p>
                         <p className="text-lg font-bold text-purple-400">{unitCurrency} {computedAmount.toLocaleString()}</p>
                       </div>
                     </div>
