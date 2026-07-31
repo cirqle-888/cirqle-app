@@ -415,6 +415,7 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
         pending:       inv.outstanding ?? 0,
         status:        inv.status,
       }))
+    const total = lines.reduce((sum, line) => sum + line.pending, 0)
     let greetingName = overrideGreeting !== undefined ? overrideGreeting : partnerGreetings[partner.id]
     return buildPartnerStatementTextFromLines(partner.name, lines, total, templates, greetingName || undefined)
   }, [pendingByPartner, templates, partnerGreetings])
