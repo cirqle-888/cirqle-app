@@ -395,7 +395,7 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
   // ── Business-partner collection statement ──────────────────────────
   // Same message the partner's own dashboard produces (shared builder + the
   // Settings templates), but reachable from the chase list.
-  const partnerStatementText = useCallback((partner: FUPartner) => {
+  const partnerStatementText = useCallback((partner: FUPartner, overrideGreeting?: string) => {
     const list = pendingByPartner.get(partner.id) ?? []
     const lines = [...list]
       .sort((a, b) => (a.client?.name ?? '').localeCompare(b.client?.name ?? '')
@@ -407,7 +407,11 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
         status:        inv.status,
       }))
     const total = lines.reduce((s, l) => s + l.pending, 0)
-    return buildPartnerStatementTextFromLines(partner.name, lines, total, templates)
+    let greetingName = overrideGreeting
+    if (greetingName === undefined && typeof window !== 'undefined') {
+      greetingName = localStorage.getItem(`cirqle:partner-greeting:${partner.id}`) || ''
+    }
+    return buildPartnerStatementTextFromLines(partner.name, lines, total, templates, greetingName || undefined)
   }, [pendingByPartner, templates])
 
   const openPartnerStatement = (clusterId: string, partner: FUPartner) => {
@@ -590,9 +594,23 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
 
                                 {bpCluster === clusterId && (
                                   <div className="mt-2 rounded-lg border border-violet-500/30 bg-violet-500/5 p-3">
-                                    <div className="flex items-center gap-1.5 text-[11px] font-semibold text-violet-700 dark:text-violet-400 mb-2">
-                                      <Handshake className="w-3.5 h-3.5" /> Collection statement for {partner.name}
-                                      <span className="text-muted-foreground font-normal">(every sent invoice of their clients — drafts excluded)</span>
+                                    <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+                                      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-violet-700 dark:text-violet-400">
+                                        <Handshake className="w-3.5 h-3.5" /> Collection statement for {partner.name}
+                                        <span className="text-muted-foreground font-normal hidden sm:inline">(every sent invoice of their clients — drafts excluded)</span>
+                                      </div>
+                                      <input
+                                        type="text"
+                                        placeholder={`Name (e.g. Bro, Sir, ${partner.name})`}
+                                        defaultValue={typeof window !== 'undefined' ? (localStorage.getItem(`cirqle:partner-greeting:${partner.id}`) || '') : ''}
+                                        onChange={e => {
+                                          const val = e.target.value
+                                          if (val) localStorage.setItem(`cirqle:partner-greeting:${partner.id}`, val)
+                                          else localStorage.removeItem(`cirqle:partner-greeting:${partner.id}`)
+                                          setBpText(partnerStatementText(partner, val))
+                                        }}
+                                        className="text-[10px] bg-background/50 border border-violet-500/30 rounded px-2 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/40 w-full sm:w-auto min-w-[120px]"
+                                      />
                                     </div>
                                     <textarea
                                       value={bpText}

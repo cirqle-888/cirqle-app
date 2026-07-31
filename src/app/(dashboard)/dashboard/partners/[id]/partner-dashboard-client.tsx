@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
 import {
@@ -47,6 +47,21 @@ export default function PartnerDashboardClient({ partner, dashboard, unlinkedCli
   const [statement, setStatement] = useState<PartnerStatementData | null>(null)
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [actionMsg, setActionMsg] = useState<string | null>(null)
+  const [greetingName, setGreetingName] = useState('')
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(`cirqle:partner-greeting:${partner.id}`)
+      if (saved) setGreetingName(saved)
+    }
+  }, [partner.id])
+
+  function handleGreetingChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const val = e.target.value
+    setGreetingName(val)
+    if (val) localStorage.setItem(`cirqle:partner-greeting:${partner.id}`, val)
+    else localStorage.removeItem(`cirqle:partner-greeting:${partner.id}`)
+  }
 
   async function ensureStatement(): Promise<PartnerStatementData | null> {
     if (statement) return statement
@@ -64,7 +79,7 @@ export default function PartnerDashboardClient({ partner, dashboard, unlinkedCli
     setActionMsg(null)
     const data = await ensureStatement()
     if (data) {
-      const ok = await copyToClipboard(buildPartnerStatementText(data))
+      const ok = await copyToClipboard(buildPartnerStatementText(data, undefined, greetingName))
       setActionMsg(ok
         ? 'Statement text copied to clipboard.'
         : 'Could not reach the clipboard — open WhatsApp from the link instead.')
@@ -183,6 +198,16 @@ export default function PartnerDashboardClient({ partner, dashboard, unlinkedCli
         {canExport && (
           <div className="bg-secondary border border-border rounded-xl p-4">
             <h2 className="text-sm font-semibold text-foreground mb-3">Generate Statement</h2>
+            <div className="mb-4 max-w-xs">
+              <label className="text-[11px] font-medium text-muted-foreground mb-1.5 block">Addressing Name (Optional, saved for you)</label>
+              <input
+                type="text"
+                placeholder={`e.g. Bro, Sir, ${partner.name}`}
+                value={greetingName}
+                onChange={handleGreetingChange}
+                className="w-full text-xs bg-background border border-border rounded-lg px-2.5 py-1.5 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+              />
+            </div>
             <div className="flex flex-wrap gap-2">
               <ActionButton icon={Copy} label="Copy WhatsApp Text" busy={busyAction === 'text'} onClick={handleCopyText} primary />
               <ActionButton icon={ImageIcon} label="Share WhatsApp Image" busy={busyAction === 'image'} onClick={handleShareImage} primary />
@@ -190,7 +215,7 @@ export default function PartnerDashboardClient({ partner, dashboard, unlinkedCli
               <ActionButton icon={Mail} label="Send Email" busy={busyAction === 'email'} onClick={handleSendEmail} />
               {statement?.partner.phone && (
                 <a
-                  href={partnerWhatsappShareUrl(buildPartnerStatementText(statement), statement.partner.phone)}
+                  href={partnerWhatsappShareUrl(buildPartnerStatementText(statement, undefined, greetingName), statement.partner.phone)}
                   target="_blank" rel="noreferrer"
                   className="text-xs text-primary hover:underline self-center"
                 >

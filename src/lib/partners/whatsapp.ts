@@ -38,6 +38,7 @@ export function buildPartnerStatementTextFromLines(
   lines: PartnerStatementLine[],
   totalPending: number,
   templates?: PartnerStatementTemplates,
+  greetingName?: string,
 ): string {
   const itemTpl = templates?.partnerStatementItem || DEFAULT_TEMPLATES.partnerStatementItem
   const items_block = lines
@@ -50,7 +51,7 @@ export function buildPartnerStatementTextFromLines(
     .join('\n')
 
   return renderTemplate(templates?.partnerStatement || DEFAULT_TEMPLATES.partnerStatement, {
-    partner_name:   partnerName,
+    partner_name:   greetingName || partnerName,
     items_block:    items_block || 'No pending invoices.',
     total_pending:  fmtAmt(totalPending),
   })
@@ -60,12 +61,14 @@ export function buildPartnerStatementTextFromLines(
 export function buildPartnerStatementText(
   data: PartnerStatementData,
   templates?: PartnerStatementTemplates,
+  greetingName?: string,
 ): string {
   return buildPartnerStatementTextFromLines(
     data.partner.name,
     data.rows.map(r => ({ clientName: r.clientName, invoiceNumber: r.invoiceNumber, pending: r.pending, status: r.status })),
     data.totalOutstanding,
     templates,
+    greetingName,
   )
 }
 
