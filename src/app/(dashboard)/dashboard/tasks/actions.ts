@@ -120,6 +120,31 @@ export async function serverPermanentDeleteTask(
   return { ok: true }
 }
 
+export async function serverEmptyTrash(taskIds: string[]): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.TASKS_TRASH)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+  if (taskIds.length === 0) return { ok: true }
+
+  await logActivity({
+    actorId:    guard.employeeId,
+    entityType: 'task',
+    entityId:   null,
+    action:     'deleted',
+    detail:     { bulk: true, permanent: true, count: taskIds.length },
+  })
+
+  const CHUNK = 100
+  for (let i = 0; i < taskIds.length; i += CHUNK) {
+    const chunk = taskIds.slice(i, i + CHUNK)
+    const { error } = await admin.from('tasks').delete().in('id', chunk)
+    if (error) return { ok: false, error: error.message }
+  }
+
+  return { ok: true }
+}
+
 // ── Status change ─────────────────────────────────────────────────────────────
 
 export async function serverUpdateTaskStatus(

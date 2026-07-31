@@ -44,6 +44,7 @@ import {
   serverBulkUpdateStatus,
   serverBulkAssignEmployees,
   serverBulkDeleteTasks,
+  serverEmptyTrash,
   serverCancelTask,
   serverFillTaskBilling,
   logTaskCreated,
@@ -1137,6 +1138,21 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
     setDeleting(false)
   }
 
+  const [emptyTrashConfirm, setEmptyTrashConfirm] = useState(false)
+  const [emptyingTrash, setEmptyingTrash] = useState(false)
+
+  async function handleEmptyTrash() {
+    setEmptyingTrash(true)
+    const res = await serverEmptyTrash(trash.map(t => t.id))
+    if (res.ok) {
+      setTrash([])
+      setEmptyTrashConfirm(false)
+    } else {
+      toastError(res.error ?? 'Could not empty trash. Please try again.')
+    }
+    setEmptyingTrash(false)
+  }
+
   async function bulkUpdateStatus(status: string) {
     const ids = [...selectedTasks]
     const res = await serverBulkUpdateStatus(ids, status)
@@ -2044,9 +2060,30 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       {/* ── Trash View ── */}
       {showTrash && (
         <div className="p-4 sm:p-6 space-y-4">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground bg-red-500/5 border border-red-500/15 rounded-xl px-4 py-3">
-            <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
-            Items in Trash are automatically deleted after <strong className="text-foreground mx-1">45 days</strong>. Restore within this window to recover.
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-sm text-muted-foreground bg-red-500/5 border border-red-500/15 rounded-xl px-4 py-3">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
+              <span>Items in Trash are automatically deleted after <strong className="text-foreground mx-1">45 days</strong>. Restore within this window to recover.</span>
+            </div>
+            {trash.length > 0 && (
+              <div className="shrink-0 flex justify-end">
+                {emptyTrashConfirm ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-red-400 font-medium">Delete all forever?</span>
+                    <button onClick={handleEmptyTrash} disabled={emptyingTrash} className="text-xs px-3 py-1.5 rounded-lg bg-red-500 text-white font-medium hover:bg-red-600 transition-colors disabled:opacity-50">
+                      {emptyingTrash ? '...' : 'Yes, Empty'}
+                    </button>
+                    <button onClick={() => setEmptyTrashConfirm(false)} disabled={emptyingTrash} className="text-xs px-3 py-1.5 rounded-lg bg-secondary text-foreground font-medium hover:bg-secondary/80 transition-colors">
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button onClick={() => setEmptyTrashConfirm(true)} className="text-xs px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 font-medium transition-colors">
+                    Empty Trash
+                  </button>
+                )}
+              </div>
+            )}
           </div>
           {trash.length === 0 ? (
             <div className="text-center py-16 text-muted-foreground">
