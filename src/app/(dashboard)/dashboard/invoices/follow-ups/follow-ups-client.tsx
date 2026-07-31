@@ -56,6 +56,7 @@ interface Props {
   setupNeeded: boolean
   templates:   MessageTemplates
   partnerGreetings: Record<string, string>
+  clientGreetings: Record<string, string>
 }
 
 // ── Outcome metadata ─────────────────────────────────────────────────
