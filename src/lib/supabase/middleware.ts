@@ -126,6 +126,39 @@ async function verifyProfile(cookie: string | undefined, authId: string): Promis
   }
 }
 
+// ── Rate Limiter ─────────────────────────────────────────────────────────────
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>()
+const RATE_LIMIT = 60 // requests
+const RATE_LIMIT_WINDOW = 60 * 1000 // 1 minute
+
+function checkRateLimit(request: NextRequest): boolean {
+  // Edge runtime supports x-forwarded-for or req.ip directly on Vercel
+  const ip = request.ip || request.headers.get('x-forwarded-for') || 'unknown'
+  if (ip === 'unknown') return true
+
+  const now = Date.now()
+  const record = rateLimitMap.get(ip)
+
+  // Lazy cleanup to prevent memory leaks in long-lived isolates
+  if (rateLimitMap.size > 10000) {
+    for (const [k, v] of rateLimitMap.entries()) {
+      if (v.resetAt < now) rateLimitMap.delete(k)
+    }
+  }
+
+  if (!record || record.resetAt < now) {
+    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW })
+    return true
+  }
+
+  if (record.count >= RATE_LIMIT) {
+    return false
+  }
+
+  record.count++
+  return true
+}
+
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
@@ -172,6 +205,12 @@ export async function updateSession(request: NextRequest) {
                                                          // its CORS preflight was 307-redirected to /login — and browsers reject
                                                          // any redirected preflight ("Redirect is not allowed for a preflight
                                                          // request"), making the API unreachable from Figma despite valid auth.
+
+  if (isPublic || isAuthPage) {
+    if (!checkRateLimit(request)) {
+      return new NextResponse('Too Many Requests', { status: 429 })
+    }
+  }
 
   if (!user && !isAuthPage && !isPublic) {
     // Server Action POSTs cannot follow an HTML redirect. `fetch` auto-follows
