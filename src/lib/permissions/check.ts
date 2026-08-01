@@ -128,11 +128,7 @@ export const loadCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   }
 
   const designation = Array.isArray(emp.designation) ? emp.designation[0] : emp.designation
-  // Pre-migration fallback: employees with no designation assigned are treated
-  // as admin. This matches the layout sidebar (`me.isAdmin || me.designationId
-  // === null`) and the server-action guard in `enforce.ts`, so every page sees
-  // the same notion of "admin" without each consumer re-implementing it.
-  const isAdmin = designation?.is_admin === true || !designation?.id
+  const isAdmin = designation?.is_admin === true
 
   let permissions = new Set<string>()
   if (isAdmin) {

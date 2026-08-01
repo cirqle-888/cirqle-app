@@ -15,9 +15,9 @@ export default async function ContributionAnalysisPage() {
   // Same wall as Reports: admin OR explicit reports.view. Fail-open pre-migration
   // (no employee record yet) so the app keeps working before perms are seeded.
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin = me?.isAdmin ?? true
-  const canView = isAdmin || me?.permissions.has('reports.view') || !me
-  if (me && !canView) redirect('/dashboard')
+  const isAdmin = me?.isAdmin ?? false
+  const canView = isAdmin || me?.permissions.has('reports.view')
+  if (!canView) redirect('/dashboard')
 
   const supabase = createAdminClient()
 

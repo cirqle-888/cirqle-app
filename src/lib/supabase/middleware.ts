@@ -224,12 +224,12 @@ export async function updateSession(request: NextRequest) {
         queryFailed = true
       }
 
-      // Migration not applied OR query failed → no gating
-      if (queryFailed) return supabaseResponse
-
-      // No employee row → legacy admin (single-user setup before invite flow) → no gating
-      if (!emp) return supabaseResponse
-
+      if (queryFailed || !emp) {
+        const url = request.nextUrl.clone()
+        url.pathname = '/login'
+        url.searchParams.set('error', 'profile')
+        return NextResponse.redirect(url)
+      }
       const designation = Array.isArray(emp.designation) ? emp.designation[0] : emp.designation
       const isAdmin = designation?.is_admin === true
 

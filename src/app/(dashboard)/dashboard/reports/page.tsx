@@ -12,11 +12,11 @@ export default async function ReportsPage() {
   // The sidebar already hides the nav item; this is the server-side wall in
   // case anyone types the URL or follows a stale link.
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin = me?.isAdmin ?? true   // pre-migration fail-open
+  const isAdmin = me?.isAdmin ?? false   // pre-migration fail-open
   // Allow access when: admin, OR has explicit reports.view permission, OR no user
   // record yet (fail-open so the app keeps working pre-migration).
-  const canViewReports = isAdmin || me?.permissions.has('reports.view') || !me
-  if (me && !canViewReports) redirect('/dashboard')
+  const canViewReports = isAdmin || me?.permissions.has('reports.view')
+  if (!canViewReports) redirect('/dashboard')
 
   const supabase = createAdminClient()
   const employeeId = me?.employeeId

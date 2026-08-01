@@ -26,9 +26,9 @@ type Cashbook = {
 export default async function ReconcilePage() {
   // Same wall as Reports: admin OR explicit reports.view (fail-open pre-migration).
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin = me?.isAdmin ?? true
-  const canView = isAdmin || me?.permissions.has('reports.view') || !me
-  if (me && !canView) redirect('/dashboard')
+  const isAdmin = me?.isAdmin ?? false
+  const canView = isAdmin || me?.permissions.has('reports.view')
+  if (!canView) redirect('/dashboard')
 
   const supabase = createAdminClient()
 

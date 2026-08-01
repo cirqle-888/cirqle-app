@@ -13,9 +13,9 @@ export const dynamic = 'force-dynamic'
 export default async function WhatIfPage() {
   // Same wall as the sibling reports: admin OR explicit reports.view.
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin = me?.isAdmin ?? true
-  const canView = isAdmin || me?.permissions.has('reports.view') || !me
-  if (me && !canView) redirect('/dashboard')
+  const isAdmin = me?.isAdmin ?? false
+  const canView = isAdmin || me?.permissions.has('reports.view')
+  if (!canView) redirect('/dashboard')
 
   // Base salaries feed the payroll-cost / increment lever. Strip them
   // server-side unless the viewer can see payroll amounts, so ₹ salaries never

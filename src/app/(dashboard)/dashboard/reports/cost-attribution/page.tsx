@@ -30,9 +30,9 @@ export default async function CostAttributionPage({
   searchParams?: Promise<Record<string, string | string[] | undefined>>
 }) {
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin = me?.isAdmin ?? true
-  const canView = isAdmin || me?.permissions.has('reports.view') || !me
-  if (me && !canView) redirect('/dashboard')
+  const isAdmin = me?.isAdmin ?? false
+  const canView = isAdmin || me?.permissions.has('reports.view')
+  if (!canView) redirect('/dashboard')
 
   const sp = searchParams ? await searchParams : undefined
   const windowMonths = Math.min(24, Math.max(1, parseInt(String(sp?.months ?? '6'), 10) || 6))

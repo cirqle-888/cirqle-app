@@ -18,9 +18,9 @@ export default async function RetainerAnalyticsReportPage({
   searchParams?: Promise<Record<string, string | string[] | undefined>>
 }) {
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin = me?.isAdmin ?? true
+  const isAdmin = me?.isAdmin ?? false
   const canView = isAdmin || hasPermission(me, PERMS.AGREEMENTS_VIEW) || hasPermission(me, PERMS.REPORTS_VIEW)
-  if (me && !canView) redirect('/dashboard')
+  if (!canView) redirect('/dashboard')
   const canViewPricing = isAdmin || hasPermission(me, PERMS.AGREEMENTS_VIEW_PRICING)
 
   const sp = searchParams ? await searchParams : undefined
