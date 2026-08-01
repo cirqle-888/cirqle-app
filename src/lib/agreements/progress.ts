@@ -1,17 +1,32 @@
 /**
  * Client Agreements — Progress Engine
  *
- * Computes live numbers (Committed, Planned, Delivered, Remaining, Extra)
- * from the social calendar and tasks. Nothing is stored.
+ * Answers one question: for month M, how much of what we committed have we
+ * delivered? Nothing is stored; everything is derived.
  *
- * Doctrine: for month M, the engine resolves the term row whose
- * [effective_from, effective_to] overlaps M, and derives all logic against it.
+ * ── The single rule ─────────────────────────────────────────────────────────
+ * Delivered = SUM(task.quantity) for tasks that are
+ *   (a) stamped with this term row's id in tasks.retainer_item_id,
+ *   (b) in a completed status, and
+ *   (c) not soft-deleted.
+ *
+ * `retainer_item_id` is written by the billing-coverage engine — the same stamp
+ * that zeroes client billing on a covered task. Progress and billing therefore
+ * read one source and can never disagree.
+ *
+ * This replaced four competing rules (calendar items counted as 1 per unit,
+ * stamped tasks by quantity, explicitly-linked tasks by quantity, and a
+ * same-service safety net). They mixed units of measure — items vs quantity —
+ * inside one total, and the calendar path was fed by an invalid PostgREST
+ * filter, so it had been contributing zero in production without anyone
+ * noticing. Counting `quantity` (not tasks) matters: one task with quantity 4
+ * consumes 4 of a 15-unit commitment.
+ *
+ * Committed is still prorated by active days in the month, so an agreement
+ * starting mid-month commits a part-month quantity. Surface that in the UI —
+ * an unexplained "8" against a promised 15 reads as a bug.
  */
 
-import {
-  resolveItemProgress,
-  ContentType,
-} from '@/lib/social/plan'
 import type {
   ClientAgreementRow,
   ClientAgreementItemRow,
@@ -21,28 +36,15 @@ import type {
 
 // ─── Core Types ──────────────────────────────────────────────────────────────
 
-export interface DeliverableProgress {
-  deliverableId: string
-  label: string
-  committed: number
-  planned: number
-  delivered: number
-  remaining: number
-  extra: number
-}
-
 export interface ItemProgressSummary {
   itemId: string
   serviceId: string | null
   displayOrder: number
   committed: number
-  planned: number
   delivered: number
   remaining: number
+  /** Delivered beyond the commitment. Still delivered work — it bills separately if flagged. */
   extra: number
-  deliverables: DeliverableProgress[]
-  /** True if under-planned (planned < committed) */
-  isUnderPlanned: boolean
 }
 
 export interface AgreementProgressSummary {
@@ -52,7 +54,6 @@ export interface AgreementProgressSummary {
   status: string
   items: ItemProgressSummary[]
   totalCommitted: number
-  totalPlanned: number
   totalDelivered: number
   totalRemaining: number
   totalExtra: number
@@ -63,7 +64,6 @@ export interface AgreementProgressRollup {
   /** Number of summaries with an `active` status (paused/others excluded). */
   activeAgreements: number
   committed: number
-  planned: number
   delivered: number
   remaining: number
   extra: number
@@ -73,10 +73,9 @@ export interface AgreementProgressRollup {
 
 /**
  * Sum a set of per-agreement summaries into a single rollup. Pure — no I/O — so
- * both the Social Calendar meter and the Client-page card reuse one reduce
- * instead of duplicating the arithmetic. Only `active` agreements contribute
- * (paused agreements show no bars per the design); pass already-scoped input
- * (e.g. one client's summaries) to scope the rollup.
+ * every consumer reuses one reduce instead of duplicating the arithmetic. Only
+ * `active` agreements contribute; pass already-scoped input (e.g. one client's
+ * summaries) to scope the rollup.
  */
 export function rollupAgreementProgress(
   summaries: AgreementProgressSummary[],
@@ -88,24 +87,13 @@ export function rollupAgreementProgress(
     activeAgreements: active.length,
     committed,
     delivered,
-    planned: active.reduce((sum, s) => sum + (s.totalPlanned || 0), 0),
     remaining: active.reduce((sum, s) => sum + (s.totalRemaining || 0), 0),
     extra: active.reduce((sum, s) => sum + (s.totalExtra || 0), 0),
     completionPct: committed > 0 ? Math.min(100, Math.round((delivered / committed) * 100)) : 0,
   }
 }
 
-/** Matches a calendar item (planned) */
-export interface SourceCalendarItem {
-  id: string
-  service_id: string | null
-  content_type: ContentType
-  variants?: ContentType[] | null
-  status: string // The calendar's internal status (e.g., 'planned', 'requested')
-  linkedRequest?: any // the request join, needed for resolveItemProgress
-}
-
-/** Matches a raw task record */
+/** Minimal task shape the engine needs. */
 export interface SourceTask {
   id: string
   service_id: string | null
@@ -113,10 +101,12 @@ export interface SourceTask {
   status: string
   quantity: number
   deleted_at: string | null
-  isExplicitlyLinked?: boolean // true if joined via client_agreement_tasks
   /** Agreement item the coverage engine linked this task to (tasks.retainer_item_id). */
   retainer_item_id?: string | null
 }
+
+/** A task in one of these statuses counts as delivered. */
+export const DELIVERED_STATUSES = ['delivered', 'done', 'invoiced', 'paid'] as const
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -196,172 +186,50 @@ export function prorateCommitted(
 
 // ─── Computation Engine ──────────────────────────────────────────────────────
 
-interface ComputeContext {
+export interface ComputeContext {
   month: string
   agreement: ClientAgreementRow
   termRow: ClientAgreementItemRow
+  /** Sub-lines of the item. Used only to total the commitment, not to split delivery. */
   deliverables: ClientAgreementDeliverableRow[]
-  adjustments: ClientAgreementAdjustmentRow[] // for manual carry-forward
-  calendarItems: SourceCalendarItem[] // already filtered to this client & month
-  tasks: SourceTask[] // already filtered to this client & month (or global for one_time)
-  carryInRemaining: number // fed from the recursion
-}
-
-/**
- * Rule 3: Every unit attributes to exactly one deliverable.
- * Matches first by display_order.
- */
-function matchDeliverable(
-  unitType: ContentType,
-  unitServiceId: string | null,
-  deliverables: ClientAgreementDeliverableRow[],
-  itemServiceId: string | null
-): ClientAgreementDeliverableRow | null {
-  for (const d of deliverables) {
-    if (d.content_types.length === 0) {
-      if (unitServiceId === itemServiceId) return d
-    } else {
-      if (d.content_types.includes(unitType)) return d
-    }
-  }
-  return null
+  adjustments?: ClientAgreementAdjustmentRow[]
+  /** Already filtered to this client & month (or global for one_time items). */
+  tasks: SourceTask[]
+  /** Unmet commitment rolled in from the previous month. */
+  carryInRemaining: number
 }
 
 export function computeItemProgress(ctx: ComputeContext): ItemProgressSummary {
-  const { month, termRow, agreement, deliverables, calendarItems, tasks, carryInRemaining } = ctx
+  const { month, termRow, agreement, deliverables, tasks, carryInRemaining } = ctx
 
-  // 1. Calculate committed baseline
-  let baseCommitted = 0
-  if (deliverables.length === 0) {
-    baseCommitted = prorateCommitted(termRow.committed_quantity || 0, month, termRow, agreement)
-  } else {
-    // Deliverables are the source of truth if they exist
-    baseCommitted = deliverables.reduce(
-      (sum, d) => sum + prorateCommitted(d.committed_quantity, month, termRow, agreement),
-      0
-    )
-  }
-  baseCommitted += carryInRemaining // apply carry-forward
+  // ── Committed ──────────────────────────────────────────────────────────────
+  // Deliverables, when present, are the source of truth for the quantity.
+  let committed =
+    deliverables.length > 0
+      ? deliverables.reduce(
+          (sum, d) => sum + prorateCommitted(d.committed_quantity, month, termRow, agreement),
+          0,
+        )
+      : prorateCommitted(termRow.committed_quantity || 0, month, termRow, agreement)
 
-  // Initialize trackers
-  const delMap = new Map<string, DeliverableProgress>()
-  for (const d of deliverables) {
-    delMap.set(d.id, {
-      deliverableId: d.id,
-      label: d.label,
-      committed: prorateCommitted(d.committed_quantity, month, termRow, agreement),
-      planned: 0,
-      delivered: 0,
-      remaining: 0,
-      extra: 0,
-    })
-  }
-  
-  // Track out-of-calendar extra tasks explicitly
-  let safetyNetDelivered = 0
+  committed += carryInRemaining
 
-  // 2. Process Calendar Items
-  // "A calendar item is 1 unit of its content_type, and each value in its variants[] array is 1 additional unit"
-  const processedCalendarTaskIds = new Set<string>()
-
-  for (const calItem of calendarItems) {
-    // Rule 1 & 4
-    const resolvedProgress = resolveItemProgress(calItem.status, calItem.linkedRequest)
-    if (resolvedProgress === 'cancelled') continue
-    
-    // Remember the promoted task ID to prevent double-counting via safety net
-    if (calItem.linkedRequest?.promoted_task?.id) {
-      processedCalendarTaskIds.add(calItem.linkedRequest.promoted_task.id)
-    }
-
-    const units = [calItem.content_type, ...(calItem.variants || [])]
-    for (const unitType of units) {
-      const match = matchDeliverable(unitType, calItem.service_id, deliverables, termRow.service_id)
-      
-      const isDelivered = resolvedProgress === 'delivered' || resolvedProgress === 'done'
-      
-      if (match) {
-        const d = delMap.get(match.id)!
-        d.planned += 1
-        if (isDelivered) d.delivered += 1
-      } else if (isDelivered) {
-        // Did not match a typed deliverable, but is delivered work.
-        // It falls to the item-level safety net.
-        safetyNetDelivered += 1
-      }
-    }
-  }
-
-  // 3. Process Tasks (Safety net & explicitly linked tasks)
+  // ── Delivered — the single rule ────────────────────────────────────────────
+  let delivered = 0
   for (const task of tasks) {
-    if (task.deleted_at) continue // soft-deleted tasks never count
-    const isCompleted = ['delivered', 'done', 'invoiced', 'paid'].includes(task.status)
-    if (!isCompleted) continue
-    
-    if (processedCalendarTaskIds.has(task.id)) continue // skip double counting
-
-    // PREFERRED match: the coverage engine already stamped this task with the
-    // exact agreement item it belongs to (tasks.retainer_item_id). If it points
-    // at THIS term row, count it — regardless of how the task was created
-    // (manual, request, import, future integration) and regardless of service.
-    // This keeps Agreement Progress consistent with Billing coverage. `continue`
-    // avoids any double count with the service/link rules below. (Independent of
-    // bill_as_extra: extra work still counts toward progress AND bills.)
-    if (task.retainer_item_id && task.retainer_item_id === termRow.id) {
-      const match = matchDeliverable('other', task.service_id, deliverables, termRow.service_id)
-      if (match) delMap.get(match.id)!.delivered += task.quantity
-      else safetyNetDelivered += task.quantity
-      continue
-    }
-
-    if (task.isExplicitlyLinked) {
-      // Explicit links count fully towards the item/deliverable if possible
-      // (Without a content_type, we attribute to the first matching service deliverable, 
-      // or to the generic safety net if no deliverables match).
-      const match = matchDeliverable('other', task.service_id, deliverables, termRow.service_id)
-      if (match) {
-        const d = delMap.get(match.id)!
-        d.delivered += task.quantity
-      } else {
-        safetyNetDelivered += task.quantity
-      }
-    } else {
-      // Safety net: tasks under the same service ID that aren't linked or from the calendar
-      if (task.service_id === termRow.service_id) {
-        safetyNetDelivered += task.quantity
-      }
-    }
+    if (task.deleted_at) continue
+    if (!task.retainer_item_id || task.retainer_item_id !== termRow.id) continue
+    if (!DELIVERED_STATUSES.includes(task.status as typeof DELIVERED_STATUSES[number])) continue
+    delivered += Number(task.quantity) || 0
   }
-
-  // 4. Rollup
-  let totalCommitted = baseCommitted
-  let totalPlanned = 0
-  let totalDelivered = safetyNetDelivered
-
-  for (const d of delMap.values()) {
-    d.remaining = Math.max(0, d.committed - d.delivered)
-    d.extra = Math.max(0, d.delivered - d.committed)
-    
-    totalPlanned += d.planned
-    totalDelivered += d.delivered
-  }
-
-  const remaining = Math.max(0, totalCommitted - totalDelivered)
-  const extra = Math.max(0, totalDelivered - totalCommitted)
 
   return {
     itemId: termRow.id,
     serviceId: termRow.service_id,
     displayOrder: termRow.display_order,
-    committed: totalCommitted,
-    planned: totalPlanned,
-    delivered: totalDelivered,
-    remaining,
-    extra,
-    deliverables: Array.from(delMap.values()).sort((a, b) => 
-      (deliverables.find(x => x.id === a.deliverableId)?.display_order || 0) - 
-      (deliverables.find(x => x.id === b.deliverableId)?.display_order || 0)
-    ),
-    isUnderPlanned: totalPlanned < totalCommitted,
+    committed,
+    delivered,
+    remaining: Math.max(0, committed - delivered),
+    extra: Math.max(0, delivered - committed),
   }
 }

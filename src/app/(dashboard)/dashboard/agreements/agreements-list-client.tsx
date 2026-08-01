@@ -8,10 +8,8 @@ import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { FileSignature, Plus, Search, Loader2, Check, X } from 'lucide-react'
 import { AGREEMENT_STATUS_CHIP, STATUS_LABEL, STATUSES, RENEWAL_TYPES, type RenewalType } from '@/lib/agreements/types'
-import type { RetainerAnalytics } from '@/lib/agreements/analytics'
 import { createAgreement } from './actions'
 
-const HEALTH_DOT: Record<string, string> = { green: 'bg-emerald-500', amber: 'bg-amber-500', red: 'bg-red-500' }
 
 interface ClientRef { id: string; name: string; code: string }
 interface AgreementRow {
@@ -47,19 +45,14 @@ const emptyForm = (): CreateForm => ({
 })
 
 export default function AgreementsListClient({
-  initialAgreements, clients, analytics, canManage, canViewPricing = false, errorMsg,
+  initialAgreements, clients, canManage, canViewPricing = false, errorMsg,
 }: {
   initialAgreements: AgreementRow[]
   clients: ClientRef[]
-  analytics?: RetainerAnalytics[]
   canManage: boolean
   canViewPricing?: boolean
   errorMsg: string | null
 }) {
-  const analyticsById = useMemo(
-    () => new Map((analytics ?? []).map(a => [a.agreementId, a])),
-    [analytics],
-  )
   const router = useRouter()
   const searchParams = useSearchParams()
   const { toasts, dismiss, success, error: toastError } = useToast()
@@ -188,9 +181,6 @@ export default function AgreementsListClient({
                   <th className="px-6 py-3 font-medium">Agreement</th>
                   <th className="px-6 py-3 font-medium">Client</th>
                   <th className="px-6 py-3 font-medium">Term</th>
-                  {canViewPricing && <th className="px-6 py-3 font-medium">Retainer</th>}
-                  <th className="px-6 py-3 font-medium">Utilisation</th>
-                  <th className="px-6 py-3 font-medium">Health</th>
                   <th className="px-6 py-3 font-medium">Renewal</th>
                   <th className="px-6 py-3 font-medium">Status</th>
                   <th className="px-6 py-3 font-medium text-right">Actions</th>
@@ -209,34 +199,6 @@ export default function AgreementsListClient({
                     <td className="px-6 py-4 text-muted-foreground">
                       {agr.start_date} &rarr; {agr.end_date || 'Ongoing'}
                     </td>
-                    {(() => {
-                      const an = analyticsById.get(agr.id)
-                      return (
-                        <>
-                          {canViewPricing && (
-                            <td className="px-6 py-4 tabular-nums">
-                              {an?.monthlyRetainer != null ? `${an.currency} ${an.monthlyRetainer}` : <span className="text-muted-foreground">—</span>}
-                            </td>
-                          )}
-                          <td className="px-6 py-4">
-                            {an ? (
-                              <div className="min-w-[120px]">
-                                <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-1">
-                                  <span>{an.delivered}/{an.included}</span>
-                                  <span className="font-semibold text-foreground">{an.utilisation}%</span>
-                                </div>
-                                <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
-                                  <div className={`h-full rounded-full ${HEALTH_DOT[an.coverageHealth]}`} style={{ width: `${Math.min(100, an.utilisation)}%` }} />
-                                </div>
-                              </div>
-                            ) : <span className="text-muted-foreground">—</span>}
-                          </td>
-                          <td className="px-6 py-4">
-                            {an ? <span className={`inline-block w-2.5 h-2.5 rounded-full ${HEALTH_DOT[an.coverageHealth]}`} title={an.coverageHealth} /> : <span className="text-muted-foreground">—</span>}
-                          </td>
-                        </>
-                      )
-                    })()}
                     <td className="px-6 py-4 text-muted-foreground capitalize">{agr.renewal_type}</td>
                     <td className="px-6 py-4">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${AGREEMENT_STATUS_CHIP[agr.status]}`}>

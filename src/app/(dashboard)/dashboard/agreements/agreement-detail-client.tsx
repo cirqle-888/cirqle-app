@@ -21,7 +21,6 @@ import {
   setAgreementStatus, updateAgreementDetails, deleteAgreement, addAgreementNote,
   type AgreementItemInput, type AgreementDeliverableInput, type AgreementMilestoneInput,
 } from './actions'
-import type { RetainerAnalytics } from '@/lib/agreements/analytics'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -111,14 +110,13 @@ const EVENT_LABEL: Record<string, string> = {
 // ─── Main component ──────────────────────────────────────────────────────────
 
 export default function AgreementDetailClient({
-  agreement, items: initialItems, events: initialEvents, progress, analytics, currentMonth,
+  agreement, items: initialItems, events: initialEvents, progress, currentMonth,
   services, canManage, canViewPricing,
 }: {
   agreement: Agreement
   items: Item[]
   events: EventRow[]
   progress: any | null
-  analytics: RetainerAnalytics | null
   currentMonth: string
   services: { id: string; name: string }[]
   canManage: boolean
@@ -247,7 +245,6 @@ export default function AgreementDetailClient({
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
           { label: `Committed (${currentMonth})`, value: progress?.totalCommitted ?? 0, tone: '' },
-          { label: 'Planned', value: progress?.totalPlanned ?? 0, tone: 'text-blue-600' },
           { label: 'Delivered', value: progress?.totalDelivered ?? 0, tone: 'text-green-600' },
           { label: 'Remaining', value: progress?.totalRemaining ?? 0, tone: 'text-amber-600' },
         ].map(card => (
@@ -261,11 +258,6 @@ export default function AgreementDetailClient({
         <p className="text-xs text-muted-foreground -mt-3">
           No progress yet for {currentMonth} — figures populate as calendar items and tasks are delivered.
         </p>
-      )}
-
-      {/* Retainer analytics dashboard (Phase 3c) — reuses the analytics engine */}
-      {analytics && (
-        <AgreementAnalyticsBlock a={analytics} />
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -373,62 +365,8 @@ export default function AgreementDetailClient({
   )
 }
 
-// ─── Agreement analytics dashboard (Phase 3c) ────────────────────────────────
-
-const AN_HEALTH_DOT: Record<string, string> = { green: 'bg-emerald-500', amber: 'bg-amber-500', red: 'bg-red-500' }
-const AN_HEALTH_LABEL: Record<string, string> = { green: 'On track', amber: 'Near limit', red: 'Exceeded' }
-const AN_FIN: Record<string, string> = {
-  healthy: 'text-emerald-600 dark:text-emerald-400',
-  warning: 'text-amber-600 dark:text-amber-400',
-  loss: 'text-red-600 dark:text-red-400',
-}
 const AN_FIN_LABEL: Record<string, string> = { healthy: 'Healthy', warning: 'Warning', loss: 'Loss-making' }
 
-function AgreementAnalyticsBlock({ a }: { a: RetainerAnalytics }) {
-  const cur = a.currency
-  const native = (n: number | null | undefined) => n == null ? null : `${cur} ${Math.round(n).toLocaleString('en-US')}`
-  const inr = (n: number | null | undefined) => n == null ? null : `₹${Math.round(n).toLocaleString('en-IN')}`
-  const cells: { label: string; value: string; tone?: string }[] = []
-  if (a.monthlyRetainer != null) cells.push({ label: 'Monthly retainer', value: native(a.monthlyRetainer)! })
-  if (a.creativeAllocation != null) cells.push({ label: 'Creative allocation', value: native(a.creativeAllocation)! })
-  if (a.managementAllocation != null) cells.push({ label: 'Management allocation', value: native(a.managementAllocation)! })
-  if (a.allocatedUnitValue != null) cells.push({ label: 'Allocated unit value', value: `${native(a.allocatedUnitValue)} /unit` })
-  if (a.allocatedValueDelivered != null) cells.push({ label: 'Value delivered', value: native(a.allocatedValueDelivered)! })
-  if (a.allocatedValueRemaining != null) cells.push({ label: 'Value remaining', value: native(a.allocatedValueRemaining)! })
-  if (a.internalCost != null) cells.push({ label: 'Internal cost', value: inr(a.internalCost)! })
-  if (a.grossMargin != null) cells.push({ label: 'Est. gross margin', value: `${inr(a.grossMargin)}${a.marginPct != null ? ` · ${a.marginPct}%` : ''}`, tone: AN_FIN[a.financialHealth || 'healthy'] })
-
-  return (
-    <div className="rounded-xl border bg-card p-5 shadow-sm">
-      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
-        <h3 className="font-semibold text-sm flex items-center gap-1.5"><Wallet className="w-4 h-4 text-muted-foreground" /> Retainer Analytics <span className="text-[11px] font-normal text-muted-foreground">· {a.currency}</span></h3>
-        <div className="flex items-center gap-3 text-xs">
-          <span className="inline-flex items-center gap-1.5"><span className={`w-2 h-2 rounded-full ${AN_HEALTH_DOT[a.coverageHealth]}`} />{AN_HEALTH_LABEL[a.coverageHealth]}</span>
-          {a.financialHealth && <span className={AN_FIN[a.financialHealth]}>{AN_FIN_LABEL[a.financialHealth]}</span>}
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
-        <span>Utilisation · {a.delivered}/{a.included} delivered{a.extraTasks > 0 ? ` · ${a.extraTasks} extra` : ''}</span>
-        <span className="font-semibold text-foreground">{a.utilisation}%</span>
-      </div>
-      <div className="h-2 w-full rounded-full bg-secondary overflow-hidden mb-4">
-        <div className={`h-full rounded-full ${AN_HEALTH_DOT[a.coverageHealth]}`} style={{ width: `${Math.min(100, a.utilisation)}%` }} />
-      </div>
-
-      {cells.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {cells.map(c => (
-            <div key={c.label}>
-              <div className="text-[10px] text-muted-foreground">{c.label}</div>
-              <div className={`text-sm font-semibold tabular-nums ${c.tone || ''}`}>{c.value}</div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
 
 // ─── Item card ───────────────────────────────────────────────────────────────
 

@@ -148,91 +148,74 @@ export async function loadClientMonthProgress(
   const activeItemIds = Array.from(activeItemsByAgreement.values()).flat().map(i => i.id)
   if (activeItemIds.length === 0) return []
 
-  // 3. Fetch related Deliverables, Linked Tasks, Adjustments
+  // 3. Fetch Deliverables (commitment totals) and Adjustments (manual carry-forward)
   const [
     { data: deliverables },
-    { data: linkedTasks },
     { data: adjustments }
   ] = await Promise.all([
     supabase.from('client_agreement_deliverables').select('*').in('item_id', activeItemIds),
-    supabase.from('client_agreement_tasks').select('*').in('item_id', activeItemIds),
     supabase.from('client_agreement_adjustments').select('*').in('item_id', activeItemIds).lte('month', `${month}-01`)
   ])
-  
-  // 4. Fetch Calendar Items & Pipeline Tasks for the month
+
+  // 4. Fetch the month's tasks. Delivery is counted solely from tasks the
+  // coverage engine stamped with retainer_item_id — see progress.ts for why the
+  // calendar and service-matching paths were removed.
+  //
   // task_date is a DATE column, so the upper bound must be the REAL last day —
   // "${month}-31" is an invalid date for 30-day months / February and Postgres
   // rejects the whole query (silently, via the caller's catch), zeroing all
   // progress. Derive the last day the same way the item-window check does.
   const [my, mm] = month.split('-').map(Number)
   const monthEnd = `${month}-${String(new Date(my, mm, 0).getDate()).padStart(2, '0')}`
-  const [
-    { data: calendarItems },
-    { data: pipelineTasks }
-  ] = await Promise.all([
-    supabase.from('social_calendar_items')
-      .select(`
-        id, service_id, content_type, variants, status,
-        linkedRequest:request_id (
-          id, status,
-          promoted_task:tasks ( id, status )
-        )
-      `)
-      .eq('calendar:social_calendars!inner(client_id)', clientId)
-      .eq('calendar:social_calendars!inner(month)', month),
-      
-    supabase.from('tasks')
-      .select('id, service_id, task_date, status, quantity, deleted_at, retainer_item_id')
-      .eq('client_id', clientId)
-      .is('deleted_at', null)
-      // For tasks we should technically fetch matching the month, but one_time items ignore month. 
-      // For now we fetch month tasks, we can refine this.
-      .gte('task_date', `${month}-01`)
-      .lte('task_date', monthEnd)
-  ])
-  
-  const linkedTaskIds = new Set((linkedTasks || []).map(lt => lt.task_id))
-  const enrichedTasks = (pipelineTasks || []).map(t => ({
-    ...t,
-    isExplicitlyLinked: linkedTaskIds.has(t.id)
-  }))
-  
+
+  const { data: pipelineTasks, error: tasksError } = await supabase
+    .from('tasks')
+    .select('id, service_id, task_date, status, quantity, deleted_at, retainer_item_id')
+    .eq('client_id', clientId)
+    .is('deleted_at', null)
+    .gte('task_date', `${month}-01`)
+    .lte('task_date', monthEnd)
+
+  // Surface the failure rather than silently reporting zero progress.
+  if (tasksError) {
+    throw new Error(`loadClientMonthProgress: task fetch failed — ${tasksError.message}`)
+  }
+
+  const tasks = pipelineTasks || []
   const results: AgreementProgressSummary[] = []
-  
+
   for (const agr of agreements) {
     const termRows = activeItemsByAgreement.get(agr.id) || []
     if (termRows.length === 0) continue
-    
-    let totalCommitted = 0, totalPlanned = 0, totalDelivered = 0
+
+    let totalCommitted = 0, totalDelivered = 0
     const itemSummaries: ItemProgressSummary[] = []
-    
+
     for (const termRow of termRows) {
       const itemDeliverables = (deliverables || []).filter(d => d.item_id === termRow.id)
       const itemAdjustments = (adjustments || []).filter(a => a.item_id === termRow.id)
-      
+
       // Calculate manual carry in
       let carryIn = 0
       if (termRow.carry_forward_rule === 'manual') {
         carryIn = itemAdjustments.reduce((sum, a) => sum + Number(a.qty), 0)
       }
-      
+
       const summary = computeItemProgress({
         month,
         agreement: agr,
         termRow,
         deliverables: itemDeliverables,
         adjustments: itemAdjustments,
-        calendarItems: (calendarItems || []) as any,
-        tasks: enrichedTasks,
+        tasks,
         carryInRemaining: carryIn
       })
-      
+
       itemSummaries.push(summary)
       totalCommitted += summary.committed
-      totalPlanned += summary.planned
       totalDelivered += summary.delivered
     }
-    
+
     results.push({
       agreementId: agr.id,
       agreementNumber: agr.agreement_number,
@@ -240,7 +223,6 @@ export async function loadClientMonthProgress(
       status: agr.status,
       items: itemSummaries.sort((a, b) => a.displayOrder - b.displayOrder),
       totalCommitted,
-      totalPlanned,
       totalDelivered,
       totalRemaining: Math.max(0, totalCommitted - totalDelivered),
       totalExtra: Math.max(0, totalDelivered - totalCommitted)

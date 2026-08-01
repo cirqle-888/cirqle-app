@@ -4,7 +4,6 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { loadAgreementOverview } from '@/lib/agreements/server'
-import { loadRetainerAnalytics, type RetainerAnalytics } from '@/lib/agreements/analytics'
 import AgreementsListClient from './agreements-list-client'
 
 export const dynamic = 'force-dynamic'
@@ -25,19 +24,16 @@ export default async function AgreementsPage() {
   let agreements: any[] = []
   let errorMsg: string | null = null
   let clients: { id: string; name: string; code: string }[] = []
-  let analytics: RetainerAnalytics[] = []
 
   try {
     const currentMonth = new Date().toISOString().slice(0, 7)
     const admin = await createAdminClient()
-    const [overview, clientsRes, analyticsRes] = await Promise.all([
+    const [overview, clientsRes] = await Promise.all([
       loadAgreementOverview({}),
       admin.from('clients').select('id, name, code').eq('is_active', true).order('name'),
-      loadRetainerAnalytics({ month: currentMonth, pricingVisible: canViewPricing }).catch(() => [] as RetainerAnalytics[]),
     ])
     agreements = overview
     clients = clientsRes.data || []
-    analytics = analyticsRes
   } catch (err) {
     console.error('Failed to load agreements', err)
     errorMsg = 'Agreements module is not fully initialized. Please ensure migrations are applied.'
@@ -47,7 +43,6 @@ export default async function AgreementsPage() {
     <AgreementsListClient
       initialAgreements={agreements}
       clients={clients}
-      analytics={analytics}
       canManage={canManage}
       canViewPricing={canViewPricing}
       errorMsg={errorMsg}

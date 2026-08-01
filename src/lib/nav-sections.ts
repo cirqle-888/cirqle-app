@@ -106,8 +106,6 @@ export const navSections: NavSection[] = [
       { label: 'Reports', href: '/dashboard/reports', icon: BarChart3, requiredPerm: 'reports.view' },
       // Contribution Analysis: spreadsheet-style per-task profitability / earnings BI report.
       { label: 'Contribution Analysis', href: '/dashboard/reports/contribution-analysis', icon: Sheet, requiredPerm: 'reports.view', keywords: ['spreadsheet', 'earnings', 'BI'] },
-      // Retainer Analytics: revenue / utilisation / profitability / employee production for retainers.
-      { label: 'Retainer Analytics', href: '/dashboard/reports/retainer-analytics', icon: Handshake, requiredPerm: 'reports.view', keywords: ['retainer', 'utilisation', 'profitability', 'margin', 'revenue', 'agreement analytics'] },
       // Company Operations: company-scoped P&L + burn rate / runway + scope triage.
       { label: 'Company Operations', href: '/dashboard/reports/company-ops', icon: Building2, requiredPerm: 'reports.view', keywords: ['P&L', 'burn rate', 'runway'] },
       // Client Profitability: per-client contribution margin (Finance Engine).

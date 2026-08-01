@@ -10,13 +10,9 @@ import {
 } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import type { AgreementProgressSummary } from '@/lib/agreements/progress'
-import type { RetainerAnalytics, RetainerTrendPoint } from '@/lib/agreements/analytics'
-import { agreementHealthScore, HEALTH_LABEL as BAND_LABEL, HEALTH_COLOR as BAND_COLOR } from '@/lib/agreements/intelligence'
 
 // Lazy recharts — only loads when a client with retainer trend data is viewed.
 const ChartSkeleton = () => <div className="h-[220px] rounded-lg bg-secondary/40 animate-pulse" />
-const RevenueTrendChart = dynamic(() => import('@/app/(dashboard)/dashboard/reports/retainer-analytics/_retainer-charts').then(m => m.RevenueTrendChart), { ssr: false, loading: ChartSkeleton })
-const UtilisationTrendChart = dynamic(() => import('@/app/(dashboard)/dashboard/reports/retainer-analytics/_retainer-charts').then(m => m.UtilisationTrendChart), { ssr: false, loading: ChartSkeleton })
 
 interface Props {
   client: any
@@ -28,8 +24,6 @@ interface Props {
   showAmounts: boolean
   agreements?: any[]
   agreementProgress?: AgreementProgressSummary[]
-  retainerAnalytics?: RetainerAnalytics[]
-  retainerTrend?: RetainerTrendPoint[]
   canViewAgreements?: boolean
   canManageAgreements?: boolean
 }
@@ -79,60 +73,6 @@ const inrMoney = (n: number | null | undefined) => n == null ? null : `₹${Math
 
 /** Operational retainer dashboard row (Phase 3). Read-only; money already
  *  stripped upstream for viewers without agreements.view_pricing. */
-function RetainerInsightCard({ a }: { a: RetainerAnalytics }) {
-  const cells: { label: string; value: string }[] = []
-  if (a.monthlyRetainer != null)          cells.push({ label: 'Monthly retainer', value: nativeMoney(a.currency, a.monthlyRetainer)! })
-  if (a.creativeAllocation != null)       cells.push({ label: 'Creative allocation', value: nativeMoney(a.currency, a.creativeAllocation)! })
-  if (a.managementAllocation != null)     cells.push({ label: 'Management allocation', value: nativeMoney(a.currency, a.managementAllocation)! })
-  if (a.allocatedValueDelivered != null)  cells.push({ label: 'Value delivered', value: nativeMoney(a.currency, a.allocatedValueDelivered)! })
-  if (a.allocatedValueRemaining != null)  cells.push({ label: 'Value remaining', value: nativeMoney(a.currency, a.allocatedValueRemaining)! })
-  if (a.internalCost != null)             cells.push({ label: 'Internal cost', value: inrMoney(a.internalCost)! })
-  return (
-    <div className="px-5 py-4">
-      <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
-        <div className="min-w-0">
-          <Link href={`/dashboard/agreements/${a.agreementId}`} className="text-sm font-medium hover:underline truncate">{a.title}</Link>
-          <p className="text-[11px] text-muted-foreground">{a.agreementNumber}</p>
-        </div>
-        <div className="flex items-center gap-2.5 text-[11px] font-medium">
-          {(() => { const h = agreementHealthScore(a, new Date().toISOString().slice(0, 7)); return (
-            <span className={BAND_COLOR[h.band]} title={`Health score ${h.score}/100`}>{BAND_LABEL[h.band]}</span>
-          ) })()}
-          <span className="inline-flex items-center gap-1.5">
-            <span className={`w-2 h-2 rounded-full ${HEALTH_DOT[a.coverageHealth]}`} />{HEALTH_LABEL[a.coverageHealth]}
-          </span>
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-1">
-        <span>{a.delivered} / {a.included} delivered · {a.remaining} remaining{a.extraTasks > 0 ? ` · ${a.extraTasks} extra` : ''}</span>
-        <span className="font-semibold text-foreground">{a.utilisation}%</span>
-      </div>
-      <div className="h-2 w-full rounded-full bg-secondary overflow-hidden">
-        <div className={`h-full rounded-full ${HEALTH_BAR[a.coverageHealth]}`} style={{ width: `${Math.min(100, a.utilisation)}%` }} />
-      </div>
-
-      {cells.length > 0 && (
-        <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
-          {cells.map(c => (
-            <div key={c.label}>
-              <div className="text-[10px] text-muted-foreground">{c.label}</div>
-              <div className="text-sm font-semibold tabular-nums">{c.value}</div>
-            </div>
-          ))}
-          {a.grossMargin != null && (
-            <div>
-              <div className="text-[10px] text-muted-foreground">Gross margin</div>
-              <div className={`text-sm font-semibold tabular-nums ${FIN_STYLE[a.financialHealth || 'healthy']}`}>
-                {inrMoney(a.grossMargin)}{a.marginPct != null ? ` · ${a.marginPct}%` : ''}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
 
 /** Shape the Agreements card reads off each overview row (loadAgreementOverview). */
 interface AgreementCardRow {
@@ -148,7 +88,7 @@ interface AgreementCardRow {
 
 export default function ClientDetailClient({
   client, invoices, tasks, pricing, services, partner, showAmounts,
-  agreements, agreementProgress, retainerAnalytics, retainerTrend, canViewAgreements = false, canManageAgreements = false,
+  agreements, agreementProgress, canViewAgreements = false, canManageAgreements = false,
 }: Props) {
   const { ds } = usePrivacy()
 
@@ -268,26 +208,6 @@ export default function ClientDetailClient({
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
-
-            {canViewAgreements && retainerAnalytics && retainerAnalytics.length > 0 && (
-              <div className="bg-card border border-border rounded-2xl overflow-hidden">
-                <div className="px-5 py-3.5 border-b border-border/60 flex items-center justify-between">
-                  <h2 className="text-sm font-semibold flex items-center gap-1.5"><Handshake className="w-4 h-4 text-muted-foreground" /> Retainer Insights</h2>
-                  <span className="text-[11px] text-muted-foreground">This month</span>
-                </div>
-                <div className="divide-y divide-border/40">
-                  {retainerAnalytics.map(a => <RetainerInsightCard key={a.agreementId} a={a} />)}
-                </div>
-                {retainerTrend && retainerTrend.some(t => t.included > 0 || (t.revenue ?? 0) > 0) && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-5 border-t border-border/60">
-                    {retainerTrend.some(t => (t.revenue ?? 0) > 0) && (
-                      <div><div className="text-[11px] text-muted-foreground mb-2">Revenue trend (6mo)</div><RevenueTrendChart data={retainerTrend} /></div>
-                    )}
-                    <div><div className="text-[11px] text-muted-foreground mb-2">Utilisation trend (6mo)</div><UtilisationTrendChart data={retainerTrend} /></div>
-                  </div>
-                )}
               </div>
             )}
 

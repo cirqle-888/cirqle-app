@@ -5,7 +5,6 @@ import { financialVisibility } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
 import { loadAgreementOverview, loadClientMonthProgress } from '@/lib/agreements/server'
 import type { AgreementProgressSummary } from '@/lib/agreements/progress'
-import { loadRetainerAnalytics, loadRetainerAnalyticsTrend, type RetainerAnalytics, type RetainerTrendPoint } from '@/lib/agreements/analytics'
 import ClientDetailClient from './client-detail-client'
 
 export const dynamic = 'force-dynamic'
@@ -52,11 +51,9 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   // no N+1. All skipped when the viewer can't see agreements.
   let agreements: Awaited<ReturnType<typeof loadAgreementOverview>> = []
   let agreementProgress: AgreementProgressSummary[] = []
-  let retainerAnalytics: RetainerAnalytics[] = []
-  let retainerTrend: RetainerTrendPoint[] = []
   if (canViewAgreements) {
     const currentMonth = new Date().toISOString().slice(0, 7)
-    const [overview, progress, analytics, trend] = await Promise.all([
+    const [overview, progress] = await Promise.all([
       loadAgreementOverview({ clientId: id }).catch(err => {
         console.error('Failed to load agreements', err)
         return []
@@ -65,16 +62,9 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         console.error('Failed to load agreement progress', err)
         return [] as AgreementProgressSummary[]
       }),
-      loadRetainerAnalytics({ clientId: id, month: currentMonth, pricingVisible: canViewAgreementPricing }).catch(err => {
-        console.error('Failed to load retainer analytics', err)
-        return [] as RetainerAnalytics[]
-      }),
-      loadRetainerAnalyticsTrend({ clientId: id, endMonth: currentMonth, months: 6, pricingVisible: canViewAgreementPricing }).catch(() => [] as RetainerTrendPoint[]),
     ])
     agreements = overview
     agreementProgress = progress
-    retainerAnalytics = analytics
-    retainerTrend = trend
   }
 
   return (
@@ -88,8 +78,6 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       showAmounts={showAmounts}
       agreements={agreements}
       agreementProgress={agreementProgress}
-      retainerAnalytics={retainerAnalytics}
-      retainerTrend={retainerTrend}
       canViewAgreements={canViewAgreements}
       canManageAgreements={canManageAgreements}
     />
