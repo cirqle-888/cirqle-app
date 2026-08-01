@@ -132,8 +132,14 @@ const RATE_LIMIT = 60 // requests
 const RATE_LIMIT_WINDOW = 60 * 1000 // 1 minute
 
 function checkRateLimit(request: NextRequest): boolean {
-  // Edge runtime supports x-forwarded-for or req.ip directly on Vercel
-  const ip = request.ip || request.headers.get('x-forwarded-for') || 'unknown'
+  // NextRequest.ip was removed in Next 15+ — on Vercel the client address
+  // arrives as the FIRST entry of x-forwarded-for (later entries are proxies),
+  // with x-real-ip as a fallback. Taking the whole header would let a caller
+  // append values and get a fresh bucket per request.
+  const forwarded = request.headers.get('x-forwarded-for')
+  const ip = forwarded?.split(',')[0]?.trim()
+    || request.headers.get('x-real-ip')?.trim()
+    || 'unknown'
   if (ip === 'unknown') return true
 
   const now = Date.now()
