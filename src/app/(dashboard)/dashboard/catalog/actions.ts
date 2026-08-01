@@ -186,7 +186,21 @@ export async function getProductImageUploadUrl(
   const empId = guard.employeeId
 
   const admin = createAdminClient()
-  const ext = filename.split('.').pop() || 'jpg'
+
+  const EXT_BY_TYPE: Record<string, string> = {
+    'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png',
+    'image/webp': 'webp', 'image/gif': 'gif', 'image/avif': 'avif',
+    'image/heic': 'heic', 'image/heif': 'heif',
+  }
+  const ALLOWED_EXTS = new Set([...Object.values(EXT_BY_TYPE), 'jpeg'])
+  const declaredType = contentType.toLowerCase().split(';')[0].trim()
+  const filenameExt = (filename.split('.').pop() || '').toLowerCase()
+  const ext = EXT_BY_TYPE[declaredType] ?? (ALLOWED_EXTS.has(filenameExt) ? filenameExt : undefined)
+  
+  if (!ext) {
+    return { ok: false, error: 'Only JPG, PNG, WebP, GIF, AVIF or HEIC images can be uploaded.' }
+  }
+
   const storagePath = `catalog/${productId}/${Date.now()}-original.${ext}`
 
   const { data, error } = await admin.storage
