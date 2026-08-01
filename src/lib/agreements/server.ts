@@ -170,7 +170,7 @@ export async function loadClientMonthProgress(
 
   const { data: pipelineTasks, error: tasksError } = await supabase
     .from('tasks')
-    .select('id, service_id, task_date, status, quantity, deleted_at, retainer_item_id')
+    .select('id, service_id, task_date, status, quantity, deleted_at, retainer_item_id, bill_as_extra')
     .eq('client_id', clientId)
     .is('deleted_at', null)
     .gte('task_date', `${month}-01`)
@@ -188,7 +188,7 @@ export async function loadClientMonthProgress(
     const termRows = activeItemsByAgreement.get(agr.id) || []
     if (termRows.length === 0) continue
 
-    let totalCommitted = 0, totalDelivered = 0
+    let totalCommitted = 0, totalDelivered = 0, totalExtraBilled = 0
     const itemSummaries: ItemProgressSummary[] = []
 
     for (const termRow of termRows) {
@@ -214,6 +214,7 @@ export async function loadClientMonthProgress(
       itemSummaries.push(summary)
       totalCommitted += summary.committed
       totalDelivered += summary.delivered
+      totalExtraBilled += summary.extraBilled
     }
 
     results.push({
@@ -225,7 +226,8 @@ export async function loadClientMonthProgress(
       totalCommitted,
       totalDelivered,
       totalRemaining: Math.max(0, totalCommitted - totalDelivered),
-      totalExtra: Math.max(0, totalDelivered - totalCommitted)
+      totalExtra: Math.max(0, totalDelivered - totalCommitted),
+      totalExtraBilled
     })
   }
 

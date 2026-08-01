@@ -15,12 +15,21 @@ export const metadata: Metadata = {
   title: 'Agreement Detail | Cirqle',
 }
 
+/** 'YYYY-MM' or null. Guards against a hand-edited ?month= reaching the query. */
+function parseMonth(raw: string | string[] | undefined): string | null {
+  const v = Array.isArray(raw) ? raw[0] : raw
+  return v && /^\d{4}-(0[1-9]|1[0-2])$/.test(v) ? v : null
+}
+
 export default async function AgreementDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>
+  searchParams: Promise<{ month?: string }>
 }) {
   const { id } = await params
+  const { month: monthParam } = await searchParams
   const me = await loadCurrentUser().catch(() => null)
   const isAdmin = me?.isAdmin ?? false
   const canView = isAdmin || hasPermission(me, PERMS.AGREEMENTS_VIEW)
@@ -39,7 +48,7 @@ export default async function AgreementDetailPage({
 
   if (!agreement) notFound()
 
-  const currentMonth = new Date().toISOString().slice(0, 7)
+  const currentMonth = parseMonth(monthParam) ?? new Date().toISOString().slice(0, 7)
 
   const [items, events, progress, servicesRes] = await Promise.all([
     loadAgreementItems(agreement.id).catch(() => []),

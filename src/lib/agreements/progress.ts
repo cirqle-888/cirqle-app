@@ -41,10 +41,17 @@ export interface ItemProgressSummary {
   serviceId: string | null
   displayOrder: number
   committed: number
+  /** Work that consumed the included allowance. Excludes bill-as-extra tasks. */
   delivered: number
   remaining: number
-  /** Delivered beyond the commitment. Still delivered work — it bills separately if flagged. */
+  /** Delivered beyond the commitment (delivered > committed). */
   extra: number
+  /**
+   * Covered tasks the client is billed for separately (`bill_as_extra`). Counted
+   * and shown, but deliberately NOT consuming the allowance: charging for a task
+   * *and* spending one of the included units would bill the client twice for it.
+   */
+  extraBilled: number
 }
 
 export interface AgreementProgressSummary {
@@ -57,6 +64,8 @@ export interface AgreementProgressSummary {
   totalDelivered: number
   totalRemaining: number
   totalExtra: number
+  /** Covered work billed separately — shown, but not consuming the allowance. */
+  totalExtraBilled: number
 }
 
 /** Aggregate of one or more agreement summaries — powers headline meters/cards. */
@@ -67,6 +76,7 @@ export interface AgreementProgressRollup {
   delivered: number
   remaining: number
   extra: number
+  extraBilled: number
   /** Delivered ÷ committed, 0–100 (0 when nothing is committed). */
   completionPct: number
 }
@@ -89,6 +99,7 @@ export function rollupAgreementProgress(
     delivered,
     remaining: active.reduce((sum, s) => sum + (s.totalRemaining || 0), 0),
     extra: active.reduce((sum, s) => sum + (s.totalExtra || 0), 0),
+    extraBilled: active.reduce((sum, s) => sum + (s.totalExtraBilled || 0), 0),
     completionPct: committed > 0 ? Math.min(100, Math.round((delivered / committed) * 100)) : 0,
   }
 }
@@ -103,6 +114,8 @@ export interface SourceTask {
   deleted_at: string | null
   /** Agreement item the coverage engine linked this task to (tasks.retainer_item_id). */
   retainer_item_id?: string | null
+  /** Covered, but billed to the client separately instead of consuming the allowance. */
+  bill_as_extra?: boolean | null
 }
 
 /** A task in one of these statuses counts as delivered. */
@@ -216,11 +229,17 @@ export function computeItemProgress(ctx: ComputeContext): ItemProgressSummary {
 
   // ── Delivered — the single rule ────────────────────────────────────────────
   let delivered = 0
+  let extraBilled = 0
   for (const task of tasks) {
     if (task.deleted_at) continue
     if (!task.retainer_item_id || task.retainer_item_id !== termRow.id) continue
     if (!DELIVERED_STATUSES.includes(task.status as typeof DELIVERED_STATUSES[number])) continue
-    delivered += Number(task.quantity) || 0
+
+    const qty = Number(task.quantity) || 0
+    // Billed separately => the client is paying for it on top of the retainer, so
+    // it must not also spend one of the included units.
+    if (task.bill_as_extra) extraBilled += qty
+    else delivered += qty
   }
 
   return {
@@ -231,5 +250,6 @@ export function computeItemProgress(ctx: ComputeContext): ItemProgressSummary {
     delivered,
     remaining: Math.max(0, committed - delivered),
     extra: Math.max(0, delivered - committed),
+    extraBilled,
   }
 }

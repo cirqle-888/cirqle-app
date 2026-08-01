@@ -59,9 +59,20 @@ describe('computeItemProgress — the single rule', () => {
     }
   })
 
-  it('counts an extra-work task toward progress (progress ignores billing)', () => {
-    // bill_as_extra is not a progress input; retainer_item_id being set is enough.
+  it('counts a covered task that is NOT billed as extra toward the allowance', () => {
     expect(run([task({ retainer_item_id: ITEM_ID })]).delivered).toBe(1)
+  })
+
+  it('does not spend the allowance on work the client is billed for separately', () => {
+    // Charging for a task AND consuming one of the 15 included units would bill
+    // the client twice for it. Real case: task #1883 (Elara), extra work at AED 20.
+    const r = run([
+      task({ id: 'covered', retainer_item_id: ITEM_ID }),
+      task({ id: 'extra', retainer_item_id: ITEM_ID, bill_as_extra: true }),
+    ])
+    expect(r.delivered).toBe(1)     // only the covered one consumes
+    expect(r.extraBilled).toBe(1)   // the billed one is reported separately
+    expect(r.remaining).toBe(14)    // 15 − 1, not 15 − 2
   })
 
   it('never double-counts when both the link AND the service match', () => {

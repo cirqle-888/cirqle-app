@@ -242,11 +242,24 @@ export default function AgreementDetailClient({
       )}
 
       {/* Progress overview */}
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <h2 className="text-sm font-semibold">Delivery this period</h2>
+        <MonthSwitcher
+          month={currentMonth}
+          agreementStart={agreement.start_date}
+          onChange={m => router.push(`?month=${m}`)}
+        />
+      </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
           { label: `Committed (${currentMonth})`, value: progress?.totalCommitted ?? 0, tone: '' },
           { label: 'Delivered', value: progress?.totalDelivered ?? 0, tone: 'text-green-600' },
           { label: 'Remaining', value: progress?.totalRemaining ?? 0, tone: 'text-amber-600' },
+          // Covered work billed on top of the retainer. Shown only when it exists,
+          // so the usual case stays a clean three-card row.
+          ...((progress?.totalExtraBilled ?? 0) > 0
+            ? [{ label: 'Billed as extra', value: progress!.totalExtraBilled, tone: 'text-blue-600' }]
+            : []),
         ].map(card => (
           <div key={card.label} className="bg-card border rounded-xl p-5 shadow-sm">
             <div className="text-xs font-medium text-muted-foreground mb-1">{card.label}</div>
@@ -254,9 +267,16 @@ export default function AgreementDetailClient({
           </div>
         ))}
       </div>
+      {/* A part-month commitment is correct but reads as a bug without this line. */}
+      {isPartialMonth(currentMonth, agreement.start_date, agreement.end_date) && (
+        <p className="text-xs text-muted-foreground -mt-3">
+          {currentMonth} is a part month — the commitment is prorated by active days
+          {agreement.start_date >= `${currentMonth}-01` ? ` (agreement starts ${agreement.start_date})` : ''}.
+        </p>
+      )}
       {progress == null && agreement.status === 'active' && (
         <p className="text-xs text-muted-foreground -mt-3">
-          No progress yet for {currentMonth} — figures populate as calendar items and tasks are delivered.
+          No delivery recorded for {currentMonth} — figures populate as covered tasks are completed.
         </p>
       )}
 
@@ -995,5 +1015,62 @@ function NoteEditor({
         </div>
       </div>
     </ModalOverlay>
+  )
+}
+
+// ─── Month navigation ────────────────────────────────────────────────────────
+
+/** True when the agreement covers only part of `month`, so committed is prorated. */
+function isPartialMonth(month: string, start: string, end: string | null): boolean {
+  const [y, m] = month.split('-').map(Number)
+  const first = `${month}-01`
+  const last = `${month}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`
+  return start > first || (!!end && end < last)
+}
+
+function shiftMonth(month: string, delta: number): string {
+  const [y, m] = month.split('-').map(Number)
+  const d = new Date(y, m - 1 + delta, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+/**
+ * Steps the progress view month by month. Without this the page always showed
+ * the current month, so on the 1st it read "Delivered 0" for an agreement that
+ * had delivered all month — indistinguishable from a broken engine.
+ */
+function MonthSwitcher({
+  month, agreementStart, onChange,
+}: {
+  month: string
+  agreementStart: string
+  onChange: (m: string) => void
+}) {
+  const thisMonth = new Date().toISOString().slice(0, 7)
+  const atStart = shiftMonth(month, -1) < agreementStart.slice(0, 7)
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        onClick={() => onChange(shiftMonth(month, -1))}
+        disabled={atStart}
+        aria-label="Previous month"
+        className="px-2 py-1 rounded-md border text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:bg-accent"
+      >‹</button>
+      <span className="text-sm font-medium tabular-nums min-w-[72px] text-center">{month}</span>
+      <button
+        type="button"
+        onClick={() => onChange(shiftMonth(month, 1))}
+        aria-label="Next month"
+        className="px-2 py-1 rounded-md border text-sm hover:bg-accent"
+      >›</button>
+      {month !== thisMonth && (
+        <button
+          type="button"
+          onClick={() => onChange(thisMonth)}
+          className="ml-1 px-2 py-1 rounded-md border text-xs hover:bg-accent"
+        >This month</button>
+      )}
+    </div>
   )
 }
