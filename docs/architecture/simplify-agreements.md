@@ -1,5 +1,11 @@
 # Simplification Plan — Agreements & Contributions
 
+> **Status (1 Aug 2026, commit `422178e`)**
+> **Phase 1 — done** except 1.1 (coverage backfill) and 1.4 (month switcher / proration label).
+> **Phase 2 — done.** Analytics stack and all four duplicate renderings removed.
+> **Phase 3 — not started.** Contributions still read `billing_amount`.
+> Verified against production: Elara July = committed 6, delivered 2, remaining 4. 473 tests pass.
+
 **Goal, stated plainly:** Tasks is where work gets added. Agreements answers one question — *did we deliver what we committed?* Nothing else, for now.
 
 **Effect:** roughly 2,700 of ~5,000 lines in the agreements module go away.
