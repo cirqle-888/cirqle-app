@@ -31,3 +31,23 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - run: npm run test
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Start local Supabase
+        run: supabase start
+      - name: Check RLS is enabled on all tables
+        run: |
+          # The query returns tables without RLS. If the output isn't empty, fail.
+          OUTPUT=$(supabase db psql -t -f scripts/check-rls.sql)
+          if [ -n "$(echo "$OUTPUT" | xargs)" ]; then
+            echo "Error: The following tables have RLS disabled:"
+            echo "$OUTPUT"
+            exit 1
+          fi
