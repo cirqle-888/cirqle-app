@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { selectWithOptionalColumns } from '@/lib/offer-columns'
-import { resolveCurrentEmployeeId, requireAdmin } from '@/lib/auth/enforce'
+import { resolveCurrentEmployeeId, requireAdmin } from '@/lib/permissions/check'
 import { getIntakeKindsByClient } from '@/lib/services/intake-server'
 import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'

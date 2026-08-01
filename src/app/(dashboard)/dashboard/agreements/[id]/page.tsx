@@ -23,7 +23,7 @@ export default async function AgreementDetailPage({
 }) {
   const { id } = await params
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin = me?.isAdmin ?? true
+  const isAdmin = me?.isAdmin ?? false
   const canView = isAdmin || hasPermission(me, PERMS.AGREEMENTS_VIEW)
   if (me && !canView) redirect('/dashboard')
   const canManage = isAdmin || hasPermission(me, PERMS.AGREEMENTS_MANAGE)

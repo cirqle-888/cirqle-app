@@ -12,7 +12,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/auth/enforce'
+import { requirePermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { recalcTaskCommissions } from '@/lib/sync/integrity'
 import { recalculatePayrollForMonth } from '@/app/(dashboard)/dashboard/payroll/actions'

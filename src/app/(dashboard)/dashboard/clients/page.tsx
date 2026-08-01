@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic'
  */
 export default async function ClientsPage() {
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin = me?.isAdmin ?? true
+  const isAdmin = me?.isAdmin ?? false
   const canView = isAdmin || me?.permissions.has(PERMS.CLIENTS_VIEW) || !me
   if (me && !canView) redirect('/dashboard')
 

@@ -9,7 +9,7 @@
  */
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requireAnyPermission } from '@/lib/auth/enforce'
+import { requireAnyPermission } from '@/lib/permissions/check'
 import { logActivity } from '@/lib/activity/log'
 import { revalidatePath } from 'next/cache'
 

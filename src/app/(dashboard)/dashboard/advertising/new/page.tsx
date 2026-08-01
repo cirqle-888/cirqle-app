@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
 
 export default async function NewCampaignPage() {
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin = me?.isAdmin ?? true
+  const isAdmin = me?.isAdmin ?? false
   const canCreate = isAdmin || hasPermission(me, PERMS.ADVERTISING_CREATE)
   if (me && !canCreate) redirect('/dashboard/advertising')
 

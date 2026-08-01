@@ -11,7 +11,7 @@
  * "authenticated ALL" RLS policy.
  */
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveCurrentEmployeeId } from '@/lib/auth/enforce'
+import { resolveCurrentEmployeeId } from '@/lib/permissions/check'
 import { listFavoritesForEmployee, type FavoriteEntry } from './queries'
 
 interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }

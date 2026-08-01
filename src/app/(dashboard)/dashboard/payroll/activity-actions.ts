@@ -1,7 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/auth/enforce'
+import { requirePermission } from '@/lib/permissions/check'
 import { logActivity } from '@/lib/activity/log'
 import type { LogActivityInput } from '@/lib/activity/log'
 

@@ -10,7 +10,7 @@ export default async function ImportPage() {
   // contributions, and cashbook entries. The sidebar already hides the link;
   // this is the server-side wall in case anyone types the URL.
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin = me?.isAdmin ?? true   // pre-migration fail-open
+  const isAdmin = me?.isAdmin ?? false   // pre-migration fail-open
   if (me && !isAdmin) redirect('/dashboard')
 
   const supabase = createAdminClient()

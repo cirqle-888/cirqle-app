@@ -1,7 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/server'
-import { requireAdmin } from '@/lib/auth/enforce'
+import { requireAdmin } from '@/lib/permissions/check'
 import { revalidatePath } from 'next/cache'
 
 export async function fetchJobsSummary() {

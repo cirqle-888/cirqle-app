@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic'
 
 export default async function ReportsPage() {
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin = me?.isAdmin ?? true
+  const isAdmin = me?.isAdmin ?? false
   const canView = isAdmin || hasPermission(me, PERMS.ADVERTISING_VIEW)
   if (me && !canView) redirect('/dashboard')
 

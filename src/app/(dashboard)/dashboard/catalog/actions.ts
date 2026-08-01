@@ -1,7 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveCurrentEmployeeId, requirePermission } from '@/lib/auth/enforce'
+import { resolveCurrentEmployeeId, requirePermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { selectWithOptionalColumns } from '@/lib/offer-columns'
 import { revalidatePath } from 'next/cache'

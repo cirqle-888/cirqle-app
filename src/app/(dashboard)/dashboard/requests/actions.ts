@@ -9,7 +9,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission, resolveCurrentEmployeeId } from '@/lib/auth/enforce'
+import { requirePermission, resolveCurrentEmployeeId } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import {
   setRequestStatus, logRequestActivity, requestStatusFromTask, type RequestStatus,

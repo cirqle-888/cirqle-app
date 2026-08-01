@@ -15,7 +15,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   const { id } = await params
 
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin = me?.isAdmin ?? true
+  const isAdmin = me?.isAdmin ?? false
   const canView = isAdmin || me?.permissions.has(PERMS.CLIENTS_VIEW) || !me
   if (me && !canView) redirect('/dashboard')
 

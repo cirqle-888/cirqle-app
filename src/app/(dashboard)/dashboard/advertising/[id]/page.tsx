@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
 export default async function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin = me?.isAdmin ?? true
+  const isAdmin = me?.isAdmin ?? false
   const canView = isAdmin || hasPermission(me, PERMS.ADVERTISING_VIEW)
   if (me && !canView) redirect('/dashboard')
 

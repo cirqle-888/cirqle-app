@@ -1,7 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission, resolveCurrentEmployeeId, requireAdmin } from '@/lib/auth/enforce'
+import { requirePermission, resolveCurrentEmployeeId, requireAdmin } from '@/lib/permissions/check'
 import { logActivity } from '@/lib/activity/log'
 import { syncRatesToDb, ratesAreStale } from '@/lib/fx/sync'
 import { revalidatePath } from 'next/cache'

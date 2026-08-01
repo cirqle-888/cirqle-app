@@ -1,7 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/auth/enforce'
+import { requirePermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { extractSheetId } from '@/lib/google-sheets/routing'
 import { fetchSheetTabCsv, parseSheetCsv, type PulledRow } from '@/lib/google-sheets/pull'

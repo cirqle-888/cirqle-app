@@ -170,9 +170,58 @@ export const loadCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   })
 })
 
-export function hasPermission(user: CurrentUser | null, key: PermKey | string): boolean {
-  if (!user) return false
-  if (user.isArchived) return false
+export function hasPermission(user: CurrentUser | null, key: string | string[]): boolean {
+  if (!user || user.isArchived) return false
   if (user.isAdmin) return true
+  if (Array.isArray(key)) return key.some(k => user.permissions.has(k))
   return user.permissions.has(key)
+}
+
+// ── Server Action Guards (moved from enforce.ts) ───────────────────────────────
+
+export type GuardOk   = { ok: true; employeeId: string; isAdmin: boolean }
+export type GuardFail = { ok: false; error: string }
+export type GuardResult = GuardOk | GuardFail
+
+/**
+ * Require the caller to hold a specific permission key.
+ * Admins always pass. Archived employees are always denied.
+ */
+export async function requirePermission(key: PermKey | string): Promise<GuardResult> {
+  const user = await loadCurrentUser()
+  if (!user)              return { ok: false, error: 'Not signed in.' }
+  if (user.isArchived)    return { ok: false, error: 'Your account is archived.' }
+  if (user.isAdmin)       return { ok: true, employeeId: user.employeeId, isAdmin: true }
+  if (!user.designationId) return { ok: false, error: 'No designation assigned.' }
+  if (!user.permissions.has(key)) return { ok: false, error: 'Permission denied.' }
+  return { ok: true, employeeId: user.employeeId, isAdmin: false }
+}
+
+/** Require the caller to hold ANY of the supplied permission keys. */
+export async function requireAnyPermission(keys: (PermKey | string)[]): Promise<GuardResult> {
+  const user = await loadCurrentUser()
+  if (!user)              return { ok: false, error: 'Not signed in.' }
+  if (user.isArchived)    return { ok: false, error: 'Your account is archived.' }
+  if (user.isAdmin)       return { ok: true, employeeId: user.employeeId, isAdmin: true }
+  if (!user.designationId) return { ok: false, error: 'No designation assigned.' }
+  
+  const has = keys.some(k => user.permissions.has(k))
+  if (!has) return { ok: false, error: 'Permission denied.' }
+  return { ok: true, employeeId: user.employeeId, isAdmin: false }
+}
+
+/** Require the caller to be an admin. */
+export async function requireAdmin(): Promise<GuardResult> {
+  const user = await loadCurrentUser()
+  if (!user)           return { ok: false, error: 'Not signed in.' }
+  if (user.isArchived) return { ok: false, error: 'Your account is archived.' }
+  if (!user.isAdmin)   return { ok: false, error: 'Admin access required.' }
+  return { ok: true, employeeId: user.employeeId, isAdmin: true }
+}
+
+/** Resolve the current employee ID without checking permissions. */
+export async function resolveCurrentEmployeeId(): Promise<string | null> {
+  const user = await loadCurrentUser()
+  if (!user || user.isArchived) return null
+  return user.employeeId
 }

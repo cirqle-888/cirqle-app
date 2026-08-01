@@ -1,7 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requireAdmin, resolveCurrentEmployeeId } from '@/lib/auth/enforce'
+import { requireAdmin, resolveCurrentEmployeeId } from '@/lib/permissions/check'
 import { syncCampaignToSheet } from '@/lib/google-sheets/sync'
 import { revalidatePath } from 'next/cache'
 

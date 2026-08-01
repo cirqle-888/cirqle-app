@@ -15,7 +15,7 @@
  */
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/auth/enforce'
+import { requirePermission } from '@/lib/permissions/check'
 import { logActivity } from '@/lib/activity/log'
 import { PERMS } from '@/lib/permissions/keys'
 import { revalidatePath } from 'next/cache'
@@ -379,7 +379,7 @@ export async function fetchRetainerCoverage(
   taskDate: string | null,
 ): Promise<RetainerCoverageInfo | null> {
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin = me?.isAdmin ?? true
+  const isAdmin = me?.isAdmin ?? false
   const pricingVisible = isAdmin || hasPermission(me, PERMS.AGREEMENTS_VIEW_PRICING)
   const admin = createAdminClient()
   return getRetainerCoverageInfo(admin, { clientId, serviceId, taskDate, pricingVisible })

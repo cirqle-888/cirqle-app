@@ -9,7 +9,7 @@ export default async function EmployeeAgreementsPage({ params }: { params: Promi
   const { id } = await params
 
   const me = await loadCurrentUser().catch(() => null)
-  const allowed = (me?.isAdmin ?? true) || !!me?.permissions?.has('employees.manage_agreements')
+  const allowed = (me?.isAdmin ?? false) || !!me?.permissions?.has('employees.manage_agreements')
   if (me && !allowed) redirect('/dashboard')
 
   const admin = createAdminClient()

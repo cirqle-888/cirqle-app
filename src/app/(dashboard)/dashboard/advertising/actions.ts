@@ -12,7 +12,7 @@
 import { revalidatePath } from 'next/cache'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission, requireAnyPermission } from '@/lib/auth/enforce'
+import { requirePermission, requireAnyPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { generateInvoiceNumber } from '@/lib/invoices/numbering'
 import { nextTaskNumber } from '@/lib/utils/task-code'

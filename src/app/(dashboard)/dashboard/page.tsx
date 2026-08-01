@@ -33,7 +33,7 @@ export default async function DashboardPage() {
   const displayFromStr = displayFrom.toISOString().slice(0, 10)
 
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin = me?.isAdmin ?? true
+  const isAdmin = me?.isAdmin ?? false
   const employeeId = me?.employeeId
 
   // ── Streamed analytics promises ──────────────────────────────────────────────

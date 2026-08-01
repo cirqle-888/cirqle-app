@@ -31,7 +31,7 @@ vi.mock('@/lib/supabase/admin', () => {
 let mockRequirePermission = vi.fn()
 let mockRequireAdmin = vi.fn()
 
-vi.mock('@/lib/auth/enforce', () => ({
+vi.mock('@/lib/permissions/check', () => ({
   requirePermission: (...args: any[]) => mockRequirePermission(...args),
   requireAdmin: (...args: any[]) => mockRequireAdmin(...args),
   resolveCurrentEmployeeId: vi.fn(() => Promise.resolve('test-user-id'))

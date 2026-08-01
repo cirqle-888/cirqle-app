@@ -11,7 +11,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveCurrentEmployeeId } from '@/lib/auth/enforce'
+import { resolveCurrentEmployeeId } from '@/lib/permissions/check'
 
 interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
 
