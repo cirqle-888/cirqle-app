@@ -16,7 +16,6 @@ import QRCode from 'qrcode'
 import { getCurrencySymbol } from '@/lib/calculations/currency'
 import { formatBillingPeriod } from '@/lib/utils/invoice'
 import type { Currency } from '@/types'
-import type { Currency } from '@/types'
 
 function escapeHtml(unsafe: string | null | undefined, keepNewlines = false): string {
   if (!unsafe) return ''
