@@ -363,6 +363,7 @@
         <button class="tool" id="tool-weight" title="Append the weight to the product name">+ Weight → name</button>
         <span class="tool-sep"></span>
         <button class="tool" id="tool-add" title="Add an empty row">+ Row</button>
+        <button class="tool" id="tool-dup" title="Copy the selected rows — use it to print the same product on more than one page">Duplicate</button>
         <button class="tool" id="tool-del" title="Delete selected rows">Delete</button>
         <span class="tool-sep"></span>
         <button class="tool" id="tool-plan" title="Plan pages: show the Category and Page columns">Pages</button>
@@ -3101,6 +3102,35 @@ $('tool-add').onclick = () => {
   // these two" points. At the end otherwise, as before.
   const rect = selRect()
   insertRows(rect ? rect.r1 + 1 : state.parsed.length, 1)
+}
+
+/**
+ * Copy the selected rows in place. Page is one value per row, so setting a
+ * page again MOVES a product rather than adding it to a second page — a
+ * product that has to print on two pages needs two rows. The copies land
+ * right below the selection and come out selected, ready to be given their
+ * own page.
+ */
+$('tool-dup').onclick = () => {
+  const rows = [...state.picked].sort((a, b) => a - b)
+  if (!rows.length) {
+    reportError('Nothing selected.', 'Duplicate', 'Click a row number (drag or ⌘-click for several), then Duplicate.')
+    return
+  }
+  pushUndo()
+  const copies = rows.map(i => {
+    const p = state.parsed[i]
+    return Object.assign({}, p, { custom: Object.assign({}, p.custom || {}) })
+  })
+  const at = rows[rows.length - 1] + 1
+  state.parsed.splice(at, 0, ...copies)
+  // Keep the picks on the copies, not the originals: the next move is almost
+  // always "…and put these on page 2".
+  state.picked = new Set(copies.map((_, k) => at + k))
+  gridSel = { ar: at, ac: 0, fr: at + copies.length - 1, fc: lastC() }
+  gridExtra = []
+  renderTable()
+  log(copies.length + ' row(s) duplicated — set their Page to print the same product on another page.', 'ok')
 }
 
 $('tool-del').onclick = () => {
