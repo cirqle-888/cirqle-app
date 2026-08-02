@@ -12,7 +12,7 @@
  */
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveCurrentEmployeeId } from '@/lib/auth/enforce'
+import { resolveCurrentEmployeeId } from '@/lib/permissions/check'
 
 export interface UsageItem {
   itemKey: string

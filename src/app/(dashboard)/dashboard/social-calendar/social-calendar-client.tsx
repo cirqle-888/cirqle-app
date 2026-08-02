@@ -923,9 +923,8 @@ export default function SocialCalendarClient({
               let sub = `${c.title ? c.title + ' · ' : ''}${total} items · ${sent} in requests${c.status === 'archived' ? ' · archived' : ''}`
               if (c.id === selected?.id && agreementProgress && agreementProgress.length > 0) {
                 const totalCommitted = agreementProgress.reduce((sum, a) => sum + (a.totalCommitted || 0), 0)
-                const totalPlanned = agreementProgress.reduce((sum, a) => sum + (a.totalPlanned || 0), 0)
                 const totalDelivered = agreementProgress.reduce((sum, a) => sum + (a.totalDelivered || 0), 0)
-                sub = `${c.title ? c.title + ' · ' : ''}${totalPlanned}/${totalCommitted} Planned · ${totalDelivered} Delivered${c.status === 'archived' ? ' · archived' : ''}`
+                sub = `${c.title ? c.title + ' · ' : ''}${totalDelivered}/${totalCommitted} Delivered${c.status === 'archived' ? ' · archived' : ''}`
               }
               return {
                 id: c.id,
@@ -1072,11 +1071,6 @@ export default function SocialCalendarClient({
                   <span className="text-emerald-500">✓</span>
                   <span className="text-muted-foreground">Delivered</span>
                   <span className="font-semibold tabular-nums">{agreementRollup.delivered}</span>
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="text-blue-500">○</span>
-                  <span className="text-muted-foreground">Planned</span>
-                  <span className="font-semibold tabular-nums">{agreementRollup.planned}</span>
                 </span>
                 <span className="flex items-center gap-1.5">
                   <span className="text-amber-500">◐</span>

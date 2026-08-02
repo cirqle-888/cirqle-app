@@ -1,7 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission, resolveCurrentEmployeeId } from '@/lib/auth/enforce'
+import { requirePermission, resolveCurrentEmployeeId, requireAdmin } from '@/lib/permissions/check'
 import { logActivity } from '@/lib/activity/log'
 import { syncRatesToDb, ratesAreStale } from '@/lib/fx/sync'
 import { revalidatePath } from 'next/cache'
@@ -37,12 +37,37 @@ export async function upsertCompanySettings(
 
 // ── Employees ─────────────────────────────────────────────────────────────────
 
+const PERMITTED_EMPLOYEE_FIELDS = new Set([
+  'name', 'email', 'phone', 'cqid', 'designation_id', 'role', 
+  'joined_date', 'date_of_birth', 'avatar_url', 'emergency_contact_name', 
+  'emergency_contact_phone', 'bank_details', 'base_salary', 'hourly_rate', 
+  'salary_type', 'reveal_salary', 'is_active', 'is_archived', 
+  'performance_rating', 'current_workspace_id'
+])
+
+const PRIVILEGE_ESCALATING_FIELDS = new Set([
+  'designation_id', 'base_salary', 'hourly_rate', 'salary_type', 'reveal_salary'
+])
+
 export async function createEmployee(form: Record<string, unknown>): Promise<ActionResult<any>> {
   const auth = await requirePermission('employees.create')
   if (!auth.ok) return { ok: false, error: auth.error }
 
+  const safeForm: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(form)) {
+    if (PERMITTED_EMPLOYEE_FIELDS.has(k)) {
+      safeForm[k] = v
+    }
+  }
+
+  const hasEscalating = Object.keys(safeForm).some(k => PRIVILEGE_ESCALATING_FIELDS.has(k))
+  if (hasEscalating) {
+    const adminCheck = await requireAdmin()
+    if (!adminCheck.ok) return { ok: false, error: 'Only admins can set designations or compensation' }
+  }
+
   const admin = createAdminClient()
-  const { data, error } = await admin.from('employees').insert(form).select().single()
+  const { data, error } = await admin.from('employees').insert(safeForm).select().single()
   if (error) return { ok: false, error: error.message }
 
   // Log: new employee created (fire-and-forget)
@@ -65,21 +90,38 @@ export async function updateEmployee(
   const auth = await requirePermission('employees.edit')
   if (!auth.ok) return { ok: false, error: auth.error }
 
+  const safeForm: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(form)) {
+    if (PERMITTED_EMPLOYEE_FIELDS.has(k)) {
+      safeForm[k] = v
+    }
+  }
+
+  const hasEscalating = Object.keys(safeForm).some(k => PRIVILEGE_ESCALATING_FIELDS.has(k))
+  if (hasEscalating) {
+    const adminCheck = await requireAdmin()
+    if (!adminCheck.ok) return { ok: false, error: 'Only admins can set designations or compensation' }
+  }
+
+  if (id === auth.employeeId && safeForm.designation_id !== undefined) {
+    return { ok: false, error: 'Cannot change your own designation' }
+  }
+
   const admin = createAdminClient()
-  const { data, error } = await admin.from('employees').update(form).eq('id', id).select().single()
+  const { data, error } = await admin.from('employees').update(safeForm).eq('id', id).select().single()
   if (error) return { ok: false, error: error.message }
 
   // Log: employee record edited (fire-and-forget)
   // Log designation changes specifically so the timeline shows them clearly
-  const action = form.designation_id ? 'designation_changed' : 'edited'
+  const action = safeForm.designation_id ? 'designation_changed' : 'edited'
   void logActivity({
     actorId:    auth.employeeId,
     subjectId:  id,
     entityType: 'employee',
     entityId:   id,
     action,
-    detail:     Object.keys(form).filter(k => k !== 'updated_at').reduce<Record<string, unknown>>(
-                  (acc, k) => { acc[k] = form[k]; return acc }, {}
+    detail:     Object.keys(safeForm).filter(k => k !== 'updated_at').reduce<Record<string, unknown>>(
+                  (acc, k) => { acc[k] = safeForm[k]; return acc }, {}
                 ),
   })
 

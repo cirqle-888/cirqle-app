@@ -126,6 +126,45 @@ async function verifyProfile(cookie: string | undefined, authId: string): Promis
   }
 }
 
+// ── Rate Limiter ─────────────────────────────────────────────────────────────
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>()
+const RATE_LIMIT = 60 // requests
+const RATE_LIMIT_WINDOW = 60 * 1000 // 1 minute
+
+function checkRateLimit(request: NextRequest): boolean {
+  // NextRequest.ip was removed in Next 15+ — on Vercel the client address
+  // arrives as the FIRST entry of x-forwarded-for (later entries are proxies),
+  // with x-real-ip as a fallback. Taking the whole header would let a caller
+  // append values and get a fresh bucket per request.
+  const forwarded = request.headers.get('x-forwarded-for')
+  const ip = forwarded?.split(',')[0]?.trim()
+    || request.headers.get('x-real-ip')?.trim()
+    || 'unknown'
+  if (ip === 'unknown') return true
+
+  const now = Date.now()
+  const record = rateLimitMap.get(ip)
+
+  // Lazy cleanup to prevent memory leaks in long-lived isolates
+  if (rateLimitMap.size > 10000) {
+    for (const [k, v] of rateLimitMap.entries()) {
+      if (v.resetAt < now) rateLimitMap.delete(k)
+    }
+  }
+
+  if (!record || record.resetAt < now) {
+    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW })
+    return true
+  }
+
+  if (record.count >= RATE_LIMIT) {
+    return false
+  }
+
+  record.count++
+  return true
+}
+
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
@@ -137,6 +176,7 @@ export async function updateSession(request: NextRequest) {
         getAll() { return request.cookies.getAll() },
         setAll(cookiesToSet: { name: string, value: string, options: any }[]) {
           cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
+          request.headers.set('x-pathname', request.nextUrl.pathname)
           supabaseResponse = NextResponse.next({ request })
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options)
@@ -171,6 +211,12 @@ export async function updateSession(request: NextRequest) {
                                                          // its CORS preflight was 307-redirected to /login — and browsers reject
                                                          // any redirected preflight ("Redirect is not allowed for a preflight
                                                          // request"), making the API unreachable from Figma despite valid auth.
+
+  if (isPublic || isAuthPage) {
+    if (!checkRateLimit(request)) {
+      return new NextResponse('Too Many Requests', { status: 429 })
+    }
+  }
 
   if (!user && !isAuthPage && !isPublic) {
     // Server Action POSTs cannot follow an HTML redirect. `fetch` auto-follows
@@ -224,12 +270,12 @@ export async function updateSession(request: NextRequest) {
         queryFailed = true
       }
 
-      // Migration not applied OR query failed → no gating
-      if (queryFailed) return supabaseResponse
-
-      // No employee row → legacy admin (single-user setup before invite flow) → no gating
-      if (!emp) return supabaseResponse
-
+      if (queryFailed || !emp) {
+        const url = request.nextUrl.clone()
+        url.pathname = '/login'
+        url.searchParams.set('error', 'profile')
+        return NextResponse.redirect(url)
+      }
       const designation = Array.isArray(emp.designation) ? emp.designation[0] : emp.designation
       const isAdmin = designation?.is_admin === true
 

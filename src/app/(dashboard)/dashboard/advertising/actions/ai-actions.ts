@@ -2,10 +2,15 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { cookies } from 'next/headers'
+import { requirePermission, requireAdmin } from '@/lib/permissions/check'
+import { PERMS } from '@/lib/permissions/keys'
 
 // E3.1: Server Actions Layer
 
 export async function getExecutiveSummary(clientId: string) {
+  const guard = await requirePermission(PERMS.ADVERTISING_VIEW_AI)
+  if (!guard.ok) throw new Error(guard.error)
+
   const supabase = await createClient()
   
   // 1. Fetch rolled-up performance from materialized view
@@ -32,6 +37,9 @@ export async function getExecutiveSummary(clientId: string) {
 }
 
 export async function getCampaignHealth(projectId: string) {
+  const guard = await requirePermission(PERMS.ADVERTISING_VIEW_AI)
+  if (!guard.ok) throw new Error(guard.error)
+
   const supabase = await createClient()
   const { data } = await supabase
     .from('ad_ai_insights')
@@ -46,6 +54,9 @@ export async function getCampaignHealth(projectId: string) {
 }
 
 export async function getRecommendations(projectId?: string) {
+  const guard = await requirePermission(PERMS.ADVERTISING_VIEW_AI)
+  if (!guard.ok) throw new Error(guard.error)
+
   const supabase = await createClient()
   
   let query = supabase
@@ -65,6 +76,9 @@ export async function getRecommendations(projectId?: string) {
 }
 
 export async function updateRecommendationStatus(id: string, status: 'viewed' | 'accepted' | 'applied' | 'dismissed') {
+  const guard = await requirePermission(PERMS.ADVERTISING_MANAGE_AI)
+  if (!guard.ok) throw new Error(guard.error)
+
   const supabase = await createClient()
   
   // Append to history
@@ -91,6 +105,9 @@ export async function updateRecommendationStatus(id: string, status: 'viewed' | 
 }
 
 export async function getForecastData(projectId: string) {
+  const guard = await requirePermission(PERMS.ADVERTISING_VIEW_AI)
+  if (!guard.ok) throw new Error(guard.error)
+
   const supabase = await createClient()
   // Fetch historical data
   const { data: historical } = await supabase
@@ -116,6 +133,9 @@ export async function getForecastData(projectId: string) {
 }
 
 export async function getAdminAIUsage() {
+  const guard = await requireAdmin()
+  if (!guard.ok) throw new Error(guard.error)
+
   const supabase = await createClient()
   
   // Global aggregate usage (requires admin privileges, which the client might not have, 

@@ -1,7 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requireAnyPermission, requireAdmin } from '@/lib/auth/enforce'
+import { requireAnyPermission, requireAdmin } from '@/lib/permissions/check'
 
 interface ActionResult<T = void> {
   ok: boolean

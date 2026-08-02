@@ -3,7 +3,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { headers } from 'next/headers'
-import { requirePermission } from '@/lib/auth/enforce'
+import { requirePermission } from '@/lib/permissions/check'
 import { logActivity } from '@/lib/activity/log'
 
 interface ActionResult<T = void> {

@@ -14,7 +14,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/auth/enforce'
+import { requirePermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
 import type { AgreementType } from '@/lib/calculations/agreements'

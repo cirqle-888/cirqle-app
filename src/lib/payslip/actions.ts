@@ -10,7 +10,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/auth/enforce'
+import { requirePermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { getResend, payslipFrom, isEmailConfigured } from '@/lib/email/resend'
 import { buildPayslipData } from './build-payslip'

@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic'
  */
 export default async function PricingMatrixPage() {
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin = me?.isAdmin ?? true
+  const isAdmin = me?.isAdmin ?? false
   const canEdit = isAdmin || hasPermission(me, PERMS.SETTINGS_ACCESS)
   if (me && !canEdit) redirect('/dashboard')
 

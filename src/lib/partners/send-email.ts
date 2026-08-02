@@ -6,7 +6,7 @@
  * used for payslip emails) — no new email infrastructure.
  */
 import { getResend, isEmailConfigured, payslipFrom } from '@/lib/email/resend'
-import { requirePermission } from '@/lib/auth/enforce'
+import { requirePermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { getPartnerStatementData } from '@/lib/partners/queries'
 import { renderPartnerStatementHtml } from '@/lib/partners/render-html'

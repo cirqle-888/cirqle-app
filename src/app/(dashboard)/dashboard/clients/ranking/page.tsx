@@ -12,7 +12,7 @@ export default async function ClientRankingPage() {
   // sensitivity as Reports, so gate the same way: admin or explicit
   // reports.view, fail-open pre-migration.
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin = me?.isAdmin ?? true
+  const isAdmin = me?.isAdmin ?? false
   const canView = isAdmin || me?.permissions.has('reports.view') || !me
   if (me && !canView) redirect('/dashboard')
 

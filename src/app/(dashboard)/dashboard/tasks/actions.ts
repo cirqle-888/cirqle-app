@@ -15,7 +15,7 @@
  */
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/auth/enforce'
+import { requirePermission } from '@/lib/permissions/check'
 import { logActivity } from '@/lib/activity/log'
 import { PERMS } from '@/lib/permissions/keys'
 import { revalidatePath } from 'next/cache'
@@ -379,7 +379,7 @@ export async function fetchRetainerCoverage(
   taskDate: string | null,
 ): Promise<RetainerCoverageInfo | null> {
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin = me?.isAdmin ?? true
+  const isAdmin = me?.isAdmin ?? false
   const pricingVisible = isAdmin || hasPermission(me, PERMS.AGREEMENTS_VIEW_PRICING)
   const admin = createAdminClient()
   return getRetainerCoverageInfo(admin, { clientId, serviceId, taskDate, pricingVisible })
@@ -469,6 +469,9 @@ export async function serverInlineTaskUpdate(
 
   const admin = createAdminClient()
 
+  const inlineConflict = await coverageBillingConflict(admin, taskId, updates.billing_amount)
+  if (inlineConflict) return { ok: false, error: inlineConflict }
+
   if (updates.billing_amount !== undefined && currencyForInrConversion) {
     updates.billing_amount_inr = await toInr(admin, updates.billing_amount, currencyForInrConversion)
   }
@@ -501,6 +504,39 @@ export interface SaveTaskInput {
   taskDate:     string | null
 }
 
+/**
+ * Refuses a non-zero billing amount on a retainer-covered task that is not
+ * flagged as extra work.
+ *
+ * The coverage engine zeroes billing on covered tasks so the client is not
+ * charged twice — once in the retainer fee, once per task. Nothing stopped a
+ * manual edit from writing an amount straight back over that, which is how task
+ * #1883 (Elara) came to bill AED 20 on top of a AED 400 retainer.
+ *
+ * We reject rather than auto-correct: silently zeroing loses the user's intent,
+ * and silently setting bill_as_extra would start charging a client without
+ * anyone deciding to. Returns null when the write is allowed.
+ */
+async function coverageBillingConflict(
+  admin: ReturnType<typeof createAdminClient>,
+  taskId: string,
+  billingAmount: number | undefined,
+): Promise<string | null> {
+  if (billingAmount === undefined || billingAmount <= 0) return null
+
+  const { data: task } = await admin
+    .from('tasks')
+    .select('retainer_item_id, bill_as_extra')
+    .eq('id', taskId)
+    .maybeSingle()
+
+  if (!task?.retainer_item_id) return null   // not covered — bill freely
+  if (task.bill_as_extra) return null        // explicitly extra work — bill freely
+
+  return 'This task is covered by the client’s retainer, so it bills at 0. ' +
+         'To charge for it on top of the retainer, tick “Bill as extra” first.'
+}
+
 async function toInr(
   admin: ReturnType<typeof createAdminClient>,
   amount: number,
@@ -523,6 +559,9 @@ export async function serverSaveTask(
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const admin = createAdminClient()
+
+  const conflict = await coverageBillingConflict(admin, input.taskId, input.billingAmount)
+  if (conflict) return { ok: false, error: conflict }
 
   const billingInr = input.billingAmount !== undefined
     ? await toInr(admin, input.billingAmount, input.currency)

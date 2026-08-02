@@ -1,5 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveCurrentEmployeeId } from '@/lib/auth/enforce'
+import { resolveCurrentEmployeeId } from '@/lib/permissions/check'
 import { redirect } from 'next/navigation'
 import { getIntakeKindsByClient } from '@/lib/services/intake-server'
 import CatalogClient from './catalog-client'

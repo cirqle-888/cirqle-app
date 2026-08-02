@@ -138,7 +138,7 @@ export default async function TasksPage({
 
   // Best-effort load user role to apply optimizations
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin   = me?.isAdmin ?? true
+  const isAdmin   = me?.isAdmin ?? false
   const vis = financialVisibility(me)
 
   const canAccessContribs = isAdmin

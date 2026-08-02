@@ -1,7 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveCurrentEmployeeId, requirePermission } from '@/lib/auth/enforce'
+import { resolveCurrentEmployeeId, requirePermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { selectWithOptionalColumns } from '@/lib/offer-columns'
 import { revalidatePath } from 'next/cache'
@@ -28,8 +28,9 @@ export async function getProducts(filters?: {
   brand?: string
   status?: string
 }): Promise<ActionResult<{ products: any[] }>> {
-  const empId = await resolveCurrentEmployeeId()
-  if (!empId) return { ok: false, error: 'Not signed in.' }
+  const guard = await requirePermission(PERMS.OFFER_PREPARE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const empId = guard.employeeId
 
   const admin = createAdminClient()
 
@@ -73,8 +74,9 @@ export async function getProducts(filters?: {
 // ── Create single product ────────────────────────────────────────────────────
 
 export async function createProduct(row: ProductRow): Promise<ActionResult<{ product: any }>> {
-  const empId = await resolveCurrentEmployeeId()
-  if (!empId) return { ok: false, error: 'Not signed in.' }
+  const guard = await requirePermission(PERMS.OFFER_PREPARE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const empId = guard.employeeId
 
   const admin = createAdminClient()
   const { data, error } = await admin
@@ -102,8 +104,9 @@ export async function updateProduct(
   id: string,
   row: Partial<ProductRow> & { status?: string },
 ): Promise<ActionResult> {
-  const empId = await resolveCurrentEmployeeId()
-  if (!empId) return { ok: false, error: 'Not signed in.' }
+  const guard = await requirePermission(PERMS.OFFER_PREPARE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const empId = guard.employeeId
 
   const admin = createAdminClient()
   const updates: Record<string, any> = { updated_at: new Date().toISOString() }
@@ -127,8 +130,9 @@ export async function updateProduct(
 export async function bulkImportProducts(
   rows: ProductRow[],
 ): Promise<ActionResult<{ inserted: number; skipped: number; errors: string[] }>> {
-  const empId = await resolveCurrentEmployeeId()
-  if (!empId) return { ok: false, error: 'Not signed in.' }
+  const guard = await requirePermission(PERMS.OFFER_PREPARE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const empId = guard.employeeId
   if (!rows.length) return { ok: false, error: 'No rows to import.' }
 
   const admin = createAdminClient()
@@ -177,11 +181,26 @@ export async function getProductImageUploadUrl(
   filename: string,
   contentType: string,
 ): Promise<ActionResult<{ uploadUrl: string; publicUrl: string; storagePath: string }>> {
-  const empId = await resolveCurrentEmployeeId()
-  if (!empId) return { ok: false, error: 'Not signed in.' }
+  const guard = await requirePermission(PERMS.OFFER_PREPARE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const empId = guard.employeeId
 
   const admin = createAdminClient()
-  const ext = filename.split('.').pop() || 'jpg'
+
+  const EXT_BY_TYPE: Record<string, string> = {
+    'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png',
+    'image/webp': 'webp', 'image/gif': 'gif', 'image/avif': 'avif',
+    'image/heic': 'heic', 'image/heif': 'heif',
+  }
+  const ALLOWED_EXTS = new Set([...Object.values(EXT_BY_TYPE), 'jpeg'])
+  const declaredType = contentType.toLowerCase().split(';')[0].trim()
+  const filenameExt = (filename.split('.').pop() || '').toLowerCase()
+  const ext = EXT_BY_TYPE[declaredType] ?? (ALLOWED_EXTS.has(filenameExt) ? filenameExt : undefined)
+  
+  if (!ext) {
+    return { ok: false, error: 'Only JPG, PNG, WebP, GIF, AVIF or HEIC images can be uploaded.' }
+  }
+
   const storagePath = `catalog/${productId}/${Date.now()}-original.${ext}`
 
   const { data, error } = await admin.storage
@@ -206,8 +225,9 @@ export async function saveProductImage(
   version: 'original' | 'bg_removed' | 'flyer_ready' | 'thumbnail' = 'original',
   makePrimary = true,
 ): Promise<ActionResult<{ imageId: string }>> {
-  const empId = await resolveCurrentEmployeeId()
-  if (!empId) return { ok: false, error: 'Not signed in.' }
+  const guard = await requirePermission(PERMS.OFFER_PREPARE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const empId = guard.employeeId
 
   const admin = createAdminClient()
 
@@ -238,8 +258,9 @@ export async function saveProductImage(
 // ── Set an existing image as primary ─────────────────────────────────────────
 
 export async function setPrimaryImage(productId: string, imageId: string): Promise<ActionResult> {
-  const empId = await resolveCurrentEmployeeId()
-  if (!empId) return { ok: false, error: 'Not signed in.' }
+  const guard = await requirePermission(PERMS.OFFER_PREPARE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const empId = guard.employeeId
 
   const admin = createAdminClient()
   await admin.from('product_catalog_images').update({ is_primary: false }).eq('product_id', productId).eq('is_primary', true)
@@ -255,8 +276,9 @@ export async function setPrimaryImage(productId: string, imageId: string): Promi
 // ── Delete an image (manual cleanup — separate from the scheduled retention job) ──
 
 export async function deleteProductImage(imageId: string): Promise<ActionResult> {
-  const empId = await resolveCurrentEmployeeId()
-  if (!empId) return { ok: false, error: 'Not signed in.' }
+  const guard = await requirePermission(PERMS.OFFER_PREPARE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const empId = guard.employeeId
 
   const admin = createAdminClient()
   const { data: img } = await admin.from('product_catalog_images').select('storage_path, product_id, is_primary').eq('id', imageId).maybeSingle()
@@ -287,8 +309,9 @@ export async function assignProductToClients(
   productId: string,
   clientIds: string[],
 ): Promise<ActionResult> {
-  const empId = await resolveCurrentEmployeeId()
-  if (!empId) return { ok: false, error: 'Not signed in.' }
+  const guard = await requirePermission(PERMS.OFFER_PREPARE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const empId = guard.employeeId
 
   const admin = createAdminClient()
 
@@ -313,8 +336,9 @@ export async function removeClientAssignment(
   productId: string,
   clientId: string,
 ): Promise<ActionResult> {
-  const empId = await resolveCurrentEmployeeId()
-  if (!empId) return { ok: false, error: 'Not signed in.' }
+  const guard = await requirePermission(PERMS.OFFER_PREPARE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const empId = guard.employeeId
 
   const admin = createAdminClient()
   const { error } = await admin
@@ -335,8 +359,9 @@ export async function getCatalogMeta(): Promise<ActionResult<{
   brands: string[]
   clients: { id: string; name: string }[]
 }>> {
-  const empId = await resolveCurrentEmployeeId()
-  if (!empId) return { ok: false, error: 'Not signed in.' }
+  const guard = await requirePermission(PERMS.OFFER_PREPARE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const empId = guard.employeeId
 
   const admin = createAdminClient()
   const [catRes, brandRes, clientRes] = await Promise.all([
@@ -514,8 +539,9 @@ export async function updateProductLocalName(
   lang: string,
   value: string,
 ): Promise<ActionResult> {
-  const empId = await resolveCurrentEmployeeId()
-  if (!empId) return { ok: false, error: 'Not signed in.' }
+  const guard = await requirePermission(PERMS.OFFER_PREPARE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const empId = guard.employeeId
   if (!id) return { ok: false, error: 'Missing product id.' }
 
   const code = (lang || '').trim().toLowerCase()

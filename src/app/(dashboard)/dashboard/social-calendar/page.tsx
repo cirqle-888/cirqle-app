@@ -20,7 +20,7 @@ export default async function SocialCalendarPage({
   searchParams?: Promise<Record<string, string | string[] | undefined>>
 }) {
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin = me?.isAdmin ?? true
+  const isAdmin = me?.isAdmin ?? false
   const canView = isAdmin || hasPermission(me, PERMS.SOCIAL_VIEW)
   if (me && !canView) redirect('/dashboard')
   const canViewAgreements = isAdmin || hasPermission(me, PERMS.AGREEMENTS_VIEW)

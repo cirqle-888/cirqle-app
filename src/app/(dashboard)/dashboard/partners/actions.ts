@@ -10,7 +10,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/auth/enforce'
+import { requirePermission } from '@/lib/permissions/check'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { getPartnerStatementData, type PartnerStatementData } from '@/lib/partners/queries'

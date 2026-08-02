@@ -17,6 +17,17 @@ import { getCurrencySymbol } from '@/lib/calculations/currency'
 import { formatBillingPeriod } from '@/lib/utils/invoice'
 import type { Currency } from '@/types'
 
+function escapeHtml(unsafe: string | null | undefined, keepNewlines = false): string {
+  if (!unsafe) return ''
+  const escaped = String(unsafe)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;")
+  return keepNewlines ? escaped.replace(/\n/g, '<br/>') : escaped
+}
+
 /** Darken (f<1) a hex color by multiplying channels. */
 export function shadeHex(hex: string, f: number): string {
   const h = hex.replace('#', '')
@@ -324,7 +335,7 @@ export function buildInvoiceParts(
       <tr style="background:${bg};height:${ROW_H}px">
         <td style="${td('border-left:none;text-align:center;color:#222')}">${idx + 1}</td>
         <td style="${td('text-align:center;color:#222;white-space:nowrap')}">${taskDate}</td>
-        <td style="${td('text-align:left;color:#222')}">${it.description}</td>
+        <td style="${td('text-align:left;color:#222')}">${escapeHtml(it.description, true)}</td>
         <td style="${td('text-align:center;color:#222')}">${it.quantity}</td>
         <td style="${td('text-align:center;color:#222;white-space:nowrap')}">${inr(it.unit_price)}</td>
         <td style="${td('text-align:right;color:#111;font-weight:700;white-space:nowrap')}">${inr(it.total)}</td>
@@ -344,7 +355,7 @@ export function buildInvoiceParts(
       if (expensesMode === 'mode_b' && hasMarkup) {
         return `<tr style="background:${bg}">
           <td style="${tdE}color:#222">
-            <div style="font-weight:600">${exp.description}</div>
+            <div style="font-weight:600">${escapeHtml(exp.description)}</div>
             <table style="margin-top:4px;font-size:11px;color:#666;border-collapse:collapse">
               <tr><td style="padding:1px 0">Cost</td><td style="padding:1px 8px">:</td><td style="text-align:right">${inr(exp.original_amount || 0)}</td></tr>
               <tr><td style="padding:1px 0">Markup</td><td style="padding:1px 8px">:</td><td style="text-align:right">${inr(exp.markup_amount || 0)}</td></tr>
@@ -356,7 +367,7 @@ export function buildInvoiceParts(
       if (expensesMode === 'mode_c') {
         return `<tr style="background:${bg}">
           <td style="${tdE}color:#222">
-            <div style="font-weight:600">${exp.description}</div>
+            <div style="font-weight:600">${escapeHtml(exp.description)}</div>
             <div style="font-size:10.5px;color:#888;margin-top:2px;font-style:italic">Reimbursable Expense</div>
           </td>
           <td style="${tdE}border-left:1px solid ${CELL_BORD};font-weight:700;text-align:right;white-space:nowrap">${inr(exp.amount)}</td>
@@ -364,7 +375,7 @@ export function buildInvoiceParts(
       }
       // Mode A (default): description + billing amount only
       return `<tr style="background:${bg};height:${EXP_H}px">
-        <td style="${tdE}color:#222">${exp.description}</td>
+        <td style="${tdE}color:#222">${escapeHtml(exp.description)}</td>
         <td style="${tdE}border-left:1px solid ${CELL_BORD};font-weight:700;text-align:right;white-space:nowrap">${inr(exp.amount)}</td>
       </tr>`
     }).join('')
@@ -492,7 +503,7 @@ export function buildInvoiceParts(
           <tr>
             <td style="font-size:13.5px;font-weight:700;color:#111;padding:2.5px 0;white-space:nowrap">Invoice No.</td>
             <td style="font-size:13.5px;color:#222;padding:2.5px 12px">:</td>
-            <td style="font-size:13.5px;color:#222;padding:2.5px 0">${inv.invoice_number}</td>
+            <td style="font-size:13.5px;color:#222;padding:2.5px 0">${escapeHtml(inv.invoice_number)}</td>
           </tr>
           <tr>
             <td style="font-size:13.5px;font-weight:700;color:#111;padding:2.5px 0">Date</td>
@@ -523,10 +534,10 @@ export function buildInvoiceParts(
         <!-- Bill To (below INVOICE in same td, aligned right then left for content) -->
         <div style="margin-top:16px;text-align:left">
           <div style="font-size:14.5px;color:#222">Bill to :</div>
-          <div style="font-size:16px;font-weight:700;color:#111;margin-top:3px">${inv.client?.name || ''}</div>
-          ${inv.client?.address ? `<div style="font-size:13px;color:#222;margin-top:2px;line-height:1.5">${inv.client.address}</div>` : ''}
-          ${inv.client?.phone   ? `<div style="font-size:13px;color:#222;margin-top:2px">${inv.client.phone}</div>` : ''}
-          ${inv.client?.email   ? `<div style="font-size:13px;color:#222">${inv.client.email}</div>` : ''}
+          <div style="font-size:16px;font-weight:700;color:#111;margin-top:3px">${escapeHtml(inv.client?.name || '')}</div>
+          ${inv.client?.address ? `<div style="font-size:13px;color:#222;margin-top:2px;line-height:1.5">${escapeHtml(inv.client.address, true)}</div>` : ''}
+          ${inv.client?.phone   ? `<div style="font-size:13px;color:#222;margin-top:2px">${escapeHtml(inv.client.phone)}</div>` : ''}
+          ${inv.client?.email   ? `<div style="font-size:13px;color:#222">${escapeHtml(inv.client.email)}</div>` : ''}
         </div>
       </td>
     </tr>
@@ -553,8 +564,8 @@ export function buildInvoiceParts(
       </tr>
     </table>
     <div style="display:flex;flex-wrap:wrap;gap:6px 26px;margin-top:12px;font-size:11.5px;color:#555">
-      <span style="white-space:nowrap"><span style="font-weight:700;color:#111">Invoice No.</span>&nbsp;&nbsp;${inv.invoice_number}</span>
-      <span style="white-space:nowrap"><span style="font-weight:700;color:#111">Client</span>&nbsp;&nbsp;${inv.client?.name || ''}</span>
+      <span style="white-space:nowrap"><span style="font-weight:700;color:#111">Invoice No.</span>&nbsp;&nbsp;${escapeHtml(inv.invoice_number)}</span>
+      <span style="white-space:nowrap"><span style="font-weight:700;color:#111">Client</span>&nbsp;&nbsp;${escapeHtml(inv.client?.name || '')}</span>
       <span style="white-space:nowrap"><span style="font-weight:700;color:#111">Date</span>&nbsp;&nbsp;${dd(inv.issue_date)}</span>
     </div>
     <div style="height:3px;background:linear-gradient(90deg,${NAVY},${NAVY_LIGHT});border-radius:2px;margin-top:12px"></div>
@@ -663,7 +674,7 @@ export function buildInvoiceParts(
     </tr>
   </table>`
 
-  const notesBlock = inv.notes ? `<div style="margin-top:14px;font-size:11.5px;color:#444;font-style:italic">${inv.notes}</div>` : ''
+  const notesBlock = inv.notes ? `<div style="margin-top:14px;font-size:11.5px;color:#444;font-style:italic">${escapeHtml(inv.notes, true)}</div>` : ''
 
   // ── FOOTER: payment info | QR | thank-you (pinned to page bottom) ──
   const footerBlock = `

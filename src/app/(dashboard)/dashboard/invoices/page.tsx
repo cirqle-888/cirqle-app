@@ -77,7 +77,7 @@ export default async function InvoicesPage() {
   )
 
   // Pending-to-price banner — only for users who can see invoice amounts/pricing.
-  const canSeePricing = (me?.isAdmin ?? true) || vis.billingAmounts || vis.billingLinePricing
+  const canSeePricing = (me?.isAdmin ?? false) || vis.billingAmounts || vis.billingLinePricing
   const pendingPricing = canSeePricing ? await getPendingPricing(supabase) : { clients: [], services: [], total: 0 }
 
   return (

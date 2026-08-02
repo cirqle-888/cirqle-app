@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 
 export default async function IntakeLinksPage() {
   const me = await loadCurrentUser().catch(() => null)
-  const allowed = (me?.isAdmin ?? true)
+  const allowed = (me?.isAdmin ?? false)
     || !!me?.permissions?.has('intake_links.manage')
     || !!me?.permissions?.has('agency_links.manage')
   if (me && !allowed) redirect('/dashboard')

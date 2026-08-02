@@ -33,9 +33,9 @@ interface DiscountLog { invoice_id: string; discount_amount: number | null }
  */
 export default async function ClientProfitabilityPage() {
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin = me?.isAdmin ?? true
-  const canView = isAdmin || me?.permissions.has('reports.view') || !me
-  if (me && !canView) redirect('/dashboard')
+  const isAdmin = me?.isAdmin ?? false
+  const canView = isAdmin || me?.permissions.has('reports.view')
+  if (!canView) redirect('/dashboard')
 
   const admin = createAdminClient()
 

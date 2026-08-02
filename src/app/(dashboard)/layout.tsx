@@ -15,7 +15,10 @@ import { isBirthdayToday } from '@/lib/utils/birthday'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { listFavoritesForEmployee } from '@/lib/favorites/queries'
 import { getMyWorkspaceState } from '@/lib/workspaces/actions'
-
+import { headers } from 'next/headers'
+import { redirect } from 'next/navigation'
+import { navSections, isNavItemVisible, resolveActiveHref } from '@/lib/nav-sections'
+import { hasPermission } from '@/lib/permissions/check'
 // Workspace logo URL fetch — pulls both dark and light variants.
 // Service-role client so RLS on company_settings can't block it.
 // Returns nulls on any failure so the Sidebar falls back to the default mark.
@@ -84,7 +87,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     email: '',
     designationId: null,
     designationName: null,
-    isAdmin: !loadFailed,
+    isAdmin: false,
     permissions: [],
     dateOfBirth: null,
   }
@@ -111,6 +114,17 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const serverEmployee: ServerEmployee | null = me
     ? { id: me.employeeId, authId: me.authId, name: me.name, email: me.email, cqid: me.cqid, isAdmin: user.isAdmin }
     : null
+
+  const headersList = await headers()
+  const pathname = headersList.get('x-pathname') || '/dashboard'
+  const activeHref = resolveActiveHref(navSections, pathname)
+  if (activeHref && activeHref !== '/dashboard') {
+    const section = navSections.find(s => s.items.some(i => i.href === activeHref))
+    const item = section?.items.find(i => i.href === activeHref)
+    if (item && !isNavItemVisible(item, (key) => hasPermission(me, key), user.isAdmin)) {
+      redirect('/dashboard?denied=1')
+    }
+  }
 
   return (
     <PrivacyProvider>

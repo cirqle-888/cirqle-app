@@ -15,7 +15,7 @@ export default async function BusinessHealthPage() {
   // Same sensitivity as Reports / Contribution Analysis / Client Ranking —
   // gate identically so it sits naturally alongside them under Insights.
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin = me?.isAdmin ?? true
+  const isAdmin = me?.isAdmin ?? false
   const canView = isAdmin || me?.permissions.has('reports.view') || !me
   if (me && !canView) redirect('/dashboard')
 

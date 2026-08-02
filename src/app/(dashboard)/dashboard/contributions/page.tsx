@@ -13,7 +13,7 @@ export default async function ContributionsPage() {
 
   // Best-effort load user role to apply optimizations
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin    = me?.isAdmin ?? true
+  const isAdmin    = me?.isAdmin ?? false
   const isEmployee = !isAdmin
   const vis = financialVisibility(me)
 

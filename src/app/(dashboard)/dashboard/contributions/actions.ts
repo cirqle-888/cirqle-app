@@ -1,7 +1,7 @@
 'use server'
 
 import { syncTaskAgreementEarnings } from '@/lib/sync/agreement-earnings'
-import { requireAnyPermission } from '@/lib/auth/enforce'
+import { requireAnyPermission } from '@/lib/permissions/check'
 import { logActivity } from '@/lib/activity/log'
 
 /**

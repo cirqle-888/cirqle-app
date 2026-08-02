@@ -14,7 +14,7 @@ export default async function RequestsPage({
   const sp = searchParams ? await searchParams : undefined
   const focusId = typeof sp?.focus === 'string' ? sp.focus : null
   const me = await loadCurrentUser().catch(() => null)
-  const isAdmin = me?.isAdmin ?? true
+  const isAdmin = me?.isAdmin ?? false
   const canView = isAdmin || !!me?.permissions?.has('requests.view')
   if (me && !canView) redirect('/dashboard')
 

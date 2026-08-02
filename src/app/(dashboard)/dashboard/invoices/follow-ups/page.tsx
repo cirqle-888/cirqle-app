@@ -14,7 +14,7 @@ export default async function FollowUpsPage() {
   // Route is permission-gated by middleware (`/^\/dashboard\/invoices/` → billing.view_invoices).
   const me = await loadCurrentUser().catch(() => null)
   const vis = financialVisibility(me)
-  const showAmounts = (me?.isAdmin ?? true) || vis.billingAmounts
+  const showAmounts = (me?.isAdmin ?? false) || vis.billingAmounts
   const supabase = createAdminClient()
 
   const { data: invoicesRaw } = await supabase

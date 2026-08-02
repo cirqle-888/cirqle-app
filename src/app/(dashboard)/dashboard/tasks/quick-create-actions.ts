@@ -10,7 +10,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requireAnyPermission, requirePermission } from '@/lib/auth/enforce'
+import { requireAnyPermission, requirePermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 
 interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }

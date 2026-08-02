@@ -8,7 +8,7 @@
  * permission-guarded action, so capture never bypasses module security.
  */
 
-import { resolveCurrentEmployeeId } from '@/lib/auth/enforce'
+import { resolveCurrentEmployeeId } from '@/lib/permissions/check'
 import { runCapture, prepareAs } from '@/lib/capture/engine'
 import { createManualRequest } from '@/app/(dashboard)/dashboard/requests/actions'
 import { createAdvertisingRequest } from '@/app/(dashboard)/dashboard/advertising/actions'
