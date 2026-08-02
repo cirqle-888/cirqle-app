@@ -95,7 +95,21 @@ export async function GET(req: NextRequest) {
       }
     })
 
-    return NextResponse.json({ ok: true, offers }, { headers: CORS_HEADERS })
+    // The service list rides along with the offers so the plugin can let the
+    // designer say which service this flyer is ("Offer Flyer", "Offer Flyer
+    // Updating", "A3 Offer Flyer"…) on the task it creates. Sent with the
+    // offers rather than from a route of its own: the plugin already calls
+    // this on every connect, and the list is small and rarely changes.
+    const { data: serviceRows } = await admin
+      .from('services')
+      .select('id, name')
+      .eq('is_active', true)
+      .order('display_order')
+      .order('name')
+    const services = ((serviceRows as { id: string; name: string | null }[] | null) || [])
+      .map(s => ({ id: s.id, name: s.name || '' }))
+
+    return NextResponse.json({ ok: true, offers, services }, { headers: CORS_HEADERS })
   } catch (err) {
     // The plugin promises "never crash, always explain" — hold the server to
     // the same bar instead of letting Next return an opaque 500 page.

@@ -394,6 +394,8 @@
       <input type="text" id="paste-title" placeholder="e.g. Sunday Shop Fest">
       <label>Offer date</label>
       <input type="date" id="paste-date">
+      <label>Service <span style="font-weight:400">— for the task this creates</span></label>
+      <select id="paste-service"><option value="">Offer Flyer (default)</option></select>
       <button id="paste-save">Save to Cirqle</button>
       <p class="hint">Saves to Cirqle, then loads it here ready to build.</p>
     </section>
@@ -525,6 +527,7 @@ function saveSettings() {
     uiTheme: state.uiTheme || 'light',
     user: state.user || null,
     planCols: state.planCols === true,
+    lastServiceName: state.lastServiceName || '',
     layoutOpen: state.layoutOpen === true,
     logOpen: state.logOpen === true,
     // The sheet's unsaved work — restored on reopen so a half-edited offer
@@ -772,6 +775,8 @@ async function connect() {
     saveSettings()
     const data = await api('/api/figma/offers')
     state.offers = data.offers || []
+    state.services = data.services || []
+    fillServiceDropdown()
     chip('chip-conn', 'Connected', 'on')
     foldSetup(true)
     fillClientDropdown()
@@ -782,6 +787,32 @@ async function connect() {
     foldSetup(false)   // the fields are what needs fixing — reopen them
     reportError(e.what || String(e), e.where || 'Connect', e.fix)
   }
+}
+
+/** Which service the task gets. Left alone it is "Offer Flyer"; the picker
+ * is for the days it is an update, an A3, or a revision instead. Remembered
+ * by NAME, so it survives a workspace re-seeding of service ids. */
+function fillServiceDropdown() {
+  const sel = $('paste-service')
+  sel.innerHTML = ''
+  const def = document.createElement('option')
+  def.value = ''
+  def.textContent = 'Offer Flyer (default)'
+  sel.appendChild(def)
+  for (const s of (state.services || [])) {
+    const opt = document.createElement('option')
+    opt.value = s.id
+    opt.textContent = s.name
+    sel.appendChild(opt)
+  }
+  const saved = (state.services || []).find(s => s.name === state.lastServiceName)
+  if (saved) sel.value = saved.id
+}
+
+$('paste-service').onchange = () => {
+  const s = (state.services || []).find(x => x.id === $('paste-service').value)
+  state.lastServiceName = s ? s.name : ''
+  saveSettings()
 }
 
 function fillClientDropdown() {
@@ -2968,6 +2999,7 @@ $('paste-save').onclick = async () => {
       offerDate: $('paste-date').value || undefined,
       // Who saved it — the server turns this into a task on the Tasks page.
       createdBy: state.user || undefined,
+      serviceId: $('paste-service').value || undefined,
       products: state.parsed.map(p => ({
         name: p.name, price: p.price, mrp: p.mrp,
         weight: p.weight, badge: p.badge, offerType: p.offerType,
@@ -3114,6 +3146,7 @@ onmessage = (event) => {
           ? { id: msg.settings.user.id || null, cqid: msg.settings.user.cqid || null }
           : null
         state.planCols = msg.settings.planCols === true
+        state.lastServiceName = msg.settings.lastServiceName || ''
         $('plan-row').style.display = state.planCols ? 'flex' : 'none'
         $('tool-plan').classList.toggle('tag-missing', !!state.planCols)
         applyTheme(msg.settings.uiTheme)

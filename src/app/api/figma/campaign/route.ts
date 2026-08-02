@@ -61,6 +61,9 @@ interface IncomingBody {
   /** The signed-in employee (from /api/figma/login) — used to attribute the
    * task this save creates on the Tasks page. CQID only, never a name. */
   createdBy?: { id?: string | null; cqid?: string | null }
+  /** Service for that task, chosen in the plugin. Falls back to the
+   * workspace's "Offer Flyer" service when absent. */
+  serviceId?: string | null
 }
 
 const MAX_PRODUCTS = 300
@@ -237,6 +240,21 @@ export async function POST(req: NextRequest) {
       const addedProducts = Math.max(0, productInputs.length - prevProducts.length)
       const isUpdate = prevProducts.length > 0
 
+      // Which service this flyer is. The plugin's choice wins; otherwise
+      // fall back to the workspace's "Offer Flyer" service, since that is
+      // what an offer flyer saved from Figma is by default. Without this
+      // the task lands on the Tasks page with an empty Service.
+      let serviceId: string | null = (body?.serviceId || '').trim() || null
+      if (!serviceId) {
+        const { data: svc } = await admin
+          .from('services')
+          .select('id')
+          .eq('is_active', true)
+          .ilike('name', 'offer flyer')
+          .maybeSingle()
+        serviceId = (svc as { id?: string } | null)?.id || null
+      }
+
       // One task per campaign — find before creating.
       const { data: existingTask } = await admin
         .from('tasks')
@@ -248,8 +266,13 @@ export async function POST(req: NextRequest) {
       taskNumber = (existingTask as { task_number?: number } | null)?.task_number ?? null
 
       if (taskId) {
-        // Same offer re-saved — keep the task, refresh the title.
-        await admin.from('tasks').update({ title: offerTitle }).eq('id', taskId)
+        // Same offer re-saved — keep the task, refresh the title, and follow
+        // a service the designer changed in the plugin (an offer that turned
+        // into "Offer Flyer Updating" should say so). Never clears a service
+        // someone set by hand in Cirqle.
+        const patch: Record<string, unknown> = { title: offerTitle }
+        if (serviceId) patch.service_id = serviceId
+        await admin.from('tasks').update(patch).eq('id', taskId)
       } else {
         const { data: maxRow } = await admin
           .from('tasks')
@@ -267,6 +290,7 @@ export async function POST(req: NextRequest) {
               `Offer flyer saved from Figma (Cirqle Studio)${byName ? ' by ' + byName : ''} — ` +
               `${productInputs.length} products. ${marker}`,
             client_id: client.id,
+            service_id: serviceId,
             status: 'pending',
             task_date: today,
             quantity: 1,
