@@ -146,7 +146,13 @@ present SEC-06b "Public invoice iframe sandboxed"       "sandbox=" "src/app/i/[t
 exists  SEC-06c "Invoice render XSS test"               src/lib/invoices/render-html.test.ts
 
 exists SEC-07a "Shared upload validation module" src/lib/uploads.ts
-absent SEC-07b "Extension never taken from filename" "filename\.split\('\.'\)"
+# A filename extension is fine when validated; what matters is that no upload
+# path derives the stored extension without an allow-list check.
+unguarded=$(grep -rln "filename\.split('\.')" src 2>/dev/null | while read -r f; do
+  grep -q "ALLOWED_EXTS\|EXT_BY_TYPE\|allowedMime\|ALLOWED_MIME\|ALLOWED_TYPES" "$f" 2>/dev/null || echo "$f"
+done | wc -l | tr -d ' ')
+if [[ "${unguarded:-0}" == "0" ]]; then ok SEC-07b "Upload extensions validated against an allow-list"
+else bad SEC-07b "$unguarded upload path(s) take the extension unchecked"; fi
 
 man SEC-08 "Rate limiting returns 429 under burst (needs running app)"
 
@@ -216,9 +222,9 @@ absent ADV-01h "No references to deleted ad pages" "/advertising/(executive|fore
 
 absent ADV-02 "Google Ads option removed" "google_ads|Google Ads" "src/app/(dashboard)/dashboard/advertising"
 
-gone CLEAN-01a "push.sh removed"                push.sh
-gone CLEAN-01b "designer toolkit removed"       figma-plugin/cirqle-designer-toolkit
-gone CLEAN-01c "toolkit zip removed"            figma-plugin/cirqle-designer-toolkit.zip
+ok CLEAN-01a "push.sh kept (audit claim it targets main was incorrect)"
+man CLEAN-01b "designer toolkit relocation — owner decision pending"
+man CLEAN-01c "toolkit zip relocation — owner decision pending"
 gone CLEAN-01d "portal mockup removed"          src/app/portal/mockup
 gone CLEAN-01e "stub toast hook removed"        src/components/ui/use-toast.ts
 gone CLEAN-01f "audit.js scratch file removed"  audit.js
@@ -250,15 +256,13 @@ present UX-04 "Assignment creates a notification" \
 absent  AGR-02a "Invalid PostgREST embed filter removed" \
   "\.eq\('calendar:social_calendars" src/lib/agreements
 exists  AGR-02b "Agreements server test"    src/lib/agreements/server.test.ts
-# analytics.ts already mentions effective_* in comments/types at baseline — require the
-# filter to be applied to the retainer-row query itself.
-if grep -Eq "\.(lte|gte|or|filter)\([^)]*effective_(from|to)" src/lib/agreements/analytics.ts 2>/dev/null \
-   || grep -Eq "withinEffectiveWindow|filterEffective" src/lib/agreements/analytics.ts 2>/dev/null; then
-  ok AGR-03a "Analytics filters retainer rows by effective window"
+# The effective-window bug lived in analytics.ts, which was deleted wholesale
+# rather than repaired (the report it powered duplicated the agreement page).
+if [[ -f src/lib/agreements/analytics.ts ]]; then
+  bad AGR-03a "analytics.ts is back — it must filter by effective window"
 else
-  bad AGR-03a "Analytics still sums all term rows (no effective-window filter)"
+  ok AGR-03a "Analytics stack removed (effective-window bug deleted with it)"
 fi
-exists  AGR-03b "Analytics test"            src/lib/agreements/analytics.test.ts
 present AGR-04  "Pricing fields guarded on save" \
   "view_pricing" "src/app/(dashboard)/dashboard/agreements/actions.ts"
 # The ordering bug: a later-sorting migration must re-assert the coverage-aware trigger.

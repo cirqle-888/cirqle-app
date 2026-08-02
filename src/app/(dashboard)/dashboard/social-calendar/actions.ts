@@ -15,6 +15,7 @@
  */
 
 import { revalidatePath } from 'next/cache'
+import { resolveImageExt, IMAGE_UPLOAD_ERROR, IMAGE_EXT_BY_TYPE, MAX_IMAGE_BYTES } from '@/lib/uploads'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
@@ -620,14 +621,24 @@ export async function moveCalendarItem(
  */
 export async function getRefUploadUrl(
   filename: string,
+  contentType?: string,
 ): Promise<ActionResult<{ uploadUrl: string; publicUrl: string }>> {
   const guard = await requirePermission(PERMS.SOCIAL_MANAGE)
   if (!guard.ok) return { ok: false, error: guard.error }
 
-  const admin = createAdminClient()
-  try { await admin.storage.createBucket('social-refs', { public: true }) } catch { /* exists */ }
+  // social-refs is a PUBLIC bucket, so an unchecked extension here would let a
+  // .html upload be served from our own origin.
+  const ext = resolveImageExt(filename, contentType)
+  if (!ext) return { ok: false, error: IMAGE_UPLOAD_ERROR }
 
-  const ext = (filename.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg'
+  const admin = createAdminClient()
+  try {
+    await admin.storage.createBucket('social-refs', {
+      public: true,
+      fileSizeLimit: MAX_IMAGE_BYTES,
+      allowedMimeTypes: Object.keys(IMAGE_EXT_BY_TYPE),
+    })
+  } catch { /* exists */ }
   const path = `${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}.${ext}`
   const { data, error } = await admin.storage.from('social-refs').createSignedUploadUrl(path)
   if (error || !data) return { ok: false, error: 'Could not prepare the upload.' }

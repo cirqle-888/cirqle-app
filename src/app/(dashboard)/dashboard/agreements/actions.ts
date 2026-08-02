@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import { requirePermission } from '@/lib/permissions/check'
+import { requirePermission, loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { generateAgreementNumber } from '@/lib/agreements/numbering'
 import { logAgreementEvent } from '@/lib/agreements/events'
@@ -313,6 +313,14 @@ export async function saveAgreementItem(
   const guard = await requirePermission(PERMS.AGREEMENTS_MANAGE)
   if (!guard.ok) return guard
 
+  // Pricing is stripped from the payload sent to a viewer without
+  // agreements.view_pricing, so their form round-trips it back as null. Writing
+  // that would silently wipe unit_price, currency and the internal allocation
+  // the moment such a user edited an item for any other reason. They may edit
+  // an item; they may not (re)write its money.
+  const me = await loadCurrentUser().catch(() => null)
+  const canWritePricing = (me?.isAdmin ?? false) || hasPermission(me, PERMS.AGREEMENTS_VIEW_PRICING)
+
   if (!item.effective_from) return { ok: false, error: 'Pick an effective-from date' }
   if (item.effective_to && item.effective_to < item.effective_from)
     return { ok: false, error: 'Effective-to date is before effective-from' }
@@ -355,9 +363,19 @@ export async function saveAgreementItem(
     updated_at: new Date().toISOString(),
   }
 
+  // Omit rather than null: an UPDATE without these keys leaves the stored
+  // values untouched. (A brand-new item has nothing to preserve, so the insert
+  // below keeps the full row and simply records nulls.)
+  const PRICING_KEYS = [
+    'unit_price', 'currency', 'extra_unit_price',
+    'creative_allocation_amount', 'management_allocation_amount',
+  ] as const
+  const updateRow: Record<string, unknown> = { ...itemRow }
+  if (!canWritePricing) for (const k of PRICING_KEYS) delete updateRow[k]
+
   let itemId = item.id
   if (itemId) {
-    const { error } = await supabase.from('client_agreement_items').update(itemRow).eq('id', itemId)
+    const { error } = await supabase.from('client_agreement_items').update(updateRow).eq('id', itemId)
     if (error) return { ok: false, error: error.message }
   } else {
     const { data, error } = await supabase
