@@ -62,21 +62,31 @@ echo
 exists  DB-00  "DB state documented"                 docs/db-state.md
 man     DB-00b "Live DB confirms RLS on all tables"  # requires production/staging access
 
-if ls supabase/migrations/*rls_baseline* >/dev/null 2>&1; then
-  f=$(ls supabase/migrations/*rls_baseline* | head -1)
-  if grep -qi "enable row level security" "$f" && grep -qi "revoke all" "$f" && grep -qi "from anon" "$f"; then
-    ok DB-01 "RLS baseline migration (enable + revoke anon)"
+# Match either naming: the original *rls_baseline* or the measured-scope *rls_remaining*.
+rls_mig=$(find supabase/migrations -name '*rls_baseline*' -o -name '*rls_remaining*' 2>/dev/null | sort | head -1)
+rls_rb=$(find supabase/rollbacks -name '*rls_baseline*' -o -name '*rls_remaining*' 2>/dev/null | sort | head -1)
+if [[ -n "$rls_mig" ]]; then
+  if grep -qi "enable row level security" "$rls_mig" && grep -qi "revoke all" "$rls_mig" \
+     && grep -qi "from anon" "$rls_mig"; then
+    ok DB-01 "RLS migration present (enable + revoke anon)"
   else
-    bad DB-01 "RLS baseline migration incomplete (needs ENABLE RLS + REVOKE ALL FROM anon)"
-  fi
-  if ls supabase/rollbacks/*rls_baseline* >/dev/null 2>&1; then
-    ok DB-01b "RLS rollback script present"
-  else
-    bad DB-01b "RLS rollback script missing"
+    bad DB-01 "RLS migration incomplete (needs ENABLE RLS + REVOKE ALL FROM anon)"
   fi
 else
-  bad DB-01  "RLS baseline migration missing"
-  bad DB-01b "RLS rollback script missing"
+  bad DB-01 "RLS migration missing"
+fi
+if [[ -n "$rls_rb" ]]; then ok DB-01b "RLS rollback script present"
+else bad DB-01b "RLS rollback script missing"; fi
+
+# Live check: the probe exits 0 only when no table with data is anon-readable.
+if [[ -f scripts/probe-rls.mjs && -f .env.local ]]; then
+  if node scripts/probe-rls.mjs >/tmp/cirqle-rls.log 2>&1; then
+    ok DB-01d "Live probe: no table readable by the public anon key"
+  else
+    bad DB-01d "Live probe: tables still anon-readable (see /tmp/cirqle-rls.log)"
+  fi
+else
+  man DB-01d "Live probe unavailable (needs scripts/probe-rls.mjs + .env.local)"
 fi
 man DB-01c "Staging smoke test: Tasks/Invoices/Cashbook/Settings/intake all load"
 
@@ -86,8 +96,13 @@ else
   bad DB-02 "CI guard against unsecured tables missing"
 fi
 
-absent SEC-01 "No raw form spread into employees write" \
-  "\.(insert|update)\(form\)" "src/app/(dashboard)/dashboard/settings/actions.ts"
+# Scope to the employees table specifically — other entities in this file taking a
+# raw form are a separate, lower-severity follow-up (no designation escalation path).
+emp_raw=$(awk "/export async function (create|update)Employee/,/^}/" \
+  "src/app/(dashboard)/dashboard/settings/actions.ts" 2>/dev/null \
+  | grep -cE "\.(insert|update)\(form\)" | tr -d ' ')
+if [[ "$emp_raw" == "0" ]]; then ok SEC-01 "No raw form spread into employees write"
+else bad SEC-01 "employees write still spreads raw form ($emp_raw)"; fi
 exists SEC-01b "Settings actions test exists" "src/app/(dashboard)/dashboard/settings/actions.test.ts"
 
 absent SEC-02  "No 'isAdmin ?? true' fail-open"        "isAdmin \?\? true"

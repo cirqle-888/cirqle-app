@@ -31,10 +31,15 @@ vi.mock('@/lib/supabase/admin', () => {
 let mockRequirePermission = vi.fn()
 let mockRequireAdmin = vi.fn()
 
+// One factory per module: a second vi.mock() for the same path silently replaces
+// this one, which is how requirePermission went missing and took the SEC-01
+// guarantees down with it. Every export settings/actions.ts pulls from
+// permissions/check belongs here.
 vi.mock('@/lib/permissions/check', () => ({
   requirePermission: (...args: any[]) => mockRequirePermission(...args),
   requireAdmin: (...args: any[]) => mockRequireAdmin(...args),
-  resolveCurrentEmployeeId: vi.fn(() => Promise.resolve('test-user-id'))
+  resolveCurrentEmployeeId: vi.fn(() => Promise.resolve('test-user-id')),
+  invalidateUserCache: vi.fn(),
 }))
 
 vi.mock('@/lib/activity/log', () => ({
@@ -48,10 +53,6 @@ vi.mock('@/lib/fx/sync', () => ({
 
 vi.mock('next/cache', () => ({
   revalidatePath: vi.fn()
-}))
-
-vi.mock('@/lib/permissions/check', () => ({
-  invalidateUserCache: vi.fn()
 }))
 
 vi.mock('@/lib/scope/audit', () => ({
