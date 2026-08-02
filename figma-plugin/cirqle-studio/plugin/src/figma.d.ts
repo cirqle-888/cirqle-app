@@ -113,6 +113,7 @@ interface ComponentSetNode extends SceneNode {
   type: 'COMPONENT_SET'
   description: string
   defaultVariant: ComponentNode
+  children: readonly SceneNode[]
   variantGroupProperties?: { [name: string]: { values: string[] } }
 }
 interface InstanceNode extends SceneNode {

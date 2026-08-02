@@ -45,14 +45,59 @@ Live server routes (in the app, not this folder):
 `/api/figma/offers`, `/api/figma/campaign/[id]`, `/api/figma/parse`,
 `/api/figma/campaign` (POST).
 
+## Sign in once, work as yourself
+
+The plugin signs in with the employee's own Cirqle credentials (email or
+CQID + password) against `POST /api/figma/login` — a new app route that
+verifies the password via Supabase auth and returns the workspace token
+plus the employee's identity. The plugin keeps only those (never the
+password). From then on:
+
+- the header shows the signed-in **CQID**, never a name ("CQID001 ·
+  app.cirqle.work") — the panel sits open on shared screens, so the login
+  route returns only `{ id, cqid }` and a session stored by an older build
+  is stripped of any name on load,
+- every offer saved from Figma creates (or reuses) **one task per campaign**
+  on the Tasks page — titled with the *offer title*, linked to the client,
+  tracked by a `[figma:cmp:<id>]` marker in the description, and everyone
+  who saves that offer is added via `task_assignments`,
+- **contribution counts fill themselves**: on the first save the employee's
+  "Products" count is the product total; on a re-save the *differences* are
+  attributed to whoever saved — changed prices/MRPs bump their
+  "Price Updating", changed names bump "Product Name Updating", and added
+  products bump "Products". After every build the plugin also reports
+  pages + creatives (`POST /api/figma/build-report`), which SETS the
+  employee's "Pages"/"Creatives" counts (rebuilds don't inflate them).
+  Parameters are matched by name against the workspace's own contribution
+  setup, so this adapts to renames and skips anything missing; the
+  contribution panel remains the manual override for all of it,
+- the old shared-secret path still exists under "Advanced — shared secret"
+  for manual/edge cases.
+
+Server routes in the app: `src/app/api/figma/login/route.ts`,
+`src/app/api/figma/build-report/route.ts` (both new) and
+`src/app/api/figma/campaign/route.ts` (task + contributions — always
+best-effort, a hiccup never fails the offer save or the build).
+
 ## Interface: the plugin resumes, you build
+
+Explanations stay out of the way: the Variants panel shows one short line
+per property instead of repeating a paragraph under each, long instructions
+live behind a collapsed **How auto picks**, and a set's variant values are
+listed as the first few plus "+N more" (full list in the tooltip).
 
 The main interface only shows the decision that's actually in front of you —
 everything set-once lives behind folds, and everything from last session
 comes back on its own (all persisted per user via `figma.clientStorage`):
 
-- **Auto-connect** — with a saved URL + token the plugin connects on open;
-  the Connection card only reappears when connecting fails.
+- **Auto-connect** — after the one-time sign-in the plugin connects on
+  open; the sign-in card only reappears when connecting fails.
+- **Picking is loading** — there is no Load Offers button: choosing a
+  client or offer loads it (a sequence guard drops stale responses when
+  selections change quickly), and the sheet fills itself. The old "Edit
+  offer in sheet" button is gone too — the Paste tab always holds the
+  loaded offer. Manual paths that remain: ↻ re-scan/reload, and the
+  Advanced shared-secret connect.
 - **Resume last offer** — the last client, offer and template are
   reselected, and if that offer is still active it is loaded immediately:
   open plugin → press Build Flyer. Templates are remembered by *name*, so
@@ -66,6 +111,109 @@ comes back on its own (all persisted per user via `figma.clientStorage`):
 - **Contextual hints** — the template how-to shows only while the page has
   no template; the AI-hint field lives behind "AI options" on the Paste tab.
 - The last-used tab (Build / Paste offer) is also restored.
+- **Tag layers** — select any layer on the canvas and click the #token it
+  holds (#product, #price1, #mrp, #imageurl, …); the plugin renames it, and
+  for a component-set template it renames the matching layer in **every
+  variant** in one click. Tokens the current template is still missing are
+  highlighted, and the panel opens itself whenever validation reports a
+  template problem. Text tokens refuse shapes (and #imageurl refuses text)
+  with a pointer to the right layer, and renames inside *instances* are
+  rejected — tag the main component so the template actually changes.
+  Aliases now also accept "price a" / "price b" for #price1 / #price2.
+- **Default variant** — when the template is a component set, a "Default
+  variant" selector picks which variant new cards start from (instead of
+  silently using Figma's default). Remembered per template name; the
+  per-product variant mapping still overrides whatever properties it maps.
+- Dropdowns show only the template's *name*; the technical details
+  ("1 card · 3 fields") sit in a muted hint beside the label.
+- **Column gap and row gap are separate** — the Layout fold has both, each
+  remembered, summarised as "gap 10×24" when they differ.
+- **Card variants** — with an offer loaded and a component-set template, a
+  per-product list pins any product's card to a specific variant. "Auto"
+  keeps the mapping-driven switching; a manual pin is applied after it, so
+  it always wins. Picks are per-offer (cleared when a different offer
+  loads) and follow the product through any build order.
+- **Sample-based variant matching** — when variant names carry no meaning
+  ("Variant 2", "Variant 7"), the automatic switching reads each variant's
+  own sample price instead. Sequence-number names are explicitly *not*
+  read as widths (`digitWidthOf` rejects `default|variant|type|style|…`
+  followed by digits): "Variant2" used to parse as "2 digits" and
+  "Variant10" as "10 digits", which both sent products to the wrong
+  sticker and — because it counted as a match — stopped the sample
+  fallback from ever running. The rules: the variant whose `#price1` shows `000` is used
+  for 3-digit prices, one with no visible `#price2` serves whole-rupee
+  products, and a variant with no price layers at all catches no-price
+  offers (B1G1 etc). Exact digit width first, else the smallest roomier
+  variant, else the widest — paise presence breaks ties. Runs only when
+  name-based matching found nothing, and manual pins still override it.
+  The "name language" fact groups Malayalam *and* Arabic as regional, so
+  one mapping restyles every non-English product name at once. MRP is a
+  fact too: products with an MRP get a variant whose sample shows a
+  visible `#mrp` layer, products without one get the plain variant — and
+  validation warns when the offer has MRPs but no variant can show one.
+- **The sheet is always live** — loading an offer fills the editable
+  spreadsheet automatically (unless it holds unsaved work for a different
+  offer), and "Edit offer in sheet" jumps straight to it. Price fixes or
+  product swaps from the client are edited there, saved back to Cirqle,
+  and rebuilt — never hand-edited behind Cirqle's back.
+- **Page planning in the sheet** — the **Pages** toolbar button shows two
+  optional columns, *Category* and *Page*. With them:
+  · **N per page → number all** numbers every product sequentially ("this
+  page takes 16");
+  · **new page at each category** makes the count a maximum instead, so a
+  category never splits across pages;
+  · select any rows and **set selected rows** puts that range on a page —
+  "from this product to this product goes on page 3";
+  · **sort by category** groups rows, keeping their order inside each group
+  (uncategorised last).
+  Category is filled automatically from the section the parser found a row
+  under (a day, a weight like "100gm"), so an AI-parsed list arrives already
+  categorised; it stays editable. Pages are saved to Cirqle with the offer,
+  so the Build tab's Page filter — and anyone reopening the offer later —
+  works from the plan.
+- **One block per page** (Layout) — builds each page separately, one block
+  beside the previous, instead of one grid for the whole offer. Runs the
+  builds sequentially (the document work is single-threaded) and each block
+  is named "… — Page N".
+- **Variant column in the sheet** — when the selected template has
+  variants, every sheet row ends with a Variant cell (Auto / pin), kept in
+  step with the Build tab's Card variants panel. Like P1·P2 it sits outside
+  the cell-selection model, so keyboard nav and copy-paste ignore it.
+- **Drafts survive closing the plugin** — the sheet's unsaved rows, title,
+  date and variant pins are stored in `figma.clientStorage` (debounced) and
+  restored on reopen; saving to Cirqle replaces the draft with the
+  server's canonical copy.
+- **Free cards** — a Layout checkbox ("Free cards — no wrapper frame")
+  builds cards straight onto the page in the same grid, each independently
+  movable from the first second; all built cards come out selected. Off by
+  default (the wrapper frame keeps big builds tidy); persisted.
+- **Modular card templates** — a template can be a plain **Group** of
+  separate components (product name + price tag + photo as three
+  components, grouped per product). The group is the template: it scans,
+  tags, validates and builds like any frame, and each sub-component's
+  variants still switch per product.
+- **Each piece is also its own template.** The pieces a card is built from
+  are listed in the Template dropdown in their own right, labelled with the
+  card they belong to ("Component 66 ▸ Price Tag"), so a build can place
+  *only* the price tags over finished artwork, or *only* the product names.
+  Selecting a piece that is a component set offers that set's own default
+  variant.
+
+  How the list is built (`scanTemplates`): top-level nodes are listed first
+  and keep their plain name. Then every piece *inside* a card is resolved —
+  Figma stores pieces as instances, so each is followed to the master (or
+  its component set) that a build would actually clone, which also surfaces
+  masters filed on another page. A master used inside exactly one card is
+  then shown as that card's piece; one shared by several cards stays
+  plainly named rather than claiming a card. Nested frames and groups stay
+  out (structure, not reusable pieces), as do the variant children of a
+  component set — the set itself is the template. Templates are remembered
+  by this full label, so the choice survives a re-scan (node ids change)
+  and two pieces named "PRODUCT" in different cards never collide.
+- **Light theme by default**, with a ☾/☀ toggle in the header; the choice
+  persists. Component-set templates are measured by ONE card (the chosen
+  default variant), not the whole variant stack — row spacing now honours
+  the row gap exactly.
 
 ## The two tabs
 

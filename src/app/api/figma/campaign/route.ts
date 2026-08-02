@@ -58,6 +58,9 @@ interface IncomingBody {
   offerDateTo?: string
   campaignId?: string
   products?: IncomingProduct[]
+  /** The signed-in employee (from /api/figma/login) — used to attribute the
+   * task this save creates on the Tasks page. CQID only, never a name. */
+  createdBy?: { id?: string | null; cqid?: string | null }
 }
 
 const MAX_PRODUCTS = 300
@@ -155,6 +158,32 @@ export async function POST(req: NextRequest) {
     const today = new Date().toISOString().slice(0, 10)
     const dateType = body?.dateType === 'range' ? 'range' : 'single'
 
+    // Snapshot what this save is about to replace — the client's active
+    // campaign — so per-field edit counts (price/name changes) can be
+    // attributed to the employee who made them (see the contribution
+    // section after the save).
+    type PrevProduct = { name: string | null; price: number | null; mrp: number | null; display_order: number | null }
+    let prevProducts: PrevProduct[] = []
+    try {
+      const { data: activeCampaign } = await admin
+        .from('offer_campaigns')
+        .select('id')
+        .eq('client_id', clientId)
+        .eq('status', 'active')
+        .maybeSingle()
+      const activeId = (activeCampaign as { id?: string } | null)?.id
+      if (activeId) {
+        const { data: prevRows } = await admin
+          .from('offer_products')
+          .select('name, price, mrp, display_order')
+          .eq('campaign_id', activeId)
+          .order('display_order')
+        prevProducts = (prevRows as PrevProduct[] | null) || []
+      }
+    } catch {
+      prevProducts = []
+    }
+
     const result = await saveCampaign(
       client.offer_intake_token,
       {
@@ -176,12 +205,143 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // Every offer saved from Figma also lands on the Tasks page — ONE task
+    // per campaign (re-saves reuse it via the [figma:cmp:…] marker), titled
+    // with the offer title, assigned to everyone who worked on it, and with
+    // contribution counts filled in automatically:
+    //   · "Products" count      → total products in the offer
+    //   · "Price Updating"      → prices/MRPs this save changed
+    //   · "Product Name Updating" → names this save changed
+    // The contribution panel stays the manual override — anything written
+    // here can be corrected by hand. Best-effort by design: none of this
+    // may ever fail the offer save.
+    let taskNumber: number | null = null
+    try {
+      const campaignId = result.data.campaignId
+      const offerTitle = body?.title?.trim() || 'Offer ' + today
+      const marker = `[figma:cmp:${campaignId}]`
+      const employeeId = body?.createdBy?.id || null
+      // CQID, not a name — the task is already assigned to the employee row,
+      // so the description only needs a staff identifier.
+      const byName = (body?.createdBy?.cqid || '').trim()
+
+      // Edit deltas: same row position, different value.
+      let nameChanges = 0
+      let priceChanges = 0
+      for (let i = 0; i < Math.min(prevProducts.length, productInputs.length); i++) {
+        const oldP = prevProducts[i]
+        const newP = productInputs[i]
+        if ((oldP.name || '').trim() !== newP.name.trim()) nameChanges++
+        if ((oldP.price ?? null) !== (newP.price ?? null) || (oldP.mrp ?? null) !== (newP.mrp ?? null)) priceChanges++
+      }
+      const addedProducts = Math.max(0, productInputs.length - prevProducts.length)
+      const isUpdate = prevProducts.length > 0
+
+      // One task per campaign — find before creating.
+      const { data: existingTask } = await admin
+        .from('tasks')
+        .select('id, task_number')
+        .ilike('description', `%${marker}%`)
+        .is('deleted_at', null)
+        .maybeSingle()
+      let taskId = (existingTask as { id?: string } | null)?.id || null
+      taskNumber = (existingTask as { task_number?: number } | null)?.task_number ?? null
+
+      if (taskId) {
+        // Same offer re-saved — keep the task, refresh the title.
+        await admin.from('tasks').update({ title: offerTitle }).eq('id', taskId)
+      } else {
+        const { data: maxRow } = await admin
+          .from('tasks')
+          .select('task_number')
+          .order('task_number', { ascending: false, nullsFirst: false })
+          .limit(1)
+          .maybeSingle()
+        taskNumber = (((maxRow as { task_number?: number } | null)?.task_number) ?? 0) + 1
+        const { data: taskRow } = await admin
+          .from('tasks')
+          .insert({
+            task_number: taskNumber,
+            title: offerTitle,
+            description:
+              `Offer flyer saved from Figma (Cirqle Studio)${byName ? ' by ' + byName : ''} — ` +
+              `${productInputs.length} products. ${marker}`,
+            client_id: client.id,
+            status: 'pending',
+            task_date: today,
+            quantity: 1,
+          })
+          .select('id')
+          .single()
+        taskId = (taskRow as { id?: string } | null)?.id || null
+      }
+
+      if (taskId && employeeId) {
+        // Everyone who saved this offer is on the task (idempotent add).
+        const { data: existingAssign } = await admin
+          .from('task_assignments')
+          .select('task_id')
+          .eq('task_id', taskId)
+          .eq('employee_id', employeeId)
+          .maybeSingle()
+        if (!existingAssign) {
+          await admin.from('task_assignments').insert({ task_id: taskId, employee_id: employeeId })
+        }
+
+        // Auto contribution counts. Parameters are matched by name so this
+        // adapts to the workspace's own contribution setup; anything not
+        // found is simply skipped.
+        const { data: paramRows } = await admin.from('parameters').select('id, name, input_type')
+        const params = (paramRows as { id: string; name: string | null; input_type: string | null }[] | null) || []
+        const flat = (s: string | null) => String(s || '').toLowerCase().replace(/[^a-z]/g, '')
+        const findParam = (test: (n: string) => boolean) =>
+          params.find(p => (p.input_type || 'count') === 'count' && test(flat(p.name)))?.id || null
+        const productsParam = findParam(n => n === 'products' || n === 'productcount' || n === 'product')
+        const priceParam = findParam(n => n.includes('price') && n.includes('updat'))
+        const nameParam = findParam(n => n.includes('name') && n.includes('updat'))
+
+        const bump = async (parameterId: string | null, delta: number, setTo?: number) => {
+          if (!parameterId || (delta <= 0 && setTo == null)) return
+          const { data: row } = await admin
+            .from('contributions')
+            .select('value')
+            .eq('task_id', taskId)
+            .eq('employee_id', employeeId)
+            .eq('parameter_id', parameterId)
+            .maybeSingle()
+          const current = Number((row as { value?: number } | null)?.value ?? NaN)
+          if (Number.isFinite(current)) {
+            const next = setTo != null ? setTo : current + delta
+            await admin.from('contributions').update({ value: next })
+              .eq('task_id', taskId).eq('employee_id', employeeId).eq('parameter_id', parameterId)
+          } else {
+            await admin.from('contributions').insert({
+              task_id: taskId, employee_id: employeeId, parameter_id: parameterId,
+              value: setTo != null ? setTo : delta,
+            })
+          }
+        }
+
+        if (!isUpdate) {
+          // First save: the whole product list is this employee's work.
+          await bump(productsParam, productInputs.length)
+        } else {
+          await bump(productsParam, addedProducts)
+          await bump(priceParam, priceChanges)
+          await bump(nameParam, nameChanges)
+        }
+      }
+    } catch {
+      taskNumber = null
+    }
+
     return NextResponse.json(
       {
         ok: true,
         campaignId: result.data.campaignId,
         productCount: productInputs.length,
         clientName: client.name,
+        taskNumber,
         // saveCampaign fires the Google Sheet sync in the background, so a
         // client still on the sheet pipeline stays in step automatically.
         message: `Saved ${productInputs.length} products to ${client.name} in Cirqle.`,

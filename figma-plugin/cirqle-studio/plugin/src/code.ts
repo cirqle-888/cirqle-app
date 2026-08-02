@@ -47,6 +47,10 @@ const TOKEN_ALIASES: Record<string, string> = {
   '#date': '#offerdatedisplay',
   '#size': '#weight',
   '#qty': '#weight',
+  // "price a / price b" is how designers naturally label the two price
+  // slots on a card (normalizeLayerName strips the space and case).
+  '#pricea': '#price1',
+  '#priceb': '#price2',
 }
 
 function normalizeLayerName(raw: string): string {
@@ -293,36 +297,124 @@ function subtreeIds(nodes: SceneNode[]): Set<string> {
  * Template scanning
  * ================================================================== */
 
-type TemplateInfo = { id: string; name: string; nodeType: string; tokens: string[]; slots: number }
+type TemplateInfo = {
+  id: string; name: string; nodeType: string; tokens: string[]; slots: number
+  /** Variant components of a COMPONENT_SET template — lets the UI offer a
+   * "default variant" choice instead of silently using Figma's default. */
+  variants: { id: string; name: string }[]
+  /** Name of the card this piece sits inside, for nested component
+   * templates — "PRODUCT" alone is ambiguous, "Card ▸ PRODUCT" is not. */
+  parentName?: string | null
+}
 
 /**
  * A "template" is any component/frame on the CURRENT page whose descendants
  * include at least one #token layer. Components are preferred (instances stay
  * linked), but plain frames work — many real templates are frames.
  */
-function scanTemplates(): TemplateInfo[] {
-  const results: TemplateInfo[] = []
-  const roots = figma.currentPage.findAll(n =>
-    n.type === 'COMPONENT' || n.type === 'COMPONENT_SET' || n.type === 'FRAME' || n.type === 'INSTANCE'
-  )
-  for (const root of roots) {
-    // A nested candidate inside another candidate is noise — only offer
-    // top-level-ish nodes (parent is the page or a section-like container).
-    const parentType = root.parent ? root.parent.type : 'PAGE'
-    if (parentType !== 'PAGE' && parentType !== 'SECTION') continue
+/** The outermost node this one sits inside — the card, in a modular card. */
+function topLevelAncestorName(node: SceneNode): string | null {
+  let cur: BaseNode | null = node.parent
+  let last: BaseNode | null = null
+  while (cur && cur.type !== 'PAGE' && cur.type !== 'DOCUMENT') {
+    last = cur
+    cur = cur.parent
+  }
+  return last ? last.name : null
+}
 
+async function scanTemplates(): Promise<TemplateInfo[]> {
+  const results: TemplateInfo[] = []
+  const seen: Record<string, boolean> = {}
+
+  /** Offer `node` as a template if it holds any #token layer. First entry
+   * wins, so a master listed on its own never gets relabelled as a piece. */
+  const offer = (node: SceneNode, parentName: string | null): void => {
+    if (seen[node.id]) return
     const tokens = new Set<string>()
-    for (const node of descendantsOf(root)) {
-      const token = layerToken(node.name)
+    for (const d of descendantsOf(node)) {
+      const token = layerToken(d.name)
       if (token) tokens.add(token)
     }
-    if (tokens.size > 0) {
-      results.push({
-        id: root.id, name: root.name, nodeType: root.type,
-        tokens: Array.from(tokens).sort(),
-        slots: productLayersIn(root).length,
-      })
+    if (tokens.size === 0) return
+    seen[node.id] = true
+    results.push({
+      id: node.id, name: node.name, nodeType: node.type,
+      tokens: Array.from(tokens).sort(),
+      slots: productLayersIn(node).length,
+      variants: node.type === 'COMPONENT_SET'
+        ? ((node as ComponentSetNode).children || [])
+            .filter(c => c.type === 'COMPONENT')
+            .map(c => ({ id: c.id, name: c.name }))
+        : [],
+      parentName,
+    })
+  }
+
+  // GROUP included deliberately: the "modular card" pattern — product name,
+  // price tag and photo as three separate components, grouped per product —
+  // makes the group itself the template.
+  const roots = figma.currentPage.findAll(n =>
+    n.type === 'COMPONENT' || n.type === 'COMPONENT_SET' || n.type === 'FRAME' ||
+    n.type === 'INSTANCE' || n.type === 'GROUP'
+  )
+  const isTopLevel = (n: SceneNode) => {
+    const t = n.parent ? n.parent.type : 'PAGE'
+    return t === 'PAGE' || t === 'SECTION'
+  }
+
+  // Pass 1 — whole cards. Done first so a master that lives on the canvas
+  // in its own right is listed plainly, not as somebody's nested piece.
+  for (const root of roots) if (isTopLevel(root)) offer(root, null)
+
+  // Pass 2 — the pieces INSIDE a card, each selectable on its own so a
+  // build can place only the price tags over finished art. Figma stores
+  // those pieces as instances of masters that usually live on the canvas
+  // too, so resolve each to the master (or its component set) a build
+  // would actually clone, and remember which card used it. Nested frames
+  // and groups stay out: they are structure, not reusable pieces.
+  const usedIn: Record<string, Record<string, boolean>> = {}
+  const noteUse = (id: string, cardName: string | null) => {
+    if (!cardName) return
+    if (!usedIn[id]) usedIn[id] = {}
+    usedIn[id][cardName] = true
+  }
+
+  for (const root of roots) {
+    if (isTopLevel(root)) continue
+    const cardName = topLevelAncestorName(root)
+    if (root.type === 'COMPONENT_SET' ||
+        (root.type === 'COMPONENT' && !(root.parent && root.parent.type === 'COMPONENT_SET'))) {
+      noteUse(root.id, cardName)
+      offer(root, cardName)
+      continue
     }
+    if (root.type === 'INSTANCE') {
+      try {
+        const main = await (root as InstanceNode).getMainComponentAsync()
+        if (!main) continue
+        const target = main.parent && main.parent.type === 'COMPONENT_SET'
+          ? (main.parent as ComponentSetNode as unknown as SceneNode)
+          : (main as unknown as SceneNode)
+        noteUse(target.id, cardName)
+        // Masters living off this page aren't in pass 1 — add them here so
+        // a piece is selectable even when its master is filed elsewhere.
+        offer(target, cardName)
+      } catch {
+        // Master on an unloaded page, or a broken link — skip it rather
+        // than fail the whole scan.
+      }
+    }
+  }
+
+  // Pass 3 — a master that is used inside exactly ONE card is shown as that
+  // card's piece ("Component 66 ▸ PRODUCT"), which is what makes the pieces
+  // findable at all. Shared across several cards, it stays plainly named
+  // rather than claiming to belong to whichever card was scanned first.
+  for (const info of results) {
+    if (info.parentName) continue
+    const uses = usedIn[info.id] ? Object.keys(usedIn[info.id]) : []
+    if (uses.length === 1 && uses[0] !== info.name) info.parentName = uses[0]
   }
   return results
 }
@@ -449,9 +541,11 @@ async function validateTemplate(msg: { templateId: string }): Promise<void> {
  * fixed value from the panel — the mapping is remembered per workspace.
  * ================================================================== */
 
-const MALAYALAM_RE = /[ഀ-ൿ]/
+// Malayalam plus Arabic — both group as the "regional script" state so a
+// single mapping restyles every non-English product name at once.
+const MALAYALAM_RE = /[ഀ-ൿ؀-ۿ]/
 
-type FactName = 'digits' | 'paise' | 'offer' | 'script' | 'price'
+type FactName = 'digits' | 'paise' | 'offer' | 'script' | 'price' | 'mrp'
 
 /**
  * `null` means "this product says nothing about that property" — a Buy-1-Get-1
@@ -464,6 +558,7 @@ type ProductFacts = {
   offer: string
   script: string
   price: string
+  mrp: string
 }
 
 function productFacts(product: BuildProduct): ProductFacts {
@@ -496,6 +591,7 @@ function productFacts(product: BuildProduct): ProductFacts {
     price: hasPrice ? 'yes' : 'no',
     offer,
     script: hasMalayalam && hasLatin ? 'mixed' : hasMalayalam ? 'malayalam' : 'latin',
+    mrp: String(f['#mrp'] || '').replace(/[^\d]/g, '').length > 0 ? 'yes' : 'no',
   }
 }
 
@@ -505,6 +601,7 @@ const FACT_PATTERNS: { fact: FactName; re: RegExp }[] = [
   { fact: 'paise', re: /paise|decimal|fraction|point|cents/i },
   { fact: 'price', re: /(has|show|with|no)\s*price|price\s*(shown|visible|state|less)|^\s*price\s*\??\s*$|priced/i },
   { fact: 'script', re: /script|lang|malayalam|english|regional|font/i },
+  { fact: 'mrp', re: /mrp|strike|old\s*price|original|slash/i },
   { fact: 'offer', re: /offer|deal|promo|badge|type|mode/i },
 ]
 
@@ -534,6 +631,10 @@ const FACT_VALUE_SYNONYMS: Record<string, Record<string, string[]>> = {
     yes: ['price', 'priced', 'hasprice', 'showprice', 'withprice', 'number', 'amount', 'rate'],
     no: ['noprice', 'withoutprice', 'hideprice', 'priceless', 'text', 'saletext', 'offertext',
          'badgeonly', 'textonly', 'free', 'offer'],
+  },
+  mrp: {
+    yes: ['mrp', 'withmrp', 'hasmrp', 'strike', 'strikethrough', 'oldprice', 'showmrp'],
+    no: ['nomrp', 'withoutmrp', 'nostrike', 'hidemrp', 'saleonly', 'singleprice'],
   },
 }
 
@@ -570,6 +671,11 @@ function digitWidthOf(value: string): { n: number; decimal: boolean } | null {
   if (embedded) return { n: embedded[1].length, decimal: !!embedded[2] }
 
   const flat = flatten(value)
+  // "Variant 2", "Type 3", "Default" — that number is a sequence index, not
+  // a price width. Reading it as one silently sends a ₹49 product to
+  // whatever "Variant2" happens to look like, AND it counts as a match, so
+  // the sample-based fallback that WOULD get this right never runs.
+  if (/^(default|variant|type|style|option|state|property|item|no|num|prop)\d*$/.test(flat)) return null
   const found = flat.match(/\d+/)
   if (!found) return null
   return { n: parseInt(found[0], 10), decimal: /decimal|paise|point|fraction/.test(flat) }
@@ -674,6 +780,7 @@ const FACT_STATES: Record<FactName, string[]> = {
   price: ['yes', 'no'],
   offer: ['price', 'bogo', 'percent'],
   script: ['latin', 'malayalam', 'mixed'],
+  mrp: ['yes', 'no'],
 }
 
 /** 'none' stands in for "this product has no opinion", so it can be mapped. */
@@ -709,6 +816,87 @@ function groupProducts(products: BuildProduct[]): Record<string, Record<string, 
  *   'off'          — leave it exactly as the designer set it
  *   any value      — pin it to that value for every product
  */
+/* ------------------------------------------------------------------ *
+ * Sample-based variant matching.
+ *
+ * When variant names carry no meaning ("Variant 2", "Variant 7") the
+ * name-matching below has nothing to read — but the template itself does:
+ * the variant whose #price1 sample shows "000" IS the 3-digit variant, and
+ * a variant with no visible #price2 is the one for whole-rupee prices.
+ * Reading the sample text lets digit-based switching work with zero
+ * renaming and zero mapping setup.
+ * ------------------------------------------------------------------ */
+
+type VariantSampleInfo = { name: string; digits: number | null; price2: boolean; mrp: boolean }
+
+/** Per-build cache — template edits between builds must be re-read. */
+let sampleCache: Record<string, VariantSampleInfo[]> = {}
+
+function variantSamples(set: ComponentSetNode): VariantSampleInfo[] {
+  if (sampleCache[set.id]) return sampleCache[set.id]
+  const out: VariantSampleInfo[] = []
+  for (const kid of (set.children || [])) {
+    if (kid.type !== 'COMPONENT') continue
+    let digits: number | null = null
+    let price2 = false
+    let mrp = false
+    for (const node of descendantsOf(kid as ComponentNode)) {
+      const token = layerToken(node.name)
+      if (!token) continue
+      if ((token === '#price1' || token === '#offerprice') && isText(node) && node.visible !== false) {
+        const run = String((node as TextNode).characters).match(/\d+/)
+        if (run) digits = Math.min(6, run[0].length)
+      }
+      if (token === '#price2' && node.visible !== false) price2 = true
+      if (token === '#mrp' && node.visible !== false) mrp = true
+    }
+    out.push({ name: kid.name, digits, price2, mrp })
+  }
+  sampleCache[set.id] = out
+  return out
+}
+
+/**
+ * The variant whose sample best fits this product, as a properties object —
+ * or null when the samples don't tell enough to act. Mirrors
+ * matchVariantValue's ladder: exact digit width, else the smallest roomier
+ * one, else the widest; paise presence breaks ties at every rung.
+ */
+function samplePickProps(set: ComponentSetNode, facts: ProductFacts): { [k: string]: string } | null {
+  const samples = variantSamples(set)
+  if (samples.length < 2) return null
+
+  if (facts.price === 'no') {
+    const blank = samples.find(s => s.digits === null && !s.price2)
+    return blank ? parseVariantName(blank.name) : null
+  }
+  if (facts.digits === null) return null
+
+  const want = parseInt(facts.digits, 10)
+  const priced = samples.filter(s => s.digits !== null)
+    .sort((a, b) => (a.digits as number) - (b.digits as number))
+  if (!priced.length) return null
+
+  const wantPaise = facts.paise === 'yes'
+  const wantMrp = facts.mrp === 'yes'
+  // Tie-break ladder inside a digit rung: paise presence first, then MRP —
+  // a product without an MRP gets the variant without the strike price.
+  const pick = (list: VariantSampleInfo[]) => {
+    let pool = list
+    const paiseMatch = pool.filter(s => s.price2 === wantPaise)
+    if (paiseMatch.length) pool = paiseMatch
+    const mrpMatch = pool.filter(s => s.mrp === wantMrp)
+    if (mrpMatch.length) pool = mrpMatch
+    return pool[0]
+  }
+  const exact = priced.filter(s => s.digits === want)
+  if (exact.length) return parseVariantName(pick(exact).name)
+  const roomier = priced.filter(s => (s.digits as number) >= want)
+  if (roomier.length) return parseVariantName(pick(roomier).name)
+  const widest = priced[priced.length - 1].digits
+  return parseVariantName(pick(priced.filter(s => s.digits === widest)).name)
+}
+
 async function applyVariants(
   card: SceneNode,
   product: BuildProduct,
@@ -723,11 +911,13 @@ async function applyVariants(
     if (!set) continue
     const groups = set.variantGroupProperties as { [name: string]: { values: string[] } }
     const next: { [name: string]: string } = {}
+    let anyActive = false
 
     for (const property of Object.keys(groups)) {
       const values = (groups[property] && groups[property].values) || []
       const choice = choiceFor(choices, set.name, property)
       if (choice === 'off') continue
+      anyActive = true
 
       let fact: FactName | null = null
       if (choice === 'auto') {
@@ -756,6 +946,15 @@ async function applyVariants(
       if (value) next[property] = value
     }
 
+    // Names told us nothing ("Property 1" holding "Variant 7") — let the
+    // template's own sample prices decide instead.
+    if (Object.keys(next).length === 0 && anyActive) {
+      const sampled = samplePickProps(set, facts)
+      if (sampled) {
+        for (const k of Object.keys(sampled)) if (groups[k]) next[k] = sampled[k]
+      }
+    }
+
     if (Object.keys(next).length === 0) continue
     try {
       ;(node as InstanceNode).setProperties(next)
@@ -767,6 +966,39 @@ async function applyVariants(
     }
   }
   return { switched, failed }
+}
+
+/** "Property 1=Variant3, Size=Big" → { 'Property 1': 'Variant3', Size: 'Big' } */
+function parseVariantName(name: string): { [k: string]: string } {
+  const props: { [k: string]: string } = {}
+  for (const part of String(name).split(',')) {
+    const eq = part.indexOf('=')
+    if (eq > 0) props[part.slice(0, eq).trim()] = part.slice(eq + 1).trim()
+  }
+  return props
+}
+
+/** A designer's explicit per-product variant pick — applied after the
+ * automatic mapping so a manual choice always wins. */
+async function applyVariantOverride(
+  card: SceneNode,
+  overrideName: string | null | undefined,
+): Promise<{ switched: number; failed: number }> {
+  if (!overrideName) return { switched: 0, failed: 0 }
+  const props = parseVariantName(overrideName)
+  if (Object.keys(props).length === 0) return { switched: 0, failed: 0 }
+  for (const node of descendantsOf(card)) {
+    if (node.type !== 'INSTANCE') continue
+    const set = await variantSetOf(node)
+    if (!set) continue
+    try {
+      ;(node as InstanceNode).setProperties(props)
+      return { switched: 1, failed: 0 }
+    } catch (err) {
+      return { switched: 0, failed: 1 }
+    }
+  }
+  return { switched: 0, failed: 0 }
 }
 
 type VariantInfo = {
@@ -783,9 +1015,9 @@ type VariantInfo = {
 /** What a property's values could plausibly drive, judged on the values alone. */
 function suggestedFacts(values: string[]): FactName[] {
   const out: FactName[] = []
-  const facts: ProductFacts = { digits: '2', paise: 'yes', offer: 'price', script: 'latin', price: 'yes' }
+  const facts: ProductFacts = { digits: '2', paise: 'yes', offer: 'price', script: 'latin', price: 'yes', mrp: 'yes' }
   if (digitCandidates(values).length >= 2) out.push('digits')
-  for (const fact of ['paise', 'price', 'offer', 'script'] as FactName[]) {
+  for (const fact of ['paise', 'price', 'offer', 'script', 'mrp'] as FactName[]) {
     // A property serves a fact if at least two of that fact's states can be
     // told apart in its values — one match could be a coincidence.
     const states = fact === 'offer' ? ['price', 'bogo', 'percent']
@@ -840,9 +1072,18 @@ type BuildProduct = {
   hasImageUrl: boolean
 }
 
-async function makeCard(template: SceneNode): Promise<SceneNode> {
+async function makeCard(template: SceneNode, defaultVariantId?: string | null): Promise<SceneNode> {
   if (template.type === 'COMPONENT') return (template as ComponentNode).createInstance()
-  if (template.type === 'COMPONENT_SET') return (template as ComponentSetNode).defaultVariant.createInstance()
+  if (template.type === 'COMPONENT_SET') {
+    const set = template as ComponentSetNode
+    // The designer's chosen base variant, when it still exists — the variant
+    // mapping (per-product switching) then only overrides mapped properties.
+    if (defaultVariantId) {
+      const chosen = (set.children || []).find(c => c.id === defaultVariantId && c.type === 'COMPONENT')
+      if (chosen) return (chosen as ComponentNode).createInstance()
+    }
+    return set.defaultVariant.createInstance()
+  }
   return template.clone()
 }
 
@@ -1059,6 +1300,8 @@ async function fillSelection(
 
 async function buildFlyer(msg: {
   templateId: string
+  /** Variant to base new cards on when the template is a component set. */
+  defaultVariantId?: string | null
   products: BuildProduct[]
   columns: number
   gap: number
@@ -1066,6 +1309,15 @@ async function buildFlyer(msg: {
   fillSelection?: boolean
   variants?: Record<string, VariantChoice>
   variantMaps?: Record<string, Record<string, string>>
+  /** Vertical gap between card rows; falls back to `gap` when absent. */
+  rowGap?: number
+  /** Per-product manual variant picks, aligned with `products`. */
+  variantOverrides?: (string | null)[]
+  /** Place cards directly on the page — no wrapper frame, every card moves
+   * on its own. The grid spacing still applies as starting positions. */
+  freeCards?: boolean
+  /** Which block this is when building one block per page (0, 1, 2 …). */
+  offsetIndex?: number
 }): Promise<void> {
   if (msg.fillSelection) {
     await fillSelection(msg.products, msg.variants || {}, msg.variantMaps || {})
@@ -1089,9 +1341,22 @@ async function buildFlyer(msg: {
   const slots = findSlots(template)
   const perPage = slots.length
 
-  const width = (template as FrameNode).width || 200
-  const height = (template as FrameNode).height || 200
+  // Measure ONE card, never the template container: a component set's own
+  // width/height is every variant stacked together, which would space rows
+  // by the whole stack instead of by a single card.
+  let cardBase: SceneNode = template
+  if (template.type === 'COMPONENT_SET') {
+    const set = template as ComponentSetNode
+    const chosen = msg.defaultVariantId
+      ? (set.children || []).find(c => c.id === msg.defaultVariantId && c.type === 'COMPONENT')
+      : null
+    cardBase = (chosen as SceneNode) || (set.defaultVariant as SceneNode) || template
+  }
+  const width = (cardBase as FrameNode).width || 200
+  const height = (cardBase as FrameNode).height || 200
   const gap = Number.isFinite(msg.gap) ? msg.gap : 40
+  const rowGap = Number.isFinite(msg.rowGap as number) ? (msg.rowGap as number) : gap
+  sampleCache = {}   // template may have been edited since the last build
   // A page template produces one copy per N products, not one copy per product.
   const copies = perPage > 1 ? Math.ceil(msg.products.length / perPage) : msg.products.length
   const cols = Math.max(1, Math.min(msg.columns || 4, copies))
@@ -1099,17 +1364,29 @@ async function buildFlyer(msg: {
 
   // Everything lands inside ONE new frame on the CURRENT page — the plugin
   // never edits existing nodes and never touches other pages.
-  const wrapper = figma.createFrame()
-  wrapper.name = msg.frameName || 'Cirqle Studio build'
-  wrapper.fills = []
-  wrapper.clipsContent = false
-  wrapper.x = ((template as FrameNode).x || 0)
-  wrapper.y = ((template as FrameNode).y || 0) + height + gap * 2
-  wrapper.resize(
-    Math.max(1, cols * width + (cols - 1) * gap),
-    Math.max(1, rows * height + (rows - 1) * gap),
-  )
-  figma.currentPage.appendChild(wrapper)
+  // Building page by page runs this once per page; each block steps to the
+  // right of the last so the pages sit side by side instead of stacking.
+  const blockWidth = cols * width + (cols - 1) * gap
+  const offset = Math.max(0, Math.round(Number(msg.offsetIndex) || 0))
+  const baseX = ((template as FrameNode).x || 0) + offset * (blockWidth + gap * 3)
+  const baseY = ((template as FrameNode).y || 0) + height + gap * 2
+
+  // Free-cards mode skips the wrapper: cards land straight on the page in
+  // the same grid, each one independently movable from the first second.
+  const wrapper = msg.freeCards ? null : figma.createFrame()
+  if (wrapper) {
+    wrapper.name = msg.frameName || 'Cirqle Studio build'
+    wrapper.fills = []
+    wrapper.clipsContent = false
+    wrapper.x = baseX
+    wrapper.y = baseY
+    wrapper.resize(
+      Math.max(1, cols * width + (cols - 1) * gap),
+      Math.max(1, rows * height + (rows - 1) * rowGap),
+    )
+    figma.currentPage.appendChild(wrapper)
+  }
+  const builtCards: SceneNode[] = []
 
   const report = {
     cards: 0,
@@ -1137,7 +1414,7 @@ async function buildFlyer(msg: {
   for (let copy = 0; copy < copies; copy++) {
     let card: SceneNode
     try {
-      card = await makeCard(template)
+      card = await makeCard(template, msg.defaultVariantId)
     } catch (err) {
       fail(
         'Could not duplicate the template (copy ' + (copy + 1) + ').',
@@ -1146,9 +1423,11 @@ async function buildFlyer(msg: {
       )
       continue
     }
-    wrapper.appendChild(card)
-    ;(card as FrameNode).x = (copy % cols) * (width + gap)
-    ;(card as FrameNode).y = Math.floor(copy / cols) * (height + gap)
+    if (wrapper) wrapper.appendChild(card)
+    else figma.currentPage.appendChild(card)
+    builtCards.push(card)
+    ;(card as FrameNode).x = (wrapper ? 0 : baseX) + (copy % cols) * (width + gap)
+    ;(card as FrameNode).y = (wrapper ? 0 : baseY) + Math.floor(copy / cols) * (height + rowGap)
 
     try {
       if (perPage > 1) {
@@ -1170,6 +1449,9 @@ async function buildFlyer(msg: {
           const swap = await applyVariants(cardSlots[s], product, msg.variants || {}, msg.variantMaps || {})
           report.variantsSwitched += swap.switched
           report.variantsFailed += swap.failed
+          const ov = await applyVariantOverride(cardSlots[s], msg.variantOverrides ? msg.variantOverrides[first + s] : null)
+          report.variantsSwitched += ov.switched
+          report.variantsFailed += ov.failed
           tally(await fillCard(cardSlots[s], product))
           report.cards++
         }
@@ -1187,6 +1469,9 @@ async function buildFlyer(msg: {
         const swap = await applyVariants(card, msg.products[copy], msg.variants || {}, msg.variantMaps || {})
         report.variantsSwitched += swap.switched
         report.variantsFailed += swap.failed
+        const ov = await applyVariantOverride(card, msg.variantOverrides ? msg.variantOverrides[copy] : null)
+        report.variantsSwitched += ov.switched
+        report.variantsFailed += ov.failed
         tally(await fillCard(card, msg.products[copy]))
         report.cards++
       }
@@ -1203,8 +1488,11 @@ async function buildFlyer(msg: {
     figma.ui.postMessage({ type: 'progress', done: copy + 1, total: copies })
   }
 
-  figma.currentPage.selection = [wrapper]
-  figma.viewport.scrollAndZoomIntoView([wrapper])
+  const focus = wrapper ? [wrapper] : builtCards
+  if (focus.length) {
+    figma.currentPage.selection = focus
+    figma.viewport.scrollAndZoomIntoView(focus)
+  }
   figma.ui.postMessage({ type: 'build-done', report })
   figma.notify(
     perPage > 1
@@ -1480,13 +1768,98 @@ async function createCardTemplate(): Promise<void> {
   figma.currentPage.selection = [set]
   figma.viewport.scrollAndZoomIntoView([set])
   figma.ui.postMessage({ type: 'template-created', name: set.name, id: set.id, variants: parts.length })
-  figma.ui.postMessage({ type: 'templates', templates: scanTemplates() })
+  figma.ui.postMessage({ type: 'templates', templates: await scanTemplates() })
   figma.notify('Cirqle Studio: card template created with ' + parts.length + ' variants.')
 }
 
 /* ================================================================== *
  * Message router — the single uncaught-error boundary.
  * ================================================================== */
+
+/* ------------------------------------------------------------------ *
+ * Layer tagging — rename a selected layer to a #token, across variants
+ * ------------------------------------------------------------------ */
+
+/** The COMPONENT_SET a node lives in (via its variant COMPONENT), if any. */
+function variantContext(node: SceneNode): { set: ComponentSetNode; variant: ComponentNode } | null {
+  let cur: BaseNode | null = node as BaseNode
+  while (cur && cur.type !== 'PAGE' && cur.type !== 'DOCUMENT') {
+    if (cur.type === 'COMPONENT' && cur.parent && cur.parent.type === 'COMPONENT_SET') {
+      return { set: cur.parent as ComponentSetNode, variant: cur as ComponentNode }
+    }
+    cur = cur.parent
+  }
+  return null
+}
+
+/** Renames inside an instance are overrides — the template (main component)
+ * would stay untagged, so the tag panel refuses them with a pointer. */
+function insideInstance(node: SceneNode): boolean {
+  let cur: BaseNode | null = node.parent
+  while (cur && cur.type !== 'PAGE' && cur.type !== 'DOCUMENT') {
+    if (cur.type === 'INSTANCE') return true
+    cur = cur.parent
+  }
+  return false
+}
+
+function postSelection(): void {
+  const sel = figma.currentPage.selection
+  if (sel.length !== 1) {
+    figma.ui.postMessage({ type: 'selection', count: sel.length, node: null })
+    return
+  }
+  const node = sel[0]
+  const ctx = variantContext(node)
+  figma.ui.postMessage({
+    type: 'selection',
+    count: 1,
+    node: {
+      id: node.id,
+      name: node.name,
+      nodeType: node.type,
+      isText: node.type === 'TEXT',
+      inInstance: insideInstance(node),
+      variants: ctx ? ctx.set.children.filter(c => c.type === 'COMPONENT').length : 0,
+      setName: ctx ? ctx.set.name : null,
+    },
+  })
+}
+
+figma.on('selectionchange', postSelection)
+
+async function renameLayer(msg: { nodeId: string; newName: string; allVariants?: boolean }): Promise<void> {
+  const node = (await figma.getNodeByIdAsync(msg.nodeId)) as SceneNode | null
+  if (!node || node.removed) {
+    fail('That layer no longer exists.', 'Tag layer', 'Select the layer on the canvas again and retag it.')
+    return
+  }
+  const oldNorm = normalizeLayerName(node.name)
+  node.name = msg.newName
+  let renamed = 1
+  const ctx = variantContext(node)
+  if (msg.allVariants && ctx) {
+    // Sibling variants mirror the structure; the same-named layer of the
+    // same type in each one is the same slot on that variant's card.
+    for (const sibling of ctx.set.children) {
+      if (sibling.type !== 'COMPONENT' || sibling.id === ctx.variant.id) continue
+      const matches = (sibling as ComponentNode).findAll(
+        n => normalizeLayerName(n.name) === oldNorm && n.type === node.type
+      )
+      for (const m of matches) { m.name = msg.newName; renamed++ }
+    }
+  }
+  figma.ui.postMessage({
+    type: 'rename-done',
+    renamed,
+    token: msg.newName,
+    variants: msg.allVariants && ctx ? ctx.set.children.filter(c => c.type === 'COMPONENT').length : 1,
+  })
+  // The template's field count just changed — refresh the dropdown so the
+  // "(N fields)" label and validation stay honest without a manual Refresh.
+  figma.ui.postMessage({ type: 'templates', templates: await scanTemplates() })
+  postSelection()
+}
 
 const SETTINGS_KEY = 'cirqle-studio-settings'
 
@@ -1496,9 +1869,13 @@ figma.ui.onmessage = async (msg: any) => {
       case 'ready': {
         const saved = await figma.clientStorage.getAsync(SETTINGS_KEY)
         figma.ui.postMessage({ type: 'init', settings: saved || null })
-        figma.ui.postMessage({ type: 'templates', templates: scanTemplates() })
+        figma.ui.postMessage({ type: 'templates', templates: await scanTemplates() })
+        postSelection()
         break
       }
+      case 'rename-layer':
+        await renameLayer(msg)
+        break
       case 'save-settings':
         await figma.clientStorage.setAsync(SETTINGS_KEY, msg.settings)
         break
@@ -1528,7 +1905,7 @@ figma.ui.onmessage = async (msg: any) => {
         break
       }
       case 'scan-templates':
-        figma.ui.postMessage({ type: 'templates', templates: scanTemplates() })
+        figma.ui.postMessage({ type: 'templates', templates: await scanTemplates() })
         break
       case 'create-template':
         await createCardTemplate()

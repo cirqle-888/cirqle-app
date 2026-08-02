@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html data-theme="light">
 <head>
 <meta charset="utf-8">
 <style>
@@ -12,6 +12,15 @@
     --ink: var(--figma-color-text, #18181b);
     --mut: var(--figma-color-text-secondary, #71717a);
     --ok: #059669; --warn: #b45309; --err: #dc2626;
+  }
+  /* Light is the default look; dark is an explicit choice. Setting the
+     palette here overrides Figma's injected theme variables either way. */
+  :root[data-theme='light'] {
+    --bg: #ffffff; --bg2: #f7f7f8; --line: #e4e4e7; --ink: #18181b; --mut: #71717a;
+  }
+  :root[data-theme='dark'] {
+    --bg: #2c2c2c; --bg2: #3a3a3c; --line: #4c4c4f; --ink: #f4f4f5; --mut: #a1a1aa;
+    --accent-soft: #3d2f66;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); }
@@ -107,6 +116,8 @@
   .tool { width: auto; margin: 0; padding: 4px 7px; font-size: 10.5px; font-weight: 600; border-radius: 5px;
           background: var(--bg2); color: var(--ink); border: 1px solid var(--line); cursor: pointer; }
   .tool:hover { border-color: var(--accent); }
+  .tool:disabled { opacity: .45; cursor: default; }
+  .tool.tag-missing { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
   .tool-sep { width: 1px; height: 16px; background: var(--line); margin: 0 3px; }
   .colmap { display: flex; gap: 3px; margin-top: 6px; }
   .colmap select { flex: 1; padding: 3px 4px; font-size: 10px; height: 24px; }
@@ -119,6 +130,8 @@
   .vrow.vsub { margin-left: 10px; }
   .vrow.vsub .vname { flex: 0 0 92px; font-weight: 400; }
   .vcount { flex: 0 0 66px; font-size: 9px; text-align: right; color: var(--mut); }
+  .vprice { flex: 0 0 42px; font-size: 10px; text-align: right; color: var(--mut);
+            font-variant-numeric: tabular-nums; }
   .vhint { font-size: 9px; line-height: 1.45; margin: 1px 0 7px 102px; color: var(--mut); }
   .vvals { font-size: 9px; line-height: 1.4; color: var(--mut); margin: 2px 0 6px 102px;
            overflow: hidden; text-overflow: ellipsis; display: -webkit-box;
@@ -148,6 +161,9 @@
   .g-ro { font-size: 10px; font-family: ui-monospace, Menlo, monospace; text-align: center;
           color: var(--mut); background: var(--bg2); cursor: default; }
   .g-ro b { color: var(--ok); font-weight: 600; }
+  .g-var { padding: 0; cursor: default; }
+  .g-var select { width: 100%; height: 100%; border: 0; background: transparent;
+                  color: var(--ink); font-size: 10px; padding: 0 2px; }
   .g-ro i { color: var(--accent); font-style: normal; font-weight: 600; }
   .g-sel { background: var(--accent-soft); }
   .g-anchor { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--bg); }
@@ -176,17 +192,29 @@
   <div class="hdr">
     <span class="dot" id="hdr-dot"></span><b>Cirqle Studio</b>
     <span class="host" id="conn-host">Not connected</span>
+    <button class="iconbtn" id="theme-toggle" title="Switch light / dark theme">☾</button>
     <button class="iconbtn" id="settings-toggle" title="Connection settings">⚙</button>
     <button class="iconbtn" id="refresh" title="Re-scan templates, reconnect, reload the offer">↻</button>
   </div>
 
   <section class="card" id="setup">
-    <div class="sec">Connection</div>
+    <div class="sec">Sign in</div>
     <label>Server URL</label>
     <input type="text" id="url" value="https://app.cirqle.work" spellcheck="false">
-    <label>Authentication Token</label>
-    <input type="password" id="token" placeholder="shared secret (Apps → Offer Intake)" spellcheck="false">
-    <button id="connect">Connect</button>
+    <label>Email or CQID</label>
+    <input type="text" id="login-id" placeholder="you@company.com or CQID001" spellcheck="false" autocomplete="username">
+    <label>Password</label>
+    <input type="password" id="login-pass" placeholder="your Cirqle password" autocomplete="current-password">
+    <button id="signin">Sign in</button>
+    <p class="hint">One time only. Your password is never stored.</p>
+    <div class="fold-head" id="adv-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="adv-body">
+      <span class="chev">▶</span>Advanced — shared secret
+    </div>
+    <div id="adv-body" style="display:none">
+      <label>Authentication Token</label>
+      <input type="password" id="token" placeholder="shared secret (Apps → Offer Intake)" spellcheck="false">
+      <button class="secondary" id="connect">Connect with secret</button>
+    </div>
   </section>
 
   <div class="tabs">
@@ -202,21 +230,47 @@
     <select id="client" disabled><option>— connect first —</option></select>
     <label>Offer</label>
     <select id="offer" disabled><option>—</option></select>
-    <button class="secondary" id="load" disabled>Load Offers</button>
+    <p class="hint">Picking an offer loads it and fills the sheet. ↻ reloads.</p>
   </section>
 
   <section class="card">
     <div class="sec"><span class="n">2</span>Template &amp; layout</div>
     <label>Template <span id="template-hint" style="font-weight:400"></span></label>
     <select id="template" disabled><option>— none found on this page —</option></select>
+    <div id="variant-default-row" style="display:none">
+      <label>Default variant <span style="font-weight:400">— the look cards start from</span></label>
+      <select id="variant-default"></select>
+    </div>
     <button class="secondary" id="new-template" style="margin-top:6px">＋ New card template</button>
-    <p class="hint" id="tpl-guide">12 ready-named variants (Price / B1G1 / % off × circle / pill × whole / paise). Restyle freely — only the #names matter.</p>
+    <p class="hint" id="tpl-guide">Makes a card with 12 ready-named variants. Restyle freely — only the #names matter.
+      A <b>Group</b> of components works as a card too.</p>
+
+    <div class="fold-head" id="tag-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="tag-body">
+      <span class="chev">▶</span>Tag layers<span class="sum" id="tag-sum"></span>
+    </div>
+    <div id="tag-body" style="display:none">
+      <p class="hint" id="tag-sel" style="margin-top:4px">Select a layer on the canvas, then click what it holds.</p>
+      <div class="toolbar" id="tag-tokens"></div>
+      <label id="tag-variants-row" style="display:none;gap:7px;align-items:center;margin-top:8px;cursor:pointer">
+        <input type="checkbox" id="tag-all-variants" checked style="width:13px;height:13px;margin:0">
+        <span id="tag-variants-label">Apply to all variants</span>
+      </label>
+    </div>
 
     <div id="variant-box" style="display:none">
       <label>Variants — switched per product</label>
       <div id="variant-map"></div>
-      <p class="hint">Auto reads each product: price digits, paise, has-a-price, offer type, name language.
-        For a property named “Property 1”, pick <b>Use: …</b> — ✓&nbsp;fits marks the ones whose values work.</p>
+      <div class="fold-head" id="varhelp-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="varhelp-body">
+        <span class="chev">▶</span>How auto picks
+      </div>
+      <div id="varhelp-body" style="display:none">
+        <p class="hint">Auto reads each product — price digits, paise, MRP, offer type, name language — and picks the
+          variant that fits. Names like “Variant 2” are fine: Studio reads each variant's own sample instead, so the
+          card showing <b>000</b> is used for 3-digit prices.</p>
+        <p class="hint">If a property isn't recognised, set <b>Use: …</b> yourself (✓&nbsp;fits marks the ones that
+          work) and aim each product group at a variant. <b>Use: name language</b> restyles all Malayalam or English
+          names in one move.</p>
+      </div>
     </div>
 
     <div class="fold-head" id="layout-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="layout-body">
@@ -241,14 +295,25 @@
 
       <div class="row2" style="margin-top:8px">
         <div><label style="margin-top:0">Columns</label><input type="number" id="cols" value="4" min="1" max="12"></div>
-        <div><label style="margin-top:0">Gap</label><input type="number" id="gap" value="40" min="0" max="400"></div>
+        <div><label style="margin-top:0">Column gap</label><input type="number" id="gap" value="40" min="0" max="400"></div>
+        <div><label style="margin-top:0">Row gap</label><input type="number" id="rowgap" value="40" min="0" max="400"></div>
       </div>
 
       <label style="display:flex;gap:7px;align-items:center;margin-top:9px;cursor:pointer">
         <input type="checkbox" id="fill-selection" style="width:13px;height:13px;margin:0">
         <span>Fill selected cards (don't create new)</span>
       </label>
+      <label style="display:flex;gap:7px;align-items:center;margin-top:6px;cursor:pointer"
+             title="Build each page separately, one block per page, side by side">
+        <input type="checkbox" id="per-page" style="width:13px;height:13px;margin:0">
+        <span>One block per page</span>
+      </label>
+      <label style="display:flex;gap:7px;align-items:center;margin-top:7px;cursor:pointer" title="Cards land straight on the page in the same grid — no wrapper frame, each card moves on its own from the start">
+        <input type="checkbox" id="free-cards" style="width:13px;height:13px;margin:0">
+        <span>Free cards — no wrapper frame</span>
+      </label>
     </div>
+
   </section>
 
   <section class="card">
@@ -272,7 +337,7 @@
       <button id="paste-split">Split to columns</button>
       <button class="secondary" id="paste-parse" title="Only for loose English WhatsApp text with 'Sunday 100gm' style headers. Non-English lists should use Split — it copies your text exactly.">Parse with AI</button>
     </div>
-    <p class="hint"><b>Split</b> — instant, no AI, copies your text exactly. Reads sheet cells, CSV, 2+ spaces, trailing prices and header rows.</p>
+    <p class="hint"><b>Split</b> — instant, no AI, copies your text exactly.</p>
     <div class="fold-head" id="ai-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ai-body">
       <span class="chev">▶</span>AI options<span class="sum" id="ai-sum"></span>
     </div>
@@ -297,6 +362,7 @@
         <button class="tool" id="tool-add" title="Add an empty row">+ Row</button>
         <button class="tool" id="tool-del" title="Delete selected rows">Delete</button>
         <span class="tool-sep"></span>
+        <button class="tool" id="tool-plan" title="Plan pages: show the Category and Page columns">Pages</button>
         <button class="tool" id="tool-addcol" title="Add a design-only column that fills a custom #layer, e.g. a second badge">+ Col</button>
         <span id="custom-cols" style="display:contents"></span>
       </div>
@@ -304,12 +370,22 @@
         <input type="text" id="addcol-name" placeholder="Column name — e.g. Badge 2 → fills #badge2" style="flex:1">
         <button class="tool" id="addcol-ok" style="flex:0 0 auto">Add</button>
       </div>
+      <div id="plan-row" style="display:none;gap:5px;margin-top:6px;align-items:center;flex-wrap:wrap">
+        <input type="number" id="plan-per" min="1" max="60" value="16" style="width:52px" title="Products per page">
+        <button class="tool" id="plan-auto">per page → number all</button>
+        <label style="display:flex;gap:4px;align-items:center;margin:0;font-size:10px;cursor:pointer">
+          <input type="checkbox" id="plan-bycat" style="width:12px;height:12px;margin:0">new page at each category
+        </label>
+        <span class="tool-sep"></span>
+        <input type="number" id="plan-page" min="1" max="99" value="1" style="width:46px" title="Page number">
+        <button class="tool" id="plan-set" title="Put the selected rows on this page">set selected rows</button>
+        <button class="tool" id="plan-sortcat" title="Group rows by category, keeping their order inside each">sort by category</button>
+      </div>
       <div id="paste-colmap" class="colmap"></div>
       <div id="paste-rows"></div>
       <textarea id="grid-clip" tabindex="-1" aria-hidden="true"></textarea>
-      <p class="kbd-hint">Works like a sheet: click a cell and <b>type</b> · <b>Enter</b> ↓ · <b>Tab</b> → ·
-        <b>⌘C / ⌘V</b> copy-paste ranges (to and from Google Sheets too) · <b>⌘Z</b> undo ·
-        <b>⌘D</b> fill down · click a row number or column name to select it.</p>
+      <p class="kbd-hint" title="Click a cell and type · Enter moves down · Tab moves right · ⌘C/⌘V copy-paste ranges, including to and from Google Sheets · ⌘Z undo · ⌘D fill down · click a row number or column name to select it">Works like a sheet —
+        <b>Enter</b> ↓ · <b>Tab</b> → · <b>⌘C/⌘V</b> · <b>⌘Z</b> · <b>⌘D</b> fill down</p>
     </section>
 
     <section class="card">
@@ -319,7 +395,7 @@
       <label>Offer date</label>
       <input type="date" id="paste-date">
       <button id="paste-save">Save to Cirqle</button>
-      <p class="hint">Saves into Cirqle first (change log, catalog, sheet sync), then loads it here ready to build.</p>
+      <p class="hint">Saves to Cirqle, then loads it here ready to build.</p>
     </section>
   </div>
 
@@ -411,9 +487,9 @@ async function api(path, body) {
     throw {
       what: 'Could not reach the server.',
       where: path,
-      fix: 'Check the Server URL and your connection. If both are fine, open Plugins → Development → Show console: '
-         + '"Redirect is not allowed for a preflight request" means /api/figma is being redirected to /login '
-         + '(the middleware needs the /api/figma exemption); a CSP error means the manifest networkAccess needs this domain.',
+      // The console detail matters when it matters, but printing it on every
+      // dropped connection buries the one line that usually fixes this.
+      fix: 'Check the Server URL and your connection. Still failing? Plugins → Development → Show console.',
     }
   }
   let data = null
@@ -440,11 +516,26 @@ function saveSettings() {
     activeTab: state.activeTab || 'build',
     cols: $('cols').value,
     gap: $('gap').value,
+    rowGap: $('rowgap').value,
+    freeCards: $('free-cards').checked,
     lastClientId: $('client').disabled ? state.lastClientId : $('client').value,
     lastCampaignId: $('offer').disabled ? state.lastCampaignId : $('offer').value,
     lastTemplateName: state.lastTemplateName || '',
+    defaultVariants: state.defaultVariants || {},
+    uiTheme: state.uiTheme || 'light',
+    user: state.user || null,
+    planCols: state.planCols === true,
     layoutOpen: state.layoutOpen === true,
     logOpen: state.logOpen === true,
+    // The sheet's unsaved work — restored on reopen so a half-edited offer
+    // is never lost to closing the plugin.
+    sheetDraft: state.parsed && state.parsed.length ? {
+      campaignId: state.sheetCampaignId || null,
+      title: $('paste-title').value,
+      date: $('paste-date').value,
+      parsed: state.parsed,
+      overrides: state.variantOverrides || {},
+    } : null,
   } })
 }
 
@@ -455,13 +546,77 @@ function saveSettings() {
 function foldSetup(folded) {
   $('setup').style.display = folded ? 'none' : 'block'
   const host = base().replace(/^https?:\/\//, '')
-  $('conn-host').textContent = folded ? host : 'Not connected'
+  // CQID only — the panel sits open on a shared screen, so it identifies
+  // the signed-in user without showing anybody's name.
+  const who = state.user && state.user.cqid ? state.user.cqid + ' · ' : ''
+  $('conn-host').textContent = folded ? who + host : 'Not connected'
   $('hdr-dot').className = 'dot' + (folded ? ' on' : '')
+}
+
+/* One-time sign-in with the employee's own Cirqle credentials. The server
+ * verifies them and returns the workspace token + the employee identity;
+ * only those are kept — the password is cleared immediately. */
+$('signin').onclick = async () => {
+  const identifier = $('login-id').value.trim()
+  const password = $('login-pass').value
+  if (!identifier || !password) {
+    reportError('Enter your email (or CQID) and password.', 'Sign in', 'The same credentials you use for the Cirqle app.')
+    return
+  }
+  clearLog()
+  chip('chip-conn', 'Signing in…')
+  $('signin').disabled = true
+  try {
+    const res = await fetch(base() + '/api/figma/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier, password }),
+    })
+    const data = await res.json().catch(() => null)
+    // A 404 is not a wrong password — it means this Cirqle server predates
+    // the sign-in route. Saying "check your credentials" there sends people
+    // to retype a password that was right all along.
+    if (res.status === 404) {
+      throw {
+        what: 'This Cirqle server has no sign-in route yet.',
+        where: 'Sign in',
+        fix: 'Deploy the app (src/app/api/figma/login) — until then open “Advanced — shared secret” below and connect with the workspace secret.',
+      }
+    }
+    if (!res.ok || !data || !data.ok) {
+      throw {
+        what: (data && data.error) || ('Sign-in failed (HTTP ' + res.status + ').'),
+        where: 'Sign in',
+        fix: res.status === 401 ? 'Check your email/CQID and password — the same ones you use for the Cirqle app.'
+          : 'Check the Server URL, then try again.',
+      }
+    }
+    $('token').value = data.token
+    state.user = data.user || null
+    $('login-pass').value = ''
+    log('Signed in as ' + ((state.user && state.user.cqid) || identifier.toUpperCase()) + '.', 'ok')
+    await connect()
+  } catch (e) {
+    chip('chip-conn', 'Offline', 'err')
+    reportError(e.what || String(e), e.where || 'Sign in', e.fix)
+  }
+  $('signin').disabled = false
 }
 
 $('settings-toggle').onclick = () => {
   const hidden = $('setup').style.display === 'none'
   $('setup').style.display = hidden ? 'block' : 'none'
+}
+
+function applyTheme(theme) {
+  const t = theme === 'dark' ? 'dark' : 'light'
+  document.documentElement.setAttribute('data-theme', t)
+  $('theme-toggle').textContent = t === 'dark' ? '☀' : '☾'
+  state.uiTheme = t
+}
+$('theme-toggle').onclick = () => {
+  applyTheme(state.uiTheme === 'dark' ? 'light' : 'dark')
+  saveSettings()
 }
 
 /* ------------------------------------------------------------------ *
@@ -491,13 +646,106 @@ function layoutSummary() {
   const sortSel = $('sort')
   const order = sortSel.options[sortSel.selectedIndex] ? sortSel.options[sortSel.selectedIndex].textContent : 'Cirqle order'
   const fill = $('fill-selection').checked ? ' · fill selection' : ''
-  return $('cols').value + ' col · gap ' + $('gap').value + ' · ' + page + ' · ' + order + fill
+  const free = $('free-cards').checked ? ' · free cards' : ''
+  const g = $('gap').value, rg = $('rowgap').value
+  const gap = g === rg ? 'gap ' + g : 'gap ' + g + '×' + rg
+  return $('cols').value + ' col · ' + gap + ' · ' + page + ' · ' + order + fill + free
 }
 function updateLayoutSummary() { $('layout-sum').textContent = layoutSummary() }
 
 wireFold('layout-toggle', 'layout-body', (open) => { state.layoutOpen = open; saveSettings() })
 wireFold('ai-toggle', 'ai-body', null)
 wireFold('log-toggle', 'log', (open) => { state.logOpen = open; saveSettings() })
+wireFold('tag-toggle', 'tag-body', () => renderTagPanel())
+wireFold('adv-toggle', 'adv-body', null)
+wireFold('varhelp-toggle', 'varhelp-body', null)
+
+/* ------------------------------------------------------------------ *
+ * Tag layers — select a layer on the canvas, click what it holds, and
+ * the plugin renames it to the right #token in every variant at once.
+ * ------------------------------------------------------------------ */
+const TAG_TOKENS = [
+  ['#product', 'Product name'],
+  ['#price1', 'Sale price (price A)'],
+  ['#price2', 'Second price (price B)'],
+  ['#mrp', 'MRP / strike-through price'],
+  ['#offerprice', 'Offer price text'],
+  ['#weight', 'Weight / size'],
+  ['#badges', 'Badge'],
+  ['#imageurl', 'Product photo (shape, not text)'],
+  ['#offertext', 'Offer text'],
+  ['#offertitle', 'Offer title'],
+  ['#offerdatedisplay', 'Offer date'],
+  ['#client', 'Client name'],
+]
+
+state.selNode = null
+
+for (const [token, label] of TAG_TOKENS) {
+  const btn = document.createElement('button')
+  btn.className = 'tool'
+  btn.textContent = token
+  btn.dataset.token = token
+  btn.dataset.label = label
+  btn.disabled = true
+  btn.onclick = () => tagSelected(token, label)
+  $('tag-tokens').appendChild(btn)
+}
+
+function currentTemplateTokens() {
+  const tpl = state.templates.find(t => t.id === $('template').value)
+  return tpl ? tpl.tokens : []
+}
+
+function renderTagPanel() {
+  const n = state.selNode
+  const have = new Set(currentTemplateTokens())
+  let missing = 0
+  for (const btn of $('tag-tokens').children) {
+    const isMissing = state.templates.length > 0 && !have.has(btn.dataset.token)
+    btn.classList.toggle('tag-missing', isMissing)
+    if (isMissing) missing++
+    btn.title = btn.dataset.label + (isMissing ? ' — not in this template yet' : '')
+    btn.disabled = !n || n.inInstance
+  }
+  $('tag-sum').textContent =
+    n ? '"' + n.name + '"' : (missing && state.templates.length ? missing + ' fields untagged' : '')
+
+  const sel = $('tag-sel')
+  if (!n && state._selCount > 1) sel.textContent = 'Select a single layer (' + state._selCount + ' selected).'
+  else if (!n) sel.textContent = 'Select a layer on the canvas, then click what it holds.'
+  else if (n.inInstance) sel.textContent = '"' + n.name + '" is inside an instance — select the same layer in the main component instead.'
+  else sel.textContent = 'Selected: "' + n.name + '" (' + n.nodeType.toLowerCase() + '). Click what this layer holds:'
+
+  const row = $('tag-variants-row')
+  if (n && n.variants > 1) {
+    row.style.display = 'flex'
+    $('tag-variants-label').textContent = 'Also rename the matching layer in all ' + n.variants + ' variants of "' + n.setName + '"'
+  } else {
+    row.style.display = 'none'
+  }
+}
+
+function tagSelected(token, label) {
+  const n = state.selNode
+  if (!n) return
+  if (token === '#imageurl' && n.isText) {
+    reportError('#imageurl needs a shape, not a text layer.', 'Tag layer',
+      'Select the photo rectangle/ellipse on the card, then press #imageurl.')
+    return
+  }
+  if (token !== '#imageurl' && !n.isText) {
+    reportError(token + ' needs a text layer.', 'Tag layer',
+      'Select the text that shows the ' + label.toLowerCase() + ', then press ' + token + '.')
+    return
+  }
+  post({
+    type: 'rename-layer',
+    nodeId: n.id,
+    newName: token,
+    allVariants: n.variants > 1 && $('tag-all-variants').checked,
+  })
+}
 
 async function connect() {
   clearLog(); setBar(0)
@@ -511,7 +759,6 @@ async function connect() {
     fillClientDropdown()
     log('Connected. ' + state.offers.length + ' active offer' + (state.offers.length === 1 ? '' : 's') + '.', 'ok')
     if (!state.offers.length) logFix('No active campaigns right now — save an offer in Cirqle first.')
-    $('load').disabled = state.offers.length === 0
   } catch (e) {
     chip('chip-conn', 'Offline', 'err')
     foldSetup(false)   // the fields are what needs fixing — reopen them
@@ -558,25 +805,28 @@ function fillOfferDropdown() {
   chip('chip-count', '—')
   chip('chip-ready', '—')
   updateButtons()
-  // If the offer from last session is still active, pick it up and load it
-  // without being asked — the daily flow resumes exactly where it stopped.
+  // Last session's offer wins the initial selection when it's still active…
   if (state._restoreCampaignId) {
-    const id = String(state._restoreCampaignId)
+    const rid = String(state._restoreCampaignId)
     state._restoreCampaignId = null
-    if ([...sel.options].some(o => o.value === id)) {
-      sel.value = id
-      log('Resuming last offer…', 'ok')
-      loadCampaign()
-    }
+    if ([...sel.options].some(o => o.value === rid)) sel.value = rid
   }
+  // …and whatever is selected loads immediately — picking IS loading; there
+  // is no Load button. loadCampaign's sequence guard makes this safe even
+  // when a caller immediately re-targets another offer (paste-save does).
+  if (sel.value) loadCampaign()
 }
 
 async function loadCampaign() {
   clearLog(); setBar(0)
   const id = $('offer').value
   if (!id) { reportError('No offer selected.', 'Load Offers', 'Pick a client and an offer first.'); return }
+  // Only the newest load may apply — a stale response from a superseded
+  // auto-load must not overwrite the offer the user actually wants.
+  const seq = (state._loadSeq = (state._loadSeq || 0) + 1)
   try {
     const data = await api('/api/figma/campaign/' + encodeURIComponent(id))
+    if (seq !== state._loadSeq) return
     state.campaign = data
     state.validated = false
     chip('chip-count', data.campaign.productCount + ' Products', 'on')
@@ -587,6 +837,12 @@ async function loadCampaign() {
         (data.campaign.pageCount === 1 ? '' : 's') + '.', 'ok')
     updateButtons()
     requestGroups()   // fills the per-group rows in the Variants panel
+    // Variant picks belong to an offer — keep them only when this is the
+    // same offer the sheet (or a restored draft) was already working on.
+    if (state.sheetCampaignId !== id) state.variantOverrides = {}
+    // The sheet mirrors the loaded offer, unless it holds unsaved work for
+    // a different one — a draft is never silently thrown away.
+    if (!state.parsed.length || state.sheetCampaignId === id) fillSheetFromCampaign()
   } catch (e) {
     reportError(e.what || String(e), e.where || 'Load Offers', e.fix)
   }
@@ -787,6 +1043,19 @@ function onTemplateValidated(msg) {
   state.templateTokens = msg.tokens || []
   const issues = [...(state._pendingDataIssues || []), ...(msg.issues || [])]
 
+  // Products carry an MRP but no variant (and no layer) can show it — the
+  // strike price would silently vanish from every card.
+  if (state.campaign && state.templateTokens.length) {
+    const anyMrp = state.campaign.products.some(p => p.mrp != null && String(p.mrp) !== '')
+    if (anyMrp && state.templateTokens.indexOf('#mrp') < 0) {
+      issues.push({
+        severity: 'warning', area: 'template',
+        message: 'This offer has MRP values, but no variant of the template has an #mrp layer.',
+        fix: 'Add an MRP text layer to the right variant and tag it with Tag layers → #mrp — or the MRP will not appear on any card.',
+      })
+    }
+  }
+
   // Unknown #tokens: a layer named #procduct silently never fills — the
   // designer deserves to hear about the typo instead of shipping a blank.
   if (state.campaign && state.templateTokens.length) {
@@ -802,13 +1071,47 @@ function onTemplateValidated(msg) {
     }
   }
   renderIssues(issues)
+  // Template problems are exactly what the tag panel fixes — surface it.
+  if (issues.some(i => i.area === 'template')) {
+    setFold('tag-toggle', 'tag-body', true)
+    renderTagPanel()
+  }
 }
 
 /* ------------------------------------------------------------------ *
  * Build
  * ------------------------------------------------------------------ */
-async function build() {
-  clearLog(); setBar(0)
+/**
+ * "One block per page" — run the normal build once per page, so each page
+ * of the flyer is its own block on the canvas. Sequential on purpose: the
+ * document work happens on the main thread, and overlapping builds would
+ * fight over the same wrapper placement.
+ */
+async function buildPerPage() {
+  const pageCount = state.campaign ? state.campaign.campaign.pageCount : 1
+  const pages = []
+  for (let p = 1; p <= pageCount; p++) {
+    if (state.campaign.products.some(x => String(x.page) === String(p))) pages.push(p)
+  }
+  if (pages.length < 2) return build()   // nothing to split
+  const restore = $('page').value
+  log('Building ' + pages.length + ' pages, one block each…', 'ok')
+  for (let i = 0; i < pages.length; i++) {
+    $('page').value = String(pages[i])
+    state._buildOffset = i
+    await build({ keepLog: true })
+  }
+  state._buildOffset = 0
+  $('page').value = restore
+  updateLayoutSummary()
+}
+
+async function build(opts) {
+  if (!opts && $('per-page').checked && $('page').value === '' && !$('fill-selection').checked) {
+    return buildPerPage()
+  }
+  if (!(opts && opts.keepLog)) clearLog()
+  setBar(0)
   const products = selectedProducts()
   const templateId = $('template').value
   const fillMode = $('fill-selection').checked
@@ -834,7 +1137,8 @@ async function build() {
     // saved from that same table.
     const extras = state.customRows && state.customRows.campaignId === $('offer').value
       ? state.customRows.rows : null
-    for (const i of orderedIndices()) {
+    const orderIdx = orderedIndices()
+    for (const i of orderIdx) {
       const fields = {}
       for (let c = 0; c < layers.length; c++) fields[layers[c]] = String(rows[i][c] ?? '')
       if (extras && extras[i]) {
@@ -865,22 +1169,54 @@ async function build() {
     post({
       type: 'build',
       templateId,
+      defaultVariantId: $('variant-default-row').style.display !== 'none' ? $('variant-default').value : null,
       products: buildProducts.map(bp => ({ fields: bp.fields, image: bp.image, hasImageUrl: bp.hasImageUrl })),
       columns: parseInt($('cols').value, 10) || 4,
       gap: parseInt($('gap').value, 10) || 40,
+      rowGap: parseInt($('rowgap').value, 10) || 0,
+      freeCards: $('free-cards').checked,
+      // Aligned with `products` — same orderIdx walk built both.
+      variantOverrides: orderIdx.map(i => state.variantOverrides[i] || null),
       frameName: campaignInfo.clientName + ' — ' + campaignInfo.name + (pageFilter ? ' — Page ' + pageFilter : ''),
       fillSelection: fillMode,
       variants: state.variantChoices,
       variantMaps: state.variantMaps,
+      // Set when building page by page, so each page's block lands beside
+      // the previous one instead of on top of it.
+      offsetIndex: state._buildOffset || 0,
     })
+    // Wait for the document work to finish before the caller starts the
+    // next page. Resolved by build-done or by an error, never left hanging.
+    await new Promise(resolve => { state._buildResolve = resolve })
   } catch (e) {
     reportError(e.what || (e.message || String(e)), e.where || 'Build Flyer', e.fix || 'Press Refresh and try again.')
     $('build').disabled = false
+    releaseBuildWait()
   }
+}
+
+function releaseBuildWait() {
+  const resolve = state._buildResolve
+  state._buildResolve = null
+  if (resolve) resolve()
 }
 
 function onBuildDone(report) {
   setBar(1)
+  releaseBuildWait()
+  // Tell Cirqle what was actually produced, so the task's contribution
+  // counts (pages, creatives) update themselves. Fire-and-forget: a
+  // reporting hiccup must never distract from a finished build.
+  if (state.user && state.user.id && $('offer').value && report.cards) {
+    api('/api/figma/build-report', {
+      campaignId: $('offer').value,
+      createdBy: state.user,
+      pages: report.pages || (state.campaign ? state.campaign.campaign.pageCount : 1) || 1,
+      cards: report.cards,
+    }).then(r => {
+      if (r && r.recorded && r.taskNumber) log('· Counts updated on Task #' + r.taskNumber + '.', 'ok')
+    }).catch(() => undefined)
+  }
   const verb = report.filledInPlace ? 'cards filled in place' : 'cards built'
   const head = report.pages
     ? '✓ ' + report.pages + ' page(s) built · ' + report.cards + ' products placed (' +
@@ -935,19 +1271,18 @@ function fillTemplateDropdown() {
     sel.appendChild(opt)
     sel.disabled = true
     $('template-hint').textContent = '(add #-named layers to a card)'
+    $('variant-default-row').style.display = 'none'
     return
   }
   for (const t of state.templates) {
     const opt = document.createElement('option')
     opt.value = t.id
-    // Slot count is the thing a designer most needs to see before building:
-    // "22 product slots" means a whole page, "1 card" means one per product.
-    opt.textContent = t.name + ' (' + t.nodeType.toLowerCase() + ', ' +
-      (t.slots > 1 ? t.slots + ' product slots' : '1 card') + ', ' + t.tokens.length + ' fields)'
+    // Just the name — the technical details live in the muted hint beside
+    // the label, not shouting from inside the dropdown.
+    opt.textContent = templateKey(t)
     sel.appendChild(opt)
   }
   sel.disabled = false
-  $('template-hint').textContent = ''
   // A template created moments ago is the one they meant to use; failing
   // that, the one they used last time (matched by name — node ids are
   // per-file, names travel between files and re-scans).
@@ -955,11 +1290,125 @@ function fillTemplateDropdown() {
     sel.value = state._selectTemplateId
     state._selectTemplateId = null
   } else if (state.lastTemplateName) {
-    const match = state.templates.find(t => t.name === state.lastTemplateName)
+    const match = state.templates.find(t => templateKey(t) === state.lastTemplateName)
     if (match) sel.value = match.id
   }
   const chosen = state.templates.find(t => t.id === sel.value)
-  state.lastTemplateName = chosen ? chosen.name : state.lastTemplateName
+  state.lastTemplateName = chosen ? templateKey(chosen) : state.lastTemplateName
+  updateTemplateMeta()
+  renderVariantDefault()
+}
+
+/** How a template is shown and remembered. A piece nested inside a card
+ * carries its card's name ("Cirqle Product Card ▸ PRODUCT") so two pieces
+ * called "PRODUCT" in different cards stay tellable apart — and so the
+ * remembered choice survives a re-scan, where node ids change. */
+function templateKey(t) {
+  return t.parentName ? t.parentName + ' ▸ ' + t.name : t.name
+}
+
+/** The technical details ("1 card · 3 fields") belong in a quiet hint next
+ * to the label, not inside every dropdown option. */
+function updateTemplateMeta() {
+  const t = state.templates.find(x => x.id === $('template').value)
+  $('template-hint').textContent = t
+    ? '— ' + (t.slots > 1 ? t.slots + ' product slots' : '1 card') + ' · ' + t.tokens.length + ' fields'
+    : ''
+}
+
+/** Component-set templates: let the designer pick which variant new cards
+ * start from, instead of silently using Figma's default. Remembered per
+ * template name. The per-product variant mapping still overrides whatever
+ * properties it maps — this is the base look for everything unmapped. */
+function renderVariantDefault() {
+  const t = state.templates.find(x => x.id === $('template').value)
+  const row = $('variant-default-row')
+  const sel = $('variant-default')
+  if (!t || !t.variants || t.variants.length < 2) {
+    row.style.display = 'none'
+    sel.innerHTML = ''
+    return
+  }
+  sel.innerHTML = ''
+  for (const v of t.variants) {
+    const opt = document.createElement('option')
+    opt.value = v.id
+    opt.textContent = variantLabel(v.name)
+    sel.appendChild(opt)
+  }
+  const savedName = (state.defaultVariants || {})[t.name]
+  const match = t.variants.find(v => v.name === savedName)
+  if (match) sel.value = match.id
+  row.style.display = 'block'
+}
+
+$('variant-default').onchange = () => {
+  const t = state.templates.find(x => x.id === $('template').value)
+  const v = t && t.variants.find(x => x.id === $('variant-default').value)
+  if (!t || !v) return
+  state.defaultVariants = state.defaultVariants || {}
+  state.defaultVariants[t.name] = v.name
+  saveSettings()
+  log('New cards will start from "' + variantLabel(v.name) + '".', 'ok')
+}
+
+/** "Property 1=Variant3, Size=Big" → "Variant3 · Big" — the property names
+ * are Figma plumbing; the values are what the designer recognises. */
+function variantLabel(name) {
+  return String(name).split(',').map(p => {
+    const eq = p.indexOf('=')
+    return (eq >= 0 ? p.slice(eq + 1) : p).trim()
+  }).join(' · ')
+}
+
+/* ------------------------------------------------------------------ *
+ * Card variants — pin a specific product's card to a specific variant.
+ * "Auto" keeps the mapping-driven switching; a pick always wins over it.
+ * ------------------------------------------------------------------ */
+state.variantOverrides = {}
+
+// Variant pinning lives in the sheet's own Variant column now (renderTable)
+// — the old Build-tab "Card variants" list duplicated it and is gone.
+
+/** The template whose variants the sheet's Variant column offers — the
+ * currently selected one, when it actually has variants to choose from. */
+function sheetVariantTemplate() {
+  const t = state.templates.find(x => x.id === $('template').value)
+  return t && t.variants && t.variants.length > 1 ? t : null
+}
+
+/* ------------------------------------------------------------------ *
+ * Sheet draft — whatever is in the sheet survives closing the plugin.
+ * Saved (debounced) into the same clientStorage settings blob; cleared
+ * naturally once the offer is saved to Cirqle and reloaded.
+ * ------------------------------------------------------------------ */
+let draftTimer = null
+function scheduleDraftSave() {
+  clearTimeout(draftTimer)
+  draftTimer = setTimeout(saveSettings, 400)
+}
+
+/** Pull the loaded offer into the editable sheet. */
+function fillSheetFromCampaign() {
+  if (!state.campaign) return
+  state.rawRows = null
+  state.rawMeta = null
+  state.colRoles = []
+  state.parsed = state.campaign.products.map(p => ({
+    name: p.name || '',
+    price: p.price != null && p.price !== '' ? Number(p.price) : null,
+    mrp: p.mrp != null && p.mrp !== '' ? Number(p.mrp) : null,
+    weight: p.weight || null,
+    badge: p.badge || null,
+    day: p.day || null,
+    offerType: p.offerType || 'price',
+    // Pages already planned in Cirqle come back editable.
+    page: p.page || null,
+    category: p.category || null,
+  }))
+  state.sheetCampaignId = $('offer').value
+  $('paste-title').value = state.campaign.campaign.name || ''
+  renderTable()
 }
 
 /* ------------------------------------------------------------------ *
@@ -976,6 +1425,7 @@ const FACT_LABEL = {
   price: 'has a price',
   offer: 'offer type',
   script: 'name language',
+  mrp: 'has MRP',
 }
 
 function renderVariants() {
@@ -1026,11 +1476,14 @@ function renderVariants() {
     row.appendChild(sel)
     box.appendChild(row)
 
-    // Show the values: without them there is no way to tell what "Variant7"
-    // is, and no way to know what to rename it to.
+    // Show the values so "Variant7" is identifiable — but a 12-variant set
+    // printed in full is the noise this panel is worst at. First few, then
+    // a count; the full list stays in the tooltip.
     const values = document.createElement('div')
     values.className = 'vvals'
-    values.textContent = prop.values.join(' · ')
+    const shown = prop.values.slice(0, 4)
+    values.textContent = shown.join(' · ') +
+      (prop.values.length > shown.length ? '  +' + (prop.values.length - shown.length) + ' more' : '')
     values.title = prop.values.join('\n')
     box.appendChild(values)
 
@@ -1054,23 +1507,25 @@ function renderGroupRows(box, prop, choice) {
     box.appendChild(line)
   }
 
-  if (choice === 'off') { hint('Left exactly as you set it — no groups needed.'); return }
+  if (choice === 'off') { hint('Left as you set it.'); return }
   const fact = choice === 'auto' ? prop.fact
     : choice.indexOf('fact:') === 0 ? choice.slice(5)
     : null
-  if (!fact && choice !== 'auto') { hint('Pinned — every card uses this one value.'); return }
+  if (!fact && choice !== 'auto') { hint('Pinned to one value.'); return }
   if (!fact) {
-    hint('Not mapped yet. Pick “Use: …” above — the ✓ fits one is usually right — and the product groups appear here.')
+    // Auto still handles this via each variant's sample artwork; picking
+    // "Use: …" is the override, not a requirement.
+    hint('Auto — matched from each variant’s sample.')
     return
   }
   if (!state.groupCounts) {
-    hint('Press Load Offers, and this offer’s product groups appear here.')
+    hint('Load an offer to see its product groups.')
     return
   }
   const counts = state.groupCounts[fact] || {}
   const order = (state.groupStates && state.groupStates[fact]) || Object.keys(counts)
   const present = order.filter(st => counts[st])
-  if (!present.length) { hint('No product in this offer falls into a group for this.'); return }
+  if (!present.length) { hint('No product falls into a group for this.'); return }
 
   if (!state.variantMaps[prop.key]) state.variantMaps[prop.key] = {}
 
@@ -1146,9 +1601,7 @@ function requestVariants() {
 }
 
 function updateButtons() {
-  const hasOffer = !!$('offer').value
   const hasCampaign = !!state.campaign
-  $('load').disabled = !hasOffer
   $('preview').disabled = !hasCampaign
   $('validate').disabled = !hasCampaign
   $('build').disabled = !hasCampaign
@@ -1553,6 +2006,9 @@ function applyRoles() {
     if (m) {
       if (!p.weight && m.weight) p.weight = m.weight
       if (!p.day && m.day) p.day = m.day
+      // The section a row was found under IS its category — the parser
+      // already worked it out, so paging by category needs no retyping.
+      if (!p.category && (m.day || m.weight)) p.category = m.day || m.weight
     }
     if (/buy\s*1\s*get\s*1|b1g1|bogo/i.test(p.badge || '')) p.offerType = 'bogo'
     return p
@@ -1610,6 +2066,12 @@ function gridCols() {
     const at = (cc.pos == null) ? cols.length : Math.max(0, Math.min(cols.length, cc.pos))
     cols.splice(at, 0, col)
   }
+  // Planning columns last, so turning them on never shifts the columns a
+  // designer already knows the position of.
+  if (state.planCols) {
+    cols.push({ key: 'category', label: 'Category', type: 'text' })
+    cols.push({ key: 'page', label: 'Page', type: 'page' })
+  }
   return cols
 }
 function lastC() { return gridCols().length - 1 }
@@ -1651,6 +2113,9 @@ function setCellValue(r, c, raw) {
   if (col.type === 'price') {
     const v = String(raw == null ? '' : raw).trim()
     p[col.key] = v === '' ? null : parsePrice(v)
+  } else if (col.type === 'page') {
+    const n = parseInt(String(raw == null ? '' : raw).replace(/[^\d]/g, ''), 10)
+    p.page = Number.isFinite(n) && n > 0 ? n : null
   } else {
     p[col.key] = String(raw == null ? '' : raw)
   }
@@ -1893,8 +2358,10 @@ function renderTable() {
   const COLS = gridCols()
 
   // Column widths follow the interleaved display order.
-  const W = { name: 'minmax(150px, 1fr)', price: '64px', mrp: '64px', weight: '72px', badge: '80px' }
-  const widths = '34px ' + COLS.map(col => col.custom ? '84px' : W[col.key]).join(' ') + ' 62px'
+  const W = { name: 'minmax(150px, 1fr)', price: '64px', mrp: '64px', weight: '72px', badge: '80px',
+              category: '92px', page: '52px' }
+  const vt = sheetVariantTemplate()
+  const widths = '34px ' + COLS.map(col => col.custom ? '84px' : W[col.key]).join(' ') + ' 62px' + (vt ? ' 96px' : '')
   if (box.style) {
     if (box.style.setProperty) box.style.setProperty('--gcols', widths)
     else box.style['--gcols'] = widths
@@ -1922,6 +2389,13 @@ function renderTable() {
   hp.title = 'What #price1 and #price2 will receive'
   hp.textContent = 'P1·P2'
   head.appendChild(hp)
+  if (vt) {
+    const hv = document.createElement('div')
+    hv.className = 'g-cell g-ro'
+    hv.title = 'Which variant of "' + vt.name + '" this card uses — Auto follows the automatic matching'
+    hv.textContent = 'Variant'
+    head.appendChild(hv)
+  }
   box.appendChild(head)
 
   let lastDay = null
@@ -1970,8 +2444,36 @@ function renderTable() {
     row.appendChild(p1p2)
     gridCells[r].p1p2 = p1p2
 
+    // Variant pin, right in the sheet — Auto follows the sample/mapping
+    // matching; a pick pins this row's card. Outside the cell-selection
+    // model on purpose (like P1·P2), so keyboard nav and ranges ignore it.
+    if (vt) {
+      const vc = document.createElement('div')
+      vc.className = 'g-cell g-var'
+      const sel = document.createElement('select')
+      const auto = document.createElement('option')
+      auto.value = ''
+      auto.textContent = 'Auto'
+      sel.appendChild(auto)
+      for (const v of vt.variants) {
+        const o = document.createElement('option')
+        o.value = v.name
+        o.textContent = variantLabel(v.name)
+        sel.appendChild(o)
+      }
+      sel.value = state.variantOverrides[r] || ''
+      sel.onchange = () => {
+        if (sel.value) state.variantOverrides[r] = sel.value
+        else delete state.variantOverrides[r]
+        scheduleDraftSave()
+      }
+      vc.appendChild(sel)
+      row.appendChild(vc)
+    }
+
     box.appendChild(row)
   })
+  scheduleDraftSave()
 
   document.onmouseup = () => { gridDrag = false }
   document.onclick = hideCtx
@@ -2095,6 +2597,75 @@ function showAddCol(pos) {
   state._pendingColPos = pos == null ? null : pos
   $('addcol-row').style.display = 'flex'
   if ($('addcol-name').focus) $('addcol-name').focus()
+}
+
+/* ------------------------------------------------------------------ *
+ * Page planning — decide which products print on which page, in the
+ * sheet where the products already are. Pages ride along to Cirqle on
+ * save, so the Build tab's Page filter and the per-page build both use
+ * exactly what was planned here.
+ * ------------------------------------------------------------------ */
+$('tool-plan').onclick = () => {
+  state.planCols = !state.planCols
+  $('plan-row').style.display = state.planCols ? 'flex' : 'none'
+  $('tool-plan').classList.toggle('tag-missing', !!state.planCols)
+  saveSettings()
+  renderTable()
+}
+
+/** Number every row sequentially, N per page — "this page takes 16".
+ * With "new page at each category" the count is a maximum instead: a
+ * category always starts a fresh page, so a section never splits. */
+$('plan-auto').onclick = () => {
+  const per = Math.max(1, parseInt($('plan-per').value, 10) || 16)
+  const byCat = $('plan-bycat').checked
+  pushUndo()
+  let page = 1
+  let onPage = 0
+  let lastCat = null
+  for (const p of state.parsed) {
+    const cat = (p.category || '').trim()
+    if (byCat && lastCat !== null && cat !== lastCat && onPage > 0) { page++; onPage = 0 }
+    if (onPage >= per) { page++; onPage = 0 }
+    p.page = page
+    onPage++
+    lastCat = cat
+  }
+  renderTable()
+  log('Numbered ' + state.parsed.length + ' products across ' + page + ' page' + (page === 1 ? '' : 's') +
+      ' — ' + per + ' per page' + (byCat ? ', new page at each category' : '') + '.', 'ok')
+}
+
+/** "From this product to this product goes on page N" — select the rows,
+ * type the page, press set. */
+$('plan-set').onclick = () => {
+  const page = Math.max(1, parseInt($('plan-page').value, 10) || 1)
+  const rows = targetRows()
+  if (!rows.length) { reportError('No rows to set.', 'Pages', 'Select some rows first.'); return }
+  pushUndo()
+  for (const i of rows) if (state.parsed[i]) state.parsed[i].page = page
+  renderTable()
+  log(rows.length + ' product(s) put on page ' + page + '.', 'ok')
+}
+
+/** Group rows by category without disturbing the order inside a group. */
+$('plan-sortcat').onclick = () => {
+  const cats = []
+  for (const p of state.parsed) {
+    const c = (p.category || '').trim()
+    if (cats.indexOf(c) < 0) cats.push(c)
+  }
+  // Uncategorised last, whatever order they were first seen in.
+  cats.sort((a, b) => (a === '' ? 1 : 0) - (b === '' ? 1 : 0))
+  pushUndo()
+  const out = []
+  for (const c of cats) {
+    for (const p of state.parsed) if ((p.category || '').trim() === c) out.push(p)
+  }
+  state.parsed = out
+  state.picked.clear()
+  renderTable()
+  log('Grouped by category: ' + cats.filter(Boolean).join(', ') + (cats.indexOf('') >= 0 ? ' · uncategorised last' : '') + '.', 'ok')
 }
 
 $('tool-addcol').onclick = () => {
@@ -2320,7 +2891,11 @@ $('paste-parse').onclick = async () => {
   log('Parsing…')
   try {
     const data = await api('/api/figma/parse', { text, hint: $('paste-hint').value.trim() || undefined })
-    state.parsed = data.products || []
+    // The AI groups the message into sections (a day, a weight like "100gm");
+    // that grouping is the category, so page planning can use it as-is.
+    state.parsed = (data.products || []).map(p => Object.assign({}, p, {
+      category: p.category || p.day || p.weight || null,
+    }))
     state.rawRows = null   // AI results aren't column-split, so hide the role mapper
     state.colRoles = []
     state.picked.clear()
@@ -2373,9 +2948,14 @@ $('paste-save').onclick = async () => {
       title: $('paste-title').value.trim() || undefined,
       dateType: 'single',
       offerDate: $('paste-date').value || undefined,
+      // Who saved it — the server turns this into a task on the Tasks page.
+      createdBy: state.user || undefined,
       products: state.parsed.map(p => ({
         name: p.name, price: p.price, mrp: p.mrp,
         weight: p.weight, badge: p.badge, offerType: p.offerType,
+        // Planned pages go to Cirqle with the offer, so the flyer can be
+        // rebuilt page by page later — by anyone, from the app's data.
+        page: p.page || undefined,
       })),
     })
     log('✓ ' + data.message, 'ok')
@@ -2387,6 +2967,9 @@ $('paste-save').onclick = async () => {
       state.customRows = { campaignId: data.campaignId, rows: state.parsed.map(p => Object.assign({}, p.custom || {})) }
       log('· Custom column values (' + state.customCols.map(c => c.label).join(', ') + ') will fill their #layers when you Build — they are not stored in Cirqle.', 'ok')
     }
+    // The sheet now belongs to the freshly saved campaign — the post-save
+    // reload below refills it with the canonical server copy.
+    state.sheetCampaignId = data.campaignId
     logFix('Reloading offers so you can build it now.')
     // Pull the new campaign into the Build tab and select it, so the designer
     // goes straight from paste to cards without hunting in a dropdown.
@@ -2398,6 +2981,11 @@ $('paste-save').onclick = async () => {
       document.querySelector('.tab[data-panel="build"]').click()
       log('Ready — pick a template and press Build Flyer.', 'ok')
     }
+    // Logged AFTER the reload — connect()/loadCampaign() clear the log.
+    if (data.taskNumber) {
+      log('✓ Task #' + data.taskNumber + ' added to the Tasks page' +
+        (state.user && state.user.cqid ? ' for ' + state.user.cqid : '') + '.', 'ok')
+    }
   } catch (e) {
     reportError(e.what || String(e), e.where || 'Save', e.fix)
   }
@@ -2405,7 +2993,6 @@ $('paste-save').onclick = async () => {
 }
 
 $('connect').onclick = connect
-$('load').onclick = loadCampaign
 $('preview').onclick = preview
 $('validate').onclick = validate
 $('build').onclick = build
@@ -2449,17 +3036,33 @@ $('reshuffle').onclick = () => {
 
 $('template').onchange = () => {
   const t = state.templates.find(x => x.id === $('template').value)
-  state.lastTemplateName = t ? t.name : ''
+  state.lastTemplateName = t ? templateKey(t) : ''
   saveSettings()
   requestVariants()
+  renderTagPanel()
+  updateTemplateMeta()
+  renderVariantDefault()
+  renderTable()   // the sheet's Variant column offers this template's variants
 }
 $('page').addEventListener('change', requestGroups)
-$('client').onchange = () => { fillOfferDropdown(); saveSettings() }
-$('offer').onchange = () => { state.campaign = null; state.validated = false; chip('chip-count', '—'); chip('chip-ready', '—'); updateButtons(); saveSettings() }
+// Picking IS loading — no separate Load button. fillOfferDropdown selects
+// the client's first offer, so both changes end in a loaded campaign.
+$('client').onchange = () => {
+  fillOfferDropdown()   // auto-loads the client's first offer
+  saveSettings()
+}
+$('offer').onchange = () => {
+  state.campaign = null; state.validated = false
+  chip('chip-count', '—'); chip('chip-ready', '—')
+  updateButtons(); saveSettings()
+  if ($('offer').value) loadCampaign()
+}
 $('page').onchange = () => { state.validated = false; chip('chip-ready', 'Not validated', 'warn'); updateLayoutSummary() }
 $('cols').onchange = () => { updateLayoutSummary(); saveSettings() }
 $('gap').onchange = () => { updateLayoutSummary(); saveSettings() }
+$('rowgap').onchange = () => { updateLayoutSummary(); saveSettings() }
 $('fill-selection').onchange = updateLayoutSummary
+$('free-cards').onchange = () => { updateLayoutSummary(); saveSettings() }
 updateLayoutSummary()
 
 onmessage = (event) => {
@@ -2481,7 +3084,32 @@ onmessage = (event) => {
         // Usage memory: reopen looking the way it was left.
         if (msg.settings.cols != null && msg.settings.cols !== '') $('cols').value = msg.settings.cols
         if (msg.settings.gap != null && msg.settings.gap !== '') $('gap').value = msg.settings.gap
+        // Older saves had one gap for both directions.
+        $('rowgap').value = msg.settings.rowGap != null && msg.settings.rowGap !== ''
+          ? msg.settings.rowGap : $('gap').value
+        $('free-cards').checked = msg.settings.freeCards === true
         state.lastTemplateName = msg.settings.lastTemplateName || ''
+        state.defaultVariants = msg.settings.defaultVariants || {}
+        // Keep only id + CQID: a session stored before this change may still
+        // carry a name, and it must not survive into the panel or a task.
+        state.user = msg.settings.user
+          ? { id: msg.settings.user.id || null, cqid: msg.settings.user.cqid || null }
+          : null
+        state.planCols = msg.settings.planCols === true
+        $('plan-row').style.display = state.planCols ? 'flex' : 'none'
+        $('tool-plan').classList.toggle('tag-missing', !!state.planCols)
+        applyTheme(msg.settings.uiTheme)
+        // Unsaved sheet work from last session comes back first — the
+        // auto-load below respects it (only refills for the same offer).
+        const draft = msg.settings.sheetDraft
+        if (draft && draft.parsed && draft.parsed.length) {
+          state.parsed = draft.parsed
+          state.sheetCampaignId = draft.campaignId || null
+          state.variantOverrides = draft.overrides || {}
+          if (draft.title) $('paste-title').value = draft.title
+          if (draft.date) $('paste-date').value = draft.date
+          renderTable()
+        }
         state.lastClientId = msg.settings.lastClientId || null
         state.lastCampaignId = msg.settings.lastCampaignId || null
         state._restoreClientId = state.lastClientId
@@ -2504,6 +3132,17 @@ onmessage = (event) => {
       state.templates = msg.templates || []
       fillTemplateDropdown()
       requestVariants()
+      renderTagPanel()
+      break
+    case 'selection':
+      state._selCount = msg.count
+      state.selNode = msg.node
+      renderTagPanel()
+      break
+    case 'rename-done':
+      log('✓ Tagged ' + msg.token + (msg.variants > 1
+        ? ' across ' + msg.variants + ' variants (' + msg.renamed + ' layers renamed).'
+        : '.'), 'ok')
       break
     case 'variants':
       state.variantProps = msg.properties || []
@@ -2536,6 +3175,7 @@ onmessage = (event) => {
       reportError(msg.what, msg.where, msg.fix)
       $('build').disabled = !state.campaign
       $('new-template').disabled = false
+      releaseBuildWait()
       break
   }
 }
