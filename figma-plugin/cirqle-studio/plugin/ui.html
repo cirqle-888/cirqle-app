@@ -161,6 +161,10 @@
   .g-ro { font-size: 10px; font-family: ui-monospace, Menlo, monospace; text-align: center;
           color: var(--mut); background: var(--bg2); cursor: default; }
   .g-ro b { color: var(--ok); font-weight: 600; }
+  /* Same product on more than one row — usually deliberate (a hero item
+     repeated on another page), occasionally an accident. Either way it
+     should be visible without hunting. */
+  .g-dupe { box-shadow: inset 3px 0 0 var(--warn); }
   .g-var { padding: 0; cursor: default; }
   .g-var select { width: 100%; height: 100%; border: 0; background: transparent;
                   color: var(--ink); font-size: 10px; padding: 0 2px; }
@@ -2254,6 +2258,31 @@ function makeFillHandle(box) {
 let gridFill = null
 let gridMouseUpBound = false
 
+/** Rows whose product name occurs more than once → the pages it sits on.
+ * Rebuilt with the table; read by paintSel, which rewrites class names. */
+let gridDupes = {}
+
+function findDuplicateRows() {
+  const byName = {}
+  state.parsed.forEach((p, i) => {
+    const key = String(p.name || '').trim().toLowerCase()
+    if (!key) return
+    if (!byName[key]) byName[key] = []
+    byName[key].push(i)
+  })
+  const out = {}
+  for (const key of Object.keys(byName)) {
+    const rows = byName[key]
+    if (rows.length < 2) continue
+    const pages = rows.map(i => state.parsed[i].page || 1)
+    for (const i of rows) {
+      out[i] = 'Also in this list ' + (rows.length - 1) + '× — page' +
+        (pages.length > 1 ? 's ' : ' ') + pages.join(', ')
+    }
+  }
+  return out
+}
+
 /** Apply a finished handle-drag: repeat the source block across the target. */
 function applyFill(target) {
   const src = gridFill && gridFill.from
@@ -2327,6 +2356,8 @@ function paintSel() {
       let cls = 'g-cell' + (cols[c].type === 'price' ? ' g-sale' : '')
       if (inAnyRect(rects, r, c)) cls += ' g-sel'
       if (gridSel && r === gridSel.fr && c === gridSel.fc) cls += ' g-anchor'
+      // Re-applied here, not only at render: paintSel rewrites className.
+      if (cols[c].key === 'name' && gridDupes[r]) { cls += ' g-dupe'; el.title = gridDupes[r] }
       el.className = cls
     }
   }
@@ -2501,6 +2532,7 @@ function renderTable() {
   box.innerHTML = ''
   gridCells = []
   const COLS = gridCols()
+  gridDupes = findDuplicateRows()
   makeFillHandle(box)
 
   // Column widths follow the interleaved display order.
@@ -2814,9 +2846,16 @@ function updatePlanMsg() {
   }
   const pages = Object.keys(counts).map(Number).sort((a, b) => a - b)
   const spread = pages.map(pg => 'p' + pg + ': ' + counts[pg]).join(' · ')
+  // Repeated products are worth stating plainly: it is either deliberate
+  // (the same item on two pages) or a mistake, and both want noticing.
+  const dupeRows = Object.keys(gridDupes || {}).length
+  const dupeNote = dupeRows
+    ? '  ·  ' + dupeRows + ' rows repeat a product (marked in the Product column)'
+    : ''
+
   if (pages.length > 1) {
-    el.textContent = total + ' products across ' + pages.length + ' pages — ' + spread
-    el.className = 'hint'
+    el.textContent = total + ' products across ' + pages.length + ' pages — ' + spread + dupeNote
+    el.className = dupeRows ? 'hint log-mini warn' : 'hint'
     return
   }
   // Still one page: show what pressing the button WOULD do, so the outcome
@@ -2904,9 +2943,22 @@ $('plan-set').onclick = () => {
   const rows = targetRows()
   if (!rows.length) { reportError('No rows to set.', 'Pages', 'Select some rows first.'); return }
   pushUndo()
-  for (const i of rows) if (state.parsed[i]) state.parsed[i].page = page
+  // A product that was already on a different page is being MOVED, not
+  // added — the one thing about this control that can surprise someone.
+  const moved = []
+  for (const i of rows) {
+    const p = state.parsed[i]
+    if (!p) continue
+    if (p.page && p.page !== page) moved.push(p.name + ' (was page ' + p.page + ')')
+    p.page = page
+  }
   renderTable()
   log(rows.length + ' product(s) put on page ' + page + '.', 'ok')
+  if (moved.length) {
+    log('⚠ ' + moved.length + ' moved off their old page: ' + moved.slice(0, 4).join(', ') +
+        (moved.length > 4 ? ' +' + (moved.length - 4) + ' more' : ''), 'warn')
+    logFix('They are no longer on the page they were on. To print one product on TWO pages, select it, press Duplicate, then set the copy’s page.')
+  }
 }
 
 /** Group rows by category without disturbing the order inside a group. */
