@@ -304,9 +304,9 @@
         <span>Fill selected cards (don't create new)</span>
       </label>
       <label style="display:flex;gap:7px;align-items:center;margin-top:6px;cursor:pointer"
-             title="Build each page separately, one block per page, side by side">
+             title="Only does something when products are split across pages (set them in the sheet's Page column). Page 1's cards are built as one group, Page 2's beside it, and so on — instead of one continuous grid.">
         <input type="checkbox" id="per-page" style="width:13px;height:13px;margin:0">
-        <span>One block per page</span>
+        <span>Keep each page's cards together</span>
       </label>
       <label style="display:flex;gap:7px;align-items:center;margin-top:7px;cursor:pointer" title="Cards land straight on the page in the same grid — no wrapper frame, each card moves on its own from the start">
         <input type="checkbox" id="free-cards" style="width:13px;height:13px;margin:0">
@@ -380,6 +380,7 @@
         <input type="number" id="plan-page" min="1" max="99" value="1" style="width:46px" title="Page number">
         <button class="tool" id="plan-set" title="Put the selected rows on this page">set selected rows</button>
         <button class="tool" id="plan-sortcat" title="Group rows by category, keeping their order inside each">sort by category</button>
+        <span class="hint" id="plan-msg" style="flex-basis:100%;margin:2px 0 0"></span>
       </div>
       <div id="paste-colmap" class="colmap"></div>
       <div id="paste-rows"></div>
@@ -2523,6 +2524,7 @@ function renderTable() {
     box.appendChild(row)
   })
   scheduleDraftSave()
+  updatePlanMsg()   // every edit can change the page spread
 
   document.onmouseup = () => { gridDrag = false }
   document.onclick = hideCtx
@@ -2660,7 +2662,44 @@ $('tool-plan').onclick = () => {
   $('tool-plan').classList.toggle('tag-missing', !!state.planCols)
   saveSettings()
   renderTable()
+  updatePlanMsg()
 }
+
+/**
+ * Says what the current plan actually is. Without this, "16 per page" on a
+ * 12-row list looks broken: it numbers everything page 1 — correctly — and
+ * silently, so the only visible result is nothing changing.
+ */
+function updatePlanMsg() {
+  const el = $('plan-msg')
+  if (!el) return
+  const total = state.parsed.length
+  if (!total) { el.textContent = ''; return }
+  const per = Math.max(1, parseInt($('plan-per').value, 10) || 16)
+  const counts = {}
+  for (const p of state.parsed) {
+    const key = p.page || 1
+    counts[key] = (counts[key] || 0) + 1
+  }
+  const pages = Object.keys(counts).map(Number).sort((a, b) => a - b)
+  const spread = pages.map(pg => 'p' + pg + ': ' + counts[pg]).join(' · ')
+  if (pages.length > 1) {
+    el.textContent = total + ' products across ' + pages.length + ' pages — ' + spread
+    el.className = 'hint'
+    return
+  }
+  if (per >= total) {
+    // The likeliest confusion, named outright.
+    el.textContent = total + ' products, ' + per + ' per page — they all fit on one page. ' +
+      'Use a smaller number (or select rows and “set selected rows”) to split them.'
+    el.className = 'hint log-mini warn'
+    return
+  }
+  el.textContent = total + ' products, all on one page — press “per page → number all” to split them.'
+  el.className = 'hint'
+}
+
+$('plan-per').oninput = updatePlanMsg
 
 /** Number every row sequentially, N per page — "this page takes 16".
  * With "new page at each category" the count is a maximum instead: a
