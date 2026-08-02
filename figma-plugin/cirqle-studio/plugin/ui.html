@@ -206,7 +206,7 @@
     <label>Password</label>
     <input type="password" id="login-pass" placeholder="your Cirqle password" autocomplete="current-password">
     <button id="signin">Sign in</button>
-    <p class="hint">One time only. Your password is never stored.</p>
+    <p class="hint" id="signin-msg">One time only. Your password is never stored.</p>
     <div class="fold-head" id="adv-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="adv-body">
       <span class="chev">▶</span>Advanced — shared secret
     </div>
@@ -556,16 +556,28 @@ function foldSetup(folded) {
 /* One-time sign-in with the employee's own Cirqle credentials. The server
  * verifies them and returns the workspace token + the employee identity;
  * only those are kept — the password is cleared immediately. */
+/** Sign-in feedback belongs NEXT TO the button. The Activity log is far
+ * below a long panel and starts collapsed, so an error posted only there
+ * reads as "the button did nothing". */
+function signinMsg(text, cls) {
+  const el = $('signin-msg')
+  el.textContent = text
+  el.className = 'hint' + (cls ? ' ' + cls : '')
+}
+
 $('signin').onclick = async () => {
   const identifier = $('login-id').value.trim()
   const password = $('login-pass').value
   if (!identifier || !password) {
+    signinMsg('Enter your email (or CQID) and password.', 'log-mini err')
     reportError('Enter your email (or CQID) and password.', 'Sign in', 'The same credentials you use for the Cirqle app.')
     return
   }
   clearLog()
   chip('chip-conn', 'Signing in…')
+  signinMsg('Signing in…')
   $('signin').disabled = true
+  $('signin').textContent = 'Signing in…'
   try {
     const res = await fetch(base() + '/api/figma/login', {
       method: 'POST',
@@ -594,13 +606,19 @@ $('signin').onclick = async () => {
     $('token').value = data.token
     state.user = data.user || null
     $('login-pass').value = ''
-    log('Signed in as ' + ((state.user && state.user.cqid) || identifier.toUpperCase()) + '.', 'ok')
+    const who = (state.user && state.user.cqid) || identifier.toUpperCase()
+    signinMsg('Signed in as ' + who + '.', 'log-mini ok')
+    log('Signed in as ' + who + '.', 'ok')
     await connect()
   } catch (e) {
     chip('chip-conn', 'Offline', 'err')
+    // Right under the button, where the click happened…
+    signinMsg((e.what || String(e)) + ' ' + (e.fix || ''), 'log-mini err')
+    // …and in full in the log, which reportError opens.
     reportError(e.what || String(e), e.where || 'Sign in', e.fix)
   }
   $('signin').disabled = false
+  $('signin').textContent = 'Sign in'
 }
 
 $('settings-toggle').onclick = () => {
