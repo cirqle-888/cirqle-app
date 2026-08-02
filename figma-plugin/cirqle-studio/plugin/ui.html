@@ -176,6 +176,9 @@
   .kbd-hint b { font-weight: 600; color: var(--ink); }
   #grid-clip { position: absolute; left: -9999px; top: 0; width: 10px; height: 10px;
                opacity: 0; resize: none; }
+  #grid-fill { position: absolute; width: 7px; height: 7px; background: var(--accent);
+               border: 1px solid var(--bg); border-radius: 1px; cursor: crosshair;
+               display: none; z-index: 3; }
   .ctx { position: fixed; z-index: 99; background: var(--bg); border: 1px solid var(--line);
          border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.18); padding: 4px;
          display: none; min-width: 176px; }
@@ -390,8 +393,9 @@
       <div id="paste-colmap" class="colmap"></div>
       <div id="paste-rows"></div>
       <textarea id="grid-clip" tabindex="-1" aria-hidden="true"></textarea>
-      <p class="kbd-hint" title="Click a cell and type · Enter moves down · Tab moves right · ⌘C/⌘V copy-paste ranges, including to and from Google Sheets · ⌘Z undo · ⌘D fill down · click a row number or column name to select it">Works like a sheet —
-        <b>Enter</b> ↓ · <b>Tab</b> → · <b>⌘C/⌘V</b> · <b>⌘Z</b> · <b>⌘D</b> fill down</p>
+      <p class="kbd-hint" title="Click a cell and type · Enter moves down · Tab moves right · drag across cells to select a range · ⌘/Ctrl-click to add another range · drag the small square on the selection's corner to fill · ⌘C/⌘V copy-paste ranges, including to and from Google Sheets · ⌘Z undo · ⌘D fill down · click a row number or column name to select it">Works like a sheet —
+        <b>Enter</b> ↓ · <b>Tab</b> → · <b>drag</b> to select · <b>⌘-click</b> adds a range ·
+        drag the corner square to fill · <b>⌘C/⌘V</b> · <b>⌘Z</b> · <b>⌘D</b> fill down</p>
     </section>
 
     <section class="card">
@@ -2199,17 +2203,90 @@ function gridRedo() {
 }
 
 /* --- selection ------------------------------------------------------ */
+/** Ranges kept from earlier ⌘/Ctrl-clicks. gridSel is the live one; these
+ * are the ones already committed, so "rows 2-4 and 9 and 15" is expressible
+ * — the shape bulk tools (set page, set category, delete) need most. */
+let gridExtra = []
+
 function gridSelect(r, c, opts) {
   const o = opts || {}
-  if (!state.parsed.length) { gridSel = null; return }
+  if (!state.parsed.length) { gridSel = null; gridExtra = []; return }
   r = Math.max(0, Math.min(state.parsed.length - 1, r))
   c = Math.max(0, Math.min(lastC(), c))
-  if (o.extend && gridSel) { gridSel.fr = r; gridSel.fc = c }
-  else gridSel = { ar: r, ac: c, fr: r, fc: c }
+  if (o.add && gridSel) {
+    // ⌘/Ctrl-click: bank the current range and start a new one.
+    gridExtra.push(selRect())
+    gridSel = { ar: r, ac: c, fr: r, fc: c }
+  } else if (o.extend && gridSel) {
+    gridSel.fr = r; gridSel.fc = c
+  } else {
+    gridExtra = []
+    gridSel = { ar: r, ac: c, fr: r, fc: c }
+  }
   syncPicked()
   paintSel()
   syncClip(o.focus !== false)
   updateCount()
+}
+
+/**
+ * The little square on the selection's corner. Dragging it fills the range
+ * over the cells you drag across, repeating the source block — the gesture
+ * everyone already knows from Sheets, and the fastest way to put one page
+ * number or category on twenty rows.
+ */
+function makeFillHandle(box) {
+  const el = document.createElement('div')
+  el.id = 'grid-fill'
+  el.title = 'Drag to fill this range down or across'
+  let from = null
+  el.onmousedown = (e) => {
+    e.preventDefault && e.preventDefault()
+    e.stopPropagation && e.stopPropagation()
+    from = selRect()
+    if (!from) return
+    gridFill = { from }
+  }
+  box.appendChild(el)
+}
+
+let gridFill = null
+let gridMouseUpBound = false
+
+/** Apply a finished handle-drag: repeat the source block across the target. */
+function applyFill(target) {
+  const src = gridFill && gridFill.from
+  if (!src || !target) return
+  const rows = src.r1 - src.r0 + 1
+  const cols = src.c1 - src.c0 + 1
+  pushUndo()
+  for (let r = target.r0; r <= target.r1; r++) {
+    for (let c = target.c0; c <= target.c1; c++) {
+      if (r >= src.r0 && r <= src.r1 && c >= src.c0 && c <= src.c1) continue  // the source itself
+      const sr = src.r0 + ((r - src.r0) % rows + rows) % rows
+      const sc = src.c0 + ((c - src.c0) % cols + cols) % cols
+      setCellValue(r, c, cellValue(sr, sc))
+    }
+  }
+  renderTable()
+  gridSel = { ar: target.r0, ac: target.c0, fr: target.r1, fc: target.c1 }
+  gridExtra = []
+  syncPicked(); paintSel(); syncClip(true); updateCount()
+}
+
+/** Every selected rect — the banked ones plus the live one. */
+function allRects() {
+  const rects = gridExtra.slice()
+  const live = selRect()
+  if (live) rects.push(live)
+  return rects
+}
+
+function inAnyRect(rects, r, c) {
+  for (const q of rects) {
+    if (r >= q.r0 && r <= q.r1 && c >= q.c0 && c <= q.c1) return true
+  }
+  return false
 }
 function gridSelectRow(r, opts) {
   gridSelect(r, 0, opts)
@@ -2231,13 +2308,14 @@ function gridSelectAll() {
 /** state.picked mirrors the selected ROWS so bulk tools stay one code path. */
 function syncPicked() {
   state.picked.clear()
-  const rect = selRect()
-  if (!rect) return
-  for (let r = rect.r0; r <= rect.r1; r++) state.picked.add(r)
+  for (const rect of allRects()) {
+    for (let r = rect.r0; r <= rect.r1; r++) state.picked.add(r)
+  }
 }
 
 function paintSel() {
-  const rect = selRect()
+  const rects = allRects()
+  const live = selRect()
   for (let r = 0; r < gridCells.length; r++) {
     const rowCells = gridCells[r]
     if (!rowCells) continue
@@ -2246,11 +2324,22 @@ function paintSel() {
       const el = rowCells[c]
       if (!el) continue
       let cls = 'g-cell' + (cols[c].type === 'price' ? ' g-sale' : '')
-      if (rect && r >= rect.r0 && r <= rect.r1 && c >= rect.c0 && c <= rect.c1) cls += ' g-sel'
+      if (inAnyRect(rects, r, c)) cls += ' g-sel'
       if (gridSel && r === gridSel.fr && c === gridSel.fc) cls += ' g-anchor'
       el.className = cls
     }
   }
+  // The fill handle sits on the live range's bottom-right corner, the way a
+  // spreadsheet puts it — drag it to copy that range down or across.
+  const handle = $('grid-fill')
+  const corner = live && gridCells[live.r1] ? gridCells[live.r1][live.c1] : null
+  const box = $('paste-rows')
+  if (!handle || !corner || !box) { if (handle) handle.style.display = 'none'; return }
+  const cb = corner.getBoundingClientRect()
+  const bb = box.getBoundingClientRect()
+  handle.style.display = 'block'
+  handle.style.left = (cb.right - bb.left + box.scrollLeft - 3) + 'px'
+  handle.style.top = (cb.bottom - bb.top + box.scrollTop - 3) + 'px'
 }
 
 /* --- clipboard ------------------------------------------------------ */
@@ -2411,6 +2500,7 @@ function renderTable() {
   box.innerHTML = ''
   gridCells = []
   const COLS = gridCols()
+  makeFillHandle(box)
 
   // Column widths follow the interleaved display order.
   const W = { name: 'minmax(150px, 1fr)', price: '64px', mrp: '64px', weight: '72px', badge: '80px',
@@ -2483,9 +2573,31 @@ function renderTable() {
         e.preventDefault && e.preventDefault()
         if (gridEdit) gridCommitEdit()
         gridDrag = true
-        gridSelect(r, c, { extend: e.shiftKey })
+        // ⌘/Ctrl keeps what is already selected and starts another range.
+        gridSelect(r, c, { extend: e.shiftKey, add: (e.metaKey || e.ctrlKey) && !e.shiftKey })
       }
-      cell.onmouseenter = () => { if (gridDrag) gridSelect(r, c, { extend: true, focus: false }) }
+      cell.onmouseenter = () => {
+        // Mid fill-drag the range being painted is the fill target, not a
+        // new selection — the source has to stay put until the mouse is up.
+        if (gridFill) {
+          const src = gridFill.from
+          gridFill.target = {
+            r0: Math.min(src.r0, r), r1: Math.max(src.r1, r),
+            c0: Math.min(src.c0, c), c1: Math.max(src.c1, c),
+          }
+          const rects = [gridFill.target]
+          for (let rr = 0; rr < gridCells.length; rr++) {
+            const rowCells = gridCells[rr]
+            if (!rowCells) continue
+            for (let cc = 0; cc < gridCols().length; cc++) {
+              const el = rowCells[cc]
+              if (el) el.classList.toggle('g-sel', inAnyRect(rects, rr, cc))
+            }
+          }
+          return
+        }
+        if (gridDrag) gridSelect(r, c, { extend: true, focus: false })
+      }
       cell.ondblclick = () => { gridSelect(r, c); gridBeginEdit() }
       cell.oncontextmenu = (e) => showCtxMenu(e, r, c)
       row.appendChild(cell)
@@ -2531,7 +2643,20 @@ function renderTable() {
   scheduleDraftSave()
   updatePlanMsg()   // every edit can change the page spread
 
-  document.onmouseup = () => { gridDrag = false }
+  // Window-level, and added once: a mouseup released outside the grid (or
+  // outside the plugin panel entirely) must still end the drag, or the next
+  // hover keeps painting a selection nobody asked for.
+  if (!gridMouseUpBound) {
+    gridMouseUpBound = true
+    window.addEventListener('mouseup', () => {
+      gridDrag = false
+      if (!gridFill) return
+      const target = gridFill.target      // applyFill still needs gridFill.from
+      if (target) applyFill(target)
+      else paintSel()
+      gridFill = null
+    })
+  }
   document.onclick = hideCtx
   const clip = $('grid-clip')
   clip.onkeydown = gridKeydown
