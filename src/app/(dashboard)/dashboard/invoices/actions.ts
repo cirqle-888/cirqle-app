@@ -10,7 +10,8 @@
 import { revalidatePath } from 'next/cache'
 import { requirePermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
-import { recordPayment, RecordInvoicePaymentInput } from '@/lib/finance/record-payment'
+import { recordPayment } from '@/lib/finance/record-payment'
+import type { RecordInvoicePaymentInput } from '@/lib/finance/record-payment'
 
 interface ActionResult<T = void> {
   ok: boolean
