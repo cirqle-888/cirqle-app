@@ -9,7 +9,7 @@ import { insertCashbookEntries, updateCashbookEntry, softDeleteCashbookEntry, fe
 import { SCOPE_FILTER_OPTIONS, matchesScopeFilter, getScopeFilterLabel, type ScopeFilterValue } from '@/components/ui/scope-filter'
 import { formatCompact, round2 } from '@/lib/calculations/currency'
 import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
-import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, RefreshCw, Landmark, CheckCircle, ArrowLeftRight, Copy, Users } from 'lucide-react'
+import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, RefreshCw, Landmark, CheckCircle, ArrowLeftRight, Copy, Users, Sparkles } from 'lucide-react'
 import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
 import { ActiveFilterChips } from '@/components/ui/active-filter-chips'
 import { TokenizedSearch, type SearchFacet } from '@/components/ui/tokenized-search'
@@ -143,6 +143,21 @@ interface DueInvoice {
   // Present (non-empty) when the invoice already has direct "Record Payment"
   // rows — used to exclude it from cashbook allocation (mutual exclusion).
   payments?: { id: string }[]
+}
+
+/**
+ * One line of a payment split: how much of this receipt settles one invoice.
+ * Amounts are ₹ (INR) — the currency `cashbook_invoice_allocations` stores —
+ * even when the entry itself is in a foreign currency.
+ */
+interface AllocLine {
+  invoice_id: string
+  amount: string
+}
+
+/** An invoice's outstanding balance in ₹, falling back to raw amounts for pre-FX rows. */
+function outstandingInr(inv: { total_amount_inr?: number; total_amount?: number; paid_amount_inr?: number; paid_amount?: number }): number {
+  return round2((inv.total_amount_inr ?? inv.total_amount ?? 0) - (inv.paid_amount_inr ?? inv.paid_amount ?? 0))
 }
 
 // Which category names trigger smart fields
@@ -316,9 +331,12 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     entry_date: new Date().toISOString().split('T')[0],
     description: '',
     reference: '',
-    linked_invoice_id: '',
+    // How this receipt splits across invoices, in ₹. One line is the ordinary
+    // "payment for INV-x" case; several lines let a single deposit settle
+    // multiple invoices without a second trip to the invoice page.
+    allocations: [] as AllocLine[],
     // UI-only filter: narrows the Invoice picker to a single client's pending
-    // invoices. Not persisted — once linked_invoice_id is set, the client is
+    // invoices. Not persisted — once an invoice is picked, the client is
     // implicit via the invoice. Auto-fills when an invoice is selected.
     client_filter_id: '',
     fully_paid: false,
@@ -331,6 +349,10 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     // Employees sharing this expense — split equally on save.
     splitEmployeeIds: [] as string[],
   })
+
+  // True once the user edits the description by hand — stops the invoice
+  // picker from overwriting their wording as split lines are added or removed.
+  const [descTouched, setDescTouched] = useState(false)
 
   const supabase = createClient()
 
@@ -372,12 +394,15 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     const editing = formEditingId ? entries.find(e => e.id === formEditingId) : null
     const allocInv = (editing?.allocations ?? []).find(a => !a.deleted_at && a.invoice)?.invoice
     if (allocInv && (allocInv.exchange_rate ?? 0) > 0 && allocInv.exchange_rate !== 1) return allocInv.exchange_rate as number
-    if (form.linked_invoice_id) {
-      const inv = dueInvoices.find(i => i.id === form.linked_invoice_id)
+    // On a split, the first line's invoice sets the book rate — every line of
+    // one receipt shares the same client and therefore the same currency.
+    const firstLineId = form.allocations[0]?.invoice_id
+    if (firstLineId) {
+      const inv = dueInvoices.find(i => i.id === firstLineId)
       if (inv && (inv.exchange_rate ?? 0) > 0 && inv.exchange_rate !== 1) return inv.exchange_rate as number
     }
     return 0
-  }, [formEditingId, entries, form.linked_invoice_id, dueInvoices])
+  }, [formEditingId, entries, form.allocations, dueInvoices])
   const fxBookRate      = fxLinkedInvoiceRate || rateMap[fxCalcCurrency] || 0
   const fxActualInr     = parseFloat(form.amountInr) || 0
   const fxExpectedInr   = fxCalcCurrency !== 'INR' && fxBookRate > 0
@@ -417,7 +442,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       entry_date:      new Date().toISOString().slice(0, 10),
       description:     entry.description ?? '',
       reference:       '',
-      linked_invoice_id: '',
+      allocations:     [],
       client_filter_id:  entry.client_id ?? '',
       fully_paid:      false,
       scope:           entry.scope === 'company' ? 'company' : '',
@@ -429,6 +454,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     })
     setFormEditingId(null)
     setRecurringMonths(0)
+    setDescTouched(true)   // the copied description is the user's own wording
     setShowForm(true)
   }
 
@@ -448,10 +474,11 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       entry_date:      entry.entry_date ?? new Date().toISOString().slice(0, 10),
       description:     entry.description ?? '',
       reference:       entry.reference ?? '',
-      // Pre-fill the invoice reference if linked (the Combobox will show the linked invoice
-      // if it is still open; if already paid it won't appear in the picker but the reference
-      // text still shows).
-      linked_invoice_id: entry.invoice_id ?? '',
+      // Allocations are NOT edited here — updateCashbookEntry never touched
+      // them, and silently re-writing an existing split from this form would
+      // double-pay the invoices. The form points at the row's allocation
+      // panel instead.
+      allocations:       [],
       client_filter_id:  entry.client_id  ?? '',
       fully_paid:      false,
       scope:           entry.scope === 'company' ? 'company' : '',
@@ -461,6 +488,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     setSmartExtra(entry.client_id ? { client_id: entry.client_id } : {})
     setFormEditingId(entry.id)
     setRecurringMonths(0)
+    setDescTouched(true)   // an existing description is the user's own wording
     setShowForm(true)
   }
 
@@ -540,7 +568,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         ))
         setShowForm(false)
         setFormEditingId(null)
-        setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: new Date().toISOString().split('T')[0], description: '', reference: '', linked_invoice_id: '', client_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [] })
+        setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: new Date().toISOString().split('T')[0], description: '', reference: '', allocations: [], client_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [] })
+        setDescTouched(false)
       }
       setSaving(false)
       return
@@ -564,21 +593,19 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       }
     }
 
-    // Insert all entries
-    const payload = baseDates.map((entry_date, i) => ({
-      type: form.type,
-      category_id: form.category_id,
-      bank_account_id: form.bank_account_id || null,
-      amount,
-      currency: form.currency,
-      amount_inr: amountInr,
-      entry_date,
-      description: recurringMonths > 0 && i > 0
-        ? `${form.description}${form.description ? ' ' : ''}(recurring ${i + 1}/${baseDates.length})`
-        : form.description,
-      reference: form.reference,
-      invoice_id: form.linked_invoice_id || null, // Storing strict database link
-    }))
+    // ── Invoice split ────────────────────────────────────────────────────────
+    // One line covering the whole receipt takes the legacy path (invoice_id on
+    // the entry, DB trigger allocates the full amount) so nothing changes for
+    // the ordinary "payment for INV-x" case. Anything else — several invoices,
+    // or one invoice taking only part of the money — is written as explicit
+    // allocation rows server-side.
+    // Lines only apply to invoice-category inflows — switching category hides
+    // the picker, and stale lines must not leak into the payload.
+    const splitLines = (isInvoiceCategory ? form.allocations : [])
+      .map(l => ({ invoice_id: l.invoice_id, allocated_amount: round2(parseFloat(l.amount) || 0) }))
+      .filter(l => l.invoice_id && l.allocated_amount > 0)
+    const isLegacySingle =
+      splitLines.length === 1 && Math.abs(splitLines[0].allocated_amount - amountInr) < 0.01
 
     // The client tag can come from either the smart section (client-linked
     // outflow categories) or the invoice-mode client filter — same rule the
@@ -599,7 +626,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         rate_date,
         description: form.description,
         reference: form.reference,
-        invoice_id: form.linked_invoice_id || null,
+        invoice_id: isLegacySingle ? splitLines[0].invoice_id : null,
+        allocations: isLegacySingle ? [] : splitLines,
         // Persist the client tag so auto-allocation only considers this client's invoices.
         client_id: insertClientId,
         scope: insertClientId ? 'client' : (form.scope || null),
@@ -636,7 +664,16 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       setEntries(prev => [...[...allInserted].reverse(), ...prev])
       setShowForm(false)
       setRecurringMonths(0)
-      setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: new Date().toISOString().split('T')[0], description: '', reference: '', linked_invoice_id: '', client_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [] })
+      setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: new Date().toISOString().split('T')[0], description: '', reference: '', allocations: [], client_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [] })
+      setDescTouched(false)
+      // The entry saved but the DB rejected the split (over-allocation, or an
+      // invoice that was settled from another tab meanwhile). Say so — the
+      // money is banked, only the invoice links are missing.
+      if (result.data.allocationError) {
+        alert(`Entry saved, but the invoice split was rejected:\n\n${result.data.allocationError}\n\nOpen the entry's allocation panel (⚖) to link it manually.`)
+      }
+    } else if (!result.ok) {
+      alert(result.error || 'Failed to save entry')
     }
     setSaving(false)
   }
@@ -758,6 +795,130 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     ? (parseFloat(form.amount) || 0)
     : (parseFloat(form.amountInr) || 0)
   const splitPreview = computeEqualSplit(formAmountInr, form.splitEmployeeIds)
+
+  // ── Invoice split (multi-invoice allocation from the entry form) ────────────
+  // The receipt is divided across invoices in ₹, so one deposit can settle
+  // several invoices without a second pass through the invoice page. The DB
+  // enforces the ceiling too (`validate_cashbook_allocation`); these figures
+  // keep the user from hitting it.
+  const allocTotal      = round2(form.allocations.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0))
+  const allocUnassigned = round2(formAmountInr - allocTotal)
+  const allocOver       = isInvoiceCategory && allocUnassigned < -0.01
+
+  // One receipt settles one client's invoices. The first line locks the client
+  // even if the filter chip above is later cleared — a payment from client A
+  // must never land on client B's ledger.
+  const allocClientId = useMemo(() => {
+    const first = form.allocations[0]
+    return (first ? dueInvoices.find(i => i.id === first.invoice_id)?.client?.id : '') || form.client_filter_id
+  }, [form.allocations, form.client_filter_id, dueInvoices])
+
+  /** Invoices this receipt can still be split across: same client, not already a line. */
+  const allocCandidates = useMemo(() => {
+    const taken = new Set(form.allocations.map(l => l.invoice_id))
+    return sortedDueInvoices.filter(inv =>
+      !taken.has(inv.id) &&
+      outstandingInr(inv) > 0.01 &&
+      (!allocClientId || inv.client?.id === allocClientId),
+    )
+  }, [sortedDueInvoices, form.allocations, allocClientId])
+
+  /** Auto description for a split — kept in sync until the user types their own. */
+  function describeAllocations(lines: AllocLine[]): string {
+    if (lines.length === 0) return ''
+    const invs = lines.map(l => dueInvoices.find(i => i.id === l.invoice_id)).filter(Boolean) as DueInvoice[]
+    if (invs.length === 0) return ''
+    const client = invs[0].client?.name
+    return `Payment for ${invs.map(i => i.invoice_number).join(', ')}${client ? ` — ${client}` : ''}`
+  }
+
+  /** Add an invoice to the split, taking as much of the unassigned balance as it can absorb. */
+  function addAllocation(invoiceId: string) {
+    const inv = dueInvoices.find(i => i.id === invoiceId)
+    if (!inv || form.allocations.some(l => l.invoice_id === invoiceId)) return
+
+    const outInr = outstandingInr(inv)
+    const isFirst = form.allocations.length === 0
+    const amountBlank = !((parseFloat(form.amount) || 0) > 0)
+
+    // First invoice on an empty form: adopt its currency and outstanding, the
+    // way the old single-invoice picker did — "pay this one off" in one click.
+    const seed = isFirst && amountBlank
+      ? (() => {
+          const cur = ((inv.currency as Currency) || 'INR')
+          const outCcy = round2((inv.total_amount || 0) - (inv.paid_amount || 0))
+          const amountStr = outCcy > 0 ? String(outCcy) : ''
+          const fx = fxFor(amountStr, cur)
+          return { amount: amountStr, currency: cur, rate: fx.rate, amountInr: fx.amountInr, rateSource: fx.rateSource }
+        })()
+      : null
+    const entryInr = seed
+      ? (seed.currency === 'INR' ? (parseFloat(seed.amount) || 0) : (parseFloat(seed.amountInr) || 0))
+      : formAmountInr
+
+    const remaining = round2(Math.max(0, entryInr - allocTotal))
+    const give      = round2(Math.min(remaining, outInr))
+    const lines: AllocLine[] = [...form.allocations, { invoice_id: invoiceId, amount: give > 0 ? String(give) : '' }]
+
+    setForm(p => ({
+      ...p,
+      ...(seed ?? {}),
+      allocations:      lines,
+      client_filter_id: inv.client?.id || p.client_filter_id,
+      fully_paid:       false,
+      reference:        lines.length === 1 ? (inv.invoice_number || '') : '',
+      description:      descTouched ? p.description : describeAllocations(lines),
+    }))
+  }
+
+  function updateAllocation(invoiceId: string, amount: string) {
+    setForm(p => ({ ...p, allocations: p.allocations.map(l => l.invoice_id === invoiceId ? { ...l, amount } : l) }))
+  }
+
+  function removeAllocation(invoiceId: string) {
+    const lines = form.allocations.filter(l => l.invoice_id !== invoiceId)
+    setForm(p => ({
+      ...p,
+      allocations: lines,
+      reference:   lines.length === 1 ? (dueInvoices.find(i => i.id === lines[0].invoice_id)?.invoice_number || '') : '',
+      description: descTouched ? p.description : describeAllocations(lines),
+    }))
+  }
+
+  /**
+   * Spread whatever is still unassigned over this client's open invoices,
+   * oldest issue date first — the same FIFO order the allocation panel uses.
+   * Invoices dated after the entry are skipped: paying a future invoice is a
+   * deliberate advance, so it stays a manual pick.
+   */
+  function autoSplitRemaining() {
+    let remaining = allocUnassigned
+    if (remaining <= 0.01) return
+    const lines = [...form.allocations]
+    const candidates = [...allocCandidates]
+      .filter(inv => !inv.issue_date || inv.issue_date <= form.entry_date)
+      .sort((a, b) => (a.issue_date || '').localeCompare(b.issue_date || ''))
+
+    for (const inv of candidates) {
+      if (remaining <= 0.01) break
+      const give = round2(Math.min(remaining, outstandingInr(inv)))
+      if (give <= 0.01) continue
+      lines.push({ invoice_id: inv.id, amount: String(give) })
+      remaining = round2(remaining - give)
+    }
+    if (lines.length === form.allocations.length) return
+
+    const firstInv = dueInvoices.find(i => i.id === lines[0].invoice_id)
+    setForm(p => ({
+      ...p,
+      allocations:      lines,
+      client_filter_id: firstInv?.client?.id || p.client_filter_id,
+      // A single invoice number is a useful entry reference; across a split it
+      // just duplicates what the allocations already say.
+      reference:        lines.length === 1 ? (firstInv?.invoice_number || '') : '',
+      description:      descTouched ? p.description : describeAllocations(lines),
+    }))
+  }
 
   // Determine smart mode from selected category name
   const selectedCat = categories.find(c => c.id === form.category_id)
@@ -1713,7 +1874,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                   <button
                     key={t}
                     type="button"
-                    onClick={() => { setForm(p => ({ ...p, type: t, category_id: t === 'inflow' ? invoiceCategoryId : '', linked_invoice_id: '', client_filter_id: '', fully_paid: false, scope: '', splitEmployeeIds: [] })); resetSmart() }}
+                    onClick={() => { setForm(p => ({ ...p, type: t, category_id: t === 'inflow' ? invoiceCategoryId : '', allocations: [], client_filter_id: '', fully_paid: false, scope: '', splitEmployeeIds: [] })); resetSmart() }}
                     className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${form.type === t
                       ? t === 'inflow' ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'
                       : 'bg-secondary text-muted-foreground border border-transparent hover:text-foreground'
@@ -1734,7 +1895,14 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                       // Pre-select the Books choice from the category's default
                       // scope (e.g. Rent/Software/Salary → Company).
                       const cat = categories.find(c => c.id === id)
-                      return { ...p, category_id: id, scope: cat?.default_scope === 'company' ? 'company' : '' }
+                      return {
+                        ...p,
+                        category_id: id,
+                        scope: cat?.default_scope === 'company' ? 'company' : '',
+                        // Leaving the Invoice category hides the split editor —
+                        // drop the lines rather than save them invisibly.
+                        allocations: id === invoiceCategoryId ? p.allocations : [],
+                      }
                     })}
                     placeholder="Select category…"
                     sortKey="cashbook_categories"
@@ -1795,40 +1963,60 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                   <label className="block text-xs font-medium text-muted-foreground mb-1.5">Date *</label>
                   <input type="date" value={form.entry_date} onChange={e => setForm(p => ({ ...p, entry_date: e.target.value }))} required className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none" />
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-                    {isInvoiceCategory ? 'Invoice' : 'Reference'}
-                  </label>
-                  {isInvoiceCategory ? (
-                    <div className="space-y-2">
-                      {/* Client filter — narrows the invoice picker to one client's
-                          pending invoices. Optional: leave blank to see all due
-                          invoices. Auto-fills when an invoice is picked directly. */}
+                {!isInvoiceCategory && (
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">Reference</label>
+                    <input type="text" value={form.reference} onChange={e => setForm(p => ({ ...p, reference: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none" placeholder="e.g. INV-2505-001" />
+                  </div>
+                )}
+              </div>
+
+              {/* ── Invoice split ──────────────────────────────────────────────
+                  One receipt, any number of invoices. The client's money is
+                  divided in ₹ right here, so a ₹2,750 deposit covering a ₹1,000
+                  and a ₹1,750 invoice never needs a second pass through the
+                  invoice page. */}
+              {isInvoiceCategory && (
+                <div className="rounded-xl border border-border/60 bg-foreground/[0.02] p-3 space-y-2.5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold">Invoices</p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        Add every invoice this payment settles — each one takes its own share.
+                      </p>
+                    </div>
+                    {!formEditingId && allocUnassigned > 0.01 && allocCandidates.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={autoSplitRemaining}
+                        title="Spread the unallocated balance over the oldest open invoices"
+                        className="shrink-0 flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-lg bg-violet-500/15 text-violet-600 dark:text-violet-300 border border-violet-500/25 hover:bg-violet-500/25 transition-colors"
+                      >
+                        <Sparkles className="w-3 h-3" />
+                        Split oldest first
+                      </button>
+                    )}
+                  </div>
+
+                  {formEditingId ? (
+                    <p className="text-[11px] text-amber-500/90">
+                      Invoice links aren&apos;t edited here — close this form and use the allocation
+                      button (<LinkIcon className="w-3 h-3 inline-block -mt-0.5" />) on the entry row.
+                    </p>
+                  ) : (
+                    <>
+                      {/* Client filter — narrows the picker to one client's pending
+                          invoices. Optional up front; the first invoice added fills
+                          it in and locks every later line to the same client. */}
                       <Combobox
                         options={clients.map(c => ({ id: c.id, label: c.name, sub: c.code }))}
                         value={form.client_filter_id}
-                        onChange={id => {
-                          // If a different invoice is already selected and doesn't
-                          // belong to the newly-chosen client, drop the invoice and
-                          // any fully_paid flag tied to it. Empty id clears the
-                          // filter without touching the current invoice.
-                          setForm(p => {
-                            const currentInv = dueInvoices.find(i => i.id === p.linked_invoice_id)
-                            const mismatch = !!id && !!currentInv && currentInv.client?.id !== id
-                            return {
-                              ...p,
-                              client_filter_id: id,
-                              linked_invoice_id: mismatch ? '' : p.linked_invoice_id,
-                              fully_paid: mismatch ? false : p.fully_paid,
-                            }
-                          })
-                        }}
+                        onChange={id => setForm(p => ({ ...p, client_filter_id: id }))}
                         placeholder="Filter by client (optional)…"
+                        disabled={form.allocations.length > 0}
                       />
                       <Combobox
-                        options={sortedDueInvoices
-
-                          .map(inv => {
+                        options={allocCandidates.map(inv => {
                           const cur = inv.currency || 'INR'
                           const outstanding = inv.total_amount - (inv.paid_amount || 0)
                           const overdue = inv.due_date && inv.due_date < today
@@ -1845,73 +2033,79 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                             sub: `${totalLabel} total · ${outstandingLabel} outstanding${overdue ? ' · overdue' : inv.due_date ? ` · due ${inv.due_date}` : ''}`,
                           }
                         })}
-                        value={form.linked_invoice_id}
-                        onChange={id => {
-                          const inv = dueInvoices.find(i => i.id === id)
-                          const outstanding = inv ? (inv.total_amount - (inv.paid_amount || 0)) : 0
-                          const newCurrency = (inv?.currency as Currency) || 'INR'
-                          setForm(p => {
-                            const newAmount = outstanding > 0 ? String(outstanding) : p.amount
-                            const fx = fxFor(newAmount, newCurrency)
-                            return {
-                              ...p,
-                              linked_invoice_id: id,
-                              // Auto-fill the client filter when an invoice is picked
-                              // directly, so the chip above stays consistent with the
-                              // selection. Preserves an existing filter if no invoice
-                              // is bound to it.
-                              client_filter_id: inv?.client?.id || p.client_filter_id,
-                              fully_paid: false,
-                              reference: inv?.invoice_number || '',
-                              amount: newAmount,
-                              currency: newCurrency,
-                              rate: fx.rate,
-                              amountInr: fx.amountInr,
-                              rateSource: fx.rateSource,
-                              description: inv ? `Payment for ${inv.invoice_number} — ${inv.client?.name}` : p.description,
-                            }
-                          })
-                        }}
+                        value=""
+                        onChange={id => { if (id) addAllocation(id) }}
                         placeholder={
-                          form.client_filter_id && sortedDueInvoices.length === 0
-                            ? 'No pending invoices for this client'
-                            : 'Select invoice…'
+                          allocCandidates.length === 0
+                            ? (form.allocations.length > 0 ? 'No other open invoices for this client' : 'No pending invoices for this client')
+                            : form.allocations.length > 0 ? 'Add another invoice…' : 'Select invoice…'
                         }
                       />
-                      {form.linked_invoice_id && (() => {
-                        const inv = dueInvoices.find(i => i.id === form.linked_invoice_id)
-                        const outstanding = inv ? (inv.total_amount - (inv.paid_amount || 0)) : 0
-                        const invCur = inv?.currency || 'INR'
-                        // Display the outstanding in the invoice's own currency symbol
-                        const outstandingLabel = invCur === 'INR'
-                          ? `₹${outstanding.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
-                          : `${invCur} ${outstanding.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+
+                      {form.allocations.map(line => {
+                        const inv = dueInvoices.find(i => i.id === line.invoice_id)
+                        const outInr = inv ? outstandingInr(inv) : 0
+                        const lineAmt = parseFloat(line.amount) || 0
+                        const overLine = lineAmt > outInr + 0.01
                         return (
-                          <div className="space-y-1.5">
-                            <label className="text-xs text-muted-foreground block">Quick Amount</label>
-                            <div className="flex gap-2 flex-wrap">
-                              {[outstanding, outstanding / 2].filter(v => v > 0).map((v, i) => (
-                                <button key={i}
-                                  type="button"
-                                  onClick={() => setForm(p => {
-                                    const newAmount = String(v)
-                                    const fx = fxFor(newAmount, p.currency)
-                                    return { ...p, fully_paid: false, amount: newAmount, rate: fx.rate, amountInr: fx.amountInr, rateSource: fx.rateSource }
-                                  })}
-                                  className={`text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${parseFloat(form.amount) === v ? 'bg-violet-500/20 border-violet-500/50 text-violet-700 dark:text-violet-300' : 'bg-secondary border-transparent hover:border-border'}`}>
-                                  {i === 0 ? 'Full' : 'Half'} {invCur === 'INR' ? '₹' : invCur + ' '}{v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </button>
-                              ))}
+                          <div key={line.invoice_id} className="flex items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-2">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium truncate">{inv?.invoice_number ?? 'Invoice'}</p>
+                              <p className="text-[11px] text-muted-foreground truncate">
+                                {inv?.client?.name}
+                                {inv && ` · ₹${outInr.toLocaleString('en-IN', { minimumFractionDigits: 2 })} outstanding`}
+                              </p>
                             </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <span className="text-xs text-muted-foreground">₹</span>
+                              <input
+                                type="number" step="0.01" min="0" inputMode="decimal"
+                                value={line.amount}
+                                onChange={e => updateAllocation(line.invoice_id, e.target.value)}
+                                className={`w-28 bg-secondary border rounded-lg px-2 py-1.5 text-sm text-right font-mono focus:outline-none focus:ring-2 focus:ring-primary/40 ${overLine ? 'border-amber-500/60' : 'border-border'}`}
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => removeAllocation(line.invoice_id)}
+                              title="Remove from this payment"
+                              className="shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         )
-                      })()}
-                    </div>
-                  ) : (
-                    <input type="text" value={form.reference} onChange={e => setForm(p => ({ ...p, reference: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none" placeholder="e.g. INV-2505-001" />
+                      })}
+
+                      {form.allocations.length > 0 && (
+                        <div className="flex items-center justify-between gap-3 border-t border-border/60 pt-2.5 text-[11px]">
+                          <span className="text-muted-foreground">
+                            Entry <span className="font-mono text-foreground">₹{formAmountInr.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                            {' · '}Allocated <span className="font-mono text-foreground">₹{allocTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                          </span>
+                          <span className={`font-medium shrink-0 ${allocOver ? 'text-destructive' : allocUnassigned > 0.01 ? 'text-amber-500' : 'text-green-500'}`}>
+                            {allocOver
+                              ? `Over by ₹${Math.abs(allocUnassigned).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                              : allocUnassigned > 0.01
+                                ? `₹${allocUnassigned.toLocaleString('en-IN', { minimumFractionDigits: 2 })} unallocated`
+                                : 'Fully allocated'}
+                          </span>
+                        </div>
+                      )}
+                      {allocOver && (
+                        <p className="text-[11px] text-destructive">
+                          The split is larger than the entry — reduce a line, or raise the amount above.
+                        </p>
+                      )}
+                      {form.allocations.length > 1 && allocUnassigned > 0.01 && (
+                        <p className="text-[11px] text-amber-500/90">
+                          The unallocated part is saved as an advance — link it later from the entry row.
+                        </p>
+                      )}
+                    </>
                   )}
                 </div>
-              </div>
+              )}
 
               {/* Smart contextual fields */}
               {smartMode === 'credit_given' && (
@@ -2183,7 +2377,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
 
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1.5">Description</label>
-                <input type="text" value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none" placeholder="What is this for?" />
+                <input type="text" value={form.description} onChange={e => { setDescTouched(true); setForm(p => ({ ...p, description: e.target.value })) }} className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none" placeholder="What is this for?" />
               </div>
 
               {/* Recurring entry — hidden when editing an existing entry */}
@@ -2217,7 +2411,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               </div>
               <div className="flex gap-3 px-6 py-4 border-t border-border shrink-0 bg-card pb-[max(1rem,env(safe-area-inset-bottom))]">
                 <button type="button" onClick={() => { setShowForm(false); setFormEditingId(null); setRecurringMonths(0) }} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80">Cancel</button>
-                <button type="submit" disabled={saving} className={`flex-1 text-white text-sm font-medium py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50 ${form.type === 'inflow' ? 'bg-green-600' : 'bg-red-600'}`}>
+                <button type="submit" disabled={saving || allocOver} className={`flex-1 text-white text-sm font-medium py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50 ${form.type === 'inflow' ? 'bg-green-600' : 'bg-red-600'}`}>
                   {saving
                     ? 'Saving…'
                     : formEditingId
@@ -2267,12 +2461,20 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             // Helper to handle Supabase returning an array or object for a relation
             const unwrap = (obj: any) => (Array.isArray(obj) ? obj[0] : obj)
             
+            // allocated_amount is always ₹; the receipt is drawn in the entry's
+            // own currency, so convert with the entry's own rate (1 for INR).
+            const inrToEntryCcy = (receiptEntry.amount_inr || 0) > 0
+              ? (receiptEntry.amount ?? 0) / (receiptEntry.amount_inr as number)
+              : 1
+
             // Build the list of invoices for the receipt. Fallback to the direct_invoice if there are no allocations.
             let receiptInvoices = allocs.map(a => {
               const inv = unwrap(a.invoice)
               return {
                 number: inv?.invoice_number || '—',
                 outstanding: inv ? Number(inv.total_amount) - Number(inv.paid_amount || 0) : 0,
+                // Each invoice's share — itemised on the receipt for split payments.
+                allocated: round2(Number(a.allocated_amount || 0) * inrToEntryCcy),
               }
             })
             
@@ -2285,6 +2487,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               receiptInvoices = [{
                 number: directInv?.invoice_number || '—',
                 outstanding: directInv ? Number(directInv.total_amount) - Number(directInv.paid_amount || 0) : 0,
+                allocated: receiptEntry.amount ?? 0,
               }]
               firstClientId = unwrap(directInv?.client)?.id || undefined
               firstClientName = unwrap(directInv?.client)?.name || ''

@@ -67,6 +67,16 @@ export interface CashbookEntryPayload {
   tags?: string[]
   // Employees sharing this expense — split equally (see computeEqualSplit).
   employee_split_ids?: string[]
+  // Explicit split of this receipt across several invoices, in ₹ (INR) — the
+  // currency `cashbook_invoice_allocations.allocated_amount` is always in.
+  //
+  // When present, the entry is inserted with invoice_id = NULL: the
+  // `auto_create_allocation_on_entry` trigger reacts to invoice_id by dumping
+  // the FULL amount_inr onto that one invoice, which is exactly what a split
+  // must not do. These rows are written instead, and for a single-invoice
+  // split the invoice_id link is restored afterwards (the trigger is
+  // INSERT-only, so a later UPDATE can't duplicate the allocation).
+  allocations?: { invoice_id: string; allocated_amount: number }[]
 }
 
 export interface SmartEffect {
@@ -190,22 +200,45 @@ export async function insertCashbookEntries(
   basePayload: Omit<CashbookEntryPayload, 'entry_date'>,
   baseDescription: string,
   smartEffect: SmartEffect,
-): Promise<ActionResult<{ entries: any[] }>> {
+): Promise<ActionResult<{ entries: any[]; allocationError?: string }>> {
   const guard = await requirePermission(PERMS.CASHBOOK_EDIT)
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const admin = createAdminClient()
 
+  // Tags, employee splits and invoice allocations aren't columns on
+  // cashbook_entries — pull them out before building the insert payload and
+  // apply them afterward.
+  const { tags: entryTags, employee_split_ids: splitEmployeeIds, allocations, ...tableFields } = basePayload
+
+  // A split receipt allocates itself explicitly (see `allocations` above);
+  // anything without a positive ₹ amount is dropped rather than written as a
+  // no-op row.
+  const splitAllocations = (allocations ?? [])
+    .filter(a => a.invoice_id && a.allocated_amount > 0)
+  const isSplit = splitAllocations.length > 0
+
   // Resolve the client code once (used for all dates in a recurring series).
-  // Lookup order: linked invoice → its client's code → fallback 'GEN'.
+  // Lookup order: linked invoice (or the first invoice of a split) → its
+  // client's code → the entry's own client tag → fallback 'GEN'.
   let clientCode = 'GEN'
-  if (basePayload.type === 'inflow' && basePayload.invoice_id) {
+  const receiptInvoiceId = basePayload.invoice_id || splitAllocations[0]?.invoice_id || null
+  if (basePayload.type === 'inflow' && receiptInvoiceId) {
     const { data: invRow } = await admin
       .from('invoices')
       .select('client:clients(code)')
-      .eq('id', basePayload.invoice_id)
+      .eq('id', receiptInvoiceId)
       .maybeSingle()
     const code = (invRow as any)?.client?.code
+    if (code) clientCode = String(code).toUpperCase()
+  }
+  if (basePayload.type === 'inflow' && clientCode === 'GEN' && basePayload.client_id) {
+    const { data: clientRow } = await admin
+      .from('clients')
+      .select('code')
+      .eq('id', basePayload.client_id)
+      .maybeSingle()
+    const code = clientRow?.code
     if (code) clientCode = String(code).toUpperCase()
   }
 
@@ -219,12 +252,10 @@ export async function insertCashbookEntries(
     )
   )
 
-  // Tags and employee splits aren't columns on cashbook_entries — pull them
-  // out before building the insert payload, apply them per-row afterward.
-  const { tags: entryTags, employee_split_ids: splitEmployeeIds, ...tableFields } = basePayload
-
   const rows = baseDates.map((entry_date, i) => ({
     ...tableFields,
+    // A split receipt writes its own allocation rows below — see `allocations`.
+    invoice_id: isSplit ? null : tableFields.invoice_id,
     entry_date,
     receipt_number: receiptNumbers[i],
     description: i > 0 && baseDates.length > 1
@@ -243,6 +274,47 @@ export async function insertCashbookEntries(
 
   const allInserted = Array.isArray(data) ? data : data ? [data] : []
   const firstEntry = allInserted[0]
+
+  // ── Explicit invoice split ──────────────────────────────────────────────────
+  // Only the FIRST entry of a recurring series is allocated: the split names
+  // specific invoices, and re-applying it to every copy would pay them several
+  // times over. The DB's over-allocation trigger is the final authority — if it
+  // rejects, the entry still stands and the error is surfaced so the user can
+  // fix the split from the entry's allocation panel.
+  let allocationError: string | undefined
+  if (isSplit && firstEntry) {
+    const entryId = (firstEntry as unknown as { id: string }).id
+    const { error: allocErr } = await admin
+      .from('cashbook_invoice_allocations')
+      .insert(splitAllocations.map(a => ({
+        cashbook_entry_id: entryId,
+        invoice_id:        a.invoice_id,
+        allocated_amount:  a.allocated_amount,
+      })))
+
+    if (allocErr) {
+      allocationError = allocErr.message
+      console.error('[cashbook] invoice allocation insert failed:', allocErr)
+    } else {
+      // A single-invoice split still deserves the direct invoice_id link that
+      // the invoice page and reconciliation read. Safe here: the auto-allocate
+      // trigger fires on INSERT only, so this can't duplicate the row above.
+      if (splitAllocations.length === 1) {
+        await admin
+          .from('cashbook_entries')
+          .update({ invoice_id: splitAllocations[0].invoice_id })
+          .eq('id', entryId)
+      }
+      // Re-read the row so the caller renders the new allocation chips without
+      // a refresh.
+      const { data: refreshed } = await admin
+        .from('cashbook_entries')
+        .select(ENTRY_SELECT)
+        .eq('id', entryId)
+        .maybeSingle()
+      if (refreshed) allInserted[0] = refreshed
+    }
+  }
 
   // Tags + employee splits apply to every occurrence in a recurring series
   // (same labels, split recomputed per-entry from that row's own amount).
@@ -310,7 +382,7 @@ export async function insertCashbookEntries(
   }
 
   revalidatePath(REVALIDATE)
-  return { ok: true, data: { entries: allInserted } }
+  return { ok: true, data: { entries: allInserted, allocationError } }
 }
 
 // ─── Update cashbook entry (inline edit) ─────────────────────────────────────

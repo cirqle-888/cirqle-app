@@ -270,6 +270,16 @@ export async function bulkGeneratePayroll(
     .select('*, employee:employees(id, cqid, name)')
   if (error) return { ok: false, error: error.message }
 
+  // Mark advances as repaid for employees who had deductions
+  const employeesWithDeductions = records.filter(r => r.advances_deducted > 0).map(r => r.employee_id)
+  if (employeesWithDeductions.length > 0) {
+    await admin
+      .from('salary_advances')
+      .update({ status: 'repaid' })
+      .in('employee_id', employeesWithDeductions)
+      .eq('status', 'pending')
+  }
+
   revalidatePath(REVALIDATE)
   return { ok: true, data: { rows: data ?? [] } }
 }
@@ -300,6 +310,14 @@ export async function createPayrollRecord(
     .select('*, employee:employees(id, cqid, name)')
     .single()
   if (error) return { ok: false, error: error.message }
+
+  if (input.advances_deducted > 0) {
+    await admin
+      .from('salary_advances')
+      .update({ status: 'repaid' })
+      .eq('employee_id', input.employee_id)
+      .eq('status', 'pending')
+  }
 
   revalidatePath(REVALIDATE)
   return { ok: true, data: { row: data } }

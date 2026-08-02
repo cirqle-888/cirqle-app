@@ -12,6 +12,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAnyPermission } from '@/lib/permissions/check'
 import { logActivity } from '@/lib/activity/log'
 import { revalidatePath } from 'next/cache'
+import { recordPayment as libRecordPayment } from '@/lib/finance/record-payment'
 
 const ROUTE = '/dashboard/invoices/follow-ups'
 const WRITE_PERMS = ['billing.edit', 'billing.view_workflow']
@@ -171,7 +172,7 @@ export async function recordPayment(
     const admin = createAdminClient()
     const { data: inv, error: fErr } = await admin
       .from('invoices')
-      .select('id, status, currency, exchange_rate, total_amount, paid_amount, paid_amount_inr, cashbook_invoice_allocations(id, deleted_at)')
+      .select('id, status, currency, exchange_rate, total_amount, paid_amount, paid_amount_inr, invoice_number, client_id, client:clients(id,name,code), cashbook_invoice_allocations(id, deleted_at)')
       .eq('id', input.invoiceId)
       .single()
     if (fErr || !inv) return { ok: false, error: fErr?.message ?? 'Invoice not found' }
@@ -194,25 +195,36 @@ export async function recordPayment(
     const newPaidInr = round2((inv.paid_amount_inr || 0) + amountInr)     // INR base
     const balance    = (inv.total_amount || 0) - newPaid
     const newStatus  = balance <= 0.001 ? 'paid' : 'partial'
+    
+    const clientData = (inv as any).client as any
 
-    const { error: pErr } = await admin.from('payments').insert({
-      invoice_id:     input.invoiceId,
-      amount,
-      currency:       inv.currency || 'INR',
-      exchange_rate:  invRate,
-      amount_inr:     amountInr,
-      payment_date:   input.paymentDate || new Date().toISOString().split('T')[0],
-      payment_method: input.method || 'bank_transfer',
-      reference:      input.reference || null,
-      notes:          'Recorded via Follow-ups',
+    const res = await libRecordPayment({
+      invoiceId: input.invoiceId,
+      invoiceNumber: inv.invoice_number || 'N/A',
+      clientId: inv.client_id || null,
+      clientCode: clientData?.code || null,
+      clientName: clientData?.name || null,
+      amount: amount,
+      currency: inv.currency || 'INR',
+      amountInr: amountInr,
+      exchangeRate: invRate,
+      rateSource: 'follow-ups',
+      rateDate: new Date().toISOString().split('T')[0],
+      paymentDate: input.paymentDate || new Date().toISOString().split('T')[0],
+      paymentMethod: input.method || 'bank_transfer',
+      reference: input.reference || null,
+      notes: 'Recorded via Follow-ups',
+      bankAccountId: null,
+      newPaid,
+      newPaidInr,
+      newStatus,
+      appliedInvoiceCcy: amount,
+      appliedInr: amountInr,
+      categoryId: null, // Let triage handle category if no default
+      employeeId: guard.employeeId ?? null,
     })
-    if (pErr) return { ok: false, error: pErr.message }
 
-    const { error: uErr } = await admin
-      .from('invoices')
-      .update({ paid_amount: newPaid, paid_amount_inr: newPaidInr, status: newStatus })
-      .eq('id', input.invoiceId)
-    if (uErr) return { ok: false, error: uErr.message }
+    if (!res.ok) return { ok: false, error: res.error }
 
     // Auto-log a follow-up entry so the timeline reflects the payment.
     await admin.from('invoice_followups').insert({
@@ -221,14 +233,6 @@ export async function recordPayment(
       outcome:    'other',
       created_by: guard.employeeId ?? null,
     }).then(() => {}, () => {}) // best-effort; table may not exist pre-migration
-
-    void logActivity({
-      actorId:    guard.employeeId ?? null,
-      entityType: 'invoice',
-      entityId:   input.invoiceId,
-      action:     'status_changed',
-      detail:     { field: 'payment', amount_inr: amountInr, to: newStatus, via: 'follow-ups' },
-    })
 
     revalidatePath(ROUTE)
     return { ok: true, status: newStatus }

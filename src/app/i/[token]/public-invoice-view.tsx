@@ -58,6 +58,18 @@ export default function PublicInvoiceView({
             ref={frameRef}
             srcDoc={html}
             title={`Invoice ${invoiceNumber}`}
+            /*
+             * Defence in depth behind escapeHtml(): this page is public and
+             * unauthenticated, and the document interpolates client-controlled
+             * values (names, addresses, item descriptions, notes).
+             *   allow-same-origin — the Download PDF button reaches
+             *     contentWindow.print() from the parent
+             *   allow-modals      — sandboxed frames block the print dialog
+             * allow-scripts is deliberately absent: the invoice is static (the
+             * autoprint script is never enabled on this route), so any script
+             * that survived escaping cannot execute.
+             */
+            sandbox="allow-same-origin allow-modals"
             style={{
               display: 'block', width: '100%', height: '80vh', minHeight: 600,
               border: 'none', background: '#fff', borderRadius: 12,

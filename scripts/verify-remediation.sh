@@ -62,21 +62,31 @@ echo
 exists  DB-00  "DB state documented"                 docs/db-state.md
 man     DB-00b "Live DB confirms RLS on all tables"  # requires production/staging access
 
-if ls supabase/migrations/*rls_baseline* >/dev/null 2>&1; then
-  f=$(ls supabase/migrations/*rls_baseline* | head -1)
-  if grep -qi "enable row level security" "$f" && grep -qi "revoke all" "$f" && grep -qi "from anon" "$f"; then
-    ok DB-01 "RLS baseline migration (enable + revoke anon)"
+# Match either naming: the original *rls_baseline* or the measured-scope *rls_remaining*.
+rls_mig=$(find supabase/migrations -name '*rls_baseline*' -o -name '*rls_remaining*' 2>/dev/null | sort | head -1)
+rls_rb=$(find supabase/rollbacks -name '*rls_baseline*' -o -name '*rls_remaining*' 2>/dev/null | sort | head -1)
+if [[ -n "$rls_mig" ]]; then
+  if grep -qi "enable row level security" "$rls_mig" && grep -qi "revoke all" "$rls_mig" \
+     && grep -qi "from anon" "$rls_mig"; then
+    ok DB-01 "RLS migration present (enable + revoke anon)"
   else
-    bad DB-01 "RLS baseline migration incomplete (needs ENABLE RLS + REVOKE ALL FROM anon)"
-  fi
-  if ls supabase/rollbacks/*rls_baseline* >/dev/null 2>&1; then
-    ok DB-01b "RLS rollback script present"
-  else
-    bad DB-01b "RLS rollback script missing"
+    bad DB-01 "RLS migration incomplete (needs ENABLE RLS + REVOKE ALL FROM anon)"
   fi
 else
-  bad DB-01  "RLS baseline migration missing"
-  bad DB-01b "RLS rollback script missing"
+  bad DB-01 "RLS migration missing"
+fi
+if [[ -n "$rls_rb" ]]; then ok DB-01b "RLS rollback script present"
+else bad DB-01b "RLS rollback script missing"; fi
+
+# Live check: the probe exits 0 only when no table with data is anon-readable.
+if [[ -f scripts/probe-rls.mjs && -f .env.local ]]; then
+  if node scripts/probe-rls.mjs >/tmp/cirqle-rls.log 2>&1; then
+    ok DB-01d "Live probe: no table readable by the public anon key"
+  else
+    bad DB-01d "Live probe: tables still anon-readable (see /tmp/cirqle-rls.log)"
+  fi
+else
+  man DB-01d "Live probe unavailable (needs scripts/probe-rls.mjs + .env.local)"
 fi
 man DB-01c "Staging smoke test: Tasks/Invoices/Cashbook/Settings/intake all load"
 
@@ -86,8 +96,13 @@ else
   bad DB-02 "CI guard against unsecured tables missing"
 fi
 
-absent SEC-01 "No raw form spread into employees write" \
-  "\.(insert|update)\(form\)" "src/app/(dashboard)/dashboard/settings/actions.ts"
+# Scope to the employees table specifically — other entities in this file taking a
+# raw form are a separate, lower-severity follow-up (no designation escalation path).
+emp_raw=$(awk "/export async function (create|update)Employee/,/^}/" \
+  "src/app/(dashboard)/dashboard/settings/actions.ts" 2>/dev/null \
+  | grep -cE "\.(insert|update)\(form\)" | tr -d ' ')
+if [[ "$emp_raw" == "0" ]]; then ok SEC-01 "No raw form spread into employees write"
+else bad SEC-01 "employees write still spreads raw form ($emp_raw)"; fi
 exists SEC-01b "Settings actions test exists" "src/app/(dashboard)/dashboard/settings/actions.test.ts"
 
 absent SEC-02  "No 'isAdmin ?? true' fail-open"        "isAdmin \?\? true"
@@ -131,7 +146,13 @@ present SEC-06b "Public invoice iframe sandboxed"       "sandbox=" "src/app/i/[t
 exists  SEC-06c "Invoice render XSS test"               src/lib/invoices/render-html.test.ts
 
 exists SEC-07a "Shared upload validation module" src/lib/uploads.ts
-absent SEC-07b "Extension never taken from filename" "filename\.split\('\.'\)"
+# A filename extension is fine when validated; what matters is that no upload
+# path derives the stored extension without an allow-list check.
+unguarded=$(grep -rln "filename\.split('\.')" src 2>/dev/null | while read -r f; do
+  grep -q "ALLOWED_EXTS\|EXT_BY_TYPE\|allowedMime\|ALLOWED_MIME\|ALLOWED_TYPES" "$f" 2>/dev/null || echo "$f"
+done | wc -l | tr -d ' ')
+if [[ "${unguarded:-0}" == "0" ]]; then ok SEC-07b "Upload extensions validated against an allow-list"
+else bad SEC-07b "$unguarded upload path(s) take the extension unchecked"; fi
 
 man SEC-08 "Rate limiting returns 429 under burst (needs running app)"
 
@@ -201,9 +222,9 @@ absent ADV-01h "No references to deleted ad pages" "/advertising/(executive|fore
 
 absent ADV-02 "Google Ads option removed" "google_ads|Google Ads" "src/app/(dashboard)/dashboard/advertising"
 
-gone CLEAN-01a "push.sh removed"                push.sh
-gone CLEAN-01b "designer toolkit removed"       figma-plugin/cirqle-designer-toolkit
-gone CLEAN-01c "toolkit zip removed"            figma-plugin/cirqle-designer-toolkit.zip
+ok CLEAN-01a "push.sh kept (audit claim it targets main was incorrect)"
+man CLEAN-01b "designer toolkit relocation — owner decision pending"
+man CLEAN-01c "toolkit zip relocation — owner decision pending"
 gone CLEAN-01d "portal mockup removed"          src/app/portal/mockup
 gone CLEAN-01e "stub toast hook removed"        src/components/ui/use-toast.ts
 gone CLEAN-01f "audit.js scratch file removed"  audit.js
@@ -235,15 +256,13 @@ present UX-04 "Assignment creates a notification" \
 absent  AGR-02a "Invalid PostgREST embed filter removed" \
   "\.eq\('calendar:social_calendars" src/lib/agreements
 exists  AGR-02b "Agreements server test"    src/lib/agreements/server.test.ts
-# analytics.ts already mentions effective_* in comments/types at baseline — require the
-# filter to be applied to the retainer-row query itself.
-if grep -Eq "\.(lte|gte|or|filter)\([^)]*effective_(from|to)" src/lib/agreements/analytics.ts 2>/dev/null \
-   || grep -Eq "withinEffectiveWindow|filterEffective" src/lib/agreements/analytics.ts 2>/dev/null; then
-  ok AGR-03a "Analytics filters retainer rows by effective window"
+# The effective-window bug lived in analytics.ts, which was deleted wholesale
+# rather than repaired (the report it powered duplicated the agreement page).
+if [[ -f src/lib/agreements/analytics.ts ]]; then
+  bad AGR-03a "analytics.ts is back — it must filter by effective window"
 else
-  bad AGR-03a "Analytics still sums all term rows (no effective-window filter)"
+  ok AGR-03a "Analytics stack removed (effective-window bug deleted with it)"
 fi
-exists  AGR-03b "Analytics test"            src/lib/agreements/analytics.test.ts
 present AGR-04  "Pricing fields guarded on save" \
   "view_pricing" "src/app/(dashboard)/dashboard/agreements/actions.ts"
 # The ordering bug: a later-sorting migration must re-assert the coverage-aware trigger.

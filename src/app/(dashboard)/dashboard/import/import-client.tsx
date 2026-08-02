@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { Download } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useToast, ToastContainer } from '@/components/ui/toast'
+import { ConfirmDialog, ConfirmModalProps } from '@/components/ui/confirm-dialog'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface RefClient    { id: string; name: string; code: string }
@@ -504,6 +505,7 @@ function IssueCell({ row }: { row: ParsedRow }) {
 export default function ImportClient({ clients, services, employees, groups, parameters, bankAccounts, cashCategories }: Props) {
   const supabase = createClient()
   const { toasts, dismiss, success, error: toastError } = useToast()
+  const [confirmModal, setConfirmModal] = useState<ConfirmModalProps | null>(null)
 
   const [pageTab, setPageTab] = useState<'import' | 'cleanup'>('import')
 
@@ -1834,7 +1836,6 @@ export default function ImportClient({ clients, services, employees, groups, par
     if (selectedIds.size === 0) return
     const ids = [...selectedIds]
 
-    // Warn about cascade for certain entity types
     const cascadeWarnings: Record<string, string> = {
       parameters:    'Contributions referencing these parameters will also be deleted.',
       jobs:          'Invoice items, contributions, and contribution scores for these tasks will also be deleted.',
@@ -1842,76 +1843,74 @@ export default function ImportClient({ clients, services, employees, groups, par
       groups:        'All parameters (and their contributions) inside these groups will also be deleted.',
     }
     const extraWarning = cascadeWarnings[cleanupMode] ? `\n\n⚠️ ${cascadeWarnings[cleanupMode]}` : ''
-    if (!window.confirm(`Delete ${ids.length} record${ids.length !== 1 ? 's' : ''}? This cannot be undone.${extraWarning}`)) return
 
-    setDeleting(true)
-    const BATCH = 100
+    setConfirmModal({
+      title: 'Confirm Bulk Delete',
+      body: `Delete ${ids.length} record${ids.length !== 1 ? 's' : ''}? This cannot be undone.${extraWarning}`,
+      confirmLabel: 'Delete',
+      danger: true,
+      onCancel: () => setConfirmModal(null),
+      onConfirm: async () => {
+        setConfirmModal(null)
+        setDeleting(true)
+        const BATCH = 100
 
-    const batchDelete = async (table: string, field: string, values: string[]) => {
-      for (let i = 0; i < values.length; i += BATCH) {
-        const { error } = await supabase.from(table).delete().in(field, values.slice(i, i + BATCH))
-        if (error) throw new Error(`${table}: ${error.message}`)
-      }
-    }
-
-    try {
-      // ── Commitments are DEACTIVATED, never deleted ──────────────────────────
-      // A client_service_pricing row is both the client's commitment AND its
-      // agreed price. Deleting it destroys the price that historical
-      // commission recompute still reads (see the HISTORICAL READER CONTRACT
-      // in lib/payroll/compute.ts), and unlike the import tab's delete mode
-      // this screen takes no backup first. Deactivation is what "remove"
-      // means everywhere else in the commitment model.
-      if (cleanupMode === 'pricing_matrix') {
-        for (let i = 0; i < ids.length; i += BATCH) {
-          const { error } = await supabase.from('client_service_pricing')
-            .update({ is_active: false, deactivated_at: new Date().toISOString() })
-            .in('id', ids.slice(i, i + BATCH))
-          if (error) throw new Error(`client_service_pricing: ${error.message}`)
+        const batchDelete = async (table: string, field: string, values: string[]) => {
+          for (let i = 0; i < values.length; i += BATCH) {
+            const { error } = await supabase.from(table).delete().in(field, values.slice(i, i + BATCH))
+            if (error) throw new Error(`${table}: ${error.message}`)
+          }
         }
-        setDeleting(false)
-        success(`${ids.length} commitment${ids.length !== 1 ? 's' : ''} deactivated — prices preserved`)
-        await loadCleanupRecords(cleanupMode)
-        return
-      }
 
-      // ── Cascade deletes before the main delete ──────────────────────────────
-      if (cleanupMode === 'parameters') {
-        // Delete contributions that use these parameters
-        await batchDelete('contributions', 'parameter_id', ids)
-      }
-      if (cleanupMode === 'groups') {
-        // Find all parameter IDs in these groups, then cascade
-        const { data: paramRows } = await supabase.from('parameters').select('id').in('group_id', ids)
-        const paramIds = (paramRows || []).map((p: any) => p.id)
-        if (paramIds.length) {
-          await batchDelete('contributions', 'parameter_id', paramIds)
-          await batchDelete('parameters', 'id', paramIds)
+        try {
+          // ── Commitments are DEACTIVATED, never deleted ──────────────────────────
+          if (cleanupMode === 'pricing_matrix') {
+            for (let i = 0; i < ids.length; i += BATCH) {
+              const { error } = await supabase.from('client_service_pricing')
+                .update({ is_active: false, deactivated_at: new Date().toISOString() })
+                .in('id', ids.slice(i, i + BATCH))
+              if (error) throw new Error(`client_service_pricing: ${error.message}`)
+            }
+            setDeleting(false)
+            success(`${ids.length} commitment${ids.length !== 1 ? 's' : ''} deactivated — prices preserved`)
+            await loadCleanupRecords(cleanupMode)
+            return
+          }
+
+          // ── Cascade deletes before the main delete ──────────────────────────────
+          if (cleanupMode === 'parameters') {
+            await batchDelete('contributions', 'parameter_id', ids)
+          }
+          if (cleanupMode === 'groups') {
+            const { data: paramRows } = await supabase.from('parameters').select('id').in('group_id', ids)
+            const paramIds = (paramRows || []).map((p: any) => p.id)
+            if (paramIds.length) {
+              await batchDelete('contributions', 'parameter_id', paramIds)
+              await batchDelete('parameters', 'id', paramIds)
+            }
+          }
+          if (cleanupMode === 'jobs') {
+            await batchDelete('invoice_items', 'task_id', ids)
+            await batchDelete('contribution_scores', 'task_id', ids)
+            await batchDelete('contributions', 'task_id', ids)
+          }
+          if (cleanupMode === 'employees') {
+            await batchDelete('contribution_scores', 'employee_id', ids)
+            await batchDelete('contributions', 'employee_id', ids)
+          }
+
+          // ── Main delete ─────────────────────────────────────────────────────────
+          await batchDelete(TABLE_FOR_MODE[cleanupMode], 'id', ids)
+
+          setDeleting(false)
+          success(`${ids.length} record${ids.length !== 1 ? 's' : ''} deleted`)
+          await loadCleanupRecords(cleanupMode)
+        } catch (err: any) {
+          setDeleting(false)
+          toastError(`Delete failed: ${err.message}`)
         }
       }
-      if (cleanupMode === 'jobs') {
-        // Delete invoice_items referencing these tasks (FK: invoice_items_task_id_fkey)
-        await batchDelete('invoice_items', 'task_id', ids)
-        // Delete contribution_scores for these tasks
-        await batchDelete('contribution_scores', 'task_id', ids)
-        await batchDelete('contributions', 'task_id', ids)
-      }
-      if (cleanupMode === 'employees') {
-        // Delete contribution_scores for these employees
-        await batchDelete('contribution_scores', 'employee_id', ids)
-        await batchDelete('contributions', 'employee_id', ids)
-      }
-
-      // ── Main delete ─────────────────────────────────────────────────────────
-      await batchDelete(TABLE_FOR_MODE[cleanupMode], 'id', ids)
-
-      setDeleting(false)
-      success(`${ids.length} record${ids.length !== 1 ? 's' : ''} deleted`)
-      await loadCleanupRecords(cleanupMode)
-    } catch (err: any) {
-      setDeleting(false)
-      toastError(`Delete failed: ${err.message}`)
-    }
+    })
   }
 
   // ── Clean-up table ─────────────────────────────────────────────────────────
@@ -2707,6 +2706,7 @@ export default function ImportClient({ clients, services, employees, groups, par
           </div>
         </div>
       )}
+      {confirmModal && <ConfirmDialog {...confirmModal} />}
     </div>
   )
 }

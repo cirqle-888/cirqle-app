@@ -113,45 +113,6 @@ export default function ReconciliationClient() {
     }
   }
 
-  async function fixMismatches() {
-    setAnalyzing(true)
-    let fixed = 0
-    try {
-      for (const inv of mismatches) {
-        let newStatus = inv.status
-        if (!['draft', 'reviewed', 'cancelled', 'bad_debt'].includes(inv.status)) {
-          if (inv.calculated >= inv.total_amount && inv.total_amount > 0) newStatus = 'paid'
-          else if (inv.calculated > 0) newStatus = 'partial'
-          else if (inv.due_date && new Date(inv.due_date) < new Date()) newStatus = 'overdue'
-          else newStatus = 'sent'
-        }
-
-        await supabase.from('invoices').update({
-          paid_amount: inv.calculated,
-          status: newStatus,
-        }).eq('id', inv.id)
-
-        // Write a reconcile audit event
-        await supabase.from('cashbook_audit_log').insert({
-          invoice_id: inv.id,
-          operation: 'RECONCILE',
-          old_paid_amount: inv.stored,
-          new_paid_amount: inv.calculated,
-          old_status: inv.status,
-          new_status: newStatus,
-          notes: 'Manually force-recalculated via Reconciliation Toolkit',
-        })
-        fixed++
-      }
-      toast.success(`Fixed ${fixed} invoice balance${fixed !== 1 ? 's' : ''}`)
-      analyzeData()
-    } catch (err: any) {
-      toast.error('Fix failed', err.message)
-    } finally {
-      setAnalyzing(false)
-    }
-  }
-
   async function fixOrphans() {
     setAnalyzing(true)
     let fixed = 0
@@ -366,12 +327,6 @@ export default function ReconciliationClient() {
                   <h3 className="font-semibold">Balance Mismatches</h3>
                   <p className="text-sm text-muted-foreground mt-0.5">Invoices where the stored <code className="text-xs bg-secondary px-1 rounded">paid_amount</code> differs from the real-time sum of its active payment allocations (₹, INR base).</p>
                 </div>
-                {mismatches.length > 0 && (
-                  <button onClick={fixMismatches} disabled={analyzing} className="flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg bg-destructive text-destructive-foreground hover:opacity-90 disabled:opacity-50">
-                    <FileBarChart className="w-4 h-4" />
-                    Force Recalculate All
-                  </button>
-                )}
               </div>
               {mismatches.length === 0 ? (
                 <EmptyState icon={<CheckCircle2 className="w-8 h-8 text-emerald-400" />} text="All invoice balances match perfectly." />
