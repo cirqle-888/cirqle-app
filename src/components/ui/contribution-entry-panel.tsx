@@ -93,13 +93,15 @@ export function ContributionEntryPanel({
   // empId → paramId → usage count (from history fetch on mount)
   const [paramHistory, setParamHistory] = useState<Map<string, Map<string, number>>>(new Map())
   const [performanceHistory, setPerformanceHistory] = useState<any[]>([])
+  const [rates, setRates] = useState<any[]>([])
+  const [pricingData, setPricingData] = useState<any>(null)
 
   const draftKey = `cirqle_draft_${task.id}`
 
   useEffect(() => {
     async function load() {
       setLoading(true)
-      const [contribRes, toolsRes, toolSvcRes, toolRecRes, scoreRes, pricingRes, histRes] = await Promise.all([
+      const [contribRes, toolsRes, toolSvcRes, toolRecRes, scoreRes, pricingRes, histRes, ratesRes] = await Promise.all([
         supabase.from('contributions').select('parameter_id, employee_id, value').eq('task_id', task.id),
         supabase.from('tools').select('*').eq('is_active', true).order('name'),
         supabase.from('tool_services').select('tool_id, service_id'),
@@ -109,18 +111,20 @@ export function ContributionEntryPanel({
           .eq('task_id', task.id),
         task.client_id
           ? supabase.from('client_service_pricing')
-              .select('commission_percentage')
+              .select('commission_percentage, price, currency')
               .eq('client_id', task.client_id)
               .eq('service_id', task.service_id)
               .maybeSingle()
           : Promise.resolve({ data: null, error: null }),
         supabase.from('employee_performance_history').select('*').order('effective_from', { ascending: false }),
+        supabase.from('exchange_rates').select('currency, rate_to_inr'),
       ])
 
       setTools(toolsRes.data || [])
       setToolServices(toolSvcRes.data || [])
       setExistingScores(scoreRes.data || [])
       setPerformanceHistory((histRes as any)?.data || [])
+      setRates((ratesRes as any)?.data || [])
 
       // Fetch param usage history to rank sub-parameters by frequency.
       // For 'own' scope we only need the current employee; for 'all' we
@@ -156,6 +160,7 @@ export function ContributionEntryPanel({
       const commPct = (pricingRes as any)?.data?.commission_percentage ?? 50
       setServiceCommPct(commPct)
       setPredefinedCommPct((pricingRes as any)?.data?.commission_percentage ?? null)
+      setPricingData((pricingRes as any)?.data || null)
 
       if (contribRes.data?.length) {
         const linkedGroupIds = groupServices
@@ -288,9 +293,16 @@ export function ContributionEntryPanel({
         performance_rating: getEffectivePerformanceRating(e.id, task.task_date || new Date().toISOString(), performanceHistory, e.performance_rating ?? 100)
       }))
 
+      let internalValueInr = task.billing_amount_inr || 0
+      if (internalValueInr === 0 && pricingData?.price) {
+        const qty = 1
+        const priceRate = rates.find((r: any) => r.currency === pricingData.currency)?.rate_to_inr || 1
+        internalValueInr = (pricingData.price * qty) * Number(priceRate)
+      }
+
       return calculateCommission({
         taskId: task.id,
-        billingAmountINR: task.billing_amount_inr || 0,
+        billingAmountINR: internalValueInr,
         serviceCommissionPct: serviceCommPct,
         employees: effectiveEmployees as any,
         groups: groups as any,

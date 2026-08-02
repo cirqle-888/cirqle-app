@@ -32,7 +32,12 @@ export interface ReceiptInput {
   dateISO: string
   method?: string
   reference?: string
-  invoices: { number: string; outstanding?: number }[]
+  /**
+   * The invoices this payment settles. `allocated` is that invoice's share of
+   * the receipt, in the receipt's own `currency` — supply it and a split
+   * payment itemises each invoice instead of listing bare numbers.
+   */
+  invoices: { number: string; outstanding?: number; allocated?: number }[]
   /**
    * Workspace branding from Settings → Company. All optional — the renderer
    * falls back to the hardcoded Cirqle defaults if any field is missing.
@@ -69,6 +74,45 @@ const CAPTURE_SCALE = 2.6
 function fmtAmount(n: number, currency: string) {
   const sym = CURRENCY_SYMBOL[currency] ?? `${currency} `
   return sym + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+/**
+ * At most this many invoices are itemised on the card; the rest collapse into
+ * a "+N more" line. The receipt is a fixed 432×540 — an unbounded list would
+ * run into the footer.
+ */
+const MAX_SPLIT_ROWS = 4
+
+/**
+ * Build the "Invoice Ref" section. A payment split across several invoices is
+ * itemised (each invoice with its own share) so the customer can see how their
+ * money was applied; a single invoice stays a plain one-line reference.
+ */
+function invoiceSection(
+  input: ReceiptInput,
+  showOverallBalance: boolean,
+): { label: string; splitRows: { number: string; amount: string }[] } {
+  const priced = input.invoices.filter(i => (i.allocated ?? 0) > 0.005)
+  const itemise = !showOverallBalance && priced.length > 1
+
+  if (!itemise) {
+    return {
+      label: showOverallBalance
+        ? `Allocated to ${input.invoices.length} invoice${input.invoices.length === 1 ? '' : 's'}`
+        : (input.invoices.length ? input.invoices.map(i => i.number).join(', ') : '—'),
+      splitRows: [],
+    }
+  }
+
+  const shown = priced.slice(0, MAX_SPLIT_ROWS)
+  const splitRows = shown.map(i => ({
+    number: i.number,
+    amount: fmtAmount(i.allocated as number, input.currency),
+  }))
+  const hidden = priced.length - shown.length
+  if (hidden > 0) splitRows.push({ number: `+${hidden} more`, amount: '' })
+
+  return { label: `${priced.length} invoices`, splitRows }
 }
 
 const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
@@ -129,10 +173,8 @@ function drawReceipt(
     ? input.customerTotalOutstanding 
     : input.invoices.reduce((s, i) => s + Math.max(0, i.outstanding ?? 0), 0)
     
-  const invoiceLabel = opts.showOverallBalance 
-    ? `Allocated to ${input.invoices.length} invoice${input.invoices.length === 1 ? '' : 's'}`
-    : (input.invoices.length ? input.invoices.map(i => i.number).join(', ') : '—')
-    
+  const { label: invoiceLabel, splitRows } = invoiceSection(input, opts.showOverallBalance)
+
   const dateLabel = input.dateISO
     ? new Date(input.dateISO).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
     : ''
@@ -238,9 +280,12 @@ function drawReceipt(
   setLS(0)
 
   // ── details panel ─────────────────────────────────────────────
-  const rows: { label: string; value: string; mono: boolean }[] = [
+  // `sub` rows are the per-invoice split lines — smaller and dimmer, so the
+  // breakdown reads as detail under "Invoice Ref" rather than as new fields.
+  const rows: { label: string; value: string; mono: boolean; sub?: boolean }[] = [
     { label: 'Received from', value: clientName || '—', mono: false },
     { label: 'Invoice Ref', value: invoiceLabel, mono: true },
+    ...splitRows.map(r => ({ label: r.number, value: r.amount, mono: true, sub: true })),
     { label: 'Date', value: dateLabel, mono: false },
   ]
   if (input.method) rows.push({ label: 'Method', value: input.method, mono: false })
@@ -253,7 +298,12 @@ function drawReceipt(
   const padY = 14
   const rowH = 16
   const rowGap = 9
-  const bodyH = rows.length * rowH + (rows.length - 1) * rowGap
+  const subH = 13
+  const subGap = 5
+  const hOf   = (i: number) => (rows[i].sub ? subH : rowH)
+  // The gap belongs to the row that follows it, so a split line hugs the row above.
+  const gapOf = (i: number) => (rows[i + 1]?.sub ? subGap : rowGap)
+  const bodyH = rows.reduce((h, _, i) => h + hOf(i) + (i < rows.length - 1 ? gapOf(i) : 0), 0)
   const balanceH = balanceDue > 0.01 ? 10 + rowH : 0
   const panelH = padY * 2 + bodyH + balanceH
 
@@ -263,13 +313,21 @@ function drawReceipt(
 
   const valMaxW = (panelW - padX * 2) * 0.62
   let ry = panelTop + padY
-  for (const r of rows) {
-    ctx.textAlign = 'left'; ctx.fillStyle = '#94a3b8'; ctx.font = `400 11.5px ${FONT}`
-    ctx.fillText(r.label, panelX + padX, ry + 1)
-    ctx.textAlign = 'right'; ctx.fillStyle = '#e5e7eb'; ctx.font = `600 12.5px ${r.mono ? MONO : FONT}`
-    ctx.fillText(truncate(r.value, valMaxW), panelX + panelW - padX, ry)
-    ry += rowH + rowGap
-  }
+  rows.forEach((r, i) => {
+    if (r.sub) {
+      // Indented, dimmer: "  INV-2607-059            ₹1,000.00"
+      ctx.textAlign = 'left'; ctx.fillStyle = '#8b93a7'; ctx.font = `500 10.5px ${MONO}`
+      ctx.fillText(truncate(r.label, panelW - padX * 2 - 90), panelX + padX + 10, ry)
+      ctx.textAlign = 'right'; ctx.fillStyle = '#cbd5e1'; ctx.font = `600 10.5px ${MONO}`
+      ctx.fillText(r.value, panelX + panelW - padX, ry)
+    } else {
+      ctx.textAlign = 'left'; ctx.fillStyle = '#94a3b8'; ctx.font = `400 11.5px ${FONT}`
+      ctx.fillText(r.label, panelX + padX, ry + 1)
+      ctx.textAlign = 'right'; ctx.fillStyle = '#e5e7eb'; ctx.font = `600 12.5px ${r.mono ? MONO : FONT}`
+      ctx.fillText(truncate(r.value, valMaxW), panelX + panelW - padX, ry)
+    }
+    ry += hOf(i) + gapOf(i)
+  })
   if (balanceDue > 0.01) {
     const divY = ry - rowGap + 9
     ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1
@@ -343,9 +401,7 @@ export default function ReceiptModal({ input, onClose }: Props) {
   const balanceDue = showOverallBalance && input.customerTotalOutstanding !== undefined
     ? input.customerTotalOutstanding
     : input.invoices.reduce((s, i) => s + Math.max(0, i.outstanding ?? 0), 0)
-  const invoiceLabel = showOverallBalance
-    ? `Allocated to ${input.invoices.length} invoice${input.invoices.length === 1 ? '' : 's'}`
-    : (input.invoices.length ? input.invoices.map(i => i.number).join(', ') : '—')
+  const { label: invoiceLabel, splitRows } = invoiceSection(input, showOverallBalance)
   const dateLabel = input.dateISO
     ? new Date(input.dateISO).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
     : ''
@@ -618,6 +674,16 @@ export default function ReceiptModal({ input, onClose }: Props) {
                 >
                   <DetailRow label="Received from" value={clientName || '—'} />
                   <DetailRow label="Invoice Ref" value={invoiceLabel} mono />
+                  {splitRows.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: -4 }}>
+                      {splitRows.map(r => (
+                        <div key={r.number} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, paddingLeft: 10 }}>
+                          <span style={{ fontSize: 10.5, fontWeight: 500, color: '#8b93a7', fontFamily: 'ui-monospace, monospace' }}>{r.number}</span>
+                          <span style={{ fontSize: 10.5, fontWeight: 600, color: '#cbd5e1', fontFamily: 'ui-monospace, monospace' }}>{r.amount}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <DetailRow label="Date" value={dateLabel} />
                   {input.method ? <DetailRow label="Method" value={input.method} /> : null}
                   {input.reference ? <DetailRow label="Reference" value={input.reference} mono /> : null}

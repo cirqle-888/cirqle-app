@@ -2,7 +2,6 @@ import { DequeuedJob, enqueueJob } from '@/lib/jobs/engine'
 import { createAdminClient } from '@/lib/supabase/server'
 import { getProvider } from '@/lib/advertising/providers'
 import { ingestMetrics } from '@/lib/advertising/pipeline'
-import { triggerAIAnalysisDAG } from '@/lib/advertising/workers/ai'
 
 
 export async function syncProjectWorker(job: DequeuedJob): Promise<any> {
@@ -117,11 +116,6 @@ export async function syncProjectWorker(job: DequeuedJob): Promise<any> {
       parent_job_id: job.id,
       payload: { project_id: project.id }
     })
-
-    // E4: Automatically trigger AI Analysis DAG if AI is enabled
-    if (project.provider_metadata?.ai_enabled !== false) {
-      await triggerAIAnalysisDAG(project.id)
-    }
 
     return { rows_fetched: metrics.length, imported, updated, durationMs }
   } catch (err: any) {

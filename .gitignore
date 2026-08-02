@@ -67,3 +67,6 @@ next-env.d.ts
 /mobile/latest.json
 backfill-recovery-*.json
 backfill-baseline-*.json
+
+# Figma plugin build output
+figma-plugin/**/dist/

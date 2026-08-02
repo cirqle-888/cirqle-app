@@ -1108,20 +1108,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       : i
     ))
     const label = isAdvancePayment ? `Advance ${fmt(foreign, payForm.currency)} recorded` : `Payment of ${fmt(foreign, payForm.currency)} recorded — added to Cashbook`
-    success(label, undefined, 5000, {
-      label: 'Undo',
-      onClick: async () => {
-        await supabase.from('payments').delete().eq('id', pmt.id)
-        await supabase.from('invoices').update({ paid_amount: prevPaid, paid_amount_inr: prevPaidInr, status: prevStatus }).eq('id', invoiceId)
-        // Also reverse the cashbook inflow + allocation that recordInvoicePayment
-        // created, otherwise undo leaves phantom cash inflated in the Cash Book.
-        await reverseInvoicePaymentCashbook(invoiceId, { payment_date: pmt.payment_date, amount_inr: pmt.amount_inr, amount: pmt.amount })
-        setInvoices(prev => prev.map(i => i.id === invoiceId
-          ? { ...i, paid_amount: prevPaid, paid_amount_inr: prevPaidInr, status: prevStatus, payments: (i.payments || []).filter(p => p.id !== pmt.id) }
-          : i
-        ))
-      },
-    })
+    success(label)
     setPayForm({ amount: '', currency: (inv.currency || 'INR') as Currency, rate: '', amountInr: '', rateSource: 'settings', payment_date: new Date().toISOString().split('T')[0], payment_method: 'bank_transfer', reference: '', notes: '', bank_account_id: defaultBankAccountId })
     setIsAdvancePayment(false)
     setPanelMode('detail')
@@ -1156,46 +1143,15 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   }
 
   async function deletePayment(invoiceId: string, paymentId: string) {
-    const inv = invoices.find(i => i.id === invoiceId)
-    if (!inv) return
-    const pmt = (inv.payments || []).find(p => p.id === paymentId)
-    if (!pmt) return
-
-    setConfirmModal({
-      title: 'Remove Payment',
-      body: `Remove this payment of ${fmt(pmt.amount, (pmt.currency as Currency) || inv.currency)} from ${inv.invoice_number}? The invoice balance will be restored.`,
-      confirmLabel: 'Remove Payment',
-      danger: true,
-      onConfirm: async () => {
-        // Reverse the paid_amount in invoice currency
-        const invRate = (inv.exchange_rate && inv.exchange_rate > 0) ? inv.exchange_rate : (rateMap[inv.currency] || 1)
-        const appliedInvCcy = pmt.currency === inv.currency
-          ? (pmt.amount || 0)
-          : round2((pmt.amount_inr || 0) / (invRate || 1))
-        const newPaid    = Math.max(0, round2((inv.paid_amount    || 0) - appliedInvCcy))
-        const newPaidInr = Math.max(0, round2((inv.paid_amount_inr || 0) - (pmt.amount_inr || pmt.amount || 0)))
-        const newStatus  = newPaid <= 0 ? (inv.status === 'paid' || inv.status === 'partial' ? 'sent' : inv.status) : 'partial'
-
-        // Delete payment row
-        await supabase.from('payments').delete().eq('id', paymentId)
-        // Restore invoice amounts
-        await supabase.from('invoices').update({ paid_amount: newPaid, paid_amount_inr: newPaidInr, status: newStatus }).eq('id', invoiceId)
-        // Delete the auto-created cashbook inflow linked to THIS payment
-        // (matched by date + type + amount so sibling same-day payments are safe).
-        await reverseInvoicePaymentCashbook(invoiceId, pmt)
-
-        // Update local state
-        setInvoices(prev => prev.map(i => i.id === invoiceId
-          ? { ...i, paid_amount: newPaid, paid_amount_inr: newPaidInr, status: newStatus, payments: (i.payments || []).filter(p => p.id !== paymentId) }
-          : i
-        ))
-        success('Payment removed and invoice balance restored')
-      },
-    })
+    toastError('Payments cannot be deleted directly. Manage allocations via the Cash Book.')
   }
 
   function confirmDelete(invoiceId: string) {
     const inv = invoices.find(i => i.id === invoiceId)
+    if (inv && ((inv.paid_amount && inv.paid_amount > 0) || (inv.payments && inv.payments.length > 0) || (inv.status === 'paid' || inv.status === 'partial'))) {
+      toastError(`Invoice has recorded payments and cannot be deleted. Cancel it or reverse the payments first.`)
+      return
+    }
     setConfirmModal({
       title: 'Delete Invoice',
       body: `Delete ${inv?.invoice_number ?? 'this invoice'}? This cannot be undone and will revert any linked tasks back to "Done".`,
@@ -1214,7 +1170,6 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       if (taskIds.length) await supabase.from('tasks').update({ status: 'done' }).in('id', taskIds)
       await supabase.from('cashbook_invoice_allocations').delete().eq('invoice_id', invoiceId)
       await supabase.from('invoice_items').delete().eq('invoice_id', invoiceId)
-      await supabase.from('payments').delete().eq('invoice_id', invoiceId)
       const { error } = await supabase.from('invoices').delete().eq('id', invoiceId)
       if (error) { toastError(error.message); return }
       setInvoices(prev => prev.filter(i => i.id !== invoiceId))

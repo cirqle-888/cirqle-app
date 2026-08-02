@@ -3,14 +3,6 @@ import { syncProjectWorker } from '@/lib/advertising/workers/sync'
 import { refreshTokenWorker } from '@/lib/advertising/workers/token'
 import { sendNotificationWorker } from '@/lib/advertising/workers/notifications'
 import { generateReportWorker } from '@/lib/advertising/workers/reports'
-import { 
-  metricsCollectionWorker,
-  benchmarkCalcWorker,
-  forecastGenerationWorker,
-  healthScoreWorker,
-  recommendationWorker,
-  executiveSummaryWorker
-} from '@/lib/advertising/workers/ai'
 
 // Map of job_type to handler function
 const JOB_HANDLERS: Record<string, (job: DequeuedJob) => Promise<any>> = {
@@ -18,14 +10,6 @@ const JOB_HANDLERS: Record<string, (job: DequeuedJob) => Promise<any>> = {
   'advertising_refresh_token': refreshTokenWorker,
   'advertising_send_notification': sendNotificationWorker,
   'advertising_generate_report': generateReportWorker,
-  
-  // Phase E1.5 AI DAG Workers
-  'advertising_metrics_collection': metricsCollectionWorker,
-  'advertising_benchmark_calc': benchmarkCalcWorker,
-  'advertising_forecast_generation': forecastGenerationWorker,
-  'advertising_health_score': healthScoreWorker,
-  'advertising_recommendation': recommendationWorker,
-  'advertising_executive_summary': executiveSummaryWorker,
 }
 
 export async function processJobs(workerId: string, maxDurationMs: number = 45000) {

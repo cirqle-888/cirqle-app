@@ -135,7 +135,7 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
 
   // 3. Fetch Reference Data
   const [
-    employeesRes, groupsRes, parametersRes, toolsRes, toolServicesRes, groupServicesRes, pricingRes, historyRes, taskToolsRes, oldScoresRes
+    employeesRes, groupsRes, parametersRes, toolsRes, toolServicesRes, groupServicesRes, pricingRes, historyRes, taskToolsRes, oldScoresRes, ratesRes
   ] = await Promise.all([
     supabase.from('employees').select('id, cqid, name, performance_rating, role'),
     // Active-only — the scoring UIs (contributions page, task edit panel) are
@@ -146,10 +146,11 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
     supabase.from('tools').select('*').eq('is_active', true),
     supabase.from('tool_services').select('tool_id, service_id'),
     supabase.from('group_services').select('group_id, service_id'),
-    fetchAll(supabase.from('client_service_pricing').select('client_id, service_id, commission_percentage').order('client_id').order('service_id')),
+    fetchAll(supabase.from('client_service_pricing').select('client_id, service_id, commission_percentage, price, currency').order('client_id').order('service_id')),
     (supabase as any).from('employee_performance_history').select('*').order('effective_from', { ascending: false }),
     supabase.from('task_tools').select('tool_id').eq('task_id', taskId),
-    supabase.from('contribution_scores').select('*').eq('task_id', taskId)
+    supabase.from('contribution_scores').select('*').eq('task_id', taskId),
+    supabase.from('exchange_rates').select('currency, rate_to_inr')
   ])
 
   const employees = employeesRes.data || []
@@ -169,6 +170,14 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
 
   const pricing = pricingMatrix.find(p => p.client_id === task.client_id && p.service_id === task.service_id)
   const commPct = pricing?.commission_percentage ?? 50
+  const rates = (ratesRes?.data || []).reduce((acc: any, r: any) => ({ ...acc, [r.currency]: Number(r.rate_to_inr) || 1 }), { INR: 1 })
+
+  let internalValueInr = task.billing_amount_inr || 0
+  if (internalValueInr === 0 && pricing?.price) {
+    const qty = task.quantity || 1
+    const priceRate = rates[pricing.currency || 'INR'] || 1
+    internalValueInr = (pricing.price * qty) * priceRate
+  }
 
   const usedToolIds = new Set(taskToolsData.map(tt => tt.tool_id))
   const linkedToolIds = toolServices.filter(ts => ts.service_id === task.service_id).map(ts => ts.tool_id)
@@ -184,7 +193,7 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
   try {
     const result = calculateCommission({
       taskId: task.id,
-      billingAmountINR: task.billing_amount_inr || 0,
+      billingAmountINR: internalValueInr,
       serviceCommissionPct: commPct,
       employees: effectiveEmployees as any,
       groups: taskGroups as any,
