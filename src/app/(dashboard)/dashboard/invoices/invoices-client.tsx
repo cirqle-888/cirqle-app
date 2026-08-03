@@ -1434,7 +1434,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     // Fetch done AND invoiced tasks in range (so we can warn about already-invoiced ones)
     const { data: rawTasks } = await supabase
       .from('tasks')
-      .select('id, title, task_date, billing_amount, billing_amount_inr, currency, status, service:services(name)')
+      .select('id, title, task_date, billing_amount, billing_amount_inr, currency, status, quantity, unit_price, service:services(name)')
       .eq('client_id', genForm.client_id)
       .in('status', ['done', 'invoiced'])
       .gte('task_date', from)
@@ -1547,8 +1547,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     await supabase.from('invoice_items').insert(
       selected.map((t, idx) => ({
         invoice_id: invId, task_id: t.id,
-        description: t.title, quantity: 1,
-        unit_price: taskAmt(t), total: taskAmt(t),
+        description: t.title, quantity: Number(t.quantity ?? 1),
+        unit_price: t.unit_price ?? taskAmt(t), total: taskAmt(t),
         currency: t.currency || 'INR', display_order: orderOffset + idx,
       }))
     )
@@ -1777,7 +1777,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         // Fetch task details for items
         const { data: taskDetails } = await supabase
           .from('tasks')
-          .select('id, title, billing_amount, billing_amount_inr, currency')
+          .select('id, title, billing_amount, billing_amount_inr, currency, quantity, unit_price')
           .in('id', group.taskIds)
 
         if (taskDetails?.length) {
@@ -1786,8 +1786,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               const amt = t.billing_amount ?? t.billing_amount_inr ?? 0
               return {
                 invoice_id: invId, task_id: t.id,
-                description: t.title, quantity: 1,
-                unit_price: amt, total: amt,
+                description: t.title, quantity: Number(t.quantity ?? 1),
+                unit_price: t.unit_price ?? amt, total: amt,
                 currency: t.currency || 'INR', display_order: orderOffset + idx,
               }
             })

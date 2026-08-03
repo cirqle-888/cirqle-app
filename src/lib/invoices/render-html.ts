@@ -405,7 +405,7 @@ export function buildInvoiceParts(
   // Logo: use uploaded image if available, else SVG icon
   const logoBlockSized = (h: number) => showLogo
     ? co.logoUrl
-      ? `<img src="${co.logoUrl}" alt="logo" style="height:${h}px;object-fit:contain;display:block"/>`
+      ? `<img src="${co.logoUrl}" alt="logo" crossorigin="anonymous" style="height:${h}px;object-fit:contain;display:block"/>`
       : `<svg width="${h}" height="${h}" viewBox="0 0 42 42" xmlns="http://www.w3.org/2000/svg">
            <circle cx="21" cy="21" r="20" fill="none" stroke="${NAVY}" stroke-width="2.5"/>
            <circle cx="21" cy="21" r="14" fill="${NAVY}"/>
@@ -435,7 +435,7 @@ export function buildInvoiceParts(
   // QR (encodes the UPI pay link or uses a custom uploaded QR image)
   const customQr = companySettings.invoice_qr_image_url
   const qrBlock = showQr
-    ? (customQr ? `<img src="${customQr}" alt="QR Code" style="width:104px;height:104px;object-fit:contain;display:block;margin:0 auto"/>` : (upiString ? qrSvgBlock(upiString, NAVY_LIGHT) : ''))
+    ? (customQr ? `<img src="${customQr}" alt="QR Code" crossorigin="anonymous" style="width:104px;height:104px;object-fit:contain;display:block;margin:0 auto"/>` : (upiString ? qrSvgBlock(upiString, NAVY_LIGHT) : ''))
     : ''
 
   // Thank-you block: gradient from Figma design (#8D66DB→#52117E→#4548A5), fills QR height
