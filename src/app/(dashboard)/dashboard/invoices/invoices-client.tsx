@@ -1545,12 +1545,17 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     }
 
     await supabase.from('invoice_items').insert(
-      selected.map((t, idx) => ({
-        invoice_id: invId, task_id: t.id,
-        description: t.title, quantity: Number(t.quantity ?? 1),
-        unit_price: t.unit_price ?? taskAmt(t), total: taskAmt(t),
-        currency: t.currency || 'INR', display_order: orderOffset + idx,
-      }))
+      selected.map((t, idx) => {
+        const qty = Number(t.quantity ?? 1)
+        const total = taskAmt(t)
+        const unit_price = total ? (total / qty) : 0
+        return {
+          invoice_id: invId, task_id: t.id,
+          description: t.title, quantity: qty,
+          unit_price: unit_price, total: total,
+          currency: t.currency || 'INR', display_order: orderOffset + idx,
+        }
+      })
     )
 
     // Recompute totals from the actual rows now on the invoice (correct whether
@@ -1783,11 +1788,13 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         if (taskDetails?.length) {
           await supabase.from('invoice_items').insert(
             taskDetails.map((t: any, idx: number) => {
+              const qty = Number(t.quantity ?? 1)
               const amt = t.billing_amount ?? t.billing_amount_inr ?? 0
+              const unit_price = amt ? (amt / qty) : 0
               return {
                 invoice_id: invId, task_id: t.id,
-                description: t.title, quantity: Number(t.quantity ?? 1),
-                unit_price: t.unit_price ?? amt, total: amt,
+                description: t.title, quantity: qty,
+                unit_price: unit_price, total: amt,
                 currency: t.currency || 'INR', display_order: orderOffset + idx,
               }
             })
