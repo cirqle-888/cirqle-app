@@ -1153,11 +1153,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     try {
       const result = await serverResyncInvoiceTasks(inv.id)
       if (!result.ok) throw new Error(result.error)
-      toast(`Invoice resynced`, 'success', `Successfully processed ${result.data?.syncedTasks || 0} tasks.`)
+      success(`Successfully processed ${result.data?.syncedTasks || 0} tasks.`, `Invoice resynced`)
       // Refresh list to pull updated items
       await loadInvoices()
     } catch (e: any) {
-      toast('Failed to resync invoice', 'error', e.message)
+      toastError(e.message || 'Failed to resync invoice')
     } finally {
       setSaving(false)
     }
