@@ -1149,8 +1149,6 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   async function handleResync(invoiceId: string) {
     const inv = invoices.find(i => i.id === invoiceId)
     if (!inv || inv.status !== 'draft') return
-    const origText = 'Resyncing invoice...'
-    setSavingText(origText)
     setSaving(true)
     try {
       const result = await serverResyncInvoiceTasks(inv.id)
@@ -1162,7 +1160,6 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       toast('Failed to resync invoice', 'error', e.message)
     } finally {
       setSaving(false)
-      setSavingText('')
     }
   }
 

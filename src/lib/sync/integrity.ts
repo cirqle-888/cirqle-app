@@ -381,19 +381,23 @@ export async function syncDraftInvoiceExpenses(entryId: string) {
     .select('id, type, amount, amount_inr, currency, description, client_id, entry_date, deleted_at')
     .eq('id', entryId).single()
     
-  if (!entry || entry.deleted_at || entry.type !== 'outflow' || !entry.client_id || !entry.entry_date) {
-    return { success: false, reason: 'Not applicable for auto-invoicing' }
-  }
-
   const invoiceIdsToRecalculate = new Set<string>()
 
   // 2. Check if this entry is already an expense item
   const { data: existingExp } = await supabase.from('invoice_expense_items')
     .select('id, invoice_id, amount, amount_inr, currency, original_amount, original_amount_inr, markup_type')
-    .eq('cashbook_entry_id', entry.id)
+    .eq('cashbook_entry_id', entryId)
     .maybeSingle()
 
-  if (existingExp) {
+  if (!entry || entry.deleted_at || entry.type !== 'outflow' || !entry.client_id || !entry.entry_date) {
+    if (existingExp) {
+      const { data: inv } = await supabase.from('invoices').select('status').eq('id', existingExp.invoice_id).single()
+      if (inv && inv.status === 'draft') {
+        await supabase.from('invoice_expense_items').delete().eq('id', existingExp.id)
+        invoiceIdsToRecalculate.add(existingExp.invoice_id)
+      }
+    }
+  } else if (existingExp) {
     const { data: inv } = await supabase.from('invoices').select('status, currency, exchange_rate').eq('id', existingExp.invoice_id).single()
     if (inv && inv.status === 'draft') {
       let newBilling = entry.amount

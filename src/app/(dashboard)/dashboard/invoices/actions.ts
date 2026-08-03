@@ -13,7 +13,7 @@ import { PERMS } from '@/lib/permissions/keys'
 import { recordPayment } from '@/lib/finance/record-payment'
 import type { RecordInvoicePaymentInput } from '@/lib/finance/record-payment'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { syncDraftInvoices } from '@/lib/sync/integrity'
+import { syncDraftInvoices, syncDraftInvoiceExpenses } from '@/lib/sync/integrity'
 
 interface ActionResult<T = void> {
   ok: boolean
@@ -80,7 +80,31 @@ export async function serverResyncInvoiceTasks(invoiceId: string): Promise<Actio
   for (const tid of allIds) {
     await syncDraftInvoices(tid)
   }
+
+  // Also sync expenses for the period
+  const { data: expItems } = await admin.from('invoice_expense_items')
+    .select('cashbook_entry_id')
+    .eq('invoice_id', invoiceId)
+    .not('cashbook_entry_id', 'is', null)
+    
+  const currentExpIds = (expItems || []).map(i => i.cashbook_entry_id as string)
+  
+  const { data: periodExps } = await admin.from('cashbook_entries')
+    .select('id')
+    .eq('client_id', inv.client_id)
+    .eq('type', 'outflow')
+    .is('deleted_at', null)
+    .gte('entry_date', inv.billing_period_start)
+    .lte('entry_date', inv.billing_period_end)
+    
+  const possibleExpIds = (periodExps || []).map(e => e.id)
+  
+  const allExpIds = Array.from(new Set([...currentExpIds, ...possibleExpIds]))
+  
+  for (const eid of allExpIds) {
+    await syncDraftInvoiceExpenses(eid)
+  }
   
   revalidatePath('/dashboard/invoices')
-  return { ok: true, data: { syncedTasks: allIds.length } }
+  return { ok: true, data: { syncedTasks: allIds.length + allExpIds.length } }
 }
