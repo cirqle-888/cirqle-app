@@ -260,7 +260,7 @@ export async function syncDraftInvoices(taskId: string) {
   const supabase = createTypedAdminClient()
 
   const { data: task } = await supabase.from('tasks')
-    .select('id, title, status, client_id, task_date, billing_amount_inr, currency, billing_amount')
+    .select('id, title, status, client_id, task_date, billing_amount_inr, currency, billing_amount, deleted_at')
     .eq('id', taskId).single()
   
   if (!task) return { error: 'Task not found' }
@@ -274,8 +274,8 @@ export async function syncDraftInvoices(taskId: string) {
   const taskAmt = task.billing_amount || 0
   const invoiceIdsToRecalculate = new Set<string>()
 
-    if (coverage.covered) {
-      // Covered → strip any draft line this task carries, and never add one.
+    if (coverage.covered || task.deleted_at || task.status === 'cancelled') {
+      // Covered, deleted, or cancelled → strip any draft line this task carries, and never add one.
       if (items && items.length > 0) {
         const invoiceIds = Array.from(new Set(items.map(i => i.invoice_id).filter((id): id is string => id !== null)))
         const { data: invoices } = await supabase.from('invoices').select('id').in('id', invoiceIds).eq('status', 'draft')

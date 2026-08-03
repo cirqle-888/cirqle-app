@@ -60,6 +60,9 @@ export async function serverDeleteTask(
     detail:     { title: taskTitle },
   })
 
+  // SYNC INTEGRITY!
+  await syncDraftInvoices(taskId)
+
   return { ok: true, data: { deleted_at: deletedAt } }
 }
 
@@ -86,6 +89,9 @@ export async function serverRestoreTask(
     action:     'restored',
     detail:     { title: taskTitle },
   })
+
+  // SYNC INTEGRITY!
+  await syncDraftInvoices(taskId)
 
   return { ok: true }
 }
@@ -285,6 +291,11 @@ export async function serverBulkDeleteTasks(
     detail:     { bulk: true, count: tasks.length, titles: tasks.map(t => t.title).slice(0, 20) },
   })
 
+  // SYNC INTEGRITY!
+  for (const id of ids) {
+    await syncDraftInvoices(id)
+  }
+
   return { ok: true, data: { deletedAt } }
 }
 
@@ -363,6 +374,9 @@ export async function serverCancelTask(
 
   // Mirror onto any promoted requests (no-op when none are linked).
   void syncRequestStatusFromTask(input.taskId, 'cancelled').catch(() => {})
+
+  // SYNC INTEGRITY!
+  await syncDraftInvoices(input.taskId)
 
   revalidatePath(REVALIDATE)
   return { ok: true }
