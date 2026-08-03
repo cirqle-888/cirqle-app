@@ -352,6 +352,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   // Panel modes
   const [panelMode, setPanelMode] = useState<'detail' | 'pay' | 'new' | 'generate' | 'batch_generate' | 'statement' | 'discounts'>('detail')
   const [saving, setSaving] = useState(false)
+  // Invoice currently being resynced from its tasks — drives the spinner on that row's button.
+  const [resyncingId, setResyncingId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
   // Bulk actions
@@ -1150,16 +1152,18 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const inv = invoices.find(i => i.id === invoiceId)
     if (!inv || inv.status !== 'draft') return
     setSaving(true)
+    setResyncingId(invoiceId)
     try {
       const result = await serverResyncInvoiceTasks(inv.id)
       if (!result.ok) throw new Error(result.error)
       success(`Successfully processed ${result.data?.syncedTasks || 0} tasks.`, `Invoice resynced`)
       // Refresh list to pull updated items
-      await loadInvoices()
+      router.refresh()
     } catch (e: any) {
       toastError(e.message || 'Failed to resync invoice')
     } finally {
       setSaving(false)
+      setResyncingId(null)
     }
   }
 
@@ -3011,7 +3015,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             {inv.status === 'draft' && (
               <button onClick={() => handleResync(inv.id)} disabled={saving} title="Resync Tasks"
                 className="p-2 text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10 rounded-lg transition-colors border border-transparent hover:border-blue-500/20 disabled:opacity-50">
-                <RefreshCw className={cn("w-4 h-4", saving && savingText === 'Resyncing invoice...' && "animate-spin")} />
+                <RefreshCw className={cn("w-4 h-4", resyncingId === inv.id && "animate-spin")} />
               </button>
             )}
             <button onClick={() => confirmDelete(inv.id)} title="Delete"
