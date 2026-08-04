@@ -14,7 +14,7 @@
  */
 import QRCode from 'qrcode'
 import { getCurrencySymbol } from '@/lib/calculations/currency'
-import { formatBillingPeriod } from '@/lib/utils/invoice'
+import { formatBillingPeriod, compareInvoiceItems } from '@/lib/utils/invoice'
 import type { Currency } from '@/types'
 
 function escapeHtml(unsafe: string | null | undefined, keepNewlines = false): string {
@@ -207,6 +207,16 @@ export interface InvoiceRenderOpts {
 /** Decorative layers can be viewport-fixed (print) or page-div-absolute (PDF pages). */
 type LayerPos = 'fixed' | 'absolute'
 
+/**
+ * Route a remote logo through our own origin (see src/app/api/invoice-logo).
+ * data: URIs are already inline — every other invoice asset (background art,
+ * QR, favicon) is stored that way — and are returned untouched.
+ */
+function resolveLogoUrl(url: string): string {
+  if (!url) return ''
+  return /^https?:\/\//.test(url) ? '/api/invoice-logo' : url
+}
+
 export interface InvoiceRenderParts {
   inv: any
   co: { name: string; phone: string; website: string; tagline: string; holder: string; account: string; ifsc: string; upi: string; logoUrl: string; footerText: string }
@@ -262,7 +272,11 @@ export function buildInvoiceParts(
     account: companySettings.bank_account    || '',
     ifsc:    companySettings.bank_ifsc       || '',
     upi:     companySettings.bank_upi        || '',
-    logoUrl: companySettings.logo_url_light || companySettings.logo_url || '',
+    // A remote logo is served through our own origin — the <img> below carries
+    // crossorigin="anonymous" for the PDF canvas, and a CORS request to the
+    // asset host fails, which is what left the preview and the downloaded PDF
+    // with no logo. A data: URI needs no request and is used as-is.
+    logoUrl: resolveLogoUrl(companySettings.logo_url_light || companySettings.logo_url || ''),
     footerText: companySettings.invoice_footer_text || 'Thank you for your Business!',
   }
   const showLogo       = companySettings.invoice_show_logo        !== 'false'
@@ -276,18 +290,7 @@ export function buildInvoiceParts(
   const NAVY       = companySettings.invoice_primary_color || '#1a2744'
   const NAVY_LIGHT = companySettings.invoice_accent_color  || '#243459'
   const FONT       = companySettings.invoice_font          || "'Airbnb Cereal App', Arial, Helvetica, sans-serif"
-  const sortedItems = [...(inv.items || [])].sort((a: any, b: any) => {
-    const dateA = a.task?.task_date || ''
-    const dateB = b.task?.task_date || ''
-    if (dateA && dateB) {
-      if (dateA !== dateB) return dateA.localeCompare(dateB)
-    } else if (dateA && !dateB) {
-      return -1 // Items with dates come before items without dates
-    } else if (!dateA && dateB) {
-      return 1
-    }
-    return a.display_order - b.display_order
-  })
+  const sortedItems = [...(inv.items || [])].sort(compareInvoiceItems)
   const subtotal = inv.subtotal || ((inv.total_amount || 0) + (inv.discount_amount || 0) - (inv.tax_amount || 0) - (inv.previous_balance || 0))
   const prevBal  = inv.previous_balance || 0
   const discount = inv.discount_amount || 0

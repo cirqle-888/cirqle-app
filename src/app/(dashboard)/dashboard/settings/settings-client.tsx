@@ -20,8 +20,9 @@ import {
   upsertExchangeRate,
   syncExchangeRates,
   setEmployeeServices, setServiceEmployees, setEmployeeServiceCategories,
+  createServiceCategory, updateServiceCategory, setServiceCategoryActive, reorderServiceCategories,
 } from './actions'
-import { Plus, X, Edit2, Archive, ArchiveRestore, Save, ChevronDown, ChevronLeft, ChevronRight, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Mail, Send, RotateCcw as ResetKey, RefreshCw, Star, Building2, MapPin, Users, Handshake } from 'lucide-react'
+import { Plus, X, Edit2, Archive, ArchiveRestore, Save, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Mail, Send, RotateCcw as ResetKey, RefreshCw, Star, Building2, MapPin, Users, Handshake } from 'lucide-react'
 import type { Currency } from '@/types'
 import InfoTip from '@/components/ui/info-tip'
 import { usePrivacy, getStoredPin, setStoredPin, isForceLocked } from '@/contexts/privacy-context'
@@ -93,7 +94,7 @@ function ArchFilterTabs({ value, onChange }: { value: 'active' | 'archived' | 'a
 }
 
 const SETTINGS_TABS = [
-  'Company', 'Employees', 'Services',
+  'Company', 'Employees', 'Services', 'Departments',
   'Groups & Params', 'Tools', 'Bank Accounts', 'Cash Categories', 'Exchange Rates',
   'Privacy & Security', 'Message Templates', 'Matching'
 ] as const
@@ -103,7 +104,7 @@ type SettingsTab = typeof SETTINGS_TABS[number]
 const SETTINGS_GROUPS: { label: string; emoji: string; tabs: SettingsTab[] }[] = [
   { label: 'Organization',    emoji: '🏢', tabs: ['Company', 'Privacy & Security'] },
   { label: 'People',          emoji: '👥', tabs: ['Employees'] },
-  { label: 'Service Catalog', emoji: '📦', tabs: ['Services', 'Groups & Params', 'Tools'] },
+  { label: 'Service Catalog', emoji: '📦', tabs: ['Services', 'Departments', 'Groups & Params', 'Tools'] },
   { label: 'Finance',         emoji: '💸', tabs: ['Bank Accounts', 'Cash Categories', 'Exchange Rates', 'Matching'] },
   { label: 'Communication',   emoji: '💬', tabs: ['Message Templates'] },
 ]
@@ -153,7 +154,14 @@ export default function SettingsClient(props: Props) {
   // junction — same rows power both the employee form and the service form).
   const [empServices, setEmpServices] = useState<{ employee_id: string; service_id: string }[]>(props.employeeServices || [])
   const [empCategories, setEmpCategories] = useState<{ employee_id: string; category_id: string }[]>(props.employeeServiceCategories || [])
-  const serviceCategories: any[] = props.serviceCategories || []
+  // Departments (service taxonomy) — state, not a prop passthrough, so the
+  // Departments tab's CRUD updates every consumer (employee modal grouping,
+  // service form dropdown) without a reload.
+  const [serviceCategories, setServiceCategories] = useState<any[]>(props.serviceCategories || [])
+  const [newDeptName, setNewDeptName] = useState('')
+  const [deptSaving, setDeptSaving] = useState(false)
+  // Services tab: which department groups are collapsed ('uncategorised' for the null group).
+  const [collapsedDepts, setCollapsedDepts] = useState<Set<string>>(new Set())
   const [tab, setTab] = useState(props.initialTab ?? 'Company')
   const router = useRouter()
   const supabase = createSupabaseClient()
@@ -1822,9 +1830,29 @@ export default function SettingsClient(props: Props) {
                   <ArrowUpDown className="w-3 h-3" />
                   {serviceSort === 'usage' ? 'By usage' : 'A–Z'}
                 </button>
+                {/* Collapse / expand every department group at once. Disabled
+                    while searching, because search force-opens all groups —
+                    an enabled button that visibly does nothing is worse than
+                    a disabled one that says why. */}
+                {(() => {
+                  const keys = Array.from(new Set(filteredServices.map((s: any) => s.category_id || 'uncategorised')))
+                  const allCollapsed = keys.length > 0 && keys.every(k => collapsedDepts.has(k as string))
+                  return (
+                    <button
+                      onClick={() => setCollapsedDepts(allCollapsed ? new Set() : new Set(keys as string[]))}
+                      disabled={!!serviceSearch}
+                      title={serviceSearch ? 'Groups stay open while searching' : allCollapsed ? 'Expand every department' : 'Collapse every department'}
+                      className="flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg bg-secondary border border-border text-muted-foreground hover:text-foreground transition-colors shrink-0 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-muted-foreground">
+                      {allCollapsed ? <ChevronsUpDown className="w-3 h-3" /> : <ChevronsDownUp className="w-3 h-3" />}
+                      {allCollapsed ? 'Expand all' : 'Collapse all'}
+                    </button>
+                  )
+                })()}
               </div>
-              <div className="space-y-1.5">
-                {filteredServices.map((svc: any) => {
+              {/* Grouped by department — same taxonomy that drives employee
+                  access, so the catalog reads the way access is granted. */}
+              {(() => {
+                const renderServiceRow = (svc: any) => {
                   const linkedGroupIds = groupServices.filter(gs => gs.service_id === svc.id).map(gs => gs.group_id)
                   const linkedGroupNames = groups.filter((g: any) => linkedGroupIds.includes(g.id)).map((g: any) => g.name.replace(' Group', ''))
                   return quickEdit ? (
@@ -1909,10 +1937,243 @@ export default function SettingsClient(props: Props) {
                       </div>
                     </div>
                   )
-                })}
-              </div>
+                }
+                const dotCls: Record<string, string> = {
+                  violet: 'bg-violet-500', amber: 'bg-amber-500', blue: 'bg-blue-500',
+                  emerald: 'bg-emerald-500', rose: 'bg-rose-500', cyan: 'bg-cyan-500',
+                  orange: 'bg-orange-500', slate: 'bg-slate-400',
+                }
+                const deptGroups: any[] = [
+                  ...serviceCategories.filter((c: any) => c.is_active !== false)
+                    .sort((a: any, b: any) => (a.display_order ?? 0) - (b.display_order ?? 0)),
+                  ...serviceCategories.filter((c: any) => c.is_active === false),
+                  { id: null, name: 'No department' },
+                ]
+                return (
+                  <div className="space-y-5">
+                    {deptGroups.map((g: any) => {
+                      const rows = filteredServices.filter((s: any) => (s.category_id || null) === (g.id || null))
+                      if (rows.length === 0) return null
+                      const key = g.id ?? 'uncategorised'
+                      // A live search should never hide matches behind a collapsed
+                      // header — while searching, every group is forced open.
+                      const collapsed = collapsedDepts.has(key) && !serviceSearch
+                      return (
+                        <div key={key}>
+                          <button
+                            type="button"
+                            onClick={() => setCollapsedDepts(prev => {
+                              const next = new Set(prev)
+                              if (next.has(key)) next.delete(key); else next.add(key)
+                              return next
+                            })}
+                            className="w-full flex items-center gap-2 mb-1.5 group/dept"
+                            aria-expanded={!collapsed}>
+                            <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground/50 transition-transform ${collapsed ? '-rotate-90' : ''}`} />
+                            <span className={`w-2 h-2 rounded-full ${g.id ? (dotCls[g.color] || 'bg-muted-foreground/40') : 'bg-amber-500'}`} />
+                            <h3 className={`text-[11px] font-semibold uppercase tracking-wider ${g.id ? 'text-muted-foreground group-hover/dept:text-foreground' : 'text-amber-500'} transition-colors`}>
+                              {g.name}{g.is_active === false ? ' (archived)' : ''}
+                            </h3>
+                            <span className="text-[10px] text-muted-foreground/50">{rows.length}</span>
+                            {!g.id && <span className="text-[10px] text-amber-500/70 italic">hidden from department-restricted employees</span>}
+                            <span className="flex-1 h-px bg-border/40" />
+                          </button>
+                          {!collapsed && <div className="space-y-1.5">{rows.map(renderServiceRow)}</div>}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
             </div>
           )}
+
+          {/* Departments — master data for the service taxonomy. Fully
+              data-driven: rows created here flow straight into employee access
+              via the scope engine, which resolves category membership at read
+              time. No migration is ever needed for a new department. */}
+          {tab === 'Departments' && (() => {
+            const DEPT_COLORS = ['violet', 'amber', 'blue', 'emerald', 'rose', 'cyan', 'orange', 'slate']
+            const dotCls: Record<string, string> = {
+              violet: 'bg-violet-500', amber: 'bg-amber-500', blue: 'bg-blue-500',
+              emerald: 'bg-emerald-500', rose: 'bg-rose-500', cyan: 'bg-cyan-500',
+              orange: 'bg-orange-500', slate: 'bg-slate-400',
+            }
+            const active = serviceCategories.filter((c: any) => c.is_active !== false)
+              .sort((a: any, b: any) => (a.display_order ?? 0) - (b.display_order ?? 0))
+            const archived = serviceCategories.filter((c: any) => c.is_active === false)
+            const activeServices = services.filter((s: any) => s.is_active !== false)
+            const uncategorised = activeServices.filter((s: any) => !s.category_id)
+
+            async function addDept() {
+              const name = newDeptName.trim()
+              if (!name || deptSaving) return
+              setDeptSaving(true)
+              const res = await createServiceCategory({ name, color: DEPT_COLORS[active.length % DEPT_COLORS.length] })
+              setDeptSaving(false)
+              if (!res.ok) { toast.error('Failed to create department', res.error); return }
+              setServiceCategories(prev => [...prev, res.data])
+              setNewDeptName('')
+              toast.success(`Department "${name}" created`, 'Assign services to it from Services → Edit, then assign employees.')
+            }
+
+            async function move(id: string, dir: -1 | 1) {
+              const idx = active.findIndex((c: any) => c.id === id)
+              const swap = idx + dir
+              if (swap < 0 || swap >= active.length) return
+              const ordered = [...active]
+              ;[ordered[idx], ordered[swap]] = [ordered[swap], ordered[idx]]
+              // Optimistic — display_order mirrors the new index.
+              setServiceCategories(prev => prev.map((c: any) => {
+                const pos = ordered.findIndex((o: any) => o.id === c.id)
+                return pos === -1 ? c : { ...c, display_order: pos + 1 }
+              }))
+              const res = await reorderServiceCategories(ordered.map((c: any) => c.id))
+              if (!res.ok) toast.error('Reorder not saved', res.error)
+            }
+
+            const deptRow = (c: any) => {
+              const svcCount = activeServices.filter((s: any) => s.category_id === c.id).length
+              const empCount = empCategories.filter(ec => ec.category_id === c.id).length
+              const isArchived = c.is_active === false
+              return (
+                <div key={c.id} className={`bg-card border rounded-xl px-4 py-3 flex items-center gap-3 ${isArchived ? 'border-border/50 opacity-60' : 'border-border'}`}>
+                  <button
+                    type="button"
+                    title="Change colour"
+                    onClick={async () => {
+                      const next = DEPT_COLORS[(DEPT_COLORS.indexOf(c.color) + 1) % DEPT_COLORS.length]
+                      setServiceCategories(prev => prev.map((x: any) => x.id === c.id ? { ...x, color: next } : x))
+                      const res = await updateServiceCategory(c.id, { color: next })
+                      if (!res.ok) toast.error('Colour not saved', res.error)
+                    }}
+                    className={`w-3.5 h-3.5 rounded-full shrink-0 ring-2 ring-transparent hover:ring-border transition-all ${dotCls[c.color] || 'bg-muted-foreground/40'}`}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <input
+                      key={`${c.id}-name`}
+                      defaultValue={c.name}
+                      disabled={isArchived}
+                      onBlur={async e => {
+                        const v = e.target.value.trim()
+                        if (!v || v === c.name) { e.target.value = c.name; return }
+                        const res = await updateServiceCategory(c.id, { name: v })
+                        if (!res.ok) { toast.error('Rename failed', res.error); e.target.value = c.name; return }
+                        setServiceCategories(prev => prev.map((x: any) => x.id === c.id ? { ...x, name: v } : x))
+                      }}
+                      className="w-full bg-transparent text-sm font-medium border-b border-transparent hover:border-border/60 focus:border-primary focus:outline-none pb-0.5 disabled:pointer-events-none"
+                    />
+                    <input
+                      key={`${c.id}-desc`}
+                      defaultValue={c.description || ''}
+                      disabled={isArchived}
+                      placeholder="Description (optional)…"
+                      onBlur={async e => {
+                        const v = e.target.value.trim()
+                        if (v === (c.description || '')) return
+                        const res = await updateServiceCategory(c.id, { description: v || null })
+                        if (!res.ok) { toast.error('Description not saved', res.error); return }
+                        setServiceCategories(prev => prev.map((x: any) => x.id === c.id ? { ...x, description: v || null } : x))
+                      }}
+                      className="w-full bg-transparent text-xs text-muted-foreground border-b border-transparent hover:border-border/40 focus:border-primary focus:outline-none mt-0.5 disabled:pointer-events-none"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${svcCount > 0 ? 'bg-primary/10 text-primary border-primary/20' : 'text-muted-foreground/50 border-border/50 italic'}`}>
+                      {svcCount} service{svcCount === 1 ? '' : 's'}
+                    </span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium flex items-center gap-1 ${empCount > 0 ? 'bg-blue-500/10 text-blue-500 dark:text-blue-400 border-blue-500/20' : 'text-muted-foreground/50 border-border/50 italic'}`}>
+                      <Users className="w-2.5 h-2.5" />{empCount}
+                    </span>
+                  </div>
+                  {!isArchived && (
+                    <div className="flex flex-col shrink-0">
+                      <button onClick={() => move(c.id, -1)} className="p-0.5 text-muted-foreground/50 hover:text-foreground disabled:opacity-20" disabled={active[0]?.id === c.id} title="Move up">
+                        <ArrowUp className="w-3 h-3" />
+                      </button>
+                      <button onClick={() => move(c.id, 1)} className="p-0.5 text-muted-foreground/50 hover:text-foreground disabled:opacity-20" disabled={active[active.length - 1]?.id === c.id} title="Move down">
+                        <ArrowDown className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )}
+                  {isArchived ? (
+                    <button onClick={async () => {
+                      const res = await setServiceCategoryActive(c.id, true)
+                      if (!res.ok) { toast.error('Restore failed', res.error); return }
+                      setServiceCategories(prev => prev.map((x: any) => x.id === c.id ? { ...x, is_active: true } : x))
+                    }} className="p-2 rounded-lg hover:bg-emerald-500/15 text-muted-foreground hover:text-emerald-500 transition-colors shrink-0" title="Restore department">
+                      <ArchiveRestore className="w-4 h-4" />
+                    </button>
+                  ) : (
+                    <button onClick={() => requestDelete('Department', c.id, c.name, async () => {
+                      const res = await setServiceCategoryActive(c.id, false)
+                      if (!res.ok) { toast.error('Archive failed', res.error); return }
+                      setServiceCategories(prev => prev.map((x: any) => x.id === c.id ? { ...x, is_active: false } : x))
+                    })} className="p-2 rounded-lg hover:bg-amber-500/15 text-muted-foreground hover:text-amber-400 transition-colors shrink-0" title="Archive department">
+                      <Archive className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              )
+            }
+
+            return (
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <h2 className="text-sm font-semibold">Departments ({active.length})</h2>
+                </div>
+                <p className="text-xs text-muted-foreground mb-4">
+                  Departments group services for employee access, client visibility and reporting.
+                  Assign a service to a department in <span className="font-medium text-foreground/80">Services → Edit</span>;
+                  assign employees to departments in <span className="font-medium text-foreground/80">Employees → Edit</span>.
+                  Everyone assigned to a department automatically covers every service in it — including ones added later.
+                </p>
+
+                {/* Create */}
+                <form onSubmit={e => { e.preventDefault(); addDept() }} className="flex items-center gap-2 mb-4">
+                  <input
+                    value={newDeptName}
+                    onChange={e => setNewDeptName(e.target.value)}
+                    placeholder="New department name — e.g. Photography, Web & Development…"
+                    className="flex-1 bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary"
+                  />
+                  <button type="submit" disabled={!newDeptName.trim() || deptSaving}
+                    className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90 disabled:opacity-50">
+                    <Plus className="w-4 h-4" /> {deptSaving ? 'Adding…' : 'Add Department'}
+                  </button>
+                </form>
+
+                <div className="space-y-1.5">{active.map(deptRow)}</div>
+
+                {uncategorised.length > 0 && (
+                  <div className="mt-4 px-4 py-3 rounded-xl bg-amber-500/[0.06] border border-amber-500/20">
+                    <p className="text-xs font-semibold text-amber-500 dark:text-amber-400 mb-1 flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5" /> {uncategorised.length} service{uncategorised.length === 1 ? '' : 's'} not in any department
+                    </p>
+                    <p className="text-[11px] text-muted-foreground mb-1.5">
+                      Uncategorised services are invisible to department-restricted employees unless assigned directly.
+                    </p>
+                    <div className="flex flex-wrap gap-1">
+                      {uncategorised.map((s: any) => (
+                        <button key={s.id} type="button"
+                          onClick={() => { setEditingId(s.id); setShowForm('service'); const gids = groupServices.filter(gs => gs.service_id === s.id).map(gs => gs.group_id); const eids = empServices.filter(es => es.service_id === s.id).map(es => es.employee_id); setForm({ ...s, _groupIds: gids, _employeeIds: eids }) }}
+                          className="text-[11px] px-2 py-0.5 rounded-full bg-secondary border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors">
+                          {s.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {archived.length > 0 && (
+                  <div className="mt-5">
+                    <h3 className="text-xs font-semibold text-muted-foreground mb-2">Archived ({archived.length})</h3>
+                    <div className="space-y-1.5">{archived.map(deptRow)}</div>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
 
           {/* Groups & Params */}
           {tab === 'Groups & Params' && (
@@ -3164,6 +3425,27 @@ export default function SettingsClient(props: Props) {
                 <>
                   <FieldRow label="Service Name" required><input value={form.name || ''} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} required className={inputCls} /></FieldRow>
 
+                  {/* Department — drives employee access + client visibility.
+                      Category membership is resolved at read time by the scope
+                      engine, so moving a service here re-scopes everyone
+                      instantly with no re-assignment. */}
+                  <FieldRow label={<span className="flex items-center gap-1">Department <InfoTip text="Employees assigned to this department automatically see this service, its tasks and its clients. Moving the service to another department updates visibility instantly — no employee re-assignment needed. Manage departments in Settings → Departments." /></span>}>
+                    <AppSelect
+                      value={form.category_id || ''}
+                      onChange={e => setForm(p => ({ ...p, category_id: e.target.value || null }))}>
+                      <option value="">— No department (uncategorised) —</option>
+                      {serviceCategories
+                        .filter((c: any) => c.is_active !== false || c.id === form.category_id)
+                        .sort((a: any, b: any) => (a.display_order ?? 0) - (b.display_order ?? 0))
+                        .map((c: any) => (
+                          <option key={c.id} value={c.id}>{c.is_active === false ? `${c.name} (archived)` : c.name}</option>
+                        ))}
+                    </AppSelect>
+                    {!form.category_id && (
+                      <p className="text-[11px] text-amber-500/90 mt-1">Uncategorised services are hidden from department-restricted employees unless assigned to them directly.</p>
+                    )}
+                  </FieldRow>
+
                   {/* Contribution Groups */}
                   <FieldRow label={<span className="flex items-center gap-1">Contribution Groups <InfoTip text="Select which groups apply to this service — only those appear in the Contribution Entry screen for its tasks. Leave empty to make ALL groups available. Weights auto-normalize per task, so any combination always splits exactly 100%." /></span>}>
                     <div className="space-y-2">
@@ -3239,33 +3521,61 @@ export default function SettingsClient(props: Props) {
                   </FieldRow>
 
                   {/* Assigned employees — employee_services junction (same rows as the employee form) */}
-                  <FieldRow label={<span className="flex items-center gap-1">Assigned Employees <InfoTip text="Employees who work on this service. Contribution scoring for tasks of this service offers only these employees. Editing the same assignment from the employee form updates here too." /></span>}>
+                  <FieldRow label={<span className="flex items-center gap-1">Assigned Employees <InfoTip text="Employees who work on this service. Members of this service's department are included automatically and can only be removed by changing their department assignment (Employees → Edit). Direct assignment here adds people from outside the department. Contribution scoring for tasks of this service offers only these employees." /></span>}>
                     <div className="flex flex-wrap gap-1.5">
-                      {employees.filter((emp: any) => emp.is_active && !emp.is_archived).map((emp: any) => {
-                        const selected: string[] = form._employeeIds || []
-                        const isSelected = selected.includes(emp.id)
-                        return (
-                          <button key={emp.id} type="button"
-                            onClick={() => setForm((p: any) => ({
-                              ...p,
-                              _employeeIds: isSelected
-                                ? (p._employeeIds || []).filter((id: string) => id !== emp.id)
-                                : [...(p._employeeIds || []), emp.id],
-                            }))}
-                            className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
-                              isSelected
-                                ? 'bg-primary/15 text-primary border-primary/30'
-                                : 'bg-secondary text-muted-foreground border-transparent hover:border-border hover:text-foreground'
-                            }`}>
-                            {/* eslint-disable-next-line no-restricted-syntax -- deliberate: name shown only when privacy is unlocked, on the admin settings employee picker */}
-                            {isSelected ? '✓ ' : ''}{emp.cqid}{isUnlocked && emp.name ? ` · ${emp.name}` : ''}
-                          </button>
+                      {(() => {
+                        // Department members get this service via employee_service_categories —
+                        // shown locked so nobody thinks a click here can revoke what the
+                        // department grants. Direct (employee_services) pills stay toggleable.
+                        const deptMemberIds = new Set(
+                          form.category_id ? empCategories.filter(ec => ec.category_id === form.category_id).map(ec => ec.employee_id) : [],
                         )
-                      })}
+                        const deptName = serviceCategories.find((c: any) => c.id === form.category_id)?.name
+                        return employees.filter((emp: any) => emp.is_active && !emp.is_archived).map((emp: any) => {
+                          const selected: string[] = form._employeeIds || []
+                          const isSelected = selected.includes(emp.id)
+                          const viaDept = deptMemberIds.has(emp.id)
+                          if (viaDept) return (
+                            <span key={emp.id}
+                              title={`Included automatically — member of the ${deptName} department. Manage in Employees → Edit.`}
+                              className="px-2.5 py-1 rounded-full text-xs font-medium border bg-violet-500/10 text-violet-500 dark:text-violet-400 border-violet-500/30 cursor-default inline-flex items-center gap-1">
+                              <Lock className="w-3 h-3" />
+                              {/* eslint-disable-next-line no-restricted-syntax -- deliberate: name shown only when privacy is unlocked, on the admin settings employee picker */}
+                              {emp.cqid}{isUnlocked && emp.name ? ` · ${emp.name}` : ''}
+                              <span className="opacity-70">· dept</span>
+                            </span>
+                          )
+                          return (
+                            <button key={emp.id} type="button"
+                              onClick={() => setForm((p: any) => ({
+                                ...p,
+                                _employeeIds: isSelected
+                                  ? (p._employeeIds || []).filter((id: string) => id !== emp.id)
+                                  : [...(p._employeeIds || []), emp.id],
+                              }))}
+                              className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+                                isSelected
+                                  ? 'bg-primary/15 text-primary border-primary/30'
+                                  : 'bg-secondary text-muted-foreground border-transparent hover:border-border hover:text-foreground'
+                              }`}>
+                              {/* eslint-disable-next-line no-restricted-syntax -- deliberate: name shown only when privacy is unlocked, on the admin settings employee picker */}
+                              {isSelected ? '✓ ' : ''}{emp.cqid}{isUnlocked && emp.name ? ` · ${emp.name}` : ''}
+                            </button>
+                          )
+                        })
+                      })()}
                     </div>
-                    {(form._employeeIds || []).length === 0 && (
-                      <p className="text-xs text-muted-foreground/60 mt-1.5">No employees assigned — every employee appears for this service in contribution scoring.</p>
-                    )}
+                    {(() => {
+                      const deptCount = form.category_id ? empCategories.filter(ec => ec.category_id === form.category_id).length : 0
+                      const directCount = (form._employeeIds || []).length
+                      if (deptCount + directCount === 0) return (
+                        <p className="text-xs text-muted-foreground/60 mt-1.5">No employees assigned — every employee appears for this service in contribution scoring.</p>
+                      )
+                      if (deptCount > 0) return (
+                        <p className="text-xs text-muted-foreground/60 mt-1.5">{deptCount} via department{directCount > 0 ? ` + ${directCount} direct` : ''}.</p>
+                      )
+                      return null
+                    })()}
                   </FieldRow>
 
                   <FieldRow label={<span className="flex items-center">Pricing Type <InfoTip text="How this service is billed to clients." /></span>}>

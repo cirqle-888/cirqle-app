@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { X, RefreshCw, AlertTriangle, Check } from 'lucide-react'
 import { formatTaskDate } from '@/lib/utils/format-date'
+import { computeTaskAmount, resolvePricingType } from '@/lib/tasks/pricing'
 
 interface Client { id: string; name: string; code?: string | null }
 interface Service { id: string; name: string; pricing_type?: string | null; default_price?: number | null }
@@ -47,19 +48,26 @@ interface PreviewRow {
   delta: number
 }
 
-/** Compute the billing amount a task should have, given matrix + service config. */
+/**
+ * Compute the billing amount a task should have, given matrix + service config.
+ * Delegates to the shared pricing engine so a bulk recalc can never disagree
+ * with what the task forms would have computed for the same task.
+ *
+ * `quantity` carries the pricing type's own unit (creatives / hours / ad spend),
+ * which is why it feeds all three inputs — see resolveTaskQuantity. The rate for
+ * percentage_of_spend lives in its own column here, hence percentRate.
+ */
 function computeBilling(task: TaskRow, service?: Service, pricing?: Pricing): number {
   if (!service) return 0
   const qty = task.quantity ?? 1
-  const price = pricing?.price ?? service.default_price ?? 0
-  const pct = pricing?.percentage_rate ?? 0
-  switch (service.pricing_type) {
-    case 'fixed_per_creative': return price * qty
-    case 'hourly':              return price * qty
-    case 'percentage_of_spend': return qty * (pct / 100)
-    case 'retainer':            return price
-    default:                    return price * qty
-  }
+  return computeTaskAmount({
+    pricingType: resolvePricingType(service.pricing_type),
+    unitPrice:   pricing?.price ?? service.default_price ?? 0,
+    quantity:    qty,
+    hours:       qty,
+    spend:       qty,
+    percentRate: pricing?.percentage_rate ?? 0,
+  })
 }
 
 export function RecalcBillingModal({ open, onClose, clients, services, clientPricings, onApplied }: Props) {

@@ -3,6 +3,9 @@ import { createAdminClient, fetchAll } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { financialVisibility } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
+import {
+  loadServiceScope, isServiceRestricted, scopeRowsByService, scopeServiceList,
+} from '@/lib/scope/service-scope'
 import { loadAgreementOverview, loadClientMonthProgress } from '@/lib/agreements/server'
 import type { AgreementProgressSummary } from '@/lib/agreements/progress'
 import ClientDetailClient from './client-detail-client'
@@ -25,6 +28,19 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
 
   const { data: client } = await supabase.from('clients').select('*').eq('id', id).maybeSingle()
   if (!client) notFound()
+
+  // Department scoping (C-1). The list page hides out-of-department clients,
+  // but this route is directly addressable — without this guard a restricted
+  // employee could read any client by URL. notFound (not redirect) so the
+  // response doesn't even confirm the client exists.
+  //
+  // A client with NO active pricing rows is "not configured yet" and stays
+  // reachable by everyone; a client whose services don't intersect the
+  // viewer's departments 404s.
+  const scope = await loadServiceScope(supabase, me, 'global')
+  if (isServiceRestricted(scope) && scope.clientServices.has(id) && !scope.visibleClientIds.has(id)) {
+    notFound()
+  }
 
   const [invoicesRes, tasksRes, pricingRes, servicesRes, partnerRes] = await Promise.all([
     showAmounts
@@ -67,13 +83,24 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     agreementProgress = progress
   }
 
+  // A multi-department client is VISIBLE but partially rendered: the viewer
+  // sees only their departments' slice. Tasks filter by the task's service
+  // (tasks with no service stay — unclassified work is visible app-wide);
+  // pricing rows for other departments' services are stripped so what the
+  // client buys elsewhere isn't disclosed. Invoices are client-level money and
+  // stay gated by billing permissions (showAmounts) rather than department.
+  const scopedTasks = scopeRowsByService((tasksRes.data || []) as any[], scope, (t: any) => t.service?.id ?? null)
+  const scopedPricing = isServiceRestricted(scope)
+    ? ((pricingRes.data || []) as any[]).filter((p: any) => scope.serviceIds.has(p.service_id))
+    : ((pricingRes.data || []) as any[])
+
   return (
     <ClientDetailClient
       client={client}
       invoices={(invoicesRes.data || []) as any[]}
-      tasks={(tasksRes.data || []) as any[]}
-      pricing={(pricingRes.data || []) as any[]}
-      services={(servicesRes.data || []) as any[]}
+      tasks={scopedTasks}
+      pricing={scopedPricing}
+      services={scopeServiceList((servicesRes.data || []) as any[], scope)}
       partner={partnerRes.data as any}
       showAmounts={showAmounts}
       agreements={agreements}

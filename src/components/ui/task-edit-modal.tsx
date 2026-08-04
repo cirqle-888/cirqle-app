@@ -8,7 +8,11 @@ import { ModalOverlay } from './modal-overlay'
 import AppSelect from './app-select'
 import Combobox from './combobox'
 import { Button } from './button'
-import type { Currency } from '@/types'
+import { TaskBillingSection } from './task-billing-section'
+import { useRetainerCoverage } from '@/lib/tasks/use-retainer-coverage'
+import {
+  computeTaskAmount, resolveTaskQuantity, resolveUnitPrice, effectiveBillingAmount,
+} from '@/lib/tasks/pricing'
 
 const ContributionEntryPanel = dynamic(
   () => import('./contribution-entry-panel').then(m => m.ContributionEntryPanel),
@@ -80,6 +84,7 @@ export function TaskEditModal({
     spend: String(task.billing_amount_inr ?? 0),
     description: task.description ?? '',
     status: task.status ?? 'pending',
+    bill_as_extra: !!task.bill_as_extra,
   })
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -100,11 +105,11 @@ export function TaskEditModal({
     return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update) }
   }, [])
 
-  const svc = services.find(s => s.id === form.service_id)
-  const pt = svc?.pricing_type || 'fixed_per_creative'
-  const cp = clientPricings.find(p => p.client_id === form.client_id && p.service_id === form.service_id)
-  const unitPrice = cp?.price ?? svc?.default_price ?? 0
-  const unitCurrency = (cp?.currency || svc?.default_currency || 'INR') as Currency
+  // Pricing + coverage come from the shared engine/hook — never re-derived here.
+  const { pricingType: pt, unitPrice, currency: unitCurrency } = resolveUnitPrice({
+    services, clientPricings, clientId: form.client_id, serviceId: form.service_id,
+  })
+  const coverage = useRetainerCoverage(form.client_id, form.service_id, form.task_date)
 
   // Variant tasks (revision / concept / size) bill as a derived share of their
   // PARENT task and freeze that amount at creation. Editing them here must NEVER
@@ -125,11 +130,15 @@ export function TaskEditModal({
 
     // qty is always derived from the employee-visible input fields so that
     // non-admin edits also update the quantity column correctly.
-    let amount = unitPrice
-    let qty = 1
-    if (pt === 'fixed_per_creative') { qty = parseFloat(form.quantity) || 1; amount = unitPrice * qty }
-    else if (pt === 'hourly') { qty = parseFloat(form.hours) || 1; amount = unitPrice * qty }
-    else if (pt === 'percentage_of_spend') { qty = parseFloat(form.spend) || 0; amount = qty * (unitPrice / 100) }
+    const qty = resolveTaskQuantity({ pricingType: pt, ...form })
+    // The pricing matrix says what the work is worth; coverage decides what the
+    // CLIENT is charged. Sending the raw matrix price over a retainer-covered
+    // task's zero is what made every save here fail — including edits that
+    // touched nothing financial at all.
+    const amount = effectiveBillingAmount(
+      computeTaskAmount({ pricingType: pt, unitPrice, ...form }),
+      { covered: !!coverage, billAsExtra: form.bill_as_extra },
+    )
 
     const res = await serverSaveTask({
       taskId:           task.id,
@@ -146,11 +155,16 @@ export function TaskEditModal({
       ...(isVariant ? { quantity: qty } : {
         ...(showFinancials ? {
           billingAmount:    amount,
-          billingAmountInr: amount,
           currency:         unitCurrency,
         } : {}),
         quantity: qty,
       }),
+      // A billing decision: sent only by pricing-visible users, and only once
+      // coverage is known — so a save can never silently start (or stop)
+      // charging a client. Employees without pricing access never send it, and
+      // their rows may not even load the flag.
+      ...(showFinancials && (coverage || form.bill_as_extra)
+        ? { billAsExtra: form.bill_as_extra } : {}),
       taskDate:         form.task_date || null,
     })
 
@@ -285,82 +299,31 @@ export function TaskEditModal({
                 </div>
               </div>
 
-              {/* Quantity / Hours / Spend + Price */}
-              {showFinancials && (
-                isVariant ? (
-                  /* Variant task — billing is derived from the parent and locked.
-                     Showing the editable service-price fields here would let an
-                     edit silently overwrite the variant price with the full
-                     service price, so we surface a read-only locked price instead. */
-                  <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-                      Price ({(task.currency as string) || 'INR'})
-                    </label>
-                    <input readOnly value={variantBillingInr} className={inputCls + ' opacity-60 cursor-not-allowed'} />
-                    <p className="text-[11px] text-amber-500/90 mt-1.5 flex items-start gap-1.5">
-                      <span aria-hidden>🔗</span>
-                      <span>
-                        Variant price is <strong>locked</strong> — derived from the parent task
-                        {task.billing_mode ? ` (${VARIANT_MODE_LABEL[task.billing_mode] ?? task.billing_mode})` : ''}.
-                        Editing here won’t change it, so it can’t be overwritten with the full service price.
-                      </span>
-                    </p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {pt === 'fixed_per_creative' && (
-                      <div>
-                        <label className="block text-xs font-medium text-muted-foreground mb-1.5">Creatives</label>
-                        <input type="number" min="1" step="1" value={form.quantity} onChange={e => setForm(p => ({ ...p, quantity: e.target.value }))} className={inputCls} />
-                      </div>
-                    )}
-                    {pt === 'hourly' && (
-                      <div>
-                        <label className="block text-xs font-medium text-muted-foreground mb-1.5">Hours</label>
-                        <input type="number" min="0.5" step="0.5" value={form.hours} onChange={e => setForm(p => ({ ...p, hours: e.target.value }))} className={inputCls} />
-                      </div>
-                    )}
-                    {pt === 'percentage_of_spend' && (
-                      <div>
-                        <label className="block text-xs font-medium text-muted-foreground mb-1.5">Ad Spend ({unitCurrency})</label>
-                        <input type="number" min="0" step="0.01" value={form.spend} onChange={e => setForm(p => ({ ...p, spend: e.target.value }))} className={inputCls} placeholder="e.g. 1000" />
-                      </div>
-                    )}
-                    <div>
-                      <label className="block text-xs font-medium text-muted-foreground mb-1.5">Price ({unitCurrency})</label>
-                      <input readOnly value={unitPrice} className={inputCls + ' opacity-60 cursor-not-allowed'} />
-                    </div>
-                  </div>
-                )
-              )}
-
-              {/* Quantity input for employees without pricing access.
-                  Mirrors the Add Task form: shows creatives/hours/spend but
-                  no price or total so financial data stays hidden. */}
-              {!showFinancials && !isVariant && (
-                pt === 'fixed_per_creative' ? (
-                  <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">Number of creatives</label>
-                    <input type="number" min="1" step="1" value={form.quantity}
-                      onChange={e => setForm(p => ({ ...p, quantity: e.target.value }))}
-                      className={inputCls} placeholder="1" />
-                  </div>
-                ) : pt === 'hourly' ? (
-                  <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">Hours worked</label>
-                    <input type="number" min="0.5" step="0.5" value={form.hours}
-                      onChange={e => setForm(p => ({ ...p, hours: e.target.value }))}
-                      className={inputCls} placeholder="1" />
-                  </div>
-                ) : pt === 'percentage_of_spend' ? (
-                  <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">Client's total ad spend</label>
-                    <input type="number" min="0" step="0.01" value={form.spend}
-                      onChange={e => setForm(p => ({ ...p, spend: e.target.value }))}
-                      className={inputCls} placeholder="e.g. 1000" />
-                  </div>
-                ) : null
-              )}
+              {/* Financial section — the SAME component the Add Task form uses.
+                  Never inline billing JSX here; see task-billing-section.tsx. */}
+              <TaskBillingSection
+                services={services}
+                clientPricings={clientPricings}
+                clientId={form.client_id}
+                serviceId={form.service_id}
+                quantity={form.quantity}
+                hours={form.hours}
+                spend={form.spend}
+                onChange={patch => setForm(p => ({ ...p, ...patch }))}
+                coverage={coverage}
+                billAsExtra={form.bill_as_extra}
+                onBillAsExtraChange={v => setForm(p => ({ ...p, bill_as_extra: v }))}
+                showFinancials={showFinancials}
+                lockedAmount={isVariant ? variantBillingInr : null}
+                lockedCurrency={(task.currency as string) || 'INR'}
+                lockedNote={
+                  <>
+                    Variant price is <strong>locked</strong> — derived from the parent task
+                    {task.billing_mode ? ` (${VARIANT_MODE_LABEL[task.billing_mode] ?? task.billing_mode})` : ''}.
+                    Editing here won’t change it, so it can’t be overwritten with the full service price.
+                  </>
+                }
+              />
 
               {/* Description */}
               <div>

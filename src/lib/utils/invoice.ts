@@ -94,10 +94,33 @@ export function getNextAction(status: string): { label: string; next: string } |
   const map: Record<string, { label: string; next: string }> = {
     draft:     { label: 'Mark Reviewed', next: 'reviewed' },
     reviewed:  { label: 'Mark Sent',     next: 'sent' },
-    sent:      { label: 'Record Payment', next: 'partial' },
+    // NOT "Record Payment" — this only flips the status, it records no amount
+    // and creates no cashbook entry. It sat next to the real green Record
+    // Payment button wearing the same label, which is how an invoice ends up
+    // reading "Partial" with paid_amount still 0.
+    sent:      { label: 'Mark Partial',  next: 'partial' },
     partial:   { label: 'Mark Paid',     next: 'paid' },
   }
   return map[status] || null
+}
+
+/**
+ * Line-item order: by the task's date, oldest first. Manual lines (no task, so
+ * no date) sink to the bottom, and ties fall back to display_order so the order
+ * is stable. Shared by the detail panel and the PDF/print renderer so what you
+ * see on screen is the order the client receives.
+ */
+export function compareInvoiceItems(a: any, b: any): number {
+  const dateA = a?.task?.task_date || ''
+  const dateB = b?.task?.task_date || ''
+  if (dateA && dateB) {
+    if (dateA !== dateB) return dateA.localeCompare(dateB)
+  } else if (dateA && !dateB) {
+    return -1
+  } else if (!dateA && dateB) {
+    return 1
+  }
+  return (a?.display_order ?? 0) - (b?.display_order ?? 0)
 }
 
 /** Whether an invoice is editable (items can be changed) */

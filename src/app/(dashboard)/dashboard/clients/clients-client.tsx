@@ -11,12 +11,19 @@ import AppSelect from '@/components/ui/app-select'
 import { usePrivacy } from '@/contexts/privacy-context'
 import {
   Plus, Search, X, Edit2, Archive, ArchiveRestore, ChevronRight,
-  Users2, Award, IndianRupee, AlertTriangle, Settings2,
+  Users2, Award, IndianRupee, AlertTriangle, Settings2, Layers,
 } from 'lucide-react'
 import { createClient, updateClient, deactivateClient, reactivateClient } from '@/app/(dashboard)/dashboard/settings/actions'
 import type { Currency } from '@/types'
 
 const CURRENCIES: Currency[] = ['AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
+
+// Same colour tokens Settings → Departments writes.
+const DEPT_DOT: Record<string, string> = {
+  violet: 'bg-violet-500', amber: 'bg-amber-500', blue: 'bg-blue-500',
+  emerald: 'bg-emerald-500', rose: 'bg-rose-500', cyan: 'bg-cyan-500',
+  orange: 'bg-orange-500', slate: 'bg-slate-400',
+}
 
 interface ClientRow {
   id: string
@@ -42,6 +49,10 @@ interface Props {
   clients: ClientRow[]
   stats: Record<string, ClientStats>
   services: { id: string; name: string }[]
+  /** Active departments, in display order — drives the "group by department" view. */
+  departments?: { id: string; name: string; color: string | null; display_order: number }[]
+  /** clientId → department ids, DERIVED server-side from what the client buys. */
+  clientDepartments?: Record<string, string[]>
   showAmounts: boolean
   canCreate: boolean
   canEdit: boolean
@@ -49,7 +60,7 @@ interface Props {
 
 const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
 
-export default function ClientsClient({ clients: initialClients, stats, showAmounts, canCreate, canEdit }: Props) {
+export default function ClientsClient({ clients: initialClients, stats, departments = [], clientDepartments = {}, showAmounts, canCreate, canEdit }: Props) {
   const router = useRouter()
   const toast = useToast()
   const { ds } = usePrivacy()
@@ -57,6 +68,7 @@ export default function ClientsClient({ clients: initialClients, stats, showAmou
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<'active' | 'archived' | 'all'>('active')
   const [sort, setSort] = useState<'name' | 'outstanding' | 'tasks'>('name')
+  const [groupByDept, setGroupByDept] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<Record<string, any>>({})
@@ -209,7 +221,22 @@ export default function ClientsClient({ clients: initialClients, stats, showAmou
             {showAmounts && <option value="outstanding">Sort: Outstanding</option>}
             <option value="tasks">Sort: Most tasks</option>
           </AppSelect>
+          {departments.length > 0 && (
+            <button onClick={() => setGroupByDept(g => !g)}
+              className={`flex items-center gap-1.5 text-[13px] font-medium px-3 py-1.5 rounded-lg border transition-all shrink-0 ${
+                groupByDept
+                  ? 'bg-primary/10 border-primary/30 text-primary'
+                  : 'bg-secondary/30 border-border/50 text-muted-foreground hover:text-foreground'
+              }`}>
+              <Layers className="w-3.5 h-3.5" /> Group: Department
+            </button>
+          )}
         </div>
+        {groupByDept && (
+          <p className="text-[11px] text-muted-foreground -mt-2">
+            Departments are derived from the services each client buys — a client buying from several departments appears under each.
+          </p>
+        )}
 
         {/* List */}
         <div className="space-y-2">
@@ -222,7 +249,8 @@ export default function ClientsClient({ clients: initialClients, stats, showAmou
               </p>
             </div>
           )}
-          {filtered.map(client => {
+          {(() => {
+            const renderClientRow = (client: ClientRow) => {
             const s = stats[client.id]
             return (
               <div key={client.id}
@@ -289,7 +317,33 @@ export default function ClientsClient({ clients: initialClients, stats, showAmou
                 </div>
               </div>
             )
-          })}
+            }
+
+            if (!groupByDept) return filtered.map(renderClientRow)
+
+            const sections = [
+              ...departments,
+              { id: null as any, name: 'No department', color: null },
+            ]
+            return sections.map(dep => {
+              const rows = filtered.filter(c => {
+                const deps = clientDepartments[c.id] || []
+                return dep.id ? deps.includes(dep.id) : deps.length === 0
+              })
+              if (rows.length === 0) return null
+              return (
+                <div key={dep.id ?? 'none'} className="pt-2 first:pt-0">
+                  <div className="flex items-center gap-2 mb-2 px-1">
+                    <span className={`w-2 h-2 rounded-full ${dep.id ? (DEPT_DOT[dep.color ?? ''] || 'bg-muted-foreground/40') : 'bg-amber-500'}`} />
+                    <h3 className={`text-[11px] font-semibold uppercase tracking-wider ${dep.id ? 'text-muted-foreground' : 'text-amber-500'}`}>{dep.name}</h3>
+                    <span className="text-[10px] text-muted-foreground/50">{rows.length}</span>
+                    <span className="flex-1 h-px bg-border/40" />
+                  </div>
+                  <div className="space-y-2">{rows.map(renderClientRow)}</div>
+                </div>
+              )
+            })
+          })()}
         </div>
       </div>
 

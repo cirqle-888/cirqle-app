@@ -524,6 +524,7 @@ function EmployeeProfileSheet({ onClose, onChangePassword }: { onClose: () => vo
           )}
           <div className="min-w-0">
             <div className="text-sm font-semibold text-foreground truncate">{user.cqid ?? 'Account'}</div>
+            {/* eslint-disable-next-line no-restricted-syntax -- deliberate: the SIGNED-IN user's own name in their own account panel, and only while privacy is unlocked. Never another employee's name. */}
             {isUnlocked && user.name && <div className="text-xs text-muted-foreground truncate">{user.name}</div>}
             {user.designationName && (
               <span className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border whitespace-nowrap mt-0.5">

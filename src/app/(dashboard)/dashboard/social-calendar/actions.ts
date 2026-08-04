@@ -187,12 +187,16 @@ export interface ItemInput {
   /** Extra formats of the same creative (e.g. a post that also ships as a
    *  story-size variant). Same vocabulary as contentType. */
   variants?: string[]
+  /** Optional designer earmarked at planning time. Rides into the pushed
+   *  request's assigned_employee_id, so the plan answers "who draws this?"
+   *  without waiting for the Requests inbox. Null = decide later. */
+  assignedEmployeeId?: string | null
 }
 
 /** Optional patch-migration columns (each added in a later migration). When a
  *  write fails on one, we retry WITHOUT that column only — stripping all of
  *  them would silently drop data for columns that DO exist. */
-const PATCH_COLUMNS = ['service_id', 'variants', 'reference_url', 'reference_urls', 'scheduled_end_date', 'caption_canvas'] as const
+const PATCH_COLUMNS = ['service_id', 'variants', 'reference_url', 'reference_urls', 'scheduled_end_date', 'caption_canvas', 'assigned_employee_id'] as const
 
 /** Resolve WHICH patch column an error is about.
  *
@@ -339,6 +343,7 @@ function migrationWarning(dropped: string[], input: ItemInput, refs: string[]): 
   if (dropped.includes('scheduled_end_date') && cleanEndDate(input)) lost.push('the end date')
   if (dropped.includes('reference_urls') && refs.length > 1) lost.push('the extra reference images')
   if (dropped.includes('variants') && cleanVariants(input).length) lost.push('the format variants')
+  if (dropped.includes('assigned_employee_id') && input.assignedEmployeeId) lost.push('the assigned designer')
   if (!lost.length) return undefined
   return `Saved, but ${lost.join(' and ')} could not be stored — the database migration for those columns has not been applied yet.`
 }
@@ -383,6 +388,7 @@ export async function addCalendarItem(
     reference_urls: refs,
     reference_url: refs[0] ?? null, // legacy single kept in sync with refs[0]
     caption_canvas: sanitizeCaptionCanvas(input.captionCanvas),
+    assigned_employee_id: input.assignedEmployeeId || null,
   }
   const dropped: string[] = []
   const { data, error } = await withPatchColumnFallback(row, r =>
@@ -437,6 +443,7 @@ export async function updateCalendarItem(
     reference_urls: refs,
     reference_url: refs[0] ?? null,
     caption_canvas: sanitizeCaptionCanvas(input.captionCanvas),
+    assigned_employee_id: input.assignedEmployeeId || null,
     updated_at: new Date().toISOString(),
   }
   const dropped: string[] = []
@@ -455,6 +462,7 @@ export async function updateCalendarItem(
       await admin.from('task_requests').update({
         title: input.title.trim(),
         due_date: input.scheduledDate || null,
+        assigned_employee_id: input.assignedEmployeeId || null,
         description: composeRequestDescription({
           title: input.title, contentType: input.contentType, platforms: input.platforms || [],
           scheduledDate: input.scheduledDate, scheduledEndDate: cleanEndDate(input),
@@ -721,7 +729,7 @@ export async function pushItemsToRequests(
   let itemsErr: { message: string } | null = null
   // Pre-migration fallback: drop ONLY the column each retry trips on, so a
   // pending migration doesn't also blank columns that DO exist.
-  let cols = ['id', 'scheduled_date', 'scheduled_end_date', 'title', 'content_type', 'platforms', 'caption', 'notes', 'status', 'request_id', 'service_id', 'variants', 'reference_url', 'reference_urls', 'caption_canvas']
+  let cols = ['id', 'scheduled_date', 'scheduled_end_date', 'title', 'content_type', 'platforms', 'caption', 'notes', 'status', 'request_id', 'service_id', 'variants', 'reference_url', 'reference_urls', 'caption_canvas', 'assigned_employee_id']
   for (let attempt = 0; attempt <= PATCH_COLUMNS.length; attempt++) {
     const res = await admin.from('social_calendar_items')
       .select(cols.join(', '))
@@ -759,6 +767,8 @@ export async function pushItemsToRequests(
       // The item's chosen service rides into the request so calendar work gets
       // the same service-based pricing/routing as directly-created requests.
       serviceId: item.service_id || null,
+      // Planner's pick rides along; the inbox can still reassign.
+      assignedEmployeeId: item.assigned_employee_id || null,
     })
     // createManualRequest guards REQUESTS_MANAGE independently — surfacing its
     // error matters: 'Permission denied.' is otherwise reported as an

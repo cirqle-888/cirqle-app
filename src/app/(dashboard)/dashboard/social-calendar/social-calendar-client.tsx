@@ -35,7 +35,7 @@ import {
   Link2, Clipboard, PanelRightClose, PanelRightOpen,
   Bold, Italic, Underline, Strikethrough, List, ListOrdered, Heading2, Quote,
   Link as LinkIcon, Highlighter, Palette, Smile, Eraser,
-  AlignLeft, AlignCenter, AlignRight, CalendarRange, Handshake,
+  AlignLeft, AlignCenter, AlignRight, CalendarRange, Handshake, ChevronDown,
 } from 'lucide-react'
 
 // ─── Types (mirror the page's selects) ────────────────────────────────────────
@@ -67,6 +67,7 @@ interface ItemRow {
   request_id: string | null
   service_id?: string | null
   variants?: string[] | null
+  assigned_employee_id?: string | null
   reference_url?: string | null
   reference_urls?: string[] | null
   caption_canvas?: CaptionCanvas | null
@@ -86,6 +87,15 @@ interface Props {
   initialItems: ItemRow[]
   clients: { id: string; name: string; code: string }[]
   services?: { id: string; name: string }[]
+  /** Variant tags used across every plan — autocomplete for the "Also as" field. */
+  knownVariants?: string[]
+  /** Active employees for the designer picker. CQID ONLY — employee names are
+   *  private and are deliberately never sent to the browser. */
+  employees?: { id: string; cqid: string }[]
+  /** employeeId → department ids, derived from the service-scope tables. */
+  employeeDepartments?: Record<string, string[]>
+  /** Active departments in display order — the picker's group headers. */
+  departments?: { id: string; name: string }[]
   /** Team-configured content-type → service defaults (Service defaults gear). */
   serviceMap?: Record<string, string>
   /** Branding/company keys for the PDF export (same template family as invoices). */
@@ -388,7 +398,7 @@ const monthLabel = (month: string) => {
 
 // serviceId deliberately absent: the server auto-assigns it from the content type.
 const EMPTY_ITEM: ItemInput = {
-  scheduledDate: '', scheduledEndDate: '', title: '', contentType: 'post', platforms: [], caption: '', notes: '', variants: [], referenceUrls: [], captionCanvas: null,
+  scheduledDate: '', scheduledEndDate: '', title: '', contentType: 'post', platforms: [], caption: '', notes: '', variants: [], referenceUrls: [], captionCanvas: null, assignedEmployeeId: null,
 }
 
 /** Effective reference list (array supersedes the legacy single field). */
@@ -428,7 +438,8 @@ function DroppableZone({ id, className, activeClassName, disabled, children }: {
 
 export default function SocialCalendarClient({
   migrated, calendars, selectedId, initialItems, clients, services = [], serviceMap = {}, companySettings = {}, canManage,
-  agreementProgress, canViewAgreements = false,
+  agreementProgress, canViewAgreements = false, knownVariants = [], employees = [],
+  employeeDepartments = {}, departments = [],
 }: Props) {
   const router = useRouter()
   const toast = useToast()
@@ -453,6 +464,13 @@ export default function SocialCalendarClient({
   // ── Item modal (add or edit) ────────────────────────────────────────────────
   const [itemModal, setItemModal] = useState<{ mode: 'add' | 'edit'; itemId?: string } | null>(null)
   const [itemForm, setItemForm] = useState<ItemInput>(EMPTY_ITEM)
+  // Platforms is optional metadata, so the picker stays folded away by default
+  // instead of taking a permanent row in the form. null = follow the item
+  // (auto-open when it already has platforms, so editing never hides data);
+  // once the user toggles it, their choice sticks for the session.
+  const [showPlatforms, setShowPlatforms] = useState<boolean | null>(null)
+  // "Also as" free-text tag draft (Enter commits).
+  const [variantDraft, setVariantDraft] = useState('')
   const [savingItem, setSavingItem] = useState(false)
   // ── Service-defaults editor (content type → service mapping) ───────────────
   const [showServiceDefaults, setShowServiceDefaults] = useState(false)
@@ -601,6 +619,7 @@ export default function SocialCalendarClient({
     setItemForm({
       scheduledDate: it.scheduled_date ?? '', scheduledEndDate: it.scheduled_end_date ?? '',
       title: it.title, contentType: it.content_type, platforms: it.platforms ?? [],
+      assignedEmployeeId: it.assigned_employee_id ?? null,
       caption: it.caption ?? '', notes: it.notes ?? '',
       variants: it.variants ?? [], referenceUrls: itemRefs(it),
       captionCanvas: it.caption_canvas ?? null,
@@ -1439,54 +1458,175 @@ export default function SocialCalendarClient({
                   <CalendarRange className="w-3.5 h-3.5" /> Runs over a period (add end date)
                 </button>
               ))}
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-                  Also as <span className="text-muted-foreground/60">(size/format variants of the same creative — e.g. a post that also goes out as a story)</span>
-                </label>
-                <div className="flex flex-wrap gap-1.5">
-                  {VARIANT_TYPES.filter(t => t !== itemForm.contentType).map(t => {
-                    const on = (itemForm.variants ?? []).includes(t)
-                    return (
-                      <button
-                        key={t} type="button" disabled={editingFrozen}
-                        onClick={() => setItemForm(f => ({
-                          ...f,
-                          variants: on ? (f.variants ?? []).filter(x => x !== t) : [...(f.variants ?? []), t],
-                        }))}
-                        className={`px-2.5 py-1 rounded-full text-xs border transition-colors disabled:opacity-60 ${on
-                          ? 'bg-primary/15 text-primary border-primary/30 font-medium'
-                          : 'bg-secondary text-muted-foreground border-transparent hover:text-foreground'}`}
-                      >
-                        + {CONTENT_TYPE_LABEL[t]}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
+              {/* Also as — Story is pinned as a one-tap chip (the variant that
+                  actually gets used); everything else is a free-text tag so the
+                  vocabulary can grow without a code change. Suggestions come
+                  from tags already used across every plan, which is what stops
+                  "reel"/"reels"/"Reel" fragmenting. */}
+              {(() => {
+                const chosen = itemForm.variants ?? []
+                const norm = (v: string) => v.trim().toLowerCase().replace(/\s+/g, ' ')
+                const label = (v: string) => (CONTENT_TYPE_LABEL as Record<string, string>)[v] ?? v.replace(/\b\w/g, c => c.toUpperCase())
+                const addVariant = (raw: string) => {
+                  const v = norm(raw)
+                  setVariantDraft('')
+                  if (!v || v === itemForm.contentType) return   // never duplicate the main type
+                  setItemForm(f => (f.variants ?? []).includes(v) ? f : { ...f, variants: [...(f.variants ?? []), v] })
+                }
+                const removeVariant = (v: string) =>
+                  setItemForm(f => ({ ...f, variants: (f.variants ?? []).filter(x => x !== v) }))
+
+                const storyPinned = itemForm.contentType !== 'story'
+                const storyOn = chosen.includes('story')
+                const tags = chosen.filter(v => !(storyPinned && v === 'story'))
+                const suggestions = [...new Set([...VARIANT_TYPES, ...(knownVariants ?? [])])]
+                  .filter(v => v !== itemForm.contentType && !chosen.includes(v))
+
+                return (
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                      Also as <span className="text-muted-foreground/60">(size/format variants of the same creative — e.g. a post that also goes out as a story)</span>
+                    </label>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {storyPinned && (
+                        <button
+                          type="button" disabled={editingFrozen}
+                          onClick={() => storyOn ? removeVariant('story') : addVariant('story')}
+                          className={`px-2.5 py-1 rounded-full text-xs border transition-colors disabled:opacity-60 ${storyOn
+                            ? 'bg-primary/15 text-primary border-primary/30 font-medium'
+                            : 'bg-secondary text-muted-foreground border-transparent hover:text-foreground'}`}
+                        >
+                          {storyOn ? '✓ Story' : '+ Story'}
+                        </button>
+                      )}
+                      {tags.map(v => (
+                        <span key={v} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs border bg-primary/15 text-primary border-primary/30 font-medium">
+                          {label(v)}
+                          {!editingFrozen && (
+                            <button type="button" onClick={() => removeVariant(v)} title={`Remove ${label(v)}`}
+                              className="opacity-60 hover:opacity-100">
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+                        </span>
+                      ))}
+                      <input
+                        list="variant-suggestions"
+                        value={variantDraft}
+                        disabled={editingFrozen}
+                        onChange={e => {
+                          // Picking from the datalist fires change with the full
+                          // value — commit it straight away rather than making
+                          // the user press Enter on a chosen suggestion.
+                          const v = e.target.value
+                          if (suggestions.some(sug => sug === norm(v))) addVariant(v)
+                          else setVariantDraft(v)
+                        }}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') { e.preventDefault(); addVariant(variantDraft) }
+                          else if (e.key === 'Backspace' && !variantDraft && tags.length) removeVariant(tags[tags.length - 1])
+                        }}
+                        onBlur={() => addVariant(variantDraft)}
+                        placeholder="+ type a variant, Enter…"
+                        className="min-w-[9rem] flex-1 bg-transparent border-b border-dashed border-border focus:border-primary text-xs px-1 py-1 focus:outline-none placeholder:text-muted-foreground/50 disabled:opacity-60"
+                      />
+                      <datalist id="variant-suggestions">
+                        {suggestions.map(v => <option key={v} value={v}>{label(v)}</option>)}
+                      </datalist>
+                    </div>
+                  </div>
+                )
+              })()}
               {/* No Service field here on purpose: the server assigns it
                   automatically from the content type (Service defaults gear). */}
+              {/* Designer — optional. Answered at planning time it rides into
+                  the pushed request's assigned_employee_id, so work arrives in
+                  the inbox already earmarked; left blank, the inbox decides as
+                  before. Never blocks planning. */}
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Platforms</label>
-                <div className="flex flex-wrap gap-1.5">
-                  {PLATFORMS.map(p => {
-                    const on = itemForm.platforms.includes(p)
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                  Designer <span className="text-muted-foreground/60">(optional — carries into the design request)</span>
+                </label>
+                <AppSelect
+                  value={itemForm.assignedEmployeeId ?? ''}
+                  disabled={editingFrozen}
+                  onChange={e => setItemForm(f => ({ ...f, assignedEmployeeId: e.target.value || null }))}
+                >
+                  <option value="">— Decide later —</option>
+                  {(() => {
+                    // Grouped by department so a planner picks from the people
+                    // who actually work this kind of content. Employees with no
+                    // department fall into a trailing group rather than
+                    // vanishing — an unassigned designer is still assignable.
+                    const grouped = departments
+                      .map(d => ({
+                        d,
+                        emps: employees.filter(e => (employeeDepartments[e.id] || []).includes(d.id)),
+                      }))
+                      .filter(g => g.emps.length > 0)
+                    const placed = new Set(grouped.flatMap(g => g.emps.map(e => e.id)))
+                    const rest = employees.filter(e => !placed.has(e.id))
                     return (
-                      <button
-                        key={p} type="button" disabled={editingFrozen}
-                        onClick={() => setItemForm(f => ({
-                          ...f,
-                          platforms: on ? f.platforms.filter(x => x !== p) : [...f.platforms, p],
-                        }))}
-                        className={`px-2.5 py-1 rounded-full text-xs border transition-colors disabled:opacity-60 ${on
-                          ? 'bg-primary/15 text-primary border-primary/30 font-medium'
-                          : 'bg-secondary text-muted-foreground border-transparent hover:text-foreground'}`}
-                      >
-                        {PLATFORM_LABEL[p]}
-                      </button>
+                      <>
+                        {grouped.map(({ d, emps }) => (
+                          <optgroup key={d.id} label={d.name}>
+                            {emps.map(emp => <option key={emp.id} value={emp.id}>{emp.cqid}{(emp as any).name ? ` \u00b7 ${(emp as any).name}` : ''}</option>)}
+                          </optgroup>
+                        ))}
+                        {rest.length > 0 && (
+                          <optgroup label={grouped.length ? 'No department' : 'All employees'}>
+                            {rest.map(emp => <option key={emp.id} value={emp.id}>{emp.cqid}</option>)}
+                          </optgroup>
+                        )}
+                      </>
                     )
-                  })}
-                </div>
+                  })()}
+                </AppSelect>
               </div>
+
+              {/* Platforms — optional, so it lives behind a disclosure rather
+                  than costing a permanent row. Collapsed, it still reports what
+                  is selected, so nothing is silently hidden. */}
+              {(() => {
+                const open = showPlatforms ?? itemForm.platforms.length > 0
+                return (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setShowPlatforms(!open)}
+                      aria-expanded={open}
+                      className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? '' : '-rotate-90'}`} />
+                      Platforms
+                      {itemForm.platforms.length > 0
+                        ? <span className="text-primary font-semibold">· {platformLabels(itemForm.platforms, true)}</span>
+                        : <span className="text-muted-foreground/60 font-normal">(optional)</span>}
+                    </button>
+                    {open && (
+                      <div className="flex flex-wrap gap-1.5 mt-1.5">
+                        {PLATFORMS.map(p => {
+                          const on = itemForm.platforms.includes(p)
+                          return (
+                            <button
+                              key={p} type="button" disabled={editingFrozen}
+                              onClick={() => setItemForm(f => ({
+                                ...f,
+                                platforms: on ? f.platforms.filter(x => x !== p) : [...f.platforms, p],
+                              }))}
+                              className={`px-2.5 py-1 rounded-full text-xs border transition-colors disabled:opacity-60 ${on
+                                ? 'bg-primary/15 text-primary border-primary/30 font-medium'
+                                : 'bg-secondary text-muted-foreground border-transparent hover:text-foreground'}`}
+                            >
+                              {PLATFORM_LABEL[p]}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
               <div>
                 <div className="flex items-center gap-2 mb-1.5">
                   <label className="block text-xs font-medium text-muted-foreground">Caption / copy</label>

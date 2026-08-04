@@ -124,15 +124,73 @@ describe('computeItemProgress — the single rule', () => {
 })
 
 describe('computeItemProgress — commitment', () => {
-  it('prorates a mid-month start (agreement from 20 Jul)', () => {
+  it('merges a mid-month start into the next month as one full cycle', () => {
     const midMonth = { ...agreement, start_date: '2026-07-20' } as ClientAgreementRow
+    const args = {
+      agreement: midMonth, termRow, deliverables, adjustments: [],
+      tasks: [], carryInRemaining: 0,
+    }
+    // The stub (20–31 Jul) does not owe its own cycle, and August does not
+    // restart from scratch: both months resolve to ONE period owing 15.
+    for (const month of ['2026-07', '2026-08']) {
+      const r = computeItemProgress({ ...args, month })
+      expect(r.committed).toBe(15)
+      expect(r.period.start).toBe('2026-07-20')
+      expect(r.period.end).toBe('2026-08-31')
+    }
+    // September is a plain calendar month again.
+    const sep = computeItemProgress({ ...args, month: '2026-09' })
+    expect(sep.committed).toBe(15)
+    expect(sep.period.start).toBe('2026-09-01')
+  })
+
+  it('counts stub-month delivery against the merged period', () => {
+    const midMonth = { ...agreement, start_date: '2026-07-20' } as ClientAgreementRow
+    const july = task({ retainer_item_id: ITEM_ID, task_date: '2026-07-29', status: 'done' })
     const r = computeItemProgress({
-      month: MONTH, agreement: midMonth, termRow, deliverables, adjustments: [],
+      month: '2026-08', agreement: midMonth, termRow, deliverables, adjustments: [],
+      tasks: [july], carryInRemaining: 0,
+    })
+    // Delivered on 29 Jul, read in August — the whole point of merging.
+    expect(r.delivered).toBe(1)
+    expect(r.remaining).toBe(14)
+  })
+
+  it('ignores tasks dated outside the period', () => {
+    const r = computeItemProgress({
+      month: MONTH, agreement, termRow, deliverables, adjustments: [],
+      tasks: [task({ retainer_item_id: ITEM_ID, task_date: '2026-06-30' })],
+      carryInRemaining: 0,
+    })
+    expect(r.delivered).toBe(0)
+  })
+
+  it('commits a one_time item once, not every month', () => {
+    const oneTime = {
+      ...termRow, commitment_type: 'one_time', committed_quantity: 2, cycle: null,
+      effective_from: '2026-07-20', effective_to: null,
+    } as unknown as ClientAgreementItemRow
+    const dels = [
+      { ...deliverables[0], committed_quantity: 1, label: 'Custom Logo Design' },
+      { ...deliverables[0], id: 'del-2', committed_quantity: 1, label: 'Simple Brand Chart' },
+    ] as unknown as ClientAgreementDeliverableRow[]
+    const args = {
+      agreement: { ...agreement, start_date: '2026-07-20' } as ClientAgreementRow,
+      termRow: oneTime, deliverables: dels, adjustments: [], tasks: [], carryInRemaining: 0,
+    }
+    expect(computeItemProgress({ ...args, month: '2026-07' }).committed).toBe(2)
+    // effective_to is NULL, so the old rule re-committed these 2 forever.
+    expect(computeItemProgress({ ...args, month: '2026-08' }).committed).toBe(0)
+    expect(computeItemProgress({ ...args, month: '2026-12' }).committed).toBe(0)
+  })
+
+  it('still prorates a commitment that ENDS mid-period', () => {
+    const ending = { ...agreement, end_date: '2026-07-15' } as ClientAgreementRow
+    const r = computeItemProgress({
+      month: MONTH, agreement: ending, termRow, deliverables, adjustments: [],
       tasks: [], carryInRemaining: 0,
     })
-    // 12 of 31 active days → 15 * 12/31 ≈ 6. Surface this in the UI: an
-    // unexplained 6 against a promised 15 reads as a bug.
-    expect(r.committed).toBe(6)
+    expect(r.committed).toBe(7) // 15 of 31 days → 15 * 15/31 ≈ 7
   })
 
   it('adds carry-forward from the previous month', () => {

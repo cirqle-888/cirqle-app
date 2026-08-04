@@ -21,13 +21,19 @@ interface ActionResult<T = void> {
   data?: T
 }
 
-export type { RecordInvoicePaymentInput }
-
 /**
+ * A `'use server'` module may only EXPORT async functions. A re-export such as
+ * `export type { RecordInvoicePaymentInput }` survives the server-actions
+ * transform as a value reference, so the whole module blew up at evaluation
+ * with `ReferenceError: RecordInvoicePaymentInput is not defined` — every
+ * recordInvoicePayment() call 500'd and the Record Payment button hung.
+ * Types belong in the module that defines them: import
+ * `RecordInvoicePaymentInput` from '@/lib/finance/record-payment' directly.
+ *
  * `employeeId` is deliberately NOT part of the caller's input: it is resolved
  * from the session so a client cannot attribute a payment to someone else.
  */
-export type RecordInvoicePaymentArgs = Omit<RecordInvoicePaymentInput, 'employeeId'>
+type RecordInvoicePaymentArgs = Omit<RecordInvoicePaymentInput, 'employeeId'>
 
 export async function recordInvoicePayment(
   input: RecordInvoicePaymentArgs,
@@ -35,7 +41,16 @@ export async function recordInvoicePayment(
   const guard = await requirePermission(PERMS.BILLING_EDIT)
   if (!guard.ok) return { ok: false, error: guard.error }
 
-  const result = await recordPayment({ ...input, employeeId: guard.employeeId ?? null })
+  // A throw here (missing service-role key, DB connection error) would reject on
+  // the client as an opaque server-action failure and leave the Record Payment
+  // button stuck on "Saving…". Convert it into a readable ActionResult instead.
+  let result
+  try {
+    result = await recordPayment({ ...input, employeeId: guard.employeeId ?? null })
+  } catch (err) {
+    console.error('[recordInvoicePayment] threw:', err)
+    return { ok: false, error: err instanceof Error ? err.message : 'Payment could not be recorded' }
+  }
   if (!result.ok) {
     return { ok: false, error: result.error }
   }

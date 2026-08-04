@@ -260,7 +260,7 @@ export async function syncDraftInvoices(taskId: string) {
   const supabase = createTypedAdminClient()
 
   const { data: task } = await supabase.from('tasks')
-    .select('id, title, status, client_id, task_date, billing_amount_inr, currency, billing_amount, deleted_at')
+    .select('id, title, status, client_id, task_date, billing_amount_inr, currency, billing_amount, quantity, deleted_at')
     .eq('id', taskId).single()
   
   if (!task) return { error: 'Task not found' }
@@ -271,7 +271,12 @@ export async function syncDraftInvoices(taskId: string) {
 
   // 1. Find all existing invoice items linked to this task
   const { data: items } = await supabase.from('invoice_items').select('id, invoice_id, quantity').eq('task_id', taskId)
+  // `tasks.billing_amount` is the LINE TOTAL (rate × qty) — tasks carry no
+  // unit_price column, so the invoice line's rate is derived by dividing back
+  // out. Getting this wrong is what made every PDF read "Qty 1 × <total>".
   const taskAmt = task.billing_amount || 0
+  const taskQty = Number(task.quantity ?? 1) || 1
+  const taskUnitPrice = Math.round((taskAmt / taskQty) * 100) / 100
   const invoiceIdsToRecalculate = new Set<string>()
 
     if (coverage.covered || task.deleted_at || task.status === 'cancelled') {
@@ -298,13 +303,13 @@ export async function syncDraftInvoices(taskId: string) {
         const draftItemsToUpdate = items.filter(i => draftInvoiceIds.has(i.invoice_id!))
       
       for (const item of draftItemsToUpdate) {
-        const newTotal = taskAmt * (item.quantity || 1)
-        
-        // Update the invoice item with latest task details
+        // Update the invoice item with latest task details. quantity/unit_price
+        // both come from the task so a qty change on the task is reflected.
         await supabase.from('invoice_items').update({
-          unit_price: taskAmt,
           description: task.title,
-          total: newTotal
+          quantity: taskQty,
+          unit_price: taskUnitPrice,
+          total: taskAmt,
         }).eq('id', item.id!)
         
         invoiceIdsToRecalculate.add(item.invoice_id!)
@@ -336,8 +341,8 @@ export async function syncDraftInvoices(taskId: string) {
         invoice_id: draftInvoice.id,
         task_id: task.id,
         description: task.title,
-        quantity: 1,
-        unit_price: taskAmt,
+        quantity: taskQty,
+        unit_price: taskUnitPrice,
         total: taskAmt,
         currency: task.currency || 'INR',
         display_order: nextOrder

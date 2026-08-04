@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { globalSearch } from '@/lib/search/global-search'
 import { usePermissions } from '@/contexts/permission-context'
 import { useFavorites } from '@/contexts/favorites-context'
 import { useWorkspace } from '@/contexts/workspace-context'
@@ -208,62 +208,19 @@ export function CommandPalette() {
   const search = useCallback(async (q: string) => {
     if (!q.trim()) { setDbResults([]); setLoading(false); return }
     setLoading(true)
-    const supabase = createClient()
-    const term = q.toLowerCase()
 
-    const [tasksRes, invoicesRes, clientsRes, employeesRes, projectsRes, quotationsRes, payrollRes, cashbookRes] = await Promise.all([
-      supabase
-        .from('tasks')
-        .select('id, title, status, task_date, client:clients(name)')
-        .ilike('title', `%${term}%`)
-        .limit(5),
-
-      supabase
-        .from('invoices')
-        .select('id, invoice_number, status, total_amount, client:clients(name)')
-        .or(`invoice_number.ilike.%${term}%,notes.ilike.%${term}%`)
-        .limit(5),
-
-      supabase
-        .from('clients')
-        .select('id, name, code')
-        .or(`name.ilike.%${term}%,code.ilike.%${term}%`)
-        .limit(5),
-
-      supabase
-        .from('employees')
-        .select('id, name, email')
-        .or(`name.ilike.%${term}%,email.ilike.%${term}%`)
-        .limit(5),
-
-      supabase
-        .from('ad_projects')
-        .select('id, campaign_name, client:clients(name)')
-        .ilike('campaign_name', `%${term}%`)
-        .limit(5),
-
-      supabase
-        .from('quotations')
-        .select('id, quotation_number, status, client:clients(name)')
-        .ilike('quotation_number', `%${term}%`)
-        .limit(5),
-
-      supabase
-        .from('payroll')
-        .select('id, payslip_number, month, year, status, employee:employees(name)')
-        .ilike('payslip_number', `%${term}%`)
-        .limit(5),
-
-      supabase
-        .from('cashbook_entries')
-        .select('id, description, amount, entry_date')
-        .ilike('description', `%${term}%`)
-        .limit(5),
-    ])
+    // Server action, NOT browser-side supabase: search is the discovery layer,
+    // so results are permission-gated and department-scoped on the server
+    // (see src/lib/search/global-search.ts). The anon-key queries this
+    // replaced surfaced payroll, cashbook and out-of-department clients to
+    // any signed-in employee.
+    const { tasks: tasksData, invoices: invoicesData, clients: clientsData, employees: employeesData,
+      projects: projectsData, quotations: quotationsData, payroll: payrollData, cashbook: cashbookData } =
+      await globalSearch(q)
 
     const results: Result[] = []
 
-    for (const t of tasksRes.data ?? []) {
+    for (const t of tasksData) {
       const client = Array.isArray(t.client) ? t.client[0] : t.client
       results.push({
         id: `task-${t.id}`,
@@ -276,7 +233,7 @@ export function CommandPalette() {
       })
     }
 
-    for (const inv of invoicesRes.data ?? []) {
+    for (const inv of invoicesData) {
       const client = Array.isArray(inv.client) ? inv.client[0] : inv.client
       results.push({
         id: `invoice-${inv.id}`,
@@ -289,7 +246,7 @@ export function CommandPalette() {
       })
     }
 
-    for (const c of clientsRes.data ?? []) {
+    for (const c of clientsData) {
       results.push({
         id: `client-${c.id}`,
         kind: 'client',
@@ -299,7 +256,7 @@ export function CommandPalette() {
       })
     }
 
-    for (const e of employeesRes.data ?? []) {
+    for (const e of employeesData) {
       results.push({
         id: `employee-${e.id}`,
         kind: 'employee',
@@ -309,7 +266,7 @@ export function CommandPalette() {
       })
     }
 
-    for (const p of projectsRes.data ?? []) {
+    for (const p of projectsData) {
       const client = Array.isArray(p.client) ? p.client[0] : p.client
       results.push({
         id: `project-${p.id}`,
@@ -320,7 +277,7 @@ export function CommandPalette() {
       })
     }
 
-    for (const q of quotationsRes.data ?? []) {
+    for (const q of quotationsData) {
       const client = Array.isArray(q.client) ? q.client[0] : q.client
       results.push({
         id: `quotation-${q.id}`,
@@ -331,7 +288,7 @@ export function CommandPalette() {
       })
     }
 
-    for (const pr of payrollRes.data ?? []) {
+    for (const pr of payrollData) {
       const emp = Array.isArray(pr.employee) ? pr.employee[0] : pr.employee
       results.push({
         id: `payroll-${pr.id}`,
@@ -343,7 +300,7 @@ export function CommandPalette() {
       })
     }
 
-    for (const cb of cashbookRes.data ?? []) {
+    for (const cb of cashbookData) {
       results.push({
         id: `cashbook-${cb.id}`,
         kind: 'cashbook',

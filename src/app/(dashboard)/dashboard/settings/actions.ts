@@ -660,6 +660,136 @@ export async function quickEditService(
   return { ok: true }
 }
 
+// ── Departments (service_categories) ─────────────────────────────────────────
+// Master-data CRUD so new departments never need a migration. The visibility
+// engine (src/lib/scope/service-scope.ts) resolves category membership at read
+// time, so rows created here flow into employee access with no further code.
+
+const slugify = (name: string) =>
+  name.toLowerCase().trim().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+
+export async function createServiceCategory(
+  form: { name: string; description?: string | null; color?: string | null },
+): Promise<ActionResult<any>> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+  const name = (form.name || '').trim()
+  if (!name) return { ok: false, error: 'Department name is required' }
+
+  const admin = createAdminClient()
+  // New departments go to the end of the list.
+  const { data: last } = await admin
+    .from('service_categories').select('display_order')
+    .order('display_order', { ascending: false }).limit(1).maybeSingle()
+
+  // Slug is a stable identifier — derived once at creation, kept on rename.
+  // A name collision after slugify ("Video" vs "video?") surfaces as a unique
+  // violation; suffix with a counter rather than failing the save.
+  let slug = slugify(name) || 'department'
+  const { data: taken } = await admin
+    .from('service_categories').select('slug').like('slug', `${slug}%`)
+  const existing = new Set((taken || []).map((r: any) => r.slug))
+  if (existing.has(slug)) {
+    let n = 2
+    while (existing.has(`${slug}-${n}`)) n++
+    slug = `${slug}-${n}`
+  }
+
+  const { data, error } = await admin
+    .from('service_categories')
+    .insert({
+      name, slug,
+      description: form.description?.trim() || null,
+      color: form.color || null,
+      display_order: ((last as any)?.display_order ?? 0) + 1,
+      is_active: true,
+    })
+    .select().single()
+  if (error) return { ok: false, error: error.message }
+
+  void logActivity({
+    actorId: auth.employeeId, entityType: 'setting', entityId: data.id,
+    action: 'created', detail: { label: `Department: ${name}` },
+  })
+  revalidatePath('/dashboard/settings')
+  return { ok: true, data }
+}
+
+export async function updateServiceCategory(
+  id: string,
+  patch: { name?: string; description?: string | null; color?: string | null },
+): Promise<ActionResult<any>> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+  if (patch.name !== undefined && !patch.name.trim()) {
+    return { ok: false, error: 'Department name cannot be empty' }
+  }
+
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from('service_categories')
+    .update({
+      ...(patch.name !== undefined ? { name: patch.name.trim() } : {}),
+      ...(patch.description !== undefined ? { description: patch.description?.trim() || null } : {}),
+      ...(patch.color !== undefined ? { color: patch.color } : {}),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', id).select().single()
+  if (error) return { ok: false, error: error.message }
+
+  void logActivity({
+    actorId: auth.employeeId, entityType: 'setting', entityId: id,
+    action: 'edited', detail: { label: `Department: ${data.name}` },
+  })
+  revalidatePath('/dashboard/settings')
+  return { ok: true, data }
+}
+
+/**
+ * Archive / restore. Archiving hides the department from pickers but does NOT
+ * hide its services or revoke access — employees assigned to it keep resolving
+ * its services (the scope engine deliberately ignores category is_active, the
+ * same way archived services keep their historical tasks visible). To actually
+ * retire a department, move its services elsewhere first; the UI shows the
+ * live service count so an archive with services still attached is a visible
+ * choice, not an accident.
+ */
+export async function setServiceCategoryActive(id: string, active: boolean): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('service_categories')
+    .update({ is_active: active, updated_at: new Date().toISOString() })
+    .eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  revalidatePath('/dashboard/settings')
+  return { ok: true }
+}
+
+/**
+ * Persist a full ordering in one call — the client sends every category id in
+ * display order. Writing the complete list (rather than swapping neighbours)
+ * makes the operation idempotent and immune to two admins reordering at once
+ * ending up with duplicate display_order values.
+ */
+export async function reorderServiceCategories(orderedIds: string[]): Promise<ActionResult> {
+  const auth = await requirePermission('settings.access')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const admin = createAdminClient()
+  for (let i = 0; i < orderedIds.length; i++) {
+    const { error } = await admin
+      .from('service_categories')
+      .update({ display_order: i + 1 })
+      .eq('id', orderedIds[i])
+    if (error) return { ok: false, error: error.message }
+  }
+  revalidatePath('/dashboard/settings')
+  return { ok: true }
+}
+
 // ── Contribution Groups ───────────────────────────────────────────────────────
 
 export async function createGroup(form: Record<string, unknown>): Promise<ActionResult<any>> {

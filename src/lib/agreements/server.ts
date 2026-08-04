@@ -5,7 +5,10 @@
  */
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { computeItemProgress, AgreementProgressSummary, ItemProgressSummary } from './progress'
+import {
+  computeItemProgress, resolveDeliveryPeriod,
+  type AgreementProgressSummary, type ItemProgressSummary, type DeliveryPeriod,
+} from './progress'
 import type { ClientAgreementItemRow } from './types'
 
 export interface AgreementOverviewFilter {
@@ -157,24 +160,38 @@ export async function loadClientMonthProgress(
     supabase.from('client_agreement_adjustments').select('*').in('item_id', activeItemIds).lte('month', `${month}-01`)
   ])
 
-  // 4. Fetch the month's tasks. Delivery is counted solely from tasks the
-  // coverage engine stamped with retainer_item_id — see progress.ts for why the
-  // calendar and service-matching paths were removed.
+  // 4. Fetch tasks. Delivery is counted solely from tasks the coverage engine
+  // stamped with retainer_item_id — see progress.ts for why the calendar and
+  // service-matching paths were removed.
+  //
+  // The window spans every term row's resolved period, not the calendar month:
+  // a mid-month start merges its stub month into the next one, so August's cards
+  // must be able to see a task dated 29 July. computeItemProgress filters each
+  // row down to its own period, so over-fetching here is safe.
   //
   // task_date is a DATE column, so the upper bound must be the REAL last day —
   // "${month}-31" is an invalid date for 30-day months / February and Postgres
   // rejects the whole query (silently, via the caller's catch), zeroing all
-  // progress. Derive the last day the same way the item-window check does.
+  // progress.
+  const periodByItem = new Map<string, DeliveryPeriod>()
+  for (const agr of agreements) {
+    for (const termRow of activeItemsByAgreement.get(agr.id) || []) {
+      periodByItem.set(termRow.id, resolveDeliveryPeriod(month, agr, termRow))
+    }
+  }
+  const windows = Array.from(periodByItem.values()).filter(p => !p.inactive)
   const [my, mm] = month.split('-').map(Number)
   const monthEnd = `${month}-${String(new Date(my, mm, 0).getDate()).padStart(2, '0')}`
+  const rangeStart = windows.reduce((min, p) => (p.start < min ? p.start : min), `${month}-01`)
+  const rangeEnd = windows.reduce((max, p) => (p.end > max ? p.end : max), monthEnd)
 
   const { data: pipelineTasks, error: tasksError } = await supabase
     .from('tasks')
     .select('id, service_id, task_date, status, quantity, deleted_at, retainer_item_id, bill_as_extra')
     .eq('client_id', clientId)
     .is('deleted_at', null)
-    .gte('task_date', `${month}-01`)
-    .lte('task_date', monthEnd)
+    .gte('task_date', rangeStart)
+    .lte('task_date', rangeEnd)
 
   // Surface the failure rather than silently reporting zero progress.
   if (tasksError) {
@@ -208,7 +225,8 @@ export async function loadClientMonthProgress(
         deliverables: itemDeliverables,
         adjustments: itemAdjustments,
         tasks,
-        carryInRemaining: carryIn
+        carryInRemaining: carryIn,
+        period: periodByItem.get(termRow.id),
       })
 
       itemSummaries.push(summary)
@@ -223,6 +241,9 @@ export async function loadClientMonthProgress(
       title: agr.title,
       status: agr.status,
       items: itemSummaries.sort((a, b) => a.displayOrder - b.displayOrder),
+      // Label off a row that actually owes something this period; an inactive
+      // one_time row would otherwise name the period after a spent commitment.
+      periodLabel: (itemSummaries.find(s => !s.period.inactive) ?? itemSummaries[0])?.period.label ?? month,
       totalCommitted,
       totalDelivered,
       totalRemaining: Math.max(0, totalCommitted - totalDelivered),

@@ -33,8 +33,16 @@ export default async function ContributionsPage() {
   // viewer holds `tasks.view_pricing` — otherwise they're stripped from the
   // payload before it leaves the server.
   // quantity is a count, not a price — included in both variants (see Qty display in contributions-client.tsx).
-  const taskSelectWithPricing    = 'id, task_number, title, service_id, billing_amount_inr, quantity, status, task_date, client:clients(id, name, code), service:services(id, name)'
-  const taskSelectWithoutPricing = 'id, task_number, title, service_id, quantity, status, task_date, client:clients(id, name, code), service:services(id, name)'
+  // client_id and bill_as_extra are required by the shared TaskEditModal:
+  // without them the Client field renders empty and the retainer-coverage
+  // lookup never fires, so a covered task silently loses its coverage card.
+  // client_id is required by the shared TaskEditModal: without it the Client
+  // field renders empty and the retainer-coverage lookup never fires, so a
+  // covered task silently loses its coverage card. bill_as_extra/billing_mode/
+  // currency ride along only for pricing-visible viewers, mirroring the tasks
+  // page's financial stripping.
+  const taskSelectWithPricing    = 'id, task_number, title, client_id, service_id, billing_amount_inr, quantity, status, task_date, bill_as_extra, parent_task_id, billing_mode, currency, client:clients(id, name, code), service:services(id, name)'
+  const taskSelectWithoutPricing = 'id, task_number, title, client_id, service_id, quantity, status, task_date, parent_task_id, client:clients(id, name, code), service:services(id, name)'
   // 24-month window bounds the otherwise unbounded task list. Contributions for
   // tasks older than 24 months should already be finalized; the editor here is
   // for active/recent work. HAR showed this query was the slowest (2060ms) when

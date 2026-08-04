@@ -172,6 +172,7 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
             <div className="absolute right-0 top-full mt-2 w-64 bg-card border border-border shadow-xl shadow-black/5 rounded-xl p-2 z-50 animate-in fade-in zoom-in-95 duration-200">
               <div className="px-2 py-2 mb-2 border-b border-border/50">
                 <div className="font-semibold text-foreground text-sm truncate tracking-tight">{user.cqid ?? 'Account'}</div>
+                {/* eslint-disable-next-line no-restricted-syntax -- deliberate: the SIGNED-IN user's own name in their own account menu, and only while privacy is unlocked. Never another employee's name. */}
                 {isUnlocked && user.name && <div className="text-xs text-muted-foreground truncate">{user.name}</div>}
                 {user.designationName && (
                   <span className="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border/50 whitespace-nowrap mt-1.5">

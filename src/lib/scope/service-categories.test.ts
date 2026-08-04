@@ -41,6 +41,7 @@ function fakeAdmin(tables: Record<string, { data?: any[]; error?: any; single?: 
       select: () => out,
       eq: () => out,
       in: () => out,
+      range: () => out,
       maybeSingle: async () => ({ data: res(t).single ?? null, error: res(t).error ?? null }),
       then: (resolve: any) => resolve({ data: res(t).data ?? [], error: res(t).error ?? null }),
     }

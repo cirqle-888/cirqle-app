@@ -21,7 +21,7 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import {
   getStatusColor, getStatusLabel, isOverdue,
-  isEditable, formatBillingPeriod, getNextAction,
+  isEditable, formatBillingPeriod, getNextAction, compareInvoiceItems,
 } from '@/lib/utils/invoice'
 import { publicInvoiceUrl, buildInvoiceShareText, whatsappShareUrl } from '@/lib/invoices/share'
 import { TEMPLATE_KEYS } from '@/lib/messaging/templates'
@@ -675,35 +675,38 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       }
     }
     setSaving(true)
-    const updates: any = { status: newStatus, updated_at: new Date().toISOString() }
-    // Auto-set due date when sending: net-30 from the invoice's ISSUE date
-    // (not "today") so back-dated invoices get a correct — possibly already
-    // overdue — due date instead of always landing 30 days in the future.
-    if (newStatus === 'sent' && !invoices.find(i => i.id === invoiceId)?.due_date) {
-      const inv = invoices.find(i => i.id === invoiceId)
-      const base = inv?.issue_date ? new Date(inv.issue_date) : new Date()
-      base.setDate(base.getDate() + 30)
-      updates.due_date = base.toISOString().split('T')[0]
-    }
-    const { error } = await supabase.from('invoices').update(updates).eq('id', invoiceId)
-    if (error) { toastError(error.message); setSaving(false); return }
+    try {
+      const updates: any = { status: newStatus, updated_at: new Date().toISOString() }
+      // Auto-set due date when sending: net-30 from the invoice's ISSUE date
+      // (not "today") so back-dated invoices get a correct — possibly already
+      // overdue — due date instead of always landing 30 days in the future.
+      if (newStatus === 'sent' && !invoices.find(i => i.id === invoiceId)?.due_date) {
+        const inv = invoices.find(i => i.id === invoiceId)
+        const base = inv?.issue_date ? new Date(inv.issue_date) : new Date()
+        base.setDate(base.getDate() + 30)
+        updates.due_date = base.toISOString().split('T')[0]
+      }
+      const { error } = await supabase.from('invoices').update(updates).eq('id', invoiceId)
+      if (error) { toastError(error.message); return }
 
-    // When reverting to draft OR cancelling, free tasks back to done
-    if (newStatus === 'draft' || newStatus === 'cancelled') {
-      const inv = invoices.find(i => i.id === invoiceId)
-      const taskIds = (inv?.items || []).map(it => it.task_id).filter(Boolean) as string[]
-      if (taskIds.length) await supabase.from('tasks').update({ status: 'done' }).in('id', taskIds)
-    }
-    // When marking sent, mark tasks invoiced
-    if (newStatus === 'sent') {
-      const inv = invoices.find(i => i.id === invoiceId)
-      const taskIds = (inv?.items || []).map(it => it.task_id).filter(Boolean) as string[]
-      if (taskIds.length) await supabase.from('tasks').update({ status: 'invoiced' }).in('id', taskIds)
-    }
+      // When reverting to draft OR cancelling, free tasks back to done
+      if (newStatus === 'draft' || newStatus === 'cancelled') {
+        const inv = invoices.find(i => i.id === invoiceId)
+        const taskIds = (inv?.items || []).map(it => it.task_id).filter(Boolean) as string[]
+        if (taskIds.length) await supabase.from('tasks').update({ status: 'done' }).in('id', taskIds)
+      }
+      // When marking sent, mark tasks invoiced
+      if (newStatus === 'sent') {
+        const inv = invoices.find(i => i.id === invoiceId)
+        const taskIds = (inv?.items || []).map(it => it.task_id).filter(Boolean) as string[]
+        if (taskIds.length) await supabase.from('tasks').update({ status: 'invoiced' }).in('id', taskIds)
+      }
 
-    setInvoices(prev => prev.map(i => i.id === invoiceId ? { ...i, ...updates } : i))
-    success(`Invoice ${getStatusLabel(newStatus)}`)
-    setSaving(false)
+      setInvoices(prev => prev.map(i => i.id === invoiceId ? { ...i, ...updates } : i))
+      success(`Invoice ${getStatusLabel(newStatus)}`)
+    } finally {
+      setSaving(false)
+    }
   }
 
   async function removeItem(invoiceId: string, itemId: string) {
@@ -1030,91 +1033,101 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     if (foreign <= 0) { toastError('Enter a valid amount'); return }
     setSaving(true)
 
-    // FX captured for this payment.
-    const isBase = payForm.currency === 'INR'
-    const rate = isBase ? 1 : (parseFloat(payForm.rate) || rateMap[payForm.currency] || 1)
-    const amountInr = isBase ? foreign : (parseFloat(payForm.amountInr) || round2(foreign * rate))
-    const rateSource = isBase ? 'manual' : payForm.rateSource
-    const rateDate = payForm.payment_date
+    // Everything below runs inside try/finally: if the server action rejects
+    // (500, stale action id after a redeploy, dropped connection) the button
+    // must not stay stuck on "Saving…" with no explanation.
+    try {
+      // FX captured for this payment.
+      const isBase = payForm.currency === 'INR'
+      const rate = isBase ? 1 : (parseFloat(payForm.rate) || rateMap[payForm.currency] || 1)
+      const amountInr = isBase ? foreign : (parseFloat(payForm.amountInr) || round2(foreign * rate))
+      const rateSource = isBase ? 'manual' : payForm.rateSource
+      const rateDate = payForm.payment_date
 
-    // Amount applied to the invoice's outstanding balance, in the INVOICE
-    // currency. Usually the payment IS in the invoice currency (1:1); for a
-    // cross-currency payment we pivot through INR using the invoice's own rate.
-    const invRate = (inv.exchange_rate && inv.exchange_rate > 0) ? inv.exchange_rate : (rateMap[inv.currency] || 1)
-    const appliedInvoiceCcy = payForm.currency === inv.currency ? foreign : round2(amountInr / (invRate || 1))
+      // Amount applied to the invoice's outstanding balance, in the INVOICE
+      // currency. Usually the payment IS in the invoice currency (1:1); for a
+      // cross-currency payment we pivot through INR using the invoice's own rate.
+      const invRate = (inv.exchange_rate && inv.exchange_rate > 0) ? inv.exchange_rate : (rateMap[inv.currency] || 1)
+      const appliedInvoiceCcy = payForm.currency === inv.currency ? foreign : round2(amountInr / (invRate || 1))
 
-    const noteText = [
-      isAdvancePayment ? '[ADVANCE PAYMENT]' : null,
-      payForm.notes || null,
-    ].filter(Boolean).join(' — ') || null
+      const noteText = [
+        isAdvancePayment ? '[ADVANCE PAYMENT]' : null,
+        payForm.notes || null,
+      ].filter(Boolean).join(' — ') || null
 
-    const newPaid = round2((inv.paid_amount || 0) + appliedInvoiceCcy)  // invoice currency
-    const newPaidInr = round2((inv.paid_amount_inr || 0) + amountInr)   // INR base
-    const balance = (inv.total_amount || 0) - newPaid
-    const newStatus = balance <= 0 ? 'paid' : 'partial'
+      const newPaid = round2((inv.paid_amount || 0) + appliedInvoiceCcy)  // invoice currency
+      const newPaidInr = round2((inv.paid_amount_inr || 0) + amountInr)   // INR base
+      const balance = (inv.total_amount || 0) - newPaid
+      const newStatus = balance <= 0 ? 'paid' : 'partial'
 
-    const prevPaid = inv.paid_amount || 0
-    const prevPaidInr = inv.paid_amount_inr || 0
-    const prevStatus = inv.status
+      // Find the invoice category
+      const invoiceCategoryId = cashbookCategories?.find(c => c.name.toLowerCase().includes('invoice'))?.id || null
 
-    // Find the invoice category
-    const invoiceCategoryId = cashbookCategories?.find(c => c.name.toLowerCase().includes('invoice'))?.id || null
+      // Call server action — records payment + creates cashbook inflow entry atomically
+      const res = await recordInvoicePayment({
+        invoiceId,
+        invoiceNumber:  inv.invoice_number,
+        clientId:       inv.client_id || null,
+        clientCode:     inv.client?.code || null,
+        clientName:     inv.client?.name || null,
+        amount:         foreign,
+        currency:       payForm.currency,
+        amountInr,
+        exchangeRate:   rate,
+        rateSource,
+        rateDate,
+        paymentDate:    payForm.payment_date,
+        paymentMethod:  payForm.payment_method,
+        reference:      payForm.reference || null,
+        notes:          noteText,
+        bankAccountId:  payForm.bank_account_id || null,
+        newPaid,
+        newPaidInr,
+        newStatus,
+        appliedInvoiceCcy: appliedInvoiceCcy,   // delta for atomic server-side increment
+        appliedInr:        amountInr,
+        categoryId:     invoiceCategoryId,
+      })
 
-    // Call server action — records payment + creates cashbook inflow entry atomically
-    const res = await recordInvoicePayment({
-      invoiceId,
-      invoiceNumber:  inv.invoice_number,
-      clientId:       inv.client_id || null,
-      clientCode:     inv.client?.code || null,
-      clientName:     inv.client?.name || null,
-      amount:         foreign,
-      currency:       payForm.currency,
-      amountInr,
-      exchangeRate:   rate,
-      rateSource,
-      rateDate,
-      paymentDate:    payForm.payment_date,
-      paymentMethod:  payForm.payment_method,
-      reference:      payForm.reference || null,
-      notes:          noteText,
-      bankAccountId:  payForm.bank_account_id || null,
-      newPaid,
-      newPaidInr,
-      newStatus,
-      appliedInvoiceCcy: appliedInvoiceCcy,   // delta for atomic server-side increment
-      appliedInr:        amountInr,
-      categoryId:     invoiceCategoryId,
-    })
+      if (!res.ok) { toastError(res.error ?? 'Payment failed'); return }
 
-    if (!res.ok) { toastError(res.error ?? 'Payment failed'); setSaving(false); return }
+      // Build a synthetic payment object for optimistic UI update
+      const pmt: Payment = {
+        id: res.data!.paymentId,
+        amount: foreign,
+        currency: payForm.currency,
+        exchange_rate: rate,
+        amount_inr: amountInr,
+        rate_source: rateSource as any,
+        rate_date: rateDate,
+        payment_date: payForm.payment_date,
+        payment_method: payForm.payment_method,
+        reference: payForm.reference || undefined,
+        notes: noteText ?? undefined,
+        receipt_number: res.data!.receiptNumber,
+        bank_account_name: bankAccounts.find(b => b.id === payForm.bank_account_id)?.name ?? null,
+      }
 
-    // Build a synthetic payment object for optimistic UI update
-    const pmt: Payment = {
-      id: res.data!.paymentId,
-      amount: foreign,
-      currency: payForm.currency,
-      exchange_rate: rate,
-      amount_inr: amountInr,
-      rate_source: rateSource as any,
-      rate_date: rateDate,
-      payment_date: payForm.payment_date,
-      payment_method: payForm.payment_method,
-      reference: payForm.reference || undefined,
-      notes: noteText ?? undefined,
-      receipt_number: res.data!.receiptNumber,
-      bank_account_name: bankAccounts.find(b => b.id === payForm.bank_account_id)?.name ?? null,
+      setInvoices(prev => prev.map(i => i.id === invoiceId
+        ? { ...i, paid_amount: newPaid, paid_amount_inr: newPaidInr, status: newStatus, payments: [...(i.payments || []), pmt] }
+        : i
+      ))
+      const label = isAdvancePayment ? `Advance ${fmt(foreign, payForm.currency)} recorded` : `Payment of ${fmt(foreign, payForm.currency)} recorded — added to Cashbook`
+      success(label)
+      setPayForm({ amount: '', currency: (inv.currency || 'INR') as Currency, rate: '', amountInr: '', rateSource: 'settings', payment_date: new Date().toISOString().split('T')[0], payment_method: 'bank_transfer', reference: '', notes: '', bank_account_id: defaultBankAccountId })
+      setIsAdvancePayment(false)
+      setPanelMode('detail')
+    } catch (err: any) {
+      // The payment MAY have landed server-side before the transport failed, so
+      // tell the user to re-check rather than blindly retrying.
+      console.error('[handlePayment] failed:', err)
+      toastError(
+        'Payment failed',
+        `${err?.message || 'Could not reach the server'} — not confirmed. Reload and check the invoice before retrying.`,
+      )
+    } finally {
+      setSaving(false)
     }
-
-    setInvoices(prev => prev.map(i => i.id === invoiceId
-      ? { ...i, paid_amount: newPaid, paid_amount_inr: newPaidInr, status: newStatus, payments: [...(i.payments || []), pmt] }
-      : i
-    ))
-    const label = isAdvancePayment ? `Advance ${fmt(foreign, payForm.currency)} recorded` : `Payment of ${fmt(foreign, payForm.currency)} recorded — added to Cashbook`
-    success(label)
-    setPayForm({ amount: '', currency: (inv.currency || 'INR') as Currency, rate: '', amountInr: '', rateSource: 'settings', payment_date: new Date().toISOString().split('T')[0], payment_method: 'bank_transfer', reference: '', notes: '', bank_account_id: defaultBankAccountId })
-    setIsAdvancePayment(false)
-    setPanelMode('detail')
-    setSaving(false)
   }
 
   // Reverse the auto-created cashbook inflow + allocation for a single payment.
@@ -1374,52 +1387,55 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       return
     }
     setSaving(true)
-    const client = clients.find(c => c.id === newForm.client_id)
-    const clientCode = client?.code || 'CLI'
-    const invoiceDate = new Date(newForm.issue_date)
-    const { invoiceNumber: invNum, sequenceMonth } =
-      await generateInvoiceNumber(supabase, invoiceDate, clientCode)
+    try {
+      const client = clients.find(c => c.id === newForm.client_id)
+      const clientCode = client?.code || 'CLI'
+      const invoiceDate = new Date(newForm.issue_date)
+      const { invoiceNumber: invNum, sequenceMonth } =
+        await generateInvoiceNumber(supabase, invoiceDate, clientCode)
 
-    const validItems = newForm.items.filter(it => it.description.trim())
-    const subtotal = validItems.reduce((s, it) => s + it.total, 0)
+      const validItems = newForm.items.filter(it => it.description.trim())
+      const subtotal = validItems.reduce((s, it) => s + it.total, 0)
 
-    // Base insert with columns that always exist
-    const { data: inv, error } = await supabase.from('invoices').insert({
-      invoice_number: invNum, client_id: newForm.client_id, status: 'draft',
-      issue_date: newForm.issue_date,
-      due_date: newForm.due_date || (() => { const d = new Date(newForm.issue_date); d.setDate(d.getDate() + 30); return d.toISOString().split('T')[0] })(),
-      currency: newForm.currency, total_amount: subtotal, paid_amount: 0,
-      notes: newForm.notes || null,
-    }).select('*, client:clients(id,name,code,phone,email)').single()
+      // Base insert with columns that always exist
+      const { data: inv, error } = await supabase.from('invoices').insert({
+        invoice_number: invNum, client_id: newForm.client_id, status: 'draft',
+        issue_date: newForm.issue_date,
+        due_date: newForm.due_date || (() => { const d = new Date(newForm.issue_date); d.setDate(d.getDate() + 30); return d.toISOString().split('T')[0] })(),
+        currency: newForm.currency, total_amount: subtotal, paid_amount: 0,
+        notes: newForm.notes || null,
+      }).select('*, client:clients(id,name,code,phone,email)').single()
 
-    if (error) { toastError(error.message); setSaving(false); return }
+      if (error) { toastError(error.message); return }
 
-    // Update extended columns if migration has been run (silently ignored if not)
-    await supabase.from('invoices').update({
-      subtotal, tax_rate: 0, tax_amount: 0, discount_amount: 0, previous_balance: 0,
-      invoice_sequence_month: sequenceMonth,
-      exchange_rate: creationRate(newForm.currency), paid_amount_inr: 0,
-    }).eq('id', inv.id)
+      // Update extended columns if migration has been run (silently ignored if not)
+      await supabase.from('invoices').update({
+        subtotal, tax_rate: 0, tax_amount: 0, discount_amount: 0, previous_balance: 0,
+        invoice_sequence_month: sequenceMonth,
+        exchange_rate: creationRate(newForm.currency), paid_amount_inr: 0,
+      }).eq('id', inv.id)
 
-    if (validItems.length) {
-      await supabase.from('invoice_items').insert(
-        validItems.map((it, idx) => ({
-          invoice_id: inv.id, description: it.description, service_id: it.service_id || null,
-          quantity: it.quantity, unit_price: it.unit_price, total: it.total,
-          currency: newForm.currency, display_order: idx,
-        }))
-      )
+      if (validItems.length) {
+        await supabase.from('invoice_items').insert(
+          validItems.map((it, idx) => ({
+            invoice_id: inv.id, description: it.description, service_id: it.service_id || null,
+            quantity: it.quantity, unit_price: it.unit_price, total: it.total,
+            currency: newForm.currency, display_order: idx,
+          }))
+        )
+      }
+      const { data: full } = await supabase.from('invoices')
+        .select('*, client:clients(id,name,code), items:invoice_items(*, service:services(id,name)), payments(*)')
+        .eq('id', inv.id).single()
+
+      setInvoices(prev => [full as any, ...prev])
+      setSelectedId(inv.id)
+      setPanelMode('detail')
+      setNewForm({ client_id: '', currency: 'INR', issue_date: new Date().toISOString().split('T')[0], due_date: '', notes: '', items: [{ description: '', quantity: 1, unit_price: 0, total: 0, service_id: '' }] })
+      success('Invoice created')
+    } finally {
+      setSaving(false)
     }
-    const { data: full } = await supabase.from('invoices')
-      .select('*, client:clients(id,name,code), items:invoice_items(*, service:services(id,name)), payments(*)')
-      .eq('id', inv.id).single()
-
-    setInvoices(prev => [full as any, ...prev])
-    setSelectedId(inv.id)
-    setPanelMode('detail')
-    setNewForm({ client_id: '', currency: 'INR', issue_date: new Date().toISOString().split('T')[0], due_date: '', notes: '', items: [{ description: '', quantity: 1, unit_price: 0, total: 0, service_id: '' }] })
-    success('Invoice created')
-    setSaving(false)
   }, [newForm, clients, invoices, services, saving, toastError, success, supabase, setInvoices, setPanelMode, setNewForm, setSaving])
 
   useEffect(() => { createManualInvoiceRef.current = createManualInvoice }, [createManualInvoice])
@@ -1477,114 +1493,117 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const selected = genTasks.filter(t => genSelectedIds.has(t.id))
     if (!selected.length) { toastError('No tasks selected'); return }
     setSaving(true)
-    const client = clients.find(c => c.id === genForm.client_id)
-    const clientCode = client?.code || 'CLI'
+    try {
+      const client = clients.find(c => c.id === genForm.client_id)
+      const clientCode = client?.code || 'CLI'
 
-    // Billing month = the EARLIEST selected task's own task_date, month-truncated
-    // — same convention buildBillingPeriod/the task-done trigger use everywhere
-    // else. Previously this used the raw (unstruncated) date-range `from` filter
-    // value as billing_period_start, which could land on any day of the month
-    // and never match the month-truncated value the trigger writes — silently
-    // producing a SECOND draft for a month that already had one.
-    const earliestDate = selected.reduce((min, t) => (t.task_date && t.task_date < min ? t.task_date : min), selected[0].task_date || new Date().toISOString().split('T')[0])
-    const taskMonth = earliestDate.slice(0, 7)
-    const billingPeriod = buildBillingPeriod(taskMonth)
-    const invoiceDate = getInvoiceDateForTaskMonth(taskMonth)
+      // Billing month = the EARLIEST selected task's own task_date, month-truncated
+      // — same convention buildBillingPeriod/the task-done trigger use everywhere
+      // else. Previously this used the raw (unstruncated) date-range `from` filter
+      // value as billing_period_start, which could land on any day of the month
+      // and never match the month-truncated value the trigger writes — silently
+      // producing a SECOND draft for a month that already had one.
+      const earliestDate = selected.reduce((min, t) => (t.task_date && t.task_date < min ? t.task_date : min), selected[0].task_date || new Date().toISOString().split('T')[0])
+      const taskMonth = earliestDate.slice(0, 7)
+      const billingPeriod = buildBillingPeriod(taskMonth)
+      const invoiceDate = getInvoiceDateForTaskMonth(taskMonth)
 
-    // Customer invoices bill in the task's OWN currency, so line amounts come
-    // from billing_amount (foreign), NOT billing_amount_inr (the internal INR
-    // base used only for contributions/payroll/analytics). Fallback keeps
-    // legacy rows that only have the INR column working.
-    const taskAmt = (t: any) => t.billing_amount ?? t.billing_amount_inr ?? 0
-    // Invoice currency follows the tasks (line amounts are in each task's OWN
-    // currency via billing_amount), not client.default_currency — which can be
-    // unset/stale and would mislabel foreign amounts (e.g. AED) as ₹.
-    const invCurrency = selected.find(t => t.currency)?.currency || client?.default_currency || 'INR'
+      // Customer invoices bill in the task's OWN currency, so line amounts come
+      // from billing_amount (foreign), NOT billing_amount_inr (the internal INR
+      // base used only for contributions/payroll/analytics). Fallback keeps
+      // legacy rows that only have the INR column working.
+      const taskAmt = (t: any) => t.billing_amount ?? t.billing_amount_inr ?? 0
+      // Invoice currency follows the tasks (line amounts are in each task's OWN
+      // currency via billing_amount), not client.default_currency — which can be
+      // unset/stale and would mislabel foreign amounts (e.g. AED) as ₹.
+      const invCurrency = selected.find(t => t.currency)?.currency || client?.default_currency || 'INR'
 
-    // One draft per client per billing month — check for an existing draft
-    // covering this exact month before creating a new invoice, so re-running
-    // Generate for a month that already has an open draft appends to it
-    // instead of opening a duplicate.
-    const { data: existingDraft } = await supabase
-      .from('invoices')
-      .select('id, discount_amount, tax_amount, previous_balance, currency')
-      .eq('client_id', genForm.client_id)
-      .eq('status', 'draft')
-      .eq('billing_period_start', billingPeriod.billing_period_start)
-      .maybeSingle()
+      // One draft per client per billing month — check for an existing draft
+      // covering this exact month before creating a new invoice, so re-running
+      // Generate for a month that already has an open draft appends to it
+      // instead of opening a duplicate.
+      const { data: existingDraft } = await supabase
+        .from('invoices')
+        .select('id, discount_amount, tax_amount, previous_balance, currency')
+        .eq('client_id', genForm.client_id)
+        .eq('status', 'draft')
+        .eq('billing_period_start', billingPeriod.billing_period_start)
+        .maybeSingle()
 
-    let invId: string
-    let invNum = ''
-    let orderOffset = 0
+      let invId: string
+      let invNum = ''
+      let orderOffset = 0
 
-    if (existingDraft && existingDraft.currency === invCurrency) {
-      invId = existingDraft.id
-      const { count } = await supabase.from('invoice_items').select('id', { count: 'exact', head: true }).eq('invoice_id', invId)
-      orderOffset = count || 0
-    } else {
-      const { invoiceNumber, sequenceMonth } = await generateInvoiceNumber(supabase, invoiceDate, clientCode)
-      invNum = invoiceNumber
-      const { data: created, error } = await supabase.from('invoices').insert({
-        invoice_number: invNum, client_id: genForm.client_id, status: 'draft',
-        issue_date: formatLocalDate(invoiceDate),
-        total_amount: 0, paid_amount: 0,
-        currency: invCurrency,
-      }).select('id').single()
+      if (existingDraft && existingDraft.currency === invCurrency) {
+        invId = existingDraft.id
+        const { count } = await supabase.from('invoice_items').select('id', { count: 'exact', head: true }).eq('invoice_id', invId)
+        orderOffset = count || 0
+      } else {
+        const { invoiceNumber, sequenceMonth } = await generateInvoiceNumber(supabase, invoiceDate, clientCode)
+        invNum = invoiceNumber
+        const { data: created, error } = await supabase.from('invoices').insert({
+          invoice_number: invNum, client_id: genForm.client_id, status: 'draft',
+          issue_date: formatLocalDate(invoiceDate),
+          total_amount: 0, paid_amount: 0,
+          currency: invCurrency,
+        }).select('id').single()
 
-      if (error || !created) { toastError(error?.message || 'Failed to create invoice'); setSaving(false); return }
-      invId = created.id
+        if (error || !created) { toastError(error?.message || 'Failed to create invoice'); return }
+        invId = created.id
 
-      await supabase.from('invoices').update({
-        billing_period_start: billingPeriod.billing_period_start,
-        billing_period_end: billingPeriod.billing_period_end,
-        billing_period_label: billingPeriod.billing_period_label,
-        tax_rate: 0, tax_amount: 0, discount_amount: 0, previous_balance: 0,
-        invoice_sequence_month: sequenceMonth,
-        exchange_rate: creationRate(invCurrency), paid_amount_inr: 0,
-      }).eq('id', invId)
+        await supabase.from('invoices').update({
+          billing_period_start: billingPeriod.billing_period_start,
+          billing_period_end: billingPeriod.billing_period_end,
+          billing_period_label: billingPeriod.billing_period_label,
+          tax_rate: 0, tax_amount: 0, discount_amount: 0, previous_balance: 0,
+          invoice_sequence_month: sequenceMonth,
+          exchange_rate: creationRate(invCurrency), paid_amount_inr: 0,
+        }).eq('id', invId)
+      }
+
+      await supabase.from('invoice_items').insert(
+        selected.map((t, idx) => {
+          const qty = Number(t.quantity ?? 1)
+          const total = taskAmt(t)
+          const unit_price = total ? (total / qty) : 0
+          return {
+            invoice_id: invId, task_id: t.id,
+            description: t.title, quantity: qty,
+            unit_price: unit_price, total: total,
+            currency: t.currency || 'INR', display_order: orderOffset + idx,
+          }
+        })
+      )
+
+      // Recompute totals from the actual rows now on the invoice (correct whether
+      // this was a fresh invoice or an existing draft we just appended to).
+      const [{ data: itemRows }, { data: expRows }] = await Promise.all([
+        supabase.from('invoice_items').select('total').eq('invoice_id', invId),
+        supabase.from('invoice_expense_items').select('amount').eq('invoice_id', invId),
+      ])
+      const subtotal = (itemRows || []).reduce((s, r) => s + (r.total || 0), 0) + (expRows || []).reduce((s, r) => s + (r.amount || 0), 0)
+      const discount = existingDraft?.discount_amount || 0
+      const tax = existingDraft?.tax_amount || 0
+      const prevBalance = existingDraft?.previous_balance || 0
+      const totalAmount = round2(subtotal - discount + tax + prevBalance)
+      await supabase.from('invoices').update({ subtotal, total_amount: totalAmount, updated_at: new Date().toISOString() }).eq('id', invId)
+
+      const { data: full } = await supabase.from('invoices')
+        .select('*, client:clients(id,name,code,phone,email,address), items:invoice_items(*, task:tasks(id,title,task_date,status,billing_amount_inr,currency), service:services(id,name)), payments(*)')
+        .eq('id', invId).single()
+
+      const fullInv = full as any
+      setInvoices(prev => existingDraft
+        ? prev.map(i => i.id === invId ? fullInv : i)
+        : [fullInv, ...prev])
+      setSelectedId(invId); setPanelMode('detail')
+      setGenTasks([]); setGenSelectedIds(new Set())
+      success(existingDraft
+        ? `${selected.length} item${selected.length !== 1 ? 's' : ''} added to existing draft ${full?.invoice_number}`
+        : `Invoice ${invNum} created with ${selected.length} items`)
+    } finally {
+      setSaving(false)
     }
-
-    await supabase.from('invoice_items').insert(
-      selected.map((t, idx) => {
-        const qty = Number(t.quantity ?? 1)
-        const total = taskAmt(t)
-        const unit_price = total ? (total / qty) : 0
-        return {
-          invoice_id: invId, task_id: t.id,
-          description: t.title, quantity: qty,
-          unit_price: unit_price, total: total,
-          currency: t.currency || 'INR', display_order: orderOffset + idx,
-        }
-      })
-    )
-
-    // Recompute totals from the actual rows now on the invoice (correct whether
-    // this was a fresh invoice or an existing draft we just appended to).
-    const [{ data: itemRows }, { data: expRows }] = await Promise.all([
-      supabase.from('invoice_items').select('total').eq('invoice_id', invId),
-      supabase.from('invoice_expense_items').select('amount').eq('invoice_id', invId),
-    ])
-    const subtotal = (itemRows || []).reduce((s, r) => s + (r.total || 0), 0) + (expRows || []).reduce((s, r) => s + (r.amount || 0), 0)
-    const discount = existingDraft?.discount_amount || 0
-    const tax = existingDraft?.tax_amount || 0
-    const prevBalance = existingDraft?.previous_balance || 0
-    const totalAmount = round2(subtotal - discount + tax + prevBalance)
-    await supabase.from('invoices').update({ subtotal, total_amount: totalAmount, updated_at: new Date().toISOString() }).eq('id', invId)
-
-    const { data: full } = await supabase.from('invoices')
-      .select('*, client:clients(id,name,code,phone,email,address), items:invoice_items(*, task:tasks(id,title,task_date,status,billing_amount_inr,currency), service:services(id,name)), payments(*)')
-      .eq('id', invId).single()
-
-    const fullInv = full as any
-    setInvoices(prev => existingDraft
-      ? prev.map(i => i.id === invId ? fullInv : i)
-      : [fullInv, ...prev])
-    setSelectedId(invId); setPanelMode('detail')
-    setGenTasks([]); setGenSelectedIds(new Set())
-    success(existingDraft
-      ? `${selected.length} item${selected.length !== 1 ? 's' : ''} added to existing draft ${full?.invoice_number}`
-      : `Invoice ${invNum} created with ${selected.length} items`)
-    setSaving(false)
   }
 
   // ── Batch historical invoice generation ──────────────────────────────────
@@ -2129,7 +2148,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       const invTotal = inv.total_amount || 0
       const discount = inv.discount_amount || 0
       const prevBal = inv.previous_balance || 0
-      const sortedItems = [...(inv.items || [])].sort((a, b) => a.display_order - b.display_order)
+      const sortedItems = [...(inv.items || [])].sort(compareInvoiceItems)
 
       // Invoice header row
       allRows += `
@@ -2338,7 +2357,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       const invTotal = inv.total_amount || 0
       const discount = inv.discount_amount || 0
       const prevBal = inv.previous_balance || 0
-      const sortedItems = [...(inv.items || [])].sort((a, b) => a.display_order - b.display_order)
+      const sortedItems = [...(inv.items || [])].sort(compareInvoiceItems)
       const clientName = inv.client?.name || ''
 
       // Invoice Header Info Row
@@ -3391,7 +3410,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                   No items yet — tasks marked "done" auto-appear here
                 </div>
               )}
-              {(inv.items || []).sort((a, b) => a.display_order - b.display_order).map(item => (
+              {/* Copy before sorting — Array#sort mutates, and `inv.items` is React state. */}
+              {[...(inv.items || [])].sort(compareInvoiceItems).map(item => (
                 <div key={item.id} className="flex items-start gap-3 p-3 bg-card rounded-xl border border-border/40 hover:border-border/80 hover:shadow-sm transition-all group">
                   <div className="flex-1 min-w-0">
                     {editable ? (
@@ -3414,19 +3434,31 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                       )}
                     </div>
                   </div>
+                  {/* The editable field is the RATE, the read-only figure is the
+                      LINE TOTAL. They differ whenever quantity > 1, so the total
+                      is always spelled out rather than left to be inferred. */}
                   <div className="text-right shrink-0">
                     {editable ? (
                       <input
-                        type="number" min="0"
+                        type="number" min="0" step="0.01"
+                        title="Rate per unit"
                         defaultValue={item.unit_price}
-                        onBlur={e => { const v = parseFloat(e.target.value); if (v !== item.unit_price) updateItemPrice(item.id, inv.id, v) }}
+                        onBlur={e => {
+                          const v = parseFloat(e.target.value)
+                          // Blank/garbage would otherwise write NaN to unit_price AND total.
+                          if (!Number.isFinite(v) || v < 0) { e.target.value = String(item.unit_price); return }
+                          if (v !== item.unit_price) updateItemPrice(item.id, inv.id, v)
+                        }}
                         className="w-24 bg-background border border-border/50 rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:border-violet-500/50 transition-colors"
                       />
                     ) : (
                       <div className="text-sm font-semibold text-foreground">{fmt(item.total, inv.currency)}</div>
                     )}
                     {item.quantity !== 1 && (
-                      <div className="text-[11px] text-muted-foreground mt-0.5">{item.quantity} × {fmt(item.unit_price, inv.currency)}</div>
+                      <div className="text-[11px] text-muted-foreground mt-0.5">
+                        {item.quantity} × {fmt(item.unit_price, inv.currency)}
+                        {editable && <> = <span className="font-semibold text-foreground">{fmt(item.total, inv.currency)}</span></>}
+                      </div>
                     )}
                   </div>
                   {editable && (

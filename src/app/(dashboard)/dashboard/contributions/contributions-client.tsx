@@ -7,7 +7,7 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { recalculatePayrollForMonth } from '@/app/(dashboard)/dashboard/payroll/actions'
-import { serverFillTaskBilling } from '@/app/(dashboard)/dashboard/tasks/actions'
+import { serverFillTaskBilling, fetchRetainerCoverage } from '@/app/(dashboard)/dashboard/tasks/actions'
 import { applyTaskAgreements, logContributionSaved } from './actions'
 import { calculateCommission } from '@/lib/calculations/commission'
 import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
@@ -1243,6 +1243,17 @@ export default function ContributionsClient({
     if (addTaskForm.client_id) payload.client_id = addTaskForm.client_id
     if (addTaskForm.service_id) payload.service_id = addTaskForm.service_id
     if (addTaskForm.billing_amount_inr) payload.billing_amount_inr = parseFloat(addTaskForm.billing_amount_inr as string) || 0
+
+    // Same rule as every other task surface (lib/tasks/pricing): while a
+    // retainer covers this client+service+date the client is charged 0 — the
+    // retainer is the invoice. Without this check, a manual amount typed here
+    // billed the client on top of it.
+    if (payload.client_id && payload.service_id) {
+      const cov = await fetchRetainerCoverage(
+        payload.client_id, payload.service_id, payload.task_date,
+      ).catch(() => null)
+      if (cov) { payload.billing_amount = 0; payload.billing_amount_inr = 0 }
+    }
 
     const { data, error } = await supabase
       .from('tasks')

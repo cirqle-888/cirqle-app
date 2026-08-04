@@ -873,6 +873,18 @@ export default function RequestsClient({
             const pending = col.rows.filter(r => PENDING_STATUSES.includes(r.status)).length
             const active  = col.rows.filter(r => ACTIVE_STATUSES.includes(r.status)).length
             const done    = col.rows.filter(r => DONE_STATUSES.includes(r.status)).length
+            // Empty columns collapse into slim rails so the board is dominated
+            // by real work, not placeholder boxes — the stage stays visible
+            // (the pipeline still reads left-to-right) without costing 16rem
+            // of width to say "Empty".
+            if (col.rows.length === 0) return (
+              <div key={col.key}
+                title={`${col.label} — no requests`}
+                className="w-11 shrink-0 self-stretch min-h-[140px] bg-secondary/25 border border-border/50 rounded-2xl py-3 flex flex-col items-center gap-2">
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-secondary border border-border text-muted-foreground/70">0</span>
+                <p className="text-[10px] font-bold text-muted-foreground/60 tracking-wide [writing-mode:vertical-rl]">{col.label}</p>
+              </div>
+            )
             return (
               <div key={col.key} className="w-64 shrink-0 bg-secondary/40 border border-border rounded-2xl">
                 <div className="px-3 py-2.5 border-b border-border/60">

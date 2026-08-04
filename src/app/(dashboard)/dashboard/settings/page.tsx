@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import SettingsClient from './settings-client'
 
-const ALL_TABS = ['Company', 'Privacy & Security', 'Employees', 'Services', 'Groups & Params', 'Tools', 'Bank Accounts', 'Cash Categories', 'Exchange Rates']
+const ALL_TABS = ['Company', 'Privacy & Security', 'Employees', 'Services', 'Departments', 'Groups & Params', 'Tools', 'Bank Accounts', 'Cash Categories', 'Exchange Rates']
 const normalizeTab = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-')
 
 export const dynamic = 'force-dynamic'

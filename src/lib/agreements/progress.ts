@@ -22,9 +22,25 @@
  * noticing. Counting `quantity` (not tasks) matters: one task with quantity 4
  * consumes 4 of a 15-unit commitment.
  *
- * Committed is still prorated by active days in the month, so an agreement
- * starting mid-month commits a part-month quantity. Surface that in the UI —
- * an unexplained "8" against a promised 15 reads as a bug.
+ * ── Periods, not calendar months ────────────────────────────────────────────
+ * A retainer's commitment recurs per *period*. For an agreement starting on the
+ * 1st a period is just the calendar month. For one starting mid-month the first
+ * calendar month is a stub — too short to owe a full cycle, too real to ignore —
+ * so it is MERGED into the following month: one period spanning [start_date,
+ * end of the next month], owing one full cycle. Both calendar months resolve to
+ * that same period, so a task dated in the stub month and the card the user
+ * reads in the following month agree on the same numbers.
+ *
+ * The alternative — prorating the stub month — stranded delivery: work done on
+ * 29 Jul counted against a prorated 6, then vanished from every later view while
+ * August restarted at 15. Merging keeps that work inside the commitment it was
+ * actually delivered against.
+ *
+ * one_time items do NOT recur. They commit once, in the period containing their
+ * effective_from, and contribute nothing thereafter. Counting them every month
+ * (the old behaviour, since effective_to is normally NULL) silently inflated the
+ * monthly commitment forever — a 15-post retainer plus a 2-unit logo build read
+ * as "17 committed" in every month for the life of the agreement.
  */
 
 import type {
@@ -40,6 +56,8 @@ export interface ItemProgressSummary {
   itemId: string
   serviceId: string | null
   displayOrder: number
+  /** The window this row's figures were computed over. */
+  period: DeliveryPeriod
   committed: number
   /** Work that consumed the included allowance. Excludes bill-as-extra tasks. */
   delivered: number
@@ -60,6 +78,11 @@ export interface AgreementProgressSummary {
   title: string
   status: string
   items: ItemProgressSummary[]
+  /**
+   * What the cards should call this period. Usually the 'YYYY-MM' asked for, but
+   * an explicit date range when a mid-month start merged two calendar months.
+   */
+  periodLabel: string
   totalCommitted: number
   totalDelivered: number
   totalRemaining: number
@@ -156,45 +179,118 @@ export function resolveTermRows(
   return validRows[0]
 }
 
+function lastDayOf(month: string): string {
+  const [y, m] = month.split('-').map(Number)
+  return `${month}-${String(getDaysInMonth(y, m)).padStart(2, '0')}`
+}
+
+function addMonth(month: string, delta: number): string {
+  const [y, m] = month.split('-').map(Number)
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1))
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+}
+
+function daysBetween(start: string, end: string): number {
+  const ms = new Date(end).getTime() - new Date(start).getTime()
+  return Math.max(0, Math.round(ms / 86_400_000) + 1)
+}
+
+/** The window a period's delivery is counted over, and what it owes. */
+export interface DeliveryPeriod {
+  /** Inclusive first day a task may be dated to count in this period. */
+  start: string
+  /** Inclusive last day. */
+  end: string
+  /** For the UI: 'YYYY-MM', or an explicit range when a stub month was merged. */
+  label: string
+  /** True when a mid-month start pulled the preceding stub month into this one. */
+  mergedStartStub: boolean
+  /** True when the term row owes nothing in this period (e.g. a spent one_time). */
+  inactive: boolean
+}
+
 /**
- * Computes the prorated committed quantity for a term row in month M.
- * committed(M) = qty * activeDays(M) / daysInMonth(M)
- * activeDays clips the row's window by the agreement's [start_date, end_date].
+ * Resolves which delivery period the calendar month `month` belongs to for a
+ * given term row. See the module header for why a mid-month start merges two
+ * calendar months into one period.
  */
-export function prorateCommitted(
-  qty: number,
+export function resolveDeliveryPeriod(
   month: string,
+  agreement: ClientAgreementRow,
   termRow: ClientAgreementItemRow,
-  agreement: ClientAgreementRow
-): number {
+): DeliveryPeriod {
+  const plain = (inactive: boolean): DeliveryPeriod => ({
+    start: `${month}-01`,
+    end: lastDayOf(month),
+    label: month,
+    mergedStartStub: false,
+    inactive,
+  })
+
+  // A one_time item commits once, in the period holding its effective_from.
   if (termRow.commitment_type === 'one_time') {
-    return qty // one_time items are not prorated by month
+    const firstMonth = termRow.effective_from.slice(0, 7)
+    if (month !== firstMonth) return plain(true)
+    return {
+      start: termRow.effective_from,
+      end: lastDayOf(month),
+      label: month,
+      mergedStartStub: false,
+      inactive: false,
+    }
   }
 
-  const [y, m] = month.split('-').map(Number)
-  const daysInMonth = getDaysInMonth(y, m)
-  const monthStart = `${month}-01`
-  const monthEnd = `${month}-${String(daysInMonth).padStart(2, '0')}`
+  // Retainer. A start on the 1st needs no merging — periods are calendar months.
+  const start = agreement.start_date
+  const startMonth = start.slice(0, 7)
+  if (start.slice(8, 10) === '01' || month < startMonth) return plain(month < startMonth)
 
-  // Determine the effective bounds for the row in this specific month,
-  // bounded by the agreement's global start/end dates.
-  const startBound = [monthStart, termRow.effective_from, agreement.start_date]
-    .sort((a, b) => b.localeCompare(a))[0] // MAX
+  const mergedInto = addMonth(startMonth, 1)
+  if (month === startMonth || month === mergedInto) {
+    return {
+      start,
+      end: lastDayOf(mergedInto),
+      label: `${start} → ${lastDayOf(mergedInto)}`,
+      mergedStartStub: true,
+      inactive: false,
+    }
+  }
+  return plain(false)
+}
 
-  const endBounds = [monthEnd]
+/**
+ * Committed quantity for a term row over `period`.
+ *
+ * A merged first period owes exactly one cycle — the point of merging is that
+ * the stub month does not owe a second one. Proration survives only for the
+ * *end* of a commitment (a term row or agreement ending mid-period), where a
+ * part-period really does owe part of a cycle.
+ */
+export function periodCommitted(
+  qty: number,
+  period: DeliveryPeriod,
+  termRow: ClientAgreementItemRow,
+  agreement: ClientAgreementRow,
+): number {
+  if (period.inactive) return 0
+  if (termRow.commitment_type === 'one_time') return qty
+
+  const endBounds = [period.end]
   if (termRow.effective_to) endBounds.push(termRow.effective_to)
   if (agreement.end_date) endBounds.push(agreement.end_date)
   const endBound = endBounds.sort((a, b) => a.localeCompare(b))[0] // MIN
 
-  // If bounds are inverted, 0 active days
+  const startBound = [period.start, termRow.effective_from]
+    .sort((a, b) => b.localeCompare(a))[0] // MAX
+
   if (startBound > endBound) return 0
 
-  const dStart = new Date(startBound).getTime()
-  const dEnd = new Date(endBound).getTime()
-  const activeDays = Math.max(0, Math.round((dEnd - dStart) / (1000 * 60 * 60 * 24)) + 1)
-
-  if (activeDays >= daysInMonth) return qty
-  return Math.round((qty * activeDays) / daysInMonth)
+  // The merged first period is intentionally longer than a month; measure the
+  // shortfall against the period itself, never against a fixed 30/31 days.
+  const periodDays = daysBetween(period.start, period.end)
+  const activeDays = daysBetween(startBound, endBound)
+  if (activeDays >= periodDays) return qty
+  return Math.round((qty * activeDays) / periodDays)
 }
 
 // ─── Computation Engine ──────────────────────────────────────────────────────
@@ -206,24 +302,30 @@ export interface ComputeContext {
   /** Sub-lines of the item. Used only to total the commitment, not to split delivery. */
   deliverables: ClientAgreementDeliverableRow[]
   adjustments?: ClientAgreementAdjustmentRow[]
-  /** Already filtered to this client & month (or global for one_time items). */
+  /**
+   * Client tasks covering at least this item's period. Dates outside the period
+   * are filtered out here, so the caller may pass a wider range.
+   */
   tasks: SourceTask[]
   /** Unmet commitment rolled in from the previous month. */
   carryInRemaining: number
+  /** Defaults to `resolveDeliveryPeriod(month, agreement, termRow)`. */
+  period?: DeliveryPeriod
 }
 
 export function computeItemProgress(ctx: ComputeContext): ItemProgressSummary {
   const { month, termRow, agreement, deliverables, tasks, carryInRemaining } = ctx
+  const period = ctx.period ?? resolveDeliveryPeriod(month, agreement, termRow)
 
   // ── Committed ──────────────────────────────────────────────────────────────
   // Deliverables, when present, are the source of truth for the quantity.
   let committed =
     deliverables.length > 0
       ? deliverables.reduce(
-          (sum, d) => sum + prorateCommitted(d.committed_quantity, month, termRow, agreement),
+          (sum, d) => sum + periodCommitted(d.committed_quantity, period, termRow, agreement),
           0,
         )
-      : prorateCommitted(termRow.committed_quantity || 0, month, termRow, agreement)
+      : periodCommitted(termRow.committed_quantity || 0, period, termRow, agreement)
 
   committed += carryInRemaining
 
@@ -232,6 +334,7 @@ export function computeItemProgress(ctx: ComputeContext): ItemProgressSummary {
   let extraBilled = 0
   for (const task of tasks) {
     if (task.deleted_at) continue
+    if (task.task_date < period.start || task.task_date > period.end) continue
     if (!task.retainer_item_id || task.retainer_item_id !== termRow.id) continue
     if (!DELIVERED_STATUSES.includes(task.status as typeof DELIVERED_STATUSES[number])) continue
 
@@ -246,6 +349,7 @@ export function computeItemProgress(ctx: ComputeContext): ItemProgressSummary {
     itemId: termRow.id,
     serviceId: termRow.service_id,
     displayOrder: termRow.display_order,
+    period,
     committed,
     delivered,
     remaining: Math.max(0, committed - delivered),

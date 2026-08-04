@@ -252,7 +252,7 @@ export default function AgreementDetailClient({
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: `Committed (${currentMonth})`, value: progress?.totalCommitted ?? 0, tone: '' },
+          { label: `Committed (${progress?.periodLabel ?? currentMonth})`, value: progress?.totalCommitted ?? 0, tone: '' },
           { label: 'Delivered', value: progress?.totalDelivered ?? 0, tone: 'text-green-600' },
           { label: 'Remaining', value: progress?.totalRemaining ?? 0, tone: 'text-amber-600' },
           // Covered work billed on top of the retainer. Shown only when it exists,
@@ -267,11 +267,18 @@ export default function AgreementDetailClient({
           </div>
         ))}
       </div>
-      {/* A part-month commitment is correct but reads as a bug without this line. */}
-      {isPartialMonth(currentMonth, agreement.start_date, agreement.end_date) && (
+      {/* A period that isn't the plain calendar month reads as a bug without this line. */}
+      {progress && progress.periodLabel !== currentMonth && (
         <p className="text-xs text-muted-foreground -mt-3">
-          {currentMonth} is a part month — the commitment is prorated by active days
-          {agreement.start_date >= `${currentMonth}-01` ? ` (agreement starts ${agreement.start_date})` : ''}.
+          The agreement started on {agreement.start_date}, mid-month — that part month is
+          counted together with the next one as a single cycle, so work delivered in either
+          month counts here.
+        </p>
+      )}
+      {progress && progress.periodLabel === currentMonth
+        && isPartialMonth(currentMonth, agreement.start_date, agreement.end_date) && (
+        <p className="text-xs text-muted-foreground -mt-3">
+          {currentMonth} is a part month — the commitment is prorated by active days.
         </p>
       )}
       {progress == null && agreement.status === 'active' && (

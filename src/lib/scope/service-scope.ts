@@ -151,10 +151,26 @@ export async function loadServiceScope(
       ? fetchAssignedServiceIds(admin, employeeId)
       : Promise.resolve<string[] | null>([]),
     fetchClientNarrowingEnabled(admin),
-    admin.from('client_service_pricing')
-      .select('client_id, service_id')
-      .eq('is_active', true)
-      .then(r => (r.error ? null : (r.data || []))),
+    // Paginated: a plain select is capped at 1000 rows by PostgREST, and this
+    // table is already at ~800. Silently truncating here would drop the
+    // overflow clients from every restricted employee's view — fail-closed
+    // and invisible, the worst combination. Null (read failure) still means
+    // "don't narrow", handled below.
+    (async (): Promise<{ client_id: string | null; service_id: string | null }[] | null> => {
+      const all: { client_id: string | null; service_id: string | null }[] = []
+      const PAGE = 1000
+      for (let page = 0; page < 100; page++) {
+        const { data, error } = await admin
+          .from('client_service_pricing')
+          .select('client_id, service_id')
+          .eq('is_active', true)
+          .range(page * PAGE, (page + 1) * PAGE - 1)
+        if (error) return null
+        all.push(...((data || []) as { client_id: string | null; service_id: string | null }[]))
+        if ((data || []).length < PAGE) break
+      }
+      return all
+    })(),
   ])
 
   // A failed read must not masquerade as "assigned to nothing" — that would

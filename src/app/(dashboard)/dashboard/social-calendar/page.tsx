@@ -70,8 +70,8 @@ export default async function SocialCalendarPage({
       `
     // Drop ONLY the column each retry trips on — a pending patch migration
     // must not also hide columns that already exist.
-    let extraCols = ['service_id', 'variants', 'reference_url', 'reference_urls', 'scheduled_end_date', 'caption_canvas']
-    for (let attempt = 0; attempt <= 6; attempt++) {
+    let extraCols = ['service_id', 'variants', 'reference_url', 'reference_urls', 'scheduled_end_date', 'caption_canvas', 'assigned_employee_id']
+    for (let attempt = 0; attempt <= 7; attempt++) {
       const sel = [...extraCols, ITEM_COLS].join(', ')
       const itemsRes = await admin
         .from('social_calendar_items')
@@ -92,6 +92,62 @@ export default async function SocialCalendarPage({
       extraCols = extraCols.filter(c => c !== col)
     }
   }
+
+  // Every variant tag ever used, across all plans — powers the "Also as"
+  // autocomplete so free-text tags converge on a shared vocabulary instead of
+  // fragmenting into "reel"/"reels"/"Reel". A missing `variants` column
+  // (pre-migration) just yields an empty list.
+  let knownVariants: string[] = []
+  try {
+    const { data } = await admin
+      .from('social_calendar_items')
+      .select('variants')
+      .not('variants', 'is', null)
+      .limit(2000)
+    const set = new Set<string>()
+    for (const row of (data || []) as { variants: string[] | null }[]) {
+      for (const v of row.variants || []) if (v) set.add(String(v))
+    }
+    knownVariants = [...set].sort()
+  } catch { /* column not migrated yet — suggestions fall back to the built-ins */ }
+
+  // Designers available for the optional per-item assignment.
+  //
+  // NAME IS DELIBERATELY NOT SELECTED. Employee names are private: the picker
+  // shows CQIDs only, so the name never reaches the browser in the first place
+  // — a stronger guarantee than masking it at render time.
+  const employees = (await admin
+    .from('employees').select('id, cqid')
+    .eq('is_active', true).eq('is_archived', false).order('cqid')).data || []
+
+  // Employee → department(s), so the picker can offer the people who actually
+  // work this kind of content first. Derived from the same service-scope
+  // tables the visibility engine uses — no parallel mapping.
+  let employeeDepartments: Record<string, string[]> = {}
+  try {
+    const [{ data: cats }, { data: direct }, { data: svcs }] = await Promise.all([
+      admin.from('employee_service_categories').select('employee_id, category_id'),
+      admin.from('employee_services').select('employee_id, service_id'),
+      admin.from('services').select('id, category_id'),
+    ])
+    const svcDept = new Map((svcs || []).map((s: any) => [s.id, s.category_id ?? null]))
+    const add = (empId: string, dept: string | null) => {
+      if (!dept) return
+      const list = (employeeDepartments[empId] ||= [])
+      if (!list.includes(dept)) list.push(dept)
+    }
+    for (const r of (cats || []) as any[]) add(r.employee_id, r.category_id)
+    for (const r of (direct || []) as any[]) add(r.employee_id, svcDept.get(r.service_id) ?? null)
+  } catch { /* pre-migration — picker simply lists everyone */ }
+
+  // Department names for the picker's group headers.
+  let departments: { id: string; name: string }[] = []
+  try {
+    const { data } = await admin
+      .from('service_categories').select('id, name')
+      .eq('is_active', true).order('display_order')
+    departments = (data || []) as { id: string; name: string }[]
+  } catch { /* pre-migration — picker falls back to a flat list */ }
 
   const clients = (await admin
     .from('clients').select('id, name, code').eq('is_active', true).order('name')).data || []
@@ -137,6 +193,10 @@ export default async function SocialCalendarPage({
       initialItems={items}
       clients={clients as any[]}
       services={services as any[]}
+      knownVariants={knownVariants}
+      employees={employees as any[]}
+      employeeDepartments={employeeDepartments}
+      departments={departments}
       serviceMap={serviceMap}
       companySettings={companySettings}
       canManage={isAdmin || hasPermission(me, PERMS.SOCIAL_MANAGE)}

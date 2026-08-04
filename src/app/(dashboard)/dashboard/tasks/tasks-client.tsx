@@ -51,9 +51,13 @@ import {
   logTaskAssignment,
   serverInlineTaskUpdate,
   checkPossibleDuplicateTask,
-  fetchRetainerCoverage,
 } from './actions'
-import type { RetainerCoverageInfo } from '@/lib/agreements/coverage'
+import { TaskBillingSection } from '@/components/ui/task-billing-section'
+import { useRetainerCoverage } from '@/lib/tasks/use-retainer-coverage'
+import {
+  computeTaskAmount, resolveTaskQuantity, resolvePricingType,
+  isBillingSuppressed, effectiveBillingAmount,
+} from '@/lib/tasks/pricing'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { BatchActionBar, type BatchAction } from '@/components/ui/batch-action-bar'
 import { formatTaskDate, fullTaskDate } from '@/lib/utils/format-date'
@@ -200,6 +204,17 @@ interface Props {
 // (set automatically when invoice is sent) — excluded from the manual dropdown.
 const STATUSES = ['pending', 'in_progress', 'delivered', 'done', 'invoiced', 'cancelled']
 const MANUAL_STATUSES = ['pending', 'in_progress', 'delivered', 'done', 'cancelled']
+// The pipeline the team ACTUALLY uses: pending → done → invoiced. The other
+// statuses exist in the schema but have never been used (0 of 1,883 tasks as
+// of Aug 2026), so the UI hides them — DATA-DRIVEN, not deleted: any status
+// that gains live tasks (or is a row's current value) surfaces again
+// automatically. Nothing in the schema or existing data changes.
+const CORE_STATUSES = ['pending', 'done', 'invoiced']
+const CORE_MANUAL_STATUSES = ['pending', 'done', 'cancelled']
+/** Options for a manual status dropdown: the core set, plus the row's current
+ *  status so an exotic value never renders as an empty select. */
+const manualStatusOptions = (current?: string | null) =>
+  MANUAL_STATUSES.filter(s => CORE_MANUAL_STATUSES.includes(s) || s === current)
 const CURRENCIES: Currency[] = ['INR', 'AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
 
 const RECURRING_INTERVALS = [
@@ -781,21 +796,12 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
 
   // Derived: selected service object
   const selectedService = services.find(s => s.id === form.service_id)
-  const pricingType = selectedService?.pricing_type || 'fixed_per_creative'
+  const pricingType = resolvePricingType(selectedService?.pricing_type)
 
-  // Retainer coverage — is this client+service+date covered by an active
-  // retainer? If so we hide the client-price card and show the retainer card
-  // (unless flagged as extra work). Fetched live when those inputs change.
-  const [coverage, setCoverage] = useState<RetainerCoverageInfo | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    if (!form.client_id || !form.service_id) { setCoverage(null); return }
-    fetchRetainerCoverage(form.client_id, form.service_id, form.task_date)
-      .then(c => { if (!cancelled) setCoverage(c) })
-      .catch(() => { if (!cancelled) setCoverage(null) })
-    return () => { cancelled = true }
-  }, [form.client_id, form.service_id, form.task_date])
-  const suppressBilling = !!coverage && !form.bill_as_extra
+  // Retainer coverage + the "is the client charged?" rule both come from the
+  // shared modules, so this form and the Edit modal can never disagree.
+  const coverage = useRetainerCoverage(form.client_id, form.service_id, form.task_date)
+  const suppressBilling = isBillingSuppressed({ covered: !!coverage, billAsExtra: form.bill_as_extra })
 
   // Derived: unit price — client-specific first, then service default
   const clientPrice = clientPricings.find(p => p.client_id === form.client_id && p.service_id === form.service_id)
@@ -943,12 +949,12 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       return baseVariantAmount
     }
 
-    // Standard pricing-matrix calculation (original task)
+    // Standard pricing-matrix calculation (original task) — shared engine.
     if (!selectedService) return 0
-    if (pricingType === 'fixed_per_creative') return unitPrice * (parseFloat(form.quantity) || 1)
-    if (pricingType === 'hourly') return unitPrice * (parseFloat(form.hours) || 1)
-    if (pricingType === 'percentage_of_spend') return (parseFloat(form.spend) || 0) * (unitPrice / 100)
-    return unitPrice // retainer
+    return computeTaskAmount({
+      pricingType, unitPrice,
+      quantity: form.quantity, hours: form.hours, spend: form.spend,
+    })
   }, [pricingType, unitPrice, form.quantity, form.hours, form.spend, selectedService,
       parentTask, form.parent_task_id, form.is_billable, form.billing_mode, form.billing_percent,
       form.billing_override, form.manual_billing_amount])
@@ -1045,48 +1051,11 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
     setQuickSet(null)
   }
 
-  async function handleEditSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!editTask) return
-    setEditSaving(true)
-
-    const svc = services.find(s => s.id === editForm.service_id)
-    const pt = svc?.pricing_type || 'fixed_per_creative'
-    const cp = clientPricings.find(p => p.client_id === editForm.client_id && p.service_id === editForm.service_id)
-    const up = cp?.price ?? svc?.default_price ?? 0
-    const uc = (cp?.currency || svc?.default_currency || 'INR') as Currency
-
-    let amount = up
-    let qty = 1
-    if (pt === 'fixed_per_creative') { qty = parseFloat(editForm.quantity) || 1; amount = up * qty }
-    else if (pt === 'hourly') { qty = parseFloat(editForm.hours) || 1; amount = up * qty }
-    else if (pt === 'percentage_of_spend') { qty = parseFloat(editForm.spend) || 0; amount = qty * (up / 100) }
-
-    const { data, error } = await supabase
-      .from('tasks')
-      .update({
-        ...(editForm.task_number ? { task_number: parseInt(editForm.task_number, 10) } : {}),
-        title: editForm.title,
-        description: editForm.description || null,
-        client_id: editForm.client_id || null,   // internal tasks keep NULL through edits
-        service_id: editForm.service_id,
-        status: editForm.status,
-        billing_amount: amount,
-        billing_amount_inr: amount,
-        quantity: qty,
-        currency: uc,
-        task_date: editForm.task_date,
-      })
-      .eq('id', editTask.id)
-      .select(`*, client:clients(id, name, code), service:services(id, name)`)
-      .single()
-
-    if (!error && data) {
-      setTasks(prev => prev.map(t => t.id === editTask.id ? data : t))
-      setEditTask(null)
-    }
-    setEditSaving(false)
-  }
+  // NOTE: the legacy inline edit form that used to live here has been removed.
+  // Editing goes through <TaskEditModal>, which renders the shared
+  // TaskBillingSection and saves via serverSaveTask. The old handler carried a
+  // fifth copy of the pricing formula and wrote billing straight from the
+  // browser, bypassing the retainer-coverage guard entirely.
 
   async function initiateDelete(id: string) {
     // Check if this task has any contribution scores — if so we show a stronger warning.
@@ -1264,9 +1233,9 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
     e.preventDefault()
     setSaving(true)
     setAddError(null)
-    const qty = pricingType === 'fixed_per_creative' ? (parseFloat(form.quantity) || 1) :
-                pricingType === 'hourly' ? (parseFloat(form.hours) || 1) :
-                pricingType === 'percentage_of_spend' ? (parseFloat(form.spend) || 0) : 1
+    const qty = resolveTaskQuantity({
+      pricingType, quantity: form.quantity, hours: form.hours, spend: form.spend,
+    })
 
     // Compute next task_number (sequential, starting at 1)
     const maxRow = await supabase.from('tasks').select('task_number').order('task_number', { ascending: false, nullsFirst: false }).limit(1).maybeSingle()
@@ -1326,8 +1295,8 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       service_id: form.service_id,
       status: form.status,
       // Retainer-covered (not extra) → no client amount; the retainer is the charge.
-      billing_amount: suppressBilling ? 0 : computedAmount,
-      billing_amount_inr: suppressBilling ? 0 : computedAmount,
+      billing_amount: effectiveBillingAmount(computedAmount, { covered: !!coverage, billAsExtra: form.bill_as_extra }),
+      billing_amount_inr: effectiveBillingAmount(computedAmount, { covered: !!coverage, billAsExtra: form.bill_as_extra }),
       quantity: qty,
       currency: unitCurrency,
       // Only sent once the coverage migration exists (coverage != null proves it).
@@ -1945,7 +1914,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
           <select value={task.status} onChange={e => updateStatus(task.id, e.target.value)}
             className={`text-xs px-2 py-1 rounded-md border-0 cursor-pointer ${getStatusColor(task.status)}`}
             style={{ background: 'transparent' }}>
-            {MANUAL_STATUSES.map(s => <option key={s} value={s} className="bg-card text-foreground">{getStatusLabel(s)}</option>)}
+            {manualStatusOptions(task.status).map(s => <option key={s} value={s} className="bg-card text-foreground">{getStatusLabel(s)}</option>)}
             {task.status === 'invoiced' && <option value="invoiced" className="bg-card text-foreground" disabled>🔒 Invoiced (system)</option>}
           </select>
           {task.status === 'cancelled' && task.cancelled_by && (
@@ -2438,11 +2407,12 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
               <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
                 className="sm:hidden h-[30px] px-2 rounded-xl text-xs font-medium bg-secondary border border-border text-foreground focus:outline-none cursor-pointer w-full">
                 <option value="">All ({statusCounts.all})</option>
-                {STATUSES.map(s => <option key={s} value={s}>{getStatusLabel(s)} ({statusCounts[s] ?? 0})</option>)}
+                {STATUSES.filter(s => CORE_STATUSES.includes(s) || (statusCounts[s] ?? 0) > 0).map(s => <option key={s} value={s}>{getStatusLabel(s)} ({statusCounts[s] ?? 0})</option>)}
               </select>
               {([
                 { key: '', label: 'All' },
-                ...STATUSES.map(s => ({ key: s, label: getStatusLabel(s) })),
+                ...STATUSES.filter(s => CORE_STATUSES.includes(s) || (statusCounts[s] ?? 0) > 0)
+                  .map(s => ({ key: s, label: getStatusLabel(s) })),
               ]).map(({ key, label }) => {
                 const count = key === '' ? statusCounts.all : (statusCounts[key] ?? 0)
                 const active = filterStatus === key
@@ -2993,7 +2963,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                       onClick={e => e.stopPropagation()}
                       className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                     >
-                      {MANUAL_STATUSES.map(s => <option key={s} value={s}>{getStatusLabel(s)}</option>)}
+                      {manualStatusOptions(task.status).map(s => <option key={s} value={s}>{getStatusLabel(s)}</option>)}
                       {task.status === 'invoiced' && <option value="invoiced" disabled>Invoiced (system)</option>}
                     </select>
                   </div>
@@ -3777,9 +3747,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
           onClear={() => { setSelectedTasks(new Set()); setBulkMode(false) }}
           actions={[
             { key: 'done', label: 'Done', icon: <CheckCircle className="w-3.5 h-3.5" />, tint: 'emerald', onClick: () => bulkUpdateStatus('done') },
-            { key: 'delivered', label: 'Delivered', icon: <CheckCircle className="w-3.5 h-3.5" />, tint: 'violet', onClick: () => bulkUpdateStatus('delivered') },
-            { key: 'in_progress', label: 'In Progress', icon: <Clock className="w-3.5 h-3.5" />, tint: 'blue', onClick: () => bulkUpdateStatus('in_progress') },
-            { key: 'pending', label: 'New', icon: <Hash className="w-3.5 h-3.5" />, tint: 'yellow', onClick: () => bulkUpdateStatus('pending') },
+            { key: 'pending', label: 'Pending', icon: <Hash className="w-3.5 h-3.5" />, tint: 'yellow', onClick: () => bulkUpdateStatus('pending') },
             { key: 'assign', label: 'Assign', icon: <Users className="w-3.5 h-3.5" />, tint: 'cyan', onClick: openBulkAssign },
             { key: 'delete', label: 'Delete', icon: <Trash2 className="w-3.5 h-3.5" />, tint: 'red', onClick: () => setBulkDeleteConfirm(true) },
           ] as BatchAction[]}
@@ -4863,200 +4831,74 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                 </div>
               </div>
 
-              {/* Retainer coverage card (Phase 2b) — replaces the price card when
-                  the task is covered by an active retainer and not flagged extra. */}
-              {coverage && suppressBilling && (
-                <div className="rounded-xl border border-green-500/30 bg-green-500/5 p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle className="w-4 h-4 text-green-500" />
-                      <span className="text-xs font-semibold uppercase tracking-wide text-green-600 dark:text-green-400">Covered by Retainer</span>
-                    </div>
-                    <Link href={`/dashboard/agreements/${coverage.agreementId}`} target="_blank"
-                      className="text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-                      {coverage.agreementNumber} <ExternalLink className="w-3 h-3" />
-                    </Link>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    {coverage.monthlyRetainer != null && (
-                      <div><div className="text-[10px] text-muted-foreground">Monthly retainer</div><div className="font-semibold text-sm">{coverage.currency} {coverage.monthlyRetainer}</div></div>
-                    )}
-                    {coverage.creativeAllocation != null && (
-                      <div><div className="text-[10px] text-muted-foreground">Creative allocation</div><div className="font-semibold text-sm">{coverage.currency} {coverage.creativeAllocation}</div></div>
-                    )}
-                    {coverage.allocatedUnitValue != null && (
-                      <div><div className="text-[10px] text-muted-foreground">Allocated unit value</div><div className="font-semibold text-sm">{coverage.currency} {coverage.allocatedUnitValue}<span className="text-[10px] text-muted-foreground font-normal"> /unit</span></div></div>
-                    )}
-                    <div><div className="text-[10px] text-muted-foreground">Usage</div><div className="font-semibold text-sm">{coverage.delivered} of {coverage.includedQuantity ?? '—'}<span className="text-[10px] text-muted-foreground font-normal"> · {coverage.remaining} left</span></div></div>
-                  </div>
-                  {selectedService && pricingType === 'fixed_per_creative' && (
-                    <div className="max-w-[180px]">
-                      <label className="block text-[11px] text-muted-foreground mb-1">Number of creatives</label>
-                      <input type="number" min="1" step="1" value={form.quantity}
-                        onChange={e => setForm(p => ({ ...p, quantity: e.target.value }))} className={inputCls} placeholder="1" />
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between pt-1 border-t border-green-500/15">
-                    <p className="text-[11px] text-muted-foreground">No client charge — the monthly retainer is the invoice.</p>
-                    <button type="button" onClick={() => setForm(p => ({ ...p, bill_as_extra: true }))}
-                      className="text-[11px] font-medium text-amber-600 dark:text-amber-400 hover:underline whitespace-nowrap">
-                      Bill as extra work →
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Extra-work banner when a covered task is flagged billable */}
-              {coverage && form.bill_as_extra && (
-                <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-2.5 flex items-center justify-between gap-3">
-                  <p className="text-xs text-amber-700 dark:text-amber-300">
-                    Extra work beyond the {coverage.includedQuantity ?? ''} included — this task bills the client normally.
-                  </p>
-                  <button type="button" onClick={() => setForm(p => ({ ...p, bill_as_extra: false }))}
-                    className="text-[11px] font-medium text-muted-foreground hover:text-foreground whitespace-nowrap">Back to retainer</button>
-                </div>
-              )}
-
-              {/* Smart billing section — only shown to users with pricing access */}
-              {!suppressBilling && showBilling && selectedService && (
-                <div className={`rounded-xl border p-4 space-y-3 ${
-                  pricingType === 'fixed_per_creative' ? 'bg-blue-500/5 border-blue-500/20' :
-                  pricingType === 'retainer'           ? 'bg-green-500/5 border-green-500/20' :
-                  pricingType === 'percentage_of_spend'? 'bg-purple-500/5 border-purple-500/20' :
-                                                         'bg-amber-500/5 border-amber-500/20'
-                }`}>
-                  {/* Header row */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      {pricingType === 'fixed_per_creative'  && <Hash className="w-3.5 h-3.5 text-blue-400" />}
-                      {pricingType === 'retainer'             && <CheckCircle className="w-3.5 h-3.5 text-green-400" />}
-                      {pricingType === 'hourly'               && <Clock className="w-3.5 h-3.5 text-amber-400" />}
-                      {pricingType === 'percentage_of_spend'  && <span className="text-sm font-bold text-purple-400">%</span>}
-                      <span className={`text-xs font-semibold uppercase tracking-wide ${
-                        pricingType === 'fixed_per_creative'   ? 'text-blue-400' :
-                        pricingType === 'retainer'             ? 'text-green-400' :
-                        pricingType === 'percentage_of_spend'  ? 'text-purple-400' : 'text-amber-400'
-                      }`}>
-                        {pricingType === 'fixed_per_creative'  ? 'Fixed per Creative' :
-                         pricingType === 'retainer'            ? 'Retainer' :
-                         pricingType === 'percentage_of_spend' ? '% of Client Spend' : 'Hourly'}
-                      </span>
-                    </div>
-                    <span className="text-xs text-muted-foreground">
-                      {pricingType === 'percentage_of_spend'
-                        ? displayUnitPrice > 0 ? `Your rate: ${displayUnitPrice}%` : 'No % set'
-                        : clientPrice
-                          ? `Client price: ${unitCurrency} ${displayUnitPrice}`
-                          : displayUnitPrice > 0 ? `Default: ${unitCurrency} ${displayUnitPrice}` : 'No price set'}
-                    </span>
-                  </div>
-
-                  {/* Fixed per Creative */}
-                  {pricingType === 'fixed_per_creative' && (
-                    <div className="flex items-end gap-3">
-                      <div className="flex-1">
-                        <label className="block text-xs text-muted-foreground mb-1">Number of creatives</label>
-                        <input type="number" min="1" step="1" value={form.quantity}
-                          onChange={e => setForm(p => ({ ...p, quantity: e.target.value }))}
-                          className={inputCls} placeholder="1" />
-                      </div>
-                      <div className="text-right pb-2">
-                        <p className="text-xs text-muted-foreground">{displayUnitPrice} × {form.quantity || 1}</p>
-                        <p className="text-lg font-bold">{unitCurrency} {computedAmount.toLocaleString()}</p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* % of Spend */}
-                  {pricingType === 'percentage_of_spend' && (
-                    <div className="flex items-end gap-3">
-                      <div className="flex-1">
-                        <label className="block text-xs text-muted-foreground mb-1">Client's total ad spend ({unitCurrency})</label>
-                        <input type="number" min="0" step="0.01" value={form.spend}
-                          onChange={e => setForm(p => ({ ...p, spend: e.target.value }))}
-                          className={inputCls} placeholder="e.g. 1000" />
-                      </div>
-                      <div className="text-right pb-2">
-                        <p className="text-xs text-muted-foreground">{displayUnitPrice}% of {form.spend || 0}</p>
-                        <p className="text-lg font-bold text-purple-400">{unitCurrency} {computedAmount.toLocaleString()}</p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Retainer */}
-                  {pricingType === 'retainer' && (
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm text-muted-foreground">Monthly retainer — auto-filled</p>
-                      <p className="text-lg font-bold text-green-400">{unitCurrency} {computedAmount.toLocaleString()}</p>
-                    </div>
-                  )}
-
-                  {/* Hourly */}
-                  {pricingType === 'hourly' && (
-                    <div className="flex items-end gap-3">
-                      <div className="flex-1">
-                        <label className="block text-xs text-muted-foreground mb-1">Hours worked</label>
-                        <input type="number" min="0.5" step="0.5" value={form.hours}
-                          onChange={e => setForm(p => ({ ...p, hours: e.target.value }))}
-                          className={inputCls} placeholder="1" />
-                      </div>
-                      <div className="text-right pb-2">
-                        <p className="text-xs text-muted-foreground">{unitPrice}/hr × {form.hours || 1}h</p>
-                        <p className="text-lg font-bold">{unitCurrency} {computedAmount.toLocaleString()}</p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Quick-set price if none configured */}
-                  {unitPrice === 0 && (
-                    <div className="space-y-2 pt-1 border-t border-amber-500/20">
-                      <p className="text-xs text-amber-400 font-medium">⚠ No price set — set it now:</p>
-                      {!quickSet ? (
-                        <div className="flex gap-2">
-                          <button type="button" onClick={() => setQuickSet({ mode: 'default', price: '', currency: 'INR' })}
-                            className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-secondary hover:bg-secondary/70 text-foreground border border-border transition-colors">
-                            Set default price for this service
-                          </button>
-                          {form.client_id && form.client_id !== INTERNAL_CLIENT && (
-                            <button type="button" onClick={() => setQuickSet({ mode: 'client', price: '', currency: unitCurrency })}
-                              className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 transition-colors">
-                              Set price for {clients.find(c => c.id === form.client_id)?.name?.split(' ')[0]}
-                            </button>
+              {/* Financial section — ONE shared component, identical to the
+                  Edit Task modal. Coverage, Bill-as-extra, pricing card and
+                  quantity inputs all live in task-billing-section.tsx. */}
+              <TaskBillingSection
+                services={services}
+                clientPricings={clientPricings}
+                clientId={form.client_id}
+                serviceId={form.service_id}
+                quantity={form.quantity}
+                hours={form.hours}
+                spend={form.spend}
+                onChange={patch => setForm(p => ({ ...p, ...patch }))}
+                coverage={coverage}
+                billAsExtra={form.bill_as_extra}
+                onBillAsExtraChange={v => setForm(p => ({ ...p, bill_as_extra: v }))}
+                showFinancials={showBilling}
+                amount={computedAmount}
+                unitPriceDisplay={displayUnitPrice}
+                      footer={unitPrice === 0 && (
+                        <div className="space-y-2 pt-1 border-t border-amber-500/20">
+                          <p className="text-xs text-amber-400 font-medium">⚠ No price set — set it now:</p>
+                          {!quickSet ? (
+                            <div className="flex gap-2">
+                              <button type="button" onClick={() => setQuickSet({ mode: 'default', price: '', currency: 'INR' })}
+                                className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-secondary hover:bg-secondary/70 text-foreground border border-border transition-colors">
+                                Set default price for this service
+                              </button>
+                              {form.client_id && form.client_id !== INTERNAL_CLIENT && (
+                                <button type="button" onClick={() => setQuickSet({ mode: 'client', price: '', currency: unitCurrency })}
+                                  className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 transition-colors">
+                                  Set price for {clients.find(c => c.id === form.client_id)?.name?.split(' ')[0]}
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              <p className="text-xs text-muted-foreground">
+                                {quickSet.mode === 'default' ? `Default price for "${selectedService?.name}"` : `Price for ${clients.find(c => c.id === form.client_id)?.name} — ${selectedService?.name}`}
+                              </p>
+                              <div className="flex gap-2 items-center">
+                                <input
+                                  type="number" min="0" step="0.01" autoFocus
+                                  value={quickSet.price}
+                                  onChange={e => setQuickSet(q => q ? { ...q, price: e.target.value } : q)}
+                                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveQuickPrice() } if (e.key === 'Escape') setQuickSet(null) }}
+                                  className="flex-1 bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                  placeholder="0.00"
+                                />
+                                <select value={quickSet.currency} onChange={e => setQuickSet(q => q ? { ...q, currency: e.target.value as Currency } : q)}
+                                  className="bg-secondary border border-border rounded-lg px-2 py-1.5 text-sm focus:outline-none">
+                                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                                <button type="button" onClick={saveQuickPrice} disabled={quickSaving || !quickSet.price}
+                                  className="px-3 py-1.5 rounded-lg gradient-bg text-white text-xs font-medium disabled:opacity-50 whitespace-nowrap">
+                                  {quickSaving ? '…' : 'Save'}
+                                </button>
+                                <button type="button" onClick={() => setQuickSet(null)} className="px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground">✕</button>
+                              </div>
+                            </div>
                           )}
                         </div>
-                      ) : (
-                        <div className="space-y-2">
-                          <p className="text-xs text-muted-foreground">
-                            {quickSet.mode === 'default' ? `Default price for "${selectedService?.name}"` : `Price for ${clients.find(c => c.id === form.client_id)?.name} — ${selectedService?.name}`}
-                          </p>
-                          <div className="flex gap-2 items-center">
-                            <input
-                              type="number" min="0" step="0.01" autoFocus
-                              value={quickSet.price}
-                              onChange={e => setQuickSet(q => q ? { ...q, price: e.target.value } : q)}
-                              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveQuickPrice() } if (e.key === 'Escape') setQuickSet(null) }}
-                              className="flex-1 bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                              placeholder="0.00"
-                            />
-                            <select value={quickSet.currency} onChange={e => setQuickSet(q => q ? { ...q, currency: e.target.value as Currency } : q)}
-                              className="bg-secondary border border-border rounded-lg px-2 py-1.5 text-sm focus:outline-none">
-                              {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-                            </select>
-                            <button type="button" onClick={saveQuickPrice} disabled={quickSaving || !quickSet.price}
-                              className="px-3 py-1.5 rounded-lg gradient-bg text-white text-xs font-medium disabled:opacity-50 whitespace-nowrap">
-                              {quickSaving ? '…' : 'Save'}
-                            </button>
-                            <button type="button" onClick={() => setQuickSet(null)} className="px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground">✕</button>
-                          </div>
-                        </div>
                       )}
-                    </div>
-                  )}
-                </div>
-              )}
+              />
 
-              {/* Pricing summary card */}
-              {showBilling && selectedService && (
+              {/* Pricing summary card. Hidden while a retainer absorbs the cost —
+                  quoting the service price directly under "No client charge"
+                  reads as a contradiction, and it is not what gets invoiced. */}
+              {!suppressBilling && showBilling && selectedService && (
                 <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-3 flex items-center justify-between">
                   <div className="text-xs text-muted-foreground">
                     <span className="font-medium text-foreground">{selectedService.name}</span>
@@ -5069,52 +4911,6 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                 </div>
               )}
 
-              {/* Quantity input for employees without pricing access.
-                  Shown only when the billing section above is hidden, so
-                  non-admin users can still record how many creatives/hours
-                  they worked. No price or total is revealed here. */}
-              {!suppressBilling && !showBilling && selectedService && (
-                pricingType === 'fixed_per_creative' ? (
-                  <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-                      Number of creatives
-                    </label>
-                    <input
-                      type="number" min="1" step="1"
-                      value={form.quantity}
-                      onChange={e => setForm(p => ({ ...p, quantity: e.target.value }))}
-                      className={inputCls}
-                      placeholder="1"
-                    />
-                  </div>
-                ) : pricingType === 'hourly' ? (
-                  <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-                      Hours worked
-                    </label>
-                    <input
-                      type="number" min="0.5" step="0.5"
-                      value={form.hours}
-                      onChange={e => setForm(p => ({ ...p, hours: e.target.value }))}
-                      className={inputCls}
-                      placeholder="1"
-                    />
-                  </div>
-                ) : pricingType === 'percentage_of_spend' ? (
-                  <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-                      Client's total ad spend
-                    </label>
-                    <input
-                      type="number" min="0" step="0.01"
-                      value={form.spend}
-                      onChange={e => setForm(p => ({ ...p, spend: e.target.value }))}
-                      className={inputCls}
-                      placeholder="e.g. 1000"
-                    />
-                  </div>
-                ) : null
-              )}
 
               {/* Description (more often filled than status — placed before it) */}
               <div>
@@ -5126,7 +4922,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1.5">Status</label>
                 <AppSelect value={form.status} onChange={e => setForm(p => ({ ...p, status: e.target.value }))}>
-                  {MANUAL_STATUSES.map(s => <option key={s} value={s}>{getStatusLabel(s)}</option>)}
+                  {manualStatusOptions(form.status).map(s => <option key={s} value={s}>{getStatusLabel(s)}</option>)}
                 </AppSelect>
               </div>
 

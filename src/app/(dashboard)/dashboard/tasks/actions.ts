@@ -21,6 +21,7 @@ import { PERMS } from '@/lib/permissions/keys'
 import { revalidatePath } from 'next/cache'
 import { recalcTaskCommissions, syncDraftInvoices } from '@/lib/sync/integrity'
 import { getTaskCoverage, getRetainerCoverageInfo, type RetainerCoverageInfo } from '@/lib/agreements/coverage'
+import { computeTaskAmount, resolvePricingType } from '@/lib/tasks/pricing'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { recalculatePayrollForMonth } from '@/app/(dashboard)/dashboard/payroll/actions'
 import { syncRequestStatusFromTask, syncRequestStatusFromTasks } from '@/lib/requests/task-sync'
@@ -442,16 +443,14 @@ export async function serverFillTaskBilling(
   }
   if (unitPrice == null || unitPrice <= 0) return
 
-  // billing_amount is the TOTAL for the task. Per-unit & hourly pricing
-  // multiply by quantity (the bug was a branch that stored the unit price as
-  // the total — splitting it across units instead of multiplying). Retainer is
-  // flat; percentage-of-spend can't be derived here so we leave billing alone.
-  const pt = svc.pricing_type || 'fixed_per_creative'
+  // billing_amount is the TOTAL for the task, computed by the SHARED pricing
+  // engine so this auto-fill can never drift from what the task forms show.
+  // Percentage-of-spend needs the client's ad spend, which isn't available here,
+  // so we leave that billing alone rather than guess.
+  const pt = resolvePricingType(svc.pricing_type)
+  if (pt === 'percentage_of_spend') return
   const qty = quantity || 1
-  let amount: number
-  if (pt === 'retainer') amount = unitPrice
-  else if (pt === 'percentage_of_spend') return
-  else amount = unitPrice * qty // fixed_per_creative, hourly, and sane default
+  const amount = computeTaskAmount({ pricingType: pt, unitPrice, quantity: qty, hours: qty })
   if (amount <= 0) return
 
   await admin.from('tasks').update({
@@ -515,6 +514,12 @@ export interface SaveTaskInput {
   billingAmountInr?: number
   quantity?:    number
   currency?:    string
+  /**
+   * Whether a retainer-covered task is billed on top of the retainer. Sent only
+   * when the caller actually knows the coverage state, so an unaware surface
+   * cannot silently flip a client from covered to charged.
+   */
+  billAsExtra?: boolean
   taskDate:     string | null
 }
 
@@ -535,8 +540,15 @@ async function coverageBillingConflict(
   admin: ReturnType<typeof createAdminClient>,
   taskId: string,
   billingAmount: number | undefined,
+  /**
+   * The flag being written in this same save, when the caller supplied one.
+   * Without it, ticking "Bill as extra" and entering a price in one action was
+   * rejected: the guard read the row's OLD flag, which was still false.
+   */
+  incomingBillAsExtra?: boolean,
 ): Promise<string | null> {
   if (billingAmount === undefined || billingAmount <= 0) return null
+  if (incomingBillAsExtra === true) return null
 
   const { data: task } = await admin
     .from('tasks')
@@ -545,6 +557,11 @@ async function coverageBillingConflict(
     .maybeSingle()
 
   if (!task?.retainer_item_id) return null   // not covered — bill freely
+  if (incomingBillAsExtra === false) {
+    // Explicitly returning to retainer coverage while sending a price.
+    return 'This task is covered by the client’s retainer, so it bills at 0. ' +
+           'Turn on “Bill as extra work” to charge for it on top of the retainer.'
+  }
   if (task.bill_as_extra) return null        // explicitly extra work — bill freely
 
   return 'This task is covered by the client’s retainer, so it bills at 0. ' +
@@ -574,7 +591,9 @@ export async function serverSaveTask(
 
   const admin = createAdminClient()
 
-  const conflict = await coverageBillingConflict(admin, input.taskId, input.billingAmount)
+  const conflict = await coverageBillingConflict(
+    admin, input.taskId, input.billingAmount, input.billAsExtra,
+  )
   if (conflict) return { ok: false, error: conflict }
 
   const billingInr = input.billingAmount !== undefined
@@ -594,6 +613,7 @@ export async function serverSaveTask(
       ...(billingInr !== undefined ? { billing_amount_inr: billingInr } : {}),
       ...(input.quantity         !== undefined ? { quantity:           input.quantity } : {}),
       ...(input.currency         !== undefined ? { currency:           input.currency } : {}),
+      ...(input.billAsExtra      !== undefined ? { bill_as_extra:      input.billAsExtra } : {}),
       task_date:          input.taskDate || null,
     })
     .eq('id', input.taskId)
