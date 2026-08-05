@@ -9,6 +9,11 @@ export interface ComboOption {
   id: string
   label: string
   sub?: string
+  /** Optional section header — consecutive options sharing a group render
+   *  under one divider. When any option carries a group, the caller owns the
+   *  order: smart-sort reordering and its badges are skipped (search still
+   *  filters flat). */
+  group?: string
 }
 
 interface Props {
@@ -121,6 +126,8 @@ export default function Combobox({
 
   // When searching: plain filtered list (ignore sort order)
   // When not searching + sortKey: smart-sorted list with badges
+  const grouped = options.some(o => o.group)
+
   const displayItems = (() => {
     if (query) {
       const q = query.toLowerCase()
@@ -128,12 +135,13 @@ export default function Combobox({
         .filter(o => o.label.toLowerCase().includes(q) || o.sub?.toLowerCase().includes(q))
         .map(o => ({ ...o, _badge: undefined as SortBadge }))
     }
-    if (sortKey) return smartSort(options, sortData)
+    if (sortKey && !grouped) return smartSort(options, sortData)
     return options.map(o => ({ ...o, _badge: undefined as SortBadge }))
   })()
 
   // Section dividers (only when showing sorted, no active search)
-  const showDividers = !!sortKey && !query
+  const showDividers = !!sortKey && !query && !grouped
+  const showGroups = grouped && !query
 
   function select(id: string) {
     if (sortKey && id) {
@@ -152,8 +160,13 @@ export default function Combobox({
 
     const rows: React.ReactNode[] = []
     let lastBadge: SortBadge = 'placeholder' as any // force first divider
+    let lastGroup: string | undefined
 
     displayItems.forEach((o, i) => {
+      if (showGroups && o.group && o.group !== lastGroup) {
+        rows.push(<Divider key={`g-${o.group}-${i}`} label={o.group} />)
+        lastGroup = o.group
+      }
       if (showDividers && o._badge !== lastBadge) {
         if (o._badge === 'recent')   rows.push(<Divider key={`d-recent-${i}`}   label="Recently Used" />)
         if (o._badge === 'frequent') rows.push(<Divider key={`d-frequent-${i}`} label="Frequently Used" />)

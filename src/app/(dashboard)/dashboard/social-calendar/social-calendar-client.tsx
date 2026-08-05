@@ -356,7 +356,7 @@ function RichTextEditor({
           suppressContentEditableWarning
           onInput={e => onChange((e.target as HTMLDivElement).innerHTML)}
           onPaste={handlePaste}
-          className="min-h-[110px] max-h-64 overflow-y-auto px-3 py-2 text-sm focus:outline-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-0.5 [&_h1]:text-base [&_h1]:font-bold [&_h2]:text-base [&_h2]:font-bold [&_h3]:font-semibold [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:underline"
+          className="min-h-[240px] max-h-[50dvh] overflow-y-auto px-3 py-2 text-sm focus:outline-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-0.5 [&_h1]:text-base [&_h1]:font-bold [&_h2]:text-base [&_h2]:font-bold [&_h3]:font-semibold [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:underline"
         />
       </div>
     </div>
@@ -438,6 +438,37 @@ const itemRefs = (it: { reference_urls?: string[] | null; reference_url?: string
 // droppable. The pointer sensor needs 6px of travel before a drag starts, so
 // plain clicks still open the edit modal.
 
+/** One folded row in the item modal. Collapsed it still reports what it
+ *  holds (the summary), so folding never hides data — it only hides empty
+ *  fields. Top-level on purpose: defined inside the client component it would
+ *  remount (and drop focus from) its inputs on every keystroke. */
+function OptionalSection({ label, hint, summary, open, onToggle, children }: {
+  label: string
+  /** Long-form explanation — lives in the hover tooltip, not the row. */
+  hint?: string
+  /** Compact description of current content; null/'' = section is empty. */
+  summary?: React.ReactNode
+  open: boolean
+  onToggle: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <div>
+      <button
+        type="button" onClick={onToggle} aria-expanded={open} title={hint}
+        className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors max-w-full"
+      >
+        <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform ${open ? '' : '-rotate-90'}`} />
+        {label}
+        {summary
+          ? <span className="text-primary font-semibold truncate">· {summary}</span>
+          : <span className="text-muted-foreground/60 font-normal">(optional)</span>}
+      </button>
+      {open && <div className="mt-1.5">{children}</div>}
+    </div>
+  )
+}
+
 function DraggableItem({ id, disabled, children }: { id: string; disabled?: boolean; children: React.ReactNode }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id, disabled })
   return (
@@ -492,11 +523,15 @@ export default function SocialCalendarClient({
   // ── Item modal (add or edit) ────────────────────────────────────────────────
   const [itemModal, setItemModal] = useState<{ mode: 'add' | 'edit'; itemId?: string } | null>(null)
   const [itemForm, setItemForm] = useState<ItemInput>(EMPTY_ITEM)
-  // Platforms is optional metadata, so the picker stays folded away by default
-  // instead of taking a permanent row in the form. null = follow the item
-  // (auto-open when it already has platforms, so editing never hides data);
-  // once the user toggles it, their choice sticks for the session.
-  const [showPlatforms, setShowPlatforms] = useState<boolean | null>(null)
+  // Optional metadata (Also as, Designer, Platforms, references, notes) folds
+  // away instead of costing a permanent row each — the essentials stay: title,
+  // date, type, caption. null = follow the item (auto-open when it already
+  // holds data, so editing never hides anything); once the user toggles a
+  // section, that choice sticks for the session.
+  const [openSec, setOpenSec] = useState<Record<string, boolean | null>>({})
+  const secOpen = (key: string, hasData: boolean) => openSec[key] ?? hasData
+  const toggleSec = (key: string, hasData: boolean) =>
+    setOpenSec(s => ({ ...s, [key]: !secOpen(key, hasData) }))
   // "Also as" free-text tag draft (Enter commits).
   const [variantDraft, setVariantDraft] = useState('')
   const [savingItem, setSavingItem] = useState(false)
@@ -969,21 +1004,38 @@ export default function SocialCalendarClient({
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-3 py-2.5">
         <div className="min-w-[240px] flex-1 sm:flex-none">
           <Combobox
-            options={calendars.map(c => {
-              const total = c.items?.length ?? 0
-              const sent = c.items?.filter(i => i.request_id).length ?? 0
-              let sub = `${c.title ? c.title + ' · ' : ''}${total} items · ${sent} in requests${c.status === 'archived' ? ' · archived' : ''}`
-              if (c.id === selected?.id && agreementProgress && agreementProgress.length > 0) {
-                const totalCommitted = agreementProgress.reduce((sum, a) => sum + (a.totalCommitted || 0), 0)
-                const totalDelivered = agreementProgress.reduce((sum, a) => sum + (a.totalDelivered || 0), 0)
-                sub = `${c.title ? c.title + ' · ' : ''}${totalDelivered}/${totalCommitted} Delivered${c.status === 'archived' ? ' · archived' : ''}`
+            options={(() => {
+              const opt = (c: (typeof calendars)[number]) => {
+                const total = c.items?.length ?? 0
+                const sent = c.items?.filter(i => i.request_id).length ?? 0
+                let sub = `${c.title ? c.title + ' · ' : ''}${total} items · ${sent} in requests`
+                if (c.id === selected?.id && agreementProgress && agreementProgress.length > 0) {
+                  const totalCommitted = agreementProgress.reduce((sum, a) => sum + (a.totalCommitted || 0), 0)
+                  const totalDelivered = agreementProgress.reduce((sum, a) => sum + (a.totalDelivered || 0), 0)
+                  sub = `${c.title ? c.title + ' · ' : ''}${totalDelivered}/${totalCommitted} Delivered`
+                }
+                return { id: c.id, label: `${c.client?.name ?? 'Client'} — ${monthLabel(c.month)}`, sub }
               }
-              return {
-                id: c.id,
-                label: `${c.client?.name ?? 'Client'} — ${monthLabel(c.month)}`,
-                sub
-              }
-            })}
+              // Grouped by relevance, not creation order: what's being planned
+              // now sits on top; finished months sink but stay one scroll away
+              // (search still reaches everything flat).
+              const thisMonth = new Date().toISOString().slice(0, 7)
+              const key = (c: (typeof calendars)[number]) => c.month.slice(0, 7)
+              const live = calendars.filter(c => c.status !== 'archived')
+              return [
+                ...live.filter(c => key(c) === thisMonth)
+                  .map(c => ({ ...opt(c), group: 'This month' })),
+                ...live.filter(c => key(c) > thisMonth)
+                  .sort((a, b) => a.month.localeCompare(b.month))
+                  .map(c => ({ ...opt(c), group: 'Upcoming' })),
+                ...live.filter(c => key(c) < thisMonth)
+                  .sort((a, b) => b.month.localeCompare(a.month))
+                  .map(c => ({ ...opt(c), group: 'Past months' })),
+                ...calendars.filter(c => c.status === 'archived')
+                  .sort((a, b) => b.month.localeCompare(a.month))
+                  .map(c => ({ ...opt(c), group: 'Archived' })),
+              ]
+            })()}
             value={selected?.id ?? ''}
             onChange={id => { if (id) { router.push(`/dashboard/social-calendar?calendar=${id}`); router.refresh() } }}
             placeholder={calendars.length ? 'Pick a plan…' : 'No plans yet'}
@@ -1404,7 +1456,10 @@ export default function SocialCalendarClient({
       {/* ── Item modal (add / edit) ── */}
       {itemModal && selected && (
         <ModalOverlay onClose={() => setItemModal(null)}>
-          <div className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
+          {/* max-w-2xl (not lg): the caption editor is the working surface of
+              this form — the extra width keeps its toolbar to one row and
+              gives the copy room to breathe. */}
+          <div className="bg-card border border-border rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div>
                 <h2 className="font-semibold">{itemModal.mode === 'add' ? 'Plan an item' : 'Edit item'}</h2>
@@ -1428,7 +1483,7 @@ export default function SocialCalendarClient({
               <button onClick={() => setItemModal(null)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
             </div>
 
-            <div className="px-5 py-4 space-y-3 max-h-[65dvh] overflow-y-auto">
+            <div className="px-5 py-4 space-y-3 max-h-[72dvh] overflow-y-auto">
               {editingFrozen && (
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
                   This item is already a task — the plan entry is frozen. Manage it from the Tasks page.
@@ -1445,8 +1500,8 @@ export default function SocialCalendarClient({
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-                    {itemForm.scheduledEndDate ? 'Start date' : 'Date'} <span className="text-muted-foreground/60">(blank = Idea Board)</span>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5" title="Leave blank to keep it on the Idea Board">
+                    {itemForm.scheduledEndDate ? 'Start date' : 'Date'} <span className="text-muted-foreground/60">(blank = idea)</span>
                   </label>
                   <input
                     type="date" value={itemForm.scheduledDate ?? ''} disabled={editingFrozen}
@@ -1524,10 +1579,13 @@ export default function SocialCalendarClient({
                   .filter(v => v !== itemForm.contentType && !chosen.includes(v))
 
                 return (
-                  <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-                      Also as <span className="text-muted-foreground/60">(size/format variants of the same creative — e.g. a post that also goes out as a story)</span>
-                    </label>
+                  <OptionalSection
+                    label="Also as"
+                    hint="Size/format variants of the same creative — e.g. a post that also goes out as a story"
+                    summary={chosen.length ? chosen.map(label).join(', ') : ''}
+                    open={secOpen('variants', chosen.length > 0)}
+                    onToggle={() => toggleSec('variants', chosen.length > 0)}
+                  >
                     <div className="flex flex-wrap items-center gap-1.5">
                       {storyPinned && (
                         <button
@@ -1575,7 +1633,7 @@ export default function SocialCalendarClient({
                         {suggestions.map(v => <option key={v} value={v}>{label(v)}</option>)}
                       </datalist>
                     </div>
-                  </div>
+                  </OptionalSection>
                 )
               })()}
               {/* No Service field here on purpose: the server assigns it
@@ -1631,10 +1689,13 @@ export default function SocialCalendarClient({
                   : (grouped.length ? 'No department' : 'All employees')
 
                 return (
-                  <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-                      Designer <span className="text-muted-foreground/60">(optional — carries into the design request)</span>
-                    </label>
+                  <OptionalSection
+                    label="Designer"
+                    hint="Optional — carries into the design request, so work arrives in the inbox already earmarked"
+                    summary={assignedId ? (employees.find(e => e.id === assignedId)?.cqid ?? '') : ''}
+                    open={secOpen('designer', !!assignedId)}
+                    onToggle={() => toggleSec('designer', !!assignedId)}
+                  >
                     <AppSelect
                       value={itemForm.assignedEmployeeId ?? ''}
                       disabled={editingFrozen}
@@ -1670,31 +1731,17 @@ export default function SocialCalendarClient({
                         </button>
                       </p>
                     )}
-                  </div>
+                  </OptionalSection>
                 )
               })()}
 
-              {/* Platforms — optional, so it lives behind a disclosure rather
-                  than costing a permanent row. Collapsed, it still reports what
-                  is selected, so nothing is silently hidden. */}
-              {(() => {
-                const open = showPlatforms ?? itemForm.platforms.length > 0
-                return (
-                  <div>
-                    <button
-                      type="button"
-                      onClick={() => setShowPlatforms(!open)}
-                      aria-expanded={open}
-                      className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? '' : '-rotate-90'}`} />
-                      Platforms
-                      {itemForm.platforms.length > 0
-                        ? <span className="text-primary font-semibold">· {platformLabels(itemForm.platforms, true)}</span>
-                        : <span className="text-muted-foreground/60 font-normal">(optional)</span>}
-                    </button>
-                    {open && (
-                      <div className="flex flex-wrap gap-1.5 mt-1.5">
+              <OptionalSection
+                label="Platforms"
+                summary={itemForm.platforms.length > 0 ? platformLabels(itemForm.platforms, true) : ''}
+                open={secOpen('platforms', itemForm.platforms.length > 0)}
+                onToggle={() => toggleSec('platforms', itemForm.platforms.length > 0)}
+              >
+                <div className="flex flex-wrap gap-1.5">
                         {PLATFORMS.map(p => {
                           const on = itemForm.platforms.includes(p)
                           return (
@@ -1712,11 +1759,8 @@ export default function SocialCalendarClient({
                             </button>
                           )
                         })}
-                      </div>
-                    )}
-                  </div>
-                )
-              })()}
+                </div>
+              </OptionalSection>
               <div>
                 <div className="flex items-center gap-2 mb-1.5">
                   <label className="block text-xs font-medium text-muted-foreground">Caption / copy</label>
@@ -1752,10 +1796,14 @@ export default function SocialCalendarClient({
                   />
                 )}
               </div>
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-                  Reference images <span className="text-muted-foreground/60">(mood board — what the creative should look like)</span>
-                </label>
+              <OptionalSection
+                label="Reference images"
+                hint="Mood board — what the creative should look like"
+                summary={(itemForm.referenceUrls?.length ?? 0) > 0
+                  ? `${itemForm.referenceUrls!.length} image${itemForm.referenceUrls!.length === 1 ? '' : 's'}` : ''}
+                open={secOpen('refs', (itemForm.referenceUrls?.length ?? 0) > 0)}
+                onToggle={() => toggleSec('refs', (itemForm.referenceUrls?.length ?? 0) > 0)}
+              >
                 {(itemForm.referenceUrls?.length ?? 0) > 0 && (
                   <div className="flex flex-wrap gap-2 mb-2">
                     {(itemForm.referenceUrls ?? []).map((url, i) => (
@@ -1801,18 +1849,19 @@ export default function SocialCalendarClient({
                     )}
                   </div>
                 )}
-                {(itemForm.referenceUrls?.length ?? 0) === 0 && editingFrozen && (
-                  <p className="text-[11px] text-muted-foreground/60">No reference images.</p>
-                )}
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Internal notes</label>
+              </OptionalSection>
+              <OptionalSection
+                label="Internal notes"
+                summary={itemForm.notes?.trim() ? '✓' : ''}
+                open={secOpen('notes', !!itemForm.notes?.trim())}
+                onToggle={() => toggleSec('notes', !!itemForm.notes?.trim())}
+              >
                 <textarea
                   value={itemForm.notes ?? ''} rows={2} disabled={editingFrozen}
                   onChange={e => setItemForm(p => ({ ...p, notes: e.target.value }))}
                   className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none resize-none disabled:opacity-60"
                 />
-              </div>
+              </OptionalSection>
             </div>
 
             <div className="flex flex-wrap gap-2 px-5 py-4 border-t border-border">
