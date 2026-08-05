@@ -17,7 +17,7 @@ import { useSearchParams } from 'next/navigation'
 import {
   Hash, Lock, MessageSquare, Plus, Send, ArrowLeft, Users2,
   Trash2, RefreshCw, X, Paperclip, Search, SmilePlus, Reply, Download, FileText, ClipboardCheck,
-  CornerUpLeft, Mic, Check, CheckCheck, Pencil,
+  CornerUpLeft, Mic, Check, CheckCheck, Pencil, Pin, CheckSquare, Megaphone, CalendarDays, Inbox
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { usePermissions } from '@/contexts/permission-context'
@@ -30,11 +30,20 @@ import {
   listChatEmployees, getMessages, getThread, sendMessage, deleteMessage, editMessage, markRead,
   toggleReaction, createAttachmentUploadUrl, sendFileMessage, searchMessages,
   sendVoiceMessage, getMessage, getReadReceipts, markVoicePlayed, listClientsForChat,
-  archiveConversation,
+  archiveConversation, addMembersToConversation, removeMemberFromConversation,
   type ChatConversation, type ChatMessage, type ChatSearchHit, type ReplySnapshot, type ReadReceiptDetail,
 } from './actions'
 
 const QUICK_EMOJI = ['👍', '❤️', '😂', '🎉', '✅', '👀']
+
+/** What kind of record a discussion room hangs off — shown as a row badge so
+ *  a task thread is never mistaken for a plan or a campaign. */
+const ENTITY_BADGE: Record<string, { label: string; cls: string; Icon: React.ElementType }> = {
+  task:    { label: 'Task',     cls: 'bg-blue-500/15 text-blue-600 dark:text-blue-300', Icon: CheckSquare },
+  request: { label: 'Request',  cls: 'bg-amber-500/15 text-amber-600 dark:text-amber-300', Icon: Inbox },
+  plan:    { label: 'Plan',     cls: 'bg-violet-500/15 text-violet-600 dark:text-violet-300', Icon: CalendarDays },
+  project: { label: 'Campaign', cls: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300', Icon: Megaphone },
+}
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
@@ -108,6 +117,25 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
   const [showApprovalDialog, setShowApprovalDialog] = useState(false)
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null)
   const [highlightId, setHighlightId] = useState<string | null>(null)
+
+  const [workNavFilter, setWorkNavFilter] = useState('All')
+  const [workNavSearch, setWorkNavSearch] = useState('')
+  const [showWorkNavMobile, setShowWorkNavMobile] = useState(false)
+  const [pinnedIds, setPinnedIds] = useState<string[]>(() => {
+    if (typeof window !== 'undefined') {
+      try { return JSON.parse(localStorage.getItem('chat_pinned_ids') || '[]') } catch { return [] }
+    }
+    return []
+  })
+
+  const togglePin = useCallback((id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setPinnedIds(prev => {
+      const next = prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+      localStorage.setItem('chat_pinned_ids', JSON.stringify(next))
+      return next
+    })
+  }, [])
   const [searchQ, setSearchQ] = useState('')
   const [searchHits, setSearchHits] = useState<ChatSearchHit[] | null>(null)
   const [pending, startTransition] = useTransition()
@@ -206,6 +234,7 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
   useEffect(() => { const t = setTimeout(() => setTypingBy({}), 0); return () => clearTimeout(t) }, [activeId])
 
   const [alerts, setAlerts] = useState<{ id: string; title: string; body: string; convId: string }[]>([])
+  const [showMembers, setShowMembers] = useState(false)
 
   const notifyIncoming = useCallback((convId: string, senderId: string | null, kind: string, body: string) => {
     const conv = conversationsRef.current.find(c => c.id === convId)
@@ -543,28 +572,60 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
   const clientChannels = conversations.filter(c => isChannelish(c) && c.category === 'client')
   const allDiscussions = conversations.filter(c => c.category === 'discussion' && c.isMember)
 
-  // A task/request/plan discussion is filed under its client's channel — one
-  // consolidated place per client instead of a flat pile that grows forever.
-  // Discussions whose client has no channel (or no client at all) stay in the
-  // standalone "Discussions" section so nothing can become unreachable.
-  const clientChannelIds = new Set(clientChannels.map(c => c.clientId).filter(Boolean) as string[])
-  const discussionsByClient = new Map<string, ChatConversation[]>()
-  for (const d of allDiscussions) {
-    if (d.type === 'client') continue          // the client's own room IS the channel
-    if (!d.clientId || !clientChannelIds.has(d.clientId)) continue
-    const list = discussionsByClient.get(d.clientId) ?? []
-    list.push(d)
-    discussionsByClient.set(d.clientId, list)
+  // Every task / request / plan / campaign discussion is filed under its
+  // client — one consolidated place per client instead of a flat pile that
+  // grows without bound. A client group appears whenever the client has a
+  // channel OR any discussion, so a client with no channel still collects its
+  // threads instead of scattering them. Discussions with no client at all fall
+  // back to a standalone "Other discussions" section — never unreachable.
+  type ClientGroup = { clientId: string; name: string; channel: ChatConversation | null; threads: ChatConversation[]; unreadTotal: number }
+  const clientGroups = new Map<string, ClientGroup>()
+  const groupFor = (clientId: string, name: string): ClientGroup => {
+    let g = clientGroups.get(clientId)
+    if (!g) { g = { clientId, name, channel: null, threads: [], unreadTotal: 0 }; clientGroups.set(clientId, g) }
+    if (name && g.name === 'Client') g.name = name
+    return g
   }
-  const nestedIds = new Set([...discussionsByClient.values()].flat().map(d => d.id))
+  for (const ch of clientChannels) {
+    if (!ch.clientId) continue
+    const g = groupFor(ch.clientId, ch.clientName ?? convDisplayName(ch))
+    g.channel = ch
+    g.unreadTotal += ch.unread
+  }
+  for (const d of allDiscussions) {
+    if (d.type === 'client') {
+      if (d.clientId) {
+        const g = groupFor(d.clientId, d.clientName ?? convDisplayName(d))
+        g.channel ??= d
+        g.unreadTotal += d.unread
+      }
+      continue
+    }
+    if (!d.clientId) continue
+    const g = groupFor(d.clientId, d.clientName ?? 'Client')
+    g.threads.push(d)
+    g.unreadTotal += d.unread
+  }
+  // Client channels that never got a clientId can't be grouped — keep them
+  // visible as their own standalone entries rather than dropping them.
+  const ungroupedClientChannels = clientChannels.filter(c => !c.clientId)
+  const groupedIds = new Set(
+    [...clientGroups.values()].flatMap(g => [g.channel?.id, ...g.threads.map(t => t.id)]).filter(Boolean) as string[],
+  )
+  const sortedClientGroups = [...clientGroups.values()].sort((a, b) => a.name.localeCompare(b.name))
 
   const groups = {
     general:     conversations.filter(c => isChannelish(c) && (c.category ?? 'general') === 'general'),
     department:  conversations.filter(c => isChannelish(c) && c.category === 'department'),
-    client:      clientChannels,
-    discussion:  allDiscussions.filter(c => !nestedIds.has(c.id)),
+    discussion:  allDiscussions.filter(c => !groupedIds.has(c.id)),
     dms:         conversations.filter(c => c.type === 'dm'),
   }
+
+  const activeClientGroup = useMemo(() => {
+    if (activeId?.startsWith('client:')) return clientGroups.get(activeId.replace('client:', ''))
+    if (active?.clientId) return clientGroups.get(active.clientId)
+    return null
+  }, [activeId, active, clientGroups])
 
   return (
     <div className="flex h-full">
@@ -655,27 +716,15 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
               {([
                 ['Channels', groups.general, true],
                 ['Departments', groups.department, false],
-                ['Clients', groups.client, false],
-                ['Discussions', groups.discussion, false],
               ] as [string, ChatConversation[], boolean][]).map(([label, list, always]) => (
                 (always || list.length > 0) && (
                   <div key={label}>
                     <SectionLabel>{label}</SectionLabel>
                     {list.map(c => (
-                      <div key={c.id}>
-                        <ConversationRow conv={c} active={c.id === activeId}
-                          displayName={convDisplayName(c)} showName={showName}
-                          onDelete={c.canDelete ? askDeleteConv : undefined}
-                          onClick={() => (c.isMember ? openConversation(c.id) : handleJoin(c.id))} />
-                        {/* This client's task / request / plan discussions, filed
-                            underneath it instead of in one flat list. */}
-                        {label === 'Clients' && c.clientId && (discussionsByClient.get(c.clientId) ?? []).map(d => (
-                          <ConversationRow key={d.id} conv={d} active={d.id === activeId} indented
-                            displayName={convDisplayName(d)} showName={showName}
-                            onDelete={d.canDelete ? askDeleteConv : undefined}
-                            onClick={() => openConversation(d.id)} />
-                        ))}
-                      </div>
+                      <ConversationRow key={c.id} conv={c} active={c.id === activeId}
+                        displayName={convDisplayName(c)} showName={showName}
+                        onDelete={c.canDelete ? askDeleteConv : undefined}
+                        onClick={() => (c.isMember ? openConversation(c.id) : handleJoin(c.id))} />
                     ))}
                     {label === 'Channels' && canCreateChannels && (
                       <button onClick={() => setShowNewMenu('channel')}
@@ -686,6 +735,60 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
                   </div>
                 )
               ))}
+
+              {/* ── Clients: channel + that client's threads underneath ── */}
+              {(sortedClientGroups.length > 0 || ungroupedClientChannels.length > 0) && (
+                <div>
+                  <SectionLabel>Clients</SectionLabel>
+                  {sortedClientGroups.map(g => {
+                    const rowActive = g.channel?.id === activeId || g.threads.some(t => t.id === activeId) || activeId === `client:${g.clientId}`
+                    return (
+                    <div key={g.clientId}>
+                      {g.channel ? (
+                        <ConversationRow conv={{ ...g.channel, unread: g.unreadTotal }} active={rowActive}
+                          displayName={convDisplayName(g.channel)} showName={showName}
+                          onDelete={g.channel.canDelete ? askDeleteConv : undefined}
+                          onClick={() => (g.channel!.isMember ? openConversation(g.channel!.id) : handleJoin(g.channel!.id))} />
+                      ) : (
+                        <div className={`group/row flex w-full items-center transition-colors ${rowActive ? 'bg-muted' : 'hover:bg-muted/50'}`}>
+                          <button onClick={() => setActiveId(`client:${g.clientId}`)}
+                            className="flex min-w-0 flex-1 items-center gap-2 py-2 pl-4 pr-1 text-left">
+                            <Hash className="h-4 w-4 shrink-0 text-muted-foreground opacity-50" />
+                            <span className="min-w-0 flex-1">
+                              <span className={`flex items-center gap-1.5 text-sm`}>
+                                <span className={`truncate ${g.unreadTotal > 0 ? 'font-semibold text-foreground' : ''}`}>{g.name}</span>
+                              </span>
+                            </span>
+                            {g.unreadTotal > 0 && (
+                              <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground px-1.5 text-[10px] font-semibold text-background">
+                                {g.unreadTotal > 99 ? '99+' : g.unreadTotal}
+                              </span>
+                            )}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )})}
+                  {ungroupedClientChannels.map(c => (
+                    <ConversationRow key={c.id} conv={c} active={c.id === activeId}
+                      displayName={convDisplayName(c)} showName={showName}
+                      onDelete={c.canDelete ? askDeleteConv : undefined}
+                      onClick={() => (c.isMember ? openConversation(c.id) : handleJoin(c.id))} />
+                  ))}
+                </div>
+              )}
+
+              {groups.discussion.length > 0 && (
+                <div>
+                  <SectionLabel>Other discussions</SectionLabel>
+                  {groups.discussion.map(c => (
+                    <ConversationRow key={c.id} conv={c} active={c.id === activeId}
+                      displayName={convDisplayName(c)} showName={showName}
+                      onDelete={c.canDelete ? askDeleteConv : undefined}
+                      onClick={() => openConversation(c.id)} />
+                  ))}
+                </div>
+              )}
 
               <SectionLabel>Direct messages</SectionLabel>
               {groups.dms.map(c => (
@@ -703,12 +806,34 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
       </aside>
 
       {/* ── Pane 2: thread ── */}
-      <section className={`${activeId ? 'flex' : 'hidden md:flex'} min-w-0 flex-1 flex-col bg-background`}>
+      <section className={`${activeId && !threadRootId && !(activeId && showWorkNavMobile) ? 'flex' : 'hidden md:flex'} min-w-0 flex-1 flex-col bg-background`}>
         {!active ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted-foreground">
-            <MessageSquare className="h-8 w-8" />
-            <p className="text-sm">Pick a conversation, or start a new one.</p>
-          </div>
+          activeClientGroup ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center px-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+                <Hash className="h-6 w-6 text-muted-foreground" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-foreground">General Discussion</h3>
+                <p className="mt-1 text-sm text-muted-foreground">Discuss anything related to this client here.</p>
+              </div>
+              <button disabled={pending}
+                onClick={() => startTransition(async () => {
+                  const name = activeClientGroup.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)
+                  const res = await createChannel({ name, topic: '', isPrivate: false, category: 'client', clientId: activeClientGroup.clientId })
+                  if (res.ok) { await refreshList(); openConversation(res.data.id) }
+                  else alert(res.error)
+                })}
+                className="mt-2 rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50">
+                Start Discussion
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted-foreground">
+              <MessageSquare className="h-8 w-8" />
+              <p className="text-sm">Pick a conversation, or start a new one.</p>
+            </div>
+          )
         ) : (
           <>
             {/* pl-14 on mobile: the app's global sidebar hamburger is fixed at
@@ -734,9 +859,15 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
                   title="Request approval in this conversation">
                   <ClipboardCheck className="h-3.5 w-3.5" /> Approval
                 </button>
-                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                <button onClick={() => setShowMembers(true)}
+                  className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
                   <Users2 className="h-3.5 w-3.5" /> {active.members.length}
-                </span>
+                </button>
+                {activeClientGroup && !threadRootId && (
+                  <button onClick={() => setShowWorkNavMobile(true)} className="md:hidden ml-1 inline-flex items-center gap-1 rounded-lg bg-muted px-2 py-1 text-xs font-medium hover:bg-muted/80">
+                    Work {activeClientGroup.unreadTotal > 0 && <span className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-foreground text-[9px] text-background">{activeClientGroup.unreadTotal > 99 ? '99+' : activeClientGroup.unreadTotal}</span>}
+                  </button>
+                )}
               </span>
             </div>
 
@@ -806,21 +937,23 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
           </>
         )}
       </section>
-
-      {/* ── Pane 3: reply thread ── */}
-      {threadRootId && activeId && (
-        <ThreadPanel
-          rootId={threadRootId}
-          conversationId={activeId}
-          me={me}
-          members={active?.members ?? []}
-          onClose={() => setThreadRootId(null)}
-          onReplySent={() => {
-            // bump the reply count on the root message
+      {/* ── Pane 3: Thread / Work Navigator ── */}
+      {threadRootId && activeId ? (
+        <ThreadPanel rootId={threadRootId} conversationId={activeId} me={me} members={active?.members ?? []}
+          onClose={() => setThreadRootId(null)} onReplySent={() => {
             setMessages(prev => prev.map(m => m.id === threadRootId ? { ...m, replyCount: m.replyCount + 1 } : m))
-          }}
-        />
-      )}
+          }} />
+      ) : activeClientGroup ? (
+        <div className={`${showWorkNavMobile ? 'flex' : 'hidden md:flex'} fixed inset-0 z-40 bg-background md:static md:z-auto md:w-80 md:shrink-0 md:border-l md:border-border flex-col`}>
+          <WorkNavigatorPanel
+            clientGroup={activeClientGroup} activeId={activeId}
+            filter={workNavFilter} search={workNavSearch} pinnedIds={pinnedIds}
+            setFilter={setWorkNavFilter} setSearch={setWorkNavSearch}
+            togglePin={togglePin} onSelect={(id) => { setActiveId(id); setShowWorkNavMobile(false) }}
+            onClose={() => setShowWorkNavMobile(false)}
+          />
+        </div>
+      ) : null}
 
       {/* Incoming-message toasts */}
       {alerts.length > 0 && (
@@ -854,6 +987,14 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
           canCreateChannels={canCreateChannels}
           onClose={() => setShowNewMenu(null)}
           onCreated={async (id) => { setShowNewMenu(null); await refreshList(); openConversation(id) }}
+        />
+      )}
+
+      {showMembers && active && (
+        <MembersDialog
+          conversation={active}
+          me={me}
+          onClose={() => setShowMembers(false)}
         />
       )}
     </div>
@@ -1029,6 +1170,16 @@ function MessageRow({ m, me, senderName, onDelete, onEdit, onPlayVoice, onReact,
 
   if (m.deletedAt) {
     return <p className="py-1 pl-10 text-xs italic text-muted-foreground">Message deleted</p>
+  }
+
+  if (m.kind === 'system') {
+    return (
+      <div className="my-2 flex justify-center">
+        <span className="rounded-full bg-muted/60 px-3 py-1 text-[11px] text-muted-foreground font-medium text-center">
+          {m.body}
+        </span>
+      </div>
+    )
   }
 
   return (
@@ -1439,7 +1590,14 @@ function ConversationRow({ conv, active, onClick, onDelete, displayName, showNam
           ? <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium">{initials(displayName)}</span>
           : conv.isPrivate ? <Lock className="h-4 w-4 shrink-0 text-muted-foreground" /> : <Hash className={`${indented ? 'h-3 w-3' : 'h-4 w-4'} shrink-0 text-muted-foreground`} />}
         <span className="min-w-0 flex-1">
-          <span className={`block truncate ${indented ? 'text-xs' : 'text-sm'} ${conv.unread > 0 ? 'font-semibold' : ''}`}>{displayName}</span>
+          <span className={`flex items-center gap-1.5 ${indented ? 'text-xs' : 'text-sm'}`}>
+            <span className={`truncate ${conv.unread > 0 ? 'font-semibold' : ''}`}>{displayName}</span>
+            {ENTITY_BADGE[conv.type] && (
+              <span className={`shrink-0 rounded px-1 py-px text-[9px] font-semibold uppercase tracking-wide ${ENTITY_BADGE[conv.type].cls}`}>
+                {ENTITY_BADGE[conv.type].label}
+              </span>
+            )}
+          </span>
           {conv.lastMessage && !indented && (
             <span className="block truncate text-xs text-muted-foreground">
               {(conv.lastMessage.senderCqid || conv.lastMessage.senderName)
@@ -1589,6 +1747,284 @@ function NewConversationDialog({ mode, canCreateChannels, onClose, onCreated }: 
             </div>
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+function WorkNavigatorRow({ conv, active, onClick, isPinned, togglePin }: {
+  conv: ChatConversation; active: boolean; onClick: () => void;
+  isPinned: boolean; togglePin: (e: React.MouseEvent) => void;
+}) {
+  const badge = ENTITY_BADGE[conv.type]
+  const Icon = badge?.Icon ?? Hash
+  const displayName = conv.name || 'Untitled'
+
+  return (
+    <div className={`group/row flex w-full items-center transition-colors ${active ? 'bg-muted' : 'hover:bg-muted/50'}`}>
+      <button onClick={onClick} className="flex min-w-0 flex-1 items-start gap-3 py-2 pl-4 pr-1 text-left">
+        <div className="mt-0.5"><Icon className={`h-4 w-4 shrink-0 ${badge ? badge.cls.split(' ')[1] : 'text-muted-foreground'}`} /></div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className={`truncate text-sm ${conv.unread > 0 ? 'font-semibold text-foreground' : 'font-medium text-foreground/90'}`}>{displayName}</span>
+            {conv.unread > 0 && (
+              <span className="shrink-0 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground px-1 text-[9px] font-semibold text-background">
+                {conv.unread > 99 ? '99+' : conv.unread}
+              </span>
+            )}
+          </div>
+          <div className="mt-0.5 flex items-center gap-1.5">
+            {badge && <span className={`shrink-0 rounded px-1 py-px text-[9px] font-semibold uppercase tracking-wide ${badge.cls}`}>{badge.label}</span>}
+            {conv.topic && <span className="truncate text-xs text-muted-foreground">{conv.topic}</span>}
+          </div>
+        </div>
+      </button>
+      <button onClick={togglePin} className={`mr-2 shrink-0 rounded p-1.5 transition-opacity hover:text-foreground ${isPinned ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-0 group-hover/row:opacity-100 focus:opacity-100'}`}>
+        <Pin className={`h-3.5 w-3.5 ${isPinned ? 'fill-current' : ''}`} />
+      </button>
+    </div>
+  )
+}
+
+function WorkNavigatorPanel({
+  clientGroup, activeId, filter, search, pinnedIds,
+  setFilter, setSearch, togglePin, onSelect, onClose
+}: {
+  clientGroup: { name: string; threads: ChatConversation[] }
+  activeId: string | null
+  filter: string
+  search: string
+  pinnedIds: string[]
+  setFilter: (f: string) => void
+  setSearch: (s: string) => void
+  togglePin: (id: string, e: React.MouseEvent) => void
+  onSelect: (id: string) => void
+  onClose?: () => void
+}) {
+  const threads = useMemo(() => {
+    let list = clientGroup.threads
+    if (filter !== 'All') {
+      const typeMap: Record<string, string> = { Tasks: 'task', Campaigns: 'project', Plans: 'plan' }
+      const t = typeMap[filter]
+      if (t) list = list.filter(x => x.type === t)
+    }
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      list = list.filter(x => x.name?.toLowerCase().includes(q) || x.topic?.toLowerCase().includes(q))
+    }
+    return [...list].sort((a, b) => {
+      const pA = pinnedIds.includes(a.id)
+      const pB = pinnedIds.includes(b.id)
+      if (pA && !pB) return -1
+      if (!pA && pB) return 1
+      const timeA = a.lastMessage?.createdAt ?? ''
+      const timeB = b.lastMessage?.createdAt ?? ''
+      return timeB.localeCompare(timeA)
+    })
+  }, [clientGroup.threads, filter, search, pinnedIds])
+
+  const pinned = threads.filter(t => pinnedIds.includes(t.id))
+  const unpinned = threads.filter(t => !pinnedIds.includes(t.id))
+  
+  const grouped = {
+    Tasks: unpinned.filter(t => t.type === 'task'),
+    Campaigns: unpinned.filter(t => t.type === 'project'),
+    Plans: unpinned.filter(t => t.type === 'plan'),
+    Requests: unpinned.filter(t => t.type === 'request'),
+    Other: unpinned.filter(t => !['task', 'project', 'plan', 'request'].includes(t.type))
+  }
+
+  return (
+    <>
+      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <h2 className="text-sm font-semibold truncate">{clientGroup.name} Work</h2>
+        {onClose && (
+          <button onClick={onClose} className="rounded p-1 text-muted-foreground hover:text-foreground md:hidden" aria-label="Close Work Navigator">
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+      <div className="border-b border-border px-3 py-2 space-y-2">
+        <div className="flex items-center gap-2 rounded-lg bg-muted/60 px-2.5 py-1.5">
+          <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search discussions…"
+            className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
+          {search && (
+            <button onClick={() => setSearch('')} aria-label="Clear search"><X className="h-3.5 w-3.5 text-muted-foreground" /></button>
+          )}
+        </div>
+        <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-hide">
+          {['All', 'Tasks', 'Campaigns', 'Plans'].map(f => (
+            <button key={f} onClick={() => setFilter(f)}
+              className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${filter === f ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground hover:bg-muted/80'}`}>
+              {f}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto py-2">
+        {threads.length === 0 && <p className="px-4 py-2 text-xs text-muted-foreground">No discussions found.</p>}
+        {pinned.length > 0 && (
+          <div className="mb-4">
+            <SectionLabel>📌 Pinned</SectionLabel>
+            {pinned.map(t => <WorkNavigatorRow key={t.id} conv={t} active={t.id === activeId} onClick={() => onSelect(t.id)} isPinned togglePin={e => togglePin(t.id, e)} />)}
+          </div>
+        )}
+        {Object.entries(grouped).map(([label, list]) => list.length > 0 && (
+          <div key={label} className="mb-4">
+            <SectionLabel>{label}</SectionLabel>
+            {list.map(t => <WorkNavigatorRow key={t.id} conv={t} active={t.id === activeId} onClick={() => onSelect(t.id)} isPinned={false} togglePin={e => togglePin(t.id, e)} />)}
+          </div>
+        ))}
+      </div>
+    </>
+  )
+}
+
+function MembersDialog({ conversation, me, onClose }: {
+  conversation: ChatConversation
+  me: { employeeId: string; name: string; cqid: string }
+  onClose: () => void
+}) {
+  const { revealNames } = usePermissions()
+  const mask = (name?: string | null, cqid?: string | null) =>
+    displayEmployee({ name: name ?? '', cqid: cqid ?? '' }, { revealNames, canReveal: true })
+
+  const [tab, setTab] = useState<'members' | 'add'>('members')
+  const [employees, setEmployees] = useState<{ id: string; name: string; cqid: string }[]>([])
+  const [filter, setFilter] = useState('')
+  const [pending, startTransition] = useTransition()
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    listChatEmployees().then(res => { if (res.ok) setEmployees(res.data) })
+  }, [])
+
+  const existingIds = new Set(conversation.members.map(m => m.employeeId))
+  const addable = employees.filter(e => !existingIds.has(e.id))
+  
+  const filteredMembers = conversation.members.filter(m => 
+    !filter || m.name?.toLowerCase().includes(filter.toLowerCase()) || m.cqid?.toLowerCase().includes(filter.toLowerCase()))
+    
+  const filteredAddable = addable.filter(e => 
+    !filter || e.name.toLowerCase().includes(filter.toLowerCase()) || e.cqid.toLowerCase().includes(filter.toLowerCase()))
+
+  const myMembership = conversation.members.find(m => m.employeeId === me.employeeId)
+  
+  const canRemove = (targetId: string, targetRole: string) => {
+    if (targetId === me.employeeId) return true // can leave
+    if (myMembership?.role === 'owner' && targetRole !== 'owner') return true
+    if (myMembership?.role === 'moderator' && targetRole === 'member') return true
+    return false
+  }
+
+  const RoleBadge = ({ role }: { role: string }) => {
+    if (role === 'owner') return <span className="text-[10px] uppercase font-semibold text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded">👑 Owner</span>
+    if (role === 'moderator') return <span className="text-[10px] uppercase font-semibold text-blue-500 bg-blue-500/10 px-1.5 py-0.5 rounded">🛡️ Admin</span>
+    return <span className="text-[10px] uppercase font-semibold text-muted-foreground bg-muted px-1.5 py-0.5 rounded">👤 Member</span>
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-sm rounded-2xl border border-border bg-background p-5 shadow-xl flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
+        <div className="mb-4 flex items-center justify-between">
+          <div className="flex gap-1 rounded-lg bg-muted p-0.5">
+            <button onClick={() => { setTab('members'); setFilter('') }}
+              className={`rounded-md px-3 py-1 text-xs font-medium ${tab === 'members' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+              Members ({conversation.members.length})
+            </button>
+            {conversation.type !== 'dm' && (
+              <button onClick={() => { setTab('add'); setFilter('') }}
+                className={`rounded-md px-3 py-1 text-xs font-medium ${tab === 'add' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                Add People
+              </button>
+            )}
+          </div>
+          <button onClick={onClose} className="rounded p-1 text-muted-foreground hover:text-foreground" aria-label="Close">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {error && <p className="mb-3 text-xs text-destructive">{error}</p>}
+
+        <div className="mb-3 relative">
+          <Search className="absolute left-2.5 top-2 h-4 w-4 text-muted-foreground" />
+          <input value={filter} onChange={e => setFilter(e.target.value)} placeholder="Search..."
+            className="w-full rounded-lg border border-border bg-transparent pl-9 pr-3 py-2 text-sm outline-none focus:border-foreground/40" />
+        </div>
+
+        <div className="flex-1 overflow-y-auto min-h-0 space-y-0.5 -mx-2 px-2 scrollbar-thin">
+          {tab === 'members' ? (
+            <>
+              {filteredMembers.map(m => (
+                <div key={m.employeeId} className="flex items-center gap-3 rounded-lg p-2 hover:bg-muted/50 transition-colors">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium">
+                    {initials(mask(m.name, m.cqid))}
+                  </span>
+                  <div className="min-w-0 flex-1 flex flex-col justify-center">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-sm font-medium">{mask(m.name, m.cqid)}</span>
+                      {m.employeeId === me.employeeId && <span className="text-[10px] text-muted-foreground">(You)</span>}
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-xs text-muted-foreground">{m.cqid}</span>
+                      <RoleBadge role={m.role} />
+                    </div>
+                  </div>
+                  {canRemove(m.employeeId, m.role) && (
+                    <button 
+                      disabled={pending}
+                      onClick={() => {
+                        if (m.employeeId !== me.employeeId && !confirm(`Remove ${mask(m.name, m.cqid)} from this conversation?`)) return;
+                        if (m.employeeId === me.employeeId && !confirm(`Are you sure you want to leave this conversation?`)) return;
+                        
+                        startTransition(async () => {
+                          setError(null)
+                          const res = await removeMemberFromConversation(conversation.id, m.employeeId)
+                          if (!res.ok) setError(res.error)
+                          else if (m.employeeId === me.employeeId) onClose() // Close if self left
+                        })
+                      }}
+                      className="rounded p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              ))}
+              {filteredMembers.length === 0 && <p className="p-4 text-center text-sm text-muted-foreground">No members found.</p>}
+            </>
+          ) : (
+            <>
+              {employees.length === 0 ? (
+                <p className="p-4 text-center text-sm text-muted-foreground">Loading...</p>
+              ) : filteredAddable.length === 0 ? (
+                <p className="p-4 text-center text-sm text-muted-foreground">No matching people to add.</p>
+              ) : (
+                filteredAddable.map(e => (
+                  <div key={e.id} className="flex items-center gap-3 rounded-lg p-2 hover:bg-muted/50 transition-colors">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium">
+                      {initials(mask(e.name, e.cqid))}
+                    </span>
+                    <div className="min-w-0 flex-1 flex flex-col justify-center">
+                      <span className="truncate text-sm font-medium">{mask(e.name, e.cqid)}</span>
+                      <span className="text-xs text-muted-foreground mt-0.5">{e.cqid}</span>
+                    </div>
+                    <button 
+                      disabled={pending}
+                      onClick={() => startTransition(async () => {
+                        setError(null)
+                        const res = await addMembersToConversation(conversation.id, [e.id])
+                        if (!res.ok) setError(res.error)
+                      })}
+                      className="shrink-0 rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background transition-colors hover:bg-foreground/90 disabled:opacity-50">
+                      Add
+                    </button>
+                  </div>
+                ))
+              )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   )

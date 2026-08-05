@@ -120,24 +120,50 @@ export default async function SocialCalendarPage({
     .from('employees').select('id, cqid')
     .eq('is_active', true).eq('is_archived', false).order('cqid')).data || []
 
-  // Employee → department(s), so the picker can offer the people who actually
-  // work this kind of content first. Derived from the same service-scope
-  // tables the visibility engine uses — no parallel mapping.
-  let employeeDepartments: Record<string, string[]> = {}
+  // Employee → department(s) AND employee → effective service ids, so the
+  // picker can offer only the people who actually work this kind of content.
+  // Derived from the same service-scope tables the visibility engine uses — no
+  // parallel mapping.
+  //
+  // "Effective" mirrors src/lib/scope/service-scope.ts: direct assignments ∪
+  // every service inside an assigned category. Resolving the category half here
+  // (rather than at write time) keeps a category assignment dynamic — add a
+  // service to Offer Flyers and its people pick it up with no re-assignment.
+  const employeeDepartments: Record<string, string[]> = {}
+  const employeeServices: Record<string, string[]> = {}
   try {
     const [{ data: cats }, { data: direct }, { data: svcs }] = await Promise.all([
       admin.from('employee_service_categories').select('employee_id, category_id'),
       admin.from('employee_services').select('employee_id, service_id'),
       admin.from('services').select('id, category_id'),
     ])
-    const svcDept = new Map((svcs || []).map((s: any) => [s.id, s.category_id ?? null]))
+    const svcRows = (svcs || []) as { id: string; category_id: string | null }[]
+    const svcDept = new Map(svcRows.map(s => [s.id, s.category_id ?? null]))
+    const deptServices = new Map<string, string[]>()
+    for (const s of svcRows) {
+      if (!s.category_id) continue
+      const list = deptServices.get(s.category_id) ?? []
+      list.push(s.id)
+      deptServices.set(s.category_id, list)
+    }
     const add = (empId: string, dept: string | null) => {
       if (!dept) return
       const list = (employeeDepartments[empId] ||= [])
       if (!list.includes(dept)) list.push(dept)
     }
-    for (const r of (cats || []) as any[]) add(r.employee_id, r.category_id)
-    for (const r of (direct || []) as any[]) add(r.employee_id, svcDept.get(r.service_id) ?? null)
+    const addService = (empId: string, serviceId: string | null) => {
+      if (!serviceId) return
+      const list = (employeeServices[empId] ||= [])
+      if (!list.includes(serviceId)) list.push(serviceId)
+    }
+    for (const r of (cats || []) as { employee_id: string; category_id: string }[]) {
+      add(r.employee_id, r.category_id)
+      for (const id of deptServices.get(r.category_id) ?? []) addService(r.employee_id, id)
+    }
+    for (const r of (direct || []) as { employee_id: string; service_id: string }[]) {
+      add(r.employee_id, svcDept.get(r.service_id) ?? null)
+      addService(r.employee_id, r.service_id)
+    }
   } catch { /* pre-migration — picker simply lists everyone */ }
 
   // Department names for the picker's group headers.
@@ -196,6 +222,7 @@ export default async function SocialCalendarPage({
       knownVariants={knownVariants}
       employees={employees as any[]}
       employeeDepartments={employeeDepartments}
+      employeeServices={employeeServices}
       departments={departments}
       serviceMap={serviceMap}
       companySettings={companySettings}

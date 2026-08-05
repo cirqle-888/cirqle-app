@@ -48,6 +48,9 @@ export interface ChatConversation {
   /** Client this room belongs to, when any — lets the sidebar nest a client's
    *  task/request/plan discussions under that client's own channel. */
   clientId: string | null
+  /** Name of that client, so the sidebar can head a client group even when
+   *  the client has no channel of its own yet. */
+  clientName: string | null
 }
 
 export interface ChatAttachment {
@@ -396,6 +399,76 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
 
   // Last message + unread count per conversation (bounded parallel queries —
   // fine at team scale; swap for an RPC when conversations grow past ~50).
+  // Entity rooms created before client_id was stamped (or before migration 026
+  // backfilled it) would never nest under their client. Resolve them from the
+  // linked record here and persist the answer, so the repair happens once
+  // rather than on every sidebar refresh.
+  const clientIdByConv = new Map<string, string>()
+  {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const orphanIds = (convs ?? []).filter((c: any) =>
+      ENTITY_CONV_TYPES.includes(c.type) && c.type !== 'client' && !c.client_id).map((c: { id: string }) => c.id)
+    // The link columns aren't in the main select (and plan_id doesn't exist
+    // before migration 026), so fetch them separately and degrade if absent.
+    let orphans: Record<string, unknown>[] = []
+    if (orphanIds.length) {
+      const withPlan = await admin.from('conversations')
+        .select('id, type, task_id, request_id, project_id, plan_id').in('id', orphanIds)
+      if (withPlan.error) {
+        const noPlan = await admin.from('conversations')
+          .select('id, type, task_id, request_id, project_id').in('id', orphanIds)
+        orphans = (noPlan.data ?? []) as Record<string, unknown>[]
+      } else {
+        orphans = (withPlan.data ?? []) as Record<string, unknown>[]
+      }
+    }
+    if (orphans.length) {
+      const byType: Record<string, { col: string; table: string; ids: string[] }> = {
+        task:    { col: 'task_id',    table: 'tasks',            ids: [] },
+        request: { col: 'request_id', table: 'task_requests',    ids: [] },
+        project: { col: 'project_id', table: 'ad_projects',      ids: [] },
+        plan:    { col: 'plan_id',    table: 'social_calendars', ids: [] },
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const convByEntity = new Map<string, string>()
+      for (const c of orphans as any[]) {
+        const cfg = byType[c.type]
+        const entityId = cfg && c[cfg.col]
+        if (!cfg || !entityId) continue
+        cfg.ids.push(entityId)
+        convByEntity.set(`${c.type}:${entityId}`, c.id)
+      }
+      await Promise.all(Object.entries(byType).map(async ([type, cfg]) => {
+        if (!cfg.ids.length) return
+        const { data } = await admin.from(cfg.table).select('id, client_id').in('id', cfg.ids)
+        for (const row of (data ?? []) as { id: string; client_id: string | null }[]) {
+          const convId = convByEntity.get(`${type}:${row.id}`)
+          if (convId && row.client_id) clientIdByConv.set(convId, row.client_id)
+        }
+      }))
+      // Persist (best-effort — the sidebar already has its answer in memory).
+      for (const [convId, clientId] of clientIdByConv) {
+        void admin.from('conversations').update({ client_id: clientId }).eq('id', convId)
+      }
+    }
+  }
+
+  // Client names for the sidebar's per-client grouping headers.
+  const clientNames = new Map<string, string>()
+  {
+    const ids = [...new Set([
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...(convs ?? []).map((c: any) => c.client_id as string | null),
+      ...clientIdByConv.values(),
+    ].filter(Boolean) as string[])]
+    if (ids.length) {
+      const { data } = await admin.from('clients').select('id, name').in('id', ids)
+      for (const c of (data ?? []) as { id: string; name: string | null }[]) {
+        clientNames.set(c.id, c.name ?? 'Client')
+      }
+    }
+  }
+
   const results = await Promise.all((convs ?? []).map(async (c) => {
     const isMember = lastReadByConv.has(c.id)
     const [lastRes, unreadRes] = await Promise.all([
@@ -459,7 +532,8 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
       isMember,
       unread: ('count' in unreadRes ? unreadRes.count : 0) ?? 0,
       category,
-      clientId: (c.client_id as string | null) ?? null,
+      clientId: (c.client_id as string | null) ?? clientIdByConv.get(c.id) ?? null,
+      clientName: clientNames.get(((c.client_id as string | null) ?? clientIdByConv.get(c.id)) ?? '') ?? null,
       lastMessage: last ? {
         body: last.deleted_at ? 'Message deleted' : (last.kind === 'text' ? last.body : `[${last.kind}]`),
         senderName: lastSender?.name ?? null,
@@ -1592,4 +1666,105 @@ export async function archiveConversation(conversationId: string): Promise<Resul
     detail: { label: `Deleted chat: ${(conv.name ?? 'Conversation').slice(0, 50)}` },
   })
   return { ok: true, data: null }
+}
+
+export async function addMembersToConversation(conversationId: string, targetEmployeeIds: string[]): Promise<Result<void>> {
+  const auth = await requireChatUser()
+  if (!auth.ok) return auth
+  const me = auth.me
+
+  // Must be a member to add someone.
+  const membership = await requireMembership(conversationId, me.employeeId)
+  if (!membership.ok) return membership
+
+  const admin = createAdminClient()
+  const { data: conv } = await admin.from('conversations').select('type').eq('id', conversationId).single()
+  if (conv?.type === 'dm') return { ok: false, error: 'Cannot add members to a direct message.' }
+
+  // Filter out existing members
+  const { data: existing } = await admin.from('conversation_members')
+    .select('employee_id')
+    .eq('conversation_id', conversationId)
+    .in('employee_id', targetEmployeeIds)
+  
+  const existingSet = new Set(existing?.map(e => e.employee_id) ?? [])
+  const toAdd = targetEmployeeIds.filter(id => !existingSet.has(id))
+  
+  if (toAdd.length === 0) return { ok: true, data: undefined }
+
+  const { error } = await admin.from('conversation_members').insert(
+    toAdd.map(id => ({
+      conversation_id: conversationId,
+      employee_id: id,
+      role: 'member'
+    }))
+  )
+  if (error) return { ok: false, error: error.message }
+
+  // System message
+  const { data: targets } = await admin.from('employees').select('name').in('id', toAdd)
+  const targetNames = targets?.map(t => t.name).join(' and ') ?? 'new members'
+  const body = `${me.name} added ${targetNames} to this conversation.`
+  
+  await admin.from('messages').insert({
+    conversation_id: conversationId,
+    sender_id: me.employeeId,
+    body,
+    kind: 'system'
+  })
+
+  return { ok: true, data: undefined }
+}
+
+export async function removeMemberFromConversation(conversationId: string, targetEmployeeId: string): Promise<Result<void>> {
+  const auth = await requireChatUser()
+  if (!auth.ok) return auth
+  const me = auth.me
+
+  const myMembership = await requireMembership(conversationId, me.employeeId)
+  if (!myMembership.ok) return myMembership
+  
+  const isSelf = me.employeeId === targetEmployeeId
+  
+  if (!isSelf) {
+    if (myMembership.role === 'member') {
+      return { ok: false, error: 'You do not have permission to remove members.' }
+    }
+    const targetMembership = await requireMembership(conversationId, targetEmployeeId)
+    if (!targetMembership.ok) return { ok: true, data: undefined } 
+    if (targetMembership.role === 'owner') {
+      return { ok: false, error: 'Cannot remove the conversation owner.' }
+    }
+    if (myMembership.role === 'moderator' && targetMembership.role === 'moderator') {
+      return { ok: false, error: 'Moderators cannot remove other moderators.' }
+    }
+  }
+
+  const admin = createAdminClient()
+  const { data: conv } = await admin.from('conversations').select('type').eq('id', conversationId).single()
+  if (conv?.type === 'dm') return { ok: false, error: 'Cannot leave a direct message. Delete it instead.' }
+
+  const { error } = await admin.from('conversation_members')
+    .delete()
+    .eq('conversation_id', conversationId)
+    .eq('employee_id', targetEmployeeId)
+    
+  if (error) return { ok: false, error: error.message }
+  
+  let body = ''
+  if (isSelf) {
+    body = `${me.name} left the conversation.`
+  } else {
+    const { data: target } = await admin.from('employees').select('name').eq('id', targetEmployeeId).single()
+    body = `${me.name} removed ${target?.name ?? 'a member'} from this conversation.`
+  }
+  
+  await admin.from('messages').insert({
+    conversation_id: conversationId,
+    sender_id: me.employeeId,
+    body,
+    kind: 'system'
+  })
+
+  return { ok: true, data: undefined }
 }

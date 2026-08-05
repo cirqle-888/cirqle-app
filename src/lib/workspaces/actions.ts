@@ -55,10 +55,20 @@ function mapWorkspace(r: any, memberIds: string[] = []): Workspace {
   }
 }
 
-/** Workspaces the caller may see (admins: all; employees: system + assigned). */
+/**
+ * Workspaces the caller may see: managers get all (they administer them),
+ * everyone else gets the system row plus the ones they are actually assigned
+ * to. Listing every workspace to every employee put "Accounts", "HR & Hiring"
+ * and friends in a social-media executive's switcher — dead entries, since
+ * switchWorkspace() rejects a non-member anyway.
+ *
+ * Membership ids are part of the workspace's configuration, so they only ride
+ * along for managers; a plain member has no business seeing who else is in.
+ */
 export async function listWorkspaces(): Promise<Result<Workspace[]>> {
   const auth = await requireUser()
   if (!auth.ok) return auth
+  const manager = canManage(auth.me)
   const admin = createAdminClient()
 
   const { data: rows, error } = await admin
@@ -78,7 +88,12 @@ export async function listWorkspaces(): Promise<Result<Workspace[]>> {
     membersByWs.get(m.workspace_id)!.push(m.employee_id)
   }
 
-  return { ok: true, data: (rows ?? []).map(r => mapWorkspace(r, membersByWs.get(r.id) ?? [])) }
+  const visible = manager
+    ? (rows ?? [])
+    : (rows ?? []).filter(r =>
+        r.is_system || (membersByWs.get(r.id) ?? []).includes(auth.me.employeeId))
+
+  return { ok: true, data: visible.map(r => mapWorkspace(r, manager ? membersByWs.get(r.id) ?? [] : [])) }
 }
 
 export async function createWorkspace(input: {
@@ -226,7 +241,13 @@ export async function getMyWorkspaceState(): Promise<Result<{ current: Workspace
 
   const { data: emp } = await admin.from('employees').select('current_workspace_id').eq('id', me.employeeId).maybeSingle()
   const currentId = emp?.current_workspace_id ?? null
+  // A stale current_workspace_id (assignment revoked since they last switched)
+  // simply falls back to "All Workspace" — the list is membership-filtered, so
+  // it no longer contains the revoked workspace.
   const current = list.data.find(w => w.id === currentId) ?? list.data.find(w => w.isSystem) ?? list.data[0]
+  // No system row and no memberships: let the caller use its own fallback
+  // rather than handing the shell an undefined workspace.
+  if (!current) return { ok: false, error: 'No workspace available.' }
 
   return { ok: true, data: { current, available: list.data, canManage: canManage(me) } }
 }

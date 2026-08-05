@@ -37,5 +37,7 @@ UPDATE conversations c SET client_id = r.client_id
   FROM task_requests r  WHERE c.request_id = r.id AND c.type = 'request' AND c.client_id IS NULL AND r.client_id IS NOT NULL;
 UPDATE conversations c SET client_id = p.client_id
   FROM ad_projects p    WHERE c.project_id = p.id AND c.type = 'project' AND c.client_id IS NULL AND p.client_id IS NOT NULL;
+UPDATE conversations c SET client_id = s.client_id
+  FROM social_calendars s WHERE c.plan_id = s.id AND c.type = 'plan'    AND c.client_id IS NULL AND s.client_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_conversations_client ON conversations (client_id) WHERE client_id IS NOT NULL;

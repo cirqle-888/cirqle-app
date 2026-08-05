@@ -17,6 +17,13 @@ export default async function AdvertisingPage() {
   const canView = isAdmin || hasPermission(me, PERMS.ADVERTISING_VIEW)
   if (me && !canView) redirect('/dashboard')
 
+  // The money layer (wallets, allocations, service charges, billing) is
+  // confidential: campaign handlers see campaigns + performance only.
+  // manage_budget implies it — you cannot manage a budget you cannot see.
+  const viewFinancials = isAdmin
+    || hasPermission(me, PERMS.ADVERTISING_VIEW_FINANCIALS)
+    || hasPermission(me, PERMS.ADVERTISING_MANAGE_BUDGET)
+
   const admin = createAdminClient()
 
   let projects: any[] = []
@@ -49,9 +56,12 @@ export default async function AdvertisingPage() {
 
   // ── Client wallet ledger (best-effort — migration 20260703140000) ──────────
   // One fetch powers balances, per-campaign allocations, and the history panel.
-  let walletSupported = true
+  // FINANCIALS-GATED: without view_financials the ledger is never fetched, so
+  // wallet money cannot reach the browser at all. The client then renders its
+  // wallet-less layout (same path as the pre-migration fallback).
+  let walletSupported = viewFinancials
   let ledger: any[] = []
-  try {
+  if (viewFinancials) try {
     const { data, error } = await admin
       .from('ad_wallet_ledger')
       .select(`
@@ -113,15 +123,23 @@ export default async function AdvertisingPage() {
   } catch { /* ad_meta not migrated */ }
 
   const perms = {
-    create:       isAdmin || hasPermission(me, PERMS.ADVERTISING_CREATE),
-    edit:         isAdmin || hasPermission(me, PERMS.ADVERTISING_EDIT),
-    manageBudget: isAdmin || hasPermission(me, PERMS.ADVERTISING_MANAGE_BUDGET),
+    create:         isAdmin || hasPermission(me, PERMS.ADVERTISING_CREATE),
+    edit:           isAdmin || hasPermission(me, PERMS.ADVERTISING_EDIT),
+    manageBudget:   isAdmin || hasPermission(me, PERMS.ADVERTISING_MANAGE_BUDGET),
+    viewFinancials,
   }
+
+  // Server-side strip: `select('*')` includes the agency's service-charge
+  // terms — confidential billing config that must never reach a handler's
+  // browser (masking at render time would still ship it in the RSC payload).
+  const safeProjects = viewFinancials ? projects : projects.map(p => ({
+    ...p, service_charge_type: null, service_charge_value: null, tax_percent: null,
+  }))
 
   return (
     <AdvertisingClient
       migrated={migrated}
-      initialProjects={projects}
+      initialProjects={safeProjects}
       metricsByProject={metricsByProject}
       pendingRequests={pendingRequests}
       clients={clients}

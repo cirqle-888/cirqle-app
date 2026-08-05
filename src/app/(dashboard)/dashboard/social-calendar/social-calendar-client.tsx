@@ -20,7 +20,7 @@ import {
   CONTENT_TYPES, CONTENT_TYPE_LABEL, CONTENT_TYPE_CHIP, VARIANT_TYPES,
   PLATFORMS, PLATFORM_LABEL, platformLabels, contentTypeWithVariants,
   PROGRESS_LABEL, PROGRESS_CHIP, resolveItemProgress, isClosedRequestStatus,
-  formatShortDateRange, type CaptionCanvas,
+  formatShortDateRange, suggestServiceId, type CaptionCanvas,
   type ItemProgress,
 } from '@/lib/social/plan'
 import {
@@ -95,6 +95,9 @@ interface Props {
   employees?: { id: string; cqid: string }[]
   /** employeeId → department ids, derived from the service-scope tables. */
   employeeDepartments?: Record<string, string[]>
+  /** employeeId → effective service ids (direct ∪ category-expanded). Scopes the
+   *  designer picker to the people who actually work the item's service. */
+  employeeServices?: Record<string, string[]>
   /** Active departments in display order — the picker's group headers. */
   departments?: { id: string; name: string }[]
   /** Team-configured content-type → service defaults (Service defaults gear). */
@@ -125,18 +128,25 @@ const CAPTION_EMOJI = ['✨', '🔥', '🎉', '✅', '👉', '⭐', '💥', '�
 
 // Toolbar button + separator — module-scope so they keep a stable identity
 // across editor re-renders (defining them inline would remount every keystroke).
-function EditorTool({ icon, title, on, disabled }: {
-  icon: React.ReactNode; title: string; on: () => void; disabled?: boolean
+function EditorTool({ icon, title, on, disabled, className = '' }: {
+  icon: React.ReactNode; title: string; on: () => void; disabled?: boolean; className?: string
 }) {
   return (
     <button type="button" tabIndex={-1} disabled={disabled} title={title}
       onMouseDown={e => { e.preventDefault(); on() }}
-      className="w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-background transition-colors disabled:opacity-50">
+      className={`w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-background transition-colors disabled:opacity-50 ${className}`}>
       {icon}
     </button>
   )
 }
-const EditorSep = () => <span className="w-px h-4 bg-border mx-0.5 shrink-0" />
+
+function EditorGroup({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center p-0.5 bg-background/50 border border-border/40 rounded-md shadow-sm gap-0.5">
+      {children}
+    </div>
+  )
+}
 
 function RichTextEditor({
   value, onChange, disabled = false, placeholder, onPasteImage,
@@ -241,83 +251,100 @@ function RichTextEditor({
   const empty = !value || !value.replace(/<[^>]*>|&nbsp;|&#65279;/g, '').trim()
 
   return (
-    <div className={`rounded-lg border border-border bg-secondary overflow-visible ${disabled ? 'opacity-60' : ''}`}>
-      <div className="flex flex-wrap items-center gap-0.5 px-1.5 py-1 border-b border-border/60 bg-secondary/60 relative">
-        <EditorTool disabled={disabled} icon={<Bold className="w-3.5 h-3.5" />} title="Bold (⌘B)" on={() => run('bold')} />
-        <EditorTool disabled={disabled} icon={<Italic className="w-3.5 h-3.5" />} title="Italic (⌘I)" on={() => run('italic')} />
-        <EditorTool disabled={disabled} icon={<Underline className="w-3.5 h-3.5" />} title="Underline (⌘U)" on={() => run('underline')} />
-        <EditorTool disabled={disabled} icon={<Strikethrough className="w-3.5 h-3.5" />} title="Strikethrough" on={() => run('strikeThrough')} />
-        <EditorSep />
-        <EditorTool disabled={disabled} icon={<Heading2 className="w-3.5 h-3.5" />} title="Heading" on={() => run('formatBlock', '<h3>')} />
-        <EditorTool disabled={disabled} icon={<Quote className="w-3.5 h-3.5" />} title="Quote" on={() => run('formatBlock', '<blockquote>')} />
-        <EditorTool disabled={disabled} icon={<List className="w-3.5 h-3.5" />} title="Bullet list" on={() => run('insertUnorderedList')} />
-        <EditorTool disabled={disabled} icon={<ListOrdered className="w-3.5 h-3.5" />} title="Numbered list" on={() => run('insertOrderedList')} />
-        <EditorSep />
-        <EditorTool disabled={disabled} icon={<AlignLeft className="w-3.5 h-3.5" />} title="Align left" on={() => run('justifyLeft', undefined, true)} />
-        <EditorTool disabled={disabled} icon={<AlignCenter className="w-3.5 h-3.5" />} title="Align center" on={() => run('justifyCenter', undefined, true)} />
-        <EditorTool disabled={disabled} icon={<AlignRight className="w-3.5 h-3.5" />} title="Align right" on={() => run('justifyRight', undefined, true)} />
-        <EditorSep />
-        {/* Colour / highlight / emoji popovers */}
-        <div className="relative">
-          <EditorTool disabled={disabled} icon={<Palette className="w-3.5 h-3.5" />} title="Text colour" on={() => setOpenMenu(m => m === 'color' ? null : 'color')} />
-          {openMenu === 'color' && (
-            <div className="absolute top-8 left-0 z-50 flex gap-1 p-1.5 rounded-lg border border-border bg-card shadow-xl">
-              {CAPTION_COLORS.map(c => (
-                <button key={c} type="button" title={c} onMouseDown={e => { e.preventDefault(); run('foreColor', c, true) }}
-                  className="w-5 h-5 rounded-full border border-black/10" style={{ backgroundColor: c }} />
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="relative">
-          <EditorTool disabled={disabled} icon={<Highlighter className="w-3.5 h-3.5" />} title="Highlight" on={() => setOpenMenu(m => m === 'highlight' ? null : 'highlight')} />
-          {openMenu === 'highlight' && (
-            <div className="absolute top-8 left-0 z-50 flex gap-1 p-1.5 rounded-lg border border-border bg-card shadow-xl">
-              {CAPTION_HIGHLIGHTS.map(c => (
-                <button key={c} type="button" title={c} onMouseDown={e => { e.preventDefault(); run('hiliteColor', c, true) }}
-                  className="w-5 h-5 rounded border border-black/10" style={{ backgroundColor: c }} />
-              ))}
-              <button type="button" title="No highlight" onMouseDown={e => { e.preventDefault(); run('hiliteColor', 'transparent', true) }}
-                className="w-5 h-5 rounded border border-border flex items-center justify-center text-muted-foreground"><X className="w-3 h-3" /></button>
-            </div>
-          )}
-        </div>
-        <div className="relative">
-          <EditorTool disabled={disabled} icon={<LinkIcon className="w-3.5 h-3.5" />} title="Insert link" on={openLinkMenu} />
-          {openMenu === 'link' && (
-            <div className="absolute top-8 left-0 z-50 flex items-center gap-1 p-1.5 rounded-lg border border-border bg-card shadow-xl">
-              <input
-                autoFocus
-                value={linkUrl}
-                onChange={e => setLinkUrl(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') { e.preventDefault(); applyLink() }
-                  if (e.key === 'Escape') { e.preventDefault(); setOpenMenu(null) }
-                }}
-                placeholder="https://…"
-                className="w-56 bg-secondary border border-border rounded-md px-2 py-1 text-xs focus:outline-none focus:border-primary/50"
-              />
-              <button type="button" onMouseDown={e => { e.preventDefault(); applyLink() }}
-                disabled={!/^(https?:|mailto:)/i.test(linkUrl.trim())}
-                className="px-2 py-1 rounded-md text-xs font-medium gradient-bg text-white disabled:opacity-40">
-                Add
-              </button>
-            </div>
-          )}
-        </div>
-        <div className="relative">
-          <EditorTool disabled={disabled} icon={<Smile className="w-3.5 h-3.5" />} title="Emoji" on={() => setOpenMenu(m => m === 'emoji' ? null : 'emoji')} />
-          {openMenu === 'emoji' && (
-            <div className="absolute top-8 left-0 z-50 grid grid-cols-7 gap-0.5 p-1.5 rounded-lg border border-border bg-card shadow-xl w-56">
-              {CAPTION_EMOJI.map(e => (
-                <button key={e} type="button" onMouseDown={ev => { ev.preventDefault(); insert(e) }}
-                  className="w-7 h-7 rounded hover:bg-secondary text-base">{e}</button>
-              ))}
-            </div>
-          )}
-        </div>
-        <EditorSep />
-        <EditorTool disabled={disabled} icon={<Eraser className="w-3.5 h-3.5" />} title="Clear formatting" on={() => run('removeFormat')} />
+    <div className={`rounded-xl border border-border/80 bg-background overflow-visible shadow-sm focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/10 transition-all ${disabled ? 'opacity-60' : ''}`}>
+      <div className="flex flex-wrap items-center gap-1.5 px-2 py-1.5 border-b border-border/40 bg-secondary/30 relative rounded-t-xl">
+        
+        {/* Typography */}
+        <EditorGroup>
+          <EditorTool disabled={disabled} icon={<Bold className="w-3.5 h-3.5" />} title="Bold (⌘B)" on={() => run('bold')} />
+          <EditorTool disabled={disabled} icon={<Italic className="w-3.5 h-3.5" />} title="Italic (⌘I)" on={() => run('italic')} />
+          <EditorTool disabled={disabled} icon={<Underline className="w-3.5 h-3.5" />} title="Underline (⌘U)" on={() => run('underline')} />
+          <EditorTool disabled={disabled} icon={<Strikethrough className="w-3.5 h-3.5" />} title="Strikethrough" on={() => run('strikeThrough')} />
+        </EditorGroup>
+        
+        {/* Structure */}
+        <EditorGroup>
+          <EditorTool disabled={disabled} icon={<Heading2 className="w-3.5 h-3.5" />} title="Heading" on={() => run('formatBlock', '<h3>')} />
+          <EditorTool disabled={disabled} icon={<Quote className="w-3.5 h-3.5" />} title="Quote" on={() => run('formatBlock', '<blockquote>')} />
+          <EditorTool disabled={disabled} icon={<List className="w-3.5 h-3.5" />} title="Bullet list" on={() => run('insertUnorderedList')} />
+          <EditorTool disabled={disabled} icon={<ListOrdered className="w-3.5 h-3.5" />} title="Numbered list" on={() => run('insertOrderedList')} />
+        </EditorGroup>
+        
+        {/* Alignment */}
+        <EditorGroup>
+          <EditorTool disabled={disabled} icon={<AlignLeft className="w-3.5 h-3.5" />} title="Align left" on={() => run('justifyLeft', undefined, true)} />
+          <EditorTool disabled={disabled} icon={<AlignCenter className="w-3.5 h-3.5" />} title="Align center" on={() => run('justifyCenter', undefined, true)} />
+          <EditorTool disabled={disabled} icon={<AlignRight className="w-3.5 h-3.5" />} title="Align right" on={() => run('justifyRight', undefined, true)} />
+        </EditorGroup>
+
+        <div className="flex-1" />
+
+        {/* Inserts & Decorators */}
+        <EditorGroup>
+          <div className="relative">
+            <EditorTool disabled={disabled} icon={<Palette className="w-3.5 h-3.5 text-blue-500" />} title="Text colour" on={() => setOpenMenu(m => m === 'color' ? null : 'color')} />
+            {openMenu === 'color' && (
+              <div className="absolute top-9 left-1/2 -translate-x-1/2 z-50 flex gap-1 p-1.5 rounded-lg border border-border bg-card shadow-xl animate-in fade-in zoom-in-95 duration-100">
+                {CAPTION_COLORS.map(c => (
+                  <button key={c} type="button" title={c} onMouseDown={e => { e.preventDefault(); run('foreColor', c, true) }}
+                    className="w-5 h-5 rounded-full border border-black/10 hover:scale-110 transition-transform" style={{ backgroundColor: c }} />
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="relative">
+            <EditorTool disabled={disabled} icon={<Highlighter className="w-3.5 h-3.5 text-amber-500" />} title="Highlight" on={() => setOpenMenu(m => m === 'highlight' ? null : 'highlight')} />
+            {openMenu === 'highlight' && (
+              <div className="absolute top-9 left-1/2 -translate-x-1/2 z-50 flex gap-1 p-1.5 rounded-lg border border-border bg-card shadow-xl animate-in fade-in zoom-in-95 duration-100">
+                {CAPTION_HIGHLIGHTS.map(c => (
+                  <button key={c} type="button" title={c} onMouseDown={e => { e.preventDefault(); run('hiliteColor', c, true) }}
+                    className="w-5 h-5 rounded border border-black/10 hover:scale-110 transition-transform" style={{ backgroundColor: c }} />
+                ))}
+                <button type="button" title="No highlight" onMouseDown={e => { e.preventDefault(); run('hiliteColor', 'transparent', true) }}
+                  className="w-5 h-5 rounded border border-border flex items-center justify-center text-muted-foreground hover:bg-secondary"><X className="w-3 h-3" /></button>
+              </div>
+            )}
+          </div>
+          <div className="relative">
+            <EditorTool disabled={disabled} icon={<Smile className="w-3.5 h-3.5 text-emerald-500" />} title="Emoji" on={() => setOpenMenu(m => m === 'emoji' ? null : 'emoji')} />
+            {openMenu === 'emoji' && (
+              <div className="absolute top-9 left-1/2 -translate-x-1/2 z-50 grid grid-cols-7 gap-0.5 p-1.5 rounded-lg border border-border bg-card shadow-xl w-56 animate-in fade-in zoom-in-95 duration-100">
+                {CAPTION_EMOJI.map(e => (
+                  <button key={e} type="button" onMouseDown={ev => { ev.preventDefault(); insert(e) }}
+                    className="w-7 h-7 flex justify-center items-center rounded hover:bg-secondary text-base hover:scale-110 transition-transform">{e}</button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="relative">
+            <EditorTool disabled={disabled} icon={<LinkIcon className="w-3.5 h-3.5" />} title="Insert link" on={openLinkMenu} />
+            {openMenu === 'link' && (
+              <div className="absolute top-9 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 p-1.5 rounded-lg border border-border bg-card shadow-xl animate-in fade-in zoom-in-95 duration-100">
+                <input
+                  autoFocus
+                  value={linkUrl}
+                  onChange={e => setLinkUrl(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') { e.preventDefault(); applyLink() }
+                    if (e.key === 'Escape') { e.preventDefault(); setOpenMenu(null) }
+                  }}
+                  placeholder="https://…"
+                  className="w-56 bg-secondary border border-border rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50"
+                />
+                <button type="button" onMouseDown={e => { e.preventDefault(); applyLink() }}
+                  disabled={!/^(https?:|mailto:)/i.test(linkUrl.trim())}
+                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground disabled:opacity-40 hover:bg-primary/90 transition-colors">
+                  Add
+                </button>
+              </div>
+            )}
+          </div>
+        </EditorGroup>
+        
+        {/* Clear */}
+        <EditorGroup>
+          <EditorTool disabled={disabled} icon={<Eraser className="w-3.5 h-3.5 text-red-400" />} title="Clear formatting" className="hover:text-red-500 hover:bg-red-500/10" on={() => run('removeFormat')} />
+        </EditorGroup>
       </div>
       <div className="relative">
         {empty && placeholder && (
@@ -440,7 +467,7 @@ function DroppableZone({ id, className, activeClassName, disabled, children }: {
 export default function SocialCalendarClient({
   migrated, calendars, selectedId, initialItems, clients, services = [], serviceMap = {}, companySettings = {}, canManage,
   agreementProgress, canViewAgreements = false, knownVariants = [], employees = [],
-  employeeDepartments = {}, departments = [],
+  employeeDepartments = {}, employeeServices = {}, departments = [],
 }: Props) {
   const router = useRouter()
   const toast = useToast()
@@ -473,6 +500,10 @@ export default function SocialCalendarClient({
   // "Also as" free-text tag draft (Enter commits).
   const [variantDraft, setVariantDraft] = useState('')
   const [savingItem, setSavingItem] = useState(false)
+  // Escape hatch for the designer picker's service scoping (below): off by
+  // default so the list stays short, but one click away so a planner is never
+  // blocked by a half-configured service assignment.
+  const [showAllDesigners, setShowAllDesigners] = useState(false)
   // ── Service-defaults editor (content type → service mapping) ───────────────
   const [showServiceDefaults, setShowServiceDefaults] = useState(false)
   const [serviceMapDraft, setServiceMapDraft] = useState<Record<string, string>>({})
@@ -617,6 +648,7 @@ export default function SocialCalendarClient({
 
   function openEdit(it: ItemRow) {
     setRefLink('')
+    setShowAllDesigners(false)
     setItemForm({
       scheduledDate: it.scheduled_date ?? '', scheduledEndDate: it.scheduled_end_date ?? '',
       title: it.title, contentType: it.content_type, platforms: it.platforms ?? [],
@@ -1156,6 +1188,7 @@ export default function SocialCalendarClient({
                           if (!canManage || !cell.inMonth) return
                           setItemForm({ ...EMPTY_ITEM, scheduledDate: cell.key })
                           setCopyTab('text')
+                          setShowAllDesigners(false)
                           setItemModal({ mode: 'add' })
                         }}
                       >
@@ -1551,46 +1584,95 @@ export default function SocialCalendarClient({
                   the pushed request's assigned_employee_id, so work arrives in
                   the inbox already earmarked; left blank, the inbox decides as
                   before. Never blocks planning. */}
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-                  Designer <span className="text-muted-foreground/60">(optional — carries into the design request)</span>
-                </label>
-                <AppSelect
-                  value={itemForm.assignedEmployeeId ?? ''}
-                  disabled={editingFrozen}
-                  onChange={e => setItemForm(f => ({ ...f, assignedEmployeeId: e.target.value || null }))}
-                >
-                  <option value="">— Decide later —</option>
-                  {(() => {
-                    // Grouped by department so a planner picks from the people
-                    // who actually work this kind of content. Employees with no
-                    // department fall into a trailing group rather than
-                    // vanishing — an unassigned designer is still assignable.
-                    const grouped = departments
-                      .map(d => ({
-                        d,
-                        emps: employees.filter(e => (employeeDepartments[e.id] || []).includes(d.id)),
-                      }))
+              {(() => {
+                // SCOPED TO THE ITEM'S SERVICE. This item becomes a request for
+                // exactly one service (content type → Service defaults, same
+                // resolution the server runs on save), so the picker offers the
+                // people assigned to that service — directly or through its
+                // department. An Offer-Flyers-only designer has no business
+                // appearing under a social Post.
+                //
+                // Scoping is skipped, not narrowed to nothing, whenever it
+                // cannot be trusted: no resolvable service, or nobody assigned
+                // to it yet. A half-configured catalogue must never leave the
+                // planner with an empty picker.
+                const scopedServiceId = suggestServiceId(itemForm.contentType, services, serviceMap)
+                const matches = scopedServiceId
+                  ? employees.filter(e => (employeeServices[e.id] || []).includes(scopedServiceId))
+                  : []
+                const scoping = !showAllDesigners && matches.length > 0
+                // The current assignee always stays in the list: an item
+                // assigned before the mapping changed (or whose content type
+                // was just edited) must not silently lose its designer.
+                const assignedId = itemForm.assignedEmployeeId
+                const visible = scoping
+                  ? (assignedId && !matches.some(e => e.id === assignedId)
+                      ? [...matches, ...employees.filter(e => e.id === assignedId)]
+                      : matches)
+                  : employees
+                const hiddenCount = employees.length - visible.length
+                const serviceName = services.find(s => s.id === scopedServiceId)?.name
+
+                // Department headers only earn their keep on the full list,
+                // where they help a planner browse. Once scoped to a single
+                // service they are noise — and worse, they list anyone who
+                // works several departments once per department.
+                const grouped = scoping
+                  ? []
+                  : departments
+                      .map(d => ({ d, emps: visible.filter(e => (employeeDepartments[e.id] || []).includes(d.id)) }))
                       .filter(g => g.emps.length > 0)
-                    const placed = new Set(grouped.flatMap(g => g.emps.map(e => e.id)))
-                    const rest = employees.filter(e => !placed.has(e.id))
-                    return (
-                      <>
-                        {grouped.map(({ d, emps }) => (
-                          <optgroup key={d.id} label={d.name}>
-                            {emps.map(emp => <option key={emp.id} value={emp.id}>{emp.cqid}</option>)}
-                          </optgroup>
-                        ))}
-                        {rest.length > 0 && (
-                          <optgroup label={grouped.length ? 'No department' : 'All employees'}>
-                            {rest.map(emp => <option key={emp.id} value={emp.id}>{emp.cqid}</option>)}
-                          </optgroup>
-                        )}
-                      </>
-                    )
-                  })()}
-                </AppSelect>
-              </div>
+                // Employees with no department fall into a trailing group rather
+                // than vanishing — an unassigned designer is still assignable.
+                const placed = new Set(grouped.flatMap(g => g.emps.map(e => e.id)))
+                const rest = visible.filter(e => !placed.has(e.id))
+                const restLabel = scoping
+                  ? (serviceName || 'Assigned to this service')
+                  : (grouped.length ? 'No department' : 'All employees')
+
+                return (
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                      Designer <span className="text-muted-foreground/60">(optional — carries into the design request)</span>
+                    </label>
+                    <AppSelect
+                      value={itemForm.assignedEmployeeId ?? ''}
+                      disabled={editingFrozen}
+                      onChange={e => setItemForm(f => ({ ...f, assignedEmployeeId: e.target.value || null }))}
+                    >
+                      <option value="">— Decide later —</option>
+                      {grouped.map(({ d, emps }) => (
+                        <optgroup key={d.id} label={d.name}>
+                          {emps.map(emp => <option key={emp.id} value={emp.id}>{emp.cqid}</option>)}
+                        </optgroup>
+                      ))}
+                      {rest.length > 0 && (
+                        <optgroup label={restLabel}>
+                          {rest.map(emp => <option key={emp.id} value={emp.id}>{emp.cqid}</option>)}
+                        </optgroup>
+                      )}
+                    </AppSelect>
+                    {scoping && hiddenCount > 0 && !editingFrozen && (
+                      <p className="mt-1 text-[11px] text-muted-foreground/70">
+                        Showing people assigned to {serviceName ? <span className="text-muted-foreground">{serviceName}</span> : 'this service'}.{' '}
+                        <button type="button" onClick={() => setShowAllDesigners(true)}
+                          className="underline underline-offset-2 hover:text-foreground">
+                          Show all {employees.length}
+                        </button>
+                      </p>
+                    )}
+                    {!scoping && matches.length > 0 && !editingFrozen && (
+                      <p className="mt-1 text-[11px] text-muted-foreground/70">
+                        Showing everyone.{' '}
+                        <button type="button" onClick={() => setShowAllDesigners(false)}
+                          className="underline underline-offset-2 hover:text-foreground">
+                          Only {serviceName || 'this service'}
+                        </button>
+                      </p>
+                    )}
+                  </div>
+                )
+              })()}
 
               {/* Platforms — optional, so it lives behind a disclosure rather
                   than costing a permanent row. Collapsed, it still reports what

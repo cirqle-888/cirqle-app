@@ -24,8 +24,9 @@ import {
 import { remainingBudget } from '@/lib/advertising/metrics'
 import { aggregateMetrics } from '@/lib/advertising/reporting'
 import { healthScore } from '@/lib/advertising/health'
-import { computeServiceCharge, gstOnSpend, spendWithGst } from '@/lib/advertising/budget'
+import { computeServiceCharge, spendWithGst } from '@/lib/advertising/budget'
 import { startAdvertisingRequest, addClientFund, addCompanyFund, removeWalletTransaction } from './actions'
+import { DiscussButton } from '@/components/chat/discuss-button'
 
 interface PendingRequest {
   id: string
@@ -74,7 +75,7 @@ interface Props {
   walletSupported: boolean
   ledger: LedgerRowView[]
   fundCandidates: FundCandidate[]
-  perms: { create: boolean; edit: boolean; manageBudget: boolean }
+  perms: { create: boolean; edit: boolean; manageBudget: boolean; viewFinancials: boolean }
 }
 
 const inr = (v: number | null | undefined, dp = 0) =>
@@ -373,7 +374,10 @@ export default function AdvertisingClient({
           </div>
         </div>
       )}
-      {migrated && !walletSupported && (
+      {/* viewFinancials gate: for handlers the server intentionally sends no
+          wallet data — that is permission stripping, not a missing migration,
+          so the run-the-migration notice must not show for them. */}
+      {migrated && !walletSupported && perms.viewFinancials && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 flex items-start gap-3">
           <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
           <div>
@@ -590,12 +594,14 @@ function ClientSection({ group, history, candidates, walletSupported, canManage 
         </div>
 
         {walletSupported && (
-          <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+          /* 'GST 18%' stat dropped: pure derivation of Meta Spend × 18%,
+             already folded into 'Unspent (incl. GST)' — one less repeated
+             number per client row. */
+          <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
             <WalletStat label="Wallet Credited" value={inr(w.credited, 2)} />
             <WalletStat label="Campaign Allocated" value={inr(w.allocated, 2)} />
             <WalletStat label="Remaining Balance" value={inr(w.balance, 2)} tone={w.balance < 0 ? 'bad' : w.balance > 0 ? 'good' : undefined} />
             <WalletStat label="Meta Spend (excl. GST)" value={inr(group.metaSpend, 2)} />
-            <WalletStat label="GST 18%" value={inr(gstOnSpend(group.metaSpend), 2)} />
             <WalletStat label="Unspent (incl. GST)" value={inr(unspent, 2)} tone={unspent < 0 ? 'bad' : undefined} />
           </div>
         )}
@@ -790,9 +796,19 @@ function CampaignCard({ card, walletOn }: { card: CardData; walletOn: boolean })
             {p.campaign_type ? ` · ${CAMPAIGN_TYPE_LABEL[p.campaign_type] || p.campaign_type}` : ''}
           </div>
         </div>
-        <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${AD_STATUS_CHIP[p.status] || ''}`}>
-          {STATUS_LABEL[p.status] || p.status}
-        </span>
+        <div className="flex shrink-0 items-center gap-1">
+          {/* Discuss opens the campaign's chat room in a slide-over. The card
+              itself is an <a>; capture-phase preventDefault cancels the
+              navigation while the button's own onClick still runs (the
+              button stops propagation, so this wrapper never mis-cancels a
+              plain card click — those never pass through it). */}
+          <span onClickCapture={e => e.preventDefault()}>
+            <DiscussButton entityType="project" entityId={p.id} variant="icon" label="Discuss this campaign" panelTitle={p.campaign_name} />
+          </span>
+          <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${AD_STATUS_CHIP[p.status] || ''}`}>
+            {STATUS_LABEL[p.status] || p.status}
+          </span>
+        </div>
       </div>
 
       {/* Funding: allocated vs GST-inclusive spend (falls back to estimated budget) */}

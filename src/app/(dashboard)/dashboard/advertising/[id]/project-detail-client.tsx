@@ -31,7 +31,7 @@ import {
   allocateToCampaign, removeWalletTransaction, setAdProjectArchived, generateTaskForProject,
   updateAdProject,
 } from '../actions'
-import { computeServiceCharge, gstOnSpend, spendWithGst } from '@/lib/advertising/budget'
+import { computeServiceCharge, spendWithGst } from '@/lib/advertising/budget'
 import { IntegrationsTab } from './integrations-tab'
 import { Archive, ArchiveRestore } from 'lucide-react'
 import { FavoriteToggle } from '@/components/ui/favorite-toggle'
@@ -65,14 +65,13 @@ interface Props {
   metrics: AdDailyMetricRow[]
   tasks: { id: string; task_number: number | null; title: string; status: string; billing_amount: number }[]
   notes: { id: string; body: string; created_at: string; author?: { cqid?: string; name?: string } | null }[]
-  events: { id: string; event_type: string; created_at: string; detail: any; actor?: { cqid?: string } | null }[]
   invoice: { id: string; invoice_number: string; status: string; total_amount: number } | null
   services?: { id: string; name: string; pricing_type: string | null; default_price: number | null }[]
   servicePricing?: { client_id: string; service_id: string; price: number }[]
   allocations?: CampaignAllocation[]
   wallet?: WalletSummaryView | null
   allocSupported?: boolean
-  perms: { edit: boolean; manageBudget: boolean; enterMetrics: boolean; approveMetrics: boolean }
+  perms: { edit: boolean; manageBudget: boolean; enterMetrics: boolean; approveMetrics: boolean; viewFinancials: boolean }
 }
 
 const inr = (v: number | null | undefined, dp = 0) =>
@@ -83,7 +82,7 @@ const round2 = (v: number) => Math.round(v * 100) / 100
 
 type Tab = 'overview' | 'daily' | 'budget' | 'notes' | 'integrations' | 'reports' | 'timeline'
 
-export default function ProjectDetailClient({ project, metrics, tasks, notes, events, invoice, services, servicePricing, allocations = [], wallet = null, allocSupported = false, perms }: Props) {
+export default function ProjectDetailClient({ project, metrics, tasks, notes, invoice, services, servicePricing, allocations = [], wallet = null, allocSupported = false, perms }: Props) {
   const router = useRouter()
   const [tab, setTab] = useState<Tab>('overview')
   const [status, setStatus] = useState(project.status)
@@ -126,7 +125,10 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, ev
   const tabs: { key: Tab; label: string }[] = [
     { key: 'overview', label: 'Overview' },
     { key: 'daily', label: `Daily Performance${metrics.length ? ` (${metrics.length})` : ''}` },
-    { key: 'budget', label: 'Budget' },
+    // Budget is the money tab (wallet allocations, service charge, invoicing)
+    // — hidden outright without view_financials; the server already sends no
+    // financial data, so showing it would only render an empty shell.
+    ...(perms.viewFinancials ? [{ key: 'budget', label: 'Budget' } as const] : []),
     { key: 'notes', label: 'Notes' },
     { key: 'integrations', label: 'Integrations' },
     { key: 'reports', label: 'Reports' },
@@ -237,7 +239,7 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, ev
         />
       )}
       {tab === 'notes' && (
-        <NotesTab projectId={project.id} notes={notes} events={events} canEdit={perms.edit} onChange={() => router.refresh()} />
+        <NotesTab projectId={project.id} notes={notes} canEdit={perms.edit} onChange={() => router.refresh()} />
       )}
       {tab === 'integrations' && (
         <IntegrationsTab project={project} canEdit={perms.edit} onChange={() => router.refresh()} />
@@ -290,15 +292,23 @@ function OverviewTab({ project, agg, remaining, health, allocations = [], wallet
   const spendGross = spendWithGst(spend)              // actual money consumed (incl. 18% GST)
   const serviceCharge = computeServiceCharge(basis, project.service_charge_type, Number(project.service_charge_value || 0))
 
-  const financials: [string, string][] = [
+  // Without view_financials only the working numbers remain: what the
+  // campaign may spend and what it has spent. Allocations, GST/billing math,
+  // service charge and wallet balance are the agency's money layer (the
+  // server sends none of it anyway — this just skips the empty tiles).
+  //
+  // 'GST 18%' and 'Spend (Meta, excl. GST)' tiles were dropped: both are
+  // recomputable from 'Spend incl. GST' and repeat in the Budget tab summary.
+  const financials: [string, string][] = perms.viewFinancials ? [
     ['Allocated (wallet)', hasAllocations ? inr(allocated, 2) : '—'],
     ['Budget (estimated)', inr(project.ad_budget_amount)],
-    ['Spend (Meta, excl. GST)', inr(spend, 2)],
-    ['GST 18%', inr(gstOnSpend(spend), 2)],
-    ['Spend incl. GST', inr(spendGross, 2)],
+    ['Spend incl. GST 18%', inr(spendGross, 2)],
     ['Remaining (incl. GST)', inr(round2(basis - spendGross), 2)],
     ['Service charge (billing)', `${inr(serviceCharge, 2)}${project.service_charge_type === 'percent' ? ` (${project.service_charge_value}%)` : ''}`],
     ['Wallet balance', allocSupported && wallet ? inr(wallet.balanceInr, 2) : '—'],
+  ] : [
+    ['Budget (estimated)', inr(project.ad_budget_amount)],
+    ['Spend (platform-reported)', inr(spend, 2)],
   ]
 
   const kpis: [string, string][] = [
@@ -352,7 +362,9 @@ function OverviewTab({ project, agg, remaining, health, allocations = [], wallet
 
       {/* Financials: wallet allocation, GST-aware spend, billing */}
       <div>
-        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Financials</h3>
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+          {perms.viewFinancials ? 'Financials' : 'Budget & Spend'}
+        </h3>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           {financials.map(([k, v]) => (
             <div key={k} className="rounded-lg border border-border bg-card p-3 min-w-0">
@@ -361,7 +373,7 @@ function OverviewTab({ project, agg, remaining, health, allocations = [], wallet
             </div>
           ))}
         </div>
-        {!hasAllocations && (
+        {perms.viewFinancials && !hasAllocations && (
           <p className="mt-1.5 text-[11px] text-muted-foreground">
             No wallet funds allocated yet — Service charge billing requires funds to be allocated in the Budget tab.
           </p>
@@ -377,7 +389,9 @@ function OverviewTab({ project, agg, remaining, health, allocations = [], wallet
               <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Campaign task</div>
               <div className="text-sm font-medium truncate">#{campaignTask.task_number ?? '—'} {campaignTask.title}</div>
               <div className="text-xs text-muted-foreground mt-0.5">
-                Billing {inr(campaignTask.billing_amount, 2)} · work split via Contributions
+                {perms.viewFinancials
+                  ? <>Billing {inr(campaignTask.billing_amount, 2)} · work split via Contributions</>
+                  : <>Work split via Contributions</>}
               </div>
             </div>
             <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-[10px] font-semibold capitalize">{campaignTask.status}</span>
@@ -408,7 +422,7 @@ function OverviewTab({ project, agg, remaining, health, allocations = [], wallet
             )}
           </div>
         )}
-        {invoice ? (
+        {perms.viewFinancials && (invoice ? (
           <Link href={`/dashboard/invoices?focus=${invoice.id}`}
             className="flex items-center justify-between rounded-lg border border-border bg-card p-3 hover:bg-secondary/50">
             <div className="min-w-0">
@@ -422,7 +436,7 @@ function OverviewTab({ project, agg, remaining, health, allocations = [], wallet
           <div className="rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground">
             No invoice yet — create one from the Budget tab.
           </div>
-        )}
+        ))}
       </div>
 
       {/* Performance (platform-reported) */}
@@ -921,10 +935,13 @@ function SummaryCell({ label, value }: { label: string; value: string }) {
   )
 }
 
-// ─── Notes + timeline ────────────────────────────────────────────────────────
+// ─── Notes ───────────────────────────────────────────────────────────────────
+// The inline ad_events timeline that used to sit beside the notes was removed:
+// it duplicated the dedicated Timeline tab (the universal activity feed, which
+// covers advertising events and strips finance categories server-side).
 
-function NotesTab({ projectId, notes, events, canEdit, onChange }: {
-  projectId: string; notes: Props['notes']; events: Props['events']; canEdit: boolean; onChange: () => void
+function NotesTab({ projectId, notes, canEdit, onChange }: {
+  projectId: string; notes: Props['notes']; canEdit: boolean; onChange: () => void
 }) {
   const { dn } = usePrivacy()
   const [body, setBody] = useState('')
@@ -936,48 +953,28 @@ function NotesTab({ projectId, notes, events, canEdit, onChange }: {
     setBusy(false); setBody(''); onChange()
   }
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-      <div className="space-y-3">
-        <div className="text-sm font-semibold">Notes</div>
-        {canEdit && (
-          <div className="flex gap-2">
-            <input value={body} onChange={e => setBody(e.target.value)} placeholder="Add a note…"
-              className="flex-1 rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-pink-500/40"
-              onKeyDown={e => { if (e.key === 'Enter') add() }} />
-            <button onClick={add} disabled={busy} aria-label="Add note" className="rounded-lg gradient-bg px-3 py-2 text-sm font-medium text-white disabled:opacity-50 hover:opacity-90">
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            </button>
+    <div className="max-w-2xl space-y-3">
+      <div className="text-sm font-semibold">Notes</div>
+      {canEdit && (
+        <div className="flex gap-2">
+          <input value={body} onChange={e => setBody(e.target.value)} placeholder="Add a note…"
+            className="flex-1 rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-pink-500/40"
+            onKeyDown={e => { if (e.key === 'Enter') add() }} />
+          <button onClick={add} disabled={busy} aria-label="Add note" className="rounded-lg gradient-bg px-3 py-2 text-sm font-medium text-white disabled:opacity-50 hover:opacity-90">
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+          </button>
+        </div>
+      )}
+      {notes.length === 0 ? (
+        <div className="text-sm text-muted-foreground">No notes yet.</div>
+      ) : notes.map(nt => (
+        <div key={nt.id} className="rounded-lg border border-border bg-card p-3 text-sm">
+          <div>{nt.body}</div>
+          <div className="mt-1 text-[11px] text-muted-foreground">
+            {nt.author ? dn(nt.author) : 'Someone'} · {new Date(nt.created_at).toLocaleString()}
           </div>
-        )}
-        {notes.length === 0 ? (
-          <div className="text-sm text-muted-foreground">No notes yet.</div>
-        ) : notes.map(nt => (
-          <div key={nt.id} className="rounded-lg border border-border bg-card p-3 text-sm">
-            <div>{nt.body}</div>
-            <div className="mt-1 text-[11px] text-muted-foreground">
-              {nt.author ? dn(nt.author) : 'Someone'} · {new Date(nt.created_at).toLocaleString()}
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="space-y-3">
-        <div className="text-sm font-semibold">Timeline</div>
-        {events.length === 0 ? (
-          <div className="text-sm text-muted-foreground">No activity yet.</div>
-        ) : (
-          <ol className="relative border-l border-border pl-4 space-y-3">
-            {events.map(ev => (
-              <li key={ev.id} className="text-sm">
-                <span className="absolute -left-1.5 mt-1 h-3 w-3 rounded-full bg-pink-500/60 border-2 border-card" />
-                <div className="font-medium capitalize">{ev.event_type.replace(/_/g, ' ')}</div>
-                <div className="text-[11px] text-muted-foreground">
-                  {ev.actor?.cqid ? `${ev.actor.cqid} · ` : ''}{new Date(ev.created_at).toLocaleString()}
-                </div>
-              </li>
-            ))}
-          </ol>
-        )}
-      </div>
+        </div>
+      ))}
     </div>
   )
 }

@@ -125,6 +125,22 @@ export const PERMS = {
   ADVERTISING_DELETE:          'advertising.delete',
   /** Set the ad spend budget + agency service charge, and sync invoices. */
   ADVERTISING_MANAGE_BUDGET:   'advertising.manage_budget',
+  /**
+   * SEE the wallet layer: client/company wallet balances, credited top-ups
+   * and transaction history. Campaign ALLOCATIONS are deliberately NOT behind
+   * this key — an allocation is the campaign's working budget and every
+   * advertising.view holder sees it. Stripped SERVER-SIDE without the key.
+   * manage_budget and admin imply it.
+   */
+  ADVERTISING_VIEW_FINANCIALS: 'advertising.view_financials',
+  /**
+   * SEE what the agency bills the client: service charge type/value/%,
+   * computed billing, task billing amounts, invoices and service rate cards.
+   * Separate from view_financials so a wallet-watcher need not see margins
+   * and a campaign handler sees neither. Stripped SERVER-SIDE without the
+   * key. manage_budget and admin imply it.
+   */
+  ADVERTISING_VIEW_BILLING:    'advertising.view_billing',
   /** Add / edit daily performance entries for assigned campaigns. */
   ADVERTISING_ENTER_METRICS:   'advertising.enter_metrics',
   /** Approve daily metrics submitted by media buyers. */
