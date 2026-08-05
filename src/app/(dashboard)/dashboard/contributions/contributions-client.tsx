@@ -8,7 +8,7 @@ import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { recalculatePayrollForMonth } from '@/app/(dashboard)/dashboard/payroll/actions'
 import { serverFillTaskBilling, fetchRetainerCoverage } from '@/app/(dashboard)/dashboard/tasks/actions'
-import { applyTaskAgreements, logContributionSaved } from './actions'
+import { applyTaskAgreements, saveTaskContributions } from './actions'
 import { calculateCommission } from '@/lib/calculations/commission'
 import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
 import { taskCode, taskCodeMatches, nextTaskNumber } from '@/lib/utils/task-code'
@@ -484,15 +484,22 @@ export default function ContributionsClient({
             contributions: contribArray,
           })
           if (result.employeeEarnings.length > 0) {
-            const scoreInserts = result.employeeEarnings.map((e: any) => ({
-              task_id: task.id, employee_id: e.employeeId,
-              score_percentage: e.scorePercentage, earnings_inr: e.earnings,
-            }))
-            await supabase.from('contribution_scores').delete().eq('task_id', task.id)
-            await supabase.from('contribution_scores').insert(scoreInserts)
-            // Layer employee commission agreements on top (no-op without agreements).
-            await applyTaskAgreements(task.id)
-            savedCount++
+            // Score-only recalc through the guarded server action: preserves
+            // manual overrides and refuses finalized payroll months, instead
+            // of the old browser-side delete-then-insert that clobbered both.
+            const res = await saveTaskContributions({
+              taskId: task.id,
+              scores: result.employeeEarnings.map((e: any) => ({
+                employeeId: e.employeeId,
+                scorePercentage: e.scorePercentage,
+                earnings: e.earnings,
+              })),
+            })
+            if (res.ok) {
+              // Layer employee commission agreements on top (no-op without agreements).
+              await applyTaskAgreements(task.id)
+              savedCount++
+            }
           }
         } catch { /* skip tasks that fail calculation */ }
       }
@@ -1063,65 +1070,34 @@ export default function ContributionsClient({
   async function handleSave() {
     if (!selectedTask) return
     setSaving(true)
-    const contribInserts = Object.entries(contributions).flatMap(([paramId, empMap]) =>
-      Object.entries(empMap).filter(([, v]) => v > 0)
-        .map(([empId, value]) => ({ task_id: selectedTask.id, employee_id: empId, parameter_id: paramId, value }))
-    )
     const toolInserts = filteredTools.filter(t => toolsUsed[t.id]).map(t => ({ task_id: selectedTask.id, tool_id: t.id }))
 
-    // This is a delete-then-reinsert. supabase-js returns errors instead of
-    // throwing, so we MUST check every write: if an insert fails after the
-    // deletes succeed, the task's contribution + earnings rows would be wiped
-    // while the UI says "saved" and the draft is cleared — silent data loss.
-    // On any error we surface it, keep the draft, and stop (no success toast).
-    const firstError = (...errs: ({ message?: string } | null | undefined)[]) =>
-      errs.find(e => e)?.message
+    // Phase 3.0 — one guarded server action instead of browser-side
+    // delete-then-reinsert. The server enforces permission checks and
+    // finalized-month protection, preserves manual overrides, and logs the
+    // activity entry itself. On error we surface it and keep the draft.
+    const saveRes = await saveTaskContributions({
+      taskId: selectedTask.id,
+      contributions,
+      scores: calculatedResult
+        ? calculatedResult.employeeEarnings.map((e: any) => ({
+            employeeId: e.employeeId,
+            scorePercentage: e.scorePercentage,
+            earnings: e.earnings,
+          }))
+        : undefined,
+      toolIds: toolInserts.map(t => t.tool_id),
+      markDone: true,   // server only advances pending/in_progress → done
+    })
 
-    const [delContribRes, delToolsRes] = await Promise.all([
-      supabase.from('contributions').delete().eq('task_id', selectedTask.id),
-      supabase.from('task_tools').delete().eq('task_id', selectedTask.id),
-    ])
-    let saveError = firstError(delContribRes.error, delToolsRes.error)
-
-    // Always save scores when calculatedResult is available — regardless of showFinancials display toggle
-    if (!saveError && calculatedResult) {
-      const scoreInserts = calculatedResult.employeeEarnings.map((e: any) => ({
-        task_id: selectedTask.id, employee_id: e.employeeId,
-        score_percentage: e.scorePercentage, earnings_inr: e.earnings,
-      }))
-      const delScores = await supabase.from('contribution_scores').delete().eq('task_id', selectedTask.id)
-      saveError = firstError(delScores.error)
-      if (!saveError && scoreInserts.length) {
-        const insScores = await supabase.from('contribution_scores').insert(scoreInserts)
-        saveError = firstError(insScores.error)
-      }
-      // Layer employee commission agreements on top (no-op without agreements).
-      if (!saveError) await applyTaskAgreements(selectedTask.id)
-      // Only advance status to 'done' if task is still pending/in_progress — never downgrade invoiced/paid tasks
-      if (!saveError && ['pending', 'in_progress'].includes(selectedTask.status)) {
-        await supabase.from('tasks').update({ status: 'done' }).eq('id', selectedTask.id)
-      }
-    }
-    if (!saveError && contribInserts.length) {
-      const insContrib = await supabase.from('contributions').insert(contribInserts)
-      saveError = firstError(insContrib.error)
-    }
-    if (!saveError && toolInserts.length) {
-      const insTools = await supabase.from('task_tools').insert(toolInserts)
-      saveError = firstError(insTools.error)
-    }
-
-    if (saveError) {
+    if (!saveRes.ok) {
       setSaving(false)
-      toast.error('Failed to save contributions', saveError, 6000)
+      toast.error('Failed to save contributions', saveRes.error || 'Unknown error', 6000)
       return   // keep the draft — do NOT show success or clear it
     }
 
-    // Record on the task's activity timeline (fire-and-forget — never blocks save).
-    logContributionSaved(selectedTask.id, {
-      employees: calculatedResult?.employeeEarnings?.length ?? contribInserts.length,
-      title: selectedTask.title,
-    }).catch(() => { /* logging is best-effort */ })
+    // Layer employee commission agreements on top (no-op without agreements).
+    if (calculatedResult) await applyTaskAgreements(selectedTask.id)
 
     // Auto-recalculate pending payroll for this month when contributions change
     if (selectedTask.task_date) {

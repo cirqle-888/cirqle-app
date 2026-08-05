@@ -23,6 +23,7 @@ import { TitleAutocomplete } from '@/components/tasks/title-autocomplete'
 const QuickCreateClientModal = dynamic(() => import('@/components/tasks/quick-create-modals').then(mod => mod.QuickCreateClientModal), { ssr: false })
 const QuickCreateServiceModal = dynamic(() => import('@/components/tasks/quick-create-modals').then(mod => mod.QuickCreateServiceModal), { ssr: false })
 import { markRequestPromoted, getRequestBriefForTask } from '@/app/(dashboard)/dashboard/requests/actions'
+import { createContributionSlots } from '@/app/(dashboard)/dashboard/contributions/actions'
 import AppSelect from '@/components/ui/app-select'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { DateFilter, matchesDateFilter, getDateFilterLabel } from '@/components/ui/date-filter'
@@ -1376,17 +1377,17 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       // entered at billing time. Employees fill in who did each part later; editing
       // contributions does NOT flow back to billing (snapshot is frozen).
       if (form.parent_task_id && form.billing_mode === 'parameter_driven' && variantParamIds.size > 0) {
-        const slots = [...variantParamIds].map(parameter_id => ({
-          task_id:      data.id,
-          parameter_id,
-          employee_id:  null,
-          value:        parseFloat(variantParamValues[parameter_id] || '1') || 0,
-          locked:       false,
-        }))
-        const { error: slotErr } = await supabase.from('contributions').insert(slots)
-        if (slotErr) {
-          console.warn('Auto-creating contribution slots failed:', slotErr)
-          toastError(`Task saved, but contribution slots couldn't be pre-filled: ${slotErr.message}`)
+        // Phase 3.0 — guarded server action instead of a direct browser insert.
+        const slotRes = await createContributionSlots(
+          data.id,
+          [...variantParamIds].map(parameterId => ({
+            parameterId,
+            value: parseFloat(variantParamValues[parameterId] || '1') || 0,
+          })),
+        )
+        if (!slotRes.ok) {
+          console.warn('Auto-creating contribution slots failed:', slotRes.error)
+          toastError(`Task saved, but contribution slots couldn't be pre-filled: ${slotRes.error}`)
         }
       }
 
