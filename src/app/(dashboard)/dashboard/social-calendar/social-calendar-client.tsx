@@ -1570,7 +1570,7 @@ export default function SocialCalendarClient({
                       <>
                         {grouped.map(({ d, emps }) => (
                           <optgroup key={d.id} label={d.name}>
-                            {emps.map(emp => <option key={emp.id} value={emp.id}>{emp.cqid}{(emp as any).name ? ` \u00b7 ${(emp as any).name}` : ''}</option>)}
+                            {emps.map(emp => <option key={emp.id} value={emp.id}>{emp.cqid}</option>)}
                           </optgroup>
                         ))}
                         {rest.length > 0 && (

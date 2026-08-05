@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "npm run lint:privacy && next build",
+    "lint:privacy": "node scripts/check-name-privacy.mjs",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
