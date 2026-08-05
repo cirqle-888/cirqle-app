@@ -30,7 +30,7 @@ import { formatCurrency, getCurrencySymbol, round2 } from '@/lib/calculations/cu
 import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
 import {
   FileText, Plus, X, ChevronRight, CheckCircle, Send, CreditCard,
-  Trash2, AlertTriangle, Clock, Eye, Lock, Zap, Download, RefreshCw,
+  Trash2, AlertTriangle, Clock, Eye, Lock, Zap, Download, RefreshCw, RotateCw, ListRestart, Undo2, CalendarClock,
   Calendar, Building2, IndianRupee, MoreHorizontal, Search, Filter,
   Printer, TrendingUp, BadgeCheck, CircleDollarSign, Receipt, Edit2, Save,
   History, Tag, Percent, ChevronDown, ChevronUp, ArrowDownToLine, Gift, ExternalLink, Copy,
@@ -646,6 +646,40 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       draftCount: drafts.length,
       draftTotal: drafts.reduce((s, i) => s + invTotalInr(i), 0),
       overdueCount: overdue.length,
+      // Stage-wise value cards: count + ₹ value sitting in each pipeline stage.
+      // 'overdue' is derived (due_date vs today), matching the list filter and
+      // row badge — the other four are literal status buckets. Amounts are the
+      // balance due (₹ snapshot) — for draft/reviewed nothing is paid yet, so
+      // balance == total and the semantics stay uniform across all five cards.
+      stages: (['draft', 'reviewed', 'sent', 'partial'] as const).reduce((acc, s) => {
+        const list = invoices.filter(i => i.status === s)
+        acc[s] = { count: list.length, amount: list.reduce((sum, i) => sum + balanceDueInr(i), 0) }
+        return acc
+      }, {
+        overdue: { count: overdue.length, amount: overdue.reduce((s, i) => s + balanceDueInr(i), 0) },
+      } as Record<string, { count: number; amount: number }>),
+      // Month-wise outstanding dues: unpaid balances of active invoices grouped
+      // by due month (fallback: issue month), oldest first.
+      monthDues: (() => {
+        const map = new Map<string, { label: string; count: number; amount: number }>()
+        for (const inv of active) {
+          const due = balanceDueInr(inv)
+          if (due <= 0) continue
+          const d = inv.due_date || inv.issue_date || inv.created_at
+          if (!d) continue
+          const dt = new Date(d)
+          if (isNaN(dt.getTime())) continue
+          const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`
+          const cur = map.get(key) || {
+            label: dt.toLocaleString('en-IN', { month: 'short' }) + ` ’${String(dt.getFullYear()).slice(2)}`,
+            count: 0, amount: 0,
+          }
+          cur.count += 1
+          cur.amount += due
+          map.set(key, cur)
+        }
+        return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([key, v]) => ({ key, ...v }))
+      })(),
     }
   }, [invoices])
 
@@ -2988,9 +3022,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             </div>
           </div>
           <div className="flex flex-wrap gap-1.5 items-start justify-end shrink-0">
-            <button onClick={() => refreshInvoice(inv.id)} title="Refresh"
+            <button onClick={() => refreshInvoice(inv.id)} title="Reload this invoice (re-fetch latest data)"
               className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors border border-transparent hover:border-border/50">
-              <RefreshCw className="w-4 h-4" />
+              <RotateCw className="w-4 h-4" />
             </button>
             <button onClick={() => setPreviewInv(inv)} title="Preview invoice"
               className="p-2 text-muted-foreground hover:text-violet-500 hover:bg-violet-500/10 rounded-lg transition-colors border border-transparent hover:border-violet-500/20">
@@ -3039,9 +3073,10 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             )}
             
             {inv.status === 'draft' && (
-              <button onClick={() => handleResync(inv.id)} disabled={saving} title="Resync Tasks"
+              <button onClick={() => handleResync(inv.id)} disabled={saving}
+                title="Re-sync line items from this month's completed tasks"
                 className="p-2 text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10 rounded-lg transition-colors border border-transparent hover:border-blue-500/20 disabled:opacity-50">
-                <RefreshCw className={cn("w-4 h-4", resyncingId === inv.id && "animate-spin")} />
+                <ListRestart className={cn("w-4 h-4", resyncingId === inv.id && "animate-spin")} />
               </button>
             )}
             <button onClick={() => confirmDelete(inv.id)} title="Delete"
@@ -3054,37 +3089,34 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
 
-          {/* Action pipeline */}
-          <div className="bg-foreground/[0.03] rounded-xl border border-border/40 p-3">
-            <div className="flex items-center gap-1 mb-3">
-              {STATUS_PIPELINE.map((s, idx) => {
-                const pos = STATUS_PIPELINE.indexOf(inv.status)
-                const isPast = idx < pos
-                const isCurrent = s === inv.status
-                return (
-                  <div key={s} className="flex items-center flex-1 min-w-0">
-                    <div className={`text-center flex-1 min-w-0 ${isCurrent ? 'text-violet-400' : isPast ? 'text-green-400' : 'text-muted-foreground/40'}`}>
-                      <div className={`mx-auto w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold mb-0.5
-                        ${isCurrent ? 'bg-violet-500/20 border border-violet-500' : isPast ? 'bg-green-500/20 border border-green-500' : 'bg-foreground/5 border border-border/40'}`}>
-                        {isPast ? '✓' : idx + 1}
-                      </div>
-                      <div className="text-[9px] truncate">{getStatusLabel(s)}</div>
+          {/* Action bar — one slim row: progress on the left, the one or two
+              actions that matter now on the right. Everything else lives under
+              "More actions" so the panel opens straight onto the line items. */}
+          <div className="bg-foreground/[0.03] rounded-xl border border-border/40 px-3 py-2">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-1 min-w-0" title={`Stage: ${getStatusLabel(inv.status)}`}>
+                {STATUS_PIPELINE.map((s, idx) => {
+                  const pos = STATUS_PIPELINE.indexOf(inv.status)
+                  const isPast = idx < pos
+                  const isCurrent = s === inv.status
+                  return (
+                    <div key={s} className="flex items-center">
+                      <span className={cn('w-2 h-2 rounded-full shrink-0',
+                        isCurrent ? 'bg-violet-500 ring-2 ring-violet-500/30' : isPast ? 'bg-green-500' : 'bg-border')} />
+                      {isCurrent && (
+                        <span className="ml-1.5 text-[11px] font-semibold text-violet-500 whitespace-nowrap">{getStatusLabel(s)}</span>
+                      )}
+                      {idx < STATUS_PIPELINE.length - 1 && <span className={cn('w-3 h-px mx-1', isPast ? 'bg-green-500/40' : 'bg-border/60')} />}
                     </div>
-                    {idx < STATUS_PIPELINE.length - 1 && (
-                      <div className={`h-px flex-shrink-0 w-3 mx-0.5 ${idx < pos ? 'bg-green-500/40' : 'bg-border/40'}`} />
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-
-            {/* Action buttons */}
-            <div className="flex flex-wrap gap-2">
+                  )
+                })}
+              </div>
+              <div className="flex-1" />
               {nextAct && (
                 <button
                   onClick={() => updateStatus(inv.id, nextAct.next)}
                   disabled={saving}
-                  className="flex-1 min-w-[120px] py-1.5 px-3 bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50">
+                  className="py-1.5 px-3.5 bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors disabled:opacity-50">
                   {nextAct.next === 'reviewed' && <Eye className="w-3.5 h-3.5" />}
                   {nextAct.next === 'sent' && <Send className="w-3.5 h-3.5" />}
                   {nextAct.next === 'partial' && <CreditCard className="w-3.5 h-3.5" />}
@@ -3095,59 +3127,53 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               {['sent', 'partial', 'overdue'].includes(inv.status) && (
                 <button
                   onClick={() => openPayPanel(inv)}
-
-                  className="flex-1 min-w-[120px] py-1.5 px-3 bg-green-600 hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-green-600 text-white text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 transition-colors">
+                  className="py-1.5 px-3.5 bg-green-600 hover:bg-green-500 text-white text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors">
                   <CreditCard className="w-3.5 h-3.5" />Record Payment
-                </button>
-              )}
-              {inv.status === 'draft' && (
-                <button
-                  onClick={() => openPayPanel(inv)}
-
-                  className="flex-1 min-w-[120px] py-1.5 px-3 bg-foreground/[0.06] hover:bg-foreground/[0.1] disabled:opacity-40 disabled:cursor-not-allowed text-foreground text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 transition-colors border border-border/40">
-                  <CreditCard className="w-3.5 h-3.5" />Quick Pay
-                </button>
-              )}
-              <button
-                onClick={() => setApprovalInvoice({ id: inv.id, invoice_number: inv.invoice_number, client_id: inv.client_id ?? null })}
-                title="Request approval for this invoice"
-                className="flex-1 min-w-[120px] py-1.5 px-3 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 transition-colors">
-                <CheckCircle className="w-3.5 h-3.5" />Request Approval
-              </button>
-              {/* Allocate From Cash Book — alternate entry point into the same
-                  allocation engine. Shown when the invoice still has a balance
-                  and isn't already taking a direct "Record Payment" (mutual
-                  exclusion). Allocating MORE on top of existing allocations is
-                  allowed (multiple payments against one invoice). */}
-              {showAmounts
-                && !STATUS_GROUPS.closed.includes(inv.status)
-                && balanceDueInr(inv) > 0.01 && (
-                <button
-                  onClick={() => setAllocatingInvoice(inv)}
-                  className="flex-1 min-w-[120px] py-1.5 px-3 bg-violet-600/10 hover:bg-violet-600/20 text-violet-700 dark:text-violet-300 border border-violet-500/30 text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 transition-colors">
-                  <Wallet className="w-3.5 h-3.5" />Allocate From Cash Book
-                </button>
-              )}
-              {!STATUS_GROUPS.closed.includes(inv.status) && (
-                <button
-                  onClick={() => setAddExpenseInvoice(inv)}
-                  className="flex-1 min-w-[120px] py-1.5 px-3 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 transition-colors">
-                  <ShoppingBag className="w-3.5 h-3.5" />Add Expenses
                 </button>
               )}
             </div>
 
-
-            {/* Status override dropdown */}
-            <details className="mt-2">
-              <summary className="text-[10px] text-muted-foreground cursor-pointer hover:text-foreground list-none flex items-center gap-1">
-                <MoreHorizontal className="w-3 h-3" /> More status options
+            {/* Everything secondary, one click away */}
+            <details className="mt-1.5">
+              <summary className="text-[10px] text-muted-foreground cursor-pointer hover:text-foreground list-none flex items-center gap-1 w-fit">
+                <MoreHorizontal className="w-3 h-3" /> More actions
               </summary>
               <div className="flex flex-wrap gap-1.5 mt-2">
+                {inv.status === 'draft' && (
+                  <button onClick={() => openPayPanel(inv)}
+                    className="py-1 px-2.5 bg-foreground/[0.05] hover:bg-foreground/[0.1] text-foreground text-[11px] font-medium rounded-lg flex items-center gap-1.5 border border-border/40 transition-colors">
+                    <CreditCard className="w-3 h-3" />Quick Pay
+                  </button>
+                )}
+                <button
+                  onClick={() => setApprovalInvoice({ id: inv.id, invoice_number: inv.invoice_number, client_id: inv.client_id ?? null })}
+                  className="py-1 px-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-[11px] font-medium rounded-lg flex items-center gap-1.5 transition-colors">
+                  <CheckCircle className="w-3 h-3" />Request Approval
+                </button>
+                {/* Allocate From Cash Book — alternate entry point into the same
+                    allocation engine; multiple allocations per invoice allowed. */}
+                {showAmounts
+                  && !STATUS_GROUPS.closed.includes(inv.status)
+                  && balanceDueInr(inv) > 0.01 && (
+                  <button
+                    onClick={() => setAllocatingInvoice(inv)}
+                    className="py-1 px-2.5 bg-violet-600/10 hover:bg-violet-600/20 text-violet-700 dark:text-violet-300 border border-violet-500/30 text-[11px] font-medium rounded-lg flex items-center gap-1.5 transition-colors">
+                    <Wallet className="w-3 h-3" />Allocate From Cash Book
+                  </button>
+                )}
+                {!STATUS_GROUPS.closed.includes(inv.status) && (
+                  <button
+                    onClick={() => setAddExpenseInvoice(inv)}
+                    className="py-1 px-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-[11px] font-medium rounded-lg flex items-center gap-1.5 transition-colors">
+                    <ShoppingBag className="w-3 h-3" />Add Expenses
+                  </button>
+                )}
+                <span className="w-px self-stretch bg-border/50 mx-0.5" />
                 {['draft', 'reviewed', 'sent', 'partial', 'paid', 'overdue', 'cancelled', 'bad_debt'].map(s => (
                   <button key={s} onClick={() => updateStatus(inv.id, s)}
                     disabled={saving || inv.status === s}
-                    className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors disabled:opacity-30
+                    title={`Set status to ${getStatusLabel(s)}`}
+                    className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors disabled:opacity-30 self-center
                       ${inv.status === s ? getStatusColor(s) : 'border-border/40 text-muted-foreground hover:border-violet-500/50 hover:text-violet-400'}`}>
                     {getStatusLabel(s)}
                   </button>
@@ -3156,7 +3182,272 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             </details>
           </div>
 
-          {/* Amounts */}
+          {/* Client Expenses section — hidden here, expenses now shown inline in LINE ITEMS above */}
+          {false && (inv.expense_items || []).length > 0 && (() => {
+            const expMode = inv.expenses_mode || companySettings.expense_display_mode || 'mode_a'
+            const expTotal = (inv.expense_items || []).reduce((s, e) => s + (e.amount || 0), 0)
+            const origTotal = (inv.expense_items || []).reduce((s, e) => s + (e.original_amount || e.amount || 0), 0)
+            const markupTotal = (inv.expense_items || []).reduce((s, e) => s + (e.markup_amount || 0), 0)
+            return (
+              <div className="bg-amber-500/[0.04] rounded-xl border border-amber-500/20 p-3 space-y-2">
+                <div className="flex items-center justify-between flex-wrap gap-1">
+                  <h4 className="text-[11px] font-semibold text-amber-700 dark:text-amber-300/90 uppercase tracking-wider flex items-center gap-1.5">
+                    <ShoppingBag className="w-3 h-3" />Client Expenses ({(inv.expense_items || []).length})
+                  </h4>
+                  {/* PDF display mode toggle A/B/C */}
+                  {showAmounts && (
+                    <div className="flex items-center gap-1 text-[10px]">
+                      {[
+                        { id: 'mode_a', label: 'A · Clean' },
+                        { id: 'mode_b', label: 'B · Breakdown' },
+                        { id: 'mode_c', label: 'C · Reimbursable' },
+                      ].map(m => (
+                        <button key={m.id} onClick={() => updateExpensesMode(inv.id, m.id)}
+                          className={`px-2 py-0.5 rounded-full border transition-colors ${expMode === m.id
+                            ? 'bg-amber-500/20 border-amber-500/40 text-amber-700 dark:text-amber-300'
+                            : 'border-border/30 text-muted-foreground hover:border-border/60'}`}>
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {(inv.expense_items || []).map(exp => {
+                  const hasMarkup = exp.markup_type !== 'none' && (exp.markup_amount || 0) > 0
+                  return (
+                    <div key={exp.id} className="text-xs">
+                      <div className="flex items-start gap-2">
+                        <span className="text-foreground/80 truncate flex-1">{exp.description}</span>
+                        {showAmounts && (
+                          <span className="font-mono text-amber-700 dark:text-amber-300/90 shrink-0 font-semibold">
+                            {fmt(exp.amount, exp.currency as Currency)}
+                          </span>
+                        )}
+                      </div>
+                      {hasMarkup && showAmounts && (
+                        <div className="text-[10px] text-muted-foreground ml-0 mt-0.5">
+                          Cost {fmt(exp.original_amount || 0, exp.currency as Currency)} ·
+                          Markup {exp.markup_type === 'percentage'
+                            ? `${exp.markup_value}%`
+                            : fmt(exp.markup_amount || 0, exp.currency as Currency)} = {fmt(exp.amount, exp.currency as Currency)}
+                        </div>
+                      )}
+                      {exp.notes && <div className="text-[10px] text-muted-foreground/60 italic mt-0.5">{exp.notes}</div>}
+                    </div>
+                  )
+                })}
+                {showAmounts && (
+                  <div className="pt-1.5 border-t border-amber-500/20 space-y-0.5">
+                    {markupTotal > 0 && (
+                      <>
+                        <div className="flex justify-between text-[10px] text-muted-foreground">
+                          <span>Cost basis</span>
+                          <span className="font-mono">{fmt(origTotal, inv.currency)}</span>
+                        </div>
+                        <div className="flex justify-between text-[10px] text-amber-700 dark:text-amber-300/70">
+                          <span>Markup earned</span>
+                          <span className="font-mono">+{fmt(markupTotal, inv.currency)}</span>
+                        </div>
+                      </>
+                    )}
+                    <div className="flex justify-between text-[11px] text-amber-700 dark:text-amber-300/90 font-semibold">
+                      <span>Billed to client</span>
+                      <span className="font-mono">{fmt(expTotal, inv.currency)}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+
+          {/* Line items — document-style ledger card: framed header band,
+              a column rule, numbered ruled rows and an in-card subtotal, so
+              the section reads like the actual invoice the client receives. */}
+          <div className="mb-6 rounded-2xl border border-border/60 bg-card overflow-hidden shadow-sm">
+            <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-violet-500/[0.08] via-violet-500/[0.02] to-transparent border-b border-border/50">
+              <h4 className="text-sm font-semibold text-foreground tracking-tight flex items-center gap-2">
+                <span className="w-6 h-6 rounded-lg bg-violet-500/15 flex items-center justify-center shrink-0">
+                  <ListTree className="w-3.5 h-3.5 text-violet-500" />
+                </span>
+                Line Items
+                <span className="text-[10px] font-semibold text-violet-600 dark:text-violet-300 bg-violet-500/10 border border-violet-500/20 px-1.5 py-0.5 rounded-full tabular-nums">
+                  {(inv.items?.length || 0) + (inv.expense_items?.length || 0)}
+                </span>
+              </h4>
+              <div className="flex items-center gap-2">
+                {forceEdit && (
+                  <span className="text-[10px] text-amber-500 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <Lock className="w-3 h-3" /> Force edit on
+                  </span>
+                )}
+                {!forceEdit && isEditable(inv.status) && (
+                  <span className="text-[10px] text-amber-500 flex items-center gap-1 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+                    <Zap className="w-3 h-3" />Auto-collecting
+                  </span>
+                )}
+              </div>
+            </div>
+            {/* Column rule — mirrors a printed invoice's table header */}
+            <div className="hidden sm:flex items-center gap-3 px-4 py-1.5 text-[9px] font-bold uppercase tracking-widest text-muted-foreground/50 bg-secondary/30 border-b border-border/40">
+              <span className="w-5 text-right shrink-0">#</span>
+              <span className="flex-1">Description</span>
+              <span className="text-right">Amount</span>
+            </div>
+            <div className="divide-y divide-border/40">
+              {(inv.items || []).length === 0 && (
+                <div className="text-xs text-muted-foreground text-center py-8">
+                  No items yet — tasks marked "done" auto-appear here
+                </div>
+              )}
+              {/* Copy before sorting — Array#sort mutates, and `inv.items` is React state. */}
+              {[...(inv.items || [])].sort(compareInvoiceItems).map((item, idx) => (
+                <div key={item.id} className="relative flex items-start gap-3 px-4 py-3 hover:bg-violet-500/[0.04] transition-colors group">
+                  <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-violet-500/0 group-hover:bg-violet-500/60 transition-colors" />
+                  <span className="w-5 text-right shrink-0 pt-0.5 text-[10px] font-mono text-muted-foreground/50 tabular-nums select-none">
+                    {String(idx + 1).padStart(2, '0')}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    {editable ? (
+                      <input
+                        defaultValue={item.description}
+                        onBlur={e => { if (e.target.value !== item.description) updateItemDescription(item.id, inv.id, e.target.value) }}
+                        className="w-full bg-transparent text-sm font-medium border-b border-transparent hover:border-border/50 focus:border-violet-500/50 focus:outline-none pb-0.5"
+                        placeholder="Description…"
+                      />
+                    ) : (
+                      <div className="text-sm font-medium text-foreground truncate">{item.description}</div>
+                    )}
+                    <div className="flex flex-wrap items-center gap-2 mt-1.5 text-[11px] text-muted-foreground">
+                      {item.task?.task_date && <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{fmtDate(item.task.task_date)}</span>}
+                      {item.service?.name && <span className="px-1.5 py-0.5 rounded-md bg-secondary text-secondary-foreground">{item.service.name}</span>}
+                      {item.task && (
+                        <span className={cn("px-1.5 py-0.5 rounded-md", getStatusColor(item.task.status))}>
+                          {getStatusLabel(item.task.status)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {/* The editable field is the RATE, the read-only figure is the
+                      LINE TOTAL. They differ whenever quantity > 1, so the total
+                      is always spelled out rather than left to be inferred. */}
+                  <div className="text-right shrink-0">
+                    {editable ? (
+                      <input
+                        type="number" min="0" step="0.01"
+                        title="Rate per unit"
+                        defaultValue={item.unit_price}
+                        onBlur={e => {
+                          const v = parseFloat(e.target.value)
+                          // Blank/garbage would otherwise write NaN to unit_price AND total.
+                          if (!Number.isFinite(v) || v < 0) { e.target.value = String(item.unit_price); return }
+                          if (v !== item.unit_price) updateItemPrice(item.id, inv.id, v)
+                        }}
+                        className="w-24 bg-background border border-border/50 rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:border-violet-500/50 transition-colors"
+                      />
+                    ) : (
+                      <div className="text-sm font-semibold text-foreground">{fmt(item.total, inv.currency)}</div>
+                    )}
+                    {item.quantity !== 1 && (
+                      <div className="text-[11px] text-muted-foreground mt-0.5">
+                        {item.quantity} × {fmt(item.unit_price, inv.currency)}
+                        {editable && <> = <span className="font-semibold text-foreground">{fmt(item.total, inv.currency)}</span></>}
+                      </div>
+                    )}
+                  </div>
+                  {editable && (
+                    <button
+                      aria-label="Remove item"
+                      onClick={e => { e.stopPropagation(); removeItem(inv.id, item.id) }}
+                      disabled={removingItemId === item.id}
+                      className="opacity-0 group-hover:opacity-100 p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all shrink-0 mt-0.5">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+              
+              {/* Expense items inline in line items */}
+              {(inv.expense_items || []).map(exp => (
+                <div key={`exp-${exp.id}`} className="relative flex items-start gap-3 px-4 py-3 bg-amber-500/[0.04] hover:bg-amber-500/[0.08] transition-colors group">
+                  <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-amber-400/70" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <ShoppingBag className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                      <div className="text-sm font-medium text-foreground truncate">{exp.description}</div>
+                    </div>
+                    {exp.markup_type !== 'none' && (exp.markup_amount || 0) > 0 && showAmounts && (
+                      <div className="text-[11px] text-muted-foreground ml-5 flex items-center gap-1.5">
+                        <span className="opacity-70">Cost {fmt(exp.original_amount || 0, exp.currency as Currency)}</span>
+                        <span className="w-1 h-1 rounded-full bg-border"></span>
+                        <span className="text-amber-600 dark:text-amber-400">Markup {fmt(exp.markup_amount || 0, exp.currency as Currency)}</span>
+                      </div>
+                    )}
+                    {exp.notes && <div className="text-[11px] text-muted-foreground/70 italic mt-1 ml-5 border-l-2 border-border/50 pl-2">{exp.notes}</div>}
+                  </div>
+                  <div className="text-right shrink-0">
+                    {showAmounts && <div className="text-sm font-semibold text-amber-600 dark:text-amber-400">{fmt(exp.amount, inv.currency as Currency)}</div>}
+                  </div>
+                  {editable && (
+                    <button
+                      onClick={async () => {
+                        const { error } = await supabase.from('invoice_expense_items').delete().eq('id', exp.id)
+                        if (!error) {
+                          const newExps = (inv.expense_items || []).filter(e => e.id !== exp.id)
+                          const newExpTotal = newExps.reduce((s, e) => s + (e.amount || 0), 0)
+                          const taskTotal = (inv.items || []).reduce((s, i) => s + (i.total || 0), 0)
+                          const newTotal = round2(taskTotal + newExpTotal - (inv.discount_amount || 0) + (inv.tax_amount || 0) + (inv.previous_balance || 0))
+                          await supabase.from('invoices').update({ total_amount: newTotal, subtotal: round2(taskTotal + newExpTotal) }).eq('id', inv.id)
+                          setInvoices(prev => prev.map(i => i.id === inv.id
+                            ? { ...i, expense_items: newExps, total_amount: newTotal, total_amount_inr: round2(newTotal * (i.exchange_rate || 1)), subtotal: round2(taskTotal + newExpTotal) }
+                            : i
+                          ))
+                        }
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all shrink-0 mt-0.5"
+                      title="Remove expense from invoice"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+
+              {/* Add manual item row */}
+              {editable && (() => {
+                let addDesc = '', addPrice = 0
+                return (
+                  <div className="flex gap-3 items-center px-4 py-2.5 bg-secondary/10 border-t border-dashed border-border/50 hover:bg-secondary/20 transition-colors focus-within:bg-violet-500/[0.04] group">
+                    <input
+                      placeholder="Add manual line item…"
+                      onChange={e => { addDesc = e.target.value }}
+                      className="flex-1 bg-transparent text-sm font-medium focus:outline-none px-1 placeholder:text-muted-foreground/50"
+                    />
+                    <input
+                      type="number" min="0" placeholder={getCurrencySymbol(inv.currency)}
+                      onChange={e => { addPrice = parseFloat(e.target.value) || 0 }}
+                      className="w-20 bg-background border border-border/50 rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all"
+                    />
+                    <button
+                      onClick={() => addManualItem(inv.id, addDesc, addPrice)}
+                      className="p-1.5 text-violet-500 hover:text-violet-600 hover:bg-violet-500/10 rounded-lg transition-colors border border-transparent group-focus-within:border-violet-500/20"
+                      title="Add item">
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+                )
+              })()}
+            </div>
+            {/* In-card tally — bridges into the Amounts card below */}
+            <div className="flex items-center justify-between px-4 py-2.5 bg-secondary/30 border-t border-border/50">
+              <span className="text-[11px] text-muted-foreground font-medium">
+                {(inv.items?.length || 0) + (inv.expense_items?.length || 0)} item{((inv.items?.length || 0) + (inv.expense_items?.length || 0)) !== 1 ? 's' : ''}
+              </span>
+              <span className="text-sm font-bold tabular-nums">{fmt(inv.subtotal || inv.total_amount, inv.currency)}</span>
+            </div>
+          </div>
+
+          {/* Amounts — deliberately AFTER the line items: review the work first,
+              then the money it adds up to. */}
           <div className="bg-secondary/20 rounded-xl border border-border/50 p-4 space-y-3">
             {editable && invPaidInr(inv) === 0 && (
               <div className="flex justify-between items-center text-sm">
@@ -3272,7 +3563,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                         onClick={() => updateExchangeRate(inv.id, rateMap[inv.currency])}
                         title={`Reset to Settings rate ₹${rateMap[inv.currency]}`}
                         className="p-1 text-violet-500/70 hover:text-violet-500 hover:bg-violet-500/10 rounded-md transition-colors">
-                        <RefreshCw className="w-3.5 h-3.5" />
+                        <Undo2 className="w-3.5 h-3.5" />
                       </button>
                     )}
                   </div>
@@ -3304,246 +3595,6 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           </div>
 
 
-
-          {/* Client Expenses section — hidden here, expenses now shown inline in LINE ITEMS above */}
-          {false && (inv.expense_items || []).length > 0 && (() => {
-            const expMode = inv.expenses_mode || companySettings.expense_display_mode || 'mode_a'
-            const expTotal = (inv.expense_items || []).reduce((s, e) => s + (e.amount || 0), 0)
-            const origTotal = (inv.expense_items || []).reduce((s, e) => s + (e.original_amount || e.amount || 0), 0)
-            const markupTotal = (inv.expense_items || []).reduce((s, e) => s + (e.markup_amount || 0), 0)
-            return (
-              <div className="bg-amber-500/[0.04] rounded-xl border border-amber-500/20 p-3 space-y-2">
-                <div className="flex items-center justify-between flex-wrap gap-1">
-                  <h4 className="text-[11px] font-semibold text-amber-700 dark:text-amber-300/90 uppercase tracking-wider flex items-center gap-1.5">
-                    <ShoppingBag className="w-3 h-3" />Client Expenses ({(inv.expense_items || []).length})
-                  </h4>
-                  {/* PDF display mode toggle A/B/C */}
-                  {showAmounts && (
-                    <div className="flex items-center gap-1 text-[10px]">
-                      {[
-                        { id: 'mode_a', label: 'A · Clean' },
-                        { id: 'mode_b', label: 'B · Breakdown' },
-                        { id: 'mode_c', label: 'C · Reimbursable' },
-                      ].map(m => (
-                        <button key={m.id} onClick={() => updateExpensesMode(inv.id, m.id)}
-                          className={`px-2 py-0.5 rounded-full border transition-colors ${expMode === m.id
-                            ? 'bg-amber-500/20 border-amber-500/40 text-amber-700 dark:text-amber-300'
-                            : 'border-border/30 text-muted-foreground hover:border-border/60'}`}>
-                          {m.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                {(inv.expense_items || []).map(exp => {
-                  const hasMarkup = exp.markup_type !== 'none' && (exp.markup_amount || 0) > 0
-                  return (
-                    <div key={exp.id} className="text-xs">
-                      <div className="flex items-start gap-2">
-                        <span className="text-foreground/80 truncate flex-1">{exp.description}</span>
-                        {showAmounts && (
-                          <span className="font-mono text-amber-700 dark:text-amber-300/90 shrink-0 font-semibold">
-                            {fmt(exp.amount, exp.currency as Currency)}
-                          </span>
-                        )}
-                      </div>
-                      {hasMarkup && showAmounts && (
-                        <div className="text-[10px] text-muted-foreground ml-0 mt-0.5">
-                          Cost {fmt(exp.original_amount || 0, exp.currency as Currency)} ·
-                          Markup {exp.markup_type === 'percentage'
-                            ? `${exp.markup_value}%`
-                            : fmt(exp.markup_amount || 0, exp.currency as Currency)} = {fmt(exp.amount, exp.currency as Currency)}
-                        </div>
-                      )}
-                      {exp.notes && <div className="text-[10px] text-muted-foreground/60 italic mt-0.5">{exp.notes}</div>}
-                    </div>
-                  )
-                })}
-                {showAmounts && (
-                  <div className="pt-1.5 border-t border-amber-500/20 space-y-0.5">
-                    {markupTotal > 0 && (
-                      <>
-                        <div className="flex justify-between text-[10px] text-muted-foreground">
-                          <span>Cost basis</span>
-                          <span className="font-mono">{fmt(origTotal, inv.currency)}</span>
-                        </div>
-                        <div className="flex justify-between text-[10px] text-amber-700 dark:text-amber-300/70">
-                          <span>Markup earned</span>
-                          <span className="font-mono">+{fmt(markupTotal, inv.currency)}</span>
-                        </div>
-                      </>
-                    )}
-                    <div className="flex justify-between text-[11px] text-amber-700 dark:text-amber-300/90 font-semibold">
-                      <span>Billed to client</span>
-                      <span className="font-mono">{fmt(expTotal, inv.currency)}</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )
-          })()}
-
-          {/* Line items */}
-          <div className="mb-6">
-            <div className="flex items-center justify-between mb-3">
-              <h4 className="text-sm font-semibold text-foreground tracking-tight flex items-center gap-1.5">
-                <ListTree className="w-4 h-4 text-violet-500" />
-                Line Items
-                <span className="text-muted-foreground font-normal ml-1">({(inv.items?.length || 0) + (inv.expense_items?.length || 0)})</span>
-              </h4>
-              <div className="flex items-center gap-2">
-                {forceEdit && (
-                  <span className="text-[10px] text-amber-500 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
-                    <Lock className="w-3 h-3" /> Force edit on
-                  </span>
-                )}
-                {!forceEdit && isEditable(inv.status) && (
-                  <span className="text-[10px] text-amber-500 flex items-center gap-1 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
-                    <Zap className="w-3 h-3" />Auto-collecting
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              {(inv.items || []).length === 0 && (
-                <div className="text-xs text-muted-foreground text-center py-6 bg-secondary/30 rounded-xl border border-dashed border-border/50">
-                  No items yet — tasks marked "done" auto-appear here
-                </div>
-              )}
-              {/* Copy before sorting — Array#sort mutates, and `inv.items` is React state. */}
-              {[...(inv.items || [])].sort(compareInvoiceItems).map(item => (
-                <div key={item.id} className="flex items-start gap-3 p-3 bg-card rounded-xl border border-border/40 hover:border-border/80 hover:shadow-sm transition-all group">
-                  <div className="flex-1 min-w-0">
-                    {editable ? (
-                      <input
-                        defaultValue={item.description}
-                        onBlur={e => { if (e.target.value !== item.description) updateItemDescription(item.id, inv.id, e.target.value) }}
-                        className="w-full bg-transparent text-sm font-medium border-b border-transparent hover:border-border/50 focus:border-violet-500/50 focus:outline-none pb-0.5"
-                        placeholder="Description…"
-                      />
-                    ) : (
-                      <div className="text-sm font-medium text-foreground truncate">{item.description}</div>
-                    )}
-                    <div className="flex flex-wrap items-center gap-2 mt-1.5 text-[11px] text-muted-foreground">
-                      {item.task?.task_date && <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{fmtDate(item.task.task_date)}</span>}
-                      {item.service?.name && <span className="px-1.5 py-0.5 rounded-md bg-secondary text-secondary-foreground">{item.service.name}</span>}
-                      {item.task && (
-                        <span className={cn("px-1.5 py-0.5 rounded-md", getStatusColor(item.task.status))}>
-                          {getStatusLabel(item.task.status)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  {/* The editable field is the RATE, the read-only figure is the
-                      LINE TOTAL. They differ whenever quantity > 1, so the total
-                      is always spelled out rather than left to be inferred. */}
-                  <div className="text-right shrink-0">
-                    {editable ? (
-                      <input
-                        type="number" min="0" step="0.01"
-                        title="Rate per unit"
-                        defaultValue={item.unit_price}
-                        onBlur={e => {
-                          const v = parseFloat(e.target.value)
-                          // Blank/garbage would otherwise write NaN to unit_price AND total.
-                          if (!Number.isFinite(v) || v < 0) { e.target.value = String(item.unit_price); return }
-                          if (v !== item.unit_price) updateItemPrice(item.id, inv.id, v)
-                        }}
-                        className="w-24 bg-background border border-border/50 rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:border-violet-500/50 transition-colors"
-                      />
-                    ) : (
-                      <div className="text-sm font-semibold text-foreground">{fmt(item.total, inv.currency)}</div>
-                    )}
-                    {item.quantity !== 1 && (
-                      <div className="text-[11px] text-muted-foreground mt-0.5">
-                        {item.quantity} × {fmt(item.unit_price, inv.currency)}
-                        {editable && <> = <span className="font-semibold text-foreground">{fmt(item.total, inv.currency)}</span></>}
-                      </div>
-                    )}
-                  </div>
-                  {editable && (
-                    <button
-                      aria-label="Remove item"
-                      onClick={e => { e.stopPropagation(); removeItem(inv.id, item.id) }}
-                      disabled={removingItemId === item.id}
-                      className="opacity-0 group-hover:opacity-100 p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all shrink-0 mt-0.5">
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              ))}
-              
-              {/* Expense items inline in line items */}
-              {(inv.expense_items || []).map(exp => (
-                <div key={`exp-${exp.id}`} className="flex items-start gap-3 p-3 bg-amber-500/5 rounded-xl border border-amber-500/20 hover:border-amber-500/40 hover:shadow-sm transition-all group">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <ShoppingBag className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                      <div className="text-sm font-medium text-foreground truncate">{exp.description}</div>
-                    </div>
-                    {exp.markup_type !== 'none' && (exp.markup_amount || 0) > 0 && showAmounts && (
-                      <div className="text-[11px] text-muted-foreground ml-5 flex items-center gap-1.5">
-                        <span className="opacity-70">Cost {fmt(exp.original_amount || 0, exp.currency as Currency)}</span>
-                        <span className="w-1 h-1 rounded-full bg-border"></span>
-                        <span className="text-amber-600 dark:text-amber-400">Markup {fmt(exp.markup_amount || 0, exp.currency as Currency)}</span>
-                      </div>
-                    )}
-                    {exp.notes && <div className="text-[11px] text-muted-foreground/70 italic mt-1 ml-5 border-l-2 border-border/50 pl-2">{exp.notes}</div>}
-                  </div>
-                  <div className="text-right shrink-0">
-                    {showAmounts && <div className="text-sm font-semibold text-amber-600 dark:text-amber-400">{fmt(exp.amount, inv.currency as Currency)}</div>}
-                  </div>
-                  {editable && (
-                    <button
-                      onClick={async () => {
-                        const { error } = await supabase.from('invoice_expense_items').delete().eq('id', exp.id)
-                        if (!error) {
-                          const newExps = (inv.expense_items || []).filter(e => e.id !== exp.id)
-                          const newExpTotal = newExps.reduce((s, e) => s + (e.amount || 0), 0)
-                          const taskTotal = (inv.items || []).reduce((s, i) => s + (i.total || 0), 0)
-                          const newTotal = round2(taskTotal + newExpTotal - (inv.discount_amount || 0) + (inv.tax_amount || 0) + (inv.previous_balance || 0))
-                          await supabase.from('invoices').update({ total_amount: newTotal, subtotal: round2(taskTotal + newExpTotal) }).eq('id', inv.id)
-                          setInvoices(prev => prev.map(i => i.id === inv.id
-                            ? { ...i, expense_items: newExps, total_amount: newTotal, total_amount_inr: round2(newTotal * (i.exchange_rate || 1)), subtotal: round2(taskTotal + newExpTotal) }
-                            : i
-                          ))
-                        }
-                      }}
-                      className="opacity-0 group-hover:opacity-100 p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all shrink-0 mt-0.5"
-                      title="Remove expense from invoice"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              ))}
-
-              {/* Add manual item row */}
-              {editable && (() => {
-                let addDesc = '', addPrice = 0
-                return (
-                  <div className="flex gap-3 items-center p-2 mt-2 bg-secondary/10 rounded-xl border border-dashed border-border/50 hover:border-violet-500/30 transition-colors focus-within:border-violet-500/50 focus-within:bg-secondary/20 group">
-                    <input
-                      placeholder="Add manual line item…"
-                      onChange={e => { addDesc = e.target.value }}
-                      className="flex-1 bg-transparent text-sm font-medium focus:outline-none px-1 placeholder:text-muted-foreground/50"
-                    />
-                    <input
-                      type="number" min="0" placeholder={getCurrencySymbol(inv.currency)}
-                      onChange={e => { addPrice = parseFloat(e.target.value) || 0 }}
-                      className="w-20 bg-background border border-border/50 rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all"
-                    />
-                    <button
-                      onClick={() => addManualItem(inv.id, addDesc, addPrice)}
-                      className="p-1.5 text-violet-500 hover:text-violet-600 hover:bg-violet-500/10 rounded-lg transition-colors border border-transparent group-focus-within:border-violet-500/20"
-                      title="Add item">
-                      <Plus className="w-4 h-4" />
-                    </button>
-                  </div>
-                )
-              })()}
-            </div>
-          </div>
 
           {/* ── Discount Calculator ─────────────────────────────────────────────── */}
           {(editable || (inv.discount_amount ?? 0) > 0) && (
@@ -5902,6 +5953,58 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               </div>
             </button>
           </div>
+
+          {/* ── Stage-wise value cards (click-to-filter) ── */}
+          <div className="px-4 pb-2.5 grid grid-cols-2 sm:grid-cols-5 gap-2">
+            {([
+              { key: 'draft',    label: 'Draft',    active: 'bg-amber-500/15 border-amber-500/40',   dot: 'bg-amber-400' },
+              { key: 'reviewed', label: 'Reviewed', active: 'bg-blue-500/15 border-blue-500/40',     dot: 'bg-blue-400' },
+              { key: 'sent',     label: 'Sent',     active: 'bg-violet-500/15 border-violet-500/40', dot: 'bg-violet-400' },
+              { key: 'partial',  label: 'Partial',  active: 'bg-cyan-500/15 border-cyan-500/40',     dot: 'bg-cyan-400' },
+              { key: 'overdue',  label: 'Overdue',  active: 'bg-red-500/15 border-red-500/40',       dot: 'bg-red-400' },
+            ] as const).map(st => {
+              const s = stats.stages[st.key]
+              const isActive = filterStatus === st.key
+              return (
+                <button
+                  key={st.key}
+                  onClick={() => setFilterStatus(isActive ? '' : st.key)}
+                  title={isActive ? 'Clear filter' : `Show ${st.label.toLowerCase()} invoices`}
+                  className={cn(
+                    'rounded-xl px-3 py-2 border text-left transition-colors',
+                    isActive ? st.active : 'bg-foreground/[0.03] border-border/30 hover:border-foreground/25'
+                  )}
+                >
+                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-0.5">
+                    <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', s.count > 0 ? st.dot : 'bg-border')} />
+                    {st.label}
+                    <span className="ml-auto font-semibold text-foreground/70">{s.count}</span>
+                  </div>
+                  <div className={cn('text-xs font-bold', s.count > 0 ? 'text-foreground' : 'text-muted-foreground')}>
+                    {s.count > 0 ? fmt(s.amount) : '—'}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+
+          {/* ── Month-wise outstanding dues ── */}
+          {stats.monthDues.length > 0 && (
+            <div className="px-4 pb-3 flex items-center gap-1.5 overflow-x-auto hide-scrollbar [&>*]:shrink-0">
+              <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground mr-0.5">Dues by month</span>
+              {stats.monthDues.map(m => (
+                <span
+                  key={m.key}
+                  title={`${m.count} invoice${m.count !== 1 ? 's' : ''} due in ${m.label}`}
+                  className="inline-flex items-baseline gap-1.5 rounded-lg border border-border/40 bg-foreground/[0.03] px-2 py-1"
+                >
+                  <span className="text-[10px] font-medium text-muted-foreground">{m.label}</span>
+                  <span className="text-[11px] font-bold text-foreground">{fmt(m.amount)}</span>
+                  <span className="text-[9px] text-muted-foreground">({m.count})</span>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
