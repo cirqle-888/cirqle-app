@@ -288,6 +288,7 @@ function EmployeeLevers({ employees, raw, baseSalaries, active, updateActive }: 
           return (
             <div key={e.id} className="grid grid-cols-[1fr_74px_100px] items-center gap-2">
               <div className="min-w-0">
+                {/* eslint-disable-next-line no-restricted-syntax -- `employees` is pre-masked with dn() in WhatIfClient's useMemo, so this `.name` IS the CQID when locked. */}
                 <p className="text-xs font-medium text-foreground truncate">{e.name}</p>
                 <p className="text-[10px] text-muted-foreground">rating {currentRating}{baseSalaries ? ` · base ${inr(baseSalaries[e.id] ?? 0)}` : ''}</p>
               </div>
@@ -465,6 +466,7 @@ function DraftAgreementsPanel({ employees, raw, active, updateActive }: {
       <div className="space-y-2">
         <select value={form.employee_id} onChange={e => setForm(f => ({ ...f, employee_id: e.target.value, replaces: '' }))} className={inputCls}>
           <option value="">Select employee…</option>
+          {/* eslint-disable-next-line no-restricted-syntax -- `employees` is pre-masked with dn() in WhatIfClient's useMemo, so this `.name` IS the CQID when locked. */}
           {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
         </select>
         {form.employee_id && (
@@ -588,6 +590,7 @@ function GoalSeekPanel({ raw, active, updateActive, employees, pairings, baseSal
         {goalKind === 'employee_earnings' && (
           <select value={goalEmp} onChange={e => setGoalEmp(e.target.value)} className={inputCls}>
             <option value="">Whose earnings…</option>
+            {/* eslint-disable-next-line no-restricted-syntax -- `employees` is pre-masked with dn() in WhatIfClient's useMemo, so this `.name` IS the CQID when locked. */}
             {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
           </select>
         )}
@@ -600,6 +603,7 @@ function GoalSeekPanel({ raw, active, updateActive, employees, pairings, baseSal
         {leverKind === 'employee_rating' && (
           <select value={leverEmp} onChange={e => setLeverEmp(e.target.value)} className={inputCls}>
             <option value="">Which employee…</option>
+            {/* eslint-disable-next-line no-restricted-syntax -- `employees` is pre-masked with dn() in WhatIfClient's useMemo, so this `.name` IS the CQID when locked. */}
             {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
           </select>
         )}
@@ -706,6 +710,7 @@ function PerEmployeeTable({ cmp, divisor, scenarioName }: { cmp: ScenarioCompari
           <tbody>
             {rows.map(e => (
               <tr key={e.id} className="border-b border-border/50 last:border-0">
+                {/* eslint-disable-next-line no-restricted-syntax -- `employees` is pre-masked with dn() in WhatIfClient's useMemo, so this `.name` IS the CQID when locked. */}
                 <td className="px-4 py-2 text-foreground">{e.name}</td>
                 <td className="px-4 py-2 text-right text-muted-foreground tabular-nums">{inr(e.earnings.current / divisor)}</td>
                 <td className="px-4 py-2 text-right text-foreground tabular-nums">{inr(e.earnings.simulated / divisor)}</td>

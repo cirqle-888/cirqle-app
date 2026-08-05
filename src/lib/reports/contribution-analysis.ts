@@ -436,6 +436,8 @@ export function matrixHeader(employees: EmployeeColumn[]): string[] {
     'Total Contributors',
   ]
   for (const e of employees) {
+    // Callers pass `displayEmployees`, already masked with dn(), so the CSV carries CQIDs when locked.
+    // eslint-disable-next-line no-restricted-syntax -- pre-masked by the caller (see above)
     header.push(`${e.name} Contribution %`, `${e.name} Earnings ₹`, `${e.name} Earnings % of Billing`)
   }
   return header

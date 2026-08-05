@@ -253,12 +253,20 @@ export async function getMyWorkspaceState(): Promise<Result<{ current: Workspace
 }
 
 /** Employee picklist for the member-assignment UI. */
-export async function listEmployeesForWorkspaces(): Promise<Result<{ id: string; name: string; cqid: string }[]>> {
+/**
+ * Members picker for the workspace editor — CQIDs only.
+ *
+ * `name` is deliberately NOT selected: employee names are private, and this
+ * picker only ever needs to identify a row. Not fetching the name at all makes
+ * a render-time leak impossible, which is the guarantee the lint rule can only
+ * approximate (see eslint.privacy.mjs).
+ */
+export async function listEmployeesForWorkspaces(): Promise<Result<{ id: string; cqid: string }[]>> {
   const auth = await requireUser()
   if (!auth.ok) return auth
   if (!canManage(auth.me)) return { ok: false, error: 'You do not have permission to manage workspaces.' }
   const admin = createAdminClient()
-  const { data } = await admin.from('employees').select('id, name, cqid')
-    .or('is_archived.is.null,is_archived.eq.false').order('name')
-  return { ok: true, data: (data ?? []).map(e => ({ id: e.id, name: e.name ?? '', cqid: e.cqid ?? '' })) }
+  const { data } = await admin.from('employees').select('id, cqid')
+    .or('is_archived.is.null,is_archived.eq.false').order('cqid')
+  return { ok: true, data: (data ?? []).map(e => ({ id: e.id, cqid: e.cqid ?? '' })) }
 }

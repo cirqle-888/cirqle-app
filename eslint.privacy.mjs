@@ -19,7 +19,16 @@
 // database at all for a feature that only needs CQIDs — then no render-time
 // mistake is even possible. This lint is the safety net, not the strategy.
 
-const EMP_IDENT = "/^(emp|employee|assignee|staff|member|creator|author|actor|me|designer|worker|person|user)$/";
+// Includes `e`, the short map parameter that `employees.map(e => …)` produces.
+// Leaving it out is exactly how the workspace members picker shipped
+// `{e.cqid} {e.name && `· ${e.name}`}` — the rule simply could not see `e`.
+// False-positive risk is low because the selectors below fire only in RENDER
+// positions (JSX text / template literals); a DOM event `e` is never rendered.
+//
+// `p` is deliberately NOT here: in this repo `p` is overwhelmingly a contribution
+// PARAMETER, a partner, or a product (SkillsTab, partners, campaign cards), so
+// adding it produced 8 false positives and zero real leaks.
+const EMP_IDENT = "/^(emp|employee|assignee|staff|member|creator|author|actor|me|designer|worker|person|user|e)$/";
 const EMP_CHAIN = "/^(employee|creator|author|actor|assignee|assigned_employee|assignedEmployee|requestedBy|decidedBy|sender|designer)$/";
 
 const NAME_MSG =

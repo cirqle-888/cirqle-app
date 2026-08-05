@@ -1345,6 +1345,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
                         className="flex items-center justify-center px-2 py-1 text-[11px] font-semibold text-sky-400 truncate border-l border-border"
                         title={e.name}
                       >
+                        {/* eslint-disable-next-line no-restricted-syntax -- `visibleEmpGroups` derives from `displayEmployees`, pre-masked with dn(); this `.name` IS the CQID when locked. */}
                         <span className="truncate">{e.name}</span>
                       </div>
                       {subCols.map((c, j) => {

@@ -23,7 +23,8 @@ function DynIcon({ name, className }: { name: string; className?: string }) {
 
 const ALL_NAV_ITEMS = navSections.flatMap(s => s.items.map(i => ({ ...i, section: s.label ?? 'Home' })))
 
-interface Employee { id: string; name: string; cqid: string }
+/** CQID only — employee names are private and never fetched for this picker. */
+interface Employee { id: string; cqid: string }
 
 export function WorkspacesClient({ initialWorkspaces, employees }: {
   initialWorkspaces: Workspace[]
@@ -249,7 +250,7 @@ function WorkspaceEditor({ workspace, employees, onClose, onSaved, onError }: {
                   {employees.map(e => (
                     <label key={e.id} className="flex items-center gap-2 rounded px-1 py-1 text-xs hover:bg-muted">
                       <input type="checkbox" checked={members.has(e.id)} onChange={() => toggle(members, setMembers, e.id)} />
-                      {e.cqid} {e.name && `· ${e.name}`}
+                      {e.cqid}
                     </label>
                   ))}
                   {employees.length === 0 && <p className="px-1 text-xs text-muted-foreground">No employees found.</p>}

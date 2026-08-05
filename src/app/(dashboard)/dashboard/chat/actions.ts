@@ -1701,10 +1701,12 @@ export async function addMembersToConversation(conversationId: string, targetEmp
   )
   if (error) return { ok: false, error: error.message }
 
-  // System message
-  const { data: targets } = await admin.from('employees').select('name').in('id', toAdd)
-  const targetNames = targets?.map(t => t.name).join(' and ') ?? 'new members'
-  const body = `${me.name} added ${targetNames} to this conversation.`
+  // System message — CQIDs only. This body is PERSISTED to messages.body and
+  // shown to every participant forever, so a real name here is a permanent
+  // leak that no render-time privacy mask can undo.
+  const { data: targets } = await admin.from('employees').select('cqid').in('id', toAdd)
+  const targetCqids = targets?.map(t => t.cqid).filter(Boolean).join(' and ') || 'new members'
+  const body = `${me.cqid} added ${targetCqids} to this conversation.`
   
   await admin.from('messages').insert({
     conversation_id: conversationId,
@@ -1751,12 +1753,13 @@ export async function removeMemberFromConversation(conversationId: string, targe
     
   if (error) return { ok: false, error: error.message }
   
+  // CQIDs only — see the note in addMembers: this body is persisted.
   let body = ''
   if (isSelf) {
-    body = `${me.name} left the conversation.`
+    body = `${me.cqid} left the conversation.`
   } else {
-    const { data: target } = await admin.from('employees').select('name').eq('id', targetEmployeeId).single()
-    body = `${me.name} removed ${target?.name ?? 'a member'} from this conversation.`
+    const { data: target } = await admin.from('employees').select('cqid').eq('id', targetEmployeeId).single()
+    body = `${me.cqid} removed ${target?.cqid ?? 'a member'} from this conversation.`
   }
   
   await admin.from('messages').insert({
