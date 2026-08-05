@@ -24,6 +24,7 @@ const QuickCreateClientModal = dynamic(() => import('@/components/tasks/quick-cr
 const QuickCreateServiceModal = dynamic(() => import('@/components/tasks/quick-create-modals').then(mod => mod.QuickCreateServiceModal), { ssr: false })
 import { markRequestPromoted, getRequestBriefForTask } from '@/app/(dashboard)/dashboard/requests/actions'
 import { createContributionSlots } from '@/app/(dashboard)/dashboard/contributions/actions'
+import { DiscussButton } from '@/components/chat/discuss-button'
 import AppSelect from '@/components/ui/app-select'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { DateFilter, matchesDateFilter, getDateFilterLabel } from '@/components/ui/date-filter'
@@ -2820,6 +2821,8 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                           })()}
                         </button>
                       )}
+                      <DiscussButton entityType="task" entityId={task.id} variant="icon"
+                        label="Discuss this task" panelTitle={task.title} />
                       <button onClick={e => { e.stopPropagation(); openEdit(task) }} title="Edit task"
                         className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
                         <Pencil className="w-3.5 h-3.5" />

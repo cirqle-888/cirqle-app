@@ -11,6 +11,7 @@ import { useToast, ToastContainer } from '@/components/ui/toast'
 import { refLabel } from '@/lib/requests/core'
 import { rollupAgreementProgress, type AgreementProgressSummary } from '@/lib/agreements/progress'
 import CaptionCanvasEditor from './caption-canvas'
+import { DiscussButton } from '@/components/chat/discuss-button'
 import {
   DndContext, PointerSensor, useSensor, useSensors, useDraggable, useDroppable,
   pointerWithin, type DragEndEvent,
@@ -977,6 +978,13 @@ export default function SocialCalendarClient({
 
         {selected && (
           <div className="flex items-center gap-1.5 ml-auto flex-wrap justify-end">
+            {/* Plan discussion — chatter side panel, one room per plan */}
+            <DiscussButton
+              entityType="plan"
+              entityId={selected.id}
+              label="Discuss"
+              panelTitle={`${selected.client?.name ?? 'Plan'} — ${monthLabel(selected.month)}`}
+            />
             {/* Export group */}
             {items.length > 0 && (
               <div className="flex items-center rounded-lg border border-border bg-secondary overflow-hidden">

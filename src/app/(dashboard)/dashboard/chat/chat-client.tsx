@@ -30,6 +30,7 @@ import {
   listChatEmployees, getMessages, getThread, sendMessage, deleteMessage, editMessage, markRead,
   toggleReaction, createAttachmentUploadUrl, sendFileMessage, searchMessages,
   sendVoiceMessage, getMessage, getReadReceipts, markVoicePlayed, listClientsForChat,
+  archiveConversation,
   type ChatConversation, type ChatMessage, type ChatSearchHit, type ReplySnapshot, type ReadReceiptDetail,
 } from './actions'
 
@@ -487,6 +488,24 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
     })
   }, [refreshList, openConversation])
 
+  // Delete a conversation. DMs hide for this member only; shared rooms archive
+  // globally — the server enforces both rules, this just asks first.
+  const [deleteTarget, setDeleteTarget] = useState<{ conv: ChatConversation; label: string } | null>(null)
+  const askDeleteConv = useCallback((conv: ChatConversation, label: string) => {
+    setDeleteTarget({ conv, label })
+  }, [])
+  const confirmDeleteConv = useCallback(() => {
+    const target = deleteTarget
+    if (!target) return
+    setDeleteTarget(null)
+    startTransition(async () => {
+      const res = await archiveConversation(target.conv.id)
+      if (!res.ok) { alert(res.error); return }
+      setConversations(prev => prev.filter(c => c.id !== target.conv.id))
+      setActiveId(prev => (prev === target.conv.id ? null : prev))
+    })
+  }, [deleteTarget])
+
   const handleLoadOlder = useCallback(() => {
     if (!activeId || !olderCursor) return
     startTransition(async () => {
@@ -521,16 +540,62 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
   }, [messages])
 
   const isChannelish = (c: ChatConversation) => c.type === 'channel' || c.type === 'group'
+  const clientChannels = conversations.filter(c => isChannelish(c) && c.category === 'client')
+  const allDiscussions = conversations.filter(c => c.category === 'discussion' && c.isMember)
+
+  // A task/request/plan discussion is filed under its client's channel — one
+  // consolidated place per client instead of a flat pile that grows forever.
+  // Discussions whose client has no channel (or no client at all) stay in the
+  // standalone "Discussions" section so nothing can become unreachable.
+  const clientChannelIds = new Set(clientChannels.map(c => c.clientId).filter(Boolean) as string[])
+  const discussionsByClient = new Map<string, ChatConversation[]>()
+  for (const d of allDiscussions) {
+    if (d.type === 'client') continue          // the client's own room IS the channel
+    if (!d.clientId || !clientChannelIds.has(d.clientId)) continue
+    const list = discussionsByClient.get(d.clientId) ?? []
+    list.push(d)
+    discussionsByClient.set(d.clientId, list)
+  }
+  const nestedIds = new Set([...discussionsByClient.values()].flat().map(d => d.id))
+
   const groups = {
     general:     conversations.filter(c => isChannelish(c) && (c.category ?? 'general') === 'general'),
     department:  conversations.filter(c => isChannelish(c) && c.category === 'department'),
-    client:      conversations.filter(c => isChannelish(c) && c.category === 'client'),
-    discussion:  conversations.filter(c => c.category === 'discussion' && c.isMember),
+    client:      clientChannels,
+    discussion:  allDiscussions.filter(c => !nestedIds.has(c.id)),
     dms:         conversations.filter(c => c.type === 'dm'),
   }
 
   return (
     <div className="flex h-full">
+      {/* ── Delete confirmation ── */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+          onMouseDown={e => { if (e.target === e.currentTarget) setDeleteTarget(null) }}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div className="relative w-full max-w-sm rounded-2xl border border-border bg-background p-5 shadow-2xl">
+            <h3 className="mb-2 text-sm font-semibold">Delete “{deleteTarget.label}”?</h3>
+            <p className="mb-5 text-sm leading-relaxed text-muted-foreground">
+              {deleteTarget.conv.type === 'dm'
+                ? 'This removes the conversation from your list only. The other person keeps it, and it comes back here if they message you again.'
+                : deleteTarget.conv.category === 'discussion'
+                  ? 'This removes the discussion from everyone’s list. Messages are kept, and the Discuss button on the record reopens it.'
+                  : 'This removes the conversation from everyone’s list. Messages are kept.'}
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setDeleteTarget(null)}
+                className="flex-1 rounded-xl border border-border py-2.5 text-sm font-medium text-muted-foreground hover:text-foreground">
+                Cancel
+              </button>
+              <button onClick={confirmDeleteConv}
+                className="flex-1 rounded-xl bg-red-600 py-2.5 text-sm font-semibold text-white hover:bg-red-500">
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Pane 1: list + search ── */}
       <aside className={`${activeId ? 'hidden md:flex' : 'flex'} w-full md:w-72 shrink-0 flex-col border-r border-border bg-background`}>
         {/* pl-14 on mobile clears the fixed global sidebar hamburger (see the
@@ -597,9 +662,20 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
                   <div key={label}>
                     <SectionLabel>{label}</SectionLabel>
                     {list.map(c => (
-                      <ConversationRow key={c.id} conv={c} active={c.id === activeId}
-                        displayName={convDisplayName(c)} showName={showName}
-                        onClick={() => (c.isMember ? openConversation(c.id) : handleJoin(c.id))} />
+                      <div key={c.id}>
+                        <ConversationRow conv={c} active={c.id === activeId}
+                          displayName={convDisplayName(c)} showName={showName}
+                          onDelete={c.canDelete ? askDeleteConv : undefined}
+                          onClick={() => (c.isMember ? openConversation(c.id) : handleJoin(c.id))} />
+                        {/* This client's task / request / plan discussions, filed
+                            underneath it instead of in one flat list. */}
+                        {label === 'Clients' && c.clientId && (discussionsByClient.get(c.clientId) ?? []).map(d => (
+                          <ConversationRow key={d.id} conv={d} active={d.id === activeId} indented
+                            displayName={convDisplayName(d)} showName={showName}
+                            onDelete={d.canDelete ? askDeleteConv : undefined}
+                            onClick={() => openConversation(d.id)} />
+                        ))}
+                      </div>
                     ))}
                     {label === 'Channels' && canCreateChannels && (
                       <button onClick={() => setShowNewMenu('channel')}
@@ -615,6 +691,7 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
               {groups.dms.map(c => (
                 <ConversationRow key={c.id} conv={c} active={c.id === activeId}
                   displayName={convDisplayName(c)} showName={showName}
+                  onDelete={c.canDelete ? askDeleteConv : undefined}
                   onClick={() => openConversation(c.id)} />
               ))}
               {groups.dms.length === 0 && (
@@ -1338,35 +1415,55 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   return <p className="px-4 pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">{children}</p>
 }
 
-function ConversationRow({ conv, active, onClick, displayName, showName }: {
+function ConversationRow({ conv, active, onClick, onDelete, displayName, showName, indented }: {
   conv: ChatConversation; active: boolean; onClick: () => void
+  /** Only passed when the server would actually allow this caller to delete. */
+  onDelete?: (conv: ChatConversation, displayName: string) => void
   displayName: string
   showName: (name?: string | null, cqid?: string | null) => string
+  /** Nested under a client channel — indented with a thread rail. */
+  indented?: boolean
 }) {
+  // The row and the delete control are SIBLINGS, never nested. A button inside
+  // a role="button" row swallows Enter/Space on the inner control (the outer
+  // keydown handler preventDefaults it), so the confirm could never be
+  // triggered from the keyboard.
   return (
-    <button onClick={onClick}
-      className={`flex w-full items-center gap-2 px-4 py-2 text-left transition-colors ${
-        active ? 'bg-muted' : 'hover:bg-muted/50'
-      }`}>
-      {conv.type === 'dm'
-        ? <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium">{initials(displayName)}</span>
-        : conv.isPrivate ? <Lock className="h-4 w-4 shrink-0 text-muted-foreground" /> : <Hash className="h-4 w-4 shrink-0 text-muted-foreground" />}
-      <span className="min-w-0 flex-1">
-        <span className={`block truncate text-sm ${conv.unread > 0 ? 'font-semibold' : ''}`}>{displayName}</span>
-        {conv.lastMessage && (
-          <span className="block truncate text-xs text-muted-foreground">
-            {(conv.lastMessage.senderCqid || conv.lastMessage.senderName)
-              ? `${showName(conv.lastMessage.senderName, conv.lastMessage.senderCqid)}: ` : ''}{conv.lastMessage.body}
+    <div className={`group/row flex w-full items-center transition-colors ${
+      active ? 'bg-muted' : 'hover:bg-muted/50'
+    } ${indented ? 'pl-4' : ''}`}>
+      {indented && <span aria-hidden className="ml-4 mr-1 h-6 w-px shrink-0 bg-border" />}
+      <button onClick={onClick}
+        className="flex min-w-0 flex-1 items-center gap-2 py-2 pl-4 pr-1 text-left">
+        {conv.type === 'dm'
+          ? <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium">{initials(displayName)}</span>
+          : conv.isPrivate ? <Lock className="h-4 w-4 shrink-0 text-muted-foreground" /> : <Hash className={`${indented ? 'h-3 w-3' : 'h-4 w-4'} shrink-0 text-muted-foreground`} />}
+        <span className="min-w-0 flex-1">
+          <span className={`block truncate ${indented ? 'text-xs' : 'text-sm'} ${conv.unread > 0 ? 'font-semibold' : ''}`}>{displayName}</span>
+          {conv.lastMessage && !indented && (
+            <span className="block truncate text-xs text-muted-foreground">
+              {(conv.lastMessage.senderCqid || conv.lastMessage.senderName)
+                ? `${showName(conv.lastMessage.senderName, conv.lastMessage.senderCqid)}: ` : ''}{conv.lastMessage.body}
+            </span>
+          )}
+        </span>
+        {!conv.isMember && <span className="text-[10px] text-muted-foreground">join</span>}
+        {conv.unread > 0 && (
+          <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground px-1.5 text-[10px] font-semibold text-background">
+            {conv.unread > 99 ? '99+' : conv.unread}
           </span>
         )}
-      </span>
-      {!conv.isMember && <span className="text-[10px] text-muted-foreground">join</span>}
-      {conv.unread > 0 && (
-        <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground px-1.5 text-[10px] font-semibold text-background">
-          {conv.unread > 99 ? '99+' : conv.unread}
-        </span>
+      </button>
+      {onDelete && (
+        <button
+          onClick={() => onDelete(conv, displayName)}
+          aria-label={`Delete ${displayName}`}
+          title="Delete chat"
+          className="mr-2 shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-red-500 focus:opacity-100 group-hover/row:opacity-100">
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
       )}
-    </button>
+    </div>
   )
 }
 

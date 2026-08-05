@@ -15,7 +15,8 @@
 
 import { after } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
+import { loadCurrentUser, hasPermission, requireAnyPermission } from '@/lib/permissions/check'
+import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
 import { createNotification } from '@/lib/notifications/create'
 import { transcribeAudio } from '@/lib/ai/transcribe'
@@ -31,7 +32,7 @@ export interface ChatMember {
 
 export interface ChatConversation {
   id: string
-  type: 'channel' | 'dm' | 'group' | 'project' | 'task' | 'client' | 'request'
+  type: 'channel' | 'dm' | 'group' | 'project' | 'task' | 'client' | 'request' | 'plan'
   name: string | null          // resolved display name (DM = other person)
   topic: string | null
   isPrivate: boolean
@@ -41,6 +42,12 @@ export interface ChatConversation {
   category: string | null
   lastMessage: { body: string; senderName: string | null; senderCqid: string | null; createdAt: string } | null
   members: ChatMember[]
+  /** Whether THIS caller may delete it — mirrors archiveConversation's rules,
+   *  so the UI never offers an affordance the server will reject. */
+  canDelete: boolean
+  /** Client this room belongs to, when any — lets the sidebar nest a client's
+   *  task/request/plan discussions under that client's own channel. */
+  clientId: string | null
 }
 
 export interface ChatAttachment {
@@ -101,6 +108,21 @@ async function requireMembership(conversationId: string, employeeId: string) {
     .maybeSingle()
   return data ? { ok: true as const, role: data.role as ChatMember['role'] } :
                 { ok: false as const, error: 'You are not a member of this conversation.' }
+}
+
+/**
+ * Refuse writes into an archived room. Membership alone is not enough: an
+ * archived conversation is filtered out of every sidebar, so a message posted
+ * into one is unreachable forever — the sender sees it delivered while nobody
+ * can navigate to it. Reads stay allowed (history remains viewable).
+ */
+async function requireNotArchived(conversationId: string) {
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('conversations').select('archived_at').eq('id', conversationId).maybeSingle()
+  return data?.archived_at
+    ? { ok: false as const, error: 'This conversation was deleted — reopen it before posting.' }
+    : { ok: true as const }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -331,18 +353,32 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
   if (!auth.ok) return auth
   const me = auth.me
   const admin = createAdminClient()
+  const canModerate = me.isAdmin || hasPermission(me, 'chat.moderate')
 
-  // Memberships (with per-conversation last_read_at)
+  // Memberships (with per-conversation last_read_at). hidden_at is selected
+  // separately so a pre-026 database still returns the rest of the columns.
   const { data: memberships, error: memErr } = await admin
     .from('conversation_members')
-    .select('conversation_id, last_read_at')
+    .select('conversation_id, last_read_at, role')
     .eq('employee_id', me.employeeId)
   if (memErr) {
     // Table missing → migration 015 not applied
     return { ok: false, error: 'Chat is not set up yet — apply migration 015_chat_module.sql.' }
   }
   const lastReadByConv = new Map((memberships ?? []).map(m => [m.conversation_id, m.last_read_at]))
+  const myRoleByConv = new Map((memberships ?? []).map(m => [m.conversation_id, m.role as ChatMember['role']]))
   const memberIds = [...lastReadByConv.keys()]
+
+  // Per-member hide (DM "delete"). Missing column pre-026 → nothing hidden.
+  const hiddenByConv = new Map<string, string>()
+  {
+    const { data: hidden } = await admin
+      .from('conversation_members')
+      .select('conversation_id, hidden_at')
+      .eq('employee_id', me.employeeId)
+      .not('hidden_at', 'is', null)
+    for (const h of hidden ?? []) hiddenByConv.set(h.conversation_id, h.hidden_at as string)
+  }
 
   // My conversations + public channels I could join
   const orFilter = memberIds.length
@@ -351,7 +387,7 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
   const { data: convs, error: convErr } = await admin
     .from('conversations')
     .select(`
-      id, type, name, topic, is_private, category, created_at, archived_at,
+      id, type, name, topic, is_private, category, created_at, archived_at, created_by, client_id,
       members:conversation_members(employee_id, role, employee:employee_id(id, name, cqid))
     `)
     .or(orFilter)
@@ -399,10 +435,20 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
     const last: any = (lastRes as any)?.data ?? null
     const lastSender = last ? (Array.isArray(last.sender) ? last.sender[0] : last.sender) : null
 
-    // Entity rooms group under "Discussions" in the sidebar.
-    const category = ['task', 'project', 'request', 'client'].includes(c.type)
+    // Entity rooms group under "Discussions" in the sidebar. 'plan' must be
+    // listed here too — without it a plan room matches no sidebar group at all
+    // and becomes unreachable from the chat page.
+    const category = ENTITY_CONV_TYPES.includes(c.type)
       ? 'discussion'
       : (c.category ?? 'general')
+
+    // Mirror archiveConversation's rules so the UI only offers what will work.
+    const myRole = myRoleByConv.get(c.id)
+    const canDelete = c.type === 'dm'
+      ? isMember
+      : canModerate ||
+        myRole === 'owner' || myRole === 'moderator' ||
+        (!ENTITY_CONV_TYPES.includes(c.type) && isMember && c.created_by === me.employeeId)
 
     return {
       id: c.id,
@@ -413,6 +459,7 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
       isMember,
       unread: ('count' in unreadRes ? unreadRes.count : 0) ?? 0,
       category,
+      clientId: (c.client_id as string | null) ?? null,
       lastMessage: last ? {
         body: last.deleted_at ? 'Message deleted' : (last.kind === 'text' ? last.body : `[${last.kind}]`),
         senderName: lastSender?.name ?? null,
@@ -420,15 +467,24 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
         createdAt: last.created_at,
       } : null,
       members,
+      canDelete,
     } satisfies ChatConversation
   }))
 
+  // Drop conversations this member hid, unless something was said since —
+  // a new message brings a hidden DM back, exactly like every messenger.
+  const visible = results.filter(c => {
+    const hiddenAt = hiddenByConv.get(c.id)
+    if (!hiddenAt) return true
+    return !!c.lastMessage && c.lastMessage.createdAt > hiddenAt
+  })
+
   // Sort: unread first, then most recent activity
-  results.sort((a, b) => {
+  visible.sort((a, b) => {
     const at = a.lastMessage?.createdAt ?? '', bt = b.lastMessage?.createdAt ?? ''
     return bt.localeCompare(at)
   })
-  return { ok: true, data: results }
+  return { ok: true, data: visible }
 }
 
 /** Create a channel or group. Creator becomes owner. */
@@ -510,11 +566,23 @@ export async function getOrCreateDm(otherEmployeeId: string): Promise<Result<{ i
   if (dmIds.length) {
     const { data: shared } = await admin
       .from('conversation_members')
-      .select('conversation_id')
+      .select('conversation_id, conversation:conversation_id(archived_at)')
       .in('conversation_id', dmIds)
       .eq('employee_id', otherEmployeeId)
-      .limit(1)
-    if (shared?.length) return { ok: true, data: { id: shared[0].conversation_id } }
+    // Skip an archived DM: reusing it would return a conversation that every
+    // sidebar filters out, so the pair could never message each other again.
+    const liveDm = (shared ?? []).find((r) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const c: any = Array.isArray((r as any).conversation) ? (r as any).conversation[0] : (r as any).conversation
+      return !c?.archived_at
+    })
+    if (liveDm) {
+      // Re-opening a DM you hid brings it back to your sidebar.
+      await admin.from('conversation_members')
+        .update({ hidden_at: null })
+        .eq('conversation_id', liveDm.conversation_id).eq('employee_id', me.employeeId)
+      return { ok: true, data: { id: liveDm.conversation_id } }
+    }
   }
 
   const { data: conv, error } = await admin
@@ -646,6 +714,8 @@ export async function sendMessage(
   const me = auth.me
   const membership = await requireMembership(conversationId, me.employeeId)
   if (!membership.ok) return membership
+  const live = await requireNotArchived(conversationId)
+  if (!live.ok) return live
 
   const text = (body || '').trim()
   if (!text) return { ok: false, error: 'Message is empty.' }
@@ -808,6 +878,8 @@ export async function sendFileMessage(input: {
   const me = auth.me
   const membership = await requireMembership(input.conversationId, me.employeeId)
   if (!membership.ok) return membership
+  const live = await requireNotArchived(input.conversationId)
+  if (!live.ok) return live
 
   // The path must be one we generated for THIS conversation, and must exist.
   if (!input.storagePath.startsWith(`${input.conversationId}/`)) {
@@ -1137,6 +1209,8 @@ export async function sendVoiceMessage(input: {
   const me = auth.me
   const membership = await requireMembership(input.conversationId, me.employeeId)
   if (!membership.ok) return membership
+  const live = await requireNotArchived(input.conversationId)
+  if (!live.ok) return live
 
   if (input.durationMs > MAX_VOICE_MS) return { ok: false, error: 'Voice notes are limited to 5 minutes.' }
   if (!input.storagePath.startsWith(`${input.conversationId}/`)) {
@@ -1271,20 +1345,54 @@ export async function listClientsForChat(): Promise<Result<{ id: string; name: s
   return { ok: true, data: (data ?? []).map(c => ({ id: c.id, name: c.name ?? '' })) }
 }
 
-export type DiscussEntityType = 'task' | 'project' | 'request' | 'client'
+export type DiscussEntityType = 'task' | 'project' | 'request' | 'client' | 'plan'
 
-const ENTITY_TABLE: Record<DiscussEntityType, { table: string; labelCol: string; convCol: string }> = {
-  task:    { table: 'tasks',         labelCol: 'title',         convCol: 'task_id' },
-  project: { table: 'ad_projects',   labelCol: 'campaign_name', convCol: 'project_id' },
-  request: { table: 'task_requests', labelCol: 'title',         convCol: 'request_id' },
-  client:  { table: 'clients',       labelCol: 'name',          convCol: 'client_id' },
+/** Conversation types that are auto-created per CRM record, not by a person. */
+const ENTITY_CONV_TYPES = ['task', 'project', 'request', 'client', 'plan']
+
+const ENTITY_TABLE: Record<DiscussEntityType, {
+  table: string; labelCol: string; convCol: string; labelSelect?: string
+  /** Caller must hold one of these to open the room — see the note below. */
+  viewPerms: string[]
+}> = {
+  task:    { table: 'tasks',            labelCol: 'title',         convCol: 'task_id',
+             labelSelect: 'id, title, client_id',
+             viewPerms: [PERMS.TASKS_VIEW_ALL, PERMS.TASKS_VIEW_OWN, PERMS.TASKS_VIEW_BY_SERVICE] },
+  project: { table: 'ad_projects',      labelCol: 'campaign_name', convCol: 'project_id',
+             labelSelect: 'id, campaign_name, client_id',
+             viewPerms: [PERMS.ADVERTISING_VIEW] },
+  request: { table: 'task_requests',    labelCol: 'title',         convCol: 'request_id',
+             labelSelect: 'id, title, client_id',
+             viewPerms: [PERMS.REQUESTS_VIEW] },
+  client:  { table: 'clients',          labelCol: 'name',          convCol: 'client_id',
+             viewPerms: [PERMS.CLIENTS_VIEW] },
+  // Social-calendar month plan (migration 026). title is nullable — the label
+  // falls back to "<client> — <Mon YYYY>" composed from the joined client.
+  plan:    { table: 'social_calendars', labelCol: 'title',         convCol: 'plan_id',
+             labelSelect: 'id, title, month, client_id, client:clients(name)',
+             viewPerms: [PERMS.SOCIAL_VIEW] },
+}
+
+/** Compose a room name for entities whose label column may be empty. */
+function entityLabel(entityType: DiscussEntityType, entity: Record<string, unknown>, labelCol: string): string {
+  const direct = entity[labelCol]
+  if (typeof direct === 'string' && direct.trim()) return direct
+  if (entityType === 'plan') {
+    const client = entity.client as { name?: string } | { name?: string }[] | null
+    const clientName = (Array.isArray(client) ? client[0]?.name : client?.name) ?? 'Plan'
+    const month = typeof entity.month === 'string'
+      ? new Date(entity.month + 'T00:00:00').toLocaleString('en-IN', { month: 'short', year: 'numeric' })
+      : ''
+    return `${clientName}${month ? ` — ${month}` : ''}`
+  }
+  return entityType
 }
 
 /**
  * Find (or create) the discussion room for a CRM entity, join the caller,
  * and return the conversation id. Powers the "Discuss" buttons on requests,
- * tasks, advertising projects and clients — one room per entity (unique
- * indexes in migration 019).
+ * tasks, advertising projects, clients and social-calendar plans — one live
+ * room per entity (unique indexes in migrations 019/026).
  */
 export async function getOrCreateEntityConversation(
   entityType: DiscussEntityType,
@@ -1297,24 +1405,59 @@ export async function getOrCreateEntityConversation(
   const cfg = ENTITY_TABLE[entityType]
   if (!cfg) return { ok: false, error: 'Unsupported entity type.' }
 
+  // SECURITY: joining IS the read grant — the RLS in migration 015 authorizes
+  // message reads and realtime delivery purely from conversation_members. So
+  // chat.access alone must NOT open an arbitrary record's room: the caller
+  // needs the same view permission that gates the module the record lives in,
+  // or any employee could read a client's strategy discussion by guessing a
+  // UUID and calling this action straight from the console.
+  const entityGuard = await requireAnyPermission(cfg.viewPerms)
+  if (!entityGuard.ok) {
+    return { ok: false, error: `You do not have access to ${entityType} records.` }
+  }
+
   // Entity must exist (also yields the room name). Dynamic column → cast.
   const { data: entityRaw } = await admin
-    .from(cfg.table).select(`id, ${cfg.labelCol}`).eq('id', entityId).maybeSingle()
+    .from(cfg.table).select(cfg.labelSelect ?? `id, ${cfg.labelCol}`).eq('id', entityId).maybeSingle()
   const entity = entityRaw as unknown as Record<string, unknown> | null
   if (!entity) return { ok: false, error: 'Record not found.' }
-  const label = String(entity[cfg.labelCol] ?? entityType)
+  const label = entityLabel(entityType, entity, cfg.labelCol)
 
-  // Existing room?
+  // ONE room per entity, ever — live or archived. Deleting an entity room
+  // hides it; clicking Discuss again REVIVES that same room (with its history)
+  // rather than minting a second one. Looking archived rows up here, instead
+  // of only in the insert's error path, keeps the behaviour identical whether
+  // or not migration 026's partial unique indexes are applied — the old 019
+  // indexes covered archived rows, so an insert would otherwise fail and the
+  // retry would hand back an archived room nobody's sidebar can reach.
   const { data: existing } = await admin
     .from('conversations')
-    .select('id')
+    .select('id, archived_at')
     .eq('type', entityType)
     .eq(cfg.convCol, entityId)
-    .is('archived_at', null)
+    .order('archived_at', { ascending: true, nullsFirst: true })
+    .limit(1)
     .maybeSingle()
 
   let convId = existing?.id as string | undefined
+  if (convId && existing?.archived_at) {
+    const { error: reviveErr } = await admin
+      .from('conversations').update({ archived_at: null }).eq('id', convId)
+    if (reviveErr) return { ok: false, error: reviveErr.message }
+    void logActivity({
+      actorId: me.employeeId, entityType: 'message', entityId: convId,
+      action: 'restored', category: 'chat', conversationId: convId,
+      detail: { label: `Reopened discussion: ${label.slice(0, 50)}` },
+    })
+  }
+
   if (!convId) {
+    // Stamp the owning client so the sidebar can file this discussion under
+    // that client's channel instead of one flat "Discussions" pile.
+    const ownerClientId = entityType === 'client'
+      ? entityId
+      : (entity.client_id as string | null) ?? null
+
     const { data: conv, error } = await admin
       .from('conversations')
       .insert({
@@ -1322,14 +1465,23 @@ export async function getOrCreateEntityConversation(
         name: label.slice(0, 80),
         is_private: false,
         [cfg.convCol]: entityId,
+        ...(entityType !== 'client' && ownerClientId ? { client_id: ownerClientId } : {}),
         created_by: me.employeeId,
       })
       .select('id').single()
     if (error) {
-      // Unique-index race: someone created it concurrently — fetch theirs.
+      // Pre-migration degradation: plan rooms need migration 026's plan_id
+      // column. PostgREST reports an unknown insert column as PGRST204.
+      if (entityType === 'plan' && (error.code === 'PGRST204' || /plan_id/.test(error.message))) {
+        return { ok: false, error: 'Plan discussions need migration 026_chat_plan_discussions.sql — run it in the Supabase SQL editor first.' }
+      }
+      // Unique-index race: someone created it between our lookup and insert.
+      // Only a LIVE room is a valid race winner — an archived hit here would
+      // be the zombie case the lookup above already handles.
       const { data: retry } = await admin
         .from('conversations').select('id')
-        .eq('type', entityType).eq(cfg.convCol, entityId).maybeSingle()
+        .eq('type', entityType).eq(cfg.convCol, entityId)
+        .is('archived_at', null).maybeSingle()
       if (!retry) return { ok: false, error: error.message }
       convId = retry.id
     } else {
@@ -1343,10 +1495,101 @@ export async function getOrCreateEntityConversation(
   }
 
   // Auto-join the caller (idempotent) — Discuss = open + become a member.
+  // ignoreDuplicates matters: a plain upsert would rewrite role='member' and
+  // silently demote an existing owner/moderator of this room.
   await admin.from('conversation_members').upsert(
     { conversation_id: convId, employee_id: me.employeeId, role: 'member' },
     { onConflict: 'conversation_id,employee_id', ignoreDuplicates: true },
   )
+  // Un-hide for the caller: opening a room you had hidden brings it back.
+  // Separate statement (not part of the upsert payload) so the whole action
+  // still works before migration 026 adds the column.
+  await admin.from('conversation_members')
+    .update({ hidden_at: null })
+    .eq('conversation_id', convId).eq('employee_id', me.employeeId)
 
   return { ok: true, data: { id: convId! } }
+}
+
+/**
+ * Delete a conversation. Two different things are called "delete" here, and
+ * conflating them is how one person destroys another's records:
+ *
+ *   • DM  → HIDE, per member (conversation_members.hidden_at). It leaves only
+ *     YOUR sidebar; the other participant keeps the thread and its history.
+ *     A globally-archived DM would let a harasser erase the evidence from
+ *     their target's account. It returns automatically once a newer message
+ *     arrives, and immediately if you re-open the DM.
+ *
+ *   • channel / group / entity room → ARCHIVE, globally (archived_at). The
+ *     room leaves everyone's sidebar; messages are retained.
+ *
+ * Who may archive a shared room:
+ *   • a conversation owner/moderator, chat.moderate holders, or admins;
+ *   • the creator ONLY if they are still a member, and never for entity rooms
+ *     — those are auto-created by whoever happened to click Discuss first, so
+ *     created_by is an accident of timing, not authority over the team's
+ *     history.
+ *
+ * Archiving an entity room is reversible: its Discuss button revives that same
+ * room, history intact (see getOrCreateEntityConversation).
+ */
+export async function archiveConversation(conversationId: string): Promise<Result<null>> {
+  const auth = await requireChatUser()
+  if (!auth.ok) return auth
+  const me = auth.me
+  const admin = createAdminClient()
+
+  const { data: conv, error: convErr } = await admin
+    .from('conversations')
+    .select('id, type, name, created_by, archived_at')
+    .eq('id', conversationId)
+    .maybeSingle()
+  if (convErr) return { ok: false, error: convErr.message }
+  if (!conv) return { ok: false, error: 'Conversation not found.' }
+
+  const membership = await requireMembership(conversationId, me.employeeId)
+
+  // ── DMs: hide for me only ──
+  if (conv.type === 'dm') {
+    if (!membership.ok) return membership
+    const { error } = await admin
+      .from('conversation_members')
+      .update({ hidden_at: new Date().toISOString() })
+      .eq('conversation_id', conversationId)
+      .eq('employee_id', me.employeeId)
+    if (error) {
+      return { ok: false, error: /hidden_at/.test(error.message)
+        ? 'Deleting a direct message needs migration 026_chat_plan_discussions.sql — run it in the Supabase SQL editor first.'
+        : error.message }
+    }
+    return { ok: true, data: null }
+  }
+
+  // ── Shared rooms: global archive ──
+  if (conv.archived_at) return { ok: true, data: null }
+
+  const canModerate = me.isAdmin || hasPermission(me, 'chat.moderate')
+  const isEntityRoom = ENTITY_CONV_TYPES.includes(conv.type)
+  const allowed = canModerate ||
+    (membership.ok && (membership.role === 'owner' || membership.role === 'moderator')) ||
+    (!isEntityRoom && membership.ok && conv.created_by === me.employeeId)
+  if (!allowed) {
+    return { ok: false, error: isEntityRoom
+      ? 'Only a moderator or an admin can delete a discussion room.'
+      : 'Only the creator, a moderator, or an admin can delete this conversation.' }
+  }
+
+  const { error } = await admin
+    .from('conversations')
+    .update({ archived_at: new Date().toISOString() })
+    .eq('id', conversationId)
+  if (error) return { ok: false, error: error.message }
+
+  void logActivity({
+    actorId: me.employeeId, entityType: 'message', entityId: conversationId,
+    action: 'archived', category: 'chat', conversationId,
+    detail: { label: `Deleted chat: ${(conv.name ?? 'Conversation').slice(0, 50)}` },
+  })
+  return { ok: true, data: null }
 }

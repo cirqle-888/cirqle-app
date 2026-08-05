@@ -1062,6 +1062,10 @@ export default function RequestsClient({
                       </span>
                       <ChevronRight className="w-4 h-4 text-muted-foreground/40 shrink-0" />
                     </button>
+                    <span className="shrink-0 pr-2">
+                      <DiscussButton entityType="request" entityId={r.id} variant="icon"
+                        label="Discuss this request" panelTitle={r.title} />
+                    </span>
                   </div>
                 )}
               </SortableListItem>
@@ -1116,7 +1120,7 @@ export default function RequestsClient({
                 <div className="overflow-y-auto flex-1 p-5 space-y-5">
               {/* Action bar */}
               <div className="flex flex-wrap gap-2">
-                <DiscussButton entityType="request" entityId={open.id} label="Discuss" />
+                <DiscussButton entityType="request" entityId={open.id} label="Discuss" panelTitle={open.title} />
                 {perms.start && !open.promoted_task_id && ['submitted', 'under_review', 'approved'].includes(open.status) && (
                   <Link href={`/dashboard/tasks?fromRequest=${open.id}`}
                     className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg gradient-bg text-white hover:opacity-90 transition-opacity">

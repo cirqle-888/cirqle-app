@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { ChevronRight, Home, ChevronDown, UserCircle, Sparkles } from 'lucide-react'
+import { ChevronRight, Home, ChevronDown, UserCircle, Sparkles, MessageCircle } from 'lucide-react'
 import { forwardRef, useState } from 'react'
 import { usePermissions } from '@/contexts/permission-context'
 import { usePrivacy } from '@/contexts/privacy-context'
@@ -149,6 +149,17 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
       <CommandPaletteTrigger className="md:hidden" isCollapsed={true} />
       
       <AppLauncherTrigger />
+      {/* Toggles the app-wide comms widget on its Chat tab — the same surface
+          as the corner launcher, reachable from the top bar on every page. */}
+      <button
+        type="button"
+        onClick={() => window.dispatchEvent(new CustomEvent('cirqle:toggleChat'))}
+        title="Chat & discussions"
+        aria-label="Toggle chat"
+        className="inline-flex items-center justify-center rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary/80 hover:text-foreground"
+      >
+        <MessageCircle className="h-4 w-4" />
+      </button>
       <NotificationBell />
 
       {/* Profile Dropdown */}

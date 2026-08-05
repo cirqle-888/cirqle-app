@@ -126,8 +126,18 @@ export function FloatingCommsWidget() {
   // matter which page is currently showing.
   useEffect(() => {
     const onOpenNotifications = () => { setOpen(true); setTab('alerts') }
+    // Header chat button → toggle this widget on the Chat tab. Same surface,
+    // just a second way in for people who never look at the corner launcher.
+    const onToggleChat = () => {
+      setTab('chat')
+      setOpen(o => !o)
+    }
     window.addEventListener('cirqle:openNotifications', onOpenNotifications)
-    return () => window.removeEventListener('cirqle:openNotifications', onOpenNotifications)
+    window.addEventListener('cirqle:toggleChat', onToggleChat)
+    return () => {
+      window.removeEventListener('cirqle:openNotifications', onOpenNotifications)
+      window.removeEventListener('cirqle:toggleChat', onToggleChat)
+    }
   }, [])
 
   // ── Realtime: messages (RLS-scoped to my conversations) + my notifications ──

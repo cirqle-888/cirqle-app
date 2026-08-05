@@ -403,7 +403,7 @@ export function TaskEditModal({
             <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
               <div className="overflow-y-auto flex-1 p-6">
                 <div className="mb-2 flex justify-end">
-                  <DiscussButton entityType="task" entityId={task.id} label="Discuss in chat" />
+                  <DiscussButton entityType="task" entityId={task.id} label="Discuss in chat" panelTitle={task.title} />
                 </div>
                 <ActivityPanel entityType="task" entityId={task.id} />
               </div>

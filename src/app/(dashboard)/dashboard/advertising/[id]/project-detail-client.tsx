@@ -156,7 +156,7 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, ev
                 label={project.campaign_name}
                 iconKey="Megaphone"
               />
-              <DiscussButton entityType="project" entityId={project.id} variant="icon" label="Discuss this campaign in chat" />
+              <DiscussButton entityType="project" entityId={project.id} variant="icon" label="Discuss this campaign" panelTitle={project.campaign_name} />
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
               {adRefLabel(project.id)} · {project.client?.name || 'No client'} · {PLATFORM_LABEL[project.platform] || project.platform}
