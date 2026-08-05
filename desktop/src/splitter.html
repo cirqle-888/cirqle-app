@@ -10,7 +10,9 @@
 </head>
 <body>
   <script>
-    document.body.addEventListener('mousedown', (e) => { e.preventDefault(); window.desk.splitterStart() })
+    // Which pane boundary this splitter sits on rides in as ?i=<index>.
+    const i = Number(new URLSearchParams(location.search).get('i') || 0)
+    document.body.addEventListener('mousedown', (e) => { e.preventDefault(); window.desk.splitterStart(i) })
   </script>
 </body>
 </html>

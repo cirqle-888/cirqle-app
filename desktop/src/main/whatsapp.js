@@ -23,6 +23,8 @@ const deps = {
   layout: () => {},
   wireContextMenu: () => {},
   loadError: () => {},
+  /** Make the given WhatsApp account visible as a pane (added or swapped in). */
+  ensureWaPane: () => {},
 }
 function init(d) { Object.assign(deps, d) }
 
@@ -41,13 +43,11 @@ const CHROME_UA =
 // autoPaste additionally tries to focus WhatsApp's composer and paste for the
 // user (best-effort — WhatsApp Web's DOM can change, so it degrades to manual ⌘V).
 function focusWhatsapp() {
-  // If the right pane is currently showing a 2nd Cirqle, switch it back to WhatsApp
-  // so the share target is actually visible.
-  const wasComparing = state.rightPane === 'cirqle2'
-  state.rightPane = 'whatsapp'
-  if (!state.showWhatsapp) deps.applyPreset(state.showCirqle ? '50' : 'hideCirqle')
-  else if (wasComparing) { deps.layout(); saveSettings(); deps.sendStateToChrome() }
-  const wa = whatsapps[state.activeWa]
+  // Whatever the current split is, make sure the active WhatsApp account is
+  // actually on screen (creates its view lazily if needed), then focus it.
+  const id = state.activeWa || (state.waAccounts[0] && state.waAccounts[0].id)
+  deps.ensureWaPane(id)
+  const wa = whatsapps[id]
   if (wa) { wa.webContents.focus() }
   return wa
 }
@@ -170,8 +170,12 @@ function shareFileToWhatsApp(filePath, opts) {
 
 function createWhatsappView(id) {
   if (whatsapps[id]) return
+  const account = state.waAccounts.find(a => a.id === id)
   const wa = new WebContentsView({ webPreferences: { partition: `persist:whatsapp:${id}`, preload: path.join(__dirname, '..', 'preload-ui.js') } })
   wa.webContents.setUserAgent(CHROME_UA)
+  // A muted account stays muted across recreation — no notification sounds
+  // from this pane, so one message to a shared group doesn't chime N times.
+  if (account && account.muted) wa.webContents.setAudioMuted(true)
   wa.webContents.loadURL(WHATSAPP_URL, { userAgent: CHROME_UA })
   dl.wireDownloads(wa.webContents.session, 'whatsapp') // images/files saved from WhatsApp land in the common list too
   deps.wireContextMenu(wa, false)                        // Chrome-style right-click menu (Copy Image, etc.)
@@ -187,6 +191,20 @@ function createWhatsappView(id) {
 }
 
 
+/**
+ * Fully unload an account's view — used by "pause" (free the memory + network
+ * of an account you don't need right now) and by account removal. The login
+ * session survives in its persist: partition, so resuming is just a reload.
+ */
+function destroyWhatsappView(id) {
+  const wa = whatsapps[id]
+  if (!wa) return
+  const w = deps.getWin()
+  if (w) { try { w.contentView.removeChildView(wa) } catch { /* already detached */ } }
+  try { wa.webContents.close() } catch { /* already closed */ }
+  delete whatsapps[id]
+}
+
 module.exports = {
   init,
   whatsapps,
@@ -198,4 +216,5 @@ module.exports = {
   shareFileToWhatsApp,
   dropFileIntoWhatsApp,
   createWhatsappView,
+  destroyWhatsappView,
 }

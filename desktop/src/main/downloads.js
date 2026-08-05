@@ -171,6 +171,10 @@ function quickLookFile(filePath) {
   qlProcess.on('exit', () => { qlProcess = null })
   qlProcess.on('error', () => { qlProcess = null })
 }
+// App shutdown: reap the qlmanage child if a Quick Look panel is still open.
+function killQuickLook() {
+  if (qlProcess) { try { qlProcess.kill() } catch { /* already exited */ } qlProcess = null }
+}
 
 // The compact native "Downloads" submenu still lives in the menu bar (unclipped);
 // the rich actions live in the floating panel.
@@ -421,6 +425,7 @@ module.exports = {
   isImageFile,
   saveDataUrlToDownloads,
   quickLookFile,
+  killQuickLook,
   removeDownload,
   clearDownloads,
   findDownload,

@@ -59,6 +59,14 @@ module.exports = Object.freeze({
   WA_SWITCH: 'wa:switch',
   WA_REMOVE: 'wa:remove',
   WA_RENAME: 'wa:rename',
+  WA_MUTE: 'wa:mute',
+  WA_PAUSE: 'wa:pause',
+
+  // Multi-pane splits + built-in browser panes
+  SPLIT_MENU: 'split:menu',
+  SPLIT_ADD: 'split:add',
+  SPLIT_CLOSE: 'split:close',
+  WEB_NAV: 'web:nav',
 
   // Layout / splitter
   LAYOUT_PRESET: 'layout:preset',

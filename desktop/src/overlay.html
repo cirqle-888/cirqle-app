@@ -8,9 +8,11 @@
 </head>
 <body>
   <script>
-    // Floated over both panes only while dragging, so mouse events keep flowing
-    // even as the pointer passes over the web views.
-    document.addEventListener('mousemove', (e) => window.desk.splitterDrag(e.screenX))
+    // Floated over all panes only while dragging, so mouse events keep flowing
+    // even as the pointer passes over the web views. Which splitter is being
+    // dragged rides in as ?i=<index> (boundary between pane i and pane i+1).
+    const i = Number(new URLSearchParams(location.search).get('i') || 0)
+    document.addEventListener('mousemove', (e) => window.desk.splitterDrag(i, e.screenX))
     document.addEventListener('mouseup', () => window.desk.splitterEnd())
     window.addEventListener('blur', () => window.desk.splitterEnd())
   </script>

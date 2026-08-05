@@ -80,7 +80,7 @@
       background: #1e293b; border-color: #334155;
     }
     .wa-tab-wrap button.wa-tab.has-close {
-      padding-right: 28px;
+      padding-right: 66px; /* room for the mute · pause · remove minis */
     }
     .wa-tab-wrap button.wa-tab.on { 
       background: #22c55e; border-color: #16a34a; color: white;
@@ -100,6 +100,48 @@
     .wa-close-btn svg { width: 12px; height: 12px; }
     
     .sep { width: 1px; height: 20px; background: #334155; margin: 0 2px; }
+
+    /* Mini per-tab action buttons (mute / pause / close) */
+    .wa-mini {
+      background: transparent !important; border: none !important;
+      padding: 3px !important; border-radius: 5px;
+      display: flex; opacity: 0.45; color: inherit; box-shadow: none !important;
+    }
+    .wa-tab-wrap:hover .wa-mini { opacity: 0.85 }
+    .wa-mini:hover { background: rgba(0,0,0,0.18) !important; opacity: 1 !important; }
+    .wa-mini svg { width: 12px; height: 12px; }
+    .wa-mini.engaged { opacity: 1; color: #fbbf24; }
+    .wa-tab-wrap .minis { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: flex; gap: 1px; }
+    .wa-tab-wrap button.wa-tab.paused { opacity: 0.55; border-style: dashed; }
+
+    /* Split "+" dropdown */
+    .menu {
+      position: fixed; top: 44px; z-index: 50;
+      background: #111827; border: 1px solid #334155; border-radius: 10px;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.5);
+      min-width: 220px; padding: 5px; display: none;
+    }
+    .menu.open { display: block; }
+    .menu .mi {
+      display: flex; align-items: center; gap: 8px; width: 100%;
+      background: transparent; border: none; box-shadow: none;
+      padding: 7px 10px; border-radius: 7px; font-size: 12.5px; color: #d1d5db;
+      justify-content: flex-start;
+    }
+    .menu .mi:hover { background: #1f2937; color: #fff; }
+    .menu .mi[disabled] { opacity: 0.4; pointer-events: none; }
+    .menu .mhead { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; padding: 6px 10px 2px; }
+    .menu .mdiv { height: 1px; background: #1f2937; margin: 4px 6px; }
+    .menu .mi .close-x { margin-left: auto; opacity: 0.6; }
+
+    /* Browser URL bar */
+    #web-bar { display: none; align-items: center; gap: 4px; }
+    #web-bar input {
+      width: 200px; background: #0f172a; color: #e5e7eb;
+      border: 1px solid #334155; border-radius: 8px;
+      padding: 6px 10px; font-size: 12px; outline: none;
+    }
+    #web-bar input:focus { border-color: #7c3aed; }
   </style>
 </head>
 <body>
@@ -128,9 +170,18 @@
       </button>
     </div>
 
-    <button id="btn-compare" class="icon-btn" title="Compare — open a 2nd Cirqle page side-by-side">
-      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="16" rx="1.5"/></svg>
+    <button id="btn-split" class="icon-btn" title="Add a split — 2nd Cirqle, WhatsApp, or Browser (up to 4 panes)">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="16" rx="1.5"/><path d="M17.5 10v4M15.5 12h4" stroke="currentColor" fill="none"/></svg>
     </button>
+    <div id="web-bar">
+      <div class="sep"></div>
+      <div class="segmented">
+        <button id="web-back" class="icon-btn" title="Browser Back"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button>
+        <button id="web-forward" class="icon-btn" title="Browser Forward"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button>
+        <button id="web-reload" class="icon-btn" title="Reload Browser"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+      </div>
+      <input id="web-url" type="text" spellcheck="false" placeholder="Search or enter address" />
+    </div>
   </div>
 
   <!-- CENTER: WhatsApp Tabs -->
@@ -204,7 +255,23 @@
     $('#btn-downloads').onclick = () => window.desk.toggleDownloads()
     $('#btn-notifs').onclick = () => window.desk.openNotifications()
     $('#wa-add').onclick = () => window.desk.waAdd()
-    $('#btn-compare').onclick = () => window.desk.cirqleCompareToggle()
+
+    // ── Split "+" menu — native popup (an HTML dropdown would be clipped by
+    // the 48px-tall toolbar view, so main.js builds a real menu) ────────────
+    let lastState = null
+    $('#btn-split').onclick = () => window.desk.splitMenu()
+
+    // ── Browser URL bar (targets the active web pane) ──────────────────────
+    const webBar = $('#web-bar'), webUrl = $('#web-url')
+    $('#web-back').onclick = () => lastState?.activeWeb && window.desk.webNav(lastState.activeWeb, 'back')
+    $('#web-forward').onclick = () => lastState?.activeWeb && window.desk.webNav(lastState.activeWeb, 'forward')
+    $('#web-reload').onclick = () => lastState?.activeWeb && window.desk.webNav(lastState.activeWeb, 'reload')
+    webUrl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && lastState?.activeWeb) {
+        window.desk.webNav(lastState.activeWeb, 'url', webUrl.value)
+        webUrl.blur()
+      }
+    })
 
     // Tell main where the ⬇ button is (window coords) so the download "fly"
     // animation knows its landing point. Re-report on resize + layout changes.
@@ -243,22 +310,29 @@
 
     // Receive state from main process
     window.desk.onState((s) => {
-      // 1. Update Layout Presets
+      lastState = s
+      const panes = s.panes || []
+
+      // 1. Update Layout Presets — highlight only when the split IS that preset.
       document.querySelectorAll('[data-preset]').forEach((b) => b.classList.remove('on'))
       let key = null
-      if (!s.showWhatsapp) key = 'hideWA'
-      else if (!s.showCirqle) key = 'hideCirqle'
-      else key = s.ratio < 0.4 ? '25' : s.ratio > 0.6 ? '75' : '50'
-      const el = $('[data-preset="' + key + '"]')
+      const waVisible = panes.some(p => p.startsWith('wa:'))
+      if (panes.length === 1) key = panes[0] === 'cirqle' ? 'hideWA' : (panes[0].startsWith('wa:') ? 'hideCirqle' : null)
+      else if (panes.length === 2 && panes[0] === 'cirqle' && waVisible)
+        key = s.ratio < 0.4 ? '25' : s.ratio > 0.6 ? '75' : '50'
+      const el = key && $('[data-preset="' + key + '"]')
       if (el) el.classList.add('on')
 
-      // 1b. Reflect compare mode on the compare button
-      const cmp = $('#btn-compare')
-      if (cmp) {
-        cmp.classList.toggle('active', s.rightPane === 'cirqle2')
-        cmp.title = s.rightPane === 'cirqle2'
-          ? 'Close comparison — back to WhatsApp'
-          : 'Compare — open a 2nd Cirqle page side-by-side'
+      // 1b. Split button lights up whenever more than the basic pair is open.
+      const splitBtn = $('#btn-split')
+      if (splitBtn) splitBtn.classList.toggle('active', panes.includes('cirqle2') || panes.length > 2)
+
+      // 1c. Browser URL bar — shown while any browser pane is open.
+      const showWebBar = panes.some(p => p.startsWith('web:')) && s.activeWeb
+      webBar.style.display = showWebBar ? 'flex' : 'none'
+      if (showWebBar && document.activeElement !== webUrl) {
+        const tab = (s.webTabs || []).find(t => t.id === s.activeWeb)
+        if (tab) webUrl.value = tab.url || ''
       }
 
       // 2. Update WhatsApp Tabs
@@ -268,16 +342,15 @@
         s.waAccounts.forEach(wa => {
           const wrap = document.createElement('div')
           wrap.className = 'wa-tab-wrap'
-          
+
           const btn = document.createElement('button')
           btn.textContent = wa.label
-          btn.className = 'wa-tab'
-          if (s.waAccounts.length > 1) {
-            btn.classList.add('has-close')
-          }
-          if (s.activeWa === wa.id && s.showWhatsapp) {
+          btn.className = 'wa-tab has-close'
+          if (wa.paused) btn.classList.add('paused')
+          if (panes.includes('wa:' + wa.id)) {
             btn.classList.add('on')
           }
+          btn.title = wa.paused ? 'Paused — click to load' : ''
           btn.onclick = () => window.desk.waSwitch(wa.id)
           
           // Inline Rename on Right-Click
@@ -315,21 +388,44 @@
             input.select()
           }
           wrap.appendChild(btn)
-          
-          // Close button (only if > 1 account)
+
+          // Mini actions: mute · pause · remove (revealed on hover)
+          const minis = document.createElement('div')
+          minis.className = 'minis'
+
+          const muteBtn = document.createElement('button')
+          muteBtn.className = 'wa-mini' + (wa.muted ? ' engaged' : '')
+          muteBtn.title = wa.muted ? 'Unmute notifications' : 'Mute — silence this account’s notification sounds'
+          muteBtn.innerHTML = wa.muted
+            ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M11 5 6 9H2v6h4l5 4V5zM23 9l-6 6M17 9l6 6"/></svg>'
+            : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M11 5 6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14"/></svg>'
+          muteBtn.onclick = (e) => { e.stopPropagation(); window.desk.waMute(wa.id, !wa.muted) }
+          minis.appendChild(muteBtn)
+
+          const pauseBtn = document.createElement('button')
+          pauseBtn.className = 'wa-mini' + (wa.paused ? ' engaged' : '')
+          pauseBtn.title = wa.paused ? 'Resume — load this account' : 'Pause — unload this account (no memory, no notifications)'
+          pauseBtn.innerHTML = wa.paused
+            ? '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>'
+            : '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>'
+          pauseBtn.onclick = (e) => { e.stopPropagation(); window.desk.waPause(wa.id, !wa.paused) }
+          minis.appendChild(pauseBtn)
+
           if (s.waAccounts.length > 1) {
             const closeBtn = document.createElement('button')
-            closeBtn.className = 'wa-close-btn'
+            closeBtn.className = 'wa-mini'
             closeBtn.title = 'Remove Account'
-            closeBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>'
-            closeBtn.onclick = () => {
+            closeBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>'
+            closeBtn.onclick = (e) => {
+              e.stopPropagation()
               if (confirm(`Remove WhatsApp account "${wa.label}"?`)) {
                 window.desk.waRemove(wa.id)
               }
             }
-            wrap.appendChild(closeBtn)
+            minis.appendChild(closeBtn)
           }
-          
+          wrap.appendChild(minis)
+
           tabsContainer.appendChild(wrap)
         })
       }
