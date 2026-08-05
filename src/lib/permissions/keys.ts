@@ -203,3 +203,39 @@ export const FINANCIAL_VISIBILITY_PERMS = [
   PERMS.CASHBOOK_VIEW_AMOUNTS,
   PERMS.AGREEMENTS_VIEW_PRICING,
 ] as const
+
+/**
+ * CRITICAL permissions — grants that expose confidential money or personal
+ * data (client pricing, per-employee earnings & performance, salaries, agency
+ * margins, private names) or that can grant further access. The designations
+ * editor shows a red "Critical" badge on these and asks for confirmation
+ * before enabling one, and the employee form warns when the chosen
+ * designation carries any — so a mis-assigned role (the "gave a client-success
+ * exec the Reviewer role and leaked pricing" incident) is caught at a glance.
+ *
+ * PURELY ADVISORY: membership here changes labeling only, never enforcement.
+ */
+export const CRITICAL_PERMS: ReadonlySet<string> = new Set<string>([
+  // Client pricing & billing amounts
+  PERMS.TASKS_VIEW_PRICING,
+  PERMS.BILLING_VIEW_AMOUNTS,
+  PERMS.BILLING_VIEW_PRICING,
+  PERMS.BILLING_VIEW_LINE_PRICING,
+  PERMS.AGREEMENTS_VIEW_PRICING,
+  PERMS.CASHBOOK_VIEW_AMOUNTS,
+  // Advertising money layers (migration 027)
+  PERMS.ADVERTISING_VIEW_FINANCIALS,
+  PERMS.ADVERTISING_VIEW_BILLING,
+  PERMS.ADVERTISING_MANAGE_BUDGET,
+  // Per-employee earnings & performance
+  PERMS.CONTRIBUTIONS_VIEW_EARNINGS,
+  PERMS.CONTRIBUTIONS_VIEW_ALL,
+  // Salaries
+  PERMS.PAYROLL_VIEW_AMOUNTS,
+  PERMS.PAYROLL_EDIT,
+  // Personal data (names are private by design; full profiles include them)
+  PERMS.EMPLOYEES_REVEAL_NAMES,
+  PERMS.EMPLOYEES_VIEW_FULL,
+  // Power to grant everything above
+  PERMS.SETTINGS_MANAGE_DESIGNATIONS,
+])

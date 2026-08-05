@@ -133,6 +133,9 @@ interface Props {
   serviceCategories?: any[]
   employeeServiceCategories?: { employee_id: string; category_id: string }[]
   designations?: { id: string; name: string; is_admin: boolean; is_system: boolean }[]
+  /** Designations holding ≥1 CRITICAL permission (pricing / earnings / personal
+   *  data) — the picker warns in red before one is assigned. */
+  criticalDesignationIds?: string[]
   initialTab?: string
   initialEditClientId?: string
   initialEditServiceId?: string
@@ -2984,10 +2987,22 @@ export default function SettingsClient(props: Props) {
                         <option value="">— select designation —</option>
                         {props.designations.map(d => (
                           <option key={d.id} value={d.id}>
-                            {d.name}{d.is_admin ? ' (Admin — full access)' : ''}{d.is_system ? '' : ''}
+                            {d.name}
+                            {d.is_admin ? ' (Admin — full access)'
+                              : (props.criticalDesignationIds || []).includes(d.id) ? ' ⚠ critical access' : ''}
                           </option>
                         ))}
                       </AppSelect>
+                      {/* The safety net for the exact mistake this exists for:
+                          picking a role without realising it carries pricing /
+                          earnings visibility. Loud, red, at decision time. */}
+                      {form.designation_id && !props.designations.find(d => d.id === form.designation_id)?.is_admin
+                        && (props.criticalDesignationIds || []).includes(form.designation_id) && (
+                        <p className="mt-1.5 text-xs text-red-600 dark:text-red-400 font-medium">
+                          ⚠ This designation includes critical access — confidential pricing, employee earnings or
+                          personal data. Check its permissions in Settings → Designations before assigning it.
+                        </p>
+                      )}
                     </FieldRow>
                   )}
 

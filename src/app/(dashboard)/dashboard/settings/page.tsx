@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { CRITICAL_PERMS } from '@/lib/permissions/keys'
 import SettingsClient from './settings-client'
 
 const ALL_TABS = ['Company', 'Privacy & Security', 'Employees', 'Services', 'Departments', 'Groups & Params', 'Tools', 'Bank Accounts', 'Cash Categories', 'Exchange Rates']
@@ -46,6 +47,24 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     designations = data || []
   } catch {}
 
+  // Which designations carry CRITICAL permissions (pricing, earnings,
+  // salaries, personal data — CRITICAL_PERMS). Powers the red warning on the
+  // employee form's designation picker, so "Reviewer" can't be handed to a
+  // new hire without the assigner seeing it includes client pricing.
+  let criticalDesignationIds: string[] = []
+  try {
+    const { data } = await supabase
+      .from('designation_permissions')
+      .select('designation_id, allowed, permission:permissions(key)')
+      .eq('allowed', true)
+    const ids = new Set<string>()
+    type Row = { designation_id: string; permission: { key: string } | null }
+    for (const row of (data || []) as unknown as Row[]) {
+      if (row.permission?.key && CRITICAL_PERMS.has(row.permission.key)) ids.add(row.designation_id)
+    }
+    criticalDesignationIds = [...ids]
+  } catch { /* pre-migration — picker simply shows no warnings */ }
+
   // Employee ↔ service assignments (graceful — table lands in migration 20260714150000)
   let employeeServices: { employee_id: string; service_id: string }[] = []
   {
@@ -90,6 +109,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       serviceCategories={serviceCategories}
       employeeServiceCategories={employeeServiceCategories}
       designations={designations}
+      criticalDesignationIds={criticalDesignationIds}
       initialTab={initialTab}
       initialEditClientId={editClient}
       initialEditServiceId={editService}

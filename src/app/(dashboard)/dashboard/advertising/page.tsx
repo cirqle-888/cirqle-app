@@ -17,11 +17,17 @@ export default async function AdvertisingPage() {
   const canView = isAdmin || hasPermission(me, PERMS.ADVERTISING_VIEW)
   if (me && !canView) redirect('/dashboard')
 
-  // The money layer (wallets, allocations, service charges, billing) is
-  // confidential: campaign handlers see campaigns + performance only.
-  // manage_budget implies it — you cannot manage a budget you cannot see.
+  // Two confidentiality layers (migration 027). Campaign ALLOCATIONS are
+  // behind neither — they are the campaign's working budget and every viewer
+  // sees them. manage_budget implies both (you cannot manage what you cannot
+  // see).
+  //   viewFinancials — wallet balances, credited top-ups, history, Add Funds
+  //   viewBilling    — service charges, billing amounts, invoices, rate cards
   const viewFinancials = isAdmin
     || hasPermission(me, PERMS.ADVERTISING_VIEW_FINANCIALS)
+    || hasPermission(me, PERMS.ADVERTISING_MANAGE_BUDGET)
+  const viewBilling = isAdmin
+    || hasPermission(me, PERMS.ADVERTISING_VIEW_BILLING)
     || hasPermission(me, PERMS.ADVERTISING_MANAGE_BUDGET)
 
   const admin = createAdminClient()
@@ -56,13 +62,14 @@ export default async function AdvertisingPage() {
 
   // ── Client wallet ledger (best-effort — migration 20260703140000) ──────────
   // One fetch powers balances, per-campaign allocations, and the history panel.
-  // FINANCIALS-GATED: without view_financials the ledger is never fetched, so
-  // wallet money cannot reach the browser at all. The client then renders its
-  // wallet-less layout (same path as the pre-migration fallback).
-  let walletSupported = viewFinancials
+  // FINANCIALS-GATED at the QUERY: without view_financials only DEBIT rows
+  // (campaign allocations = working budgets, visible to every viewer) are
+  // fetched — credits/top-ups, and therefore wallet balances, never reach the
+  // browser at all.
+  let walletSupported = true
   let ledger: any[] = []
-  if (viewFinancials) try {
-    const { data, error } = await admin
+  try {
+    let q = admin
       .from('ad_wallet_ledger')
       .select(`
         id, client_id, direction, kind, ad_project_id, cashbook_entry_id,
@@ -72,6 +79,8 @@ export default async function AdvertisingPage() {
         project:ad_projects(id, campaign_name)
       `)
       .is('deleted_at', null)
+    if (!viewFinancials) q = q.eq('direction', 'debit')
+    const { data, error } = await q
       .order('created_at', { ascending: false })
       .limit(1000)
     if (error) walletSupported = false
@@ -79,9 +88,9 @@ export default async function AdvertisingPage() {
   } catch { walletSupported = false }
 
   // Candidate funding entries for "Add funds": recent outflows + how much of
-  // each is still uncredited to any wallet.
+  // each is still uncredited to any wallet. Wallet-layer data → gated.
   let fundCandidates: any[] = []
-  if (walletSupported) {
+  if (walletSupported && viewFinancials) {
     try {
       const { data: outflows } = await admin
         .from('cashbook_entries')
@@ -127,12 +136,14 @@ export default async function AdvertisingPage() {
     edit:           isAdmin || hasPermission(me, PERMS.ADVERTISING_EDIT),
     manageBudget:   isAdmin || hasPermission(me, PERMS.ADVERTISING_MANAGE_BUDGET),
     viewFinancials,
+    viewBilling,
   }
 
   // Server-side strip: `select('*')` includes the agency's service-charge
-  // terms — confidential billing config that must never reach a handler's
-  // browser (masking at render time would still ship it in the RSC payload).
-  const safeProjects = viewFinancials ? projects : projects.map(p => ({
+  // terms — confidential billing config that must never reach a non-billing
+  // viewer's browser (masking at render time would still ship it in the RSC
+  // payload).
+  const safeProjects = viewBilling ? projects : projects.map(p => ({
     ...p, service_charge_type: null, service_charge_value: null, tax_percent: null,
   }))
 

@@ -75,7 +75,7 @@ interface Props {
   walletSupported: boolean
   ledger: LedgerRowView[]
   fundCandidates: FundCandidate[]
-  perms: { create: boolean; edit: boolean; manageBudget: boolean; viewFinancials: boolean }
+  perms: { create: boolean; edit: boolean; manageBudget: boolean; viewFinancials: boolean; viewBilling: boolean }
 }
 
 const inr = (v: number | null | undefined, dp = 0) =>
@@ -399,7 +399,9 @@ export default function AdvertisingClient({
            card grid below. */
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
           <KpiCard icon={Zap} label="Active" value={totals.active} sub={`of ${cards.length} campaigns`} accent />
-          {walletSupported
+          {/* Wallet balance is wallet-layer data (view_financials); without it
+              the tile falls back to total spend — same as pre-wallet days. */}
+          {walletSupported && perms.viewFinancials
             ? <KpiCard icon={Wallet} label="Wallet Balance" value={inr(totals.walletBalance)} sub="across all clients" />
             : <KpiCard icon={Wallet} label="Total Spend" value={inr(totals.totalSpend)} />}
           <KpiCard icon={TrendingUp} label="Revenue" value={inr(totals.totalRev)} />
@@ -457,7 +459,7 @@ export default function AdvertisingClient({
             className="rounded-lg border border-border bg-card px-2.5 py-1 text-xs"
             title="Campaign month (start date)"
           />
-          {walletSupported && (
+          {walletSupported && perms.viewFinancials && (
             <select value={fBalance} onChange={e => setFBalance(e.target.value as BalanceFilter)}
               className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs">
               <option value="all">Any balance</option>
@@ -496,6 +498,8 @@ export default function AdvertisingClient({
           candidates={fundCandidates}
           walletSupported={walletSupported}
           canManage={perms.manageBudget}
+          viewFinancials={perms.viewFinancials}
+          viewBilling={perms.viewBilling}
         />
       ))}
       {view === 'clients' && unassigned.length > 0 && (
@@ -504,7 +508,7 @@ export default function AdvertisingClient({
             Unassigned ({unassigned.length})
           </h2>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {unassigned.map(c => <CampaignCard key={c.p.id} card={c} walletOn={walletSupported} />)}
+            {unassigned.map(c => <CampaignCard key={c.p.id} card={c} walletOn={walletSupported} showBilling={perms.viewBilling} />)}
           </div>
         </div>
       )}
@@ -519,7 +523,7 @@ export default function AdvertisingClient({
             Campaigns ({filteredCards.length})
           </h2>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {filteredCards.map(c => <CampaignCard key={c.p.id} card={c} walletOn={walletSupported} />)}
+            {filteredCards.map(c => <CampaignCard key={c.p.id} card={c} walletOn={walletSupported} showBilling={perms.viewBilling} />)}
             <Link
               href="/dashboard/advertising/integrations"
               className="group rounded-xl border border-dashed border-border bg-card/50 p-5 flex flex-col items-center justify-center gap-2 hover:border-pink-500/40 hover:bg-card transition-all text-center"
@@ -548,12 +552,14 @@ export default function AdvertisingClient({
 /** Synthetic group key for Cirqle's own (company) wallet + internal campaigns. */
 const COMPANY_KEY = '__company__'
 
-function ClientSection({ group, history, candidates, walletSupported, canManage }: {
+function ClientSection({ group, history, candidates, walletSupported, canManage, viewFinancials, viewBilling }: {
   group: ClientGroup
   history: LedgerRowView[]
   candidates: FundCandidate[]
   walletSupported: boolean
   canManage: boolean
+  viewFinancials: boolean
+  viewBilling: boolean
 }) {
   const router = useRouter()
   const [showAdd, setShowAdd] = useState(false)
@@ -572,7 +578,8 @@ function ClientSection({ group, history, candidates, walletSupported, canManage 
             {group.code && <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">{group.code}</span>}
             <span className="text-xs text-muted-foreground">· {group.cards.length} campaign{group.cards.length === 1 ? '' : 's'}</span>
           </div>
-          {walletSupported && (
+          {/* History lists top-ups (what the client paid) — wallet layer. */}
+          {walletSupported && viewFinancials && (
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setShowHistory(v => !v)}
@@ -596,17 +603,19 @@ function ClientSection({ group, history, candidates, walletSupported, canManage 
         {walletSupported && (
           /* 'GST 18%' stat dropped: pure derivation of Meta Spend × 18%,
              already folded into 'Unspent (incl. GST)' — one less repeated
-             number per client row. */
+             number per client row.
+             Credited / Remaining Balance are wallet-layer (view_financials);
+             allocations + spend are the working budget every viewer gets. */
           <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-            <WalletStat label="Wallet Credited" value={inr(w.credited, 2)} />
+            {viewFinancials && <WalletStat label="Wallet Credited" value={inr(w.credited, 2)} />}
             <WalletStat label="Campaign Allocated" value={inr(w.allocated, 2)} />
-            <WalletStat label="Remaining Balance" value={inr(w.balance, 2)} tone={w.balance < 0 ? 'bad' : w.balance > 0 ? 'good' : undefined} />
+            {viewFinancials && <WalletStat label="Remaining Balance" value={inr(w.balance, 2)} tone={w.balance < 0 ? 'bad' : w.balance > 0 ? 'good' : undefined} />}
             <WalletStat label="Meta Spend (excl. GST)" value={inr(group.metaSpend, 2)} />
             <WalletStat label="Unspent (incl. GST)" value={inr(unspent, 2)} tone={unspent < 0 ? 'bad' : undefined} />
           </div>
         )}
 
-        {showAdd && canManage && walletSupported && (
+        {showAdd && canManage && walletSupported && viewFinancials && (
           <AddFundsForm
             clientId={group.clientId === COMPANY_KEY ? null : group.clientId}
             candidates={candidates}
@@ -614,7 +623,7 @@ function ClientSection({ group, history, candidates, walletSupported, canManage 
           />
         )}
 
-        {showHistory && walletSupported && (
+        {showHistory && walletSupported && viewFinancials && (
           <LedgerHistory rows={history} canManage={canManage} onChange={() => router.refresh()} />
         )}
       </div>
@@ -628,7 +637,7 @@ function ClientSection({ group, history, candidates, walletSupported, canManage 
           symptoms of THIS, not independent bugs). */}
       {group.cards.length > 0 ? (
         <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2 xl:grid-cols-3">
-          {group.cards.map(c => <CampaignCard key={c.p.id} card={c} walletOn={walletSupported} />)}
+          {group.cards.map(c => <CampaignCard key={c.p.id} card={c} walletOn={walletSupported} showBilling={viewBilling} />)}
         </div>
       ) : (
         <p className="px-4 py-6 text-xs text-muted-foreground">No campaigns yet for this client.</p>
@@ -778,7 +787,7 @@ function LedgerHistory({ rows, canManage, onChange }: {
 
 // ─── Campaign card ────────────────────────────────────────────────────────────
 
-function CampaignCard({ card, walletOn }: { card: CardData; walletOn: boolean }) {
+function CampaignCard({ card, walletOn, showBilling }: { card: CardData; walletOn: boolean; showBilling: boolean }) {
   const { p, agg, health, days, allocated, billing } = card
   return (
     <Link
@@ -826,9 +835,13 @@ function CampaignCard({ card, walletOn }: { card: CardData; walletOn: boolean })
           // viewport (the KPI grid below inherited the overflow as a
           // symptom, not a cause).
           <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground">
-            <span>Billing: <span className="font-semibold text-foreground">{inr(billing, 2)}</span>
-              {p.service_charge_type === 'percent' ? ` (${p.service_charge_value}%)` : ''}
-            </span>
+            {/* Billing = agency margin — view_billing only (the server sends
+                null charge fields without it, so this would render ₹0). */}
+            {showBilling && (
+              <span>Billing: <span className="font-semibold text-foreground">{inr(billing, 2)}</span>
+                {p.service_charge_type === 'percent' ? ` (${p.service_charge_value}%)` : ''}
+              </span>
+            )}
             {allocated > 0 && <span>Remaining alloc: {inr(Math.max(0, round2(allocated - spendWithGst(agg.spend || 0))))}</span>}
           </div>
         )}

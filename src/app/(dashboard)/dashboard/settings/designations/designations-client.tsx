@@ -2,8 +2,9 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Trash2, Save, Check, X, ChevronDown, ChevronLeft } from 'lucide-react'
+import { Plus, Trash2, Save, Check, X, ChevronDown, ChevronLeft, ShieldAlert } from 'lucide-react'
 import { usePermissions } from '@/contexts/permission-context'
+import { CRITICAL_PERMS } from '@/lib/permissions/keys'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import {
@@ -123,6 +124,19 @@ export default function DesignationsClient(props: Props) {
     return result
   }, [props.permissions])
 
+  // Critical grants (pricing, earnings, salaries, private names — see
+  // CRITICAL_PERMS) get a red badge and a confirm step, so a role can't
+  // silently accumulate confidential access.
+  const criticalPermIds = useMemo(
+    () => new Set(props.permissions.filter(p => CRITICAL_PERMS.has(p.key)).map(p => p.id)),
+    [props.permissions],
+  )
+  const criticalCountFor = (designationId: string) => {
+    let n = 0
+    for (const id of assignmentMap[designationId] ?? []) if (criticalPermIds.has(id)) n++
+    return n
+  }
+
   // ─── Optimistic toggle ─────────────────────────────────────────────────────
   function togglePermission(designationId: string, permissionId: string, nextAllowed: boolean) {
     if (!canManage) return
@@ -131,6 +145,14 @@ export default function DesignationsClient(props: Props) {
     if (designation.is_admin) {
       toastError('Admin permissions are immutable.')
       return
+    }
+    if (nextAllowed && criticalPermIds.has(permissionId)) {
+      const perm = props.permissions.find(p => p.id === permissionId)
+      const members = props.memberCounts[designationId] ?? 0
+      if (!confirm(
+        `“${perm?.label ?? 'This permission'}” is CRITICAL access — it exposes confidential pricing, earnings or personal data.\n\n` +
+        `Everyone with the “${designation.name}” designation${members ? ` (${members} ${members === 1 ? 'member' : 'members'})` : ''} will get it.\n\nGrant it?`,
+      )) return
     }
 
     // Optimistic flip.
@@ -245,6 +267,16 @@ export default function DesignationsClient(props: Props) {
                     {!d.is_admin && d.is_system && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground font-medium uppercase tracking-wide">System</span>
                     )}
+                    {/* Red flag: this role carries confidential access — the
+                        at-a-glance warning before assigning it to someone. */}
+                    {!d.is_admin && criticalCountFor(d.id) > 0 && (
+                      <span
+                        title={`${criticalCountFor(d.id)} critical permission${criticalCountFor(d.id) === 1 ? '' : 's'} (pricing / earnings / personal data)`}
+                        className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-700 dark:text-red-400 font-semibold uppercase tracking-wide"
+                      >
+                        <ShieldAlert className="w-3 h-3" /> {criticalCountFor(d.id)}
+                      </span>
+                    )}
                   </div>
                   {d.description && (
                     <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{d.description}</p>
@@ -287,6 +319,7 @@ export default function DesignationsClient(props: Props) {
             designation={selected}
             permissionsByModule={groupedPermissions}
             allowedIds={assignmentMap[selected.id] ?? new Set()}
+            criticalPermIds={criticalPermIds}
             memberCount={props.memberCounts[selected.id] ?? 0}
             canManage={canManage}
             onTogglePermission={togglePermission}
@@ -331,6 +364,7 @@ function DesignationDetail({
   designation,
   permissionsByModule,
   allowedIds,
+  criticalPermIds,
   memberCount,
   canManage,
   onTogglePermission,
@@ -340,6 +374,7 @@ function DesignationDetail({
   designation: Designation
   permissionsByModule: { module: string; label: string; perms: Permission[] }[]
   allowedIds: Set<string>
+  criticalPermIds: Set<string>
   memberCount: number
   canManage: boolean
   onTogglePermission: (designationId: string, permissionId: string, allowed: boolean) => void
@@ -455,12 +490,42 @@ function DesignationDetail({
         </div>
       ) : (
         <div className="space-y-3">
+          {/* Critical-access summary: names every confidential grant this role
+              holds, so "Reviewer quietly includes client pricing" is visible
+              BEFORE the role is handed to a new hire. */}
+          {(() => {
+            const critical = permissionsByModule
+              .flatMap(g => g.perms)
+              .filter(p => allowedIds.has(p.id) && criticalPermIds.has(p.id))
+            if (critical.length === 0) return null
+            return (
+              <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex items-start gap-3">
+                <ShieldAlert className="w-5 h-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <p className="font-medium text-foreground">
+                    This designation includes {critical.length} critical {critical.length === 1 ? 'permission' : 'permissions'}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Confidential pricing, earnings or personal data. Assign it only to people who must see these:
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {critical.map(p => (
+                      <span key={p.id} className="text-[11px] px-2 py-0.5 rounded-full bg-red-500/15 text-red-700 dark:text-red-300 font-medium">
+                        {p.label}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
           {permissionsByModule.map(group => (
             <PermissionModuleCard
               key={group.module}
               label={group.label}
               perms={group.perms}
               allowedIds={allowedIds}
+              criticalPermIds={criticalPermIds}
               canManage={canManage}
               onToggle={(permId, next) => onTogglePermission(designation.id, permId, next)}
             />
@@ -491,17 +556,20 @@ function PermissionModuleCard({
   label,
   perms,
   allowedIds,
+  criticalPermIds,
   canManage,
   onToggle,
 }: {
   label: string
   perms: Permission[]
   allowedIds: Set<string>
+  criticalPermIds: Set<string>
   canManage: boolean
   onToggle: (permId: string, next: boolean) => void
 }) {
   const [open, setOpen] = useState(true)
   const allowedCount = perms.reduce((n, p) => n + (allowedIds.has(p.id) ? 1 : 0), 0)
+  const criticalAllowed = perms.reduce((n, p) => n + (allowedIds.has(p.id) && criticalPermIds.has(p.id) ? 1 : 0), 0)
 
   return (
     <div className="bg-card border border-border rounded-2xl overflow-hidden">
@@ -514,6 +582,11 @@ function PermissionModuleCard({
           <span className="text-xs text-muted-foreground">
             {allowedCount}/{perms.length}
           </span>
+          {criticalAllowed > 0 && (
+            <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-700 dark:text-red-400 font-semibold uppercase tracking-wide">
+              <ShieldAlert className="w-3 h-3" /> {criticalAllowed} critical
+            </span>
+          )}
         </div>
         <ChevronDown
           className={'w-4 h-4 text-muted-foreground transition-transform ' + (open ? 'rotate-180' : '')}
@@ -524,10 +597,21 @@ function PermissionModuleCard({
         <div className="border-t border-border divide-y divide-border">
           {perms.map(p => {
             const allowed = allowedIds.has(p.id)
+            const critical = criticalPermIds.has(p.id)
             return (
-              <div key={p.id} className="px-5 py-3 flex items-start gap-4">
+              <div key={p.id} className={'px-5 py-3 flex items-start gap-4' + (critical && allowed ? ' bg-red-500/[0.04]' : '')}>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-foreground">{p.label}</p>
+                  <p className="text-sm text-foreground inline-flex items-center gap-1.5 flex-wrap">
+                    {p.label}
+                    {critical && (
+                      <span
+                        title="Exposes confidential pricing, earnings or personal data — grant deliberately."
+                        className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-700 dark:text-red-400 font-semibold uppercase tracking-wide"
+                      >
+                        <ShieldAlert className="w-3 h-3" /> Critical
+                      </span>
+                    )}
+                  </p>
                   {p.description && (
                     <p className="text-xs text-muted-foreground mt-0.5">{p.description}</p>
                   )}

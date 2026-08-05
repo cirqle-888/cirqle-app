@@ -71,7 +71,7 @@ interface Props {
   allocations?: CampaignAllocation[]
   wallet?: WalletSummaryView | null
   allocSupported?: boolean
-  perms: { edit: boolean; manageBudget: boolean; enterMetrics: boolean; approveMetrics: boolean; viewFinancials: boolean }
+  perms: { edit: boolean; manageBudget: boolean; enterMetrics: boolean; approveMetrics: boolean; viewFinancials: boolean; viewBilling: boolean }
 }
 
 const inr = (v: number | null | undefined, dp = 0) =>
@@ -125,10 +125,10 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, in
   const tabs: { key: Tab; label: string }[] = [
     { key: 'overview', label: 'Overview' },
     { key: 'daily', label: `Daily Performance${metrics.length ? ` (${metrics.length})` : ''}` },
-    // Budget is the money tab (wallet allocations, service charge, invoicing)
-    // — hidden outright without view_financials; the server already sends no
-    // financial data, so showing it would only render an empty shell.
-    ...(perms.viewFinancials ? [{ key: 'budget', label: 'Budget' } as const] : []),
+    // Budget is the money-management tab (service charge config, wallet
+    // allocation, invoicing) — needs at least one money layer; a plain
+    // handler sees allocations in the Overview instead.
+    ...(perms.viewFinancials || perms.viewBilling ? [{ key: 'budget', label: 'Budget' } as const] : []),
     { key: 'notes', label: 'Notes' },
     { key: 'integrations', label: 'Integrations' },
     { key: 'reports', label: 'Reports' },
@@ -236,6 +236,7 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, in
           services={services} servicePricing={servicePricing}
           allocations={allocations} wallet={wallet} allocSupported={allocSupported}
           reportedSpend={agg.spend} campaignTask={tasks[0] ?? null}
+          viewBilling={perms.viewBilling}
         />
       )}
       {tab === 'notes' && (
@@ -292,23 +293,25 @@ function OverviewTab({ project, agg, remaining, health, allocations = [], wallet
   const spendGross = spendWithGst(spend)              // actual money consumed (incl. 18% GST)
   const serviceCharge = computeServiceCharge(basis, project.service_charge_type, Number(project.service_charge_value || 0))
 
-  // Without view_financials only the working numbers remain: what the
-  // campaign may spend and what it has spent. Allocations, GST/billing math,
-  // service charge and wallet balance are the agency's money layer (the
-  // server sends none of it anyway — this just skips the empty tiles).
+  // Composed per money layer. Allocations/budget/spend are the campaign's
+  // working numbers — every viewer gets them. Service charge is billing
+  // (view_billing); wallet balance is the wallet layer (view_financials).
+  // The server sends none of the gated data anyway — this skips empty tiles.
   //
   // 'GST 18%' and 'Spend (Meta, excl. GST)' tiles were dropped: both are
   // recomputable from 'Spend incl. GST' and repeat in the Budget tab summary.
-  const financials: [string, string][] = perms.viewFinancials ? [
+  void spend
+  const financials: [string, string][] = [
     ['Allocated (wallet)', hasAllocations ? inr(allocated, 2) : '—'],
     ['Budget (estimated)', inr(project.ad_budget_amount)],
     ['Spend incl. GST 18%', inr(spendGross, 2)],
     ['Remaining (incl. GST)', inr(round2(basis - spendGross), 2)],
-    ['Service charge (billing)', `${inr(serviceCharge, 2)}${project.service_charge_type === 'percent' ? ` (${project.service_charge_value}%)` : ''}`],
-    ['Wallet balance', allocSupported && wallet ? inr(wallet.balanceInr, 2) : '—'],
-  ] : [
-    ['Budget (estimated)', inr(project.ad_budget_amount)],
-    ['Spend (platform-reported)', inr(spend, 2)],
+    ...(perms.viewBilling ? [
+      ['Service charge (billing)', `${inr(serviceCharge, 2)}${project.service_charge_type === 'percent' ? ` (${project.service_charge_value}%)` : ''}`] as [string, string],
+    ] : []),
+    ...(perms.viewFinancials ? [
+      ['Wallet balance', allocSupported && wallet ? inr(wallet.balanceInr, 2) : '—'] as [string, string],
+    ] : []),
   ]
 
   const kpis: [string, string][] = [
@@ -363,7 +366,7 @@ function OverviewTab({ project, agg, remaining, health, allocations = [], wallet
       {/* Financials: wallet allocation, GST-aware spend, billing */}
       <div>
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-          {perms.viewFinancials ? 'Financials' : 'Budget & Spend'}
+          {perms.viewFinancials || perms.viewBilling ? 'Financials' : 'Budget & Spend'}
         </h3>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           {financials.map(([k, v]) => (
@@ -373,7 +376,7 @@ function OverviewTab({ project, agg, remaining, health, allocations = [], wallet
             </div>
           ))}
         </div>
-        {perms.viewFinancials && !hasAllocations && (
+        {perms.viewBilling && !hasAllocations && (
           <p className="mt-1.5 text-[11px] text-muted-foreground">
             No wallet funds allocated yet — Service charge billing requires funds to be allocated in the Budget tab.
           </p>
@@ -389,7 +392,7 @@ function OverviewTab({ project, agg, remaining, health, allocations = [], wallet
               <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Campaign task</div>
               <div className="text-sm font-medium truncate">#{campaignTask.task_number ?? '—'} {campaignTask.title}</div>
               <div className="text-xs text-muted-foreground mt-0.5">
-                {perms.viewFinancials
+                {perms.viewBilling
                   ? <>Billing {inr(campaignTask.billing_amount, 2)} · work split via Contributions</>
                   : <>Work split via Contributions</>}
               </div>
@@ -422,7 +425,7 @@ function OverviewTab({ project, agg, remaining, health, allocations = [], wallet
             )}
           </div>
         )}
-        {perms.viewFinancials && (invoice ? (
+        {perms.viewBilling && (invoice ? (
           <Link href={`/dashboard/invoices?focus=${invoice.id}`}
             className="flex items-center justify-between rounded-lg border border-border bg-card p-3 hover:bg-secondary/50">
             <div className="min-w-0">
@@ -623,7 +626,7 @@ function presetFromDays(days?: number | null): string {
   return days != null && days > 0 ? 'custom' : '7'
 }
 
-function BudgetTab({ project, invoice, canManage, onChange, services = [], servicePricing = [], allocations = [], wallet = null, allocSupported = false, reportedSpend = 0, campaignTask = null }: {
+function BudgetTab({ project, invoice, canManage, onChange, services = [], servicePricing = [], allocations = [], wallet = null, allocSupported = false, reportedSpend = 0, campaignTask = null, viewBilling = false }: {
   project: Project
   invoice: Props['invoice']
   canManage: boolean
@@ -635,6 +638,7 @@ function BudgetTab({ project, invoice, canManage, onChange, services = [], servi
   allocSupported?: boolean
   reportedSpend?: number
   campaignTask?: Props['tasks'][number] | null
+  viewBilling?: boolean
 }) {
   const derivedPricing = useMemo(() => {
     if (!project.service_id) return null
@@ -707,37 +711,42 @@ function BudgetTab({ project, invoice, canManage, onChange, services = [], servi
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-        <BudgetFields
-          value={budget}
-          onChange={p => setBudget(b => {
-            const next = { ...b, ...p }
-            if (p.overrideServiceCharge === false && derivedPricing) {
-              next.scType = derivedPricing.isPercent ? 'percent' : 'fixed'
-              next.scValue = String(derivedPricing.value)
-            }
-            return next
-          })}
-          startDate={project.start_date}
-          endDate={project.end_date}
-          disabled={!canManage}
-          derivedPricing={derivedPricing}
-        />
+      {/* Budget + service-charge configuration and invoicing are billing
+          (view_billing) — the server sends null charge fields without it,
+          so rendering the form would show misleading empty terms. */}
+      {viewBilling && (
+        <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+          <BudgetFields
+            value={budget}
+            onChange={p => setBudget(b => {
+              const next = { ...b, ...p }
+              if (p.overrideServiceCharge === false && derivedPricing) {
+                next.scType = derivedPricing.isPercent ? 'percent' : 'fixed'
+                next.scValue = String(derivedPricing.value)
+              }
+              return next
+            })}
+            startDate={project.start_date}
+            endDate={project.end_date}
+            disabled={!canManage}
+            derivedPricing={derivedPricing}
+          />
 
-        {msg && <div className="text-xs text-muted-foreground">{msg}</div>}
+          {msg && <div className="text-xs text-muted-foreground">{msg}</div>}
 
-        {canManage && (
-          <div className="flex flex-wrap justify-end gap-2">
-            <button onClick={save} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50">
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Save budget
-            </button>
-            <button onClick={makeInvoice} disabled={invBusy} className="inline-flex items-center gap-1.5 rounded-lg gradient-bg px-3 py-2 text-sm font-medium text-white disabled:opacity-50 hover:opacity-90">
-              {invBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-              {invoice ? 'Update invoice' : 'Create invoice'}
-            </button>
-          </div>
-        )}
-      </div>
+          {canManage && (
+            <div className="flex flex-wrap justify-end gap-2">
+              <button onClick={save} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50">
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Save budget
+              </button>
+              <button onClick={makeInvoice} disabled={invBusy} className="inline-flex items-center gap-1.5 rounded-lg gradient-bg px-3 py-2 text-sm font-medium text-white disabled:opacity-50 hover:opacity-90">
+                {invBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                {invoice ? 'Update invoice' : 'Create invoice'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       <FundAllocationCard
         project={project}
@@ -747,10 +756,11 @@ function BudgetTab({ project, invoice, canManage, onChange, services = [], servi
         reportedSpend={reportedSpend}
         campaignTask={campaignTask}
         canManage={canManage}
+        viewBilling={viewBilling}
         onChange={onChange}
       />
 
-      {invoice && (
+      {viewBilling && invoice && (
         <Link href={`/dashboard/invoices?focus=${invoice.id}`} className="flex items-center justify-between rounded-xl border border-border bg-card p-4 hover:bg-secondary/50">
           <div className="text-sm">
             <div className="font-medium">{invoice.invoice_number}</div>
@@ -765,7 +775,7 @@ function BudgetTab({ project, invoice, canManage, onChange, services = [], servi
 
 // ─── Fund allocation (client wallet → campaign billing) ─────────────────────
 
-function FundAllocationCard({ project, allocations, wallet, supported, reportedSpend, campaignTask, canManage, onChange }: {
+function FundAllocationCard({ project, allocations, wallet, supported, reportedSpend, campaignTask, canManage, viewBilling = false, onChange }: {
   project: Project
   allocations: CampaignAllocation[]
   wallet: WalletSummaryView | null
@@ -773,6 +783,7 @@ function FundAllocationCard({ project, allocations, wallet, supported, reportedS
   reportedSpend: number
   campaignTask: Props['tasks'][number] | null
   canManage: boolean
+  viewBilling?: boolean
   onChange: () => void
 }) {
   const { dn } = usePrivacy()
@@ -908,17 +919,22 @@ function FundAllocationCard({ project, allocations, wallet, supported, reportedS
 
           {err && <p className="text-xs text-red-500">{err}</p>}
 
-          {/* GST-aware billing summary */}
+          {/* GST-aware summary. The first row (allocation vs spend) is the
+              working budget — every viewer. The billing row is view_billing. */}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
             <SummaryCell label="Allocated (paid, GST incl.)" value={inr(allocatedTotal, 2)} />
             <SummaryCell label="Spend incl. GST 18%" value={inr(spendGross, 2)} />
             <SummaryCell label="Unspent allocation" value={inr(round2(basis - spendGross), 2)} />
-            <SummaryCell label="Billing basis" value={`${inr(basis, 2)}${hasAllocations ? '' : ' (estimated)'}`} />
-            <SummaryCell
-              label="Service charge"
-              value={`${inr(serviceCharge, 2)}${project.service_charge_type === 'percent' ? ` (${project.service_charge_value}%)` : ''}`}
-            />
-            <SummaryCell label="Task billing (auto-updated)" value={campaignTask ? inr(campaignTask.billing_amount, 2) : '—'} />
+            {viewBilling && (
+              <>
+                <SummaryCell label="Billing basis" value={`${inr(basis, 2)}${hasAllocations ? '' : ' (estimated)'}`} />
+                <SummaryCell
+                  label="Service charge"
+                  value={`${inr(serviceCharge, 2)}${project.service_charge_type === 'percent' ? ` (${project.service_charge_value}%)` : ''}`}
+                />
+                <SummaryCell label="Task billing (auto-updated)" value={campaignTask ? inr(campaignTask.billing_amount, 2) : '—'} />
+              </>
+            )}
           </div>
         </>
       )}

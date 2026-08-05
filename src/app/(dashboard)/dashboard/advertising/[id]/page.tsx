@@ -41,14 +41,20 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       .order('created_at', { ascending: false }),
   ])
 
-  // The money layer is confidential — manage_budget implies seeing it.
+  // Two confidentiality layers (migration 027) — manage_budget implies both.
+  // Campaign allocations are behind NEITHER: they are the campaign's working
+  // budget and every advertising.view holder sees them.
   const viewFinancials = isAdmin
     || hasPermission(me, PERMS.ADVERTISING_VIEW_FINANCIALS)
     || hasPermission(me, PERMS.ADVERTISING_MANAGE_BUDGET)
+  const viewBilling = isAdmin
+    || hasPermission(me, PERMS.ADVERTISING_VIEW_BILLING)
+    || hasPermission(me, PERMS.ADVERTISING_MANAGE_BUDGET)
 
-  const allocSupported = viewFinancials && !allocRes.error
-  // Client campaigns read the client wallet; company (internal) campaigns read
-  // the company wallet (client_id NULL rows — migration 20260714093000).
+  const allocSupported = !allocRes.error
+  // Wallet balances are the wallet layer (view_financials). Client campaigns
+  // read the client wallet; company (internal) campaigns read the company
+  // wallet (client_id NULL rows — migration 20260714093000).
   const wallet = !viewFinancials
     ? null
     : project.client_id
@@ -63,17 +69,18 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     enterMetrics:   isAdmin || hasPermission(me, PERMS.ADVERTISING_ENTER_METRICS) || hasPermission(me, PERMS.ADVERTISING_EDIT),
     approveMetrics: isAdmin || hasPermission(me, PERMS.ADVERTISING_APPROVE_METRICS),
     viewFinancials,
+    viewBilling,
   }
 
-  // Server-side strip for handlers without view_financials: the service-charge
-  // terms on the project row, task billing amounts, invoices, allocations and
-  // client price overrides never reach the browser. Stripping here (not at
-  // render) keeps them out of the RSC payload entirely.
-  const safeProject = viewFinancials ? project : {
+  // Server-side strip for viewers without view_billing: the service-charge
+  // terms on the project row, task billing amounts, invoices and rate cards
+  // never reach the browser. Stripping here (not at render) keeps them out of
+  // the RSC payload entirely.
+  const safeProject = viewBilling ? project : {
     ...project, service_charge_type: null, service_charge_value: null, tax_percent: null,
   }
   const tasks = (tasksRes.data || []).map((r: any) => r.task).filter(Boolean)
-  const safeTasks = viewFinancials ? tasks : tasks.map((t: any) => ({ ...t, billing_amount: null }))
+  const safeTasks = viewBilling ? tasks : tasks.map((t: any) => ({ ...t, billing_amount: null }))
 
   return (
     <ProjectDetailClient
@@ -81,12 +88,12 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       metrics={metricsRes.data || []}
       tasks={safeTasks}
       notes={notesRes.data || []}
-      invoice={viewFinancials ? ((invoiceRes.data as any) || null) : null}
-      services={viewFinancials
+      invoice={viewBilling ? ((invoiceRes.data as any) || null) : null}
+      services={viewBilling
         ? (servicesRes.data || [])
         : (servicesRes.data || []).map((s: any) => ({ ...s, default_price: null }))}
-      servicePricing={viewFinancials ? (pricingRes.data || []) : []}
-      allocations={viewFinancials ? ((allocRes.data as any) || []) : []}
+      servicePricing={viewBilling ? (pricingRes.data || []) : []}
+      allocations={(allocRes.data as any) || []}
       wallet={wallet}
       allocSupported={allocSupported}
       perms={perms}
