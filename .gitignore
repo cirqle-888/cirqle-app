@@ -70,3 +70,4 @@ backfill-baseline-*.json
 
 # Figma plugin build output
 figma-plugin/**/dist/
+figma-plugin/*.zip

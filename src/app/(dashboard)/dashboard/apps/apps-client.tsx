@@ -5,9 +5,9 @@ import Link from 'next/link'
 import Header from '@/components/layout/header'
 import {
   Inbox, Tag, Settings as SettingsIcon, ArrowRight,
-  Sparkles, Link2, Copy, Check, MessageCircle, Users, ExternalLink,
-  Megaphone, Shield, ArrowUpRight, BarChart3, CreditCard,
-  CheckCircle, Paintbrush, FileText, Image as ImageIcon, Briefcase,
+  Sparkles, Link2, Copy, Check, Users, ExternalLink,
+  Shield, ArrowUpRight, BarChart3,
+  Paintbrush, Image as ImageIcon, Briefcase,
   BadgePercent,
 } from 'lucide-react'
 import { INTAKE_KIND_META } from '@/lib/services/intake'
@@ -155,10 +155,10 @@ function ClientHubHero({ clients }: { clients: MultiServiceClient[] }) {
 
 // ─── 2. Client Portals ────────────────────────────────────────────────────────
 
-function ClientPortalCard({ 
-  title, description, icon: Icon, configHref, count, isMock 
-}: { 
-  title: string, description: string, icon: any, configHref: string, count: number, isMock?: boolean 
+function ClientPortalCard({
+  title, description, icon: Icon, configHref, count
+}: {
+  title: string, description: string, icon: any, configHref: string, count: number
 }) {
   return (
     <div className="rounded-2xl border border-border/80 bg-card p-6 flex flex-col shadow-sm transition-shadow hover:shadow-md">
@@ -184,15 +184,15 @@ function ClientPortalCard({
       
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-2">
-          <button disabled={isMock} className="inline-flex justify-center items-center gap-1.5 rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground hover:bg-secondary transition-colors disabled:opacity-50">
+          <button className="inline-flex justify-center items-center gap-1.5 rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground hover:bg-secondary transition-colors disabled:opacity-50">
             <Link2 className="w-3.5 h-3.5" /> Generate Link
           </button>
-          <button disabled={isMock} className="inline-flex justify-center items-center gap-1.5 rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground hover:bg-secondary transition-colors disabled:opacity-50">
+          <button className="inline-flex justify-center items-center gap-1.5 rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground hover:bg-secondary transition-colors disabled:opacity-50">
             <Copy className="w-3.5 h-3.5" /> Copy Link
           </button>
         </div>
         <div className="flex items-center justify-between pt-3 border-t border-border/50">
-           <button disabled={isMock} className="text-xs font-medium text-muted-foreground hover:text-foreground inline-flex items-center gap-1 transition-colors disabled:opacity-50">
+           <button className="text-xs font-medium text-muted-foreground hover:text-foreground inline-flex items-center gap-1 transition-colors disabled:opacity-50">
              Open Portal <ArrowUpRight className="w-3 h-3" />
            </button>
            <Link href={configHref} className="text-xs font-medium text-violet-600 dark:text-violet-400 hover:text-violet-700 inline-flex items-center gap-1 transition-colors">
@@ -228,31 +228,6 @@ function InternalModules() {
           </div>
           <p className="text-xs text-muted-foreground leading-relaxed">{mod.description}</p>
         </Link>
-      ))}
-    </div>
-  )
-}
-
-// ─── 4. Coming Soon ───────────────────────────────────────────────────────────
-
-const COMING_SOON = [
-  { label: 'Client Reports', icon: FileText },
-  { label: 'Approvals', icon: CheckCircle },
-  { label: 'Billing Portal', icon: CreditCard },
-  { label: 'Brand Guidelines', icon: Paintbrush },
-  { label: 'Campaign Dashboard', icon: BarChart3 },
-  { label: 'Feedback Center', icon: MessageCircle },
-]
-
-function ComingSoon() {
-  return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
-      {COMING_SOON.map(mod => (
-        <div key={mod.label} className="rounded-xl border border-dashed border-border/50 bg-secondary/10 p-5 opacity-70 flex flex-col items-center text-center select-none">
-          <mod.icon className="w-5 h-5 text-muted-foreground mb-3" />
-          <h4 className="text-xs font-medium text-foreground mb-1.5">{mod.label}</h4>
-          <span className="text-[9px] uppercase tracking-wider font-semibold text-muted-foreground px-2 py-0.5 rounded-full bg-secondary border border-border/50">Coming Soon</span>
-        </div>
       ))}
     </div>
   )
@@ -295,14 +270,6 @@ export default function AppsClient({ clientCounts, multiServiceClients = [] }: {
                configHref="/dashboard/apps/standard-request"
                count={clientCounts['request_portal'] || 0}
             />
-            <ClientPortalCard
-               title="Advertising Request"
-               description="Clients submit new paid media and advertising campaign requests."
-               icon={Megaphone}
-               configHref="/dashboard/advertising"
-               count={clientCounts['advertising_req'] || 0}
-               isMock={true}
-            />
           </div>
         </section>
 
@@ -313,15 +280,6 @@ export default function AppsClient({ clientCounts, multiServiceClients = [] }: {
              <p className="text-sm text-muted-foreground mt-1">Tools and dashboards for your internal operations team.</p>
           </div>
           <InternalModules />
-        </section>
-
-        {/* 4. Coming Soon */}
-        <section className="space-y-5 pt-2">
-          <div>
-             <h2 className="text-lg font-semibold text-foreground tracking-tight">Coming Soon</h2>
-             <p className="text-sm text-muted-foreground mt-1">Future modules planned for the Client Hub ecosystem.</p>
-          </div>
-          <ComingSoon />
         </section>
 
       </div>
