@@ -37,6 +37,9 @@ function timeLabel(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })
 }
 
+/** Panel width. Also published as --side-panel-w so a host modal can make room. */
+const PANEL_W = 400
+
 const KIND_CHIP: Record<string, { icon: typeof Mic; label: string }> = {
   voice:    { icon: Mic,            label: 'Voice note' },
   file:     { icon: Paperclip,      label: 'Attachment' },
@@ -68,6 +71,36 @@ export function DiscussPanel({ entityType, entityId, title, onClose }: {
 
   // createPortal needs a real document — defer past SSR/hydration.
   useEffect(() => { setMounted(true) }, [])
+
+  /**
+   * Don't cover the dialog this panel was opened FROM.
+   *
+   * A <ModalOverlay> centres its dialog in the viewport, so this fixed
+   * slide-over lands on top of it — hiding the very item being discussed.
+   * While the panel is open, reserve its width on the overlay's right edge;
+   * the dialog re-centres into the space that's left and both stay readable.
+   *
+   * Done imperatively rather than in CSS so it needs no stylesheet rebuild and
+   * stays colocated with the panel that causes it. Restored on unmount.
+   *
+   * Only from `md` up — a narrower viewport can't show both, and there the
+   * panel is meant to cover as a sheet.
+   */
+  useEffect(() => {
+    if (!window.matchMedia('(min-width: 768px)').matches) return
+    const overlays = [...document.querySelectorAll<HTMLElement>('[data-modal-overlay]')]
+    const previous = overlays.map(el => el.style.paddingRight)
+    for (const el of overlays) {
+      el.style.transition = 'padding-right 200ms cubic-bezier(0.4, 0, 0.2, 1)'
+      el.style.paddingRight = `calc(1rem + ${PANEL_W}px)`
+    }
+    return () => {
+      overlays.forEach((el, i) => {
+        el.style.paddingRight = previous[i]
+        el.style.transition = ''
+      })
+    }
+  }, [])
 
   const scrollToBottom = useCallback(() => {
     // Defer so the new row has painted before we measure.
@@ -184,15 +217,28 @@ export function DiscussPanel({ entityType, entityId, title, onClose }: {
   // Portalled to <body>: mounts live inside headings and modal subtrees, where
   // an inline <aside role="dialog"> would be invalid HTML and would inherit the
   // host's stacking context.
+  // A React portal still bubbles events through the REACT tree, not the DOM
+  // tree. When a <DiscussButton> is mounted inside a <ModalOverlay> (the social
+  // calendar's Edit-item dialog), that overlay's outside-click handler sees the
+  // portal's mousedown, finds the target outside its content ref, and closes the
+  // host modal — taking this panel down with it. Below `md` the backdrop covers
+  // the viewport, so EVERY click did it. Stop mousedown at the portal boundary:
+  // clicks inside the panel are never "outside" some ancestor dialog.
+  const stopHostClose = (e: React.MouseEvent) => e.stopPropagation()
+
   return createPortal(
     <>
       {/* Backdrop — mobile only. On desktop the page must stay clickable: a
           transparent full-screen catcher would swallow the first click on
           everything behind it, which is the opposite of a chatter panel. */}
-      <div className="fixed inset-0 z-[140] bg-black/30 md:hidden" onClick={onClose} />
+      <div className="fixed inset-0 z-[140] bg-black/30 md:hidden"
+        onMouseDown={stopHostClose} onClick={e => { e.stopPropagation(); onClose() }} />
 
       <aside
-        className="fixed inset-y-0 right-0 z-[150] flex w-full max-w-[400px] flex-col border-l border-border bg-background shadow-2xl"
+        onMouseDown={stopHostClose}
+        onClick={stopHostClose}
+        style={{ maxWidth: PANEL_W }}
+        className="fixed inset-y-0 right-0 z-[150] flex w-full flex-col border-l border-border bg-background shadow-2xl"
         role="dialog" aria-label="Discussion panel"
       >
         {/* Header */}
@@ -200,7 +246,8 @@ export function DiscussPanel({ entityType, entityId, title, onClose }: {
           <MessageSquare className="h-4 w-4 shrink-0 text-violet-500" />
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold">{title || 'Discussion'}</p>
-            <p className="text-[11px] text-muted-foreground capitalize">{entityType} discussion</p>
+            {/* `capitalize` alone renders the raw key — "Plan_item discussion". */}
+            <p className="text-[11px] text-muted-foreground capitalize">{entityType.replace(/_/g, ' ')} discussion</p>
           </div>
           <button
             onClick={() => convId && router.push(`/dashboard/chat?c=${convId}`)}

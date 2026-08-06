@@ -1419,10 +1419,10 @@ export async function listClientsForChat(): Promise<Result<{ id: string; name: s
   return { ok: true, data: (data ?? []).map(c => ({ id: c.id, name: c.name ?? '' })) }
 }
 
-export type DiscussEntityType = 'task' | 'project' | 'request' | 'client' | 'plan'
+export type DiscussEntityType = 'task' | 'project' | 'request' | 'client' | 'plan' | 'plan_item'
 
 /** Conversation types that are auto-created per CRM record, not by a person. */
-const ENTITY_CONV_TYPES = ['task', 'project', 'request', 'client', 'plan']
+const ENTITY_CONV_TYPES = ['task', 'project', 'request', 'client', 'plan', 'plan_item']
 
 const ENTITY_TABLE: Record<DiscussEntityType, {
   table: string; labelCol: string; convCol: string; labelSelect?: string
@@ -1445,6 +1445,26 @@ const ENTITY_TABLE: Record<DiscussEntityType, {
   plan:    { table: 'social_calendars', labelCol: 'title',         convCol: 'plan_id',
              labelSelect: 'id, title, month, client_id, client:clients(name)',
              viewPerms: [PERMS.SOCIAL_VIEW] },
+  // A SINGLE item inside a month plan — one room per post/story, so a debate
+  // about one caption doesn't bury the whole month's plan room. The owning
+  // client hangs off the parent calendar, not the item, hence the join.
+  plan_item: { table: 'social_calendar_items', labelCol: 'title',  convCol: 'plan_item_id',
+             labelSelect: 'id, title, scheduled_date, calendar_id, calendar:social_calendars(client_id, month, client:clients(name))',
+             viewPerms: [PERMS.SOCIAL_VIEW] },
+}
+
+/**
+ * The client that owns an entity — used to file the room under that client's
+ * channel. Most entities carry `client_id` directly; a plan item inherits it
+ * from its parent calendar.
+ */
+function ownerClientIdOf(entityType: DiscussEntityType, entityId: string, entity: Record<string, unknown>): string | null {
+  if (entityType === 'client') return entityId
+  if (entityType === 'plan_item') {
+    const cal = entity.calendar as { client_id?: string } | { client_id?: string }[] | null
+    return (Array.isArray(cal) ? cal[0]?.client_id : cal?.client_id) ?? null
+  }
+  return (entity.client_id as string | null) ?? null
 }
 
 /** Compose a room name for entities whose label column may be empty. */
@@ -1458,6 +1478,14 @@ function entityLabel(entityType: DiscussEntityType, entity: Record<string, unkno
       ? new Date(entity.month + 'T00:00:00').toLocaleString('en-IN', { month: 'short', year: 'numeric' })
       : ''
     return `${clientName}${month ? ` — ${month}` : ''}`
+  }
+  if (entityType === 'plan_item') {
+    // An untitled item is still a real card on the calendar; name the room by
+    // its date so it's identifiable in the sidebar rather than "plan_item".
+    const day = typeof entity.scheduled_date === 'string'
+      ? new Date(entity.scheduled_date + 'T00:00:00').toLocaleString('en-IN', { day: 'numeric', month: 'short' })
+      : ''
+    return day ? `Untitled — ${day}` : 'Untitled item'
   }
   return entityType
 }
@@ -1528,9 +1556,7 @@ export async function getOrCreateEntityConversation(
   if (!convId) {
     // Stamp the owning client so the sidebar can file this discussion under
     // that client's channel instead of one flat "Discussions" pile.
-    const ownerClientId = entityType === 'client'
-      ? entityId
-      : (entity.client_id as string | null) ?? null
+    const ownerClientId = ownerClientIdOf(entityType, entityId, entity)
 
     const { data: conv, error } = await admin
       .from('conversations')
@@ -1548,6 +1574,9 @@ export async function getOrCreateEntityConversation(
       // column. PostgREST reports an unknown insert column as PGRST204.
       if (entityType === 'plan' && (error.code === 'PGRST204' || /plan_id/.test(error.message))) {
         return { ok: false, error: 'Plan discussions need migration 026_chat_plan_discussions.sql — run it in the Supabase SQL editor first.' }
+      }
+      if (entityType === 'plan_item' && (error.code === 'PGRST204' || /plan_item_id/.test(error.message))) {
+        return { ok: false, error: 'Per-item discussions need migration 20260806090000_chat_plan_item_discussions.sql — run it in the Supabase SQL editor first.' }
       }
       // Unique-index race: someone created it between our lookup and insert.
       // Only a LIVE room is a valid race winner — an archived hit here would

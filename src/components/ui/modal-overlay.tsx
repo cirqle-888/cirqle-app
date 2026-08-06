@@ -140,6 +140,10 @@ export function ModalOverlay({
 
   return (
     <div
+      // Hook for the side-panel coexistence rule in globals.css: when a
+      // slide-over (Discuss) is open, it reserves room on the right so this
+      // dialog shifts left instead of being covered.
+      data-modal-overlay
       className={`fixed inset-0 ${zIndex} flex ${alignment} bg-black/60 backdrop-blur-sm ${padding} ${className}`}
       onMouseDown={e => {
         if (!isConfirmation && contentRef.current && !contentRef.current.contains(e.target as Node)) {

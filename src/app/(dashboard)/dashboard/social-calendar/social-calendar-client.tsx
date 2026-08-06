@@ -1865,6 +1865,17 @@ export default function SocialCalendarClient({
             </div>
 
             <div className="flex flex-wrap gap-2 px-5 py-4 border-t border-border">
+              {/* Per-item discussion — its own room, separate from the month
+                  plan's. Edit mode only: an unsaved item has no id to hang a
+                  conversation off. */}
+              {itemModal.mode === 'edit' && itemModal.itemId && (
+                <DiscussButton
+                  entityType="plan_item"
+                  entityId={itemModal.itemId}
+                  label="Discuss"
+                  panelTitle={itemForm.title?.trim() || 'Calendar item'}
+                />
+              )}
               {itemModal.mode === 'edit' && !editingFrozen && (
                 <button
                   onClick={() => removeItem(itemModal.itemId!)}
