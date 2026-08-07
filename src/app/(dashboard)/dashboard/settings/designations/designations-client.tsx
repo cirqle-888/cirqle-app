@@ -6,6 +6,7 @@ import { Plus, Trash2, Save, Check, X, ChevronDown, ChevronLeft, ShieldAlert } f
 import { usePermissions } from '@/contexts/permission-context'
 import { CRITICAL_PERMS } from '@/lib/permissions/keys'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import {
   createDesignation,
@@ -94,6 +95,19 @@ export default function DesignationsClient(props: Props) {
 
   const [showNewModal, setShowNewModal] = useState(false)
 
+  // In-app confirmation. NOT window.confirm: the desktop shell and embedded
+  // browser views return false from it immediately without ever showing a
+  // dialog, which silently swallowed every "grant a CRITICAL permission" and
+  // every designation delete — the toggle simply refused to move with no
+  // error and nothing in the console.
+  const [confirmPrompt, setConfirmPrompt] = useState<{
+    title: string
+    body: string
+    confirmLabel: string
+    danger?: boolean
+    onConfirm: () => void
+  } | null>(null)
+
   // Mobile-only pane switcher. The desktop layout always shows both panes
   // side by side; on phones we show one at a time so neither gets squeezed
   // into ~50% of an already-narrow screen. Defaults to 'list' so users see
@@ -149,12 +163,30 @@ export default function DesignationsClient(props: Props) {
     if (nextAllowed && criticalPermIds.has(permissionId)) {
       const perm = props.permissions.find(p => p.id === permissionId)
       const members = props.memberCounts[designationId] ?? 0
-      if (!confirm(
-        `“${perm?.label ?? 'This permission'}” is CRITICAL access — it exposes confidential pricing, earnings or personal data.\n\n` +
-        `Everyone with the “${designation.name}” designation${members ? ` (${members} ${members === 1 ? 'member' : 'members'})` : ''} will get it.\n\nGrant it?`,
-      )) return
+      setConfirmPrompt({
+        title: `Grant “${perm?.label ?? 'this permission'}”?`,
+        // The permission's OWN description, not a blanket "exposes pricing,
+        // earnings or personal data" — that over-warned on keys carrying no
+        // money at all (contributions.view_unit widens whose score rows you
+        // see; the ₹ per row stays behind contributions.view_earnings). A
+        // confirmation that overstates what it is guarding trains people to
+        // click through it.
+        body:
+          'Critical access. ' +
+          `${perm?.description ? perm.description.trim() + ' ' : ''}` +
+          `Everyone with the “${designation.name}” designation${members ? ` (${members} ${members === 1 ? 'member' : 'members'})` : ''} will get it.`,
+        confirmLabel: 'Grant',
+        danger: true,
+        onConfirm: () => applyToggle(designationId, permissionId, nextAllowed),
+      })
+      return
     }
 
+    applyToggle(designationId, permissionId, nextAllowed)
+  }
+
+  /** The flip itself, split out so the confirm dialog can resume it. */
+  function applyToggle(designationId: string, permissionId: string, nextAllowed: boolean) {
     // Optimistic flip.
     setAssignmentMap(prev => {
       const next = { ...prev }
@@ -193,14 +225,26 @@ export default function DesignationsClient(props: Props) {
     return true
   }
 
-  async function handleDelete(id: string) {
+  function handleDelete(id: string) {
     const d = designations.find(x => x.id === id)
     if (!d) return
     if (d.is_system) {
       toastError('System designations cannot be deleted.')
       return
     }
-    if (!confirm(`Delete designation “${d.name}”? This cannot be undone.`)) return
+    const members = props.memberCounts[id] ?? 0
+    setConfirmPrompt({
+      title: `Delete “${d.name}”?`,
+      body: members
+        ? `${members} ${members === 1 ? 'person holds' : 'people hold'} this designation. This cannot be undone.`
+        : 'This cannot be undone.',
+      confirmLabel: 'Delete',
+      danger: true,
+      onConfirm: () => { void applyDelete(id) },
+    })
+  }
+
+  async function applyDelete(id: string) {
     const res = await deleteDesignation(id)
     if (!res.ok) {
       toastError('Delete failed', res.error)
@@ -351,6 +395,17 @@ export default function DesignationsClient(props: Props) {
             const ok = await handleCreate(input)
             if (ok) setShowNewModal(false)
           }}
+        />
+      )}
+
+      {confirmPrompt && (
+        <ConfirmDialog
+          title={confirmPrompt.title}
+          body={confirmPrompt.body}
+          confirmLabel={confirmPrompt.confirmLabel}
+          danger={confirmPrompt.danger}
+          onConfirm={() => { const run = confirmPrompt.onConfirm; setConfirmPrompt(null); run() }}
+          onCancel={() => setConfirmPrompt(null)}
         />
       )}
 

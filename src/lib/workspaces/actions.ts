@@ -56,11 +56,13 @@ function mapWorkspace(r: any, memberIds: string[] = []): Workspace {
 }
 
 /**
- * Workspaces the caller may see: managers get all (they administer them),
- * everyone else gets the system row plus the ones they are actually assigned
- * to. Listing every workspace to every employee put "Accounts", "HR & Hiring"
- * and friends in a social-media executive's switcher — dead entries, since
- * switchWorkspace() rejects a non-member anyway.
+ * Workspaces the caller may see: managers get all (they administer them).
+ * Everyone else gets exactly the workspaces they are assigned to — including
+ * NOT the "All Workspace" system row once they have at least one assignment.
+ * An employee with a curated workspace should live in it, not next to an
+ * everything-view that defeats the curation; the system row remains only as
+ * the fallback for employees no one has assigned anywhere yet (without it
+ * they would have no nav config at all).
  *
  * Membership ids are part of the workspace's configuration, so they only ride
  * along for managers; a plain member has no business seeing who else is in.
@@ -88,10 +90,13 @@ export async function listWorkspaces(): Promise<Result<Workspace[]>> {
     membersByWs.get(m.workspace_id)!.push(m.employee_id)
   }
 
+  const mine = (rows ?? []).filter(r => (membersByWs.get(r.id) ?? []).includes(auth.me.employeeId))
   const visible = manager
     ? (rows ?? [])
-    : (rows ?? []).filter(r =>
-        r.is_system || (membersByWs.get(r.id) ?? []).includes(auth.me.employeeId))
+    // Assigned somewhere → only those. Assigned nowhere → the system fallback.
+    : mine.length > 0
+      ? mine
+      : (rows ?? []).filter(r => r.is_system)
 
   return { ok: true, data: visible.map(r => mapWorkspace(r, manager ? membersByWs.get(r.id) ?? [] : [])) }
 }
@@ -206,8 +211,23 @@ export async function switchWorkspace(workspaceId: string | null): Promise<Resul
   const me = auth.me
   const admin = createAdminClient()
 
+  // Mirror of listWorkspaces' visibility rule: an assigned employee lives in
+  // their assigned workspaces — the "All Workspace" system row is reachable
+  // only by managers and by employees with no assignment (their fallback).
+  // Enforced here too so a stale switcher can't route around the list filter.
+  const systemAllowed = async (): Promise<boolean> => {
+    if (canManage(me)) return true
+    const { count } = await admin.from('workspace_members')
+      .select('workspace_id', { count: 'exact', head: true })
+      .eq('employee_id', me.employeeId)
+    return (count ?? 0) === 0
+  }
+
   if (workspaceId === null) {
     // Explicit "All Workspace" — resolve the system row's landing href.
+    if (!(await systemAllowed())) {
+      return { ok: false, error: 'You are assigned to specific workspaces — pick one of those.' }
+    }
     const { data: sys } = await admin.from('workspaces').select('id, default_landing_href').eq('is_system', true).maybeSingle()
     await admin.from('employees').update({ current_workspace_id: sys?.id ?? null }).eq('id', me.employeeId)
     revalidatePath('/dashboard')
@@ -217,7 +237,11 @@ export async function switchWorkspace(workspaceId: string | null): Promise<Resul
   const { data: ws } = await admin.from('workspaces').select('id, is_system, default_landing_href').eq('id', workspaceId).maybeSingle()
   if (!ws) return { ok: false, error: 'Workspace not found.' }
 
-  if (!ws.is_system && !me.isAdmin) {
+  if (ws.is_system) {
+    if (!(await systemAllowed())) {
+      return { ok: false, error: 'You are assigned to specific workspaces — pick one of those.' }
+    }
+  } else if (!me.isAdmin) {
     const { data: member } = await admin.from('workspace_members')
       .select('employee_id').eq('workspace_id', workspaceId).eq('employee_id', me.employeeId).maybeSingle()
     if (!member) return { ok: false, error: 'You do not have access to that workspace.' }
