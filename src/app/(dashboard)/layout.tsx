@@ -66,7 +66,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const FALLBACK_ALL_WORKSPACE = {
     id: '', name: 'All Workspace', icon: 'LayoutGrid', color: 'slate',
     sidebarModuleHrefs: null, dashboardWidgetKeys: null,
-    defaultLandingHref: '/dashboard', isSystem: true, memberIds: [],
+    defaultLandingHref: '/dashboard', isSystem: true,
+    ownerEmployeeId: null, memberIds: [],
   }
   const wsState = meResult.user
     ? await getMyWorkspaceState().catch(() => null)

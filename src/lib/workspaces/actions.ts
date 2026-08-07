@@ -25,8 +25,13 @@ export interface Workspace {
   dashboardWidgetKeys: string[] | null  // null = all widgets
   defaultLandingHref: string
   isSystem: boolean
+  /** Set = a PERSONAL workspace, designed and editable by that employee alone. */
+  ownerEmployeeId: string | null
   memberIds: string[]
 }
+
+/** Enough for real use, low enough that the switcher stays a list, not a search problem. */
+const PERSONAL_WORKSPACE_LIMIT = 5
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string }
 
@@ -51,6 +56,8 @@ function mapWorkspace(r: any, memberIds: string[] = []): Workspace {
     dashboardWidgetKeys: r.dashboard_widget_keys?.length ? r.dashboard_widget_keys : null,
     defaultLandingHref: r.default_landing_href,
     isSystem: r.is_system,
+    // Tolerant read: pre-migration rows simply have no owner column.
+    ownerEmployeeId: r.owner_employee_id ?? null,
     memberIds,
   }
 }
@@ -73,9 +80,11 @@ export async function listWorkspaces(): Promise<Result<Workspace[]>> {
   const manager = canManage(auth.me)
   const admin = createAdminClient()
 
+  // '*' keeps this working before the personal-workspaces migration adds
+  // owner_employee_id — mapWorkspace reads the column tolerantly.
   const { data: rows, error } = await admin
     .from('workspaces')
-    .select('id, name, icon, color, sidebar_module_hrefs, dashboard_widget_keys, default_landing_href, is_system')
+    .select('*')
     .order('is_system', { ascending: false })
     .order('name', { ascending: true })
   if (error) return { ok: false, error: error.message }
@@ -90,9 +99,16 @@ export async function listWorkspaces(): Promise<Result<Workspace[]>> {
     membersByWs.get(m.workspace_id)!.push(m.employee_id)
   }
 
-  const mine = (rows ?? []).filter(r => (membersByWs.get(r.id) ?? []).includes(auth.me.employeeId))
+  // Another employee's PERSONAL workspace is their private UI arrangement —
+  // it appears in nobody else's list, not even a manager's (managers
+  // administer the SHARED workspaces; personal ones have their own owner).
+  const notOthersPersonal = (r: { owner_employee_id?: string | null }) =>
+    (r.owner_employee_id ?? null) === null || r.owner_employee_id === auth.me.employeeId
+
+  const mine = (rows ?? []).filter(r =>
+    notOthersPersonal(r) && (membersByWs.get(r.id) ?? []).includes(auth.me.employeeId))
   const visible = manager
-    ? (rows ?? [])
+    ? (rows ?? []).filter(notOthersPersonal)
     // Assigned somewhere → only those. Assigned nowhere → the system fallback.
     : mine.length > 0
       ? mine
@@ -112,11 +128,24 @@ export async function createWorkspace(input: {
 }): Promise<Result<{ id: string }>> {
   const auth = await requireUser()
   if (!auth.ok) return auth
-  if (!canManage(auth.me)) return { ok: false, error: 'You do not have permission to manage workspaces.' }
+  const manager = canManage(auth.me)
   const name = (input.name || '').trim()
   if (!name) return { ok: false, error: 'A name is required.' }
 
   const admin = createAdminClient()
+
+  // Non-managers create PERSONAL workspaces: owned by them, membered by them,
+  // capped. Safe because a workspace only ever subtracts from the nav their
+  // permissions already allow — designing their own can reveal nothing.
+  if (!manager) {
+    const { count } = await admin.from('workspaces')
+      .select('id', { count: 'exact', head: true })
+      .eq('owner_employee_id', auth.me.employeeId)
+    if ((count ?? 0) >= PERSONAL_WORKSPACE_LIMIT) {
+      return { ok: false, error: `You can keep up to ${PERSONAL_WORKSPACE_LIMIT} personal workspaces — delete one first.` }
+    }
+  }
+
   const { data: ws, error } = await admin.from('workspaces').insert({
     name,
     icon: input.icon || 'LayoutGrid',
@@ -125,12 +154,23 @@ export async function createWorkspace(input: {
     dashboard_widget_keys: input.dashboardWidgetKeys?.length ? input.dashboardWidgetKeys : null,
     default_landing_href: input.defaultLandingHref || '/dashboard',
     created_by: auth.me.employeeId,
+    ...(manager ? {} : { owner_employee_id: auth.me.employeeId }),
   }).select('id').single()
-  if (error) return { ok: false, error: error.message }
+  if (error) {
+    // Pre-migration: the owner column doesn't exist yet, so personal creation
+    // isn't available. Shared creation (managers) is untouched.
+    if (!manager && /owner_employee_id/.test(error.message)) {
+      return { ok: false, error: 'Personal workspaces are not enabled yet — ask your admin to run the latest migration.' }
+    }
+    return { ok: false, error: error.message }
+  }
 
-  if (input.memberIds.length) {
+  // A personal workspace's one member is its owner — that member row is what
+  // every existing read (visibility filter, switch guard) keys off.
+  const memberIds = manager ? input.memberIds : [auth.me.employeeId]
+  if (memberIds.length) {
     await admin.from('workspace_members').insert(
-      input.memberIds.map(employeeId => ({ workspace_id: ws.id, employee_id: employeeId })),
+      memberIds.map(employeeId => ({ workspace_id: ws.id, employee_id: employeeId })),
     )
   }
   revalidatePath('/dashboard/settings/workspaces')
@@ -148,11 +188,21 @@ export async function updateWorkspace(id: string, input: {
 }): Promise<Result<null>> {
   const auth = await requireUser()
   if (!auth.ok) return auth
-  if (!canManage(auth.me)) return { ok: false, error: 'You do not have permission to manage workspaces.' }
 
   const admin = createAdminClient()
-  const { data: existing } = await admin.from('workspaces').select('is_system').eq('id', id).maybeSingle()
+  const { data: existing } = await admin.from('workspaces').select('*').eq('id', id).maybeSingle()
   if (!existing) return { ok: false, error: 'Workspace not found.' }
+
+  // Managers edit shared workspaces; an owner edits their own personal one.
+  // A manager does NOT edit someone else's personal workspace — it is that
+  // person's private UI arrangement, and there is nothing to administer in it.
+  const owner = (existing.owner_employee_id ?? null) as string | null
+  const isOwnPersonal = owner !== null && owner === auth.me.employeeId
+  if (owner !== null && !isOwnPersonal) return { ok: false, error: 'This is someone else’s personal workspace.' }
+  if (owner === null && !canManage(auth.me)) {
+    return { ok: false, error: 'You do not have permission to manage workspaces.' }
+  }
+
   if (existing.is_system && (input.name !== undefined)) {
     return { ok: false, error: '"All Workspace" cannot be renamed.' }
   }
@@ -169,11 +219,17 @@ export async function updateWorkspace(id: string, input: {
   const { error } = await admin.from('workspaces').update(upd).eq('id', id)
   if (error) return { ok: false, error: error.message }
 
-  if (input.memberIds !== undefined) {
+  // Personal workspaces have exactly one member — the owner. Whatever a
+  // client sends, membership never changes, so a personal workspace can never
+  // quietly become a shared one.
+  const memberIds = isOwnPersonal
+    ? undefined
+    : input.memberIds
+  if (memberIds !== undefined) {
     await admin.from('workspace_members').delete().eq('workspace_id', id)
-    if (input.memberIds.length) {
+    if (memberIds.length) {
       await admin.from('workspace_members').insert(
-        input.memberIds.map(employeeId => ({ workspace_id: id, employee_id: employeeId })),
+        memberIds.map(employeeId => ({ workspace_id: id, employee_id: employeeId })),
       )
     }
   }
@@ -184,12 +240,20 @@ export async function updateWorkspace(id: string, input: {
 export async function deleteWorkspace(id: string): Promise<Result<null>> {
   const auth = await requireUser()
   if (!auth.ok) return auth
-  if (!canManage(auth.me)) return { ok: false, error: 'You do not have permission to manage workspaces.' }
 
   const admin = createAdminClient()
-  const { data: existing } = await admin.from('workspaces').select('is_system').eq('id', id).maybeSingle()
+  const { data: existing } = await admin.from('workspaces').select('*').eq('id', id).maybeSingle()
   if (!existing) return { ok: false, error: 'Workspace not found.' }
   if (existing.is_system) return { ok: false, error: '"All Workspace" cannot be deleted.' }
+
+  // Same ownership rule as updateWorkspace.
+  const owner = (existing.owner_employee_id ?? null) as string | null
+  if (owner !== null && owner !== auth.me.employeeId) {
+    return { ok: false, error: 'This is someone else’s personal workspace.' }
+  }
+  if (owner === null && !canManage(auth.me)) {
+    return { ok: false, error: 'You do not have permission to manage workspaces.' }
+  }
 
   // Anyone currently on this workspace falls back to "All Workspace".
   await admin.from('employees').update({ current_workspace_id: null }).eq('current_workspace_id', id)

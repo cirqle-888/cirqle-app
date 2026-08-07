@@ -26,18 +26,29 @@ const ALL_NAV_ITEMS = navSections.flatMap(s => s.items.map(i => ({ ...i, section
 /** CQID only — employee names are private and never fetched for this picker. */
 interface Employee { id: string; cqid: string }
 
-export function WorkspacesClient({ initialWorkspaces, employees }: {
+export function WorkspacesClient({ initialWorkspaces, employees, canManage, myEmployeeId }: {
   initialWorkspaces: Workspace[]
   employees: Employee[]
+  canManage: boolean
+  myEmployeeId: string
 }) {
   const [list, setList] = useState<Workspace[]>(initialWorkspaces)
   const [editing, setEditing] = useState<Workspace | 'new' | null>(null)
   const { toasts, dismiss, success: toastSuccess, error: toastErr } = useToast()
   const [, startTransition] = useTransition()
 
+  const isMine = (ws: Workspace) => ws.ownerEmployeeId === myEmployeeId
+  // Managers administer the shared workspaces (plus any personal ones of their
+  // own). Everyone else sees ONLY their personal workspaces here — the shared
+  // ones they're assigned to are someone else's to configure.
+  const shown = canManage ? list : list.filter(isMine)
+  const editable = (ws: Workspace) => (canManage && ws.ownerEmployeeId === null) || isMine(ws)
+
   const remove = (ws: Workspace) => {
     if (ws.isSystem) return
-    if (!confirm(`Delete workspace "${ws.name}"? Anyone using it falls back to "All Workspace".`)) return
+    if (!confirm(isMine(ws)
+      ? `Delete your workspace "${ws.name}"?`
+      : `Delete workspace "${ws.name}"? Anyone using it falls back to "All Workspace".`)) return
     setList(prev => prev.filter(w => w.id !== ws.id))
     startTransition(async () => {
       const res = await deleteWorkspace(ws.id)
@@ -48,17 +59,20 @@ export function WorkspacesClient({ initialWorkspaces, employees }: {
 
   return (
     <div>
-      <Header title="Workspaces" subtitle="Configure focused UI contexts — HR, Sales, Accounts, and any others you need" />
+      <Header title={canManage ? 'Workspaces' : 'My Workspaces'}
+        subtitle={canManage
+          ? 'Configure focused UI contexts — HR, Sales, Accounts, and any others you need'
+          : 'Design your own focused view — pick the modules, widgets and landing page you actually use'} />
       <div className="mx-auto max-w-3xl px-4 py-6">
         <div className="mb-4 flex justify-end">
           <button onClick={() => setEditing('new')}
             className="flex items-center gap-1.5 rounded-lg bg-foreground px-3 py-2 text-sm font-medium text-background">
-            <Plus className="h-4 w-4" /> New workspace
+            <Plus className="h-4 w-4" /> {canManage ? 'New workspace' : 'New personal workspace'}
           </button>
         </div>
 
         <div className="space-y-2">
-          {list.map(ws => (
+          {shown.map(ws => (
             <div key={ws.id} className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
               <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white ${COLOR_SWATCH[ws.color] ?? 'bg-slate-500'}`}>
                 <DynIcon name={ws.icon} className="h-4.5 w-4.5" />
@@ -67,24 +81,34 @@ export function WorkspacesClient({ initialWorkspaces, employees }: {
                 <p className="flex items-center gap-1.5 truncate text-sm font-semibold">
                   {ws.name}
                   {ws.isSystem && <Lock className="h-3 w-3 text-muted-foreground" />}
+                  {isMine(ws) && (
+                    <span className="rounded-full border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">Personal</span>
+                  )}
                 </p>
                 <p className="truncate text-xs text-muted-foreground">
                   {ws.isSystem ? 'Everyone · shows everything you have access to' : (
                     ws.sidebarModuleHrefs ? `${ws.sidebarModuleHrefs.length} modules` : 'All modules'
                   )}
-                  {!ws.isSystem && ` · ${ws.memberIds.length} member${ws.memberIds.length === 1 ? '' : 's'}`}
+                  {!ws.isSystem && !isMine(ws) && ` · ${ws.memberIds.length} member${ws.memberIds.length === 1 ? '' : 's'}`}
                 </p>
               </div>
-              <button onClick={() => setEditing(ws)} className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted">
-                Edit
-              </button>
-              {!ws.isSystem && (
+              {editable(ws) && (
+                <button onClick={() => setEditing(ws)} className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted">
+                  Edit
+                </button>
+              )}
+              {!ws.isSystem && editable(ws) && (
                 <button onClick={() => remove(ws)} className="rounded-lg p-1.5 text-muted-foreground hover:text-destructive" aria-label="Delete">
                   <Trash2 className="h-4 w-4" />
                 </button>
               )}
             </div>
           ))}
+          {shown.length === 0 && (
+            <p className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+              No personal workspaces yet — create one to get a sidebar with just the modules you use.
+            </p>
+          )}
         </div>
       </div>
 
@@ -92,6 +116,10 @@ export function WorkspacesClient({ initialWorkspaces, employees }: {
         <WorkspaceEditor
           workspace={editing === 'new' ? null : editing}
           employees={employees}
+          // Member picker is for SHARED workspaces only: a personal workspace's
+          // one member is always its owner (the server enforces this too).
+          showMembers={canManage && (editing === 'new' || editing.ownerEmployeeId === null)}
+          createOwnerId={canManage ? null : myEmployeeId}
           onClose={() => setEditing(null)}
           onSaved={(ws) => {
             setList(prev => editing === 'new' ? [...prev, ws] : prev.map(w => w.id === ws.id ? ws : w))
@@ -106,9 +134,13 @@ export function WorkspacesClient({ initialWorkspaces, employees }: {
   )
 }
 
-function WorkspaceEditor({ workspace, employees, onClose, onSaved, onError }: {
+function WorkspaceEditor({ workspace, employees, showMembers, createOwnerId, onClose, onSaved, onError }: {
   workspace: Workspace | null
   employees: Employee[]
+  /** Show the shared-workspace member picker (managers, non-personal only). */
+  showMembers: boolean
+  /** Owner a NEW workspace will get (self for non-managers, null for shared). */
+  createOwnerId: string | null
   onClose: () => void
   onSaved: (ws: Workspace) => void
   onError: (msg: string) => void
@@ -152,7 +184,12 @@ function WorkspaceEditor({ workspace, employees, onClose, onSaved, onError }: {
     setSaving(false)
     if (!res.ok) { setError(res.error); return }
     const id = workspace ? workspace.id : (res.data && 'id' in res.data ? res.data.id : '')
-    onSaved({ id, isSystem: workspace?.isSystem ?? false, ...payload })
+    onSaved({
+      id,
+      isSystem: workspace?.isSystem ?? false,
+      ownerEmployeeId: workspace ? workspace.ownerEmployeeId : createOwnerId,
+      ...payload,
+    })
   }
 
   return (
@@ -244,18 +281,20 @@ function WorkspaceEditor({ workspace, employees, onClose, onSaved, onError }: {
                 </select>
               </label>
 
-              <div>
-                <p className="mb-1.5 text-xs text-muted-foreground">Who can switch into this workspace</p>
-                <div className="max-h-36 space-y-1 overflow-y-auto rounded-lg border border-border p-2">
-                  {employees.map(e => (
-                    <label key={e.id} className="flex items-center gap-2 rounded px-1 py-1 text-xs hover:bg-muted">
-                      <input type="checkbox" checked={members.has(e.id)} onChange={() => toggle(members, setMembers, e.id)} />
-                      {e.cqid}
-                    </label>
-                  ))}
-                  {employees.length === 0 && <p className="px-1 text-xs text-muted-foreground">No employees found.</p>}
+              {showMembers && (
+                <div>
+                  <p className="mb-1.5 text-xs text-muted-foreground">Who can switch into this workspace</p>
+                  <div className="max-h-36 space-y-1 overflow-y-auto rounded-lg border border-border p-2">
+                    {employees.map(e => (
+                      <label key={e.id} className="flex items-center gap-2 rounded px-1 py-1 text-xs hover:bg-muted">
+                        <input type="checkbox" checked={members.has(e.id)} onChange={() => toggle(members, setMembers, e.id)} />
+                        {e.cqid}
+                      </label>
+                    ))}
+                    {employees.length === 0 && <p className="px-1 text-xs text-muted-foreground">No employees found.</p>}
+                  </div>
                 </div>
-              </div>
+              )}
             </>
           )}
 

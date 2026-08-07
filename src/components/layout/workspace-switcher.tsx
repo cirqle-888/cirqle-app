@@ -35,8 +35,8 @@ export function WorkspaceSwitcher({ isCollapsed }: { isCollapsed: boolean }) {
     return () => document.removeEventListener('mousedown', onClick)
   }, [open])
 
-  // Nothing to switch between (no extra workspaces, can't manage) — stay invisible.
-  if (available.length <= 1 && !canManage) return null
+  // Always rendered: even with a single workspace the dropdown is the way to
+  // "My workspaces", where any employee can design their own personal one.
 
   return (
     <div ref={ref} className={`relative px-3 pb-2 ${isCollapsed ? 'px-2' : ''}`}>
@@ -75,15 +75,15 @@ export function WorkspaceSwitcher({ isCollapsed }: { isCollapsed: boolean }) {
               </button>
             ))}
           </div>
-          {canManage && (
-            <Link
-              href="/dashboard/settings/workspaces"
-              onClick={() => setOpen(false)}
-              className="flex items-center gap-2 border-t border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-            >
-              <Settings2 className="h-3.5 w-3.5" /> Manage workspaces
-            </Link>
-          )}
+          {/* Managers administer the shared workspaces; everyone else designs
+              their own personal ones on the same page (scoped there). */}
+          <Link
+            href="/dashboard/settings/workspaces"
+            onClick={() => setOpen(false)}
+            className="flex items-center gap-2 border-t border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <Settings2 className="h-3.5 w-3.5" /> {canManage ? 'Manage workspaces' : 'My workspaces'}
+          </Link>
         </div>
       )}
     </div>
