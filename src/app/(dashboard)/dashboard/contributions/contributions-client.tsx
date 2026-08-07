@@ -75,6 +75,8 @@ interface Props {
   contributorRecords: { task_id: string; employee_id: string; parameter_id?: string; value: number }[]
   taskToolRecords: { task_id: string; tool_id: string }[]
   pricingMatrix: { client_id: string; service_id: string; commission_percentage: number | null; price: number | null; currency: string | null }[]
+  /** Agreement items covering these tasks — their work_commission_pct overrides the matrix. */
+  agreementItems?: { id: string; work_commission_pct: number | null }[]
   performanceHistory: any[]
   visibilitySettings?: VisibilitySettings
   /**
@@ -169,13 +171,23 @@ export default function ContributionsClient({
   parameterServices, toolServices, groupServices: groupServicesFromDB,
   employeeServices = [],
   scores, clients, services, taskAssignments: taskAssignmentsFromDB,
-  contributorRecords, taskToolRecords, pricingMatrix, performanceHistory, visibilitySettings,
+  contributorRecords, taskToolRecords, pricingMatrix, agreementItems = [], performanceHistory, visibilitySettings,
   permissionFlags,
 }: Props) {
 
   // ── Toast ───────────────────────────────────────────
   const toast = useToast()
   const { can } = usePermissions()
+
+  // Commission override from the agreement item covering a task. Supplied as a
+  // flat list by the server (an embed here fails PGRST201 — tasks and
+  // client_agreement_items have two relationships) and looked up by id.
+  const agreementPctById = useMemo(
+    () => new Map(agreementItems.map(i => [i.id, i.work_commission_pct ?? null])),
+    [agreementItems],
+  )
+  const agreementPctFor = (t: { retainer_item_id?: string | null }): number | null =>
+    t.retainer_item_id ? (agreementPctById.get(t.retainer_item_id) ?? null) : null
 
   // Inline quick-create (client / service) from the Add Task dropdowns — same as
   // the Tasks page. Local lists so newly added ones appear immediately.
@@ -455,7 +467,7 @@ export default function ContributionsClient({
           (p: any) => p.client_id === task.client?.id && p.service_id === task.service_id
         )
         const commPct = resolveCommissionPct(
-          task, task.retainer_item?.work_commission_pct ?? null, pricing?.commission_percentage ?? null,
+          task, agreementPctFor(task), pricing?.commission_percentage ?? null,
         )
 
         const usedToolIds = new Set(
@@ -977,7 +989,7 @@ export default function ContributionsClient({
     const pricing = pricingMatrix.find(
       p => p.client_id === (task.client?.id) && p.service_id === task.service_id
     )
-    const agreementPct = task.retainer_item?.work_commission_pct ?? null
+    const agreementPct = agreementPctFor(task)
     if (task.retainer_item_id && agreementPct != null) {
       setServiceCommPct(agreementPct)
       setPredefinedCommPct(agreementPct)

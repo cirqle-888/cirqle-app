@@ -64,13 +64,13 @@ export function stripTaskPricing<T extends Record<string, any>>(task: T, canView
   const {
     billing_amount, billing_amount_inr, currency, loss_amount,
     billing_mode, billing_percent, billing_override, is_billable, honor_contributions,
-    work_value_inr,
+    work_value_inr, work_value, work_value_currency,
     ...rest
   } = task
   // Silence unused-binding linter warnings (these names exist only to destructure-out).
   void billing_amount; void billing_amount_inr; void currency; void loss_amount
   void billing_mode; void billing_percent; void billing_override; void is_billable; void honor_contributions
-  void work_value_inr
+  void work_value_inr; void work_value; void work_value_currency
   return rest as T
 }
 export function stripTaskListPricing<T extends Record<string, any>>(tasks: T[], canView: boolean): T[] {
