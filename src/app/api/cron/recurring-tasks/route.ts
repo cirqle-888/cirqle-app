@@ -4,6 +4,8 @@ import { getNextOccurrence, shouldGenerateNext } from '@/lib/utils/recurring'
 import { nextTaskNumber } from '@/lib/utils/task-code'
 import { notifyAdmins } from '@/lib/notifications/create'
 import { logCronRun } from '@/lib/cron/log'
+import { parseBillingRule, isRuleDormant } from '@/lib/tasks/derived-billing'
+import { recomputeDerivedTask } from '@/lib/tasks/derived-billing-sync'
 
 /**
  * Recurring-task JUST-IN-TIME generation cron.
@@ -56,7 +58,7 @@ export async function GET(req: NextRequest) {
   // Active recurring series — the parent row itself, not its instances.
   const { data: parents, error: parentsErr } = await admin
     .from('tasks')
-    .select('id, title, description, client_id, service_id, billing_amount, billing_amount_inr, currency, quantity, task_date, recurring_interval, recurring_end_date')
+    .select('id, title, description, client_id, service_id, billing_amount, billing_amount_inr, currency, quantity, task_date, recurring_interval, recurring_end_date, billing_mode, billing_rule')
     .eq('is_recurring', true)
     .is('deleted_at', null)
     .neq('status', 'cancelled')
@@ -112,6 +114,17 @@ export async function GET(req: NextRequest) {
 
     if (dates.length === 0) continue
 
+    // A recurring DERIVED task is a standing billing rule ("Handling = 30% of
+    // posters, every month"). Each occurrence carries the rule and prices
+    // itself from ITS OWN month — copying the parent's amount would bill every
+    // month at the first month's figure.
+    const parentRule = parseBillingRule((parent as { billing_rule?: unknown }).billing_rule)
+    const derived = (parent as { billing_mode?: string | null }).billing_mode === 'percent_of_services'
+      && parentRule.ok
+    // Paused or archived rules stop producing occurrences — that is what
+    // pausing means, and it is why archiving beats deleting.
+    if (derived && parentRule.ok && isRuleDormant(parentRule.rule)) continue
+
     const instances = dates.map(d => ({
       task_number: nextNumber++,
       title: parent.title,
@@ -119,18 +132,30 @@ export async function GET(req: NextRequest) {
       client_id: parent.client_id,
       service_id: parent.service_id,
       status: 'pending',
-      billing_amount: parent.billing_amount,
-      billing_amount_inr: parent.billing_amount_inr,
-      quantity: parent.quantity || 1,
+      billing_amount: derived ? 0 : parent.billing_amount,
+      billing_amount_inr: derived ? 0 : parent.billing_amount_inr,
+      quantity: derived ? 1 : (parent.quantity || 1),
       currency: parent.currency || 'INR',
       task_date: d,
       is_recurring: false,
       recurring_parent_id: parent.id,
+      ...(derived
+        ? { billing_mode: 'percent_of_services', billing_rule: (parent as { billing_rule?: unknown }).billing_rule }
+        : {}),
     }))
 
-    const { error: insertErr } = await admin.from('tasks').insert(instances)
+    const { data: inserted, error: insertErr } = await admin.from('tasks').insert(instances).select('id')
     if (insertErr) { errors.push(`${parent.id}: ${insertErr.message}`); continue }
     totalGenerated += instances.length
+
+    // Price each new derived occurrence from its own month's sources.
+    if (derived) {
+      for (const row of (inserted ?? []) as { id: string }[]) {
+        try {
+          await recomputeDerivedTask(admin as never, row.id, 'monthly occurrence generated')
+        } catch { /* the occurrence exists; it will price on the next source edit */ }
+      }
+    }
     seriesGenerated.push({ parentId: parent.id, title: parent.title, count: instances.length, dates })
   }
 

@@ -60,6 +60,10 @@ import {
   computeTaskAmount, resolveTaskQuantity, resolvePricingType,
   isBillingSuppressed, effectiveBillingAmount, applyCoverageExtraPrice,
 } from '@/lib/tasks/pricing'
+import {
+  emptyBillingRule, isBasisTask, sumBasis, computeRule, findDuplicateRules,
+  type BillingRule,
+} from '@/lib/tasks/derived-billing'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { BatchActionBar, type BatchAction } from '@/components/ui/batch-action-bar'
 import { formatTaskDate, fullTaskDate } from '@/lib/utils/format-date'
@@ -314,6 +318,12 @@ const EMPTY_FORM = {
   is_billable: true,                                                             // false = internal/non-billable concept
   manual_billing_amount: '',                                                     // user-typed override amount
   bill_as_extra: false,                                                          // retainer-covered task billed as extra work
+  // ── Derived billing ("Handling = 30% of this month's posters") ──
+  derived_on: false,                                                             // the rule section is switched on
+  derived_service_ids: [] as string[],                                           // source services
+  derived_percent: '',                                                           // string for input; parsed on save
+  derived_min: '',                                                               // optional floor (INR), Advanced
+  derived_max: '',                                                               // optional ceiling (INR), Advanced
 }
 
 // ── Reorderable column system ─────────────────────────────────────────────────
@@ -987,11 +997,50 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
     }
   }, [showForm, form.parent_task_id])
 
+  // ── Derived billing rule (from the form) ─────────────────────────────────
+  // Built with the SAME pure helpers the server recompute uses, so the preview
+  // below and the saved amount can never disagree.
+  const derivedRule = useMemo<BillingRule | null>(() => {
+    if (!form.derived_on) return null
+    const pct = parseFloat(form.derived_percent)
+    if (!form.derived_service_ids.length || !Number.isFinite(pct) || pct <= 0) return null
+    const num = (s: string) => { const n = parseFloat(s); return Number.isFinite(n) ? n : null }
+    return {
+      ...emptyBillingRule(),
+      percent: pct,
+      sources: { serviceIds: form.derived_service_ids },
+      clamps: { minInr: num(form.derived_min), maxInr: num(form.derived_max) },
+    }
+  }, [form.derived_on, form.derived_percent, form.derived_service_ids, form.derived_min, form.derived_max])
+
+  /**
+   * Live preview: "18 matching tasks · AED 850 · Handling = AED 255".
+   *
+   * Computed over the tasks already loaded in the page — the server recompute
+   * on save is authoritative, which is why the UI says "loaded tasks".
+   */
+  const derivedPreview = useMemo(() => {
+    if (!derivedRule || !form.client_id || form.client_id === INTERNAL_CLIENT) return null
+    const ctx = { clientId: form.client_id, taskDate: form.task_date, rule: derivedRule }
+    const basisTasks = tasks.filter(t => isBasisTask(t as never, ctx))
+    const basis = sumBasis(basisTasks as never)
+    const amounts = computeRule(derivedRule, basis)
+    const duplicates = findDuplicateRules(tasks as never, {
+      clientId: form.client_id, taskDate: form.task_date,
+      serviceIds: derivedRule.sources.serviceIds,
+    })
+    return { basis, amounts, duplicates }
+  }, [derivedRule, form.client_id, form.task_date, tasks])
+
   // Derived: computed billing amount
   //   1. If user typed a manual override → that wins
   //   2. Else if linked to a parent task → derive from parent + billing_mode
   //   3. Else use the standard pricing-matrix calculation
   const computedAmount = useMemo(() => {
+    // Derived tasks are priced by the server from their rule; the preview owns
+    // the display, so the matrix engine must not also produce a number here.
+    if (form.derived_on) return 0
+
     // Non-billable variant: ₹0
     if (form.parent_task_id && !form.is_billable) return 0
 
@@ -1032,7 +1081,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
     })
   }, [pricingType, unitPrice, form.quantity, form.hours, form.spend, selectedService,
       parentTask, form.parent_task_id, form.is_billable, form.billing_mode, form.billing_percent,
-      form.billing_override, form.manual_billing_amount])
+      form.billing_override, form.manual_billing_amount, form.derived_on])
 
   const displayUnitPrice = useMemo(() => {
     if (parentTask && !form.billing_override && form.is_billable !== false) {
@@ -1122,6 +1171,12 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       is_billable:       task.is_billable !== false,
       manual_billing_amount: task.billing_amount_inr != null ? String(task.billing_amount_inr) : '',
       bill_as_extra:     !!task.bill_as_extra,
+      // Derived billing is edited in TaskEditModal, not this legacy form state.
+      derived_on: false,
+      derived_service_ids: [],
+      derived_percent: '',
+      derived_min: '',
+      derived_max: '',
     })
     setQuickSet(null)
   }
@@ -1391,6 +1446,15 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
         billing_override: form.billing_override,
         is_billable:      form.is_billable,
       } : {}),
+      // ── Derived billing — amounts start at 0; serverFillTaskBilling computes
+      //    the real figure from the rule right after this insert. ──
+      ...(derivedRule ? {
+        billing_mode: 'percent_of_services',
+        billing_rule: derivedRule,
+        billing_amount: 0,
+        billing_amount_inr: 0,
+        quantity: 1,
+      } : {}),
     }
 
     const selectCols = `*, client:clients(id, name, code), service:services(id, name)`
@@ -1444,6 +1508,21 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
           form.service_id,
           pricingType === 'fixed_per_creative' ? (parseFloat(form.quantity) || 1) : 1,
         )
+      }
+
+      // A derived task was inserted at 0 — price it now from its rule. The
+      // server re-reads the month's real sources, so this is authoritative
+      // even when the page had only part of the month loaded for the preview.
+      if (derivedRule) {
+        void serverFillTaskBilling(data.id, form.client_id || null, form.service_id, 1)
+          .then(async () => {
+            // Pull the computed amount back into the row we just optimistically
+            // added, so the list shows the real figure without a full reload.
+            const { data: priced } = await supabase
+              .from('tasks').select(selectCols).eq('id', data!.id).single()
+            if (priced) setTasks(prev => prev.map(t => t.id === data!.id ? (priced as Task) : t))
+          })
+          .catch(() => {})
       }
 
       // ── Auto-create contribution slots from the selected billable parameters ──
@@ -4508,7 +4587,134 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                 </div>
               )}
 
+              {/* ── Derived billing: "Handling = 30% of this month's posters" ──
+                  Basic is three fields (services, %, preview); everything else
+                  lives in the collapsed Advanced block, so the daily flow stays
+                  as short as it was before this feature existed. */}
+              {showBilling && !form.parent_task_id && (
+                <div className="rounded-xl border border-foreground/15 bg-foreground/[0.02]">
+                  <label className="flex cursor-pointer select-none items-center gap-2 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={form.derived_on}
+                      onChange={e => setForm(p => ({ ...p, derived_on: e.target.checked }))}
+                    />
+                    <span className="inline-flex h-4 w-4 items-center justify-center rounded bg-foreground/5 text-[10px]">%</span>
+                    Bill as a % of other services
+                    <span className="text-[10px] text-muted-foreground/60">(e.g. handling, supervision, agency fee)</span>
+                  </label>
+
+                  {form.derived_on && (
+                    <div className="space-y-2.5 border-t border-foreground/[0.06] px-3 pb-3 pt-2.5">
+                      <div>
+                        <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                          Source services <span className="text-muted-foreground/60">— this task bills a % of their total</span>
+                        </label>
+                        <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
+                          {sortedServices.map(s => {
+                            const on = form.derived_service_ids.includes(s.id)
+                            return (
+                              <button
+                                key={s.id} type="button"
+                                onClick={() => setForm(p => ({
+                                  ...p,
+                                  derived_service_ids: on
+                                    ? p.derived_service_ids.filter(id => id !== s.id)
+                                    : [...p.derived_service_ids, s.id],
+                                }))}
+                                className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                                  on ? 'border-violet-500 bg-violet-500 text-white'
+                                     : 'border-border bg-secondary text-muted-foreground hover:border-foreground/30'}`}
+                              >
+                                {on && <CheckCircle className="mr-1 -mt-0.5 inline h-3 w-3" />}{s.name}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="flex items-end gap-3">
+                        <div className="w-28">
+                          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Percentage</label>
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number" min="0" max="100" step="any"
+                              value={form.derived_percent}
+                              onChange={e => setForm(p => ({ ...p, derived_percent: e.target.value }))}
+                              placeholder="30"
+                              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+                            />
+                            <span className="text-sm text-muted-foreground">%</span>
+                          </div>
+                        </div>
+
+                        {/* Live preview / "if you save now" — same numbers the server will compute */}
+                        <div className="flex-1 pb-1 text-right">
+                          {derivedPreview ? (
+                            <>
+                              <p className="text-xs text-muted-foreground">
+                                {derivedPreview.basis.count} matching task{derivedPreview.basis.count === 1 ? '' : 's'}
+                                {' · '}
+                                {formatCurrency(
+                                  derivedPreview.basis.native ?? derivedPreview.basis.inr,
+                                  (derivedPreview.basis.uniformCurrency ?? 'INR') as Currency,
+                                )}
+                              </p>
+                              <p className="text-lg font-bold">
+                                {formatCurrency(derivedPreview.amounts.billingAmount, derivedPreview.amounts.currency as Currency)}
+                              </p>
+                              <p className="text-[10px] text-muted-foreground/60">based on loaded tasks · recalculated on save</p>
+                            </>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">Pick services and a % to preview</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {derivedPreview && derivedPreview.duplicates.length > 0 && (
+                        <p className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+                          ⚠ {derivedPreview.duplicates.length === 1 ? 'Another rule' : `${derivedPreview.duplicates.length} other rules`} already
+                          bill this client from the same services this month
+                          {derivedPreview.duplicates[0].title ? ` (e.g. “${derivedPreview.duplicates[0].title}”)` : ''}.
+                          That is fine if you meant to stack them.
+                        </p>
+                      )}
+
+                      <details className="rounded-lg border border-foreground/10">
+                        <summary className="cursor-pointer select-none px-2.5 py-1.5 text-[11px] text-muted-foreground hover:text-foreground">
+                          Advanced
+                        </summary>
+                        <div className="grid grid-cols-2 gap-2 border-t border-foreground/[0.06] px-2.5 pb-2.5 pt-2">
+                          <div>
+                            <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Minimum charge (₹)</label>
+                            <input
+                              type="number" min="0" step="any" value={form.derived_min}
+                              onChange={e => setForm(p => ({ ...p, derived_min: e.target.value }))}
+                              placeholder="none"
+                              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Maximum charge (₹)</label>
+                            <input
+                              type="number" min="0" step="any" value={form.derived_max}
+                              onChange={e => setForm(p => ({ ...p, derived_max: e.target.value }))}
+                              placeholder="none"
+                              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+                            />
+                          </div>
+                          <p className="col-span-2 text-[10px] text-muted-foreground/70">
+                            Cancelled tasks never count. Turn on “Repeat monthly” above to make this a standing rule that bills every month.
+                          </p>
+                        </div>
+                      </details>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* ── Variant linking (collapsed by default; opens when a parent is picked) ── */}
+              {!form.derived_on && (
               <div className="rounded-xl border border-foreground/15 bg-foreground/[0.02]">
                 <details>
                   <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground flex items-center gap-2">
@@ -4897,6 +5103,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                   </div>
                 </details>
               </div>
+              )}
 
               {/* Task Date */}
               <div>

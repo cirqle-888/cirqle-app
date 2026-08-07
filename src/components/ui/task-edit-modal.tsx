@@ -10,6 +10,8 @@ import Combobox from './combobox'
 import { Button } from './button'
 import { TaskBillingSection } from './task-billing-section'
 import { useRetainerCoverage } from '@/lib/tasks/use-retainer-coverage'
+import { DerivedBillingPanel } from './derived-billing-panel'
+import { parseBillingRule, type BillingRule } from '@/lib/tasks/derived-billing'
 import {
   computeTaskAmount, resolveTaskQuantity, resolveUnitPrice, effectiveBillingAmount,
   applyCoverageExtraPrice,
@@ -87,6 +89,15 @@ export function TaskEditModal({
     status: task.status ?? 'pending',
     bill_as_extra: !!task.bill_as_extra,
   })
+
+  // Derived billing ("Handling = 30% of posters"): the rule is edited here and
+  // sent on save; the AMOUNT is always computed server-side from it.
+  const isDerived = task.billing_mode === 'percent_of_services'
+  const [derivedRule, setDerivedRule] = useState<BillingRule | null>(() => {
+    const parsed = parseBillingRule(task.billing_rule)
+    return parsed.ok ? parsed.rule : null
+  })
+
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -156,7 +167,10 @@ export function TaskEditModal({
       // Non-admin (showFinancials=false): save quantity only — billing fields
       // are omitted so the server keeps the existing price untouched.
       // Admin + original task: recompute from matrix as before.
-      ...(isVariant ? { quantity: qty } : {
+      // Derived tasks are priced from their rule, so — like variants — they
+      // must never send a client-computed amount; the server would ignore it
+      // anyway, and sending it invites the two to look like they disagree.
+      ...(isVariant || isDerived ? { quantity: qty } : {
         ...(showFinancials ? {
           billingAmount:    amount,
           currency:         unitCurrency,
@@ -169,6 +183,9 @@ export function TaskEditModal({
       // their rows may not even load the flag.
       ...(showFinancials && (coverage || form.bill_as_extra)
         ? { billAsExtra: form.bill_as_extra } : {}),
+      // The rule, not an amount: the server recomputes from it and ignores any
+      // billingAmount for derived tasks.
+      ...(isDerived && showFinancials && derivedRule ? { billingRule: derivedRule } : {}),
       taskDate:         form.task_date || null,
     })
 
@@ -313,6 +330,23 @@ export function TaskEditModal({
 
               {/* Financial section — the SAME component the Add Task form uses.
                   Never inline billing JSX here; see task-billing-section.tsx. */}
+              {/* Derived billing replaces the pricing card entirely: the amount
+                  comes from the rule, so a price input here would be a lie. */}
+              {isDerived && showFinancials && (
+                <DerivedBillingPanel
+                  taskId={task.id}
+                  taskStatus={form.status}
+                  billingRule={derivedRule ?? task.billing_rule}
+                  billingSnapshot={task.billing_snapshot}
+                  amount={task.billing_amount ?? null}
+                  currency={(task.currency as string) || 'INR'}
+                  services={services}
+                  onRuleChange={setDerivedRule}
+                  onRefresh={onClose}
+                />
+              )}
+
+              {!isDerived && (
               <TaskBillingSection
                 services={services}
                 clientPricings={clientPricings}
@@ -336,6 +370,7 @@ export function TaskEditModal({
                   </>
                 }
               />
+              )}
 
               {/* Description */}
               <div>
