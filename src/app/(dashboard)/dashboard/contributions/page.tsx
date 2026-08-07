@@ -41,8 +41,11 @@ export default async function ContributionsPage() {
   // covered task silently loses its coverage card. bill_as_extra/billing_mode/
   // currency ride along only for pricing-visible viewers, mirroring the tasks
   // page's financial stripping.
-  const taskSelectWithPricing    = 'id, task_number, title, client_id, service_id, billing_amount_inr, quantity, status, task_date, bill_as_extra, parent_task_id, billing_mode, currency, client:clients(id, name, code), service:services(id, name)'
-  const taskSelectWithoutPricing = 'id, task_number, title, client_id, service_id, quantity, status, task_date, parent_task_id, client:clients(id, name, code), service:services(id, name)'
+  // retainer_item_id/work_value_inr: covered tasks bill 0 but pool from the
+  // agreement's work value — the joined retainer_item carries its commission
+  // override. work_value_inr is money → pricing-visible viewers only.
+  const taskSelectWithPricing    = 'id, task_number, title, client_id, service_id, billing_amount_inr, quantity, status, task_date, bill_as_extra, retainer_item_id, work_value_inr, parent_task_id, billing_mode, currency, client:clients(id, name, code), service:services(id, name), retainer_item:client_agreement_items(id, work_commission_pct)'
+  const taskSelectWithoutPricing = 'id, task_number, title, client_id, service_id, quantity, status, task_date, retainer_item_id, parent_task_id, client:clients(id, name, code), service:services(id, name)'
   // 24-month window bounds the otherwise unbounded task list. Contributions for
   // tasks older than 24 months should already be finalized; the editor here is
   // for active/recent work. HAR showed this query was the slowest (2060ms) when

@@ -9,7 +9,7 @@ import HealthClient from './health-client'
 
 export const dynamic = 'force-dynamic'
 
-const KNOWN_CRONS = ['recurring-tasks', 'payroll-draft', 'business-alerts', 'cleanup-product-images']
+const KNOWN_CRONS = ['recurring-tasks', 'recurring-expenses', 'payroll-draft', 'retainer-invoices', 'business-alerts', 'cleanup-product-images']
 
 export default async function BusinessHealthPage() {
   // Same sensitivity as Reports / Contribution Analysis / Client Ranking —

@@ -30,7 +30,7 @@ export default async function ContributionAnalysisPage() {
     fetchAll(
       supabase
         .from('tasks')
-        .select('id, task_number, title, task_date, status, currency, billing_amount, billing_amount_inr, client_id, service_id')
+        .select('id, task_number, title, task_date, status, currency, billing_amount, billing_amount_inr, client_id, service_id, retainer_item_id, bill_as_extra, work_value_inr')
         .is('deleted_at', null)
         .order('id', { ascending: true }),
     ),
@@ -127,6 +127,26 @@ export default async function ContributionAnalysisPage() {
     if (!error && data) agreements = data as CommissionAgreement[]
   } catch { /* table missing pre-migration — ignore */ }
 
+  // Agreement-item commission overrides for retainer-linked tasks. Defensive:
+  // empty pre-migration, so behaviour is unchanged.
+  const itemCommissionPct = new Map<string, number | null>()
+  try {
+    const retainerItemIds = Array.from(new Set(
+      ((tasksRes.data || []) as RawTask[])
+        .map(t => t.retainer_item_id)
+        .filter(Boolean) as string[]
+    ))
+    if (retainerItemIds.length > 0) {
+      const { data: items } = await supabase
+        .from('client_agreement_items')
+        .select('id, work_commission_pct')
+        .in('id', retainerItemIds)
+      for (const i of (items || []) as { id: string; work_commission_pct: number | null }[]) {
+        itemCommissionPct.set(i.id, i.work_commission_pct ?? null)
+      }
+    }
+  } catch { /* pre-migration — default commission path */ }
+
   const rows = buildAnalysisRows(
     (tasksRes.data || []) as RawTask[],
     (scoresRes.data || []) as RawScore[],
@@ -139,6 +159,7 @@ export default async function ContributionAnalysisPage() {
     toolPctByTask,
     100,           // defaultPerformanceRating
     agreements,
+    itemCommissionPct,
   )
 
   // ── Saved layouts (personal + system default) ──────────────────────────────

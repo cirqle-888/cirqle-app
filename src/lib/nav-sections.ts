@@ -12,7 +12,7 @@ import {
   Settings, TrendingUp, Upload, Inbox, PhoneCall, Award, Activity, Blocks, Megaphone, Handshake,
   SlidersHorizontal, MessageSquare, ClipboardCheck, NotebookPen, LayoutGrid,
   Briefcase, ClipboardList, CalendarClock, CalendarDays, BadgeCheck, PieChart, Building2, Tags, History, Sparkles,
-  BadgePercent, FileSignature,
+  BadgePercent, FileSignature, CalendarRange,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -82,6 +82,9 @@ export const navSections: NavSection[] = [
       { label: 'Invoices',          href: '/dashboard/invoices',   icon: FileText, requiredPerm: 'billing.view_invoices' },
       { label: 'Follow-ups',        href: '/dashboard/invoices/follow-ups', icon: PhoneCall, requiredPerm: 'billing.view_invoices' },
       { label: 'Cash Book',         href: '/dashboard/cashbook',   icon: Wallet,   requiredPerm: 'cashbook.view', keywords: ['expenses', 'bank', 'transactions'] },
+      // The monthly control centre: profit composition, payroll status,
+      // corrections and the lock action for each financial period.
+      { label: 'Months',            href: '/dashboard/finance/months', icon: CalendarRange, requiredPerm: 'payroll.view', keywords: ['financial timeline', 'period', 'close', 'lock', 'profit', 'month end'] },
       { label: 'Business Partners', href: '/dashboard/partners',   icon: Handshake, requiredPerm: 'finance.partner.view', keywords: ['vendors', 'suppliers'] },
     ],
   },

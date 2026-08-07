@@ -13,6 +13,7 @@ import {
   matchAgreement, computeAgreementEarning,
   type CommissionAgreement, type EarningSource,
 } from '@/lib/calculations/agreements'
+import { isCoveredWorkTask, taskPoolBasisInr, resolveCommissionPct } from '@/lib/calculations/work-value'
 
 // ─── Column / row shapes ──────────────────────────────────────────────────────
 
@@ -87,6 +88,11 @@ export interface RawTask {
   billing_amount_inr: number | null
   client_id: string | null
   service_id: string | null
+  // Retainer coverage (migration 20260807110000). Covered tasks bill 0 but
+  // pool/profit from the stamped internal work value.
+  retainer_item_id?: string | null
+  bill_as_extra?: boolean | null
+  work_value_inr?: number | null
 }
 export interface RawScore {
   task_id: string
@@ -124,6 +130,8 @@ export function buildAnalysisRows(
   defaultPerformanceRating = 100,
   /** Active employee commission agreements. Empty ⇒ pure contribution model (unchanged). */
   agreements: CommissionAgreement[] = [],
+  /** client_agreement_items.id → work_commission_pct (retainer-linked tasks). */
+  itemCommissionPct: Map<string, number | null> = new Map(),
 ): AnalysisRow[] {
   // HISTORICAL READER CONTRACT: `pricing` must be passed in UNFILTERED by
   // is_active. is_active governs what a client may be SOLD today, never what
@@ -146,12 +154,22 @@ export function buildAnalysisRows(
   const rows: AnalysisRow[] = []
   for (const t of tasks) {
     const billing_inr = t.billing_amount_inr || 0
-    const commission_pct = (t.client_id && t.service_id)
-      ? (pmap.get(`${t.client_id}|${t.service_id}`) ?? defaultCommissionPct)
-      : defaultCommissionPct
+    // Retainer-covered work bills the client 0; the pool, earnings, and profit
+    // are based on the stamped internal work value instead. Extra work and
+    // normal tasks keep the billing basis.
+    const basis_inr = taskPoolBasisInr(t)
+    const matrixPct = (t.client_id && t.service_id)
+      ? (pmap.get(`${t.client_id}|${t.service_id}`) ?? null)
+      : null
+    const commission_pct = resolveCommissionPct(
+      t,
+      t.retainer_item_id ? (itemCommissionPct.get(t.retainer_item_id) ?? null) : null,
+      matrixPct,
+      defaultCommissionPct,
+    )
 
-    // Commission pool from CURRENT billing.
-    const commission_pool = r2(billing_inr * commission_pct / 100)
+    // Commission pool from the CURRENT pool basis (billing or work value).
+    const commission_pool = r2(basis_inr * commission_pct / 100)
     // Tools deduct a flat % of the pool first (mirrors the live commission
     // engine). `remainingPool` is what employees actually split.
     const toolPct = toolPctByTask.get(t.id) || 0
@@ -181,7 +199,7 @@ export function buildAnalysisRows(
       if (pct > 0 && !s.is_manual_override && agreements.length > 0) {
         const ag = matchAgreement(agreements, s.employee_id, t.client_id || null, t.service_id || null, t.task_date)
         if (ag) {
-          earn = computeAgreementEarning(ag, { billingInr: billing_inr, remainingPool })
+          earn = computeAgreementEarning(ag, { billingInr: basis_inr, remainingPool })
           source = 'agreement'
         }
       }
@@ -190,10 +208,13 @@ export function buildAnalysisRows(
       if (pct > 0) contributors++
     }
     total_earnings = r2(total_earnings)
-    const profit = r2(billing_inr - total_earnings)
-    const profit_pct = billing_inr > 0 ? r2(profit / billing_inr * 100) : 0
+    // For covered tasks this is the internal margin on the allocated work
+    // value (the retainer fee itself is company revenue at the invoice level).
+    const profit = r2(basis_inr - total_earnings)
+    const profit_pct = basis_inr > 0 ? r2(profit / basis_inr * 100) : 0
 
     // Actual / FX — only when the linked invoice is fully paid (value present).
+    // (Covered tasks have no invoice line, so they simply stay pending here.)
     const ar = actualByTask.get(t.id)
     const actual_received = ar === undefined ? null : r2(ar)
     const fx_gain_loss = actual_received === null ? null : r2(actual_received - billing_inr)
@@ -218,7 +239,7 @@ export function buildAnalysisRows(
       commission_pct,
       commission_pool,
       total_earnings,
-      company_received: billing_inr,
+      company_received: isCoveredWorkTask(t) ? basis_inr : billing_inr,
       profit,
       profit_pct,
       actual_received,

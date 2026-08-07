@@ -64,11 +64,13 @@ export function stripTaskPricing<T extends Record<string, any>>(task: T, canView
   const {
     billing_amount, billing_amount_inr, currency, loss_amount,
     billing_mode, billing_percent, billing_override, is_billable, honor_contributions,
+    work_value_inr,
     ...rest
   } = task
   // Silence unused-binding linter warnings (these names exist only to destructure-out).
   void billing_amount; void billing_amount_inr; void currency; void loss_amount
   void billing_mode; void billing_percent; void billing_override; void is_billable; void honor_contributions
+  void work_value_inr
   return rest as T
 }
 export function stripTaskListPricing<T extends Record<string, any>>(tasks: T[], canView: boolean): T[] {
@@ -88,10 +90,12 @@ export function stripAgreementItemPricing<T extends Record<string, any>>(item: T
   const {
     unit_price, extra_unit_price, currency,
     creative_allocation_amount, management_allocation_amount, allocated_unit_value,
+    work_unit_value, work_commission_pct,
     ...rest
   } = item
   void unit_price; void extra_unit_price; void currency
   void creative_allocation_amount; void management_allocation_amount; void allocated_unit_value
+  void work_unit_value; void work_commission_pct
   return rest as T
 }
 export function stripAgreementItemListPricing<T extends Record<string, any>>(items: T[], canView: boolean): T[] {
@@ -121,10 +125,15 @@ export function stripPayrollAmounts<T extends Record<string, any>>(row: T, canVi
   const {
     base_salary, commission_earned, net_salary, gross_salary,
     deductions_total, advances_total, credits_total, paid_amount,
+    // Earnings components added by the Financial Core / Ownership Platform.
+    // Every money column on payroll must be listed here — one omission and
+    // the amount reaches a viewer who is not allowed to see pay.
+    adjustment_earned, ownership_earned, bonus,
     ...rest
   } = row
   void base_salary; void commission_earned; void net_salary; void gross_salary
   void deductions_total; void advances_total; void credits_total; void paid_amount
+  void adjustment_earned; void ownership_earned; void bonus
   return rest as T
 }
 export function stripPayrollListAmounts<T extends Record<string, any>>(rows: T[], canView: boolean): T[] {

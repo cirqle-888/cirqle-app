@@ -47,6 +47,23 @@ export interface PayslipData {
     baseSalary: number
     commission: number
     bonus: number
+    /** Corrections for already-closed months, paid with this payslip.
+     *  Signed — a correction can recover an overpayment as well. */
+    adjustment: number
+    /** Which months those corrections came from, for the payslip line. */
+    adjustmentSources: { month: number; year: number; amountInr: number }[]
+    /** Ownership rewards (revenue share, profit share, incentives, bonuses). */
+    ownership: number
+    /** One entry per program, so the payslip explains WHY the amount is what
+     *  it is rather than showing an unexplained lump sum. */
+    ownershipAwards: {
+      programName: string
+      label: string | null
+      basis: string
+      basisAmountInr: number
+      percent: number | null
+      earnedInr: number
+    }[]
     advancesDeducted: number
     otherDeductions: number
     netSalary: number

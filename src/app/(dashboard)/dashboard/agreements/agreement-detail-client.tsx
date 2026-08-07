@@ -74,6 +74,7 @@ interface Item {
   extra_unit_price?: number | null; display_order: number; notes: string | null
   creative_allocation_amount?: number | null; management_allocation_amount?: number | null
   included_quantity?: number | null; allocated_unit_value?: number | null
+  work_unit_value?: number | null; work_commission_pct?: number | null
   coveredServices?: { id: string; name: string }[]
   deliverables: Deliverable[]; milestones: Milestone[]
 }
@@ -453,6 +454,28 @@ function ItemCard({
         )}
       </div>
 
+      {/* Pricing summary — client pays / team is paid / extras (retainer) */}
+      {canViewPricing && it.commitment_type === 'retainer' &&
+        (it.unit_price != null || it.work_unit_value != null || it.extra_unit_price != null) && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs bg-primary/[0.04] border border-primary/15 rounded-lg px-3 py-2">
+          {it.unit_price != null && (
+            <span className="text-muted-foreground">Client pays <b className="text-foreground">{currency} {it.unit_price}</b>/{it.cycle || 'cycle'}</span>
+          )}
+          <span className="text-muted-foreground">
+            Work value {it.work_unit_value != null
+              ? <b className="text-foreground">{currency} {it.work_unit_value}</b>
+              : <b className="text-amber-600 dark:text-amber-400">not set — covered tasks pay ₹0</b>}
+            {it.work_unit_value != null && '/task'}
+          </span>
+          {it.extra_unit_price != null && (
+            <span className="text-muted-foreground">Extra work <b className="text-foreground">{currency} {it.extra_unit_price}</b>/task</span>
+          )}
+          {it.work_commission_pct != null && (
+            <span className="text-muted-foreground">Pool <b className="text-foreground">{it.work_commission_pct}%</b></span>
+          )}
+        </div>
+      )}
+
       {/* Internal allocation summary (retainer, operational only) */}
       {canViewPricing && it.commitment_type === 'retainer' &&
         (it.creative_allocation_amount != null || it.management_allocation_amount != null) && (
@@ -534,6 +557,7 @@ function newItemForm(currency: string): ItemForm {
     unit_price: null, currency, carry_forward_rule: 'expire', extra_unit_price: null,
     display_order: 0, notes: '',
     creative_allocation_amount: null, management_allocation_amount: null, included_quantity: null,
+    work_unit_value: null, work_commission_pct: null,
     coveredServiceIds: [],
     deliverables: [], milestones: [],
   }
@@ -554,6 +578,8 @@ function itemToForm(it: Item, status: AgreementStatus, changeTerms = false): Ite
     creative_allocation_amount: it.creative_allocation_amount ?? null,
     management_allocation_amount: it.management_allocation_amount ?? null,
     included_quantity: it.included_quantity ?? null,
+    work_unit_value: it.work_unit_value ?? null,
+    work_commission_pct: it.work_commission_pct ?? null,
     coveredServiceIds: (it.coveredServices ?? []).map(s => s.id),
     deliverables: it.deliverables.map(d => ({ ...d })),
     milestones: it.milestones.map(m => ({ ...m })),
@@ -629,6 +655,71 @@ function AllocationEditor({
           Heads up: allocations total {currency} {Math.round(allocSum * 100) / 100}, which does not match the {currency} {retainer} retainer. That is allowed — just confirm it is intentional.
         </p>
       )}
+    </div>
+  )
+}
+
+// ─── Work value editor (retainer only) ───────────────────────────────────────
+// The THREE prices of an agreement service line:
+//   unit_price       → what the client pays (invoice)         — edited above
+//   work_unit_value  → what each covered task pays the TEAM   — edited here
+//   extra_unit_price → client price per task beyond the quota — edited above
+// The work value feeds the contribution pool only; it is never invoiced.
+
+function WorkValueEditor({
+  form, set, currency,
+}: {
+  form: ItemForm
+  set: (patch: Partial<ItemForm>) => void
+  currency: string
+}) {
+  const included = form.included_quantity ?? form.committed_quantity ?? null
+  const autoValue = form.unit_price != null && included && included > 0
+    ? Math.round((form.unit_price / included) * 100) / 100
+    : null
+
+  return (
+    <div className="mt-5 rounded-xl border border-primary/25 bg-primary/[0.04] p-4">
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-sm font-semibold flex items-center gap-1.5">
+          <Wallet className="w-4 h-4 text-muted-foreground" /> Work Value — pays the team
+        </p>
+        <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border">Never invoiced</span>
+      </div>
+      <p className="text-xs text-muted-foreground mb-3">
+        Each covered task feeds contributor earnings from this per-task value (billing to the client stays
+        {' '}{currency} 0 — the retainer is the invoice). Leave blank and covered tasks pay ₹0.
+      </p>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className={labelCls}>Work value per task ({currency})</label>
+          <div className="flex gap-2">
+            <input type="number" min="0" step="any" value={form.work_unit_value ?? ''}
+              onChange={e => set({ work_unit_value: e.target.value === '' ? null : parseFloat(e.target.value) })}
+              className={inputCls} placeholder={autoValue != null ? `e.g. ${autoValue}` : 'e.g. 26.67'} />
+            {autoValue != null && (
+              <button type="button" onClick={() => set({ work_unit_value: autoValue })}
+                title={`Retainer ÷ included quantity = ${currency} ${autoValue}`}
+                className="shrink-0 text-xs px-2.5 rounded-lg border border-border bg-secondary hover:bg-secondary/70 transition-colors">
+                Auto: {autoValue}
+              </button>
+            )}
+          </div>
+          <p className="text-[11px] text-muted-foreground/70 mt-1">
+            Auto = {form.unit_price ?? '—'} retainer ÷ {included ?? '—'} included
+          </p>
+        </div>
+        <div>
+          <label className={labelCls}>Commission pool % <span className="text-muted-foreground/60">(optional)</span></label>
+          <input type="number" min="0" max="100" step="any" value={form.work_commission_pct ?? ''}
+            onChange={e => set({ work_commission_pct: e.target.value === '' ? null : parseFloat(e.target.value) })}
+            className={inputCls} placeholder="Blank = default 50%" />
+          <p className="text-[11px] text-muted-foreground/70 mt-1">
+            Share of the work value that becomes the employee pool. Overrides the pricing matrix for this item&apos;s tasks.
+          </p>
+        </div>
+      </div>
     </div>
   )
 }
@@ -719,6 +810,8 @@ function ItemEditor({
       creative_allocation_amount: form.creative_allocation_amount != null ? Number(form.creative_allocation_amount) : null,
       management_allocation_amount: form.management_allocation_amount != null ? Number(form.management_allocation_amount) : null,
       included_quantity: form.included_quantity != null ? Number(form.included_quantity) : null,
+      work_unit_value: form.work_unit_value != null ? Number(form.work_unit_value) : null,
+      work_commission_pct: form.work_commission_pct != null ? Number(form.work_commission_pct) : null,
       coveredServiceIds: form.commitment_type === 'retainer' ? (form.coveredServiceIds ?? []) : undefined,
       deliverables: form.deliverables.map((d, i) => ({ ...d, committed_quantity: Number(d.committed_quantity) || 0, display_order: i })),
       milestones: form.milestones.map((m, i) => ({ ...m, display_order: i })),
@@ -820,6 +913,11 @@ function ItemEditor({
             <input value={form.notes || ''} onChange={e => set({ notes: e.target.value })} className={inputCls} placeholder="Item context…" />
           </div>
         </div>
+
+        {/* Work value (retainer only) — pays contributors on covered tasks */}
+        {isRetainer && canViewPricing && (
+          <WorkValueEditor form={form} set={set} currency={currency} />
+        )}
 
         {/* Internal Allocation (retainer only) — operational split, never billing */}
         {isRetainer && canViewPricing && (

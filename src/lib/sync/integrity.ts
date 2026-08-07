@@ -6,8 +6,29 @@ import { isTaskMonthProtected } from '@/lib/payroll/compute'
 import { getInvoiceDateForTaskMonth, toSequenceMonth } from '@/lib/invoices/numbering'
 import { fetchAll } from '@/lib/supabase/server'
 import { getTaskCoverage } from '@/lib/agreements/coverage'
+import { isCoveredWorkTask, taskPoolBasisInr, resolveCommissionPct } from '@/lib/calculations/work-value'
 
 const r2 = (n: number) => Math.round(n * 100) / 100
+
+/** work_commission_pct of the task's linked agreement item, or null. */
+async function agreementItemCommissionPct(
+  supabase: ReturnType<typeof createTypedAdminClient>,
+  retainerItemId: string | null | undefined,
+): Promise<number | null> {
+  if (!retainerItemId) return null
+  try {
+    // Cast: client_agreement_items post-dates the generated Database types
+    // (same convention as lib/agreements/coverage.ts).
+    const { data } = await (supabase as any)
+      .from('client_agreement_items')
+      .select('work_commission_pct')
+      .eq('id', retainerItemId)
+      .maybeSingle()
+    return (data as { work_commission_pct?: number | null } | null)?.work_commission_pct ?? null
+  } catch {
+    return null // pre-migration: column/table unreadable → default path
+  }
+}
 
 /**
  * Fallback refresh for tasks that have contribution SCORES but no raw
@@ -26,9 +47,10 @@ const r2 = (n: number) => Math.round(n * 100) / 100
 export async function refreshStoredEarningsFromBilling(taskId: string) {
   const supabase = createTypedAdminClient()
 
-  const { data: task } = await supabase
+  // Cast: retainer_item_id / work_value_inr post-date the generated types.
+  const { data: task } = await (supabase as any)
     .from('tasks')
-    .select('id, billing_amount_inr, client_id, service_id, task_date')
+    .select('id, billing_amount_inr, client_id, service_id, task_date, retainer_item_id, bill_as_extra, work_value_inr')
     .eq('id', taskId)
     .single()
   if (!task) return { updated: 0, message: 'Task not found' }
@@ -52,7 +74,7 @@ export async function refreshStoredEarningsFromBilling(taskId: string) {
   // HISTORICAL READER CONTRACT — DELIBERATE: no `.eq('is_active', true)`.
   // is_active governs what may be SOLD, never what was EARNED; filtering here
   // would reprice every past task on a deactivated pair to the 50% fallback.
-  let commPct = 50
+  let matrixPct: number | null = null
   if (task.client_id && task.service_id) {
     const { data: pricing } = await supabase
       .from('client_service_pricing')
@@ -60,8 +82,13 @@ export async function refreshStoredEarningsFromBilling(taskId: string) {
       .eq('client_id', task.client_id)
       .eq('service_id', task.service_id)
       .maybeSingle()
-    if (pricing?.commission_percentage != null) commPct = pricing.commission_percentage
+    if (pricing?.commission_percentage != null) matrixPct = pricing.commission_percentage
   }
+  const commPct = resolveCommissionPct(
+    task as any,
+    await agreementItemCommissionPct(supabase, (task as any).retainer_item_id),
+    matrixPct,
+  )
 
   // Tool deductions (Σ active tool fixed_percentage), a flat % off the pool.
   let toolPct = 0
@@ -79,7 +106,8 @@ export async function refreshStoredEarningsFromBilling(taskId: string) {
   const rating = new Map<string, number>()
   for (const e of (emps || [])) rating.set(e.id, Number(e.performance_rating) || 100)
 
-  const pool = (task.billing_amount_inr || 0) * commPct / 100
+  // Retainer-covered work pools from the stamped work value, not billing (0).
+  const pool = taskPoolBasisInr(task as any) * commPct / 100
   const remainingPool = pool * (1 - toolPct / 100)
 
   let updated = 0
@@ -169,11 +197,18 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
   const taskParams = parameters.filter(p => taskGroups.some(g => g.id === p.group_id))
 
   const pricing = pricingMatrix.find(p => p.client_id === task.client_id && p.service_id === task.service_id)
-  const commPct = pricing?.commission_percentage ?? 50
+  const commPct = resolveCommissionPct(
+    task as any,
+    await agreementItemCommissionPct(supabase, (task as any).retainer_item_id),
+    pricing?.commission_percentage ?? null,
+  )
   const rates = (ratesRes?.data || []).reduce((acc: any, r: any) => ({ ...acc, [r.currency]: Number(r.rate_to_inr) || 1 }), { INR: 1 })
 
-  let internalValueInr = task.billing_amount_inr || 0
-  if (internalValueInr === 0 && pricing?.price) {
+  // Retainer-covered work pools from the stamped work value (agreement page),
+  // never from billing (0) or the pricing matrix. The matrix fallback below
+  // remains for NON-covered tasks whose billing hasn't been filled yet.
+  let internalValueInr = taskPoolBasisInr(task as any)
+  if (!isCoveredWorkTask(task as any) && internalValueInr === 0 && pricing?.price) {
     const qty = task.quantity || 1
     const priceRate = rates[pricing.currency || 'INR'] || 1
     internalValueInr = (pricing.price * qty) * priceRate

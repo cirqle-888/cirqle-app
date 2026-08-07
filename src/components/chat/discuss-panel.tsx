@@ -16,6 +16,7 @@ import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { X, ExternalLink, SendHorizonal, Loader2, MessageSquare, Mic, Paperclip, ClipboardCheck } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { useSidePanelRoom } from '@/components/ui/side-panel-room'
 import { usePermissions } from '@/contexts/permission-context'
 import { displayEmployee } from '@/lib/utils/employee-display'
 import {
@@ -37,7 +38,8 @@ function timeLabel(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })
 }
 
-/** Panel width. Also published as --side-panel-w so a host modal can make room. */
+/** Panel width. Published as --side-panel-w so host modals make room — see
+ *  useSidePanelRoom below and the rule in globals.css. */
 const PANEL_W = 400
 
 const KIND_CHIP: Record<string, { icon: typeof Mic; label: string }> = {
@@ -72,35 +74,12 @@ export function DiscussPanel({ entityType, entityId, title, onClose }: {
   // createPortal needs a real document — defer past SSR/hydration.
   useEffect(() => { setMounted(true) }, [])
 
-  /**
-   * Don't cover the dialog this panel was opened FROM.
-   *
-   * A <ModalOverlay> centres its dialog in the viewport, so this fixed
-   * slide-over lands on top of it — hiding the very item being discussed.
-   * While the panel is open, reserve its width on the overlay's right edge;
-   * the dialog re-centres into the space that's left and both stay readable.
-   *
-   * Done imperatively rather than in CSS so it needs no stylesheet rebuild and
-   * stays colocated with the panel that causes it. Restored on unmount.
-   *
-   * Only from `md` up — a narrower viewport can't show both, and there the
-   * panel is meant to cover as a sheet.
-   */
-  useEffect(() => {
-    if (!window.matchMedia('(min-width: 768px)').matches) return
-    const overlays = [...document.querySelectorAll<HTMLElement>('[data-modal-overlay]')]
-    const previous = overlays.map(el => el.style.paddingRight)
-    for (const el of overlays) {
-      el.style.transition = 'padding-right 200ms cubic-bezier(0.4, 0, 0.2, 1)'
-      el.style.paddingRight = `calc(1rem + ${PANEL_W}px)`
-    }
-    return () => {
-      overlays.forEach((el, i) => {
-        el.style.paddingRight = previous[i]
-        el.style.transition = ''
-      })
-    }
-  }, [])
+  // Don't cover the dialog this panel was opened from: reserve the panel's
+  // width so any <ModalOverlay> re-centres into the space that's left, and
+  // give it back on close. Shared with every other slide-over — see
+  // side-panel-room.ts for why this is a CSS variable rather than inline
+  // styles (modals opened *after* the panel must shift too).
+  useSidePanelRoom(PANEL_W)
 
   const scrollToBottom = useCallback(() => {
     // Defer so the new row has painted before we measure.

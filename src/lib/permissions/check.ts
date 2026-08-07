@@ -1,6 +1,8 @@
 import { cache } from 'react'
 import { createClient } from '@/lib/supabase/server'
 import type { PermKey } from './keys'
+// TEMPORARY — remove with the bypass. See src/lib/permissions/dev-bypass.ts
+import { devPermissionBypass } from './dev-bypass'
 
 export interface CurrentUser {
   authId: string
@@ -173,6 +175,8 @@ export const loadCurrentUser = cache(async (): Promise<CurrentUser | null> => {
 export function hasPermission(user: CurrentUser | null, key: string | string[]): boolean {
   if (!user || user.isArchived) return false
   if (user.isAdmin) return true
+  // TEMPORARY (dev only, dead code in production builds) — src/lib/permissions/dev-bypass.ts
+  if (devPermissionBypass()) return true
   if (Array.isArray(key)) return key.some(k => user.permissions.has(k))
   return user.permissions.has(key)
 }
@@ -192,6 +196,8 @@ export async function requirePermission(key: PermKey | string): Promise<GuardRes
   if (!user)              return { ok: false, error: 'Not signed in.' }
   if (user.isArchived)    return { ok: false, error: 'Your account is archived.' }
   if (user.isAdmin)       return { ok: true, employeeId: user.employeeId, isAdmin: true }
+  // TEMPORARY (dev only, dead code in production builds) — src/lib/permissions/dev-bypass.ts
+  if (devPermissionBypass()) return { ok: true, employeeId: user.employeeId, isAdmin: false }
   if (!user.designationId) return { ok: false, error: 'No designation assigned.' }
   if (!user.permissions.has(key)) return { ok: false, error: 'Permission denied.' }
   return { ok: true, employeeId: user.employeeId, isAdmin: false }
@@ -203,8 +209,10 @@ export async function requireAnyPermission(keys: (PermKey | string)[]): Promise<
   if (!user)              return { ok: false, error: 'Not signed in.' }
   if (user.isArchived)    return { ok: false, error: 'Your account is archived.' }
   if (user.isAdmin)       return { ok: true, employeeId: user.employeeId, isAdmin: true }
+  // TEMPORARY (dev only, dead code in production builds) — src/lib/permissions/dev-bypass.ts
+  if (devPermissionBypass()) return { ok: true, employeeId: user.employeeId, isAdmin: false }
   if (!user.designationId) return { ok: false, error: 'No designation assigned.' }
-  
+
   const has = keys.some(k => user.permissions.has(k))
   if (!has) return { ok: false, error: 'Permission denied.' }
   return { ok: true, employeeId: user.employeeId, isAdmin: false }
@@ -215,6 +223,10 @@ export async function requireAdmin(): Promise<GuardResult> {
   const user = await loadCurrentUser()
   if (!user)           return { ok: false, error: 'Not signed in.' }
   if (user.isArchived) return { ok: false, error: 'Your account is archived.' }
+  // TEMPORARY (dev only, dead code in production builds) — src/lib/permissions/dev-bypass.ts
+  // Included so privilege-escalating fields (base salary, designation) are
+  // editable while validating the new modules, not just readable.
+  if (devPermissionBypass()) return { ok: true, employeeId: user.employeeId, isAdmin: true }
   if (!user.isAdmin)   return { ok: false, error: 'Admin access required.' }
   return { ok: true, employeeId: user.employeeId, isAdmin: true }
 }

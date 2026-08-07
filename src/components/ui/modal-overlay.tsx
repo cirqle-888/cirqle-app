@@ -140,9 +140,12 @@ export function ModalOverlay({
 
   return (
     <div
-      // Hook for the side-panel coexistence rule in globals.css: when a
-      // slide-over (Discuss) is open, it reserves room on the right so this
-      // dialog shifts left instead of being covered.
+      // Hook for the side-panel coexistence rule in globals.css: while a
+      // slide-over (Discuss) is open it stamps `data-side-panel-open` on
+      // <html>, and that rule reserves room here so this dialog shifts left
+      // instead of being covered. Purely declarative, so a modal opened while
+      // the panel is already open is offset on its first paint too.
+      // See src/components/ui/side-panel-room.ts.
       data-modal-overlay
       className={`fixed inset-0 ${zIndex} flex ${alignment} bg-black/60 backdrop-blur-sm ${padding} ${className}`}
       onMouseDown={e => {

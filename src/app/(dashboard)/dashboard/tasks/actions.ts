@@ -415,8 +415,15 @@ export async function serverFillTaskBilling(
   const coverage = await getTaskCoverage(admin, taskId)
   if (coverage.covered) {
     await admin.from('tasks').update({ billing_amount: 0, billing_amount_inr: 0 }).eq('id', taskId)
+    // Covered tasks still pay contributors (from the agreement's work value,
+    // stamped by trigger), so earnings AND pending payroll must refresh.
     await recalcTaskCommissions(taskId)
     await syncDraftInvoices(taskId)
+    const { data: t } = await admin.from('tasks').select('task_date').eq('id', taskId).maybeSingle()
+    if (t?.task_date) {
+      const d = new Date(t.task_date)
+      void recalculatePayrollForMonth({ month: d.getMonth() + 1, year: d.getFullYear(), source: 'task_edit' }).catch(() => {})
+    }
     return
   }
 
@@ -427,12 +434,29 @@ export async function serverFillTaskBilling(
     .maybeSingle()
   if (!svc) return
 
-  // Resolve the UNIT price + currency. The per-client Pricing Matrix wins;
-  // otherwise fall back to the service's default price. NOTE: matrix/default
-  // price is *per creative / per unit* — quantity is applied below.
+  // Resolve the UNIT price + currency. A retainer-linked EXTRA task prices
+  // from the agreement item's extra_unit_price when one is agreed; otherwise
+  // the per-client Pricing Matrix wins; otherwise the service default. NOTE:
+  // all of these are *per creative / per unit* — quantity is applied below.
   let unitPrice: number | null = svc.default_price ?? null
   let unitCurrency = svc.default_currency || 'INR'
-  if (clientId) {
+  let extraPriced = false
+  if (coverage.retainerItemId && !coverage.covered) {
+    // bill_as_extra on a retainer-covered client+service
+    try {
+      const { data: item } = await admin
+        .from('client_agreement_items')
+        .select('extra_unit_price, currency')
+        .eq('id', coverage.retainerItemId)
+        .maybeSingle()
+      if (item?.extra_unit_price != null && item.extra_unit_price > 0) {
+        unitPrice = item.extra_unit_price
+        unitCurrency = item.currency || unitCurrency
+        extraPriced = true
+      }
+    } catch { /* fall through to matrix/default */ }
+  }
+  if (!extraPriced && clientId) {
     const { data: cp } = await admin
       .from('client_service_pricing')
       .select('price, currency')
@@ -447,7 +471,9 @@ export async function serverFillTaskBilling(
   // engine so this auto-fill can never drift from what the task forms show.
   // Percentage-of-spend needs the client's ad spend, which isn't available here,
   // so we leave that billing alone rather than guess.
-  const pt = resolvePricingType(svc.pricing_type)
+  // Agreement extra prices are always per task, regardless of the service's
+  // own pricing type (a 'retainer' service would otherwise ignore quantity).
+  const pt = extraPriced ? 'fixed_per_creative' : resolvePricingType(svc.pricing_type)
   if (pt === 'percentage_of_spend') return
   const qty = quantity || 1
   const amount = computeTaskAmount({ pricingType: pt, unitPrice, quantity: qty, hours: qty })

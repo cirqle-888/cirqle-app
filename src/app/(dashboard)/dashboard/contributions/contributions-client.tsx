@@ -10,6 +10,7 @@ import { recalculatePayrollForMonth } from '@/app/(dashboard)/dashboard/payroll/
 import { serverFillTaskBilling, fetchRetainerCoverage } from '@/app/(dashboard)/dashboard/tasks/actions'
 import { applyTaskAgreements, saveTaskContributions } from './actions'
 import { calculateCommission } from '@/lib/calculations/commission'
+import { taskPoolBasisInr, isCoveredWorkTask, resolveCommissionPct } from '@/lib/calculations/work-value'
 import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
 import { taskCode, taskCodeMatches, nextTaskNumber } from '@/lib/utils/task-code'
 import { usePrivacy } from '@/contexts/privacy-context'
@@ -36,6 +37,8 @@ import { usePermissions } from '@/contexts/permission-context'
 import { useRole } from '@/contexts/role-context'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 const ActivityPanel = dynamic(() => import('@/components/activity/activity-panel'), { ssr: false })
+// Matches the loading strategy the task modal already uses for this button.
+const DiscussButton = dynamic(() => import('@/components/chat/discuss-button').then(m => m.DiscussButton), { ssr: false })
 import { PageShell, PageContent, StickyToolbar, PageChrome } from '@/components/layout/page-shell'
 
 // Heavy task editor — only mount when opened; bundle splits off the
@@ -411,8 +414,9 @@ export default function ContributionsClient({
       const hasScore = scoredTaskIds.has(t.id)
       // Case 1: contributions but no score row at all.
       if (!hasScore) return true
-      // Case 2: scored, but every row is ₹0 while the task now has billing.
-      const billing = t.billing_amount_inr || 0
+      // Case 2: scored, but every row is ₹0 while the task now has a pool
+      // basis (billing, or the agreement work value for covered tasks).
+      const billing = taskPoolBasisInr(t)
       const stale = billing > 0 && taskHasNonZeroEarnings.get(t.id) === false
       return stale
     })
@@ -450,7 +454,9 @@ export default function ContributionsClient({
         const pricing = pricingMatrix.find(
           (p: any) => p.client_id === task.client?.id && p.service_id === task.service_id
         )
-        const commPct = pricing?.commission_percentage ?? 50
+        const commPct = resolveCommissionPct(
+          task, task.retainer_item?.work_commission_pct ?? null, pricing?.commission_percentage ?? null,
+        )
 
         const usedToolIds = new Set(
           taskToolRecords.filter((tt: any) => tt.task_id === task.id).map((tt: any) => tt.tool_id)
@@ -476,7 +482,7 @@ export default function ContributionsClient({
         try {
           const result = calculateCommission({
             taskId: task.id,
-            billingAmountINR: task.billing_amount_inr || 0,
+            billingAmountINR: taskPoolBasisInr(task),
             serviceCommissionPct: commPct,
             employees: effectiveEmployees, groups: taskGroups,
             parameters: taskParams,
@@ -927,7 +933,7 @@ export default function ContributionsClient({
     try {
       return calculateCommission({
         taskId: selectedTask.id,
-        billingAmountINR: selectedTask.billing_amount_inr || 0,
+        billingAmountINR: taskPoolBasisInr(selectedTask),
         serviceCommissionPct: serviceCommPct,
         employees: effectiveEmployees, groups,
         parameters: filteredParams,
@@ -966,11 +972,16 @@ export default function ContributionsClient({
     setExpandedEmployees(new Set()); setActiveGroups(new Set()); setActiveSubParams(new Set())
     setCommOverrideReason(''); setShowCommOverride(false)
 
-    // Auto-load commission rate from pricing matrix
+    // Auto-load commission rate: agreement item override wins for
+    // retainer-linked tasks, else the pricing matrix, else 50.
     const pricing = pricingMatrix.find(
       p => p.client_id === (task.client?.id) && p.service_id === task.service_id
     )
-    if (pricing?.commission_percentage != null) {
+    const agreementPct = task.retainer_item?.work_commission_pct ?? null
+    if (task.retainer_item_id && agreementPct != null) {
+      setServiceCommPct(agreementPct)
+      setPredefinedCommPct(agreementPct)
+    } else if (pricing?.commission_percentage != null) {
       setServiceCommPct(pricing.commission_percentage)
       setPredefinedCommPct(pricing.commission_percentage)
     } else {
@@ -1647,7 +1658,7 @@ export default function ContributionsClient({
                     <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{fmt(date)}</div>
                     <div className="flex-1 h-px bg-border" />
                     {showBilling && (() => {
-                      const dayTotal = dateTasks.reduce((s, t) => s + (t.billing_amount_inr ?? 0), 0)
+                      const dayTotal = dateTasks.reduce((s, t) => s + taskPoolBasisInr(t), 0)
                       return dayTotal > 0 ? (
                         <span className="text-xs font-semibold text-foreground tabular-nums">₹{dayTotal.toLocaleString('en-IN')}</span>
                       ) : null
@@ -1717,8 +1728,8 @@ export default function ContributionsClient({
                                 {(task.quantity ?? 1) > 1 && (
                                   <><span>·</span><span className="font-medium text-violet-400/80">×{task.quantity} qty</span></>
                                 )}
-                                {canSeeFinancials && showFinancials && task.billing_amount_inr > 0 && (
-                                  <><span>·</span><span className="font-semibold text-foreground">₹{task.billing_amount_inr.toLocaleString('en-IN')}</span></>
+                                {canSeeFinancials && showFinancials && taskPoolBasisInr(task) > 0 && (
+                                  <><span>·</span><span className="font-semibold text-foreground">₹{taskPoolBasisInr(task).toLocaleString('en-IN')}</span></>
                                 )}
                               </div>
 
@@ -1786,6 +1797,11 @@ export default function ContributionsClient({
                                   <ExternalLink className="w-3.5 h-3.5" />
                                 </a>
                               )}
+                              {/* Same per-task discussion room as Tasks and
+                                  Requests — scoring a contribution is exactly
+                                  when you need to ask about the work. */}
+                              <DiscussButton entityType="task" entityId={task.id} variant="icon"
+                                label="Discuss this task" panelTitle={task.title} />
                               <button type="button"
                                 onClick={() => openEditTask(task)}
                                 title="Edit task details"
@@ -2372,8 +2388,10 @@ export default function ContributionsClient({
             <p className="text-[11px] text-muted-foreground truncate leading-tight">
               {[selectedTask?.client?.name, selectedTask?.service?.name].filter(Boolean).join(' · ')}
               {(selectedTask?.quantity ?? 1) > 1 && <> · ×{selectedTask.quantity} qty</>}
-              {canSeeFinancials && showFinancials && selectedTask?.billing_amount_inr > 0 && (
-                <> · ₹{(selectedTask.billing_amount_inr || 0).toLocaleString('en-IN')}</>
+              {canSeeFinancials && showFinancials && taskPoolBasisInr(selectedTask || {}) > 0 && (
+                <> · ₹{taskPoolBasisInr(selectedTask || {}).toLocaleString('en-IN')}
+                  {isCoveredWorkTask(selectedTask || {}) && <span className="text-primary/80"> (retainer work value)</span>}
+                </>
               )}
             </p>
           </div>
@@ -2400,10 +2418,14 @@ export default function ContributionsClient({
           )}
         </div>
 
-        {/* Billing amount warning — shows when billing is 0 but contributions are entered */}
-        {canSeeFinancials && showFinancials && calculatedResult && (selectedTask?.billing_amount_inr || 0) === 0 && (
+        {/* Pool-basis warning — shows when the pool basis is 0 but contributions are entered */}
+        {canSeeFinancials && showFinancials && calculatedResult && taskPoolBasisInr(selectedTask || {}) === 0 && (
           <div className="px-6 py-2 bg-amber-500/10 border-t border-amber-500/25 flex items-center gap-2">
-            <span className="text-[11px] text-amber-400 font-medium">⚠ No billing amount set on this task — commission will be ₹0. Edit the task to add a billing amount first.</span>
+            <span className="text-[11px] text-amber-400 font-medium">
+              {isCoveredWorkTask(selectedTask || {})
+                ? '⚠ This task is retainer-covered but its agreement item has no work value — commission will be ₹0. Set a work value on the agreement page.'
+                : '⚠ No billing amount set on this task — commission will be ₹0. Edit the task to add a billing amount first.'}
+            </span>
           </div>
         )}
 
@@ -2420,7 +2442,7 @@ export default function ContributionsClient({
               ) : null}
               <span className="text-[11px] text-muted-foreground">→ pool</span>
               <span className="text-xs font-bold gradient-text">
-                ₹{((selectedTask?.billing_amount_inr || 0) * serviceCommPct / 100).toLocaleString('en-IN')}
+                ₹{(taskPoolBasisInr(selectedTask || {}) * serviceCommPct / 100).toLocaleString('en-IN')}
               </span>
             </div>
             <button type="button" onClick={() => setShowCommOverride(v => !v)}

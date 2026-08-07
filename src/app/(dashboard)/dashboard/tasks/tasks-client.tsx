@@ -58,7 +58,7 @@ import { TaskBillingSection } from '@/components/ui/task-billing-section'
 import { useRetainerCoverage } from '@/lib/tasks/use-retainer-coverage'
 import {
   computeTaskAmount, resolveTaskQuantity, resolvePricingType,
-  isBillingSuppressed, effectiveBillingAmount,
+  isBillingSuppressed, effectiveBillingAmount, applyCoverageExtraPrice,
 } from '@/lib/tasks/pricing'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { BatchActionBar, type BatchAction } from '@/components/ui/batch-action-bar'
@@ -798,17 +798,27 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
 
   // Derived: selected service object
   const selectedService = services.find(s => s.id === form.service_id)
-  const pricingType = resolvePricingType(selectedService?.pricing_type)
 
   // Retainer coverage + the "is the client charged?" rule both come from the
   // shared modules, so this form and the Edit modal can never disagree.
   const coverage = useRetainerCoverage(form.client_id, form.service_id, form.task_date)
   const suppressBilling = isBillingSuppressed({ covered: !!coverage, billAsExtra: form.bill_as_extra })
 
-  // Derived: unit price — client-specific first, then service default
+  // Derived: unit price — agreement extra rate (when billed as extra) first,
+  // then client-specific matrix, then service default. Shared engine.
   const clientPrice = clientPricings.find(p => p.client_id === form.client_id && p.service_id === form.service_id)
-  const unitPrice = clientPrice?.price ?? selectedService?.default_price ?? 0
-  const unitCurrency = (clientPrice?.currency || selectedService?.default_currency || 'INR') as Currency
+  const resolvedPrice = applyCoverageExtraPrice(
+    {
+      pricingType: resolvePricingType(selectedService?.pricing_type),
+      unitPrice: clientPrice?.price ?? selectedService?.default_price ?? 0,
+      currency: clientPrice?.currency || selectedService?.default_currency || 'INR',
+      fromClientMatrix: !!clientPrice,
+    },
+    coverage, form.bill_as_extra,
+  )
+  const pricingType = resolvedPrice.pricingType
+  const unitPrice = resolvedPrice.unitPrice
+  const unitCurrency = resolvedPrice.currency as Currency
 
   // Derived: parent task (when creating a variant)
   const parentTask = useMemo(

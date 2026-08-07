@@ -1,10 +1,18 @@
 # Simplification Plan — Agreements & Contributions
 
-> **Status (1 Aug 2026, commit `422178e`)**
+> **Status (7 Aug 2026)**
 > **Phase 1 — done** except 1.1 (coverage backfill) and 1.4 (month switcher / proration label).
 > **Phase 2 — done.** Analytics stack and all four duplicate renderings removed.
-> **Phase 3 — not started.** Contributions still read `billing_amount`.
-> Verified against production: Elara July = committed 6, delivered 2, remaining 4. 473 tests pass.
+> **Phase 3 — done (migration `20260807110000_agreement_work_values`),** with one
+> deliberate deviation from the plan below: the work value lives on
+> `client_agreement_items.work_unit_value` (per agreement line, edited on the
+> agreement page) instead of a global `service_work_values` table — the
+> agreement is the single pricing source for agreement clients. The DB stamps
+> `tasks.work_value_inr` (trigger), and every contribution engine pools from
+> `taskPoolBasisInr()` in `src/lib/calculations/work-value.ts`. Also shipped:
+> `work_commission_pct` (pool % override per item), extras priced from
+> `extra_unit_price`, and the monthly retainer fee auto-invoiced by
+> `/api/cron/retainer-invoices`.
 
 **Goal, stated plainly:** Tasks is where work gets added. Agreements answers one question — *did we deliver what we committed?* Nothing else, for now.
 

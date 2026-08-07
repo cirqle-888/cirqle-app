@@ -19,6 +19,8 @@ import { requirePermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
 import { computeMonthlyCommissions } from '@/lib/payroll/compute'
+import { pendingAdjustmentTotals, settleAdjustments } from '@/lib/payroll/adjustments'
+import { computeMonthlyOwnership } from '@/lib/ownership/engine'
 import { retryWithoutScope, withoutScope } from '@/lib/finance/classify'
 
 const REVALIDATE = '/dashboard/payroll'
@@ -121,10 +123,21 @@ export async function recalculatePayrollForMonth(
   if (!commissionRes.ok) return { ok: false, error: commissionRes.error }
   const { commissionByEmployee } = commissionRes
 
+  // Unsettled prior-period adjustments (corrections owed for already-closed
+  // months — see src/lib/payroll/adjustments.ts). They ride along in this
+  // month's net without ever reopening the month they came from.
+  const adjustmentByEmployee = await pendingAdjustmentTotals(admin)
+
+  // Ownership rewards for this month (revenue share, profit share, incentives,
+  // bonuses). NULL means "could not compute" — distinct from "computed as
+  // zero", so a transient failure leaves stored amounts alone instead of
+  // wiping someone's reward.
+  const ownershipByEmployee = await computeMonthlyOwnership(admin, input.month, input.year)
+
   // Get all pending payroll for this month with employee info
   const { data: payroll, error: payrollErr } = await admin
     .from('payroll')
-    .select('id, employee_id, base_salary, commission_earned, advances_deducted, other_deductions, employee:employees(id, cqid)')
+    .select('id, employee_id, base_salary, commission_earned, adjustment_earned, ownership_earned, advances_deducted, other_deductions, employee:employees(id, cqid)')
     .eq('month', input.month)
     .eq('year', input.year)
     .eq('status', 'pending')
@@ -145,22 +158,32 @@ export async function recalculatePayrollForMonth(
     // refresh produce the same stored value (no flip-flopping).
     const newCommission = Math.round(commissionByEmployee[record.employee_id] || 0)
     const oldCommission = record.commission_earned || 0
+    const newAdjustment = Math.round(adjustmentByEmployee[record.employee_id] || 0)
+    const oldAdjustment = (record as { adjustment_earned?: number }).adjustment_earned || 0
+    const oldOwnership = (record as { ownership_earned?: number }).ownership_earned || 0
+    const newOwnership = ownershipByEmployee
+      ? Math.round(ownershipByEmployee[record.employee_id] || 0)
+      : oldOwnership                                  // compute failed — keep what is stored
 
-    // Skip if commission is unchanged (≥ ₹1 difference required to write).
-    if (Math.round(oldCommission) === newCommission) continue
+    // Skip only when EVERY component is unchanged (≥ ₹1 difference to write).
+    if (Math.round(oldCommission) === newCommission
+      && Math.round(oldAdjustment) === newAdjustment
+      && Math.round(oldOwnership) === newOwnership) continue
 
     // Net salary clamped to ≥ 0 — matches the payroll client's handleRefreshPayroll.
     const baseMinusDeductions =
       (record.base_salary || 0) -
       (record.advances_deducted || 0) -
       (record.other_deductions || 0)
-    const oldNetSalary = Math.max(0, baseMinusDeductions + oldCommission)
-    const newNetSalary = Math.max(0, baseMinusDeductions + newCommission)
+    const oldNetSalary = Math.max(0, baseMinusDeductions + oldCommission + oldAdjustment + oldOwnership)
+    const newNetSalary = Math.max(0, baseMinusDeductions + newCommission + newAdjustment + newOwnership)
 
     const { error: updateErr } = await admin
       .from('payroll')
       .update({
         commission_earned: newCommission,
+        adjustment_earned: newAdjustment,
+        ownership_earned: newOwnership,
         net_salary: newNetSalary,
       })
       .eq('id', record.id)
@@ -173,6 +196,10 @@ export async function recalculatePayrollForMonth(
         cqid: (record.employee as any)?.cqid,
         oldCommission,
         newCommission,
+        oldAdjustment,
+        newAdjustment,
+        oldOwnership,
+        newOwnership,
         oldNetSalary,
         newNetSalary,
         commissionDiff: newCommission - oldCommission,
@@ -333,6 +360,11 @@ export interface MarkPaidInput {
   year: number
   finalNet: number
   liveCommission: number
+  /** Prior-period adjustments included in finalNet. Signed: a correction can
+   *  recover an overpayment as well as pay a shortfall. */
+  liveAdjustment?: number
+  /** Ownership rewards (revenue/profit share, incentives, bonuses) in finalNet. */
+  liveOwnership?: number
   salaryCategory: string
 }
 
@@ -346,8 +378,15 @@ export async function markPayrollPaid(
   const today = new Date().toISOString().split('T')[0]
 
   const updates: Record<string, unknown> = { status: 'paid', paid_date: today }
-  if (input.liveCommission > 0) {
+  // Write the live figures whenever ANY variable component is present. The
+  // old `liveCommission > 0` alone left a stale net stored for anyone paid on
+  // base salary or prior-period adjustments only.
+  const liveAdjustment = input.liveAdjustment || 0
+  const liveOwnership = input.liveOwnership || 0
+  if (input.liveCommission > 0 || liveAdjustment !== 0 || liveOwnership > 0) {
     updates.commission_earned = input.liveCommission
+    updates.adjustment_earned = liveAdjustment
+    updates.ownership_earned = liveOwnership
     updates.net_salary = input.finalNet
   }
 
@@ -356,6 +395,12 @@ export async function markPayrollPaid(
     .update(updates)
     .eq('id', input.id)
   if (updateErr) return { ok: false, error: updateErr.message }
+
+  // The adjustments this payslip just discharged are now history. Stamped with
+  // the paying period, they never surface in a future draft again.
+  if (liveAdjustment !== 0) {
+    await settleAdjustments(admin, input.employeeId, input.month, input.year).catch(() => ({ settled: 0 }))
+  }
 
   // Log: payroll marked paid (fire-and-forget)
   void logActivity({

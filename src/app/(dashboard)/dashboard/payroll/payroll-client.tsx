@@ -74,6 +74,10 @@ interface PayrollRecord {
   // employee join) remain available.
   base_salary?: number
   commission_earned?: number
+  /** Corrections owed for already-closed months, paid with this payslip. */
+  adjustment_earned?: number
+  /** Ownership rewards — revenue/profit share, incentives, bonuses. */
+  ownership_earned?: number
   advances_deducted?: number
   other_deductions?: number
   net_salary?: number
@@ -149,6 +153,19 @@ function avatarText(displayName: string | undefined, cqid: string): string {
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
+
+/**
+ * Earnings already stored on a payroll row that the live recalculation does
+ * not recompute: prior-period adjustments and ownership rewards.
+ *
+ * Kept as one helper because the net formula appears in several places here —
+ * adding a future component in only some of them is exactly how a payslip
+ * ends up disagreeing with the amount actually paid.
+ */
+function storedExtras(record: { adjustment_earned?: number | null; ownership_earned?: number | null } | null | undefined): number {
+  if (!record) return 0
+  return (Number(record.adjustment_earned) || 0) + (Number(record.ownership_earned) || 0)
+}
 
 export default function PayrollClient({
   employees, payrollRecords, advances, credits, deductions, contributionScores, allTasks,
@@ -406,7 +423,7 @@ export default function PayrollClient({
     const monthName = record ? MONTHS[record.month - 1] : ''
     // Show the live (up-to-date) net amount in the confirmation
     const liveCommission = record ? (monthCommissions[record.employee_id] || 0) : 0
-    const liveNet = record ? Math.max(0, (record.base_salary || 0) + liveCommission - (record.advances_deducted || 0) - (record.other_deductions || 0)) : 0
+    const liveNet = record ? Math.max(0, (record.base_salary || 0) + liveCommission + storedExtras(record) - (record.advances_deducted || 0) - (record.other_deductions || 0)) : 0
     const displayNet = liveNet || record?.net_salary || 0
     setConfirmModal({
       title:        'Mark Salary as Paid',
@@ -421,7 +438,7 @@ export default function PayrollClient({
     const record = payroll.find(r => r.id === id)
     if (!record) return
     const liveCommission = monthCommissions[record.employee_id] || 0
-    const liveNet = Math.max(0, (record.base_salary || 0) + liveCommission - (record.advances_deducted || 0) - (record.other_deductions || 0))
+    const liveNet = Math.max(0, (record.base_salary || 0) + liveCommission + storedExtras(record) - (record.advances_deducted || 0) - (record.other_deductions || 0))
     const finalNet = liveNet || record.net_salary || 0
     const emp = empList.find(e => e.id === record.employee_id)
     const result = await markPayrollPaid({
@@ -487,7 +504,7 @@ export default function PayrollClient({
     const record = payroll.find(r => r.id === id)
     if (!record || record.status === 'paid') return
     const liveComm = monthCommissions[record.employee_id] || 0
-    const liveNet = Math.max(0, (record.base_salary || 0) + liveComm - (record.advances_deducted || 0) - (record.other_deductions || 0))
+    const liveNet = Math.max(0, (record.base_salary || 0) + liveComm + storedExtras(record) - (record.advances_deducted || 0) - (record.other_deductions || 0))
     
     setRefreshingId(id)
     try {
@@ -515,7 +532,7 @@ export default function PayrollClient({
   function payrollOutOfSync(record: any): boolean {
     if (!record || record.status !== 'pending') return false
     const liveComm = monthCommissions[record.employee_id] || 0
-    const liveNet = Math.max(0, (record.base_salary || 0) + liveComm - (record.advances_deducted || 0) - (record.other_deductions || 0))
+    const liveNet = Math.max(0, (record.base_salary || 0) + liveComm + storedExtras(record) - (record.advances_deducted || 0) - (record.other_deductions || 0))
     return Math.round(record.commission_earned || 0) !== Math.round(liveComm)
       || Math.round(record.net_salary || 0) !== Math.round(liveNet)
   }

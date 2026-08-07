@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getQualityBand } from '@/lib/calculations/commission'
 import type { PayslipData, PayslipBand, PayslipTask, PayslipMonthEarning } from './types'
+import { loadAwardsForPayslip } from '@/lib/ownership/engine'
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
 const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -49,11 +50,39 @@ export async function buildPayslipData(
   // ── Payroll record for the period ──────────────────────────────────────────
   const { data: pay } = await admin
     .from('payroll')
-    .select('base_salary, commission_earned, bonus, advances_deducted, other_deductions, net_salary, status, paid_date, payslip_number')
+    .select('base_salary, commission_earned, bonus, adjustment_earned, ownership_earned, advances_deducted, other_deductions, net_salary, status, paid_date, payslip_number')
     .eq('employee_id', employeeId)
     .eq('month', month)
     .eq('year', year)
     .maybeSingle()
+
+  // Which closed months the adjustments on this payslip came from. Settled
+  // rows carry the paying period; unsettled ones are what a pending payslip
+  // will pay. Best-effort: the line simply shows a total if this read fails.
+  const adjustmentSources: { month: number; year: number; amountInr: number }[] = []
+  try {
+    const { data: adj } = await admin
+      .from('payroll_adjustments')
+      .select('source_month, source_year, amount_inr, settled_month, settled_year, settled_at')
+      .eq('employee_id', employeeId)
+    for (const a of (adj || []) as Record<string, unknown>[]) {
+      const settled = a.settled_at != null
+      const belongsHere = settled
+        ? Number(a.settled_month) === month && Number(a.settled_year) === year
+        : true
+      if (!belongsHere) continue
+      adjustmentSources.push({
+        month: Number(a.source_month),
+        year: Number(a.source_year),
+        amountInr: Number(a.amount_inr || 0),
+      })
+    }
+  } catch { /* pre-migration — no adjustments to show */ }
+
+  // Per-program ownership breakdown. Best-effort: the payslip falls back to a
+  // single total if this read fails.
+  const ownershipAwards = await loadAwardsForPayslip(admin, employeeId, month, year)
+    .catch(() => [] as Awaited<ReturnType<typeof loadAwardsForPayslip>>)
 
   // ── 6-month window [start, end) ────────────────────────────────────────────
   // Months: (m-5) … m. Build the list first so empty months still show.
@@ -195,6 +224,10 @@ export async function buildPayslipData(
       baseSalary:       pay?.base_salary || 0,
       commission:       pay?.commission_earned || 0,
       bonus:            pay?.bonus || 0,
+      adjustment:       (pay as { adjustment_earned?: number } | null)?.adjustment_earned || 0,
+      adjustmentSources,
+      ownership:        (pay as { ownership_earned?: number } | null)?.ownership_earned || 0,
+      ownershipAwards,
       advancesDeducted: pay?.advances_deducted || 0,
       otherDeductions:  pay?.other_deductions || 0,
       netSalary:        pay?.net_salary || 0,

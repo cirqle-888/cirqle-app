@@ -55,10 +55,40 @@ function salaryRow(label: string, value: string, color = C.ink, bold = false) {
     </tr>`
 }
 
+const SHORT_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+/**
+ * Names the closed month(s) an adjustment came from, so the line reads
+ * "Adjustment (Jul 2026)" rather than an unexplained extra amount.
+ */
+export function adjustmentLabel(
+  sources: { month: number; year: number; amountInr: number }[] | undefined,
+): string {
+  const list = sources ?? []
+  if (list.length === 0) return 'Previous Month Adjustment'
+  const uniq = [...new Set(list.map(s => `${SHORT_MONTHS[s.month - 1]} ${s.year}`))]
+  if (uniq.length === 1) return `Adjustment (${uniq[0]})`
+  if (uniq.length <= 3) return `Adjustment (${uniq.join(', ')})`
+  return `Adjustment (${uniq.length} previous months)`
+}
+
+/**
+ * Label for one ownership line: the program, the hat the person wore, and the
+ * rate — "Manager Revenue Share · Ops Manager (2% of billing)". Showing the
+ * rate is what turns a number into something an employee can check.
+ */
+export function ownershipRowLabel(a: {
+  programName: string; label: string | null; basis: string; percent: number | null
+}): string {
+  const hat = a.label ? ` · ${a.label}` : ''
+  const rate = a.percent != null ? ` (${a.percent}% of ${a.basis})` : ''
+  return `${a.programName}${hat}${rate}`
+}
+
 /** Full HTML email body — light theme, no per-band earnings, no performance %. */
 export function renderPayslipHtml(d: PayslipData, note?: string): string {
   const s = d.salary
-  const gross = s.baseSalary + s.commission + s.bonus
+  const gross = s.baseSalary + s.commission + s.bonus + (s.adjustment || 0) + (s.ownership || 0)
   const deductions = s.advancesDeducted + s.otherDeductions
   const statusPaid = s.status === 'paid'
 
@@ -136,6 +166,18 @@ export function renderPayslipHtml(d: PayslipData, note?: string): string {
             ${s.baseSalary > 0 ? salaryRow('Base Salary', inr(s.baseSalary)) : ''}
             ${salaryRow('Creative Rewards', inr(s.commission), C.green)}
             ${s.bonus > 0 ? salaryRow('Bonus', inr(s.bonus), C.green) : ''}
+            ${s.adjustment ? salaryRow(
+              adjustmentLabel(s.adjustmentSources),
+              (s.adjustment < 0 ? '− ' : '') + inr(Math.abs(s.adjustment)),
+              s.adjustment < 0 ? C.red : C.green,
+            ) : ''}
+            ${/* One line per ownership program, so the reward is explained
+                  rather than appearing as an unexplained lump sum. */
+              (s.ownershipAwards ?? []).length > 0
+                ? (s.ownershipAwards ?? []).map(a => salaryRow(
+                    ownershipRowLabel(a), inr(a.earnedInr), C.green,
+                  )).join('')
+                : (s.ownership ? salaryRow('Ownership Reward', inr(s.ownership), C.green) : '')}
             <tr><td colspan="2" style="border-top:1px solid ${C.border};padding-top:4px;"></td></tr>
             ${salaryRow('Gross', inr(gross), C.ink, true)}
             ${s.advancesDeducted > 0 ? salaryRow('Advance Deducted', '− ' + inr(s.advancesDeducted), C.red) : ''}
@@ -237,6 +279,8 @@ export function renderPayslipText(d: PayslipData): string {
     s.baseSalary > 0 ? `Base Salary:     ${inr(s.baseSalary)}` : '',
     `Creative Rewards: ${inr(s.commission)}`,
     s.bonus > 0 ? `Bonus:           ${inr(s.bonus)}` : '',
+    s.adjustment ? `${adjustmentLabel(s.adjustmentSources)}: ${s.adjustment < 0 ? '-' : ''}${inr(Math.abs(s.adjustment))}` : '',
+    ...(s.ownershipAwards ?? []).map(a => `${ownershipRowLabel(a)}: ${inr(a.earnedInr)}`),
     s.advancesDeducted > 0 ? `Advance Ded:    -${inr(s.advancesDeducted)}` : '',
     s.otherDeductions > 0 ? `Deductions:     -${inr(s.otherDeductions)}` : '',
     `NET ${s.status === 'paid' ? 'PAID' : 'PAYABLE'}: ${inr(s.netSalary)}`,

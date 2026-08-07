@@ -1,6 +1,7 @@
 import { createTypedAdminClient } from '@/lib/supabase/server'
 import { matchAgreement, computeAgreementEarning, type CommissionAgreement } from '@/lib/calculations/agreements'
 import { isTaskMonthProtected } from '@/lib/payroll/compute'
+import { taskPoolBasisInr, resolveCommissionPct } from '@/lib/calculations/work-value'
 
 /**
  * Apply employee commission agreements to a task's stored earnings.
@@ -37,9 +38,10 @@ export async function syncTaskAgreementEarnings(taskId: string): Promise<{ chang
   const { available, agreements } = await loadActiveAgreements(admin)
   if (!available) return { changed: 0 } // pre-migration / no table → no-op
 
-  const { data: task } = await admin
+  // Cast: retainer_item_id / work_value_inr post-date the generated types.
+  const { data: task } = await (admin as any)
     .from('tasks')
-    .select('id, client_id, service_id, billing_amount_inr, task_date')
+    .select('id, client_id, service_id, billing_amount_inr, task_date, retainer_item_id, bill_as_extra, work_value_inr')
     .eq('id', taskId)
     .single()
   if (!task) return { changed: 0 }
@@ -69,7 +71,7 @@ export async function syncTaskAgreementEarnings(taskId: string): Promise<{ chang
   //
   // HISTORICAL READER CONTRACT — DELIBERATE: no `.eq('is_active', true)` below.
   // is_active governs what may be SOLD, never what was EARNED.
-  let commPct = 50
+  let matrixPct: number | null = null
   if (task.client_id && task.service_id) {
     const { data: pricing } = await admin
       .from('client_service_pricing')
@@ -77,8 +79,21 @@ export async function syncTaskAgreementEarnings(taskId: string): Promise<{ chang
       .eq('client_id', task.client_id)
       .eq('service_id', task.service_id)
       .maybeSingle()
-    if (pricing?.commission_percentage != null) commPct = pricing.commission_percentage
+    if (pricing?.commission_percentage != null) matrixPct = pricing.commission_percentage
   }
+  let agreementPct: number | null = null
+  if ((task as any).retainer_item_id) {
+    try {
+      // Cast: client_agreement_items post-dates the generated types.
+      const { data: item } = await (admin as any)
+        .from('client_agreement_items')
+        .select('work_commission_pct')
+        .eq('id', (task as any).retainer_item_id)
+        .maybeSingle()
+      agreementPct = (item as { work_commission_pct?: number | null } | null)?.work_commission_pct ?? null
+    } catch { /* pre-migration → default path */ }
+  }
+  const commPct = resolveCommissionPct(task as any, agreementPct, matrixPct)
   let toolPct = 0
   const { data: taskTools } = await admin.from('task_tools').select('tool_id').eq('task_id', taskId)
   if (taskTools && taskTools.length) {
@@ -86,7 +101,8 @@ export async function syncTaskAgreementEarnings(taskId: string): Promise<{ chang
       .from('tools').select('fixed_percentage, is_active').in('id', taskTools.map(t => t.tool_id).filter((id): id is string => id !== null))
     toolPct = (tools || []).reduce((s, t) => s + (t.is_active !== false ? Number(t.fixed_percentage) || 0 : 0), 0)
   }
-  const billingInr = task.billing_amount_inr || 0
+  // Covered work pools from the stamped work value; billing stays 0 client-side.
+  const billingInr = taskPoolBasisInr(task as any)
   const remainingPool = (billingInr * commPct / 100) * (1 - toolPct / 100)
 
   let changed = 0

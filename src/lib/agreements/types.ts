@@ -144,6 +144,11 @@ export interface ClientAgreementItemRow {
   included_quantity: number | null
   /** DB-generated: creative_allocation_amount / included_quantity. Read-only. */
   allocated_unit_value: number | null
+  // Work-value pricing (migration 20260807110000). Internal per-task value for
+  // covered work — feeds the contribution pool, never the invoice.
+  work_unit_value: number | null
+  /** Employee-pool % for work on this item. NULL = engine default (50). */
+  work_commission_pct: number | null
   created_at: string
   updated_at: string
 }

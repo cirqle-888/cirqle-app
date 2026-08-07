@@ -22,7 +22,7 @@ import Link from 'next/link'
 import { CheckCircle, ExternalLink, Hash, Clock } from 'lucide-react'
 import type { RetainerCoverageInfo } from '@/lib/agreements/coverage'
 import {
-  computeTaskAmount, resolveUnitPrice, isBillingSuppressed,
+  computeTaskAmount, resolveUnitPrice, isBillingSuppressed, applyCoverageExtraPrice,
   type ClientPricingLike, type ServiceLike,
 } from '@/lib/tasks/pricing'
 
@@ -75,9 +75,11 @@ export function TaskBillingSection({
   lockedAmount = null, lockedCurrency, lockedNote,
   amount, unitPriceDisplay, footer,
 }: TaskBillingSectionProps) {
-  const { pricingType, unitPrice, currency, fromClientMatrix } = resolveUnitPrice({
-    services, clientPricings, clientId, serviceId,
-  })
+  const { pricingType, unitPrice, currency, fromClientMatrix, fromAgreementExtra } =
+    applyCoverageExtraPrice(
+      resolveUnitPrice({ services, clientPricings, clientId, serviceId }),
+      coverage, billAsExtra,
+    )
   const suppressed = isBillingSuppressed({ covered: !!coverage, billAsExtra })
   const engineAmount = computeTaskAmount({ pricingType, unitPrice, quantity, hours, spend })
   const total = amount ?? engineAmount
@@ -142,7 +144,15 @@ export function TaskBillingSection({
                   <div className="font-semibold text-sm">{coverage.currency} {coverage.creativeAllocation}</div>
                 </div>
               )}
-              {coverage.allocatedUnitValue != null && (
+              {coverage.workUnitValue != null ? (
+                <div>
+                  <div className="text-[10px] text-muted-foreground">Work value (pays team)</div>
+                  <div className="font-semibold text-sm">
+                    {coverage.currency} {coverage.workUnitValue}
+                    <span className="text-[10px] text-muted-foreground font-normal"> /task</span>
+                  </div>
+                </div>
+              ) : coverage.allocatedUnitValue != null && (
                 <div>
                   <div className="text-[10px] text-muted-foreground">Allocated unit value</div>
                   <div className="font-semibold text-sm">
@@ -161,6 +171,16 @@ export function TaskBillingSection({
             </div>
           )}
           {pricingType === 'fixed_per_creative' && <div className="max-w-[180px]">{creativesInput}</div>}
+          {/* Commitment used up → suggest billing this one as extra work. */}
+          {showFinancials && coverage.includedQuantity != null && coverage.remaining === 0 && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+              <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                All {coverage.includedQuantity} included tasks are used this period — this looks like
+                extra work{coverage.extraUnitPrice != null
+                  ? ` (agreed extra rate: ${coverage.currency} ${coverage.extraUnitPrice}/task)` : ''}.
+              </p>
+            </div>
+          )}
           <div className="flex items-center justify-between pt-1 border-t border-green-500/15">
             <p className="text-[11px] text-muted-foreground">
               No client charge — the monthly retainer is the invoice.
@@ -181,7 +201,10 @@ export function TaskBillingSection({
       {coverage && billAsExtra && showFinancials && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-2.5 flex items-center justify-between gap-3">
           <p className="text-xs text-amber-700 dark:text-amber-300">
-            Extra work beyond the {coverage.includedQuantity ?? ''} included — this task bills the client normally.
+            Extra work beyond the {coverage.includedQuantity ?? ''} included — this task bills the client
+            {fromAgreementExtra
+              ? <> at the agreed extra rate ({coverage.currency} {coverage.extraUnitPrice}/task).</>
+              : ' normally.'}
           </p>
           <button type="button" onClick={() => onBillAsExtraChange(false)}
             className="text-[11px] font-medium text-muted-foreground hover:text-foreground whitespace-nowrap">
@@ -215,7 +238,9 @@ export function TaskBillingSection({
               </span>
             </div>
             <span className="text-xs text-muted-foreground">
-              {pricingType === 'percentage_of_spend'
+              {fromAgreementExtra
+                ? `Agreement extra rate: ${currency} ${shownUnit}`
+                : pricingType === 'percentage_of_spend'
                 ? shownUnit > 0 ? `Your rate: ${shownUnit}%` : 'No % set'
                 : fromClientMatrix
                   ? `Client price: ${currency} ${shownUnit}`

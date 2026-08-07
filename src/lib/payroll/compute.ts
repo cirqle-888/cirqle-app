@@ -24,9 +24,17 @@ const r2 = (n: number) => Math.round(n * 100) / 100
 const FINALIZED_PAYROLL_STATUSES = ['paid'] as const
 
 /**
- * True when a month's payroll has been finalized for anyone.
+ * True when a month's books are closed, by EITHER of two independent signals:
  *
- * Fails CLOSED: if the check itself errors we report the month as finalized,
+ *   1. Any payslip for the month reached a finalized status (money moved).
+ *   2. The owner explicitly locked the period (`period_locks`, migration
+ *      20260807090000) — "close the books" without waiting for payroll.
+ *
+ * Every money writer in the app funnels through this one predicate, so adding
+ * the second signal here freezes them all consistently — no writer had to
+ * change.
+ *
+ * Fails CLOSED: if either check errors we report the month as finalized,
  * because wrongly skipping a refresh only leaves a cache stale (recoverable),
  * while wrongly rewriting a paid month silently rewrites issued payslips
  * (not recoverable).
@@ -44,7 +52,29 @@ export async function isMonthFinalized(
     .in('status', FINALIZED_PAYROLL_STATUSES as unknown as string[])
     .limit(1)
   if (error) return true
-  return (data?.length ?? 0) > 0
+  if ((data?.length ?? 0) > 0) return true
+
+  // Explicit lock. A MISSING TABLE IS NOT A LOCK: pre-migration environments
+  // must keep behaving exactly as before, so only a real read failure on an
+  // existing table fails closed. PostgREST reports an absent relation as
+  // PGRST205 / 42P01, which we treat as "feature not installed".
+  try {
+    const { data: lock, error: lockErr } = await admin
+      .from('period_locks')
+      .select('id')
+      .eq('month', month)
+      .eq('year', year)
+      .limit(1)
+    if (lockErr) {
+      const code = (lockErr as { code?: string }).code ?? ''
+      const msg = (lockErr as { message?: string }).message ?? ''
+      const missing = code === 'PGRST205' || code === '42P01' || /does not exist/i.test(msg)
+      return !missing
+    }
+    return (lock?.length ?? 0) > 0
+  } catch {
+    return false // network/client throw — payroll status above already checked
+  }
 }
 
 /**

@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf'
 import sharp from 'sharp'
 import type { PayslipData } from './types'
+import { adjustmentLabel, ownershipRowLabel } from './payslip-html'
 
 // Professional light palette — A4, white background
 const C = {
@@ -79,7 +80,7 @@ export async function renderPayslipPdf(d: PayslipData): Promise<Buffer> {
 
   const s = d.salary
   const statusPaid = s.status === 'paid'
-  const gross = s.baseSalary + s.commission + s.bonus
+  const gross = s.baseSalary + s.commission + s.bonus + (s.adjustment || 0) + (s.ownership || 0)
   const totalDeductions = s.advancesDeducted + s.otherDeductions
 
   // Pre-fetch logo if available
@@ -247,6 +248,22 @@ export async function renderPayslipPdf(d: PayslipData): Promise<Buffer> {
   if (s.baseSalary > 0) tableRow('Base Salary', inr(s.baseSalary))
   tableRow('Creative Rewards', inr(s.commission), C.green)
   if (s.bonus > 0) tableRow('Bonus', inr(s.bonus), C.green)
+  // Corrections for already-closed months, paid with this payslip and labelled
+  // with the month they came from.
+  if (s.adjustment) {
+    tableRow(
+      adjustmentLabel(s.adjustmentSources),
+      (s.adjustment < 0 ? '- ' : '') + inr(Math.abs(s.adjustment)),
+      s.adjustment < 0 ? C.red : C.green,
+    )
+  }
+
+  // Ownership rewards, one line per program so the amount is explained.
+  if ((s.ownershipAwards ?? []).length > 0) {
+    for (const a of s.ownershipAwards) tableRow(ownershipRowLabel(a), inr(a.earnedInr), C.green)
+  } else if (s.ownership) {
+    tableRow('Ownership Reward', inr(s.ownership), C.green)
+  }
 
   // Gross subtotal
   doc.setFillColor(245, 243, 255); doc.setDrawColor(...C.accentBorder)

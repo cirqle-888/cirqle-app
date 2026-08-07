@@ -86,6 +86,38 @@ export function resolveUnitPrice(args: {
   }
 }
 
+// ─── Agreement extra pricing ─────────────────────────────────────────────────
+
+export interface CoverageExtraPricing {
+  /** client_agreement_items.extra_unit_price for the covering item. */
+  extraUnitPrice?: number | null
+  /** The agreement item's currency. */
+  currency?: string | null
+}
+
+/**
+ * A retainer-covered task flagged "Bill as extra" prices from the agreement's
+ * extra_unit_price when one is agreed — per task, regardless of the service's
+ * own pricing type. Without an agreed extra rate the base (matrix/default)
+ * price stands. Mirrors serverFillTaskBilling's precedence exactly.
+ */
+export function applyCoverageExtraPrice(
+  base: ResolvedPrice,
+  coverage: CoverageExtraPricing | null,
+  billAsExtra: boolean,
+): ResolvedPrice & { fromAgreementExtra: boolean } {
+  if (coverage && billAsExtra && coverage.extraUnitPrice != null && coverage.extraUnitPrice > 0) {
+    return {
+      pricingType: 'fixed_per_creative',
+      unitPrice: coverage.extraUnitPrice,
+      currency: coverage.currency || base.currency,
+      fromClientMatrix: false,
+      fromAgreementExtra: true,
+    }
+  }
+  return { ...base, fromAgreementExtra: false }
+}
+
 // ─── The formula ─────────────────────────────────────────────────────────────
 
 export interface AmountInputs {

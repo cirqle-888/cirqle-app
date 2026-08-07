@@ -53,6 +53,8 @@ BEGIN
     EXECUTE format('ALTER TABLE public.conversations DROP CONSTRAINT %I', con_name);
     ALTER TABLE public.conversations
       ADD CONSTRAINT conversations_type_check
-      CHECK (type IN ('dm', 'channel', 'task', 'project', 'request', 'client', 'plan', 'plan_item'));
+      -- Full superset. 'group' is created by createChannel(type:'channel'|'group')
+      -- and MUST stay listed — omitting it here would reject every new group.
+      CHECK (type IN ('channel', 'dm', 'group', 'project', 'task', 'client', 'request', 'plan', 'plan_item'));
   END IF;
 END $$;

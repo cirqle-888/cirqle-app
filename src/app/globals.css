@@ -213,6 +213,58 @@
       font-size: 16px !important;
     }
   }
+
+}
+
+/* ── Side panel ↔ modal coexistence ────────────────────────────────
+   A slide-over (the Discuss chatter panel) is `position: fixed` on the right
+   edge, so it lands ON TOP of any centred <ModalOverlay> dialog — hiding the
+   very record being discussed.
+
+   While a panel is open, `reserveSidePanelRoom()` (see
+   src/components/ui/side-panel-room.ts) stamps `data-side-panel-open` and
+   `--side-panel-w` on <html>. This rule then reserves that width on every
+   overlay's right edge, so each dialog re-centres into the space that's left.
+   Both stay fully readable.
+
+   Declarative on purpose: a modal opened AFTER the panel is already open gets
+   the offset on its very first paint. The previous imperative version wrote
+   inline styles onto the overlays that existed at panel-mount time only, so a
+   modal opened later stayed centred and covered. Removing the attribute
+   restores every overlay at once.
+
+   DELIBERATELY UNLAYERED. The overlay's padding comes from Tailwind's `p-4`,
+   which lives in the `utilities` cascade layer. Layer order beats selector
+   specificity, so this rule inside `@layer base` lost to `p-4` no matter how
+   specific it was — verified in the browser: the modal stayed at 16px.
+   Unlayered rules outrank every layer, so this one wins.
+
+   `md` and up only — a narrower viewport cannot show a dialog and a 400px
+   panel side by side, and there the panel is meant to cover as a sheet. */
+@media (min-width: 768px) {
+  /* 1. The page itself. Shrinking the shell (rather than letting the panel
+        overlay it) is what keeps ALL data readable: the sidebar and content
+        reflow into the narrower width, and a wide table keeps every column
+        reachable through its own horizontal scroller instead of having its
+        right-hand columns — Billing, Qty, Total, Status — sit permanently
+        under the panel. */
+  [data-app-shell] {
+    width: 100%;
+    transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  [data-side-panel-open] [data-app-shell] {
+    width: calc(100% - var(--side-panel-w, 0px));
+  }
+
+  /* 2. Modals. `position: fixed` takes them out of the shell's flow, so
+        shrinking it above does not move them — they still need their own
+        reservation. */
+  [data-modal-overlay] {
+    transition: padding-right 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  [data-side-panel-open] [data-modal-overlay] {
+    padding-right: calc(1rem + var(--side-panel-w, 0px));
+  }
 }
 
 @layer utilities {

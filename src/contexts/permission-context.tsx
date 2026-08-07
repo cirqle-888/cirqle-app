@@ -2,6 +2,8 @@
 
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
 import type { PermKey } from '@/lib/permissions/keys'
+// TEMPORARY — remove with the bypass. See src/lib/permissions/dev-bypass.ts
+import { isDevPermissionBypassActive } from '@/lib/permissions/dev-bypass'
 
 export interface PermissionUser {
   employeeId: string
@@ -49,7 +51,10 @@ export function PermissionProvider(
   // Stable value reference — without useMemo every consumer re-renders on every Provider tick.
   const value = useMemo<PermissionContextValue>(() => ({
     user,
-    can: (key) => (user.isAdmin ? true : perms.has(key)),
+    // TEMPORARY dev bypass (dead code in production builds) — see
+    // src/lib/permissions/dev-bypass.ts. Keeps the client's `can()` in step
+    // with the server guards so the UI doesn't hide what the server allows.
+    can: (key) => (user.isAdmin || isDevPermissionBypassActive() ? true : perms.has(key)),
     revealNames: user.isAdmin && revealNames,
     setRevealNames,
     logoUrl,

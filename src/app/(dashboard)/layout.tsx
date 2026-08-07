@@ -6,6 +6,8 @@ import { FavoritesProvider } from '@/contexts/favorites-context'
 import { WorkspaceProvider } from '@/contexts/workspace-context'
 import { RequestsBadgeProvider } from '@/contexts/requests-badge-context'
 import { CommandPalette } from '@/components/ui/command-palette'
+// TEMPORARY — remove with the bypass. See src/lib/permissions/dev-bypass.ts
+import { PermissionBypassBanner } from '@/components/dev/permission-bypass-banner'
 import { DesktopNotifier } from '@/components/desktop/desktop-notifier'
 import { FloatingCommsWidget } from '@/components/comms/floating-comms-widget'
 import { BirthdayCelebration } from '@/components/ui/birthday-celebration'
@@ -139,7 +141,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
               is showing — that gap appears as blank white space on iPad.
               overscroll-none on main prevents iOS elastic-bounce into the
               background that's visible when page content is shorter than the viewport. */}
-          <div className="flex h-dvh overflow-hidden">
+          {/* data-app-shell: while a slide-over (Discuss) is open, the rule in
+              globals.css shrinks this container by the panel's width so the
+              page reflows beside it instead of hiding underneath — tables keep
+              every column reachable through their own scroller. */}
+          <div data-app-shell className="flex h-dvh overflow-hidden">
             {/* First tab stop on every dashboard page: lets keyboard users jump
                 past the full sidebar nav. Visually hidden until focused. */}
             <a
@@ -154,6 +160,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <main id="main-content" tabIndex={-1} className={`flex-1 overflow-y-auto overscroll-none bg-background w-full ${!user.isAdmin ? 'pb-16 md:pb-0' : ''}`}>
               {children}
             </main>
+            {/* TEMPORARY — remove with the permission bypass.
+                See src/lib/permissions/dev-bypass.ts */}
+            <PermissionBypassBanner />
             <CommandPalette />
             <DesktopNotifier />
             <FloatingCommsWidget />

@@ -178,6 +178,14 @@ export const PERMS = {
   SETTINGS_ACCESS:              'settings.access',
   SETTINGS_MANAGE_DESIGNATIONS: 'settings.manage_designations',
   SETTINGS_MANAGE_COMPANY:      'settings.manage_company',
+  /** Departments, teams, branches, regions, client groups + their managers,
+   *  members and revenue scopes (migration 20260807100000). */
+  SETTINGS_MANAGE_ORG:          'settings.manage_org',
+
+  // Ownership Platform — the second earning stream, alongside contributions.
+  /** Create/edit ownership programs and rules (revenue share, profit share,
+   *  incentives, bonuses). Exposes company profit and everyone's share. */
+  PAYROLL_MANAGE_OWNERSHIP:     'payroll.manage_ownership',
 
   // Recruitment / Careers module
   RECRUITMENT_VIEW:      'recruitment.view',
@@ -233,6 +241,9 @@ export const CRITICAL_PERMS: ReadonlySet<string> = new Set<string>([
   // Salaries
   PERMS.PAYROLL_VIEW_AMOUNTS,
   PERMS.PAYROLL_EDIT,
+  // Ownership: sets what everyone earns from company revenue and profit, and
+  // exposes the profit figure itself.
+  PERMS.PAYROLL_MANAGE_OWNERSHIP,
   // Personal data (names are private by design; full profiles include them)
   PERMS.EMPLOYEES_REVEAL_NAMES,
   PERMS.EMPLOYEES_VIEW_FULL,

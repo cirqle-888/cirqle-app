@@ -2,7 +2,9 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission, loadCurrentUser, hasPermission } from '@/lib/permissions/check'
+import { recalcTaskCommissions } from '@/lib/sync/integrity'
 import { PERMS } from '@/lib/permissions/keys'
 import { generateAgreementNumber } from '@/lib/agreements/numbering'
 import { logAgreementEvent } from '@/lib/agreements/events'
@@ -230,6 +232,10 @@ export interface AgreementItemInput {
   creative_allocation_amount?: number | null
   management_allocation_amount?: number | null
   included_quantity?: number | null
+  /** Internal per-task value for covered work → contribution pool, never invoiced. */
+  work_unit_value?: number | null
+  /** Employee-pool % for this item's work. null = engine default (50). */
+  work_commission_pct?: number | null
   /** Services this retainer item covers (Phase 2b). undefined = leave unchanged. */
   coveredServiceIds?: string[]
   deliverables: AgreementDeliverableInput[]
@@ -360,6 +366,8 @@ export async function saveAgreementItem(
     included_quantity:
       item.commitment_type === 'retainer' && item.included_quantity != null
         ? Number(item.included_quantity) : null,
+    work_unit_value: item.work_unit_value != null ? Number(item.work_unit_value) : null,
+    work_commission_pct: item.work_commission_pct != null ? Number(item.work_commission_pct) : null,
     updated_at: new Date().toISOString(),
   }
 
@@ -369,6 +377,7 @@ export async function saveAgreementItem(
   const PRICING_KEYS = [
     'unit_price', 'currency', 'extra_unit_price',
     'creative_allocation_amount', 'management_allocation_amount',
+    'work_unit_value', 'work_commission_pct',
   ] as const
   const updateRow: Record<string, unknown> = { ...itemRow }
   if (!canWritePricing) for (const k of PRICING_KEYS) delete updateRow[k]
@@ -411,8 +420,34 @@ export async function saveAgreementItem(
     action: item.id ? 'item_updated' : 'item_added',
   })
 
+  // A changed work value must reach every covered task's stamped
+  // work_value_inr and its contribution earnings. Best-effort: the item is
+  // saved either way, and the payroll guard inside the recalc skips
+  // finalized months on its own.
+  if (item.id && canWritePricing) {
+    void restampItemWorkValues(item.id).catch(() => {})
+  }
+
   revalidatePath(`/dashboard/agreements/${agreementId}`)
   return { ok: true, data: itemId }
+}
+
+/**
+ * Re-stamp tasks.work_value_inr for every covered task of this item (DB
+ * function from migration 20260807110000), then recalculate their
+ * contribution earnings so pay follows the new work value.
+ */
+async function restampItemWorkValues(itemId: string): Promise<void> {
+  const admin = createAdminClient()
+  await admin.rpc('restamp_agreement_item_work_values', { p_item_id: itemId })
+  const { data: tasks } = await admin
+    .from('tasks')
+    .select('id')
+    .eq('retainer_item_id', itemId)
+    .is('deleted_at', null)
+  for (const t of tasks || []) {
+    try { await recalcTaskCommissions(t.id) } catch { /* per-task best-effort */ }
+  }
 }
 
 /**

@@ -26,6 +26,12 @@ export interface RetainerCoverageInfo {
   creativeAllocation: number | null
   managementAllocation: number | null
   allocatedUnitValue: number | null
+  /** Internal per-task value paying contributors on covered work (item currency). */
+  workUnitValue: number | null
+  /** Employee-pool % override for this item's work; null = default 50. */
+  workCommissionPct: number | null
+  /** Client price per task when billed as extra work; null = not agreed. */
+  extraUnitPrice: number | null
   includedQuantity: number | null
   delivered: number
   remaining: number
@@ -55,7 +61,7 @@ export async function getRetainerCoverageInfo(
 
     const { data: items } = await admin
       .from('client_agreement_items')
-      .select('id, agreement_id, service_id, unit_price, currency, committed_quantity, included_quantity, creative_allocation_amount, management_allocation_amount, allocated_unit_value, effective_from, effective_to')
+      .select('id, agreement_id, service_id, unit_price, currency, committed_quantity, included_quantity, creative_allocation_amount, management_allocation_amount, allocated_unit_value, work_unit_value, work_commission_pct, extra_unit_price, effective_from, effective_to')
       .in('agreement_id', agreements.map(a => a.id)).eq('commitment_type', 'retainer')
     if (!items || items.length === 0) return null
 
@@ -96,6 +102,9 @@ export async function getRetainerCoverageInfo(
       creativeAllocation: pricingVisible ? (item.creative_allocation_amount ?? null) : null,
       managementAllocation: pricingVisible ? (item.management_allocation_amount ?? null) : null,
       allocatedUnitValue: pricingVisible ? (item.allocated_unit_value ?? null) : null,
+      workUnitValue: pricingVisible ? ((item as any).work_unit_value ?? null) : null,
+      workCommissionPct: pricingVisible ? ((item as any).work_commission_pct ?? null) : null,
+      extraUnitPrice: pricingVisible ? ((item as any).extra_unit_price ?? null) : null,
       includedQuantity: included,
       delivered,
       remaining,

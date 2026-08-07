@@ -32,7 +32,7 @@ export interface ChatMember {
 
 export interface ChatConversation {
   id: string
-  type: 'channel' | 'dm' | 'group' | 'project' | 'task' | 'client' | 'request' | 'plan'
+  type: 'channel' | 'dm' | 'group' | 'project' | 'task' | 'client' | 'request' | 'plan' | 'plan_item'
   name: string | null          // resolved display name (DM = other person)
   topic: string | null
   isPrivate: boolean

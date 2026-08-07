@@ -12,6 +12,7 @@ import { TaskBillingSection } from './task-billing-section'
 import { useRetainerCoverage } from '@/lib/tasks/use-retainer-coverage'
 import {
   computeTaskAmount, resolveTaskQuantity, resolveUnitPrice, effectiveBillingAmount,
+  applyCoverageExtraPrice,
 } from '@/lib/tasks/pricing'
 
 const ContributionEntryPanel = dynamic(
@@ -106,10 +107,13 @@ export function TaskEditModal({
   }, [])
 
   // Pricing + coverage come from the shared engine/hook — never re-derived here.
-  const { pricingType: pt, unitPrice, currency: unitCurrency } = resolveUnitPrice({
+  const basePrice = resolveUnitPrice({
     services, clientPricings, clientId: form.client_id, serviceId: form.service_id,
   })
   const coverage = useRetainerCoverage(form.client_id, form.service_id, form.task_date)
+  // "Bill as extra" prices from the agreement's extra rate when one is agreed.
+  const { pricingType: pt, unitPrice, currency: unitCurrency } =
+    applyCoverageExtraPrice(basePrice, coverage, form.bill_as_extra)
 
   // Variant tasks (revision / concept / size) bill as a derived share of their
   // PARENT task and freeze that amount at creation. Editing them here must NEVER
@@ -196,11 +200,19 @@ export function TaskEditModal({
       >
         {/* Header — always visible, never scrolls */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-card rounded-t-2xl shrink-0">
-            <div>
+            <div className="min-w-0">
               <h2 className="font-semibold">Edit Task</h2>
               <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-72">{task.title}</p>
             </div>
-            <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+            {/* Discuss lives in the header, not only under the Activity tab:
+                the question you want to ask about a task ("is this price
+                right?") occurs while you are looking at the Details tab, and
+                the panel now shifts this dialog aside instead of covering it. */}
+            <div className="flex items-center gap-1 shrink-0">
+              <DiscussButton entityType="task" entityId={task.id} variant="icon"
+                label="Discuss this task" panelTitle={task.title} />
+              <button onClick={onClose} aria-label="Close" className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+            </div>
           </div>
 
           {/* Tab bar — Details + Activity always; Contributions when permitted */}
@@ -402,9 +414,8 @@ export function TaskEditModal({
           {activeTab === 'activity' && (
             <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
               <div className="overflow-y-auto flex-1 p-6">
-                <div className="mb-2 flex justify-end">
-                  <DiscussButton entityType="task" entityId={task.id} label="Discuss in chat" panelTitle={task.title} />
-                </div>
+                {/* Discuss moved to the modal header — reachable from every
+                    tab now, so a second copy here would just be duplication. */}
                 <ActivityPanel entityType="task" entityId={task.id} />
               </div>
               <div
