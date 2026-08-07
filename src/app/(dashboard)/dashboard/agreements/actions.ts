@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission, loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { recalcTaskCommissions } from '@/lib/sync/integrity'
+import { syncFeeLinesForAgreementItem } from '@/lib/agreements/fee-lines'
 import { PERMS } from '@/lib/permissions/keys'
 import { generateAgreementNumber } from '@/lib/agreements/numbering'
 import { logAgreementEvent } from '@/lib/agreements/events'
@@ -421,11 +422,14 @@ export async function saveAgreementItem(
   })
 
   // A changed work value must reach every covered task's stamped
-  // work_value_inr and its contribution earnings. Best-effort: the item is
-  // saved either way, and the payroll guard inside the recalc skips
-  // finalized months on its own.
+  // work_value_inr and its contribution earnings; a changed fee must reach the
+  // open invoices already carrying it. Best-effort: the item is saved either
+  // way, the payroll guard inside the recalc skips finalized months, and the
+  // fee sync only ever UPDATES existing lines — an edit here never creates an
+  // invoice for a month nobody chose to bill.
   if (item.id && canWritePricing) {
     void restampItemWorkValues(item.id).catch(() => {})
+    void syncFeeLinesForAgreementItem(createAdminClient(), item.id).catch(() => {})
   }
 
   revalidatePath(`/dashboard/agreements/${agreementId}`)

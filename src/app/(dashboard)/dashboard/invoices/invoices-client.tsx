@@ -1203,7 +1203,12 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     try {
       const result = await serverResyncInvoiceTasks(inv.id)
       if (!result.ok) throw new Error(result.error)
-      success(`Successfully processed ${result.data?.syncedTasks || 0} tasks.`, `Invoice resynced`)
+      const fees = result.data?.feeLines || 0
+      success(
+        `Processed ${result.data?.syncedTasks || 0} tasks`
+          + (fees > 0 ? ` and ${fees} agreement fee line${fees === 1 ? '' : 's'}` : '') + '.',
+        `Invoice resynced`,
+      )
       // Refresh list to pull updated items
       router.refresh()
     } catch (e: any) {
