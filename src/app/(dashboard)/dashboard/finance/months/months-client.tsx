@@ -16,6 +16,7 @@ import {
   Lock, LockOpen, Loader2, TrendingUp, TrendingDown, AlertTriangle, ArrowRight, RefreshCw,
 } from 'lucide-react'
 import { useToast, ToastContainer } from '@/components/ui/toast'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { lockMonth, unlockMonth, rescanAdjustments } from './actions'
 
 export interface MonthCard {
@@ -50,12 +51,35 @@ export default function MonthsClient({ cards, canManage, canSeeAmounts }: {
   const [busy, setBusy] = useState<string | null>(null)
   const [, startTransition] = useTransition()
 
+  // In-app confirmation. NOT window.confirm: the desktop shell returns false
+  // from it immediately without ever drawing a dialog, so Reopen did nothing
+  // at all — the one button that unblocks a wrongly-closed month sat there
+  // dead, with no error to explain it.
+  const [confirmPrompt, setConfirmPrompt] = useState<{
+    title: string
+    body: string
+    confirmLabel: string
+    danger?: boolean
+    onConfirm: () => void
+  } | null>(null)
+
   const key = (c: MonthCard) => `${c.year}-${c.month}`
 
-  async function onLock(c: MonthCard) {
+  function onLock(c: MonthCard) {
     if (c.payrollTotal > 0 && c.payrollPaid < c.payrollTotal) {
-      if (!confirm(`${c.payrollPaid} of ${c.payrollTotal} payslips are paid for ${MONTHS[c.month - 1]} ${c.year}.\n\nLocking freezes the month anyway — unpaid payslips stay unpaid and can no longer be recalculated. Continue?`)) return
+      setConfirmPrompt({
+        title: `Lock ${MONTHS[c.month - 1]} ${c.year} with unpaid payslips?`,
+        body: `${c.payrollPaid} of ${c.payrollTotal} payslips are paid. Locking freezes the month anyway — unpaid payslips stay unpaid and can no longer be recalculated.`,
+        confirmLabel: 'Lock month',
+        danger: true,
+        onConfirm: () => { void applyLock(c) },
+      })
+      return
     }
+    void applyLock(c)
+  }
+
+  async function applyLock(c: MonthCard) {
     setBusy(key(c))
     const res = await lockMonth(c.month, c.year)
     setBusy(null)
@@ -64,8 +88,16 @@ export default function MonthsClient({ cards, canManage, canSeeAmounts }: {
     startTransition(() => router.refresh())
   }
 
-  async function onUnlock(c: MonthCard) {
-    if (!confirm(`Reopen ${MONTHS[c.month - 1]} ${c.year}?\n\nFigures become live again. The profit snapshot taken at lock time is kept for audit.`)) return
+  function onUnlock(c: MonthCard) {
+    setConfirmPrompt({
+      title: `Reopen ${MONTHS[c.month - 1]} ${c.year}?`,
+      body: 'Figures become live again and contributions can be edited. The profit snapshot taken at lock time is kept for audit.',
+      confirmLabel: 'Reopen',
+      onConfirm: () => { void applyUnlock(c) },
+    })
+  }
+
+  async function applyUnlock(c: MonthCard) {
     setBusy(key(c))
     const res = await unlockMonth(c.month, c.year)
     setBusy(null)
@@ -199,6 +231,17 @@ export default function MonthsClient({ cards, canManage, canSeeAmounts }: {
           )
         })}
       </div>
+
+      {confirmPrompt && (
+        <ConfirmDialog
+          title={confirmPrompt.title}
+          body={confirmPrompt.body}
+          confirmLabel={confirmPrompt.confirmLabel}
+          danger={confirmPrompt.danger}
+          onConfirm={() => { const run = confirmPrompt.onConfirm; setConfirmPrompt(null); run() }}
+          onCancel={() => setConfirmPrompt(null)}
+        />
+      )}
 
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </div>
