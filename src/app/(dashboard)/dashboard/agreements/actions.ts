@@ -440,9 +440,15 @@ export async function saveAgreementItem(
 }
 
 /**
- * Re-stamp tasks.work_value_inr for every covered task of this item (DB
- * function from migration 20260807110000), then recalculate their
- * contribution earnings so pay follows the new work value.
+ * Re-stamp work values for this item's covered tasks, then recalculate their
+ * contribution earnings so pay follows the new value.
+ *
+ * OPEN PAYROLL PERIODS ONLY. The stamp is the basis earnings were computed
+ * from, so once a month's payroll is finalized both freeze together and the
+ * historical record keeps matching the payslip — the DB function excludes
+ * those tasks (migration 20260807150000), and recalcTaskCommissions refuses
+ * them independently. Changing an agreement's Work Value therefore never
+ * rewrites what someone was already paid, or the figure it was paid from.
  */
 async function restampItemWorkValues(itemId: string): Promise<void> {
   const admin = createAdminClient()
@@ -453,6 +459,7 @@ async function restampItemWorkValues(itemId: string): Promise<void> {
     .eq('retainer_item_id', itemId)
     .is('deleted_at', null)
   for (const t of tasks || []) {
+    // Finalized months are a no-op inside the recalc's own guard.
     try { await recalcTaskCommissions(t.id) } catch { /* per-task best-effort */ }
   }
 }
