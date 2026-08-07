@@ -7,6 +7,10 @@ let monthProtected = false
 let existingScores: any[] = []
 const captured: Record<string, any[]> = { contributions: [], contribution_scores: [], task_tools: [] }
 const deleted: string[] = []
+const updatedTables: string[] = []
+const loggedActivity: any[] = []
+const recordAdjustmentsCalls: { month: number; year: number }[] = []
+let recordedAdjustments = 0
 
 vi.mock('@/lib/permissions/check', () => ({
   requireAnyPermission: (...a: any[]) => mockGuard(...a),
@@ -18,7 +22,15 @@ vi.mock('@/lib/permissions/keys', () => ({
 vi.mock('@/lib/payroll/compute', () => ({
   isTaskMonthProtected: () => Promise.resolve(monthProtected),
 }))
-vi.mock('@/lib/activity/log', () => ({ logActivity: vi.fn() }))
+vi.mock('@/lib/activity/log', () => ({
+  logActivity: (input: any) => { loggedActivity.push(input); return Promise.resolve() },
+}))
+vi.mock('@/lib/payroll/adjustments', () => ({
+  recordAdjustments: (_admin: any, month: number, year: number) => {
+    recordAdjustmentsCalls.push({ month, year })
+    return Promise.resolve({ recorded: recordedAdjustments })
+  },
+}))
 vi.mock('@/lib/sync/agreement-earnings', () => ({
   syncTaskAgreementEarnings: vi.fn(() => Promise.resolve({ changed: 0 })),
 }))
@@ -40,7 +52,7 @@ vi.mock('@/lib/supabase/admin', () => ({
         return Promise.resolve({ error: null })
       },
       delete: () => ({ eq: () => { deleted.push(table); return Promise.resolve({ error: null }) } }),
-      update: () => ({ eq: () => Promise.resolve({ error: null }) }),
+      update: () => ({ eq: () => { updatedTables.push(table); return Promise.resolve({ error: null }) } }),
     }),
   }),
 }))
@@ -51,8 +63,12 @@ beforeEach(() => {
   mockGuard = vi.fn(() => Promise.resolve({ ok: true, employeeId: 'me' }))
   monthProtected = false
   existingScores = []
+  recordedAdjustments = 0
   for (const k of Object.keys(captured)) captured[k] = []
   deleted.length = 0
+  updatedTables.length = 0
+  loggedActivity.length = 0
+  recordAdjustmentsCalls.length = 0
 })
 
 describe('saveTaskContributions (Phase 3.0)', () => {
@@ -64,15 +80,87 @@ describe('saveTaskContributions (Phase 3.0)', () => {
     expect(captured.contribution_scores).toHaveLength(0)
   })
 
-  it('refuses when the payroll month is finalized', async () => {
+  // ── Closed-period corrections ──────────────────────────────────────────────
+  // Closed books are never reopened, but the WORK RECORD is not the books. A
+  // task remembered late belongs in the month it happened; the money difference
+  // rides to the next open payroll as a prior-period adjustment.
+
+  it('SAVES into a closed month instead of refusing', async () => {
     monthProtected = true
     const res = await saveTaskContributions({
       taskId: 't1', contributions: {},
       scores: [{ employeeId: 'e1', scorePercentage: 100, earnings: 500 }],
     })
-    expect(res.ok).toBe(false)
-    expect(res.error).toMatch(/finalized/i)
-    expect(deleted).not.toContain('contribution_scores')
+    expect(res.ok).toBe(true)
+    expect(res.closedPeriod).toBe(true)
+    // The work data is written — that is the whole point of the correction.
+    expect(captured.contribution_scores).toHaveLength(1)
+  })
+
+  it('queues the difference through the EXISTING adjustment engine', async () => {
+    monthProtected = true
+    recordedAdjustments = 2
+    const res = await saveTaskContributions({
+      taskId: 't1', contributions: {},
+      scores: [{ employeeId: 'e1', scorePercentage: 100, earnings: 500 }],
+    })
+    expect(recordAdjustmentsCalls).toEqual([{ month: 8, year: 2026 }])
+    expect(res.adjustmentsRecorded).toBe(2)
+    expect(res.correctedMonth).toMatch(/2026/)
+  })
+
+  it('never advances task status in a closed month', async () => {
+    // tasks.status feeds revenue reporting, so flipping a historical task to
+    // done would restate the closed month's revenue — the one thing a
+    // prior-period correction must never do.
+    monthProtected = true
+    await saveTaskContributions({
+      taskId: 't1', contributions: {},
+      scores: [{ employeeId: 'e1', scorePercentage: 100, earnings: 500 }],
+      markDone: true,
+    })
+    expect(updatedTables).not.toContain('tasks')
+
+    // …but an OPEN month still marks it done, unchanged.
+    monthProtected = false
+    updatedTables.length = 0
+    await saveTaskContributions({
+      taskId: 't1', contributions: {},
+      scores: [{ employeeId: 'e1', scorePercentage: 100, earnings: 500 }],
+      markDone: true,
+    })
+    expect(updatedTables).toContain('tasks')
+  })
+
+  it('audits the correction with actor, month, reason and a before/after diff', async () => {
+    monthProtected = true
+    existingScores = [
+      { employee_id: 'e1', score_percentage: 40, earnings_inr: 200, is_manual_override: false },
+    ]
+    await saveTaskContributions({
+      taskId: 't1', contributions: {},
+      scores: [{ employeeId: 'e1', scorePercentage: 100, earnings: 500 }],
+      reason: 'Task remembered late',
+    })
+
+    const entry = loggedActivity.find(a => a.action === 'contribution_corrected_closed_period')
+    expect(entry, 'a closed-period edit must never be silent').toBeDefined()
+    expect(entry.actorId).toBe('me')
+    expect(entry.note).toBe('Task remembered late')
+    expect(entry.detail.month).toBe(8)
+    expect(entry.detail.year).toBe(2026)
+    expect(Array.isArray(entry.detail.scores)).toBe(true)
+  })
+
+  it('leaves an open month on the plain save path — no correction machinery', async () => {
+    monthProtected = false
+    const res = await saveTaskContributions({
+      taskId: 't1', contributions: {},
+      scores: [{ employeeId: 'e1', scorePercentage: 100, earnings: 500 }],
+    })
+    expect(res.closedPeriod).toBeUndefined()
+    expect(recordAdjustmentsCalls).toHaveLength(0)
+    expect(loggedActivity.some(a => a.action === 'contribution_saved')).toBe(true)
   })
 
   it('preserves a manually-overridden score instead of recomputing over it', async () => {

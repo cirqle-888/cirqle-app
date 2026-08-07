@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase/client'
 import { recalculatePayrollForMonth } from '@/app/(dashboard)/dashboard/payroll/actions'
 import { serverFillTaskBilling, fetchRetainerCoverage } from '@/app/(dashboard)/dashboard/tasks/actions'
 import { applyTaskAgreements, saveTaskContributions } from './actions'
+import { closedPeriodNotice } from '@/lib/payroll/correction-notice'
 import { calculateCommission } from '@/lib/calculations/commission'
 import { taskPoolBasisInr, isCoveredWorkTask, resolveCommissionPct } from '@/lib/calculations/work-value'
 import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
@@ -451,6 +452,12 @@ export default function ContributionsClient({
       })
 
       let savedCount = 0
+      // Months whose payroll may be recalculated afterwards. Closed months are
+      // deliberately excluded: their saves are prior-period corrections, and
+      // recalculatePayrollForMonth would restate every PENDING payslip in them.
+      const openMonths = new Set<string>()
+      let closedCorrections = 0
+      let queuedAdjustments = 0
       for (const task of tasksNeedingScores) {
         const contribs = byTask[task.id]
         if (!contribs?.length) continue
@@ -514,31 +521,46 @@ export default function ContributionsClient({
               })),
             })
             if (res.ok) {
-              // Layer employee commission agreements on top (no-op without agreements).
-              await applyTaskAgreements(task.id)
               savedCount++
+              if (res.closedPeriod) {
+                // Correction to closed books: the server has already queued the
+                // money difference. Touch nothing else for this month.
+                closedCorrections++
+                queuedAdjustments += res.adjustmentsRecorded ?? 0
+              } else {
+                // Layer employee commission agreements on top (no-op without agreements).
+                await applyTaskAgreements(task.id)
+                if (task.task_date) {
+                  const d = new Date(task.task_date)
+                  openMonths.add(`${d.getFullYear()}-${d.getMonth() + 1}`)
+                }
+              }
             }
           }
         } catch { /* skip tasks that fail calculation */ }
       }
 
-      // Auto-recalculate payroll for affected months when contributions change
-      if (savedCount > 0) {
-        const affectedMonths = new Set<string>()
-        tasksNeedingScores.forEach((task: any) => {
-          if (task.task_date) {
-            const taskDate = new Date(task.task_date)
-            const monthKey = `${taskDate.getFullYear()}-${taskDate.getMonth() + 1}`
-            affectedMonths.add(monthKey)
-          }
+      // Auto-recalculate payroll for the OPEN months only. This used to derive
+      // the month set from every task in the batch, which — now that closed
+      // months save successfully — would have recalculated payroll for exactly
+      // the months whose books are shut.
+      openMonths.forEach((monthKey: string) => {
+        const [year, month] = monthKey.split('-').map(Number)
+        recalculatePayrollForMonth({ month, year, source: 'contribution_edit' }).catch(() => {
+          // Silently ignore payroll recalc errors
         })
-        // Fire-and-forget payroll recalculations for all affected months
-        affectedMonths.forEach((monthKey: string) => {
-          const [year, month] = monthKey.split('-').map(Number)
-          recalculatePayrollForMonth({ month, year, source: 'contribution_edit' }).catch(() => {
-            // Silently ignore payroll recalc errors
-          })
-        })
+      })
+
+      // A silent bulk correction to closed books is exactly what must not
+      // happen — surface it even though this path runs in the background.
+      if (closedCorrections > 0) {
+        toast.info(
+          `${closedCorrections} task${closedCorrections === 1 ? '' : 's'} corrected in closed periods`,
+          queuedAdjustments > 0
+            ? `Historical payroll was not changed. ${queuedAdjustments} prior-period adjustment${queuedAdjustments === 1 ? '' : 's'} queued for the next open payroll.`
+            : 'Historical payroll was not changed. Run Check corrections on those month cards to queue any difference.',
+          10000,
+        )
       }
 
       // Refresh server data so counts & payroll reflect the new scores
@@ -1119,24 +1141,51 @@ export default function ContributionsClient({
       return   // keep the draft — do NOT show success or clear it
     }
 
-    // Layer employee commission agreements on top (no-op without agreements).
-    if (calculatedResult) await applyTaskAgreements(selectedTask.id)
+    // ── Closed period: the money must NOT be re-derived here ─────────────────
+    // A correction to a closed month is carried by the prior-period adjustment
+    // ledger, which the server already queued. Running the two follow-ups below
+    // would defeat that: recalculatePayrollForMonth rewrites every PENDING
+    // payslip for the month, so an explicitly locked month (whose payslips are
+    // still pending) would have its historical payroll silently restated —
+    // exactly what closing the books is meant to prevent.
+    if (!saveRes.closedPeriod) {
+      // Layer employee commission agreements on top (no-op without agreements).
+      if (calculatedResult) await applyTaskAgreements(selectedTask.id)
 
-    // Auto-recalculate pending payroll for this month when contributions change
-    if (selectedTask.task_date) {
-      const taskDate = new Date(selectedTask.task_date)
-      const month = taskDate.getMonth() + 1
-      const year = taskDate.getFullYear()
-      // Fire-and-forget payroll recalculation
-      recalculatePayrollForMonth({ month, year, source: 'contribution_edit' }).catch(() => {
-        // Silently ignore payroll recalc errors; contribution save succeeded
-      })
+      // Auto-recalculate pending payroll for this month when contributions change
+      if (selectedTask.task_date) {
+        const taskDate = new Date(selectedTask.task_date)
+        const month = taskDate.getMonth() + 1
+        const year = taskDate.getFullYear()
+        // Fire-and-forget payroll recalculation
+        recalculatePayrollForMonth({ month, year, source: 'contribution_edit' }).catch(() => {
+          // Silently ignore payroll recalc errors; contribution save succeeded
+        })
+      }
     }
 
     setSaving(false)
 
-    // Auto-dismiss toast showing who was paid what
-    if (calculatedResult && calculatedResult.employeeEarnings.length > 0) {
+    // Manually-overridden scores are re-inserted verbatim by the server, never
+    // replaced by the freshly computed figure. Saying only "saved" made that
+    // look like a failed write: the edit appeared to take, then the old number
+    // came back on reload with nothing explaining why. Say it out loud instead.
+    if ((saveRes.preservedOverrides ?? 0) > 0) {
+      const n = saveRes.preservedOverrides!
+      toast.info(
+        `${n} ${n === 1 ? 'score kept its manual override' : 'scores kept their manual overrides'}`,
+        'Their parameters were saved, but the score % and ₹ stay as manually set — recalculation cannot overwrite an override. Clear the override to recompute.',
+        8000,
+      )
+    }
+
+    // Closed period: say what moved and what did not, instead of a bare
+    // "saved" that hides the prior-period adjustment.
+    if (saveRes.closedPeriod) {
+      const notice = closedPeriodNotice(saveRes.correctedMonth, saveRes.adjustmentsRecorded)
+      toast.info(notice.title, notice.body, 10000)
+    } else if (calculatedResult && calculatedResult.employeeEarnings.length > 0) {
+      // Auto-dismiss toast showing who was paid what
       const lines = calculatedResult.employeeEarnings
         .map((e: any) => `${employees.find((emp: any) => emp.id === e.employeeId)?.cqid ?? '?'} ₹${Math.round(e.earnings).toLocaleString('en-IN')}`)
         .join(' · ')

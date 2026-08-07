@@ -8,6 +8,8 @@ import { getEffectivePerformanceRating } from '@/lib/calculations/performance-hi
 import { cn, ROW_INTERACTIVE_CLASS } from '@/lib/utils'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { useToast } from '@/components/ui/toast'
+import { saveTaskContributions } from '@/app/(dashboard)/dashboard/contributions/actions'
+import { closedPeriodNotice } from '@/lib/payroll/correction-notice'
 import {
   Minus, Plus, X, Check, Eye, EyeOff, Users,
   CheckCircle2, AlertCircle, Clock, ChevronRight, ChevronLeft,
@@ -435,45 +437,78 @@ export function ContributionEntryPanel({
     return scored.map(s => ({ ...s, isMostUsed: s.g.id === topId }))
   }
 
+  /**
+   * Saves through the SAME guarded server action as the Contributions page.
+   *
+   * This used to delete-then-insert `contributions`, `task_tools` and
+   * `contribution_scores` straight from the browser. RLS only checks
+   * `contributions.edit`, so that path silently skipped both protections the
+   * Contributions page enforces: the closed-month guard and manual-override
+   * preservation. The same person, on the same task, was refused in one place
+   * and succeeded in the other — editing closed books and wiping curated
+   * earnings with no warning. Phase 3.0 moved the other call site server-side;
+   * this shared panel was left behind.
+   *
+   * Do NOT reintroduce direct writes to these three tables from here.
+   */
   async function handleSave() {
     if (!canEdit) return
     setSaving(true)
 
-    const contribInserts = Object.entries(contributions).flatMap(([paramId, empMap]) =>
-      Object.entries(empMap).filter(([, v]) => v > 0)
-        .map(([empId, value]) => ({ task_id: task.id, employee_id: empId, parameter_id: paramId, value }))
-    )
-    const toolInserts = filteredTools.filter((t: any) => toolsUsed[t.id]).map((t: any) => ({ task_id: task.id, tool_id: t.id }))
+    const toolIds = filteredTools.filter((t: any) => toolsUsed[t.id]).map((t: any) => t.id)
 
-    await Promise.all([
-      supabase.from('contributions').delete().eq('task_id', task.id),
-      supabase.from('task_tools').delete().eq('task_id', task.id),
-    ])
+    const res = await saveTaskContributions({
+      taskId: task.id,
+      contributions,
+      scores: calculatedResult
+        ? calculatedResult.employeeEarnings.map((e: any) => ({
+            employeeId: e.employeeId,
+            scorePercentage: e.scorePercentage,
+            earnings: e.earnings,
+          }))
+        : undefined,
+      toolIds,
+      markDone: true,   // server only advances pending/in_progress → done
+    })
 
-    if (calculatedResult) {
-      const scoreInserts = calculatedResult.employeeEarnings.map((e: any) => ({
-        task_id: task.id, employee_id: e.employeeId,
-        score_percentage: e.scorePercentage, earnings_inr: e.earnings,
-      }))
-      await supabase.from('contribution_scores').delete().eq('task_id', task.id)
-      if (scoreInserts.length) {
-        await supabase.from('contribution_scores').insert(scoreInserts)
-        const now = new Date().toISOString()
-        setExistingScores(scoreInserts.map((s: any) => ({ ...s, calculated_at: now })))
-        setLastUpdated(now)
-      }
-      if (['pending', 'in_progress'].includes(task.status)) {
-        await supabase.from('tasks').update({ status: 'done' }).eq('id', task.id)
-      }
+    if (!res.ok) {
+      setSaving(false)
+      // Keep the draft: a refused save (closed month, missing permission) must
+      // not cost the user the values they just typed.
+      toast.error('Failed to save contributions', res.error || 'Unknown error', 6000)
+      return
     }
 
-    if (contribInserts.length) await supabase.from('contributions').insert(contribInserts)
-    if (toolInserts.length) await supabase.from('task_tools').insert(toolInserts)
+    // Re-read what actually landed rather than echoing what we sent — a
+    // manually-overridden row keeps its old figure, so trusting the local
+    // computation here would show a number the database does not hold.
+    const { data: saved } = await supabase
+      .from('contribution_scores')
+      .select('employee_id, score_percentage, earnings_inr, calculated_at')
+      .eq('task_id', task.id)
+    if (saved) {
+      setExistingScores(saved)
+      setLastUpdated(
+        saved.map((s: any) => s.calculated_at).filter(Boolean).sort().pop() ?? new Date().toISOString(),
+      )
+    }
 
     setSaving(false)
     try { localStorage.removeItem(draftKey) } catch { /* ignore */ }
 
-    if (calculatedResult?.employeeEarnings.length) {
+    if ((res.preservedOverrides ?? 0) > 0) {
+      const n = res.preservedOverrides!
+      toast.info(
+        `${n} ${n === 1 ? 'score kept its manual override' : 'scores kept their manual overrides'}`,
+        'Their parameters were saved, but the score % and ₹ stay as manually set — recalculation cannot overwrite an override.',
+        8000,
+      )
+    }
+
+    if (res.closedPeriod) {
+      const notice = closedPeriodNotice(res.correctedMonth, res.adjustmentsRecorded)
+      toast.info(notice.title, notice.body, 10000)
+    } else if (calculatedResult?.employeeEarnings.length) {
       const lines = calculatedResult.employeeEarnings
         .map((e: any) => `${employees.find(em => em.id === e.employeeId)?.cqid ?? '?'} ₹${Math.round(e.earnings).toLocaleString('en-IN')}`)
         .join(' · ')
