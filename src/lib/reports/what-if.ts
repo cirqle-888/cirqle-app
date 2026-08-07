@@ -92,6 +92,13 @@ export interface WhatIfRawInputs {
   /** taskId → Σ tool fixed_percentage */
   toolPctByTask: Record<string, number>
   agreements: CommissionAgreement[]
+  /**
+   * agreementItemId → work_commission_pct. Without it, retainer-linked tasks
+   * simulate at the pricing-matrix rate while the live report uses the
+   * agreement's override — the two would disagree on identical inputs, which
+   * is exactly what this module promises cannot happen.
+   */
+  itemCommissionPct?: Record<string, number | null>
 }
 
 // ─── Simulation: transform inputs → re-run the real engine ────────────────────
@@ -136,6 +143,13 @@ function runEngine(raw: WhatIfRawInputs, s: Scenario | null): AnalysisRow[] {
     }
 
     // Billing scaling: global growth % plus per-pairing price ratios.
+    //
+    // Deliberately does NOT scale work_value_inr, so retainer-covered tasks
+    // hold their pool basis under both levers. Charging a client more does not
+    // raise what the work is internally worth, and "business grows 10%" means
+    // more retainer clients or more posts, not a richer per-post value. Scaling
+    // it would quietly hand the team a raise nobody agreed to. Change the
+    // agreement's Work Value to model that instead.
     const growth = 1 + (s.billingGrowthPct || 0) / 100
     const priceKeys = Object.keys(s.priceOverrides)
     if (growth !== 1 || priceKeys.length > 0) {
@@ -188,6 +202,7 @@ function runEngine(raw: WhatIfRawInputs, s: Scenario | null): AnalysisRow[] {
     toolPctByTask,
     100,
     agreements,
+    new Map(Object.entries(raw.itemCommissionPct || {})),
   )
 }
 

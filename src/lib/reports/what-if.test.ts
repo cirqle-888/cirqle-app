@@ -271,3 +271,65 @@ describe('helpers', () => {
     expect(resolveIncrement(30000, undefined)).toBe(0)
   })
 })
+
+// ─── Retainer-covered work ───────────────────────────────────────────────────
+// A covered task bills the client 0 and pools from the agreement's work value
+// instead. The planner must read that basis, or every retainer client
+// simulates at ₹0 earnings and ₹0 profit — understating the plan precisely
+// where a retainer makes the revenue most predictable.
+
+function coveredFixture(): WhatIfRawInputs {
+  const raw = fixture()
+  raw.tasks = [{
+    id: 'tc', task_number: 3, title: 'Covered post', task_date: '2026-06-15',
+    status: 'done', currency: 'AED',
+    billing_amount: 0, billing_amount_inr: 0,          // client pays via the retainer
+    client_id: 'A', service_id: 'S1',
+    retainer_item_id: 'item-1', bill_as_extra: false,
+    work_value_inr: 1000,
+  }]
+  raw.scores = [
+    { task_id: 'tc', employee_id: 'e1', score_percentage: 100, earnings_inr: 0, is_manual_override: false },
+  ]
+  raw.empRating = { e1: 100, e2: 100 }
+  return raw
+}
+
+describe('retainer-covered tasks', () => {
+  it('pools from the work value, not the zero billing', () => {
+    const [row] = baselineRows(coveredFixture())
+    // 1000 work value × 50% matrix commission
+    expect(row.commission_pool).toBe(500)
+    expect(row.emp.e1.earn).toBe(500)
+  })
+
+  it('does not report a covered task as ₹0 earnings', () => {
+    const [row] = baselineRows(coveredFixture())
+    expect(row.emp.e1.earn).toBeGreaterThan(0)
+  })
+
+  it('prefers the agreement commission override over the pricing matrix', () => {
+    const raw = coveredFixture()
+    raw.itemCommissionPct = { 'item-1': 20 }
+    const [row] = baselineRows(raw)
+    expect(row.commission_pool).toBe(200)   // 20%, not the matrix's 50%
+  })
+
+  it('holds the work value steady under the price and growth levers', () => {
+    // Charging the client more does not raise what the work is internally
+    // worth — scaling it would hand the team a raise nobody agreed to.
+    const raw = coveredFixture()
+    const base = baselineRows(raw)[0].commission_pool
+    const s = emptyScenario('s', 'S')
+    s.billingGrowthPct = 50
+    s.priceOverrides = { 'A|S1': { oldPrice: 100, newPrice: 200 } }
+    expect(simulateScenario(raw, s)[0].commission_pool).toBe(base)
+  })
+
+  it('still scales an ordinary billed task under the growth lever', () => {
+    const s = emptyScenario('s', 'S')
+    s.billingGrowthPct = 50
+    const t1 = simulateScenario(fixture(), s).find(r => r.task_id === 't1')!
+    expect(t1.commission_pool).toBe(7500)   // 10000 × 1.5 × 50%
+  })
+})

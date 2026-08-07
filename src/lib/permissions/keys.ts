@@ -20,6 +20,12 @@ export const PERMS = {
    * Opt-in: with neither this nor view_all, legacy behaviour (all tasks) holds.
    */
   TASKS_VIEW_BY_SERVICE: 'tasks.view_by_service',
+  /**
+   * Restrict task visibility to the viewer's own org unit — their department,
+   * team, branch or region and everything beneath it (org_unit_members +
+   * org_unit_scopes). Opt-in; see SCOPE_BY_UNIT for the cross-module version.
+   */
+  TASKS_VIEW_BY_UNIT: 'tasks.view_by_unit',
   TASKS_CREATE:       'tasks.create',
   // (Service Scope keys live in their own block below — see SCOPE_*.)
   TASKS_EDIT:         'tasks.edit',
@@ -34,6 +40,12 @@ export const PERMS = {
   // Contributions
   CONTRIBUTIONS_VIEW_OWN:      'contributions.view_own',
   CONTRIBUTIONS_VIEW_ALL:      'contributions.view_all',
+  /**
+   * The middle rung between view_own and view_all: see the contributions of
+   * everyone in the viewer's own org unit — department, team, branch or region
+   * — and every unit beneath it. Ignored when view_all is also held.
+   */
+  CONTRIBUTIONS_VIEW_UNIT:     'contributions.view_unit',
   CONTRIBUTIONS_EDIT:          'contributions.edit',
   /** See ₹ earned per contribution row in addition to score percentage. */
   CONTRIBUTIONS_VIEW_EARNINGS: 'contributions.view_earnings',
@@ -115,7 +127,15 @@ export const PERMS = {
    * Opt-in: without it, behaviour is unchanged.
    */
   SCOPE_BY_SERVICE: 'scope.by_service',
-  /** Explicit escape hatch: overrides SCOPE_BY_SERVICE and shows everything. */
+  /**
+   * RESTRICTION: the holder only sees their own org unit — the department,
+   * team, branch or region they are a member of, plus every unit beneath it,
+   * and the clients/services those units are mapped to. The cross-module form
+   * of TASKS_VIEW_BY_UNIT / CONTRIBUTIONS_VIEW_UNIT.
+   * Opt-in: without it, behaviour is unchanged.
+   */
+  SCOPE_BY_UNIT:    'scope.by_unit',
+  /** Explicit escape hatch: overrides SCOPE_BY_SERVICE / SCOPE_BY_UNIT and shows everything. */
   SCOPE_VIEW_ALL:   'scope.view_all',
 
   // Advertising — paid-ads campaign management module
@@ -238,6 +258,8 @@ export const CRITICAL_PERMS: ReadonlySet<string> = new Set<string>([
   // Per-employee earnings & performance
   PERMS.CONTRIBUTIONS_VIEW_EARNINGS,
   PERMS.CONTRIBUTIONS_VIEW_ALL,
+  // Narrower than view_all, but still other people's performance data.
+  PERMS.CONTRIBUTIONS_VIEW_UNIT,
   // Salaries
   PERMS.PAYROLL_VIEW_AMOUNTS,
   PERMS.PAYROLL_EDIT,

@@ -32,7 +32,11 @@ export default async function WhatIfPage() {
     fetchAll(
       supabase
         .from('tasks')
-        .select('id, task_number, title, task_date, status, currency, billing_amount, billing_amount_inr, client_id, service_id')
+        // Coverage fields are load-bearing, not extra: a retainer-covered task
+        // bills 0 and pools from work_value_inr instead. Omit them and every
+        // covered task simulates at ₹0 earnings and ₹0 profit, silently
+        // understating the plan for any retainer client.
+        .select('id, task_number, title, task_date, status, currency, billing_amount, billing_amount_inr, client_id, service_id, retainer_item_id, bill_as_extra, work_value_inr')
         .is('deleted_at', null)
         .order('id', { ascending: true }),
     ),
@@ -84,6 +88,28 @@ export default async function WhatIfPage() {
     if (!error && data) agreements = data as CommissionAgreement[]
   } catch { /* pre-migration — planner runs without agreements */ }
 
+  // Agreement-item commission overrides, so a retainer-linked task simulates
+  // at the same rate the live report charges it. Separate query, never an
+  // embed: tasks and client_agreement_items have two relationships and an
+  // unqualified embed fails PGRST201, taking the whole task list with it.
+  const itemCommissionPct: Record<string, number | null> = {}
+  try {
+    const retainerItemIds = Array.from(new Set(
+      ((tasksRes.data || []) as { retainer_item_id?: string | null }[])
+        .map(t => t.retainer_item_id)
+        .filter(Boolean) as string[],
+    ))
+    if (retainerItemIds.length > 0) {
+      const { data } = await supabase
+        .from('client_agreement_items')
+        .select('id, work_commission_pct')
+        .in('id', retainerItemIds)
+      for (const i of (data || []) as { id: string; work_commission_pct: number | null }[]) {
+        itemCommissionPct[i.id] = i.work_commission_pct ?? null
+      }
+    }
+  } catch { /* pre-migration — planner falls back to the pricing matrix */ }
+
   type PricingRow = { client_id: string; service_id: string; commission_percentage: number | null; price: number | null }
   const pricingRows = (pricingRes.data || []) as PricingRow[]
 
@@ -96,6 +122,7 @@ export default async function WhatIfPage() {
     empRating,
     toolPctByTask,
     agreements,
+    itemCommissionPct,
   }
 
   // client|service → current price (feeds the price lever; 0/undefined hides it for that pairing)

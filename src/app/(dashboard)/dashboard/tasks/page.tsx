@@ -3,6 +3,7 @@ import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility, stripTaskListPricing, userCanSee } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
 import { resolveTaskVisibilityMode, fetchEmployeeServiceIds, filterTasksByVisibility } from '@/lib/tasks/visibility'
+import { loadUnitScope, scopeTasksByUnit, unitTaskIdsFrom } from '@/lib/scope/unit-scope'
 import { getPendingPricing } from '@/lib/pricing/pending'
 import { PricingPendingBanner } from '@/components/pricing/pricing-pending-banner'
 import TasksClient from './tasks-client'
@@ -183,7 +184,7 @@ export default async function TasksPage({
   const [allTasks, dbCountRes, clientsRes, servicesRes, clientPricingsRes, employeesRes, taskAssignmentsRes,
     groupsRes, paramsRes, groupServicesRes, paramServicesRes,
     taskGroupsRes, taskGroupAssignmentsRes, taskParamAssignmentsRes, myTaskIds,
-    visibilityBillingRes, visibilityContribRes, visibilityNamesRes, myServiceIds] = await Promise.all([
+    visibilityBillingRes, visibilityContribRes, visibilityNamesRes, myServiceIds, unitScope] = await Promise.all([
     fetchAllTasks(supabase, hasDeletedAt, selectClause),
     // Real DB count of all tasks (used for the "DB search" fallback in the UI).
     hasDeletedAt
@@ -241,6 +242,9 @@ export default async function TasksPage({
     visibilityMode === 'services' && me?.employeeId
       ? fetchEmployeeServiceIds(supabase, me.employeeId)
       : Promise.resolve([] as string[]),
+    // Org-unit task visibility (tasks.view_by_unit). Short-circuits without a
+    // query for every viewer who isn't unit-scoped.
+    loadUnitScope(supabase, me, 'tasks'),
   ])
 
   // Fetch trash only if column exists. Trash uses the same pricing-aware
@@ -260,14 +264,30 @@ export default async function TasksPage({
   // Belt-and-suspenders: even with the right select, run the strip helper to
   // guarantee no late-added column slips through if a future select switches
   // to `*`. Cheap no-op when vis.tasksPricing is true.
-  const initialTasks = filterTasksByVisibility(
+  // Org-unit scoping (tasks.view_by_unit) stacks on top of the service filter:
+  // the unit's own clients/services, plus every task the viewer or one of
+  // their unit-mates has history on. Ids come from the assignment graph
+  // already fetched above — no extra query. No-op when the viewer isn't
+  // unit-scoped, or when their unit maps no revenue at all.
+  const unitTaskIds = unitTaskIdsFrom(unitScope, [
+    (taskAssignmentsRes.data || []) as any[],
+    (taskGroupAssignmentsRes.data || []) as any[],
+    (taskParamAssignmentsRes.data || []) as any[],
+  ])
+  const scopeToUnit = (rows: any[]) => scopeTasksByUnit(rows, unitScope, {
+    id:        (t: any) => t.id,
+    clientId:  (t: any) => t.client_id,
+    serviceId: (t: any) => t.service_id,
+  }, unitTaskIds)
+
+  const initialTasks = scopeToUnit(filterTasksByVisibility(
     stripTaskListPricing(allTasks || [], vis.tasksPricing),
     visibilityMode, myServiceIds, myTaskIds,
-  )
-  const initialTrash = filterTasksByVisibility(
+  ))
+  const initialTrash = scopeToUnit(filterTasksByVisibility(
     stripTaskListPricing((trashRes.data || []) as any[], vis.tasksPricing),
     visibilityMode, myServiceIds, myTaskIds,
-  )
+  ))
 
   // Pending-to-price banner — only for users who can see/set pricing.
   const pendingPricing = vis.tasksPricing ? await getPendingPricing(supabase) : { clients: [], services: [], total: 0 }

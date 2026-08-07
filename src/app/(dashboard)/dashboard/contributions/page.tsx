@@ -3,6 +3,9 @@ import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility, userCanSee } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
 import { resolveTaskVisibilityMode, filterTasksByVisibility } from '@/lib/tasks/visibility'
+import {
+  loadUnitScope, isUnitScoped, scopeRowsByUnitMember, scopeTasksByUnit, unitTaskIdsFrom,
+} from '@/lib/scope/unit-scope'
 import ContributionsClient from './contributions-client'
 
 export const dynamic = 'force-dynamic'
@@ -23,6 +26,10 @@ export default async function ContributionsPage() {
   //    other contributors never reach the browser at all (real privacy, not just
   //    a UI hide). Tasks themselves stay full — all tasks show, other contributors
   //    are simply absent.
+  //  • viewUnit       — the middle rung (contributions.view_unit): the same strip,
+  //    widened from "just me" to everyone in my department / team / branch /
+  //    region and every unit beneath it. Resolved below, after the org graph
+  //    loads; ignored when viewAll is held.
   //  • canViewActivity — see the per-task activity log + post log notes.
   const viewAll         = isAdmin || userCanSee(me, PERMS.CONTRIBUTIONS_VIEW_ALL)
   const canViewActivity = isAdmin || userCanSee(me, PERMS.CONTRIBUTIONS_VIEW_ACTIVITY)
@@ -91,7 +98,7 @@ export default async function ContributionsPage() {
     contributorRecordsRes, taskToolRecordsRes, pricingRes,
     visibilityBillingRes, visibilityContribRes, visibilityNamesRes,
     taskGroupAssignmentsRes, taskParamAssignmentsRes, performanceHistoryRes,
-    employeeServicesRes,
+    employeeServicesRes, unitScope,
   ] = await Promise.all([
     // Tasks — same shape for both roles, employee select drops billing_amount_inr.
     timed('tasks',                  fetchAll(tasksQuery)),
@@ -140,6 +147,9 @@ export default async function ContributionsPage() {
     // Employee ↔ service assignments — drives "only employees of this task's
     // service" in the scoring UI. Missing table (pre-migration) → empty list.
     timed('employee_services',      supabase.from('employee_services').select('employee_id, service_id')),
+    // Org-unit scope (contributions.view_unit). Short-circuits to an empty
+    // scope without a query for every viewer who isn't unit-scoped.
+    timed('unit_scope',             loadUnitScope(supabase, me, 'contributions')),
   ])
 
   // Merge all assignment types into a unique list for visibility filtering
@@ -160,15 +170,31 @@ export default async function ContributionsPage() {
 
   // ── Server-side privacy strip ──────────────────────────────────────────────
   // When the viewer lacks `contributions.view_all`, drop every row that belongs
-  // to another employee BEFORE it leaves the server, and send only the viewer's
-  // own employee record. The contributor graph for other people then simply
-  // doesn't exist client-side — nothing to leak via dev tools or network tab.
-  const mine = <T extends { employee_id?: string }>(rows: T[]): T[] =>
-    viewAll ? rows : rows.filter(r => r.employee_id === myEmployeeId)
+  // to someone outside their scope BEFORE it leaves the server, and send only
+  // the matching employee records. The contributor graph for everyone else then
+  // simply doesn't exist client-side — nothing to leak via dev tools or the
+  // network tab.
+  //
+  // Three rungs, widest first:
+  //   viewAll  → every row
+  //   viewUnit → every member of the viewer's org unit subtree (always
+  //              including the viewer, even when they belong to no unit — so
+  //              an unconfigured org chart degrades to exactly the own-rows
+  //              behaviour the grant replaced, never to a blank page)
+  //   neither  → the viewer's own rows
+  const viewUnit = !viewAll && isUnitScoped(unitScope)
+
+  const mine = <T extends { employee_id?: string }>(rows: T[]): T[] => {
+    if (viewAll) return rows
+    if (viewUnit) return scopeRowsByUnitMember(rows, unitScope, r => r.employee_id)
+    return rows.filter(r => r.employee_id === myEmployeeId)
+  }
 
   const outEmployees = viewAll
     ? (employeesRes.data || [])
-    : (employeesRes.data || []).filter((e: any) => e.id === myEmployeeId)
+    : viewUnit
+      ? (employeesRes.data || []).filter((e: any) => unitScope.memberEmployeeIds.has(e.id))
+      : (employeesRes.data || []).filter((e: any) => e.id === myEmployeeId)
   const outScores             = mine(scoresRes.data || [])
   const outContributorRecords = mine(contributorRecordsRes.data || [])
   const outAssignments        = mine(mergedAssignments)
@@ -188,6 +214,23 @@ export default async function ContributionsPage() {
       ...(contributorRecordsRes.data || []).filter((c: any) => c.employee_id === myEmployeeId).map((c: any) => c.task_id),
     ])
     outTasks = filterTasksByVisibility(outTasks, visibilityMode, myServiceIds, ownTaskIds)
+  }
+
+  // ── Org-unit task scoping ─────────────────────────────────────────────────
+  // A unit-scoped viewer scores their own team's worklist: tasks whose client
+  // or service the unit owns, plus anything the viewer or a unit-mate has
+  // history on. No-op when the unit maps no revenue (see scopeTasksByUnit).
+  if (viewUnit) {
+    const unitTaskIds = unitTaskIdsFrom(unitScope, [
+      mergedAssignments,
+      (scoresRes.data || []) as any[],
+      (contributorRecordsRes.data || []) as any[],
+    ])
+    outTasks = scopeTasksByUnit(outTasks as any[], unitScope, {
+      id:        (t: any) => t.id,
+      clientId:  (t: any) => t.client_id,
+      serviceId: (t: any) => t.service_id,
+    }, unitTaskIds)
   }
 
   // Agreement-item commission overrides for retainer-linked tasks. A SEPARATE
@@ -238,7 +281,10 @@ export default async function ContributionsPage() {
       permissionFlags={{
         earnings:     vis.contributionEarnings,
         pricing:      vis.tasksPricing,
-        viewAll,
+        // Unit viewers get the multi-employee roster UI: the payload above
+        // already contains only their unit, so "all" here means "everyone in
+        // what you were sent", not everyone in the company.
+        viewAll:      viewAll || viewUnit,
         viewActivity: canViewActivity,
       }}
     />
