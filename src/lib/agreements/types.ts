@@ -149,6 +149,12 @@ export interface ClientAgreementItemRow {
   work_unit_value: number | null
   /** Employee-pool % for work on this item. NULL = engine default (50). */
   work_commission_pct: number | null
+  /**
+   * Client-facing name on the invoice ("Brand Identity Development"). NULL
+   * falls back to the service name — which is the internal catalogue entry
+   * ("Logo Design"), not necessarily the wording in the signed proposal.
+   */
+  invoice_label: string | null
   created_at: string
   updated_at: string
 }

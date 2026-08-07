@@ -237,6 +237,8 @@ export interface AgreementItemInput {
   work_unit_value?: number | null
   /** Employee-pool % for this item's work. null = engine default (50). */
   work_commission_pct?: number | null
+  /** Client-facing name on the invoice. null = fall back to the service name. */
+  invoice_label?: string | null
   /** Services this retainer item covers (Phase 2b). undefined = leave unchanged. */
   coveredServiceIds?: string[]
   deliverables: AgreementDeliverableInput[]
@@ -369,6 +371,7 @@ export async function saveAgreementItem(
         ? Number(item.included_quantity) : null,
     work_unit_value: item.work_unit_value != null ? Number(item.work_unit_value) : null,
     work_commission_pct: item.work_commission_pct != null ? Number(item.work_commission_pct) : null,
+    invoice_label: item.invoice_label?.trim() || null,
     updated_at: new Date().toISOString(),
   }
 

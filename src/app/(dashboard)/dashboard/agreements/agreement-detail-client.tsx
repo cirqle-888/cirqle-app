@@ -75,6 +75,7 @@ interface Item {
   creative_allocation_amount?: number | null; management_allocation_amount?: number | null
   included_quantity?: number | null; allocated_unit_value?: number | null
   work_unit_value?: number | null; work_commission_pct?: number | null
+  invoice_label?: string | null
   coveredServices?: { id: string; name: string }[]
   deliverables: Deliverable[]; milestones: Milestone[]
 }
@@ -426,6 +427,11 @@ function ItemCard({
               </span>
             )}
           </div>
+          {it.invoice_label && (
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Invoices as <span className="text-foreground font-medium">{it.invoice_label}</span>
+            </p>
+          )}
           <p className="text-xs text-muted-foreground mt-1">
             {it.effective_from} → {it.effective_to || 'current'}
             {canViewPricing && it.unit_price != null ? ` · ${currency} ${it.unit_price}` : ''}
@@ -557,7 +563,7 @@ function newItemForm(currency: string): ItemForm {
     unit_price: null, currency, carry_forward_rule: 'expire', extra_unit_price: null,
     display_order: 0, notes: '',
     creative_allocation_amount: null, management_allocation_amount: null, included_quantity: null,
-    work_unit_value: null, work_commission_pct: null,
+    work_unit_value: null, work_commission_pct: null, invoice_label: null,
     coveredServiceIds: [],
     deliverables: [], milestones: [],
   }
@@ -580,6 +586,7 @@ function itemToForm(it: Item, status: AgreementStatus, changeTerms = false): Ite
     included_quantity: it.included_quantity ?? null,
     work_unit_value: it.work_unit_value ?? null,
     work_commission_pct: it.work_commission_pct ?? null,
+    invoice_label: it.invoice_label ?? null,
     coveredServiceIds: (it.coveredServices ?? []).map(s => s.id),
     deliverables: it.deliverables.map(d => ({ ...d })),
     milestones: it.milestones.map(m => ({ ...m })),
@@ -812,6 +819,7 @@ function ItemEditor({
       included_quantity: form.included_quantity != null ? Number(form.included_quantity) : null,
       work_unit_value: form.work_unit_value != null ? Number(form.work_unit_value) : null,
       work_commission_pct: form.work_commission_pct != null ? Number(form.work_commission_pct) : null,
+      invoice_label: form.invoice_label?.trim() || null,
       coveredServiceIds: form.commitment_type === 'retainer' ? (form.coveredServiceIds ?? []) : undefined,
       deliverables: form.deliverables.map((d, i) => ({ ...d, committed_quantity: Number(d.committed_quantity) || 0, display_order: i })),
       milestones: form.milestones.map((m, i) => ({ ...m, display_order: i })),
@@ -907,6 +915,24 @@ function ItemEditor({
               </select>
             </div>
           )}
+
+          <div className="sm:col-span-2">
+            <label className={labelCls}>
+              Invoice name <span className="text-muted-foreground/60">(optional)</span>
+            </label>
+            <input value={form.invoice_label || ''}
+              onChange={e => set({ invoice_label: e.target.value })}
+              className={inputCls}
+              placeholder={
+                (form.service_id && services.find(s => s.id === form.service_id)?.name)
+                  ? `Blank = "${services.find(s => s.id === form.service_id)!.name}" (service name)`
+                  : 'e.g. Brand Identity Development'
+              } />
+            <p className="text-[11px] text-muted-foreground/70 mt-1">
+              What the client reads on the invoice. Use the wording from the signed proposal — the
+              service name is an internal catalogue entry and often differs.
+            </p>
+          </div>
 
           <div className="sm:col-span-2">
             <label className={labelCls}>Notes <span className="text-muted-foreground/60">(optional)</span></label>

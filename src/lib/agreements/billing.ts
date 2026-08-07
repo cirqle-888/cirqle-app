@@ -27,7 +27,7 @@
  * Pure and framework-free so the cron, any backfill, and the tests share it.
  */
 
-import { addMonth } from './progress'
+import { addMonth, lastDayOf } from './progress'
 import type { ClientAgreementRow, ClientAgreementItemRow } from './types'
 
 /** The agreement's first calendar month, and whether it began mid-month. */
@@ -90,10 +90,42 @@ export function feeBillsInMonth(
 }
 
 /**
+ * The date range of work this fee pays for.
+ *
+ * Used to date the invoice line from the first task delivered against the item.
+ * Applies the same stub-merge as the fee itself, so the opening cycle's window
+ * really does start on the agreement date (20 Jul) rather than the 1st of the
+ * month the fee happens to bill in.
+ */
+export function feeWorkWindow(
+  month: string,
+  agreement: Pick<ClientAgreementRow, 'start_date'>,
+  termRow: Pick<ClientAgreementItemRow, 'effective_from'>,
+): { start: string; end: string } {
+  const { startMonth, midMonth, mergedInto } = startShape(agreement)
+
+  if (midMonth && month === mergedInto) {
+    return { start: agreement.start_date, end: lastDayOf(mergedInto) }
+  }
+  if (midMonth && month === startMonth) {
+    return { start: agreement.start_date, end: lastDayOf(mergedInto) }
+  }
+  const monthStart = `${month}-01`
+  return {
+    start: termRow.effective_from > monthStart ? termRow.effective_from : monthStart,
+    end: lastDayOf(month),
+  }
+}
+
+/**
  * Human label for the fee line, spelling out a merged opening period so the
  * client can see that one charge covers both part-months.
  *
  * `Retainer — Social Media Services (20 Jul – 31 Aug 2026)`
+ *
+ * `serviceLabel` is the agreement item's own invoice_label when set — the
+ * client should read the wording they signed ("Brand Identity Development"),
+ * not the internal service catalogue name ("Logo Design").
  */
 export function feeLineDescription(
   month: string,

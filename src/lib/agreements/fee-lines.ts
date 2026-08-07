@@ -28,8 +28,8 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { feeBillsInMonth, feeLineDescription } from './billing'
-import { lastDayOf } from './progress'
+import { feeBillsInMonth, feeLineDescription, feeWorkWindow } from './billing'
+import { lastDayOf, DELIVERED_STATUSES } from './progress'
 
 export interface FeeLinePlan {
   agreementId: string
@@ -42,6 +42,8 @@ export interface FeeLinePlan {
   description: string
   amount: number
   currency: string
+  /** First task delivered against this item inside the covered window; null if none yet. */
+  lineDate: string | null
 }
 
 export interface FeeSyncResult {
@@ -65,10 +67,63 @@ interface ItemRow {
   commitment_type: 'one_time' | 'retainer'
   unit_price: number | null; currency: string | null
   effective_from: string; effective_to: string | null
+  invoice_label: string | null
 }
 
 /** Invoice statuses whose lines may still be rewritten. */
 const MUTABLE = ['draft', 'reviewed']
+
+/**
+ * The date to show on a fee line: the earliest task actually delivered against
+ * this agreement item inside the window the fee covers.
+ *
+ * Two ways a task belongs to an item, because only retainers are stamped:
+ *  • retainer — tasks the coverage trigger linked via tasks.retainer_item_id
+ *  • one_time — nothing stamps these, so fall back to the client's tasks on
+ *    the item's own service inside the window (the logo jobs you add by hand)
+ *
+ * Returns null when no work is dated yet, leaving the column blank rather than
+ * inventing a date.
+ */
+async function firstDeliveredTaskDate(
+  admin: SupabaseClient,
+  q: {
+    clientId: string
+    lineageItemIds: string[]
+    serviceId: string | null
+    from: string
+    to: string
+  },
+): Promise<string | null> {
+  const dates: string[] = []
+
+  const collect = async (build: (b: any) => any) => {
+    const { data } = await build(
+      admin.from('tasks').select('task_date')
+        .is('deleted_at', null)
+        .in('status', DELIVERED_STATUSES as unknown as string[])
+        .gte('task_date', q.from)
+        .lte('task_date', q.to)
+        .order('task_date', { ascending: true })
+        .limit(1),
+    )
+    const d = (data as { task_date: string | null }[] | null)?.[0]?.task_date
+    if (d) dates.push(d)
+  }
+
+  try {
+    if (q.lineageItemIds.length > 0) {
+      await collect(b => b.in('retainer_item_id', q.lineageItemIds))
+    }
+    if (q.serviceId) {
+      await collect(b => b.eq('client_id', q.clientId).eq('service_id', q.serviceId))
+    }
+  } catch {
+    return null // pre-migration / unreadable → blank date, never a wrong one
+  }
+
+  return dates.length > 0 ? dates.sort()[0] : null
+}
 
 /**
  * Work out every agreement fee that belongs on `month`'s invoices.
@@ -98,7 +153,7 @@ export async function planAgreementFeeLines(
 
   const { data: items, error: itErr } = await admin
     .from('client_agreement_items')
-    .select('id, agreement_id, service_id, commitment_type, unit_price, currency, effective_from, effective_to')
+    .select('id, agreement_id, service_id, commitment_type, unit_price, currency, effective_from, effective_to, invoice_label')
     .in('agreement_id', inWindow.map(a => a.id))
     .returns<ItemRow[]>()
   if (itErr) throw new Error(`agreement items: ${itErr.message}`)
@@ -132,7 +187,20 @@ export async function planAgreementFeeLines(
       if (!inForce.unit_price || inForce.unit_price <= 0) continue
       if (!feeBillsInMonth(month, agreement, inForce)) continue
 
-      const label = (inForce.service_id && serviceName.get(inForce.service_id)) || agreement.title
+      // The client reads the wording they signed, not the service catalogue.
+      const label = inForce.invoice_label?.trim()
+        || (inForce.service_id && serviceName.get(inForce.service_id))
+        || agreement.title
+
+      const window = feeWorkWindow(month, agreement, inForce)
+      const lineDate = await firstDeliveredTaskDate(admin, {
+        clientId: agreement.client_id,
+        lineageItemIds: rows.map(r => r.id),
+        serviceId: inForce.service_id,
+        from: window.start,
+        to: window.end,
+      })
+
       planned.push({
         agreementId: agreement.id,
         agreementTitle: agreement.title,
@@ -142,6 +210,7 @@ export async function planAgreementFeeLines(
         description: feeLineDescription(month, agreement, inForce, label),
         amount: Number(inForce.unit_price),
         currency: inForce.currency || 'INR',
+        lineDate,
       })
     }
   }
@@ -182,11 +251,12 @@ export async function syncAgreementFeeLines(
   const allItemIds = Array.from(new Set(planned.flatMap(p => p.lineageItemIds)))
   const { data: feeLines } = await admin
     .from('invoice_items')
-    .select('id, agreement_item_id, invoice_id, description, unit_price, total, currency')
+    .select('id, agreement_item_id, invoice_id, description, unit_price, total, currency, line_date')
     .in('agreement_item_id', allItemIds)
     .returns<{
       id: string; agreement_item_id: string | null; invoice_id: string | null
-      description: string | null; unit_price: number | null; total: number | null; currency: string | null
+      description: string | null; unit_price: number | null; total: number | null
+      currency: string | null; line_date: string | null
     }[]>()
 
   const invoiceIds = Array.from(new Set((feeLines || []).map(l => l.invoice_id).filter(Boolean) as string[]))
@@ -222,7 +292,9 @@ export async function syncAgreementFeeLines(
         Math.abs(Number(existing.total ?? 0) - p.amount) > 0.005 ||
         Math.abs(Number(existing.unit_price ?? 0) - p.amount) > 0.005 ||
         (existing.currency || 'INR') !== p.currency ||
-        existing.description !== p.description
+        existing.description !== p.description ||
+        // A date only ever fills in as work lands; never blank one already set.
+        (p.lineDate != null && existing.line_date !== p.lineDate)
       if (!drifted) { result.unchanged++; continue }
 
       if (!dryRun) {
@@ -233,6 +305,7 @@ export async function syncAgreementFeeLines(
           unit_price: p.amount,
           total: p.amount,
           currency: p.currency,
+          ...(p.lineDate != null ? { line_date: p.lineDate } : {}),
         }).eq('id', existing.id)
         if (error) continue
         touched.add(existing.invoice_id!)
@@ -267,6 +340,7 @@ export async function syncAgreementFeeLines(
         unit_price: p.amount,
         total: p.amount,
         currency: p.currency,
+        line_date: p.lineDate,
         display_order: nextOrder,
       })
       if (insErr) continue

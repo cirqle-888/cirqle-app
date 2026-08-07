@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { feeBillingMonth, feeBillsInMonth, feeLineDescription } from './billing'
+import { feeBillingMonth, feeBillsInMonth, feeLineDescription, feeWorkWindow } from './billing'
 import { resolveDeliveryPeriod } from './progress'
 import type { ClientAgreementRow, ClientAgreementItemRow } from './types'
 
@@ -111,6 +111,25 @@ describe('feeBillingMonth', () => {
   })
   it('returns null before the agreement starts', () => {
     expect(feeBillingMonth('2026-06', midMonthAgreement, retainer)).toBeNull()
+  })
+})
+
+describe('feeWorkWindow — dating a fee line from its first task', () => {
+  it('opens the merged first cycle on the agreement date, not the 1st of the billing month', () => {
+    expect(feeWorkWindow('2026-08', midMonthAgreement, retainer))
+      .toEqual({ start: '2026-07-20', end: '2026-08-31' })
+  })
+  it('uses plain calendar months after the merge', () => {
+    expect(feeWorkWindow('2026-09', midMonthAgreement, retainer))
+      .toEqual({ start: '2026-09-01', end: '2026-09-30' })
+  })
+  it('never starts before the term row takes effect', () => {
+    expect(feeWorkWindow('2026-07', firstOfMonthAgreement, retainer))
+      .toEqual({ start: '2026-07-20', end: '2026-07-31' })
+  })
+  it('respects short months', () => {
+    const feb = { commitment_type: 'retainer', effective_from: '2027-02-01', effective_to: null } as ClientAgreementItemRow
+    expect(feeWorkWindow('2027-02', firstOfMonthAgreement, feb).end).toBe('2027-02-28')
   })
 })
 

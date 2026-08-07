@@ -332,7 +332,10 @@ export function buildInvoiceParts(
 
   // Build task item rows
   const itemRows = sortedItems.map((it, idx) => {
-    const taskDate = it.task?.task_date ? ddMon(it.task.task_date) : ''
+    // Task lines date from their task; agreement FEE lines have no task, so
+    // they carry their own line_date (first work delivered in the period).
+    const rowDate = it.task?.task_date || it.line_date
+    const taskDate = rowDate ? ddMon(rowDate) : ''
     const bg = idx % 2 === 1 ? ALT_ROW : '#ffffff'
     return `
       <tr style="background:${bg};height:${ROW_H}px">
