@@ -179,12 +179,12 @@ export function resolveTermRows(
   return validRows[0]
 }
 
-function lastDayOf(month: string): string {
+export function lastDayOf(month: string): string {
   const [y, m] = month.split('-').map(Number)
   return `${month}-${String(getDaysInMonth(y, m)).padStart(2, '0')}`
 }
 
-function addMonth(month: string, delta: number): string {
+export function addMonth(month: string, delta: number): string {
   const [y, m] = month.split('-').map(Number)
   const d = new Date(Date.UTC(y, m - 1 + delta, 1))
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
