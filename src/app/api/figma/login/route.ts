@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { createAdminClient } from '@/lib/supabase/server'
+import { FIGMA_CORS_HEADERS as CORS_HEADERS, figmaOptions, parsePluginHeader, compareVersions } from '../_lib/auth'
 
 /**
  * POST /api/figma/login — one-time sign-in for the Cirqle Studio plugin.
@@ -19,18 +20,39 @@ import { createAdminClient } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'authorization, content-type',
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS_HEADERS })
-}
+export const OPTIONS = figmaOptions
 
 export async function POST(req: NextRequest) {
   try {
+    // Login has no bearer yet (it vends the secret), so the plugin-version
+    // gate runs here directly: an outdated plugin learns it must update at
+    // sign-in, before anything else half-works.
+    {
+      const admin = createAdminClient()
+      const plugin = parsePluginHeader(req.headers.get('x-cirqle-plugin'))
+      const { data: minRow } = await admin
+        .from('company_settings')
+        .select('value')
+        .eq('key', 'figma_min_plugin_version')
+        .maybeSingle()
+      const minVersion = ((minRow as { value?: string } | null)?.value || '').trim()
+      if (minVersion && /^\d+\.\d+\.\d+$/.test(minVersion)) {
+        const current = plugin?.version || '0.0.0'
+        if (compareVersions(current, minVersion) < 0) {
+          return NextResponse.json(
+            {
+              ok: false,
+              updateRequired: true,
+              minVersion,
+              currentVersion: current,
+              error: `Please update Cirqle Studio — you have ${current === '0.0.0' ? 'an older version' : current}, the minimum is ${minVersion}. Re-import the latest plugin from the design team's folder.`,
+            },
+            { status: 426, headers: CORS_HEADERS },
+          )
+        }
+      }
+    }
+
     const body = (await req.json().catch(() => null)) as { identifier?: string; password?: string } | null
     const identifier = (body?.identifier || '').trim()
     const password = body?.password || ''

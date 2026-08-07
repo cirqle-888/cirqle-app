@@ -24,6 +24,7 @@ import {
   type ProductInput, type ProductBadgeInput, type CampaignInput, type OfferGroupOption,
 } from './actions'
 import type { ParsedOfferProduct } from '@/lib/ai/offer-capture'
+import { unlockCampaignDesign } from '@/app/(dashboard)/dashboard/offer-prepare/actions'
 import { ImageLightbox } from '@/components/ui/image-lightbox'
 import { FigmaBindingHelp } from '@/components/offer/figma-binding-help'
 import { IntakeAppSwitcher } from '@/components/intake/app-switcher'
@@ -1387,7 +1388,7 @@ const getTomorrowStr = () => {
 
 function OfferIntakeClientInner({
   token, client, campaign: initialCampaign, catalog, badges, groups = [], sheetManaged = false,
-  logoUrl, logoDarkUrl, switcher, hub, staff, flowMode = 'push',
+  designLocked = false, logoUrl, logoDarkUrl, switcher, hub, staff, flowMode = 'push',
 }: {
   token: string
   client: { id: string; name: string }
@@ -1402,6 +1403,9 @@ function OfferIntakeClientInner({
   groups?: OfferGroupOption[]
   /** Campaign mirrors the client's own Google Sheet — read-only here. */
   sheetManaged?: boolean
+  /** "Mark as Designed" pressed in Cirqle Studio — server refuses non-figma
+   * saves; the staff (admin) entrance shows Unlock. */
+  designLocked?: boolean
   logoUrl?: string | null
   logoDarkUrl?: string | null
   switcher?: { kind: string; label: string; href: string }[]
@@ -1484,6 +1488,25 @@ function OfferIntakeClientInner({
   const [cancelling, setCancelling] = useState(false)
   const [copyMessage, setCopyMessage] = useState<string | null>(null)
   const [showMissingImagesOnly, setShowMissingImagesOnly] = useState(false)
+  // Design lock — local so an admin Unlock reflects without a full reload.
+  const [locked, setLocked] = useState(designLocked)
+  const [unlocking, setUnlocking] = useState(false)
+
+  async function handleUnlock() {
+    if (unlocking || !campaignId) return
+    setUnlocking(true)
+    try {
+      const res = await unlockCampaignDesign(campaignId)
+      if (res.ok) {
+        setLocked(false)
+        router.refresh()
+      } else {
+        setError(res.error || 'Could not unlock this offer.')
+      }
+    } finally {
+      setUnlocking(false)
+    }
+  }
 
   // ── Offer categories ────────────────────────────────────────────────────────
   // Only a client with MORE THAN ONE category gets tabs; one (or none) keeps the
@@ -3103,9 +3126,31 @@ function OfferIntakeClientInner({
             </span>
           </div>
         )}
+        {/* Designer pressed "Mark as Designed" in Cirqle Studio: the server
+            refuses non-figma saves, so disable up front. The staff entrance
+            is admin-only, so it gets the Unlock. */}
+        {locked && (
+          <div className="mb-3 rounded-xl border border-violet-500/25 bg-violet-500/10 px-3 py-2.5 flex items-start gap-2 text-xs text-violet-200">
+            <span className="shrink-0 mt-0.5">🔒</span>
+            <span className="flex-1">
+              <span className="font-semibold">Designed.</span>{' '}
+              This offer is with the designer — edits are locked so the artwork and the data can’t drift apart.
+            </span>
+            {staff && (
+              <button
+                type="button"
+                onClick={() => void handleUnlock()}
+                disabled={unlocking}
+                className="shrink-0 px-2.5 py-1 rounded-lg font-semibold bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-50 transition-colors"
+              >
+                {unlocking ? 'Unlocking…' : 'Unlock'}
+              </button>
+            )}
+          </div>
+        )}
         <button
           onClick={handleSave}
-          disabled={saving || products.length === 0 || sheetManaged}
+          disabled={saving || products.length === 0 || sheetManaged || locked}
           className="w-full py-3.5 text-sm font-bold rounded-2xl bg-violet-600 hover:bg-violet-500 text-white shadow-lg shadow-violet-900/40 disabled:opacity-40 transition-all flex items-center justify-center gap-2"
         >
           {saving

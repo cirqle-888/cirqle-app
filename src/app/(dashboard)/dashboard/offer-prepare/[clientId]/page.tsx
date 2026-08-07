@@ -1,6 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin'
-import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
-import { PERMS } from '@/lib/permissions/keys'
+import { loadCurrentUser } from '@/lib/permissions/check'
 import { redirect, notFound } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
@@ -22,7 +21,9 @@ export default async function OfferPrepareForClientPage({ params }: {
 }) {
   const me = await loadCurrentUser().catch(() => null)
   if (!me) redirect('/login')
-  if (!me.isAdmin && !hasPermission(me, PERMS.OFFER_PREPARE)) redirect('/dashboard')
+  // FROZEN for normal staff (see ../page.tsx) — admin-only while Cirqle
+  // Studio is the primary design workflow.
+  if (!me.isAdmin) redirect('/dashboard')
 
   const { clientId } = await params
   const admin = createAdminClient()
@@ -38,7 +39,7 @@ export default async function OfferPrepareForClientPage({ params }: {
   const res = await getOfferPageData(client.offer_intake_token)
   if (!res.ok || !res.data) notFound()
 
-  const { campaign, catalog, badges, groups, sheetManaged, logoUrl, logoDarkUrl } = res.data
+  const { campaign, catalog, badges, groups, sheetManaged, designLocked, logoUrl, logoDarkUrl } = res.data
 
   return (
     <div>
@@ -61,6 +62,7 @@ export default async function OfferPrepareForClientPage({ params }: {
         badges={badges}
         groups={groups}
         sheetManaged={sheetManaged}
+        designLocked={designLocked}
         logoUrl={logoDarkUrl || logoUrl}
         staff
       />

@@ -17,6 +17,7 @@ import {
   type OfferGroupRow,
 } from './actions'
 import { OfferGroupsPanel } from './offer-groups-panel'
+import { PluginHealthPanel } from './plugin-health-panel'
 import { FigmaBindingHelp } from '@/components/offer/figma-binding-help'
 import { FigmaLink } from '@/components/offer/figma-link'
 
@@ -861,6 +862,9 @@ export default function OfferIntakeSettingsClient({
 
       {/* One-time shared-script setup */}
       <GlobalSyncCard initial={globalConfig} />
+
+      {/* Cirqle Studio operational glance (admin; loads on expand) */}
+      <PluginHealthPanel />
 
       {/* Search */}
       <div className="relative mb-4">

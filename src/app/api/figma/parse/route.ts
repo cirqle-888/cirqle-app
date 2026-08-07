@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminClient } from '@/lib/supabase/server'
+import { FIGMA_CORS_HEADERS as CORS_HEADERS, figmaOptions, verifyFigmaAuth } from '../_lib/auth'
 import { aiParseOfferProducts } from '@/lib/ai/offer-capture'
 import { splitOfferSections, summariseSections, type OfferSection } from '@/lib/ai/offer-sections'
 
@@ -16,7 +16,7 @@ import { splitOfferSections, summariseSections, type OfferSection } from '@/lib/
  * Read-only: nothing is written. The plugin shows the result for review and
  * only then calls POST /api/figma/campaign to persist it.
  *
- * Auth: the workspace `offer_sheet_secret`, same as the other figma routes.
+ * Auth + CORS + plugin-version gate: see ../_lib/auth.ts.
  */
 
 export const dynamic = 'force-dynamic'
@@ -24,15 +24,7 @@ export const dynamic = 'force-dynamic'
 // take longer than the default serverless ceiling.
 export const maxDuration = 60
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'authorization, content-type',
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS_HEADERS })
-}
+export const OPTIONS = figmaOptions
 
 /** Cap the paste so one runaway message can't fan out into dozens of AI calls. */
 const MAX_CHARS = 20_000
@@ -40,21 +32,8 @@ const MAX_SECTIONS = 12
 
 export async function POST(req: NextRequest) {
   try {
-    const admin = createAdminClient()
-
-    const bearer = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim()
-    const { data: secretRow } = await admin
-      .from('company_settings')
-      .select('value')
-      .eq('key', 'offer_sheet_secret')
-      .maybeSingle()
-    const secret = (secretRow?.value || '').trim()
-    if (!secret || !bearer || bearer !== secret) {
-      return NextResponse.json(
-        { ok: false, error: 'Unauthorized. Paste the shared secret from Apps → Offer Intake → Shared sync script.' },
-        { status: 401, headers: CORS_HEADERS },
-      )
-    }
+    const auth = await verifyFigmaAuth(req)
+    if (!auth.ok) return auth.response
 
     const body = await req.json().catch(() => null) as { text?: string; hint?: string } | null
     const text = (body?.text || '').trim()

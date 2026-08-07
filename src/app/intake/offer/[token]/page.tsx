@@ -1,7 +1,7 @@
 import { getOfferPageData } from './actions'
 import { getClientHubData } from '@/app/start/[token]/actions'
 import { intakeKindHref, INTAKE_KIND_META } from '@/lib/services/intake'
-import OfferIntakeClient from './offer-intake-client'
+import SimpleIntakeClient from './simple/simple-intake-client'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,7 +34,7 @@ export default async function OfferIntakePage({ params, searchParams }: {
     return <InvalidLink reason={res.error || 'This link has expired or been revoked. Please ask Cirqle for a new one.'} />
   }
 
-  const { client, campaign, catalog, badges, groups, sheetManaged, logoUrl, logoDarkUrl } = res.data
+  const { client, campaign, catalog, badges, groups, sheetManaged, designLocked, logoUrl, logoDarkUrl } = res.data
 
   // Reached via the client's Hub link with more than one app enabled —
   // render a tab switcher to the other app(s) instead of leaving the client
@@ -52,8 +52,10 @@ export default async function OfferIntakePage({ params, searchParams }: {
     }
   }
 
+  // Clients get the SIMPLE mobile-first intake; the full editor still serves
+  // the staff entrance at /dashboard/offer-prepare/[clientId].
   return (
-    <OfferIntakeClient
+    <SimpleIntakeClient
       token={token}
       client={client}
       campaign={campaign}
@@ -61,6 +63,7 @@ export default async function OfferIntakePage({ params, searchParams }: {
       badges={badges}
       groups={groups}
       sheetManaged={sheetManaged}
+      designLocked={designLocked}
       logoUrl={logoDarkUrl || logoUrl}
       switcher={switcher}
       hub={hub}

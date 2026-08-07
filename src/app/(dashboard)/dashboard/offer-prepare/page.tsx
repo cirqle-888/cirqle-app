@@ -1,7 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { selectWithOptionalColumns } from '@/lib/offer-columns'
-import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
-import { PERMS } from '@/lib/permissions/keys'
+import { loadCurrentUser } from '@/lib/permissions/check'
 import { getIntakeKindsByClient } from '@/lib/services/intake-server'
 import { redirect } from 'next/navigation'
 import OfferPrepareClientPicker from './picker-client'
@@ -20,7 +19,11 @@ export const dynamic = 'force-dynamic'
 export default async function OfferPreparePage() {
   const me = await loadCurrentUser().catch(() => null)
   if (!me) redirect('/login')
-  if (!me.isAdmin && !hasPermission(me, PERMS.OFFER_PREPARE)) redirect('/dashboard')
+  // FROZEN for normal staff: offer design moved to the Cirqle Studio Figma
+  // plugin; this heavy editor stays admin-only (matches the adminOnly nav
+  // gate in nav-sections.ts). Restore the old `!me.isAdmin &&
+  // !hasPermission(me, PERMS.OFFER_PREPARE)` check to unfreeze.
+  if (!me.isAdmin) redirect('/dashboard')
 
   const admin = createAdminClient()
   const [clientsRaw, kindsByClient, { data: globalWebhookRow }] = await Promise.all([

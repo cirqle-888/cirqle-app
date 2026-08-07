@@ -1,10 +1,12 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/permissions/check'
+import { requirePermission, loadCurrentUser } from '@/lib/permissions/check'
+import { logCampaignEvent } from '@/lib/offer-events'
 import { PERMS } from '@/lib/permissions/keys'
 import { extractSheetId } from '@/lib/google-sheets/routing'
 import { fetchSheetTabCsv, parseSheetCsv, type PulledRow } from '@/lib/google-sheets/pull'
+import { saveCampaign, type CampaignInput, type ProductInput } from '@/app/intake/offer/[token]/actions'
 import { revalidatePath } from 'next/cache'
 
 interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
@@ -195,5 +197,199 @@ export async function convertSheetCampaign(campaignId: string): Promise<ActionRe
 
   revalidatePath('/dashboard/campaigns')
   revalidatePath('/dashboard/offer-prepare')
+  return { ok: true }
+}
+
+/**
+ * Admin unlock for a design-locked campaign ("Mark as Designed" past its
+ * self-undo window). Clears the lock and leaves a timeline entry; the
+ * unlocking admin is identified by CQID only (privacy rule).
+ */
+export async function unlockCampaignDesign(campaignId: string): Promise<ActionResult> {
+  const me = await loadCurrentUser().catch(() => null)
+  if (!me) return { ok: false, error: 'Not signed in.' }
+  if (!me.isAdmin) return { ok: false, error: 'Only an admin can unlock a designed offer.' }
+
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from('offer_campaigns')
+    .update({ design_locked_at: null, design_locked_by: null })
+    .eq('id', campaignId)
+    .not('design_locked_at', 'is', null)
+    .select('id')
+    .maybeSingle()
+  if (error) return { ok: false, error: error.message }
+  if (!data) return { ok: true } // already unlocked — nothing to do
+
+  const cqid = (me as { cqid?: string | null }).cqid || null
+  void logCampaignEvent(admin, campaignId, `Design lock removed by admin${cqid ? ` ${cqid}` : ''} — the offer is editable again.`)
+
+  revalidatePath('/dashboard/requests')
+  revalidatePath('/dashboard/offer-prepare')
+  return { ok: true }
+}
+
+// ── Version history (feature_offer_revisions; admin-only) ────────────────────
+
+export interface RevisionMeta {
+  id: string
+  revision_no: number
+  actor_kind: string
+  note: string | null
+  created_at: string
+  product_count: number
+}
+
+export async function listCampaignRevisions(
+  campaignId: string,
+): Promise<ActionResult<{ revisions: RevisionMeta[] }>> {
+  const me = await loadCurrentUser().catch(() => null)
+  if (!me?.isAdmin) return { ok: false, error: 'Admins only.' }
+
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from('offer_campaign_revisions')
+    .select('id, revision_no, actor_kind, note, created_at, snapshot')
+    .eq('campaign_id', campaignId)
+    .order('revision_no', { ascending: false })
+    .limit(30)
+  if (error) return { ok: false, error: error.message }
+
+  type Row = { id: string; revision_no: number; actor_kind: string; note: string | null; created_at: string; snapshot: { products?: unknown[] } | null }
+  return {
+    ok: true,
+    data: {
+      revisions: ((data as Row[] | null) || []).map(r => ({
+        id: r.id,
+        revision_no: r.revision_no,
+        actor_kind: r.actor_kind,
+        note: r.note,
+        created_at: r.created_at,
+        product_count: Array.isArray(r.snapshot?.products) ? r.snapshot!.products!.length : 0,
+      })),
+    },
+  }
+}
+
+/**
+ * Restore a previous revision — ALWAYS reversible:
+ *  1. snapshot the CURRENT campaign state as a new revision
+ *     (actor 'restore', "Backup before restoring revision N"), then
+ *  2. replay the selected snapshot through saveCampaign, so change logs,
+ *     catalog mirroring, sheet sync — and the restored-state revision —
+ *     all fire exactly as a normal save would.
+ * The pre-restore state is therefore always the revision immediately before
+ * the restore, with zero extra user interaction.
+ */
+export async function restoreCampaignRevision(
+  campaignId: string,
+  revisionId: string,
+): Promise<ActionResult> {
+  const me = await loadCurrentUser().catch(() => null)
+  if (!me?.isAdmin) return { ok: false, error: 'Admins only.' }
+
+  const admin = createAdminClient()
+
+  // Restoring onto a design-locked campaign would fight the designer —
+  // unlock first (the card offers Unlock right next to Versions).
+  {
+    const { data: lockRow } = await admin
+      .from('offer_campaigns')
+      .select('design_locked_at')
+      .eq('id', campaignId)
+      .maybeSingle()
+    if ((lockRow as { design_locked_at?: string | null } | null)?.design_locked_at) {
+      return { ok: false, error: 'This offer is marked as designed — unlock it first, then restore.' }
+    }
+  }
+
+  const { data: revRow } = await admin
+    .from('offer_campaign_revisions')
+    .select('id, revision_no, snapshot')
+    .eq('id', revisionId)
+    .eq('campaign_id', campaignId)
+    .maybeSingle()
+  const revision = revRow as { id: string; revision_no: number; snapshot: CampaignInput } | null
+  if (!revision?.snapshot?.products) return { ok: false, error: 'Revision not found.' }
+
+  const { data: campRow } = await admin
+    .from('offer_campaigns')
+    .select('id, client_id, title, date_type, offer_date, offer_date_from, offer_date_to, products:offer_products(*, badges:offer_product_badges(badge_id, custom_label, color, display_order))')
+    .eq('id', campaignId)
+    .maybeSingle()
+  type ProdRow = {
+    id: string; catalog_id: string | null; group_id: string | null; name: string
+    weight: string | null; image_url: string | null; offer_type: ProductInput['offer_type']
+    price: number | null; mrp: number | null; offer_text: string | null
+    page: number | null; display_order: number | null
+    badges: { badge_id: string | null; custom_label: string | null; color: string | null; display_order: number | null }[] | null
+  }
+  const camp = campRow as {
+    id: string; client_id: string; title: string | null; date_type: 'single' | 'range'
+    offer_date: string | null; offer_date_from: string | null; offer_date_to: string | null
+    products: ProdRow[] | null
+  } | null
+  if (!camp) return { ok: false, error: 'Campaign not found.' }
+
+  const { data: clientRow } = await admin
+    .from('clients')
+    .select('offer_intake_token')
+    .eq('id', camp.client_id)
+    .maybeSingle()
+  const token = (clientRow as { offer_intake_token?: string | null } | null)?.offer_intake_token
+  if (!token) return { ok: false, error: 'This client has no intake token — cannot restore.' }
+
+  // 1. Automatic backup of the CURRENT state.
+  const { data: lastRev } = await admin
+    .from('offer_campaign_revisions')
+    .select('revision_no')
+    .eq('campaign_id', campaignId)
+    .order('revision_no', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  const backupNo = (((lastRev as { revision_no?: number } | null)?.revision_no) ?? 0) + 1
+  const currentSnapshot: CampaignInput = {
+    title: camp.title ?? undefined,
+    date_type: camp.date_type || 'single',
+    offer_date: camp.offer_date ?? undefined,
+    offer_date_from: camp.offer_date_from ?? undefined,
+    offer_date_to: camp.offer_date_to ?? undefined,
+    products: (camp.products || [])
+      .slice()
+      .sort((a, b) => (a.page || 1) - (b.page || 1) || (a.display_order || 0) - (b.display_order || 0))
+      .map((p, i) => ({
+        catalog_id: p.catalog_id || undefined,
+        group_id: p.group_id ?? null,
+        name: p.name,
+        weight: p.weight || undefined,
+        image_url: p.image_url || undefined,
+        offer_type: p.offer_type || 'price',
+        price: p.price ?? null,
+        mrp: p.mrp ?? null,
+        offer_text: p.offer_text || undefined,
+        badges: (p.badges || [])
+          .slice()
+          .sort((a, b) => (a.display_order || 0) - (b.display_order || 0))
+          .map(b => ({ badge_id: b.badge_id, custom_label: b.custom_label, color: b.color || 'amber' })),
+        page: p.page || 1,
+        display_order: i,
+      })),
+  }
+  const { error: backupErr } = await admin.from('offer_campaign_revisions').insert({
+    campaign_id: campaignId,
+    revision_no: backupNo,
+    snapshot: currentSnapshot,
+    actor_kind: 'restore',
+    actor_id: me.employeeId,
+    note: `Backup before restoring revision ${revision.revision_no}`,
+  })
+  if (backupErr) return { ok: false, error: `Could not back up the current state (${backupErr.message}) — restore aborted.` }
+
+  // 2. Replay the selected snapshot through the normal save path.
+  const result = await saveCampaign(token, revision.snapshot, campaignId, { actor: 'staff' })
+  if (!result.ok) return { ok: false, error: result.error || 'Restore failed.' }
+
+  void logCampaignEvent(admin, campaignId, `Revision ${revision.revision_no} restored by admin ${me.cqid || ''} (backup saved as revision ${backupNo}).`.replace('  ', ' '))
+  revalidatePath('/dashboard/requests')
   return { ok: true }
 }

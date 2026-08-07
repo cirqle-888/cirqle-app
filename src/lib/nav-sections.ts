@@ -130,10 +130,13 @@ export const navSections: NavSection[] = [
     defaultOpen: false,
     items: [
       { label: 'Advertising',    href: '/dashboard/advertising', icon: Megaphone, requiredPerm: 'advertising.view', keywords: ['campaigns', 'ads', 'marketing'] },
-      // Offer Flyer: internal weekly-offer preparation (paste WhatsApp list →
-      // review → designer Google Sheet). Gated by the dedicated offer.prepare
-      // permission; admins always see it.
-      { label: 'Offer Intake', href: '/dashboard/offer-prepare', icon: BadgePercent, requiredPerm: 'offer.prepare', keywords: ['prepare offer', 'weekly offer', 'sheet', 'whatsapp list', 'supermarket'] },
+      // Offer Flyer: internal weekly-offer preparation. Since the Cirqle
+      // Studio Figma plugin became the primary design workflow, this heavy
+      // editor is FROZEN for normal staff — adminOnly hides it from everyone
+      // else (requiredPerm alone wouldn't: admins bypass it, and staff holding
+      // offer.prepare would still see it). The permission is kept so a future
+      // unfreeze is a one-line revert.
+      { label: 'Offer Intake', href: '/dashboard/offer-prepare', icon: BadgePercent, requiredPerm: 'offer.prepare', adminOnly: true, keywords: ['prepare offer', 'weekly offer', 'sheet', 'whatsapp list', 'supermarket'] },
       // Social Calendar: plan a client's content month, push items into the
       // Requests inbox (social_meta pattern — see docs in the migration).
       { label: 'Social Calendar', href: '/dashboard/social-calendar', icon: CalendarDays, requiredPerm: 'social.view', keywords: ['content', 'planner', 'posts', 'instagram', 'social media'] },

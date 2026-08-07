@@ -12,12 +12,14 @@ import { useState } from 'react'
 import {
   CheckCircle2, AlertCircle, ChevronDown, ChevronUp,
   RefreshCw, Archive, Flag, Link2, Copy, Check, Loader2,
-  ImageIcon, Tag, Calendar, FileText, FileSpreadsheet,
+  ImageIcon, Tag, Calendar, FileText, FileSpreadsheet, History,
 } from 'lucide-react'
 import {
   acknowledgeLogs, finaliseCampaign, archiveCampaign, resyncSheet, generateOfferLink,
 } from '@/app/(dashboard)/dashboard/campaigns/actions'
-import { convertSheetCampaign } from '@/app/(dashboard)/dashboard/offer-prepare/actions'
+import {
+  convertSheetCampaign, listCampaignRevisions, restoreCampaignRevision, type RevisionMeta,
+} from '@/app/(dashboard)/dashboard/offer-prepare/actions'
 
 const BADGE_COLOR: Record<string, string> = {
   red:    'bg-red-500/15 text-red-400 border-red-500/30',
@@ -34,7 +36,7 @@ const LOG_TYPE_LABEL: Record<string, string> = {
   product_changed:  '✏️ Product changed',
   header_changed:   '📝 Header changed',
   client_note:      '💬 Client note',
-  system:           '⚙️ System',
+  system:           '⚙️ Activity',
 }
 
 function fmtDate(d?: string | null) {
@@ -85,6 +87,26 @@ export function CampaignCard({
   const [busy, setBusy] = useState(false)
   const [intakeLink, setIntakeLink] = useState<string | null>(null)
   const [linkLoading, setLinkLoading] = useState(false)
+  const [revisions, setRevisions] = useState<RevisionMeta[] | null>(null)
+  const [revisionsError, setRevisionsError] = useState('')
+
+  async function loadRevisions() {
+    if (revisions) return
+    const res = await listCampaignRevisions(campaign.id)
+    if (res.ok && res.data) setRevisions(res.data.revisions)
+    else setRevisionsError(res.error || 'Could not load versions.')
+  }
+
+  async function handleRestore(rev: RevisionMeta) {
+    if (!confirm(`Restore version ${rev.revision_no} (${rev.product_count} products)? The current state is backed up first, so this can be undone.`)) return
+    setBusy(true)
+    const res = await restoreCampaignRevision(campaign.id, rev.id)
+    if (!res.ok) alert(res.error || 'Could not restore.')
+    setRevisions(null)
+    setRevisionsError('')
+    onRefresh()
+    setBusy(false)
+  }
 
   const logs: any[] = campaign.logs || []
   const unacknowledged = logs.filter((l: any) => !l.acknowledged)
@@ -395,6 +417,44 @@ export function CampaignCard({
               </button>
             )}
           </div>
+
+          {/* ── Versions (admin; feature_offer_revisions) ─────────────────
+              Loaded lazily on first open; the server action is admin-gated,
+              so a non-admin opening it just sees the refusal note. */}
+          <details
+            className="group"
+            onToggle={e => { if ((e.target as HTMLDetailsElement).open) void loadRevisions() }}
+          >
+            <summary className="cursor-pointer text-xs text-muted-foreground/60 hover:text-muted-foreground flex items-center gap-1.5 list-none">
+              <History className="w-3 h-3" /> Versions
+              <ChevronDown className="w-3 h-3 group-open:rotate-180 transition-transform" />
+            </summary>
+            <div className="mt-2 space-y-1.5">
+              {revisionsError && <p className="text-xs text-muted-foreground/60">{revisionsError}</p>}
+              {revisions && revisions.length === 0 && !revisionsError && (
+                <p className="text-xs text-muted-foreground/60">No saved versions yet.</p>
+              )}
+              {(revisions || []).map(rev => (
+                <div key={rev.id} className="flex items-center gap-3 bg-secondary/20 rounded-xl px-3 py-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-foreground/80">
+                      v{rev.revision_no} · {rev.product_count} products · {rev.actor_kind === 'figma' ? 'from Figma' : rev.actor_kind === 'restore' ? 'backup' : rev.actor_kind}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground/50">
+                      {fmtDateTime(rev.created_at)}{rev.note ? ` · ${rev.note}` : ''}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => void handleRestore(rev)}
+                    disabled={busy}
+                    className="shrink-0 text-[11px] px-2.5 py-1 rounded-lg bg-secondary text-muted-foreground border border-border hover:text-foreground transition-colors disabled:opacity-50"
+                  >
+                    Restore
+                  </button>
+                </div>
+              ))}
+            </div>
+          </details>
 
           {/* ── Actions ── */}
           <div className="flex gap-2 pt-1 border-t border-border flex-wrap">

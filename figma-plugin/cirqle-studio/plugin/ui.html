@@ -330,6 +330,13 @@
       <button class="secondary" id="validate" disabled>Validate</button>
     </div>
     <button id="build" disabled>Build Flyer</button>
+    <!-- Contextual: appears only after a successful save/build. Locking is
+         EXPLICIT — ordinary saves never lock; 15-min self-undo, then admin. -->
+    <div id="designed-area" style="display:none;margin-top:8px;font-size:11px;line-height:1.6">
+      <button class="tool" id="mark-designed" style="display:none">✓ Mark as Designed</button>
+      <span id="designed-state" style="display:none"></span>
+      <a href="#" id="designed-undo" style="display:none;margin-left:6px">Undo</a>
+    </div>
   </section>
 
   </div><!-- /p-build -->
@@ -367,6 +374,8 @@
         <button class="tool" id="tool-weight" title="Append the weight to the product name">+ Weight → name</button>
         <span class="tool-sep"></span>
         <button class="tool" id="tool-add" title="Add an empty row">+ Row</button>
+        <button class="tool" id="tool-catalog" title="Search the client's product database and insert a product (name, weight, photo prefilled)">+ Catalog</button>
+        <button class="tool" id="tool-shot" title="Upload the selected canvas node as this product's cleaned photo: select ONE grid row and ONE node on the canvas, then press. The PNG is saved to the product database for reuse.">↑ Shot</button>
         <button class="tool" id="tool-dup" title="Copy the selected rows — use it to print the same product on more than one page">Duplicate</button>
         <button class="tool" id="tool-del" title="Delete selected rows">Delete</button>
         <span class="tool-sep"></span>
@@ -377,6 +386,11 @@
       <div id="addcol-row" style="display:none;gap:5px;margin-top:6px;align-items:center">
         <input type="text" id="addcol-name" placeholder="Column name — e.g. Badge 2 → fills #badge2" style="flex:1">
         <button class="tool" id="addcol-ok" style="flex:0 0 auto">Add</button>
+      </div>
+      <!-- Catalog search — contextual, opens from the + Catalog tool. -->
+      <div id="catalog-row" style="display:none;margin-top:6px">
+        <input type="text" id="catalog-q" placeholder="Search the product database…" style="width:100%">
+        <div id="catalog-results" style="max-height:180px;overflow-y:auto;margin-top:4px"></div>
       </div>
       <div id="plan-row" style="display:none;gap:5px;margin-top:6px;align-items:center;flex-wrap:wrap">
         <input type="text" id="plan-per" value="16" style="width:74px"
@@ -411,6 +425,32 @@
       <input type="date" id="paste-date">
       <label>Service <span style="font-weight:400">— for the task this creates</span></label>
       <select id="paste-service"><option value="">Offer Flyer (default)</option></select>
+      <!-- Contextual: visible only while the sheet holds a LOADED offer, so a
+           save updates it instead of creating a duplicate. "Save as new" is
+           the escape hatch, folded inside the chip rather than a standing
+           button. -->
+      <div id="editing-chip" style="display:none;margin:6px 0 2px;font-size:11px;line-height:1.5">
+        <span style="opacity:.75">✎ Editing the loaded offer — saving updates it.</span>
+        <a href="#" id="save-as-new" style="margin-left:6px">Save as new instead</a>
+      </div>
+      <!-- Conflict: someone changed the offer after it was loaded here. -->
+      <div id="conflict-box" style="display:none;margin:6px 0 2px;padding:8px;border:1px solid rgba(255,170,0,.4);border-radius:8px;font-size:11px;line-height:1.6">
+        <b>This offer changed since you loaded it.</b><br>
+        Someone saved a newer version (maybe the client, from their phone).
+        <div style="margin-top:6px;display:flex;gap:6px">
+          <button class="tool" id="conflict-reload">Reload their version</button>
+          <button class="tool" id="conflict-overwrite">Overwrite with mine</button>
+        </div>
+      </div>
+      <!-- Offline recovery: shown only when a save failed to reach the server. -->
+      <div id="draft-box" style="display:none;margin:6px 0 2px;padding:8px;border:1px solid rgba(120,120,255,.4);border-radius:8px;font-size:11px;line-height:1.6">
+        <b id="draft-msg">Save failed. Your work has been saved locally and can be retried.</b>
+        <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+          <button class="tool" id="draft-continue">Continue editing</button>
+          <button class="tool" id="draft-retry">Retry save</button>
+          <button class="tool" id="draft-discard">Discard</button>
+        </div>
+      </div>
       <button id="paste-save">Save to Cirqle</button>
       <p class="hint">Saves to Cirqle, then loads it here ready to build.</p>
     </section>
@@ -434,6 +474,17 @@
 
 <script>
 'use strict'
+
+/* ------------------------------------------------------------------ *
+ * Version — sent with every request as `X-Cirqle-Plugin` so the server
+ * can gate incompatible plugins (426 → friendly update screen) and the
+ * admin health panel can see the version spread. Bump on every release.
+ * ------------------------------------------------------------------ */
+const PLUGIN_NAME = 'cirqle-studio'
+const PLUGIN_VERSION = '1.1.0'
+const PLUGIN_BUILD = '1'
+const PLUGIN_PLATFORM = /Figma\/|Electron/i.test(navigator.userAgent) ? 'desktop' : 'web'
+const PLUGIN_HEADER = PLUGIN_NAME + '/' + PLUGIN_VERSION + '+' + PLUGIN_BUILD + ' (' + PLUGIN_PLATFORM + ')'
 
 /* ------------------------------------------------------------------ *
  * State
@@ -484,6 +535,34 @@ function reportError(what, where, fix) {
   setFold('log-toggle', 'log', true)
 }
 
+/**
+ * Server said 426: this plugin build is below the workspace minimum.
+ * One friendly full-screen message, no other controls — an outdated
+ * plugin silently half-working is worse than one that clearly says
+ * "update me". Built lazily so the happy path never pays for it.
+ */
+function showUpdateRequired(data) {
+  if ($('update-overlay')) return
+  const overlay = document.createElement('div')
+  overlay.id = 'update-overlay'
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:99;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--bg,#fff)'
+  const box = document.createElement('div')
+  box.style.cssText = 'max-width:300px;text-align:center;font-size:12px;line-height:1.6'
+  const icon = document.createElement('div')
+  icon.textContent = '⬆'
+  icon.style.cssText = 'font-size:28px;margin-bottom:8px'
+  const title = document.createElement('div')
+  title.textContent = 'Update Cirqle Studio'
+  title.style.cssText = 'font-weight:600;font-size:14px;margin-bottom:6px'
+  const msg = document.createElement('div')
+  const min = data && data.minVersion ? data.minVersion : 'a newer version'
+  msg.textContent = 'You have ' + PLUGIN_VERSION + '; this workspace needs ' + min +
+    '. Ask the design team for the latest plugin folder, then re-import it via Plugins → Development.'
+  box.appendChild(icon); box.appendChild(title); box.appendChild(msg)
+  overlay.appendChild(box)
+  document.body.appendChild(overlay)
+}
+
 /* ------------------------------------------------------------------ *
  * API
  * ------------------------------------------------------------------ */
@@ -495,7 +574,7 @@ async function api(path, body) {
     res = await fetch(base() + path, {
       method: body ? 'POST' : 'GET',
       headers: Object.assign(
-        { 'Authorization': 'Bearer ' + $('token').value.trim() },
+        { 'Authorization': 'Bearer ' + $('token').value.trim(), 'X-Cirqle-Plugin': PLUGIN_HEADER },
         body ? { 'Content-Type': 'application/json' } : {},
       ),
       body: body ? JSON.stringify(body) : undefined,
@@ -514,8 +593,22 @@ async function api(path, body) {
   if (res.status === 401) {
     throw { what: 'Authentication failed.', where: path, fix: (data && data.error) || 'Paste the shared secret from Apps → Offer Intake → Shared sync script.' }
   }
+  if (res.status === 426) {
+    // Server says this plugin build is too old to edit safely. Block the UI
+    // with one plain message instead of letting stale code half-work.
+    showUpdateRequired(data)
+    throw { what: 'Update required.', where: path, fix: (data && data.error) || 'Update Cirqle Studio to keep working.' }
+  }
   if (!res.ok || !data || data.ok === false) {
-    throw { what: 'Server error (HTTP ' + res.status + ').', where: path, fix: (data && data.error) || 'Check the server logs for this route.' }
+    throw {
+      what: 'Server error (HTTP ' + res.status + ').',
+      where: path,
+      fix: (data && data.error) || 'Check the server logs for this route.',
+      // Structured details for callers that branch on them (409 conflict flow).
+      status: res.status,
+      conflict: !!(data && data.conflict),
+      data: data || null,
+    }
   }
   return data
 }
@@ -549,11 +642,17 @@ function saveSettings() {
     // is never lost to closing the plugin.
     sheetDraft: state.parsed && state.parsed.length ? {
       campaignId: state.sheetCampaignId || null,
+      baseUpdatedAt: state.sheetBaseUpdatedAt || null,
+      dates: state.sheetDates || null,
       title: $('paste-title').value,
       date: $('paste-date').value,
       parsed: state.parsed,
       overrides: state.variantOverrides || {},
     } : null,
+    // Offline recovery: a save that never reached the server (network loss,
+    // timeout, 5xx). Survives closing the plugin; cleared on the next
+    // successful save of that campaign, or when the designer discards it.
+    pendingSave: state.pendingSave || null,
   } })
 }
 
@@ -599,10 +698,14 @@ $('signin').onclick = async () => {
   try {
     const res = await fetch(base() + '/api/figma/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Cirqle-Plugin': PLUGIN_HEADER },
       body: JSON.stringify({ identifier, password }),
     })
     const data = await res.json().catch(() => null)
+    if (res.status === 426) {
+      showUpdateRequired(data)
+      throw { what: 'Update required.', where: 'Sign in', fix: (data && data.error) || 'Update Cirqle Studio to keep working.' }
+    }
     // A 404 is not a wrong password — it means this Cirqle server predates
     // the sign-in route. Saying "check your credentials" there sends people
     // to retype a password that was right all along.
@@ -907,6 +1010,13 @@ async function loadCampaign() {
     // The sheet mirrors the loaded offer, unless it holds unsaved work for
     // a different one — a draft is never silently thrown away.
     if (!state.parsed.length || state.sheetCampaignId === id) fillSheetFromCampaign()
+    // Design-lock state travels with the campaign; the Mark-as-Designed
+    // control only OFFERS locking after a save/build (_designReady).
+    state.designLock = data.campaign.designLockedAt
+      ? { lockedAt: data.campaign.designLockedAt, lockedBy: data.campaign.designLockedBy || null }
+      : null
+    state._designReady = false
+    renderDesignedControl()
   } catch (e) {
     reportError(e.what || String(e), e.where || 'Load Offers', e.fix)
   }
@@ -1268,6 +1378,9 @@ function releaseBuildWait() {
 function onBuildDone(report) {
   setBar(1)
   releaseBuildWait()
+  // A finished build is the natural moment to offer "Mark as Designed".
+  state._designReady = true
+  renderDesignedControl()
   // Tell Cirqle what was actually produced, so the task's contribution
   // counts (pages, creatives) update themselves. Fire-and-forget: a
   // reporting hiccup must never distract from a finished build.
@@ -1469,10 +1582,118 @@ function fillSheetFromCampaign() {
     // Pages already planned in Cirqle come back editable.
     page: p.page || null,
     category: p.category || null,
+    // Carried through invisibly so an UPDATE save doesn't wipe them:
+    // the row's server id (field-level change logs instead of remove+add),
+    // its photo, and any badges beyond the first.
+    _id: p.id || null,
+    _imageUrl: p.imageUrl || null,
+    _badges: (p.badges && p.badges.length ? p.badges : (p.badge ? [p.badge] : [])),
   }))
   state.sheetCampaignId = $('offer').value
+  // Optimistic concurrency baseline — what the server said this campaign's
+  // updated_at was when we loaded it.
+  state.sheetBaseUpdatedAt = state.campaign.campaign.updatedAt || null
+  // Raw dates, so an update sends back what was loaded instead of collapsing
+  // every campaign to "single, today".
+  state.sheetDates = {
+    dateType: state.campaign.campaign.dateType || 'single',
+    offerDate: state.campaign.campaign.offerDateRaw || null,
+    offerDateFrom: state.campaign.campaign.offerDateFrom || null,
+    offerDateTo: state.campaign.campaign.offerDateTo || null,
+  }
   $('paste-title').value = state.campaign.campaign.name || ''
+  if (state.sheetDates.offerDate || state.sheetDates.offerDateFrom) {
+    $('paste-date').value = state.sheetDates.offerDate || state.sheetDates.offerDateFrom
+  }
+  updateEditingChip()
   renderTable()
+}
+
+/** The "editing existing" chip is contextual — visible only when a save
+ *  would UPDATE the loaded offer rather than create a new one. */
+function updateEditingChip() {
+  const editing = !!state.sheetCampaignId
+  $('editing-chip').style.display = editing ? 'block' : 'none'
+  $('paste-save').textContent = editing ? 'Save changes to Cirqle' : 'Save to Cirqle'
+}
+
+/* ------------------------------------------------------------------ *
+ * Mark as Designed — the EXPLICIT completion action. Locks client/staff
+ * edits in Cirqle (figma saves stay allowed); 15-minute self-undo for a
+ * mis-click, admin unlock after that. Shown contextually: when the
+ * loaded offer is already locked, or right after a save/build.
+ * ------------------------------------------------------------------ */
+const DESIGN_UNDO_MS = 15 * 60 * 1000
+let designedTimer = null
+
+function renderDesignedControl() {
+  const area = $('designed-area'), mark = $('mark-designed'),
+        stateEl = $('designed-state'), undo = $('designed-undo')
+  clearInterval(designedTimer)
+  const lock = state.designLock
+  const locked = !!(lock && lock.lockedAt)
+  if (!state.campaign || (!locked && !state._designReady)) { area.style.display = 'none'; return }
+  area.style.display = 'block'
+  if (!locked) {
+    mark.style.display = 'inline-block'
+    stateEl.style.display = 'none'
+    undo.style.display = 'none'
+    return
+  }
+  mark.style.display = 'none'
+  stateEl.style.display = 'inline'
+  const byMe = !!(state.user && state.user.id && lock.lockedBy === state.user.id)
+  const tick = () => {
+    const remain = DESIGN_UNDO_MS - (Date.now() - new Date(lock.lockedAt).getTime())
+    if (byMe && remain > 0) {
+      const m = Math.floor(remain / 60000), s = Math.floor((remain % 60000) / 1000)
+      stateEl.textContent = 'Designed ✓ — locked for client edits.'
+      undo.style.display = 'inline'
+      undo.textContent = 'Undo (' + m + ':' + String(s).padStart(2, '0') + ')'
+    } else {
+      stateEl.textContent = 'Designed ✓ — ask an admin in Cirqle to unlock.'
+      undo.style.display = 'none'
+      clearInterval(designedTimer)
+    }
+  }
+  tick()
+  designedTimer = setInterval(tick, 1000)
+}
+
+$('mark-designed').onclick = async () => {
+  const id = $('offer').value
+  if (!id) return
+  $('mark-designed').disabled = true
+  try {
+    const data = await api('/api/figma/campaign/' + encodeURIComponent(id) + '/designed', {
+      createdBy: state.user || undefined,
+    })
+    state.designLock = { lockedAt: data.lockedAt || new Date().toISOString(), lockedBy: (state.user && state.user.id) || null }
+    log('✓ ' + data.message, 'ok')
+    renderDesignedControl()
+  } catch (e) {
+    reportError(e.what || String(e), 'Mark as Designed', e.fix)
+  }
+  $('mark-designed').disabled = false
+}
+
+$('designed-undo').onclick = async (e) => {
+  e.preventDefault()
+  const id = $('offer').value
+  if (!id) return
+  try {
+    const data = await api('/api/figma/campaign/' + encodeURIComponent(id) + '/designed', {
+      createdBy: state.user || undefined,
+      undo: true,
+    })
+    state.designLock = null
+    log('✓ ' + data.message, 'ok')
+    renderDesignedControl()
+  } catch (e2) {
+    reportError(e2.what || String(e2), 'Undo Mark as Designed', e2.fix)
+    // Window most likely passed — re-render to the admin message.
+    renderDesignedControl()
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -3156,6 +3377,139 @@ $('tool-add').onclick = () => {
   insertRows(rect ? rect.r1 + 1 : state.parsed.length, 1)
 }
 
+/* ------------------------------------------------------------------ *
+ * Catalog search — pull past products (name, weight, photo) from the
+ * product database straight into the grid. Server: /api/figma/catalog,
+ * feature-flagged; the tool hides itself if the workspace turned it off.
+ * ------------------------------------------------------------------ */
+$('tool-catalog').onclick = () => {
+  const row = $('catalog-row')
+  const open = row.style.display !== 'none'
+  row.style.display = open ? 'none' : 'block'
+  if (!open) { $('catalog-q').value = ''; $('catalog-results').textContent = ''; $('catalog-q').focus() }
+}
+
+/* ------------------------------------------------------------------ *
+ * Upload cleaned shot — the selected canvas node becomes the selected
+ * row's product photo, saved into the product database (flyer_ready).
+ * Fully independent of campaign saving: a failure keeps a Retry in the
+ * log and never touches the save flow.
+ * ------------------------------------------------------------------ */
+state.shotRow = null   // grid row index the incoming PNG belongs to
+
+$('tool-shot').onclick = () => {
+  const rows = [...(state.picked || [])]
+  if (rows.length !== 1) {
+    reportError('Pick ONE grid row first.', 'Upload shot', 'Click the row number of the product this photo belongs to, select the cleaned image on the canvas, then press ↑ Shot.')
+    return
+  }
+  const row = state.parsed[rows[0]]
+  if (!row || !String(row.name || '').trim()) {
+    reportError('That row has no product name.', 'Upload shot', 'Give the product a name first — the photo is filed under it in the database.')
+    return
+  }
+  state.shotRow = rows[0]
+  log('Exporting the selected node…')
+  post({ type: 'export-selection' })
+}
+
+async function uploadShot(bytes, rowIndex) {
+  const row = state.parsed[rowIndex]
+  const clientId = $('client').value
+  if (!row || !clientId) return
+  const name = String(row.name || '').trim()
+  log('Uploading "' + name + '" photo (' + Math.round(bytes.length / 1024) + ' KB)…')
+  if (bytes.length > 8 * 1024 * 1024) {
+    reportError('That export is over 8 MB.', 'Upload shot', 'Export a smaller node (or reduce its size) and try again.')
+    return
+  }
+  try {
+    const signed = await api('/api/figma/image-upload', { mode: 'sign', fileName: name + '.png', clientId })
+    const put = await fetch(signed.uploadUrl, { method: 'PUT', headers: { 'Content-Type': 'image/png' }, body: bytes })
+    if (!put.ok) throw { what: 'The photo upload failed (HTTP ' + put.status + ').', where: 'Upload shot', fix: 'Check your connection, then press ↑ Shot again.' }
+    const confirmed = await api('/api/figma/image-upload', {
+      mode: 'confirm', path: signed.path, publicUrl: signed.publicUrl,
+      productName: name, clientId, setPrimary: true,
+    })
+    row._imageUrl = confirmed.imageUrl
+    scheduleDraftSave()
+    log('✓ ' + confirmed.message + ' It will ride along on the next save.', 'ok')
+  } catch (e) {
+    if (e && e.data && e.data.disabled) {
+      $('tool-shot').style.display = 'none'
+      reportError('Photo upload is turned off for this workspace.', 'Upload shot', '')
+      return
+    }
+    // Retryable, never blocking: the row keeps whatever photo it had.
+    reportError(e.what || String(e), e.where || 'Upload shot', (e.fix || '') + ' Saving the offer still works — the photo can be retried any time with ↑ Shot.')
+    // Health-panel breadcrumb — best-effort, ignored if the server is the problem.
+    api('/api/figma/image-upload', { mode: 'report-failure', error: e.what || String(e) }).catch(() => {})
+  }
+}
+
+let catalogTimer = null
+$('catalog-q').oninput = () => {
+  clearTimeout(catalogTimer)
+  const q = $('catalog-q').value.trim()
+  if (q.length < 2) { $('catalog-results').textContent = ''; return }
+  catalogTimer = setTimeout(() => searchCatalog(q), 300)
+}
+
+async function searchCatalog(q) {
+  const clientId = $('client').value
+  if (!clientId) { $('catalog-results').textContent = 'Pick a client at the top first.'; return }
+  $('catalog-results').textContent = 'Searching…'
+  try {
+    const data = await api('/api/figma/catalog?clientId=' + encodeURIComponent(clientId) + '&q=' + encodeURIComponent(q))
+    const box = $('catalog-results')
+    box.textContent = ''
+    if (!data.products.length) { box.textContent = 'Nothing found — type it into the grid instead.'; return }
+    data.products.forEach(p => {
+      const item = document.createElement('div')
+      item.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:6px;cursor:pointer;font-size:11px'
+      item.onmouseenter = () => { item.style.background = 'rgba(120,120,255,.12)' }
+      item.onmouseleave = () => { item.style.background = '' }
+      if (p.imageUrl) {
+        const img = document.createElement('img')
+        img.src = p.imageUrl
+        img.style.cssText = 'width:22px;height:22px;object-fit:cover;border-radius:4px;flex:0 0 auto'
+        item.appendChild(img)
+      } else {
+        const ph = document.createElement('span')
+        ph.textContent = '·'
+        ph.style.cssText = 'width:22px;text-align:center;opacity:.3;flex:0 0 auto'
+        item.appendChild(ph)
+      }
+      const label = document.createElement('span')
+      label.textContent = p.name + (p.weight ? ' · ' + p.weight : '')
+      label.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'
+      item.appendChild(label)
+      item.onclick = () => {
+        // Insert as a fresh grid row — photo rides along invisibly (the same
+        // _imageUrl channel loaded offers use), price left for the designer.
+        state.parsed.push({
+          name: p.name, price: null, mrp: null, weight: p.weight || null,
+          badge: null, day: null, offerType: 'price', page: null,
+          category: p.category || null,
+          _id: null, _imageUrl: p.imageUrl || null, _badges: [],
+        })
+        renderTable()
+        scheduleDraftSave()
+        log('✓ ' + p.name + ' added from the catalog.', 'ok')
+      }
+      box.appendChild(item)
+    })
+  } catch (e) {
+    if (e && e.data && e.data.disabled) {
+      $('catalog-results').textContent = 'Catalog search is turned off for this workspace.'
+      $('tool-catalog').style.display = 'none'
+      $('catalog-row').style.display = 'none'
+      return
+    }
+    $('catalog-results').textContent = (e.what || 'Search failed.') + ' ' + (e.fix || '')
+  }
+}
+
 /**
  * Copy the selected rows in place. Page is one value per row, so setting a
  * page again MOVES a product rather than adding it to a second page — a
@@ -3266,8 +3620,70 @@ $('paste-parse').onclick = async () => {
   $('paste-parse').disabled = false
 }
 
-$('paste-save').onclick = async () => {
+/** The save request body, built from the sheet's current state.
+ *  `force` overwrites after the designer reviewed a conflict. */
+function buildSavePayload(force) {
+  const editing = !!state.sheetCampaignId
+  const dates = editing && state.sheetDates ? state.sheetDates : null
+  const pickedDate = $('paste-date').value || undefined
+  // A loaded range campaign keeps its range unless the designer picked a new
+  // (single) date; everything else is single-date as before.
+  const keepRange = dates && dates.dateType === 'range' &&
+    (!pickedDate || pickedDate === (dates.offerDate || dates.offerDateFrom))
+  return {
+    clientId: $('client').value,
+    title: $('paste-title').value.trim() || undefined,
+    dateType: keepRange ? 'range' : 'single',
+    offerDate: keepRange ? undefined : pickedDate,
+    offerDateFrom: keepRange ? (dates.offerDateFrom || pickedDate) : undefined,
+    offerDateTo: keepRange ? (dates.offerDateTo || undefined) : undefined,
+    // Update the loaded offer instead of creating a duplicate; baseUpdatedAt
+    // lets the server refuse (409) if someone saved a newer version meanwhile.
+    campaignId: state.sheetCampaignId || undefined,
+    baseUpdatedAt: editing ? (state.sheetBaseUpdatedAt || undefined) : undefined,
+    force: force === true || undefined,
+    // Who saved it — the server turns this into a task on the Tasks page.
+    createdBy: state.user || undefined,
+    serviceId: $('paste-service').value || undefined,
+    products: state.parsed.map(p => ({
+      // Row id + photo + extra badges ride along invisibly so an update
+      // diffs cleanly and never wipes what the sheet doesn't show.
+      id: p._id || undefined,
+      imageUrl: p._imageUrl || undefined,
+      badges: p._badges && p._badges.length > 1
+        ? (p.badge === p._badges[0] ? p._badges : [p.badge].concat(p._badges.slice(1)).filter(Boolean))
+        : undefined,
+      name: p.name, price: p.price, mrp: p.mrp,
+      weight: p.weight, badge: p.badge, offerType: p.offerType,
+      // Planned pages go to Cirqle with the offer, so the flyer can be
+      // rebuilt page by page later — by anyone, from the app's data.
+      page: p.page || undefined,
+    })),
+  }
+}
+
+/** True for failures that never reached (or never completed on) the server —
+ *  the ones worth queueing as an offline draft. 4xx responses have their own
+ *  dialogs and must NOT queue. */
+function isTransportError(e) {
+  return !!e && (e.what === 'Could not reach the server.' || /HTTP 5\d\d/.test(e.what || ''))
+}
+
+function showDraftBox(message) {
+  if (message) $('draft-msg').textContent = message
+  $('draft-box').style.display = 'block'
+}
+function clearPendingSave() {
+  state.pendingSave = null
+  $('draft-box').style.display = 'none'
+  saveSettings()
+}
+
+$('paste-save').onclick = () => doPasteSave(false)
+
+async function doPasteSave(force) {
   clearLog()
+  $('conflict-box').style.display = 'none'
   const clientId = $('client').value
   if (!clientId) { reportError('No client selected.', 'Save', 'Pick a client at the top, then save.'); return }
   if (!state.parsed.length) { reportError('Nothing to save.', 'Save', 'Parse a list first.'); return }
@@ -3285,22 +3701,40 @@ $('paste-save').onclick = async () => {
   $('paste-save').disabled = true
   log('Saving to Cirqle…')
   try {
-    const data = await api('/api/figma/campaign', {
-      clientId,
-      title: $('paste-title').value.trim() || undefined,
-      dateType: 'single',
-      offerDate: $('paste-date').value || undefined,
-      // Who saved it — the server turns this into a task on the Tasks page.
-      createdBy: state.user || undefined,
-      serviceId: $('paste-service').value || undefined,
-      products: state.parsed.map(p => ({
-        name: p.name, price: p.price, mrp: p.mrp,
-        weight: p.weight, badge: p.badge, offerType: p.offerType,
-        // Planned pages go to Cirqle with the offer, so the flyer can be
-        // rebuilt page by page later — by anyone, from the app's data.
-        page: p.page || undefined,
-      })),
-    })
+    const payload = buildSavePayload(force)
+    let data
+    try {
+      data = await api('/api/figma/campaign', payload)
+    } catch (e) {
+      // Conflict: the server refused because the offer moved on since it was
+      // loaded here. Reload / Overwrite — never silently replace.
+      if (e && e.status === 409 && e.conflict) {
+        $('conflict-box').style.display = 'block'
+        log('✋ This offer changed since you loaded it — choose Reload or Overwrite below.', 'err')
+        $('paste-save').disabled = false
+        return
+      }
+      // Network loss / timeout / 5xx: the work is preserved locally and can
+      // be retried — the designer's sheet is never the only copy that's lost.
+      if (isTransportError(e)) {
+        state.pendingSave = {
+          clientId,
+          campaignId: state.sheetCampaignId || null,
+          payload,
+          failedAt: Date.now(),
+          error: e.what || 'Save failed.',
+        }
+        saveSettings()
+        showDraftBox('Save failed. Your work has been saved locally and can be retried.')
+        log('✗ ' + (e.what || 'Save failed.') + ' Your work is saved locally — use Retry save when the connection is back.', 'err')
+        $('paste-save').disabled = false
+        return
+      }
+      throw e
+    }
+    // Reached the server — any older local draft for this work is obsolete.
+    if (state.pendingSave) clearPendingSave()
+    if (data.updatedAt) state.sheetBaseUpdatedAt = data.updatedAt
     log('✓ ' + data.message, 'ok')
     // Custom columns have no home in Cirqle — by design. Their values are
     // pinned to this campaign for the session so the build can still use them.
@@ -3311,8 +3745,10 @@ $('paste-save').onclick = async () => {
       log('· Custom column values (' + state.customCols.map(c => c.label).join(', ') + ') will fill their #layers when you Build — they are not stored in Cirqle.', 'ok')
     }
     // The sheet now belongs to the freshly saved campaign — the post-save
-    // reload below refills it with the canonical server copy.
+    // reload below refills it with the canonical server copy. From here on,
+    // saving updates this campaign (no accidental duplicates).
     state.sheetCampaignId = data.campaignId
+    updateEditingChip()
     logFix('Reloading offers so you can build it now.')
     // Pull the new campaign into the Build tab and select it, so the designer
     // goes straight from paste to cards without hunting in a dropdown.
@@ -3324,6 +3760,10 @@ $('paste-save').onclick = async () => {
       document.querySelector('.tab[data-panel="build"]').click()
       log('Ready — pick a template and press Build Flyer.', 'ok')
     }
+    // A successful save makes "Mark as Designed" available (after the
+    // reload above, which resets it per campaign).
+    state._designReady = true
+    renderDesignedControl()
     // Logged AFTER the reload — connect()/loadCampaign() clear the log.
     if (data.taskNumber) {
       log('✓ Task #' + data.taskNumber + ' added to the Tasks page' +
@@ -3333,6 +3773,92 @@ $('paste-save').onclick = async () => {
     reportError(e.what || String(e), e.where || 'Save', e.fix)
   }
   $('paste-save').disabled = false
+}
+
+/* Conflict choices — Reload is the safe default; Overwrite resends with
+ * force:true after this one explicit confirm. */
+$('conflict-reload').onclick = async () => {
+  $('conflict-box').style.display = 'none'
+  clearLog()
+  log('Reloading the newer version…')
+  // Re-pull the campaign so the sheet shows what's on the server now; the
+  // designer re-applies their edits on top.
+  if (state.sheetCampaignId) {
+    $('offer').value = state.sheetCampaignId
+    state.parsed = []          // let fillSheetFromCampaign repopulate
+    await loadCampaign()
+  }
+}
+$('conflict-overwrite').onclick = () => {
+  $('conflict-box').style.display = 'none'
+  doPasteSave(true)
+}
+
+/* Offline-draft choices. */
+$('draft-continue').onclick = () => {
+  const p = state.pendingSave
+  if (!p) { $('draft-box').style.display = 'none'; return }
+  // The sheet already holds this work in the normal case (sheetDraft), so
+  // "continue" just dismisses the banner without dropping the retry option.
+  $('draft-box').style.display = 'none'
+  log('Your unsaved work is in the sheet — edit freely and save when ready.', 'ok')
+}
+$('draft-retry').onclick = async () => {
+  const p = state.pendingSave
+  if (!p) { $('draft-box').style.display = 'none'; return }
+  $('draft-box').style.display = 'none'
+  clearLog()
+  $('paste-save').disabled = true
+  log('Retrying the saved work…')
+  try {
+    // The failed attempt never reached the server — report it with the retry
+    // so the health panel sees real failure counts.
+    const data = await api('/api/figma/campaign', Object.assign({}, p.payload, {
+      priorFailure: { at: p.failedAt, error: p.error },
+    }))
+    clearPendingSave()
+    state.sheetCampaignId = data.campaignId
+    if (data.updatedAt) state.sheetBaseUpdatedAt = data.updatedAt
+    updateEditingChip()
+    log('✓ ' + data.message, 'ok')
+    await connect()
+  } catch (e) {
+    if (e && e.status === 409 && e.conflict) {
+      $('conflict-box').style.display = 'block'
+      log('✋ This offer changed since you loaded it — choose Reload or Overwrite below.', 'err')
+    } else if (isTransportError(e)) {
+      showDraftBox('Still can\'t reach the server — your work is safe locally. Try again in a bit.')
+      log('✗ Still offline. The draft is kept.', 'err')
+    } else {
+      reportError(e.what || String(e), e.where || 'Retry save', e.fix)
+    }
+  }
+  $('paste-save').disabled = false
+}
+$('draft-discard').onclick = () => {
+  // The one destructive choice — a two-step confirm, in place.
+  if ($('draft-discard').dataset.confirm !== '1') {
+    $('draft-discard').dataset.confirm = '1'
+    $('draft-discard').textContent = 'Really discard?'
+    setTimeout(() => {
+      $('draft-discard').dataset.confirm = ''
+      $('draft-discard').textContent = 'Discard'
+    }, 4000)
+    return
+  }
+  clearPendingSave()
+  log('Local draft discarded.', 'ok')
+}
+
+/* "Save as new" — contextual escape hatch inside the editing chip. */
+$('save-as-new').onclick = (e) => {
+  e.preventDefault()
+  state.sheetCampaignId = null
+  state.sheetBaseUpdatedAt = null
+  state.sheetDates = null
+  state.parsed.forEach(p => { p._id = null })
+  updateEditingChip()
+  log('Saving will now create a NEW offer for this client.', 'ok')
 }
 
 $('connect').onclick = connect
@@ -3449,10 +3975,21 @@ onmessage = (event) => {
         if (draft && draft.parsed && draft.parsed.length) {
           state.parsed = draft.parsed
           state.sheetCampaignId = draft.campaignId || null
+          state.sheetBaseUpdatedAt = draft.baseUpdatedAt || null
+          state.sheetDates = draft.dates || null
           state.variantOverrides = draft.overrides || {}
           if (draft.title) $('paste-title').value = draft.title
           if (draft.date) $('paste-date').value = draft.date
+          updateEditingChip()
           renderTable()
+        }
+        // A save that never reached the server last session — surface the
+        // recovery banner (Continue / Retry / Discard) rather than letting
+        // the failure be forgotten with the plugin close.
+        if (msg.settings.pendingSave && msg.settings.pendingSave.payload) {
+          state.pendingSave = msg.settings.pendingSave
+          document.querySelector('.tab[data-panel="paste"]').click()
+          showDraftBox('A save from last time didn\'t reach the server. Your work is safe — retry it, keep editing, or discard it.')
         }
         state.lastClientId = msg.settings.lastClientId || null
         state.lastCampaignId = msg.settings.lastCampaignId || null
@@ -3482,6 +4019,13 @@ onmessage = (event) => {
       state._selCount = msg.count
       state.selNode = msg.node
       renderTagPanel()
+      break
+    case 'selection-png':
+      if (msg.error) {
+        reportError(msg.error, 'Upload shot', 'Select the cleaned image on the canvas (one node), then press ↑ Shot again.')
+      } else if (state.shotRow != null && msg.bytes) {
+        uploadShot(new Uint8Array(msg.bytes), state.shotRow)
+      }
       break
     case 'rename-done':
       log('✓ Tagged ' + msg.token + (msg.variants > 1

@@ -83,6 +83,14 @@ export async function GET(req: NextRequest) {
     deleted++
   }
 
+  // Piggybacked housekeeping: prune plugin-health events (figma_events)
+  // older than ~180 days. Pure observability data — best-effort, and a
+  // missing table (pre-migration) is silently fine.
+  try {
+    const cutoff = new Date(Date.now() - 180 * 86400_000).toISOString()
+    await admin.from('figma_events').delete().lt('created_at', cutoff)
+  } catch { /* observability, never availability */ }
+
   await logCronRun(admin, 'cleanup-product-images', errors.length === 0, { deleted, retentionMonths }, errors.length ? errors.join('; ') : undefined)
   return NextResponse.json({ ok: errors.length === 0, deleted, retentionMonths, errors: errors.length ? errors : undefined })
 }

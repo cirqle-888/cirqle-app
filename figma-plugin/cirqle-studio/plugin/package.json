@@ -1,6 +1,6 @@
 {
   "name": "cirqle-studio",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Cirqle Studio — official Figma design companion for the Cirqle platform",
   "scripts": {

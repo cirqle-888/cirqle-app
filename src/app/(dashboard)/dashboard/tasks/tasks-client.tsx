@@ -132,8 +132,44 @@ interface Task {
   is_billable?: boolean
   retainer_item_id?: string | null   // set by DB coverage trigger (Phase 2)
   bill_as_extra?: boolean            // covered task billed as extra work
+  work_value_inr?: number | null     // internal value covered work pays the team from
   client?: { id: string; name: string; code: string }
   service?: { id: string; name: string }
+}
+
+/**
+ * Retainer-covered and not flagged extra: the client is charged nothing for
+ * this task because the monthly retainer already covers it.
+ */
+function isCovered(t: { retainer_item_id?: string | null; bill_as_extra?: boolean }): boolean {
+  return !!t.retainer_item_id && !t.bill_as_extra
+}
+
+/**
+ * What a covered task shows instead of "AED 0.00" — which reads as an unpriced
+ * task and had people believing the retainer work was unpaid. Zero is correct
+ * for the CLIENT; the team is still paid, from the agreement's work value.
+ */
+function CoveredCell({ task }: { task: { work_value_inr?: number | null } }) {
+  const wv = task.work_value_inr ?? 0
+  return (
+    <span
+      title={
+        wv > 0
+          ? `Covered by retainer — the client pays the monthly fee, not this task. `
+            + `Team earns from a work value of ₹${wv.toLocaleString('en-IN')}.`
+          : `Covered by retainer — the client pays the monthly fee, not this task. `
+            + `No work value is set on the agreement item yet, so this pays contributors ₹0.`
+      }
+      className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border ${
+        wv > 0
+          ? 'bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/25'
+          : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25'
+      }`}
+    >
+      Retainer{wv > 0 ? '' : ' · no work value'}
+    </span>
+  )
 }
 
 interface Service {
@@ -1900,7 +1936,12 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       )
       case 'billing': return (
         <td key={key} className="px-5 py-3.5 text-right font-medium" onClick={stopInline}>
-          {role !== 'team_lead' && inlineEditMode ? (
+          {/* A retainer-covered task bills the client nothing by design — the
+              monthly fee is the invoice. Rendering a bare "AED 0.00" reads as a
+              MISSING price, so say what it actually is (and what the team is
+              paid from), instead of leaving people to guess. */}
+          {isCovered(task) ? <CoveredCell task={task} /> :
+            role !== 'team_lead' && inlineEditMode ? (
             <input type="number" defaultValue={task.billing_amount ?? 0} onBlur={async e => {
               const val = parseFloat(e.target.value) || 0
               if (val !== task.billing_amount) {
@@ -1918,7 +1959,9 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       )
       case 'total': return (
         <td key={key} className="px-5 py-3.5 text-right font-medium" onClick={stopInline}>
-          {formatCurrency(task.billing_amount ?? 0, task.currency as Currency)}
+          {isCovered(task)
+            ? <CoveredCell task={task} />
+            : formatCurrency(task.billing_amount ?? 0, task.currency as Currency)}
         </td>
       )
       case 'status': return (

@@ -498,3 +498,77 @@ export async function ensureOfferToken(clientId: string): Promise<ActionResult<{
   revalidatePath('/dashboard/apps/offer-intake')
   return { ok: true, data: { token: newToken } }
 }
+
+// ── Plugin health (Cirqle Studio) ────────────────────────────────────────────
+
+export interface PluginHealth {
+  totalSaves: number
+  failedSaves: number
+  conflicts: number
+  imageUploads: number
+  failedImageUploads: number
+  authFailures: number
+  updateRefusals: number
+  avgSaveMs: number | null
+  avgUploadMs: number | null
+  lastActivity: string | null
+  versions: { version: string; platform: string | null; count: number; lastSeen: string }[]
+  platforms: Record<string, number>
+}
+
+/**
+ * Operational aggregates over `figma_events` for the admin "Plugin health"
+ * panel — computed on demand, no pre-aggregation. Read-only observability;
+ * tolerates a missing table (pre-migration) by returning zeros.
+ */
+export async function getPluginHealth(rangeDays = 30): Promise<ActionResult<PluginHealth>> {
+  const _guard = await requireAdmin(); if (!_guard.ok) return { ok: false, error: _guard.error }
+  const admin = createAdminClient()
+
+  const since = new Date(Date.now() - Math.min(365, Math.max(1, rangeDays)) * 86400_000).toISOString()
+  const { data, error } = await admin
+    .from('figma_events')
+    .select('kind, plugin_version, platform, duration_ms, created_at')
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(5000)
+
+  type Row = { kind: string; plugin_version: string | null; platform: string | null; duration_ms: number | null; created_at: string }
+  const rows: Row[] = error ? [] : ((data as Row[] | null) || [])
+
+  const count = (k: string) => rows.filter(r => r.kind === k).length
+  const avg = (k: string) => {
+    const ds = rows.filter(r => r.kind === k && r.duration_ms != null).map(r => r.duration_ms as number)
+    return ds.length ? Math.round(ds.reduce((a, b) => a + b, 0) / ds.length) : null
+  }
+
+  const versionMap = new Map<string, { version: string; platform: string | null; count: number; lastSeen: string }>()
+  const platforms: Record<string, number> = {}
+  for (const r of rows) {
+    if (r.plugin_version) {
+      const key = `${r.plugin_version}|${r.platform || ''}`
+      const cur = versionMap.get(key)
+      if (cur) { cur.count++; if (r.created_at > cur.lastSeen) cur.lastSeen = r.created_at }
+      else versionMap.set(key, { version: r.plugin_version, platform: r.platform, count: 1, lastSeen: r.created_at })
+    }
+    if (r.platform) platforms[r.platform] = (platforms[r.platform] || 0) + 1
+  }
+
+  return {
+    ok: true,
+    data: {
+      totalSaves: count('save_ok'),
+      failedSaves: count('save_failed'),
+      conflicts: count('save_conflict'),
+      imageUploads: count('image_upload_ok'),
+      failedImageUploads: count('image_upload_failed'),
+      authFailures: count('auth_failed'),
+      updateRefusals: count('update_required'),
+      avgSaveMs: avg('save_ok'),
+      avgUploadMs: avg('image_upload_ok'),
+      lastActivity: rows[0]?.created_at || null,
+      versions: [...versionMap.values()].sort((a, b) => b.lastSeen.localeCompare(a.lastSeen)),
+      platforms,
+    },
+  }
+}

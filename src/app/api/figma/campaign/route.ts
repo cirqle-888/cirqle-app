@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminClient } from '@/lib/supabase/server'
+import { FIGMA_CORS_HEADERS as CORS_HEADERS, figmaOptions, verifyFigmaAuth, logFigmaEvent } from '../_lib/auth'
 import { saveCampaign, type ProductInput } from '@/app/intake/offer/[token]/actions'
 
 /**
@@ -21,7 +21,7 @@ import { saveCampaign, type ProductInput } from '@/app/intake/offer/[token]/acti
  * relies on. Duplicating any of it here would create a second, divergent
  * write path.
  *
- * Auth: workspace `offer_sheet_secret` (same as the other figma routes).
+ * Auth + CORS + plugin-version gate: see ../_lib/auth.ts.
  * The client is addressed by `clientId`; its intake token is resolved
  * server-side and never travels to the plugin.
  */
@@ -29,24 +29,26 @@ import { saveCampaign, type ProductInput } from '@/app/intake/offer/[token]/acti
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'authorization, content-type',
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS_HEADERS })
-}
+export const OPTIONS = figmaOptions
 
 interface IncomingProduct {
+  /** Existing offer_products.id — sent on updates so saveCampaign diffs
+   * fields instead of logging remove+add for every row. Absent = new row. */
+  id?: string | null
   name?: string
   price?: number | null
   mrp?: number | null
   weight?: string | null
   badge?: string | null
+  /** Full badge label list, for products that carry more than one badge —
+   * `badge` (single) stays supported for old plugins and fresh pastes. */
+  badges?: (string | null)[] | null
   offerType?: string | null
   page?: number | null
+  /** Carried through on updates so a plugin round-trip never wipes the
+   * product photo the client/app attached. Also how Figma-side uploads
+   * attach a cleaned shot. */
+  imageUrl?: string | null
 }
 
 interface IncomingBody {
@@ -64,29 +66,40 @@ interface IncomingBody {
   /** Service for that task, chosen in the plugin. Falls back to the
    * workspace's "Offer Flyer" service when absent. */
   serviceId?: string | null
+  /**
+   * Optimistic concurrency: the campaign `updated_at` the plugin loaded.
+   * On update, a campaign that moved past this returns 409 {conflict:true}
+   * instead of silently replacing someone else's edits; `force:true`
+   * overwrites after the designer explicitly chose to.
+   */
+  baseUpdatedAt?: string
+  force?: boolean
+  /** Set by the plugin when this request is a RETRY of a save that never
+   * reached the server (offline recovery) — logged as a save_failed event
+   * for the health panel, since the original attempt left no server trace. */
+  priorFailure?: { at?: number; error?: string }
 }
 
 const MAX_PRODUCTS = 300
 
 export async function POST(req: NextRequest) {
+  const startedAt = Date.now()
   try {
-    const admin = createAdminClient()
-
-    const bearer = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim()
-    const { data: secretRow } = await admin
-      .from('company_settings')
-      .select('value')
-      .eq('key', 'offer_sheet_secret')
-      .maybeSingle()
-    const secret = (secretRow?.value || '').trim()
-    if (!secret || !bearer || bearer !== secret) {
-      return NextResponse.json(
-        { ok: false, error: 'Unauthorized. Paste the shared secret from Apps → Offer Intake → Shared sync script.' },
-        { status: 401, headers: CORS_HEADERS },
-      )
-    }
+    const auth = await verifyFigmaAuth(req)
+    if (!auth.ok) return auth.response
+    const admin = auth.admin
 
     const body = (await req.json().catch(() => null)) as IncomingBody | null
+
+    // The original attempt never reached the server, so its failure can only
+    // be recorded now, from the retry.
+    if (body?.priorFailure) {
+      void logFigmaEvent(admin, 'save_failed', {
+        campaignId: body?.campaignId || null,
+        plugin: auth.plugin,
+        detail: body.priorFailure.error || 'transport failure (reported on retry)',
+      })
+    }
     const clientId = (body?.clientId || '').trim()
     const products = body?.products || []
 
@@ -137,22 +150,72 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // ── Optimistic concurrency (updates only) ─────────────────────────────
+    // The plugin sends the `updated_at` it loaded; if the campaign moved on
+    // since (client edited from their phone, another designer saved), refuse
+    // with 409 so the plugin can offer Reload / Overwrite instead of silently
+    // replacing those edits. `force:true` is the explicit overwrite.
+    if (body?.campaignId && body?.baseUpdatedAt && body?.force !== true) {
+      const { data: currentRow } = await admin
+        .from('offer_campaigns')
+        .select('updated_at')
+        .eq('id', body.campaignId)
+        .maybeSingle()
+      const currentUpdatedAt = (currentRow as { updated_at?: string } | null)?.updated_at || null
+      if (currentUpdatedAt && new Date(currentUpdatedAt).getTime() > new Date(body.baseUpdatedAt).getTime()) {
+        void logFigmaEvent(admin, 'save_conflict', { campaignId: body.campaignId, plugin: auth.plugin })
+        return NextResponse.json(
+          {
+            ok: false,
+            conflict: true,
+            currentUpdatedAt,
+            error: 'This offer changed since you loaded it.',
+          },
+          { status: 409, headers: CORS_HEADERS },
+        )
+      }
+    }
+
     const isOfferType = (v: unknown): v is ProductInput['offer_type'] =>
       v === 'price' || v === 'percent' || v === 'bogo' || v === 'other'
 
+    // Labels that match a predefined badge re-link to it (id + its colour)
+    // instead of becoming a custom amber copy — otherwise every plugin
+    // round-trip would silently strip the badge's colour and identity.
+    const { data: badgeRows } = await admin
+      .from('offer_badges')
+      .select('id, label, color')
+      .eq('is_active', true)
+    const predefinedByLabel = new Map(
+      ((badgeRows as { id: string; label: string | null; color: string | null }[] | null) || [])
+        .filter(b => b.label)
+        .map(b => [String(b.label).trim().toLowerCase(), b]),
+    )
+
     const productInputs: ProductInput[] = products.map((p, index) => {
-      const badge = (p.badge || '').trim()
       const offerType = isOfferType(p.offerType) ? p.offerType : 'price'
+      const imageUrl = (p.imageUrl || '').trim()
+      // Free-text badges: the plugin sends labels, not ids, because the
+      // client's message says "B1G1", not a badge uuid. saveCampaign accepts
+      // custom_label for exactly this case. `badges` (plural) preserves
+      // multi-badge products on updates; `badge` covers fresh pastes.
+      const badgeLabels = (Array.isArray(p.badges) && p.badges.length ? p.badges : [p.badge])
+        .map(b => (b || '').trim())
+        .filter(Boolean)
       return {
+        id: p.id || undefined,
         name: (p.name || '').trim() || `Product ${index + 1}`,
         weight: (p.weight || '').trim() || undefined,
+        image_url: imageUrl || undefined,
         offer_type: offerType,
         price: typeof p.price === 'number' ? p.price : null,
         mrp: typeof p.mrp === 'number' ? p.mrp : null,
-        // Free-text badge: the plugin sends a label, not an id, because the
-        // client's message says "B1G1", not a badge uuid. saveCampaign accepts
-        // custom_label for exactly this case.
-        badges: badge ? [{ custom_label: badge, color: 'amber' }] : [],
+        badges: badgeLabels.map(label => {
+          const predefined = predefinedByLabel.get(label.toLowerCase())
+          return predefined
+            ? { badge_id: predefined.id, color: predefined.color || 'amber' }
+            : { custom_label: label, color: 'amber' }
+        }),
         page: typeof p.page === 'number' && p.page > 0 ? p.page : 1,
         display_order: index,
       }
@@ -199,6 +262,9 @@ export async function POST(req: NextRequest) {
         products: productInputs,
       },
       body?.campaignId,
+      // Figma saves stay allowed while the campaign is design-locked —
+      // designer touch-ups must not require an admin unlock.
+      { actor: 'figma' },
     )
 
     if (!result.ok || !result.data) {
@@ -207,6 +273,35 @@ export async function POST(req: NextRequest) {
         { status: 500, headers: CORS_HEADERS },
       )
     }
+
+    void logFigmaEvent(admin, 'save_ok', {
+      campaignId: result.data.campaignId,
+      plugin: auth.plugin,
+      durationMs: Date.now() - startedAt,
+    })
+
+    // Plugin metadata — debugging/support only, never fails the save. Which
+    // plugin build saved what turns "the flyer looks wrong" support calls
+    // into a version lookup. log_type 'system' is the schema's existing
+    // catch-all (adding a new enum value would need a migration for a log line).
+    try {
+      const plugin = auth.plugin
+      const byCqid = (body?.createdBy?.cqid || '').trim()
+      await admin.from('offer_change_logs').insert({
+        campaign_id: result.data.campaignId,
+        log_type: 'system',
+        // History, not an actionable change — pre-acknowledged (see
+        // logCampaignEvent). Written directly (not via the flagged timeline
+        // helper) because the version info is support forensics that should
+        // survive the timeline flag being off.
+        acknowledged: true,
+        note:
+          `${body?.campaignId ? 'Updated' : 'Created'} from Cirqle Studio` +
+          (plugin ? ` ${plugin.version}${plugin.build ? '+' + plugin.build : ''}${plugin.platform ? ' (' + plugin.platform + ')' : ''}` : '') +
+          (byCqid ? ` by ${byCqid}` : '') +
+          (body?.force ? ' — overwrote a newer version after conflict review' : ''),
+      })
+    } catch { /* observability, not availability */ }
 
     // Every offer saved from Figma also lands on the Tasks page — ONE task
     // per campaign (re-saves reuse it via the [figma:cmp:…] marker), titled
@@ -359,10 +454,23 @@ export async function POST(req: NextRequest) {
       taskNumber = null
     }
 
+    // Fresh updated_at so the plugin can rebase its conflict check without a
+    // second round-trip.
+    let updatedAt: string | null = null
+    try {
+      const { data: savedRow } = await admin
+        .from('offer_campaigns')
+        .select('updated_at')
+        .eq('id', result.data.campaignId)
+        .maybeSingle()
+      updatedAt = (savedRow as { updated_at?: string } | null)?.updated_at || null
+    } catch { /* non-essential */ }
+
     return NextResponse.json(
       {
         ok: true,
         campaignId: result.data.campaignId,
+        updatedAt,
         productCount: productInputs.length,
         clientName: client.name,
         taskNumber,

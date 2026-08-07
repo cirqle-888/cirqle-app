@@ -4,6 +4,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { syncCampaignToSheet } from '@/lib/google-sheets/sync'
 import { safePublicFetch, BlockedHostError } from '@/lib/safe-fetch'
 import { aiParseOfferProducts, type ParsedOfferProduct } from '@/lib/ai/offer-capture'
+import { getMergedClientCatalog, mirrorProductToGlobalCatalog } from '@/lib/offer-catalog'
+import { logCampaignEvent } from '@/lib/offer-events'
 
 interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
 
@@ -30,15 +32,6 @@ async function resolveOfferToken(token: string) {
       .maybeSingle()
     return data || null
   } catch { return null }
-}
-
-/** The shape the offer editor's picker consumes, from either source. */
-interface CatalogRow {
-  id: string
-  name: string
-  weight?: string | null
-  category?: string | null
-  image_url?: string | null
 }
 
 // ── Load campaign data for client ─────────────────────────────────────────────
@@ -81,6 +74,7 @@ export async function getOfferPageData(token: string): Promise<ActionResult<{
   badges: any[]
   groups: OfferGroupOption[]
   sheetManaged: boolean
+  designLocked: boolean
   logoUrl: string | null
   logoDarkUrl: string | null
 }>> {
@@ -89,7 +83,7 @@ export async function getOfferPageData(token: string): Promise<ActionResult<{
 
   const admin = createAdminClient()
 
-  const [campaignRes, catalogRes, badgesRes, logoRes, logoDarkRes, groups] = await Promise.all([
+  const [campaignRes, badgesRes, logoRes, logoDarkRes, groups, catalogWithImages] = await Promise.all([
     // Most recent active campaign for this client
     admin.from('offer_campaigns')
       .select('*, products:offer_products(*, badges:offer_product_badges(id, badge_id, custom_label, color, display_order, badge:offer_badges(label, color)))')
@@ -98,11 +92,6 @@ export async function getOfferPageData(token: string): Promise<ActionResult<{
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle(),
-    admin.from('client_product_catalog')
-      .select('*')
-      .eq('client_id', client.id)
-      .eq('is_active', true)
-      .order('name'),
     admin.from('offer_badges')
       .select('*')
       .eq('is_active', true)
@@ -110,42 +99,11 @@ export async function getOfferPageData(token: string): Promise<ActionResult<{
     admin.from('company_settings').select('value').eq('key', 'logo_url').maybeSingle(),
     admin.from('company_settings').select('value').eq('key', 'logo_url_dark').maybeSingle(),
     loadGroupOptions(admin, client.id),
+    // Own catalog + region-scoped shared library + image history — the ONE
+    // shared implementation (also behind /api/figma/catalog). See
+    // src/lib/offer-catalog.ts for the merge rules.
+    getMergedClientCatalog(admin, client),
   ])
-
-  // The picker is the client's OWN past products plus everything approved in
-  // the shared catalog that is available in their region.
-  //
-  // Without the second half the shared library is unreachable: a shop owner
-  // typing "Tomato" sees a suggestion only if they have sent Tomato before, so
-  // the 101 curated produce items — Malayalam names, cut-out photos — help
-  // nobody. Availability is expressed as the ABSENCE of a region restriction
-  // rather than as assignment rows, so "global by default" needs no backfill
-  // and no upkeep as products and clients are added.
-  const ownCatalog = (catalogRes.data || []) as CatalogRow[]
-  const globalCatalog = await loadSharedCatalogFor(admin, client)
-
-  // The client's own row wins on a name clash — it carries their weight and the
-  // photo they last used, which is more specific than the library's.
-  const key = (row: CatalogRow) => row.name.trim().toLowerCase()
-  const seen = new Set(ownCatalog.map(key))
-  const catalog = [...ownCatalog, ...globalCatalog.filter(g => !seen.has(key(g)))]
-
-  // Attach each catalog item's image HISTORY (newest first) from the global
-  // Product Catalog, matched by name (same dedup key mirrorProductToGlobalCatalog
-  // uses) — lets the client pick among past photos instead of just the latest.
-  let catalogWithImages = catalog
-  if (catalog.length) {
-    const { data: globalProducts } = await admin
-      .from('product_catalog')
-      .select('id, name, images:product_catalog_images(id, url, is_primary, created_at)')
-      .in('name', catalog.map((c: any) => c.name.trim()))
-    const byName = new Map((globalProducts || []).map((g: any) => [g.name.trim().toLowerCase(), g]))
-    catalogWithImages = catalog.map((c: any) => {
-      const g = byName.get(c.name.trim().toLowerCase())
-      const images = (g?.images || []).slice().sort((a: any, b: any) => (b.created_at || '').localeCompare(a.created_at || ''))
-      return { ...c, images }
-    })
-  }
 
   return {
     ok: true,
@@ -158,6 +116,10 @@ export async function getOfferPageData(token: string): Promise<ActionResult<{
       // Snapshots of a client-owned sheet are read-only here: the next pull
       // would overwrite anything typed, so the editor disables saving.
       sheetManaged: campaignRes.data?.source === 'sheet_import',
+      // Designer pressed "Mark as Designed" in Cirqle Studio — client/staff
+      // edits are refused until an admin unlocks (or the designer self-undoes
+      // within the window). Absent pre-migration → simply false.
+      designLocked: !!campaignRes.data?.design_locked_at,
       logoUrl: logoRes.data?.value || null,
       logoDarkUrl: logoDarkRes.data?.value || null,
     },
@@ -229,6 +191,10 @@ export async function saveCampaign(
   token: string,
   input: CampaignInput,
   campaignId?: string,
+  /** Who is saving — decides whether a design-locked campaign refuses the
+   * write ('figma' passes; 'client'/'staff' are refused). Defaults to
+   * 'client', the public entrance. */
+  opts?: { actor?: 'client' | 'staff' | 'figma' },
 ): Promise<ActionResult<{ campaignId: string; productIds: (string | null)[] }>> {
   const client = await resolveOfferToken(token)
   if (!client) return { ok: false, error: 'This link is no longer valid.' }
@@ -256,6 +222,20 @@ export async function saveCampaign(
     // on the next pull — so refuse and point at the conversion instead.
     if (existing.source === 'sheet_import') {
       return { ok: false, error: 'This offer is managed from the client’s own Google Sheet, so it can’t be edited here. Convert it to a Cirqle offer first if you need to change it in Cirqle.' }
+    }
+    // Design lock: after "Mark as Designed" only the Figma side may save
+    // (designer touch-ups); client/staff edits are refused so they can't
+    // silently diverge from the artwork. Queried separately + tolerantly so a
+    // deploy landing before the design-lock migration still saves normally.
+    if (opts?.actor !== 'figma') {
+      const { data: lockRow } = await admin
+        .from('offer_campaigns')
+        .select('design_locked_at')
+        .eq('id', campaignId)
+        .maybeSingle()
+      if ((lockRow as { design_locked_at?: string | null } | null)?.design_locked_at) {
+        return { ok: false, error: 'This offer is with the designer now, so it can’t be changed here. Contact the Cirqle team if something must change.' }
+      }
     }
     previousCampaign = existing
 
@@ -546,8 +526,60 @@ export async function saveCampaign(
     await admin.from('offer_change_logs').insert(changeLogs)
   }
 
+  // ── Version history (feature_offer_revisions, ships dark) ─────────────────
+  // A self-contained snapshot per MEANINGFUL save: creates always, updates
+  // only when the change-log diff found product changes (no-op saves add no
+  // revision). Best-effort — a revision hiccup never fails the save.
+  try {
+    const { isFeatureEnabled } = await import('@/lib/feature-flags')
+    const productChanges = changeLogs.some(l => String(l.log_type).startsWith('product_'))
+    if ((!campaignId || productChanges) && await isFeatureEnabled(admin, 'feature_offer_revisions', false)) {
+      const { data: lastRev } = await admin
+        .from('offer_campaign_revisions')
+        .select('revision_no')
+        .eq('campaign_id', campaign.id)
+        .order('revision_no', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      const nextNo = (((lastRev as { revision_no?: number } | null)?.revision_no) ?? 0) + 1
+      await admin.from('offer_campaign_revisions').insert({
+        campaign_id: campaign.id,
+        revision_no: nextNo,
+        snapshot: {
+          title: input.title ?? null,
+          date_type: input.date_type,
+          offer_date: input.offer_date ?? null,
+          offer_date_from: input.offer_date_from ?? null,
+          offer_date_to: input.offer_date_to ?? null,
+          products: input.products,
+        },
+        actor_kind: opts?.actor === 'figma' ? 'figma' : opts?.actor === 'staff' ? 'staff' : 'client',
+        note: null,
+      })
+      // Retention: keep the newest 30 revisions per campaign.
+      const { data: oldRevs } = await admin
+        .from('offer_campaign_revisions')
+        .select('id')
+        .eq('campaign_id', campaign.id)
+        .order('revision_no', { ascending: false })
+        .range(30, 200)
+      const oldIds = ((oldRevs as { id: string }[] | null) || []).map(r => r.id)
+      if (oldIds.length) await admin.from('offer_campaign_revisions').delete().in('id', oldIds)
+    }
+  } catch { /* revisions are a safety net, never a gate */ }
+
   // ── Sync to Google Sheets (fire and forget — don't block client save) ────
   void syncCampaignToSheet(admin, campaign.id, client.id).catch(() => {})
+
+  // Timeline event (tracking/support; figma saves log their own richer note
+  // in /api/figma/campaign). Best-effort, never blocks the save.
+  if (opts?.actor !== 'figma') {
+    void logCampaignEvent(
+      admin,
+      campaign.id,
+      `Offer ${campaignId ? 'updated' : 'submitted'} by ${opts?.actor === 'staff' ? 'staff' : 'the client'} — ${input.products.length} product${input.products.length === 1 ? '' : 's'}.`,
+    )
+  }
 
   return { ok: true, data: { campaignId: campaign.id, productIds } }
 }
@@ -702,131 +734,26 @@ function diffBadgeLabels(
   return oldStr !== newStr ? { old: oldStr, new: newStr } : null
 }
 
-/**
- * Approved shared-catalog products this client may use, shaped like the rows
- * client_product_catalog returns so the editor treats them identically.
- *
- * A product is available when it carries no region ("sells everywhere") or its
- * region matches the client's. Every row is NULL today, so everyone sees
- * everything — correct while all clients are in Kerala, and the filter is
- * already in place for the first Dubai client.
- *
- * Degrades to an empty list rather than throwing if migration 20260722060000
- * has not been applied yet, since this feeds a client-facing form: losing the
- * shared suggestions is survivable, breaking the offer editor is not.
- */
-async function loadSharedCatalogFor(
-  admin: ReturnType<typeof createAdminClient>,
-  client: { id: string; region?: string | null },
-): Promise<CatalogRow[]> {
-  const approved = () => admin
-    .from('product_catalog')
-    .select('id, name, weight, category, image_url')
-    .eq('status', 'active')
-    .eq('review_status', 'approved')
-
-  // `region.is.null` keeps unrestricted products; the second arm adds the
-  // client's own. A client with no region set sees only unrestricted ones,
-  // which is the safe reading of "we have not decided yet".
-  //
-  // Region is client data, so it is matched against a strict pattern before
-  // going anywhere near a PostgREST filter string — a comma or a dot in it
-  // would otherwise be read as more filter syntax.
-  const region = /^[A-Za-z0-9_-]{1,32}$/.test(client.region || '') ? client.region : null
-  const scoped = region
-    ? approved().or(`region.is.null,region.eq.${region}`)
-    : approved().is('region', null)
-
-  const withRegion = await scoped.order('name').limit(1000)
-  if (!withRegion.error) return withRegion.data || []
-
-  const plain = await approved().order('name').limit(1000)
-  if (!plain.error) return plain.data || []
-
-  // review_status missing too — pre-produce-library schema. Nothing to add.
-  return []
-}
-
-/** Find-or-create the global product_catalog row for this name, assign it to
- * the client, and — if a new image URL was submitted — record it in the
- * image history (newest upload becomes primary). See the call site for why
- * this mirror exists. */
-async function mirrorProductToGlobalCatalog(
-  admin: ReturnType<typeof createAdminClient>,
-  clientId: string,
-  name: string,
-  weight: string | null,
-  imageUrl: string | null,
-): Promise<void> {
-  if (!name) return
-
-  // Dedup case-insensitively by name. Two fixes over the previous
-  // `.ilike(name).maybeSingle()`:
-  //  - names are client-supplied, and ilike treats % and _ in them as
-  //    wildcards, so "50% Off Rice" matched unrelated rows. Escaped here.
-  //  - maybeSingle() THROWS when more than one row matches, which is a normal
-  //    state for a shared catalog. limit(1) takes the first instead.
-  const escapedName = name.replace(/[\\%_]/g, c => `\\${c}`)
-  const { data: existingRows } = await admin
-    .from('product_catalog')
-    .select('id, image_url')
-    .ilike('name', escapedName)
-    .limit(1)
-  const existing = existingRows?.[0]
-
-  let productId = existing?.id as string | undefined
-
-  if (!productId) {
-    // A name nobody has used before — this is a genuinely new product arriving
-    // with a client's offer list, which is when new products actually turn up.
-    // It goes in as PENDING so staff can set the category, tidy the title and
-    // add the local-language name before it joins the shared library.
-    //
-    // This does NOT hold up the client's flyer: the offer reads
-    // client_product_catalog, so the product is usable in this week's offer
-    // immediately. Review governs only whether it becomes part of the global
-    // catalog that every other client can draw on.
-    const { data: created } = await admin
-      .from('product_catalog')
-      .insert({
-        name,
-        weight,
-        image_url: imageUrl,
-        review_status: 'pending',
-        submitted_by_client_id: clientId,
-        submitted_at: new Date().toISOString(),
-      })
-      .select('id')
-      .single()
-    productId = created?.id
-  }
-
-  if (!productId) return
-
-  if (imageUrl) {
-    const { data: alreadyRecorded } = await admin
-      .from('product_catalog_images')
-      .select('id').eq('product_id', productId).eq('url', imageUrl).maybeSingle()
-    if (!alreadyRecorded) {
-      // New photo for this product — it becomes the primary (newest = primary).
-      await admin.from('product_catalog_images').update({ is_primary: false }).eq('product_id', productId).eq('is_primary', true)
-      await admin.from('product_catalog_images').insert({
-        product_id: productId, version: 'original', url: imageUrl, source: 'upload', is_primary: true,
-      })
-      await admin.from('product_catalog').update({ image_url: imageUrl }).eq('id', productId)
-    }
-  }
-
-  await admin
-    .from('client_product_assignments')
-    .upsert({ client_id: clientId, product_id: productId, is_active: true }, { onConflict: 'client_id,product_id' })
-}
 
 export async function cancelCampaign(token: string, campaignId: string): Promise<ActionResult> {
   const client = await resolveOfferToken(token)
   if (!client) return { ok: false, error: 'This link is no longer valid.' }
 
   const admin = createAdminClient()
+
+  // Design-locked offers can't be cancelled from the intake side either —
+  // the designer is mid-work on them. Tolerant of the pre-migration schema.
+  {
+    const { data: lockRow } = await admin
+      .from('offer_campaigns')
+      .select('design_locked_at')
+      .eq('id', campaignId)
+      .maybeSingle()
+    if ((lockRow as { design_locked_at?: string | null } | null)?.design_locked_at) {
+      return { ok: false, error: 'This offer is with the designer now, so it can’t be cancelled here. Contact the Cirqle team.' }
+    }
+  }
+
   const { data, error } = await admin
     .from('offer_campaigns')
     .update({ status: 'cancelled', updated_at: new Date().toISOString() })

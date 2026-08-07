@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminClient } from '@/lib/supabase/server'
+import { FIGMA_CORS_HEADERS as CORS_HEADERS, figmaOptions, verifyFigmaAuth } from '../_lib/auth'
 
 /**
  * GET /api/figma/offers — the Cirqle Studio Figma plugin's offer list.
@@ -9,50 +9,19 @@ import { createAdminClient } from '@/lib/supabase/server'
  * page count, product count, status, updated_at (updated_at so the plugin can
  * show "changed since you loaded" without downloading the campaign).
  *
- * Auth: `Authorization: Bearer <offer_sheet_secret>` — the workspace secret
- * that already exists in company_settings for the Sheets sync. Reusing it
- * means no new credential to provision or rotate; retiring the Sheet pipeline
- * later doesn't strand this route because the secret belongs to the
- * workspace, not to the Apps Script.
- *
- * CORS: the plugin UI runs in an iframe with a `null` origin, so the wildcard
- * is the only workable value. It is safe here because the bearer token is the
- * actual gate — CORS only decides whether the browser hands the response to
- * the page, and an unauthorized caller gets nothing worth handing over.
+ * Auth + CORS + plugin-version gate: see ../_lib/auth.ts (shared by every
+ * figma route).
  */
 
 export const dynamic = 'force-dynamic'
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'authorization, content-type',
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS_HEADERS })
-}
+export const OPTIONS = figmaOptions
 
 export async function GET(req: NextRequest) {
   try {
-    const admin = createAdminClient()
-
-    const bearer = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim()
-    const { data: secretRow } = await admin
-      .from('company_settings')
-      .select('value')
-      .eq('key', 'offer_sheet_secret')
-      .maybeSingle()
-    const secret = (secretRow?.value || '').trim()
-
-    // Fail closed: an unset secret refuses every request rather than
-    // accepting them all (same stance as the shared Apps Script).
-    if (!secret || !bearer || bearer !== secret) {
-      return NextResponse.json(
-        { ok: false, error: 'Unauthorized. Paste the shared secret from Apps → Offer Intake → Shared sync script.' },
-        { status: 401, headers: CORS_HEADERS },
-      )
-    }
+    const auth = await verifyFigmaAuth(req)
+    if (!auth.ok) return auth.response
+    const admin = auth.admin
 
     const { data: campaigns, error } = await admin
       .from('offer_campaigns')

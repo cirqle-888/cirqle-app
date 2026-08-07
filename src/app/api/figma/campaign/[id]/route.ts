@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminClient } from '@/lib/supabase/server'
+import { FIGMA_CORS_HEADERS as CORS_HEADERS, figmaOptions, verifyFigmaAuth } from '../../_lib/auth'
 import { OFFER_SHEET_HEADERS, buildOfferSheetRows, figmaLayerName } from '@/lib/offer-sheet'
 
 /**
@@ -28,15 +28,7 @@ import { OFFER_SHEET_HEADERS, buildOfferSheetRows, figmaLayerName } from '@/lib/
 
 export const dynamic = 'force-dynamic'
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'authorization, content-type',
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS_HEADERS })
-}
+export const OPTIONS = figmaOptions
 
 /** Mirrors the (unexported) formatDate in google-sheets/sync.ts so the
  *  Offer Date column matches what the Sheet pipeline writes. */
@@ -67,22 +59,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const admin = createAdminClient()
-
-    const bearer = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim()
-    const { data: secretRow } = await admin
-      .from('company_settings')
-      .select('value')
-      .eq('key', 'offer_sheet_secret')
-      .maybeSingle()
-    const secret = (secretRow?.value || '').trim()
-
-    if (!secret || !bearer || bearer !== secret) {
-      return NextResponse.json(
-        { ok: false, error: 'Unauthorized. Paste the shared secret from Apps → Offer Intake → Shared sync script.' },
-        { status: 401, headers: CORS_HEADERS },
-      )
-    }
+    const auth = await verifyFigmaAuth(req)
+    if (!auth.ok) return auth.response
+    const admin = auth.admin
 
     const { id } = await params
 
@@ -171,6 +150,20 @@ export async function GET(
         }
       })
 
+    // Lock state, fetched separately + tolerantly: pre-migration schemas
+    // simply report "not locked" instead of 500ing the whole load.
+    const lockInfo: { lockedAt: string | null; lockedBy: string | null } = { lockedAt: null, lockedBy: null }
+    {
+      const { data: lockRow } = await admin
+        .from('offer_campaigns')
+        .select('design_locked_at, design_locked_by')
+        .eq('id', id)
+        .maybeSingle()
+      const lr = lockRow as { design_locked_at?: string | null; design_locked_by?: string | null } | null
+      lockInfo.lockedAt = lr?.design_locked_at || null
+      lockInfo.lockedBy = lr?.design_locked_by || null
+    }
+
     const offerDate = formatOfferDate(campaign)
     const rows = buildOfferSheetRows({
       clientName: client?.name,
@@ -189,6 +182,16 @@ export async function GET(
           status: campaign.status,
           updatedAt: campaign.updated_at,
           offerDate,
+          // Raw date fields so a plugin UPDATE can send back what it loaded
+          // instead of collapsing every campaign to today's single date.
+          dateType: campaign.date_type || 'single',
+          offerDateRaw: campaign.offer_date || null,
+          offerDateFrom: campaign.offer_date_from || null,
+          offerDateTo: campaign.offer_date_to || null,
+          // Design lock state for the "Mark as Designed" control. Fetched
+          // tolerantly (below) so a pre-migration schema returns null.
+          designLockedAt: lockInfo.lockedAt,
+          designLockedBy: lockInfo.lockedBy,
           clientId: client?.id ?? null,
           clientName: client?.name ?? 'Unknown client',
           pageCount: products.length ? Math.max(...products.map(p => p.page)) : 0,

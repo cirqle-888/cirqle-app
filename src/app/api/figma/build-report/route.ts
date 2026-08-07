@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminClient } from '@/lib/supabase/server'
+import { FIGMA_CORS_HEADERS as CORS_HEADERS, figmaOptions, verifyFigmaAuth } from '../_lib/auth'
 
 /**
  * POST /api/figma/build-report — the plugin reports a finished flyer build.
@@ -18,30 +18,13 @@ import { createAdminClient } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'authorization, content-type',
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS_HEADERS })
-}
+export const OPTIONS = figmaOptions
 
 export async function POST(req: NextRequest) {
   try {
-    const admin = createAdminClient()
-
-    const bearer = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim()
-    const { data: secretRow } = await admin
-      .from('company_settings')
-      .select('value')
-      .eq('key', 'offer_sheet_secret')
-      .maybeSingle()
-    const secret = ((secretRow as { value?: string } | null)?.value || '').trim()
-    if (!secret || !bearer || bearer !== secret) {
-      return NextResponse.json({ ok: false, error: 'Unauthorized.' }, { status: 401, headers: CORS_HEADERS })
-    }
+    const auth = await verifyFigmaAuth(req)
+    if (!auth.ok) return auth.response
+    const admin = auth.admin
 
     const body = (await req.json().catch(() => null)) as {
       campaignId?: string

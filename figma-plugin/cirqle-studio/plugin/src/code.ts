@@ -1916,6 +1916,36 @@ figma.ui.onmessage = async (msg: any) => {
       case 'build':
         await buildFlyer(msg)
         break
+      case 'export-selection': {
+        // A cleaned product shot leaves Figma as a 2× PNG and lands in the
+        // product database (the UI uploads the bytes; this thread only
+        // exports). One node at a time — the selection IS the crop.
+        const sel = figma.currentPage.selection
+        if (sel.length !== 1) {
+          figma.ui.postMessage({
+            type: 'selection-png',
+            error: sel.length === 0
+              ? 'Select the cleaned product image on the canvas first.'
+              : 'Select just ONE node — the export is exactly what is selected.',
+          })
+          break
+        }
+        const shotNode = sel[0]
+        if (!shotNode || typeof shotNode.exportAsync !== 'function') {
+          figma.ui.postMessage({ type: 'selection-png', error: 'That node type cannot be exported — select a frame, group or image.' })
+          break
+        }
+        try {
+          const bytes = await shotNode.exportAsync({ format: 'PNG', constraint: { type: 'SCALE', value: 2 } })
+          figma.ui.postMessage({ type: 'selection-png', bytes, name: shotNode.name || 'product' })
+        } catch (err) {
+          figma.ui.postMessage({
+            type: 'selection-png',
+            error: 'Could not export that node: ' + (err instanceof Error ? err.message : String(err)),
+          })
+        }
+        break
+      }
       case 'notify':
         figma.notify(String(msg.message || ''))
         break
