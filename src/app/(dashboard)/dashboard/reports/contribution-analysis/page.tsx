@@ -6,12 +6,24 @@ import {
   type RawTask, type RawScore, type RawPricing, type EmployeeColumn,
 } from '@/lib/reports/contribution-analysis'
 import type { CommissionAgreement } from '@/lib/calculations/agreements'
+import { resolveFetchWindow, scoreWindowFor } from '@/lib/reports/date-bounds'
 import ContributionAnalysisClient from './contribution-analysis-client'
 
 // Scores are written whenever contributions are saved — always read fresh.
 export const dynamic = 'force-dynamic'
 
-export default async function ContributionAnalysisPage() {
+export default async function ContributionAnalysisPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ date?: string }>
+}) {
+  // Egress: this page used to fetch EVERY task + EVERY score on every view
+  // (~4–5 MB). The date filter lives in the URL and router.replace re-runs
+  // this component, so the server now ships only the window being looked at.
+  // No param = last 12 months; `date=all` = the explicit everything view.
+  const { date: rawDate } = await searchParams
+  const win = resolveFetchWindow(rawDate)
+  const scoreWin = scoreWindowFor(win)
   // Same wall as Reports: admin OR explicit reports.view. Fail-open pre-migration
   // (no employee record yet) so the app keeps working before perms are seeded.
   const me = await loadCurrentUser().catch(() => null)
@@ -28,17 +40,26 @@ export default async function ContributionAnalysisPage() {
     supabase.from('services').select('id, name').order('name'),
     fetchAll(supabase.from('client_service_pricing').select('client_id, service_id, commission_percentage').order('id', { ascending: true })),
     fetchAll(
-      supabase
-        .from('tasks')
-        .select('id, task_number, title, task_date, status, currency, billing_amount, billing_amount_inr, client_id, service_id, retainer_item_id, bill_as_extra, work_value_inr')
-        .is('deleted_at', null)
-        .order('id', { ascending: true }),
+      (() => {
+        let q = supabase
+          .from('tasks')
+          .select('id, task_number, title, task_date, status, currency, billing_amount, billing_amount_inr, client_id, service_id, retainer_item_id, bill_as_extra, work_value_inr')
+          .is('deleted_at', null)
+        if (win.from) q = q.gte('task_date', win.from)
+        if (win.to) q = q.lte('task_date', win.to)
+        return q.order('id', { ascending: true })
+      })(),
     ),
     fetchAll(
-      supabase
-        .from('contribution_scores')
-        .select('task_id, employee_id, score_percentage, earnings_inr, is_manual_override')
-        .order('id', { ascending: true }),
+      (() => {
+        // Lower bound only, with slack — see scoreWindowFor. Extra rows for
+        // out-of-window tasks are dropped by the task-id match in the builder.
+        let q = supabase
+          .from('contribution_scores')
+          .select('task_id, employee_id, score_percentage, earnings_inr, is_manual_override')
+        if (scoreWin.fromTs) q = q.gte('calculated_at', scoreWin.fromTs)
+        return q.order('id', { ascending: true })
+      })(),
     ),
     // Task → invoice line items (for actual-received apportioning).
     fetchAll(supabase.from('invoice_items').select('task_id, invoice_id, total').order('id', { ascending: true })),
@@ -192,6 +213,7 @@ export default async function ContributionAnalysisPage() {
       isAdmin={isAdmin}
       personalLayout={personalLayout}
       systemLayout={systemLayout}
+      dataWindowLabel={win.label}
     />
   )
 }

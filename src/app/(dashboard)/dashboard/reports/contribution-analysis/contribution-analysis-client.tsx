@@ -43,6 +43,12 @@ interface Props {
   isAdmin: boolean
   personalLayout: LayoutConfig | null
   systemLayout: LayoutConfig | null
+  /**
+   * Human label of the server-side fetch window ("the last 12 months"), or
+   * null when everything was fetched. Egress guard: the server only ships the
+   * window named in the URL — see resolveFetchWindow in the page.
+   */
+  dataWindowLabel?: string | null
 }
 
 const REPORT_NAME = 'contribution_analysis'
@@ -402,7 +408,7 @@ function parseFromParams(sp: URLSearchParams): { filters: Filters; sortKey: Sort
   }
 }
 
-export default function ContributionAnalysisClient({ rows, employees, clients, services, isAdmin, personalLayout, systemLayout }: Props) {
+export default function ContributionAnalysisClient({ rows, employees, clients, services, isAdmin, personalLayout, systemLayout, dataWindowLabel = null }: Props) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -421,6 +427,11 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
 
   const initial = useMemo(() => parseFromParams(sp0), []) // eslint-disable-line react-hooks/exhaustive-deps
   const [filters, setFilters] = useState<Filters>(initial.filters)
+  // "No date filter" is TWO different states now that the server bounds the
+  // fetch: the default 12-month window (param absent) vs an explicit All-time
+  // choice (`date=all`). This flag remembers which one the user is in, so the
+  // URL round-trips it and a fresh landing never fetches all history.
+  const [dateExplicitAll, setDateExplicitAll] = useState(sp0.get('date') === 'all')
   const [sortKey, setSortKey] = useState<SortKey>(hasUrlSort ? initial.sortKey : (dbLayout?.sortKey ?? initial.sortKey))
   const [sortDir, setSortDir] = useState<SortDir>(hasUrlSort ? initial.sortDir : (dbLayout?.sortDir ?? initial.sortDir))
   const [pageSize, setPageSize] = useState<number>(initial.pageSize)
@@ -649,7 +660,12 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   useEffect(() => {
     const p = new URLSearchParams()
     const f = filters
+    // Explicit sentinel, never absence: the server treats a missing param as
+    // "default window (12 months)", so All-time must be spelled out or the
+    // user's choice would silently show only a year of data. Absence is
+    // preserved on landing so the default window stays the default.
     if (f.date) p.set('date', JSON.stringify(f.date))
+    else if (dateExplicitAll) p.set('date', 'all')
     if (f.clientIds.length) p.set('clients', f.clientIds.join(','))
     if (f.serviceIds.length) p.set('services', f.serviceIds.join(','))
     if (f.employeeIds.length) p.set('emp', f.employeeIds.join(','))
@@ -671,7 +687,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     if (groupKey !== 'none') p.set('grp', groupKey)
     const qs = p.toString()
     if (qs !== searchParams.toString()) router.replace(`${pathname}${qs ? '?' + qs : ''}`, { scroll: false })
-  }, [filters, sortKey, sortDir, pageSize, decimals, groups, groupKey, pathname, router, searchParams])
+  }, [filters, dateExplicitAll, sortKey, sortDir, pageSize, decimals, groups, groupKey, pathname, router, searchParams])
 
   // ── Pipeline: filter → sort ───────────────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -946,7 +962,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
             Filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
           </button>
           {activeFilterCount > 0 && (
-            <button onClick={() => setFilters(EMPTY_FILTERS)} className="flex items-center gap-1 px-2.5 py-2 rounded-lg text-sm text-red-400 hover:bg-secondary">
+            <button onClick={() => { setDateExplicitAll(true); setFilters(EMPTY_FILTERS) }} className="flex items-center gap-1 px-2.5 py-2 rounded-lg text-sm text-red-400 hover:bg-secondary">
               <X className="w-3.5 h-3.5" /> Clear
             </button>
           )}
@@ -1257,7 +1273,18 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
               <div>
                 <label className="block text-[11px] font-medium text-muted-foreground mb-1">Date</label>
-                <DateFilter value={filters.date} onChange={d => setFilters(f => ({ ...f, date: d }))} className="w-full [&>button]:w-full [&>button]:border-border" compact />
+                <DateFilter value={filters.date}
+                  onChange={d => {
+                    // Clearing the date here is a deliberate "show me everything".
+                    if (d === null) setDateExplicitAll(true)
+                    setFilters(f => ({ ...f, date: d }))
+                  }}
+                  className="w-full [&>button]:w-full [&>button]:border-border" compact />
+                {!filters.date && dataWindowLabel && !dateExplicitAll && (
+                  <p className="mt-1 text-[10px] text-muted-foreground/70">
+                    Showing {dataWindowLabel} — pick a date (or clear it) for other periods.
+                  </p>
+                )}
               </div>
               <MultiSelect label="Clients" options={scopedClients} selected={filters.clientIds} onChange={ids => setFilters(f => ({ ...f, clientIds: ids }))} sortKey="clients" />
               <MultiSelect label="Services" options={scopedServices} selected={filters.serviceIds} onChange={ids => setFilters(f => ({ ...f, serviceIds: ids }))} sortKey="services" />

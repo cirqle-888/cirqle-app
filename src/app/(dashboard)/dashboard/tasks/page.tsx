@@ -10,10 +10,12 @@ import TasksClient from './tasks-client'
 
 export const dynamic = 'force-dynamic'
 
-// Admin select — full row plus client + service. The page only operates on
-// admin-only fields (billing_amount_inr, billing_mode, etc.) for admin users,
-// so admins receive `*` and the renderer gates per role.
-const ADMIN_TASK_SELECT = `*, client:clients(id, name, code), service:services(id, name)`
+// Admin select — every column the Task interface / edit modal actually reads,
+// spelled out instead of `*`. Egress: this page ships EVERY task on EVERY
+// visit, so per-row weight is multiplied by ~2,000; `*` also dragged along
+// scope, created_by, updated_at, billing_exchange_rate and contributions_locked,
+// which nothing on the page renders. Add new columns here deliberately.
+const ADMIN_TASK_SELECT = `id, task_number, title, description, client_id, service_id, status, billing_amount, billing_amount_inr, quantity, currency, task_date, created_at, deleted_at, is_recurring, recurring_interval, recurring_end_date, recurring_parent_id, cancelled_by, cancellation_notes, honor_contributions, loss_amount, completion_pct, parent_task_id, variant_type, variant_label, billing_mode, billing_percent, billing_override, is_billable, bill_as_extra, retainer_item_id, work_value, work_value_inr, work_value_currency, billing_rule, billing_snapshot, client:clients(id, name, code), service:services(id, name)`
 
 // Employee select — explicit column list with ALL financial fields stripped.
 // These never enter the client JS state for employees:
@@ -171,7 +173,9 @@ export default async function TasksPage({
   // billing_amount / loss_amount / currency / billing_mode never reach the
   // client JS state. This replaces the old binary isAdmin gate so designated
   // roles can be granted task visibility without pricing.
-  const selectClause = vis.tasksPricing ? ADMIN_TASK_SELECT : EMPLOYEE_TASK_SELECT
+  // Typed as plain string: the explicit column list is long enough that
+  // supabase-js's literal-type parser hits TS2589 (excessively deep) on it.
+  const selectClause: string = vis.tasksPricing ? ADMIN_TASK_SELECT : EMPLOYEE_TASK_SELECT
 
   // Service-scoped task visibility (tasks.view_by_service). 'services' viewers
   // only receive tasks of their assigned services plus tasks they worked on —

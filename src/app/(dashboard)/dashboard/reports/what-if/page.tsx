@@ -5,6 +5,7 @@ import { PERMS } from '@/lib/permissions/keys'
 import type { RawTask, RawScore, RawPricing, EmployeeColumn } from '@/lib/reports/contribution-analysis'
 import type { CommissionAgreement } from '@/lib/calculations/agreements'
 import type { WhatIfRawInputs } from '@/lib/reports/what-if'
+import { defaultWindow, scoreWindowFor } from '@/lib/reports/date-bounds'
 import WhatIfClient from './what-if-client'
 
 // Scores/agreements change whenever contributions are saved — always read fresh.
@@ -24,6 +25,9 @@ export default async function WhatIfPage() {
 
   const supabase = createAdminClient()
 
+  const planningWindow = defaultWindow()
+  const planningScoreWindow = scoreWindowFor(planningWindow)
+
   const [employeesRes, clientsRes, servicesRes, pricingRes, tasksRes, scoresRes, ratingsRes, taskToolsRes, toolsRes] = await Promise.all([
     supabase.from('employees').select('id, cqid, name, base_salary').eq('is_active', true).order('cqid'),
     supabase.from('clients').select('id, name').order('name'),
@@ -38,12 +42,20 @@ export default async function WhatIfPage() {
         // understating the plan for any retainer client.
         .select('id, task_number, title, task_date, status, currency, billing_amount, billing_amount_inr, client_id, service_id, retainer_item_id, bill_as_extra, work_value_inr')
         .is('deleted_at', null)
+        // Egress guard: the planner models the business as it runs TODAY, and
+        // multi-year-old tasks only distort that baseline — so the fetch is
+        // hard-bounded to the last 12 months instead of shipping all history
+        // (which cost megabytes per view).
+        .gte('task_date', planningWindow.from!)
         .order('id', { ascending: true }),
     ),
     fetchAll(
       supabase
         .from('contribution_scores')
         .select('task_id, employee_id, score_percentage, earnings_inr, is_manual_override')
+        // Lower bound with slack (scores trail task dates); out-of-window
+        // rows are dropped by the builder's task-id match.
+        .gte('calculated_at', planningScoreWindow.fromTs!)
         .order('id', { ascending: true }),
     ),
     supabase.from('employees').select('id, performance_rating'),
