@@ -759,6 +759,9 @@ export default function SocialCalendarClient({
     return cells
   }, [selected])
 
+  /** Local-midnight key for today — the same ymd() the grid cells use. */
+  const todayKey = ymd(new Date())
+
   const itemsByDate = useMemo(() => {
     const map = new Map<string, ItemRow[]>()
     for (const it of items) {
@@ -1231,7 +1234,7 @@ export default function SocialCalendarClient({
                       key={cell.key}
                       id={`day:${cell.key}`}
                       disabled={!cell.inMonth}
-                      className={`min-h-[96px] border-b border-r border-border/50 align-top transition-colors ${cell.inMonth ? '' : 'bg-secondary/20 opacity-50'}`}
+                      className={`min-h-[96px] border-b border-r border-border/50 align-top transition-colors ${cell.inMonth ? '' : 'bg-secondary/20 opacity-50'} ${cell.key === todayKey ? 'bg-primary/[0.06] ring-1 ring-inset ring-primary/30' : ''}`}
                       activeClassName="bg-primary/10"
                     >
                       <div
@@ -1244,7 +1247,11 @@ export default function SocialCalendarClient({
                           setItemModal({ mode: 'add' })
                         }}
                       >
-                        <div className="text-[10px] text-muted-foreground">{cell.date.getDate()}</div>
+                        <div className={cell.key === todayKey
+                          ? 'text-[10px] font-semibold w-4 h-4 rounded-full bg-primary text-white flex items-center justify-center'
+                          : 'text-[10px] text-muted-foreground'}>
+                          {cell.date.getDate()}
+                        </div>
                         <div className="mt-1 space-y-1">
                           {dayItems.map(it => {
                             const progress = resolveItemProgress(it.status, it.request)

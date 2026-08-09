@@ -10,6 +10,7 @@ import { CommandPaletteTrigger } from '@/components/ui/command-palette'
 import { NotificationBell } from '@/components/layout/notification-bell'
 import { AppLauncherTrigger } from '@/components/layout/app-launcher'
 import { EmployeeAvatar } from '@/components/ui/employee-avatar'
+import { LiveClock } from '@/components/layout/live-clock'
 import { ProfileActions, ChangePasswordModal } from '@/components/layout/sidebar'
 
 interface HeaderProps {
@@ -148,6 +149,7 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
         <Sparkles className="h-3.5 w-3.5" />
         <span className="hidden lg:inline">AI Capture</span>
       </button>
+      <LiveClock className="mr-1" />
       <CommandPaletteTrigger className="hidden md:flex w-52 lg:w-64" />
       <CommandPaletteTrigger className="md:hidden" isCollapsed={true} />
       

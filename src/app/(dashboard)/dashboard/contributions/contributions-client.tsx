@@ -2209,10 +2209,10 @@ export default function ContributionsClient({
                     return (
                       <div
                         key={i}
-                        className={`min-h-[100px] border-r border-b border-border/40 p-1.5 ${!cell.inMonth ? 'bg-black/20 opacity-40' : ''} ${(i+1) % 7 === 0 ? 'border-r-0' : ''} ${i >= 35 ? 'border-b-0' : ''}`}
+                        className={`min-h-[100px] border-r border-b border-border/40 p-1.5 ${!cell.inMonth ? 'bg-black/20 opacity-40' : ''} ${(i+1) % 7 === 0 ? 'border-r-0' : ''} ${i >= 35 ? 'border-b-0' : ''} ${isToday ? 'bg-primary/[0.06] ring-1 ring-inset ring-primary/30' : ''}`}
                       >
                         <div className="flex items-center justify-between mb-1">
-                          <span className={`text-[11px] font-medium ${isToday ? 'bg-blue-500 text-white rounded-full w-5 h-5 flex items-center justify-center' : 'text-muted-foreground'}`}>
+                          <span className={`text-[11px] font-medium ${isToday ? 'bg-primary text-white rounded-full w-5 h-5 flex items-center justify-center' : 'text-muted-foreground'}`}>
                             {cell.date.getDate()}
                           </span>
                           {dayTasks.length > 0 && (
