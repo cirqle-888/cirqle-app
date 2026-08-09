@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { X, ShieldAlert, Trash2, Link2, Wallet, ArrowRight } from 'lucide-react'
 
 /**
@@ -261,8 +262,12 @@ export default function AllocateFromCashbookModal({
     }
   }
 
+  // In-app confirmation. NOT window.confirm: the desktop shell returns false
+  // from it immediately without ever drawing a dialog, so this button would
+  // silently do nothing there.
+  const [removeAllocId, setRemoveAllocId] = useState<string | null>(null)
+
   async function handleRemove(allocId: string) {
-    if (!confirm('Remove this allocation? The payment goes back to unallocated.')) return
     setSaving(true)
     const { error: e } = await supabase
       .from('cashbook_invoice_allocations')
@@ -363,7 +368,7 @@ export default function AllocateFromCashbookModal({
                       </div>
                       {linked && (
                         <button
-                          onClick={() => handleRemove(e.thisInvoiceAllocId!)}
+                          onClick={() => setRemoveAllocId(e.thisInvoiceAllocId!)}
                           disabled={saving}
                           title="Remove this allocation"
                           className="text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50 shrink-0">
@@ -451,6 +456,16 @@ export default function AllocateFromCashbookModal({
           </div>
         </div>
       </div>
+      {removeAllocId && (
+        <ConfirmDialog
+          title="Undo this allocation?"
+          body="The payment goes back to unallocated cash in the book and this invoice's outstanding balance rises again. Nothing is refunded — only the link between the two is removed."
+          confirmLabel="Undo allocation"
+          danger
+          onConfirm={() => { const id = removeAllocId; setRemoveAllocId(null); void handleRemove(id) }}
+          onCancel={() => setRemoveAllocId(null)}
+        />
+      )}
     </ModalOverlay>
   )
 }

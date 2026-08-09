@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { X, Plus, Trash2, Calendar, Percent, FileText } from 'lucide-react'
 import type { Employee, EmployeePerformanceHistory } from '@/types'
@@ -13,6 +14,11 @@ export function PerformanceHistoryModal({ employee, onClose }: { employee: Emplo
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const supabase = createClient()
+
+  // In-app confirmation. NOT window.confirm: the desktop shell returns false
+  // from it immediately without ever drawing a dialog, so the delete button
+  // would silently do nothing there.
+  const [deleteTarget, setDeleteTarget] = useState<EmployeePerformanceHistory | null>(null)
 
   // New entry form state
   const [form, setForm] = useState({
@@ -64,8 +70,6 @@ export function PerformanceHistoryModal({ employee, onClose }: { employee: Emplo
   }
 
   async function handleDelete(id: string) {
-    if (!confirm('Are you sure you want to delete this historical record?')) return
-    
     const { error } = await supabase
       .from('employee_performance_history')
       .delete()
@@ -194,7 +198,7 @@ export function PerformanceHistoryModal({ employee, onClose }: { employee: Emplo
                         <td className="px-4 py-3 text-right">
                           <button
                             type="button"
-                            onClick={() => handleDelete(record.id)}
+                            onClick={() => setDeleteTarget(record)}
                             className="p-1.5 hover:bg-destructive/10 text-destructive/70 hover:text-destructive rounded transition-colors"
                             title="Delete record"
                           >
@@ -216,6 +220,16 @@ export function PerformanceHistoryModal({ employee, onClose }: { employee: Emplo
           </div>
         </div>
       </div>
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Delete this performance record?"
+          body={`The ${deleteTarget.performance_rating}% rating effective ${new Date(deleteTarget.effective_from).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} is removed for good. Contributions calculated from now on will fall back to the next earlier record, or the current profile rating.`}
+          confirmLabel="Delete record"
+          danger
+          onConfirm={() => { const id = deleteTarget.id; setDeleteTarget(null); void handleDelete(id) }}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
     </ModalOverlay>
   )
 }

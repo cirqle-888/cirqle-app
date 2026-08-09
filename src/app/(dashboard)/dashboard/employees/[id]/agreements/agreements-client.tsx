@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import Combobox from '@/components/ui/combobox'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { useToast, ToastContainer } from '@/components/ui/toast'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   ArrowLeft, Plus, Pencil, Trash2, Loader2, AlertTriangle, Check, X, Handshake, RefreshCw,
 } from 'lucide-react'
@@ -52,6 +53,11 @@ export default function AgreementsClient({
   const [form, setForm] = useState<(AgreementInput & { id?: string }) | null>(null)
   const [saving, setSaving] = useState(false)
   const [recomputing, setRecomputing] = useState(false)
+  // In-app confirmations, NOT window.confirm — the desktop shell returns false
+  // from native confirm without drawing anything, so Delete silently did
+  // nothing there.
+  const [confirmRecompute, setConfirmRecompute] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<Agreement | null>(null)
 
   const clientName = useMemo(() => new Map(clients.map(c => [c.id, c.code ? `${c.name} · ${c.code}` : c.name])), [clients])
   const serviceName = useMemo(() => new Map(services.map(s => [s.id, s.name])), [services])
@@ -105,7 +111,6 @@ export default function AgreementsClient({
   }
 
   async function handleDelete(a: Agreement) {
-    if (!confirm('Delete this agreement? Affected tasks will revert to normal contribution earnings.')) return
     const res = await deleteAgreement(a.id)
     if (res.ok) { setRows(prev => prev.filter(x => x.id !== a.id)); success('Agreement deleted') }
     else toastError('Delete failed', res.error)
@@ -136,10 +141,13 @@ export default function AgreementsClient({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={handleRecompute} disabled={recomputing}
+          {/* Reprocesses every historical task for this employee and restates
+              pending payroll. It fired on one click with only a tooltip; now
+              the consequence is stated before anything is written. */}
+          <button onClick={() => setConfirmRecompute(true)} disabled={recomputing}
             title="Recalculate all historical tasks for this employee (pending payroll only; paid is never changed)"
             className="text-xs px-3 py-2 rounded-lg bg-secondary border border-border hover:bg-secondary/70 transition-colors flex items-center gap-1.5 disabled:opacity-50">
-            {recomputing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Recalculate history
+            {recomputing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Recalculate history…
           </button>
           {!form && (
             <button onClick={() => setForm(emptyForm(employee.id))}
@@ -154,6 +162,10 @@ export default function AgreementsClient({
         An agreement <b>replaces</b> this employee's normal contribution earning on matching tasks — only when they
         actually contributed (have a score). Everyone else is unaffected. Leave Client or Service as
         <b> All</b> to apply broadly; the most specific agreement wins.
+        {/* Which-tool-when: the three pay tools look alike, so each screen
+            names its own job and points to the other two. */}
+        {' '}Setting the <b>pool for everyone</b> on a client × service belongs in the Pricing Matrix;
+        paying a <b>role</b> (Accounts, HR) regardless of tasks belongs in Settings → Ownership.
       </p>
 
       {/* Add / edit form */}
@@ -299,7 +311,7 @@ export default function AgreementsClient({
                   </button>
                   <button onClick={() => setForm({ ...a, notes: a.notes || '' })} title="Edit"
                     className="p-1.5 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
-                  <button onClick={() => handleDelete(a)} title="Delete"
+                  <button onClick={() => setDeleteTarget(a)} title="Delete"
                     className="p-1.5 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-400 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
                 </div>
               </div>
@@ -308,6 +320,25 @@ export default function AgreementsClient({
         </div>
       )}
 
+      {confirmRecompute && (
+        <ConfirmDialog
+          title={`Reprocess every past task for ${dn(employee)}?`}
+          body="Each historical task this employee contributed to is re-scored against the agreements above. Pending payroll changes to match; already-paid months are never touched."
+          confirmLabel="Recalculate history"
+          onConfirm={() => { setConfirmRecompute(false); void handleRecompute() }}
+          onCancel={() => setConfirmRecompute(false)}
+        />
+      )}
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Delete this agreement?"
+          body="Tasks it covered revert to normal contribution earnings, and pending payroll is recalculated. Paid months are not changed."
+          confirmLabel="Delete agreement"
+          danger
+          onConfirm={() => { const a = deleteTarget; setDeleteTarget(null); void handleDelete(a) }}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </div>
   )

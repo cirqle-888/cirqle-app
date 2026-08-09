@@ -9,7 +9,7 @@ import { insertCashbookEntries, updateCashbookEntry, softDeleteCashbookEntry, fe
 import { SCOPE_FILTER_OPTIONS, matchesScopeFilter, getScopeFilterLabel, type ScopeFilterValue } from '@/components/ui/scope-filter'
 import { formatCompact, round2 } from '@/lib/calculations/currency'
 import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
-import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, RefreshCw, Landmark, CheckCircle, ArrowLeftRight, Copy, Users, Sparkles } from 'lucide-react'
+import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, RefreshCw, Landmark, CheckCircle, ArrowLeftRight, Copy, Users, Sparkles, ChevronDown } from 'lucide-react'
 import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
 import { ActiveFilterChips } from '@/components/ui/active-filter-chips'
 import { TokenizedSearch, type SearchFacet } from '@/components/ui/tokenized-search'
@@ -25,6 +25,7 @@ import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { computeEqualSplit } from '@/lib/finance/splits'
 import type { Currency } from '@/types'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useRole } from '@/contexts/role-context'
 import type { ReceiptInput } from '@/components/cashbook/receipt-modal'
 
@@ -760,8 +761,12 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     }
   }
 
+  // In-app confirmation, NOT window.confirm: the desktop shell returns false
+  // from native confirm without drawing a dialog, so Delete silently did
+  // nothing there (same bug the Months screen fixed).
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+
   async function handleSoftDelete(entryId: string) {
-    if (!confirm('Delete this entry? It can be restored from the Reconciliation Toolkit.')) return
     const result = await softDeleteCashbookEntry(entryId)
     if (result.ok) {
       // Remove from local list immediately (soft-deleted entries are hidden)
@@ -1347,11 +1352,11 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               onChange={e => setFilterAllocStatus(e.target.value)}
               className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50"
             >
-              <option value="">All Allocations</option>
-              <option value="unallocated">Unallocated</option>
-              <option value="partial">Partially Allocated</option>
-              <option value="fully">Fully Allocated</option>
-              <option value="over">Over-allocated</option>
+              <option value="">Invoice link: any</option>
+              <option value="unallocated">Not linked to an invoice</option>
+              <option value="partial">Partly linked</option>
+              <option value="fully">Fully linked</option>
+              <option value="over">Linked to more than received</option>
             </select>
 
             <select
@@ -1413,9 +1418,9 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         <ActiveFilterChips
           className="mb-3"
           chips={[
-            ...(filterType ? [{ key: 'type', label: 'Type', value: filterType === 'inflow' ? 'Inflow' : 'Outflow', onRemove: () => setFilterType('') }] : []),
+            ...(filterType ? [{ key: 'type', label: 'Type', value: filterType === 'inflow' ? 'Income' : 'Expense', onRemove: () => setFilterType('') }] : []),
             ...(filterCategory ? [{ key: 'category', label: 'Category', value: categories.find((c: any) => c.id === filterCategory)?.name || 'Selected', onRemove: () => setFilterCategory('') }] : []),
-            ...(filterScope ? [{ key: 'scope', label: 'Books', value: getScopeFilterLabel(filterScope), onRemove: () => setFilterScope('') }] : []),
+            ...(filterScope ? [{ key: 'scope', label: 'Whose money', value: getScopeFilterLabel(filterScope), onRemove: () => setFilterScope('') }] : []),
             ...(filterClient ? [{ key: 'client', label: 'Client', value: clients.find((c: any) => c.id === filterClient)?.name || 'Selected', onRemove: () => setFilterClient('') }] : []),
             ...(filterMonth ? [{ key: 'month', label: 'Month', value: filterMonth, onRemove: () => setFilterMonth('') }] : []),
             ...(filterAllocStatus ? [{ key: 'alloc', label: 'Allocation', value: filterAllocStatus, onRemove: () => setFilterAllocStatus('') }] : []),
@@ -1574,7 +1579,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
                             <button
-                              onClick={() => handleSoftDelete(entry.id)}
+                              onClick={() => setDeleteConfirmId(entry.id)}
                               className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
                               title="Delete entry (reversible)"
                             >
@@ -1824,7 +1829,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
                             <button
-                              onClick={() => handleSoftDelete(entry.id)}
+                              onClick={() => setDeleteConfirmId(entry.id)}
                               className="lg:opacity-0 opacity-100 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
                               title="Delete entry (reversible)"
                             >
@@ -2293,11 +2298,35 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 </div>
               )}
 
+              {/* Everything below is optional bookkeeping detail: whose money
+                  it is, spend labels, cost sharing and repeats. A normal entry
+                  (type, category, amount, date, description) never needs it, so
+                  it stays folded — but the header counts what is already set so
+                  configured data is never hidden without a trace. */}
+              {(() => {
+                const advCount =
+                  (form.scope && form.scope !== 'company' ? 1 : 0) +
+                  (form.tags?.length ? 1 : 0) +
+                  (recurringMonths > 0 ? 1 : 0)
+                return (
+                  <details open={advCount > 0} className="group rounded-xl border border-border bg-secondary/20">
+                    <summary className="flex items-center justify-between gap-2 px-3 py-2.5 cursor-pointer select-none list-none">
+                      <span className="text-xs font-medium text-foreground">
+                        More options
+                        <span className="text-muted-foreground font-normal ml-1.5">
+                          {advCount > 0
+                            ? `· ${advCount} set`
+                            : '· whose money, tags, split, repeat'}
+                        </span>
+                      </span>
+                      <ChevronDown className="w-4 h-4 text-muted-foreground group-open:rotate-180 transition-transform" />
+                    </summary>
+                    <div className="px-3 pb-3 space-y-4">
               {/* ── Books — which economy this money belongs to. Hidden when a
                    client is tagged (client money by definition). ── */}
               {!(smartExtra.client_id || form.client_filter_id) && (
                 <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Books</label>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Whose money is this?</label>
                   <div className="flex gap-2">
                     <button
                       type="button"
@@ -2407,6 +2436,11 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                   </p>
                 )}
               </div>}
+
+                    </div>
+                  </details>
+                )
+              })()}
 
               </div>
               <div className="flex gap-3 px-6 py-4 border-t border-border shrink-0 bg-card pb-[max(1rem,env(safe-area-inset-bottom))]">
@@ -2651,6 +2685,17 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             </div>
           </div>
         </ModalOverlay>
+      )}
+
+      {deleteConfirmId && (
+        <ConfirmDialog
+          title="Delete this entry?"
+          body="The entry is hidden from the Cash Book and its balances. It can be restored from the Reconciliation Toolkit."
+          confirmLabel="Delete entry"
+          danger
+          onConfirm={() => { const id = deleteConfirmId; setDeleteConfirmId(null); void handleSoftDelete(id) }}
+          onCancel={() => setDeleteConfirmId(null)}
+        />
       )}
     </div>
   )

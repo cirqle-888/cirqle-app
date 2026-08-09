@@ -5,11 +5,13 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import Combobox from '@/components/ui/combobox'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import {
-  ArrowLeft, Calendar, FileSignature, Plus, Pencil, Trash2, Loader2, Check, X,
-  Play, Pause, CheckCircle2, Ban, RotateCcw, MessageSquarePlus, Clock, ExternalLink, Wallet, Layers,
+  ArrowLeft, Plus, Pencil, Trash2, Loader2, Check, X, ChevronRight, MoreHorizontal,
+  Play, Pause, CheckCircle2, Ban, RotateCcw, MessageSquarePlus, ExternalLink,
 } from 'lucide-react'
+import { formatTaskDate } from '@/lib/utils/format-date'
 import {
   AGREEMENT_STATUS_CHIP, STATUS_LABEL, COMMITMENT_TYPES, CYCLES, CARRY_RULES,
   RENEWAL_TYPES, VISIBILITY_TYPES,
@@ -28,7 +30,11 @@ const CONTENT_TYPES = [
   'post', 'reel', 'story', 'carousel', 'video', 'flyer', 'poster', 'blog', 'seo', 'ad', 'email', 'other',
 ]
 
-const inputCls = 'w-full bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20'
+// Width lives outside the base so a row can size its own fields. Appending
+// `w-24` to a class string that already carries `w-full` is a coin toss in the
+// cascade — that is what shrank the deliverable name box to an empty pill.
+const inputBase = 'bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20'
+const inputCls = `w-full ${inputBase}`
 const labelCls = 'block text-xs font-medium text-muted-foreground mb-1.5'
 
 // Contextual status transitions.
@@ -101,6 +107,73 @@ function itemHeadline(it: { deliverables: Deliverable[]; committed_quantity: num
   return Number(it.committed_quantity || 0)
 }
 
+/**
+ * "Change terms" closes the current row and inserts a successor, so the loader
+ * returns BOTH and the page listed them as two near-identical items — the same
+ * commitment twice, one of which no longer owes anything. The lineage is
+ * recorded nowhere but the term_changed events, so rebuild it from those: the
+ * newest term of a chain is the item, the earlier ones become its history.
+ *
+ * A chain whose event is missing (pre-dating the log, or past its 200-row
+ * window) simply stays split — the old behaviour, never a wrong merge.
+ */
+function foldTermChains(items: Item[], events: EventRow[]) {
+  const successorOf = new Map<string, string>()
+  for (const ev of events) {
+    if (ev.action !== 'term_changed') continue
+    const from = ev.detail?.from_item_id
+    const to = ev.detail?.to_item_id
+    if (typeof from === 'string' && typeof to === 'string') successorOf.set(from, to)
+  }
+
+  const byId = new Map(items.map(i => [i.id, i]))
+  const history = new Map<string, Item[]>()
+  const superseded = new Set<string>()
+
+  for (const it of items) {
+    let tipId = it.id
+    const walked = new Set([tipId])
+    while (successorOf.has(tipId)) {
+      const next = successorOf.get(tipId)!
+      if (!byId.has(next) || walked.has(next)) break // successor deleted, or a cycle
+      tipId = next
+      walked.add(tipId)
+    }
+    if (tipId === it.id) continue
+    superseded.add(it.id)
+    history.set(tipId, [...(history.get(tipId) ?? []), it])
+  }
+
+  for (const list of history.values()) {
+    list.sort((a, b) => a.effective_from.localeCompare(b.effective_from))
+  }
+  return { current: items.filter(i => !superseded.has(i.id)), history }
+}
+
+/**
+ * Consecutive events that say the same thing at the same minute (two items added
+ * in one save, say) collapse into one row with a count. Without this the whole
+ * timeline is "Item added / Item added / Item added" and the useful entries —
+ * the notes — get lost between them. Rows carrying text are never merged.
+ */
+function groupEvents(events: EventRow[]): (EventRow & { count: number })[] {
+  const out: (EventRow & { count: number })[] = []
+  for (const ev of events) {
+    const prev = out[out.length - 1]
+    if (
+      prev && prev.action === ev.action && prev.actor_label === ev.actor_label
+      && prev.visibility === ev.visibility
+      && !prev.detail?.text && !ev.detail?.text
+      && prev.created_at.slice(0, 16) === ev.created_at.slice(0, 16)
+    ) {
+      prev.count += 1
+      continue
+    }
+    out.push({ ...ev, count: 1 })
+  }
+  return out
+}
+
 const EVENT_LABEL: Record<string, string> = {
   created: 'Agreement created', updated: 'Details updated', activated: 'Activated',
   paused: 'Paused', resumed: 'Resumed', completed: 'Completed', cancelled: 'Cancelled',
@@ -133,13 +206,37 @@ export default function AgreementDetailClient({
 
   const currency = agreement.client?.default_currency || 'INR'
   const serviceName = useMemo(() => new Map(services.map(s => [s.id, s.name])), [services])
+  const { current: items, history: termHistory } = useMemo(
+    () => foldTermChains(initialItems, initialEvents),
+    [initialItems, initialEvents],
+  )
   const transitions = TRANSITIONS[agreement.status] || []
   const isDraft = agreement.status === 'draft' || agreement.status === 'pending_approval'
 
   async function refresh() { router.refresh() }
 
+  // In-app confirmation, NOT window.confirm: the desktop shell returns false
+  // from native confirm without drawing anything, so Cancel / Delete / Remove
+  // silently did nothing there (same bug the Months screen fixed).
+  const [confirmPrompt, setConfirmPrompt] = useState<{
+    title: string; body: string; confirmLabel: string; danger?: boolean; onConfirm: () => void
+  } | null>(null)
+
   async function handleStatus(to: AgreementStatus, label: string) {
-    if ((to === 'cancelled') && !confirm(`${label} this agreement?`)) return
+    if (to === 'cancelled') {
+      setConfirmPrompt({
+        title: `${label} this agreement?`,
+        body: 'Covered tasks stop drawing from its work values and bill normally again. The agreement and its history are kept.',
+        confirmLabel: label,
+        danger: true,
+        onConfirm: () => { setConfirmPrompt(null); void applyStatus(to, label) },
+      })
+      return
+    }
+    void applyStatus(to, label)
+  }
+
+  async function applyStatus(to: AgreementStatus, label: string) {
     setBusy('status')
     const res = await setAgreementStatus(agreement.id, to)
     setBusy(null)
@@ -147,8 +244,17 @@ export default function AgreementDetailClient({
     else toastError('Could not update status', res.error)
   }
 
-  async function handleDeleteAgreement() {
-    if (!confirm('Delete this agreement? It will be archived (soft-deleted).')) return
+  function handleDeleteAgreement() {
+    setConfirmPrompt({
+      title: 'Delete this agreement?',
+      body: 'It is archived, not destroyed — an admin can restore it. Covered tasks revert to normal billing.',
+      confirmLabel: 'Delete agreement',
+      danger: true,
+      onConfirm: () => { setConfirmPrompt(null); void applyDeleteAgreement() },
+    })
+  }
+
+  async function applyDeleteAgreement() {
     setBusy('delete')
     const res = await deleteAgreement(agreement.id)
     setBusy(null)
@@ -156,8 +262,17 @@ export default function AgreementDetailClient({
     else toastError('Delete failed', res.error)
   }
 
-  async function handleDeleteItem(it: Item) {
-    if (!confirm('Remove this item and its deliverables?')) return
+  function handleDeleteItem(it: Item) {
+    setConfirmPrompt({
+      title: 'Remove this item?',
+      body: 'The item and its deliverables are removed from the agreement. Tasks already linked to it revert to normal billing.',
+      confirmLabel: 'Remove item',
+      danger: true,
+      onConfirm: () => { setConfirmPrompt(null); void applyDeleteItem(it) },
+    })
+  }
+
+  async function applyDeleteItem(it: Item) {
     setBusy('item:' + it.id)
     const res = await deleteAgreementItem(agreement.id, it.id)
     setBusy(null)
@@ -174,148 +289,155 @@ export default function AgreementDetailClient({
     else toastError('Could not update milestone', res.error)
   }
 
-  return (
-    <div className="flex flex-col gap-6 p-6 md:p-8 max-w-7xl mx-auto w-full">
-      {/* Back */}
-      <div className="flex items-center gap-4 text-sm">
-        <Link href="/dashboard/agreements" className="flex items-center text-muted-foreground hover:text-foreground transition-colors">
-          <ArrowLeft className="w-4 h-4 mr-1" /> Back to Agreements
-        </Link>
-      </div>
+  const committed = progress?.totalCommitted ?? 0
+  const delivered = progress?.totalDelivered ?? 0
+  const remaining = progress?.totalRemaining ?? 0
+  const extraBilled = progress?.totalExtraBilled ?? 0
+  const pct = committed > 0 ? Math.min(100, Math.round((delivered / committed) * 100)) : 0
 
-      {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <div className="flex items-center gap-3 mb-1 flex-wrap">
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">{agreement.title}</h1>
-            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${AGREEMENT_STATUS_CHIP[agreement.status]}`}>
-              {STATUS_LABEL[agreement.status] || agreement.status}
-            </span>
+  // At most one caveat about the period is worth a line — a stack of three
+  // explanations under the bar is what made this page feel heavy.
+  const periodHint =
+    progress && progress.periodLabel !== currentMonth
+      ? `Started mid-month on ${formatTaskDate(agreement.start_date)}, so that part month runs with the next one as a single cycle.`
+      : progress && isPartialMonth(currentMonth, agreement.start_date, agreement.end_date)
+        ? 'Part month — the commitment is prorated by active days.'
+        : progress == null && agreement.status === 'active'
+          ? 'Nothing recorded yet — figures fill in as covered tasks are completed.'
+          : null
+
+  return (
+    <div className="flex flex-col gap-5 p-5 md:p-8 max-w-6xl mx-auto w-full">
+      {/* Header — identity and status first; everything else is one quiet line */}
+      <div>
+        <Link href="/dashboard/agreements"
+          className="inline-flex items-center text-xs text-muted-foreground hover:text-foreground transition-colors mb-3">
+          <ArrowLeft className="w-3.5 h-3.5 mr-1" /> Agreements
+        </Link>
+
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h1 className="text-xl md:text-2xl font-bold tracking-tight text-foreground">{agreement.title}</h1>
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${AGREEMENT_STATUS_CHIP[agreement.status]}`}>
+                {STATUS_LABEL[agreement.status] || agreement.status}
+              </span>
+            </div>
+            {/* Inline, not flex — so it wraps like a sentence on a phone instead
+                of stacking one fact per line with orphaned separators. */}
+            <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+              <span className="tabular-nums">{agreement.agreement_number}</span>
+              {agreement.client && (
+                <>
+                  {' · '}
+                  <Link href={`/dashboard/clients/${agreement.client.id}`} className="hover:text-foreground hover:underline">
+                    {agreement.client.name}
+                  </Link>
+                </>
+              )}
+              {' · '}
+              <span className="tabular-nums whitespace-nowrap">
+                {formatTaskDate(agreement.start_date)} → {agreement.end_date ? formatTaskDate(agreement.end_date) : 'Ongoing'}
+              </span>
+              {' · '}
+              <span className="capitalize whitespace-nowrap">{agreement.renewal_type} renewal</span>
+              {agreement.signed_document_url && (
+                <>
+                  {' · '}
+                  <a href={agreement.signed_document_url} target="_blank" rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-primary hover:underline align-middle">
+                    Signed doc <ExternalLink className="w-3 h-3" />
+                  </a>
+                </>
+              )}
+            </p>
           </div>
-          <div className="flex items-center gap-3 text-sm text-muted-foreground flex-wrap">
-            <span>{agreement.agreement_number}</span>
-            <span>•</span>
-            {agreement.client && (
-              <Link href={`/dashboard/clients/${agreement.client.id}`} className="hover:text-foreground hover:underline">
-                {agreement.client.name}
-              </Link>
-            )}
-            <span>•</span>
-            <span className="flex items-center">
-              <Calendar className="w-3.5 h-3.5 mr-1" />
-              {agreement.start_date} &rarr; {agreement.end_date || 'Ongoing'}
-            </span>
-            <span>•</span>
-            <span className="capitalize">Renewal: {agreement.renewal_type}</span>
-            {agreement.signed_document_url && (
-              <>
-                <span>•</span>
-                <a href={agreement.signed_document_url} target="_blank" rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-primary hover:underline">
-                  Signed doc <ExternalLink className="w-3 h-3" />
-                </a>
-              </>
-            )}
-          </div>
+
+          {canManage && (
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button onClick={() => setEditHeader(true)}
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-secondary border border-border hover:bg-secondary/70 transition-colors">
+                <Pencil className="w-3.5 h-3.5" /> Edit
+              </button>
+              <ActionMenu disabled={busy === 'status' || busy === 'delete'}>
+                {close => (
+                  <>
+                    {transitions.map(t => (
+                      <button key={t.to} onClick={() => { close(); handleStatus(t.to, t.label) }}
+                        className="w-full flex items-center gap-2.5 text-left text-sm px-2.5 py-2 rounded-lg hover:bg-secondary transition-colors">
+                        <t.icon className={`w-3.5 h-3.5 ${t.tone}`} /> {t.label}
+                      </button>
+                    ))}
+                    <div className="my-1 h-px bg-border" />
+                    <button onClick={() => { close(); handleDeleteAgreement() }}
+                      className="w-full flex items-center gap-2.5 text-left text-sm px-2.5 py-2 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors">
+                      <Trash2 className="w-3.5 h-3.5" /> Delete
+                    </button>
+                  </>
+                )}
+              </ActionMenu>
+            </div>
+          )}
         </div>
 
-        {canManage && (
-          <div className="flex items-center gap-2 flex-wrap">
-            {transitions.map(t => (
-              <button key={t.to} onClick={() => handleStatus(t.to, t.label)} disabled={busy === 'status'}
-                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg bg-secondary border border-border hover:bg-secondary/70 transition-colors disabled:opacity-50">
-                <t.icon className={`w-3.5 h-3.5 ${t.tone}`} /> {t.label}
-              </button>
-            ))}
-            <button onClick={() => setEditHeader(true)}
-              className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg bg-secondary border border-border hover:bg-secondary/70 transition-colors">
-              <Pencil className="w-3.5 h-3.5" /> Edit
-            </button>
-            <button onClick={handleDeleteAgreement} disabled={busy === 'delete'} title="Delete agreement"
-              className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-2 rounded-lg hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors disabled:opacity-50">
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
+        {agreement.notes && <ClampText text={agreement.notes} className="mt-3 max-w-3xl text-sm" />}
       </div>
 
-      {agreement.notes && (
-        <p className="text-sm text-muted-foreground -mt-2 max-w-3xl">{agreement.notes}</p>
-      )}
+      {/* Delivery — one strip instead of a wall of number cards */}
+      <section className="rounded-xl border bg-card shadow-sm px-5 py-4">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold">Delivery</h2>
+          <MonthSwitcher
+            month={currentMonth}
+            agreementStart={agreement.start_date}
+            onChange={m => router.push(`?month=${m}`)}
+          />
+        </div>
+        <div className="mt-3 flex items-baseline gap-2 flex-wrap">
+          <span className="text-2xl font-bold tabular-nums leading-none">{delivered}</span>
+          <span className="text-sm text-muted-foreground">of {committed} delivered</span>
+          <span className="ml-auto flex items-baseline gap-3 text-xs">
+            {extraBilled > 0 && (
+              <span className="text-blue-600 dark:text-blue-400 tabular-nums">+{extraBilled} billed as extra</span>
+            )}
+            {remaining > 0 && (
+              <span className="font-medium text-amber-600 dark:text-amber-400 tabular-nums">{remaining} remaining</span>
+            )}
+          </span>
+        </div>
+        <div className="mt-2 h-1.5 rounded-full bg-secondary overflow-hidden">
+          <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
+        </div>
+        {periodHint && <p className="mt-2 text-[11px] text-muted-foreground/70">{periodHint}</p>}
+      </section>
 
-      {/* Progress overview */}
-      <div className="flex items-center justify-between gap-3 mb-3">
-        <h2 className="text-sm font-semibold">Delivery this period</h2>
-        <MonthSwitcher
-          month={currentMonth}
-          agreementStart={agreement.start_date}
-          onChange={m => router.push(`?month=${m}`)}
-        />
-      </div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          { label: `Committed (${progress?.periodLabel ?? currentMonth})`, value: progress?.totalCommitted ?? 0, tone: '' },
-          { label: 'Delivered', value: progress?.totalDelivered ?? 0, tone: 'text-green-600' },
-          { label: 'Remaining', value: progress?.totalRemaining ?? 0, tone: 'text-amber-600' },
-          // Covered work billed on top of the retainer. Shown only when it exists,
-          // so the usual case stays a clean three-card row.
-          ...((progress?.totalExtraBilled ?? 0) > 0
-            ? [{ label: 'Billed as extra', value: progress!.totalExtraBilled, tone: 'text-blue-600' }]
-            : []),
-        ].map(card => (
-          <div key={card.label} className="bg-card border rounded-xl p-5 shadow-sm">
-            <div className="text-xs font-medium text-muted-foreground mb-1">{card.label}</div>
-            <div className={`text-3xl font-bold ${card.tone}`}>{card.value}</div>
-          </div>
-        ))}
-      </div>
-      {/* A period that isn't the plain calendar month reads as a bug without this line. */}
-      {progress && progress.periodLabel !== currentMonth && (
-        <p className="text-xs text-muted-foreground -mt-3">
-          The agreement started on {agreement.start_date}, mid-month — that part month is
-          counted together with the next one as a single cycle, so work delivered in either
-          month counts here.
-        </p>
-      )}
-      {progress && progress.periodLabel === currentMonth
-        && isPartialMonth(currentMonth, agreement.start_date, agreement.end_date) && (
-        <p className="text-xs text-muted-foreground -mt-3">
-          {currentMonth} is a part month — the commitment is prorated by active days.
-        </p>
-      )}
-      {progress == null && agreement.status === 'active' && (
-        <p className="text-xs text-muted-foreground -mt-3">
-          No delivery recorded for {currentMonth} — figures populate as covered tasks are completed.
-        </p>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Items */}
-        <div className="lg:col-span-2 rounded-xl border bg-card text-card-foreground shadow-sm">
-          <div className="p-5 border-b flex justify-between items-center">
-            <h3 className="font-semibold text-lg flex items-center gap-2">
-              <FileSignature className="w-5 h-5 text-muted-foreground" /> Agreement Items
+        <div className="lg:col-span-2 rounded-xl border bg-card text-card-foreground shadow-sm self-start">
+          <div className="px-5 py-3.5 border-b flex justify-between items-center gap-3">
+            <h3 className="text-sm font-semibold">
+              Items {items.length > 0 && <span className="text-muted-foreground font-normal">({items.length})</span>}
             </h3>
             {canManage && (
               <button onClick={() => setItemForm(newItemForm(currency))}
-                className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors">
-                <Plus className="w-4 h-4" /> Add item
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg bg-secondary border border-border hover:bg-secondary/70 transition-colors">
+                <Plus className="w-3.5 h-3.5" /> Add item
               </button>
             )}
           </div>
 
-          {initialItems.length === 0 ? (
-            <div className="p-10 text-center text-muted-foreground">
+          {items.length === 0 ? (
+            <div className="px-5 py-10 text-center text-sm text-muted-foreground">
               <p>No items yet.</p>
-              {canManage && <p className="text-sm mt-1">Add a retainer or one-time package to define what is committed.</p>}
+              {canManage && <p className="text-xs mt-1">Add a retainer or one-time package to define what is committed.</p>}
             </div>
           ) : (
             <div className="divide-y divide-border">
-              {initialItems.map(it => (
+              {items.map(it => (
                 <ItemCard
                   key={it.id} it={it} currency={currency} canManage={canManage}
                   canViewPricing={canViewPricing} isDraft={isDraft} serviceName={serviceName}
-                  busy={busy}
+                  busy={busy} defaultOpen={items.length === 1} history={termHistory.get(it.id) ?? []}
                   onEdit={() => setItemForm(itemToForm(it, agreement.status))}
                   onChangeTerms={() => setItemForm(itemToForm(it, agreement.status, true))}
                   onDelete={() => handleDeleteItem(it)}
@@ -326,43 +448,7 @@ export default function AgreementDetailClient({
           )}
         </div>
 
-        {/* Timeline */}
-        <div className="rounded-xl border bg-card text-card-foreground shadow-sm">
-          <div className="p-5 border-b flex justify-between items-center">
-            <h3 className="font-semibold text-lg flex items-center gap-2">
-              <Clock className="w-5 h-5 text-muted-foreground" /> Timeline
-            </h3>
-            {canManage && (
-              <button onClick={() => setNoteOpen(true)}
-                className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg bg-secondary border border-border hover:bg-secondary/70 transition-colors">
-                <MessageSquarePlus className="w-3.5 h-3.5" /> Note
-              </button>
-            )}
-          </div>
-          {initialEvents.length === 0 ? (
-            <div className="p-8 text-center text-muted-foreground text-sm">No activity yet.</div>
-          ) : (
-            <ul className="p-4 space-y-4 max-h-[520px] overflow-y-auto">
-              {initialEvents.map(ev => (
-                <li key={ev.id} className="flex gap-3">
-                  <div className="mt-1 w-2 h-2 rounded-full bg-primary/60 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-foreground">
-                      {EVENT_LABEL[ev.action] || ev.action}
-                      {ev.visibility === 'client' && (
-                        <span className="ml-2 text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 border border-blue-500/20">Client</span>
-                      )}
-                    </p>
-                    {ev.detail?.text && <p className="text-sm text-muted-foreground mt-0.5 break-words">{ev.detail.text}</p>}
-                    <p className="text-[11px] text-muted-foreground/70 mt-0.5">
-                      {ev.actor_label ? `${ev.actor_label} · ` : ''}{new Date(ev.created_at).toLocaleString()}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <Timeline events={initialEvents} canManage={canManage} onAddNote={() => setNoteOpen(true)} />
       </div>
 
       {/* Modals */}
@@ -389,76 +475,195 @@ export default function AgreementDetailClient({
         />
       )}
 
+      {confirmPrompt && (
+        <ConfirmDialog
+          title={confirmPrompt.title}
+          body={confirmPrompt.body}
+          confirmLabel={confirmPrompt.confirmLabel}
+          danger={confirmPrompt.danger}
+          onConfirm={confirmPrompt.onConfirm}
+          onCancel={() => setConfirmPrompt(null)}
+        />
+      )}
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </div>
   )
 }
 
-const AN_FIN_LABEL: Record<string, string> = { healthy: 'Healthy', warning: 'Warning', loss: 'Loss-making' }
+// ─── Header bits ─────────────────────────────────────────────────────────────
 
+/** Status changes and delete — rare enough to live behind one button. */
+function ActionMenu({
+  disabled, children,
+}: {
+  disabled?: boolean
+  children: (close: () => void) => React.ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => setOpen(o => !o)} disabled={disabled} aria-label="More actions"
+        className="p-1.5 rounded-lg bg-secondary border border-border hover:bg-secondary/70 transition-colors disabled:opacity-50">
+        <MoreHorizontal className="w-4 h-4" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full mt-1.5 z-50 w-48 rounded-xl border border-border bg-card shadow-xl p-1">
+            {children(() => setOpen(false))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+/** Signed-proposal summaries run long; two lines is enough to recognise them. */
+function ClampText({ text, className = '' }: { text: string; className?: string }) {
+  const [open, setOpen] = useState(false)
+  const long = text.length > 150
+  return (
+    <div className={className}>
+      <p className={`text-muted-foreground leading-relaxed ${!open && long ? 'line-clamp-2' : ''}`}>{text}</p>
+      {long && (
+        <button type="button" onClick={() => setOpen(o => !o)}
+          className="mt-0.5 text-xs font-medium text-primary hover:underline">
+          {open ? 'Show less' : 'Show more'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ─── Timeline ────────────────────────────────────────────────────────────────
+
+const TIMELINE_PREVIEW = 5
+
+function Timeline({
+  events, canManage, onAddNote,
+}: {
+  events: EventRow[]; canManage: boolean; onAddNote: () => void
+}) {
+  const [showAll, setShowAll] = useState(false)
+  const rows = useMemo(() => groupEvents(events), [events])
+  const visible = showAll ? rows : rows.slice(0, TIMELINE_PREVIEW)
+
+  return (
+    <div className="rounded-xl border bg-card text-card-foreground shadow-sm self-start">
+      <div className="px-5 py-3.5 border-b flex justify-between items-center gap-3">
+        <h3 className="text-sm font-semibold">Activity</h3>
+        {canManage && (
+          <button onClick={onAddNote}
+            className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg bg-secondary border border-border hover:bg-secondary/70 transition-colors">
+            <MessageSquarePlus className="w-3.5 h-3.5" /> Note
+          </button>
+        )}
+      </div>
+      {rows.length === 0 ? (
+        <p className="px-5 py-8 text-center text-sm text-muted-foreground">No activity yet.</p>
+      ) : (
+        <>
+          <ul className={`p-4 space-y-3 ${showAll ? 'max-h-[420px] overflow-y-auto' : ''}`}>
+            {visible.map(ev => (
+              <li key={ev.id} className="flex gap-2.5">
+                <span className="mt-[7px] w-1.5 h-1.5 rounded-full bg-primary/50 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-[13px] text-foreground">
+                    {EVENT_LABEL[ev.action] || ev.action}
+                    {ev.count > 1 && <span className="text-muted-foreground"> ×{ev.count}</span>}
+                    {ev.visibility === 'client' && (
+                      <span className="ml-1.5 text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 border border-blue-500/20">Client</span>
+                    )}
+                  </p>
+                  {ev.detail?.text && (
+                    <p className="text-xs text-muted-foreground mt-0.5 break-words leading-relaxed">{ev.detail.text}</p>
+                  )}
+                  <p className="text-[11px] text-muted-foreground/60 mt-0.5 tabular-nums"
+                    title={new Date(ev.created_at).toLocaleString()}>
+                    {ev.actor_label ? `${ev.actor_label} · ` : ''}{formatTaskDate(ev.created_at.slice(0, 10))}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {rows.length > TIMELINE_PREVIEW && (
+            <button type="button" onClick={() => setShowAll(s => !s)}
+              className="w-full px-5 py-2.5 border-t text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/40 transition-colors">
+              {showAll ? 'Show less' : `Show all ${rows.length}`}
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
 
 // ─── Item card ───────────────────────────────────────────────────────────────
 
 function ItemCard({
-  it, currency, canManage, canViewPricing, isDraft, serviceName, busy,
+  it, currency, canManage, canViewPricing, isDraft, serviceName, busy, defaultOpen, history,
   onEdit, onChangeTerms, onDelete, onToggleMilestone,
 }: {
   it: Item; currency: string; canManage: boolean; canViewPricing: boolean; isDraft: boolean
-  serviceName: Map<string, string>; busy: string | null
+  serviceName: Map<string, string>; busy: string | null; defaultOpen: boolean
+  /** Closed terms this row replaced, oldest first. */
+  history: Item[]
   onEdit: () => void; onChangeTerms: () => void; onDelete: () => void
   onToggleMilestone: (m: Milestone) => void
 }) {
+  const [open, setOpen] = useState(defaultOpen)
+  const [showDoneMs, setShowDoneMs] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
   const headline = itemHeadline(it)
   const typeLabel = COMMITMENT_TYPES.find(t => t.value === it.commitment_type)?.label
+  const service = it.service_id ? serviceName.get(it.service_id) || 'Service' : null
+  // The invoice wording is what people recognise; the catalogue name is detail.
+  const name = it.invoice_label || service || 'General'
+  const msTotal = it.milestones.length
+  const msDone = it.milestones.filter(m => m.completed_at).length
+  const visibleMilestones = msDone > 2 && !showDoneMs
+    ? it.milestones.filter(m => !m.completed_at)
+    : it.milestones
+
   return (
-    <div className="p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-medium text-foreground">
-              {it.service_id ? serviceName.get(it.service_id) || 'Service' : 'General'}
-            </span>
-            <span className="text-[11px] px-2 py-0.5 rounded-full bg-purple-500/12 text-purple-700 dark:text-purple-300 border border-purple-500/25">
+    <div>
+      {/* Collapsed row: what it is, how much, how far along. Nothing else. */}
+      <button type="button" onClick={() => setOpen(o => !o)}
+        className="w-full flex items-start gap-2.5 px-4 sm:px-5 py-3.5 text-left hover:bg-secondary/40 transition-colors">
+        <ChevronRight className={`w-4 h-4 mt-0.5 shrink-0 text-muted-foreground/60 transition-transform ${open ? 'rotate-90' : ''}`} />
+        {/* Name + facts share a line on desktop and stack on a phone, so the
+            name is never truncated away by the numbers on its right. */}
+        <span className="min-w-0 flex-1 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2.5">
+          <span className="min-w-0 flex items-center gap-2">
+            <span className="font-medium text-foreground truncate">{name}</span>
+            <span className="shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border">
               {typeLabel}{it.commitment_type === 'retainer' && it.cycle ? ` · ${it.cycle}` : ''}
             </span>
+          </span>
+          <span className="sm:ml-auto shrink-0 flex items-center gap-3 text-xs text-muted-foreground tabular-nums">
             {headline > 0 && (
-              <span className="text-[11px] px-2 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border">
-                {headline} committed{it.commitment_type === 'retainer' ? '/cycle' : ''}
+              <span>{headline} {it.commitment_type === 'retainer' ? 'per cycle' : 'committed'}</span>
+            )}
+            {msTotal > 0 && (
+              <span title={`${msDone} of ${msTotal} milestones complete`}
+                className={msDone === msTotal ? 'text-emerald-600 dark:text-emerald-400' : ''}>
+                {msDone}/{msTotal} done
               </span>
             )}
-          </div>
-          {it.invoice_label && (
-            <p className="text-[11px] text-muted-foreground mt-1">
-              Invoices as <span className="text-foreground font-medium">{it.invoice_label}</span>
-            </p>
-          )}
-          <p className="text-xs text-muted-foreground mt-1">
-            {it.effective_from} → {it.effective_to || 'current'}
-            {canViewPricing && it.unit_price != null ? ` · ${currency} ${it.unit_price}` : ''}
-            {it.notes ? ` · ${it.notes}` : ''}
-          </p>
-        </div>
-        {canManage && (
-          <div className="flex items-center gap-1 shrink-0">
-            {isDraft ? (
-              <button onClick={onEdit} title="Edit" className="p-1.5 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors">
-                <Pencil className="w-3.5 h-3.5" />
-              </button>
-            ) : (
-              <button onClick={onChangeTerms} title="Change terms"
-                className="text-[11px] px-2 py-1 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors">
-                Change terms
-              </button>
+            {canViewPricing && it.unit_price != null && (
+              <span className="font-medium text-foreground">{currency} {it.unit_price}</span>
             )}
-            {isDraft && (
-              <button onClick={onDelete} disabled={busy === 'item:' + it.id} title="Remove"
-                className="p-1.5 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors disabled:opacity-50">
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+          </span>
+        </span>
+      </button>
+
+      {open && (
+      <div className="px-5 pb-5">
+      <p className="text-xs text-muted-foreground tabular-nums">
+        {it.invoice_label && service ? `${service} · ` : ''}
+        {formatTaskDate(it.effective_from)} → {it.effective_to ? formatTaskDate(it.effective_to) : 'current'}
+      </p>
+      {it.notes && <ClampText text={it.notes} className="mt-1 max-w-2xl text-xs" />}
 
       {/* Pricing summary — client pays / team is paid / extras (retainer) */}
       {canViewPricing && it.commitment_type === 'retainer' &&
@@ -523,10 +728,17 @@ function ItemCard({
         </div>
       )}
 
-      {/* Milestones */}
+      {/* Milestones — finished steps fold away; what's left to do stays in view */}
       {it.milestones.length > 0 && (
         <div className="mt-3 space-y-1.5">
-          {it.milestones.map((m, i) => {
+          {msDone > 2 && !showDoneMs && (
+            <button type="button" onClick={() => setShowDoneMs(true)}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1.5">
+              <Check className="w-3.5 h-3.5 text-emerald-500" />
+              {msDone} completed — show
+            </button>
+          )}
+          {visibleMilestones.map((m, i) => {
             const done = !!m.completed_at
             const linked = !!m.task_id
             return (
@@ -547,6 +759,83 @@ function ItemCard({
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* Terms this row replaced — kept because past months were billed on them */}
+      {history.length > 0 && (
+        <div className="mt-4 border-t border-border/60 pt-3">
+          <button type="button" onClick={() => setShowHistory(h => !h)}
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+            <ChevronRight className={`w-3.5 h-3.5 transition-transform ${showHistory ? 'rotate-90' : ''}`} />
+            {history.length} earlier {history.length === 1 ? 'term' : 'terms'}
+          </button>
+          {showHistory && (
+            <ul className="mt-2 space-y-1 pl-4.5">
+              {history.map(h => (
+                <li key={h.id} className="text-xs text-muted-foreground/80 tabular-nums">
+                  {formatTaskDate(h.effective_from)} → {h.effective_to ? formatTaskDate(h.effective_to) : 'current'}
+                  {h.service_id && serviceName.get(h.service_id) ? ` · ${serviceName.get(h.service_id)}` : ''}
+                  {itemHeadline(h) > 0 ? ` · ${itemHeadline(h)} committed` : ''}
+                  {canViewPricing && h.unit_price != null ? ` · ${currency} ${h.unit_price}` : ''}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {canManage && (
+        <div className="mt-4 flex items-center gap-1.5">
+          <button onClick={isDraft ? onEdit : onChangeTerms}
+            className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg bg-secondary border border-border hover:bg-secondary/70 transition-colors">
+            <Pencil className="w-3.5 h-3.5" /> {isDraft ? 'Edit item' : 'Change terms'}
+          </button>
+          {isDraft && (
+            <button onClick={onDelete} disabled={busy === 'item:' + it.id}
+              className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors disabled:opacity-50">
+              <Trash2 className="w-3.5 h-3.5" /> Remove
+            </button>
+          )}
+        </div>
+      )}
+      </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Form section ────────────────────────────────────────────────────────────
+
+/**
+ * One collapsible block of the item form. The editor used to present every
+ * field at once — pricing, allocation, work value, covered services,
+ * deliverables, milestones — which reads as a wall. Sections open themselves
+ * when they already hold data, so editing an existing item still shows what it
+ * has, and a new item starts with just the basics.
+ */
+function Section({
+  title, hint, badge, defaultOpen = false, children,
+}: {
+  title: string
+  hint?: string
+  badge?: string
+  defaultOpen?: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div className="mt-3 rounded-xl border border-border">
+      <button type="button" onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-2 px-4 py-3 text-left rounded-xl hover:bg-secondary/40 transition-colors">
+        <ChevronRight className={`w-4 h-4 shrink-0 text-muted-foreground/60 transition-transform ${open ? 'rotate-90' : ''}`} />
+        <span className="text-sm font-medium">{title}</span>
+        {badge && <span className="ml-auto text-xs text-muted-foreground tabular-nums">{badge}</span>}
+      </button>
+      {open && (
+        <div className="px-4 pb-4">
+          {hint && <p className="text-xs text-muted-foreground leading-relaxed mb-3">{hint}</p>}
+          {children}
         </div>
       )}
     </div>
@@ -616,17 +905,7 @@ function AllocationEditor({
   const mismatch = retainer != null && (creative != null || management != null) && Math.abs(allocSum - retainer) > 0.005
 
   return (
-    <div className="mt-5 rounded-xl border border-border bg-secondary/20 p-4">
-      <div className="flex items-center justify-between mb-1">
-        <p className="text-sm font-semibold flex items-center gap-1.5">
-          <Wallet className="w-4 h-4 text-muted-foreground" /> Internal Allocation
-        </p>
-        <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border">Operational only</span>
-      </div>
-      <p className="text-xs text-muted-foreground mb-3">
-        Split the {currency} {retainer ?? '—'} monthly retainer internally. This is never billed to the client and never becomes an invoice line.
-      </p>
-
+    <>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div>
           <label className={labelCls}>Creative allocation ({currency})</label>
@@ -662,7 +941,7 @@ function AllocationEditor({
           Heads up: allocations total {currency} {Math.round(allocSum * 100) / 100}, which does not match the {currency} {retainer} retainer. That is allowed — just confirm it is intentional.
         </p>
       )}
-    </div>
+    </>
   )
 }
 
@@ -686,19 +965,7 @@ function WorkValueEditor({
     : null
 
   return (
-    <div className="mt-5 rounded-xl border border-primary/25 bg-primary/[0.04] p-4">
-      <div className="flex items-center justify-between mb-1">
-        <p className="text-sm font-semibold flex items-center gap-1.5">
-          <Wallet className="w-4 h-4 text-muted-foreground" /> Work Value — pays the team
-        </p>
-        <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border">Never invoiced</span>
-      </div>
-      <p className="text-xs text-muted-foreground mb-3">
-        Each covered task feeds contributor earnings from this per-task value (billing to the client stays
-        {' '}{currency} 0 — the retainer is the invoice). Leave blank and covered tasks pay ₹0.
-      </p>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label className={labelCls}>Work value per task ({currency})</label>
           <div className="flex gap-2">
@@ -726,7 +993,6 @@ function WorkValueEditor({
             Share of the work value that becomes the employee pool. Overrides the pricing matrix for this item&apos;s tasks.
           </p>
         </div>
-      </div>
     </div>
   )
 }
@@ -749,16 +1015,7 @@ function CoveredServicesEditor({
     set({ coveredServiceIds: Array.from(next) })
   }
   return (
-    <div className="mt-5 rounded-xl border border-border bg-secondary/20 p-4">
-      <div className="flex items-center justify-between mb-1">
-        <p className="text-sm font-semibold flex items-center gap-1.5">
-          <Layers className="w-4 h-4 text-muted-foreground" /> Covered Services
-        </p>
-        <span className="text-[11px] text-muted-foreground">{selected.size} selected</span>
-      </div>
-      <p className="text-xs text-muted-foreground mb-3">
-        Tasks on any of these services are covered by this retainer — no client billing (extra work can still be flagged per task).
-      </p>
+    <>
       {services.length === 0 ? (
         <p className="text-xs text-muted-foreground/70">No services available.</p>
       ) : (
@@ -774,7 +1031,7 @@ function CoveredServicesEditor({
           })}
         </div>
       )}
-    </div>
+    </>
   )
 }
 
@@ -791,6 +1048,9 @@ function ItemEditor({
   const set = (patch: Partial<ItemForm>) => setForm({ ...form, ...patch })
   const isRetainer = form.commitment_type === 'retainer'
   const changeTerms = form._mode === 'change_terms'
+  // Deliverable lines, when present, ARE the commitment — the headline number is
+  // only the fallback. Showing the running total keeps that relationship visible.
+  const deliverableTotal = form.deliverables.reduce((s, d) => s + (Number(d.committed_quantity) || 0), 0)
 
   function setDeliverable(i: number, patch: Partial<AgreementDeliverableInput>) {
     const next = form.deliverables.slice()
@@ -844,17 +1104,13 @@ function ItemEditor({
 
         {changeTerms && (
           <div className="mb-4 text-xs bg-amber-500/10 border border-amber-500/25 rounded-lg px-3 py-2 text-amber-700 dark:text-amber-300">
-            This agreement is active. Saving closes the current term and starts a new one from the effective date — past months keep their original terms.
+            Saving closes the current term and starts a new one — past months keep their original terms.
           </div>
         )}
 
+        {/* Essentials — the six answers that define the commitment. Everything
+            else is optional and lives under Advanced. */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className={labelCls}>Service <span className="text-muted-foreground/60">(optional)</span></label>
-            <Combobox options={services.map(s => ({ id: s.id, label: s.name }))}
-              value={form.service_id || ''} onChange={id => set({ service_id: id || null })}
-              placeholder="Search service…" sortKey="services" />
-          </div>
           <div>
             <label className={labelCls}>Commitment</label>
             <select value={form.commitment_type}
@@ -862,6 +1118,12 @@ function ItemEditor({
               className={inputCls}>
               {COMMITMENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
+          </div>
+          <div>
+            <label className={labelCls}>Service</label>
+            <Combobox options={services.map(s => ({ id: s.id, label: s.name }))}
+              value={form.service_id || ''} onChange={id => set({ service_id: id || null })}
+              placeholder="Search service…" sortKey="services" />
           </div>
 
           {isRetainer && (
@@ -874,109 +1136,67 @@ function ItemEditor({
           )}
 
           <div>
-            <label className={labelCls}>Committed quantity <span className="text-muted-foreground/60">(headline)</span></label>
+            <label className={labelCls}>
+              Committed quantity {isRetainer && <span className="text-muted-foreground/60">per cycle</span>}
+            </label>
             <input type="number" min="0" step="any" value={form.committed_quantity ?? ''}
               onChange={e => set({ committed_quantity: e.target.value === '' ? null : parseFloat(e.target.value) })}
-              placeholder="Used when no deliverables below" className={inputCls} />
+              placeholder="e.g. 15" className={inputCls} />
+            {form.deliverables.length > 0 && (
+              <p className="text-[11px] text-muted-foreground/70 mt-1">
+                Set by the deliverable lines below — {deliverableTotal} in total.
+              </p>
+            )}
           </div>
 
           <div>
-            <label className={labelCls}>Effective from</label>
+            <label className={labelCls}>Starts</label>
             <input type="date" value={form.effective_from} onChange={e => set({ effective_from: e.target.value })} className={inputCls} />
           </div>
-          {!changeTerms && (
-            <div>
-              <label className={labelCls}>Effective to <span className="text-muted-foreground/60">(optional)</span></label>
-              <input type="date" value={form.effective_to || ''} onChange={e => set({ effective_to: e.target.value || null })} className={inputCls} />
-            </div>
-          )}
 
           {canViewPricing && (
-            <>
-              <div>
-                <label className={labelCls}>{isRetainer ? 'Monthly retainer' : 'Package fee'} ({currency})</label>
-                <input type="number" min="0" step="any" value={form.unit_price ?? ''}
-                  onChange={e => set({ unit_price: e.target.value === '' ? null : parseFloat(e.target.value) })} className={inputCls} />
-              </div>
-              <div>
-                <label className={labelCls}>Extra-unit price <span className="text-muted-foreground/60">(optional)</span></label>
-                <input type="number" min="0" step="any" value={form.extra_unit_price ?? ''}
-                  onChange={e => set({ extra_unit_price: e.target.value === '' ? null : parseFloat(e.target.value) })}
-                  placeholder="Blank = extra work not auto-billable" className={inputCls} />
-              </div>
-            </>
-          )}
-
-          {isRetainer && (
             <div>
-              <label className={labelCls}>Carry-forward</label>
-              <select value={form.carry_forward_rule} onChange={e => set({ carry_forward_rule: e.target.value as CarryForwardRule })} className={inputCls}>
-                {CARRY_RULES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-              </select>
+              <label className={labelCls}>{isRetainer ? 'Monthly retainer' : 'Package fee'} ({currency})</label>
+              <input type="number" min="0" step="any" value={form.unit_price ?? ''}
+                onChange={e => set({ unit_price: e.target.value === '' ? null : parseFloat(e.target.value) })}
+                placeholder="e.g. 400" className={inputCls} />
             </div>
           )}
-
-          <div className="sm:col-span-2">
-            <label className={labelCls}>
-              Invoice name <span className="text-muted-foreground/60">(optional)</span>
-            </label>
-            <input value={form.invoice_label || ''}
-              onChange={e => set({ invoice_label: e.target.value })}
-              className={inputCls}
-              placeholder={
-                (form.service_id && services.find(s => s.id === form.service_id)?.name)
-                  ? `Blank = "${services.find(s => s.id === form.service_id)!.name}" (service name)`
-                  : 'e.g. Brand Identity Development'
-              } />
-            <p className="text-[11px] text-muted-foreground/70 mt-1">
-              What the client reads on the invoice. Use the wording from the signed proposal — the
-              service name is an internal catalogue entry and often differs.
-            </p>
-          </div>
-
-          <div className="sm:col-span-2">
-            <label className={labelCls}>Notes <span className="text-muted-foreground/60">(optional)</span></label>
-            <input value={form.notes || ''} onChange={e => set({ notes: e.target.value })} className={inputCls} placeholder="Item context…" />
-          </div>
         </div>
-
-        {/* Work value (retainer only) — pays contributors on covered tasks */}
-        {isRetainer && canViewPricing && (
-          <WorkValueEditor form={form} set={set} currency={currency} />
-        )}
-
-        {/* Internal Allocation (retainer only) — operational split, never billing */}
-        {isRetainer && canViewPricing && (
-          <AllocationEditor form={form} set={set} currency={currency} />
-        )}
 
         {/* Covered services (retainer only) — a retainer can cover many services */}
         {isRetainer && (
-          <CoveredServicesEditor form={form} set={set} services={services} />
+          <Section
+            title="Covered services"
+            hint="Pick the services this retainer pays for. Any task for this client on one of them, dated inside the term, counts as delivered automatically and is not invoiced separately — no manual linking."
+            badge={`${(form.coveredServiceIds ?? []).length} selected`}
+            defaultOpen={(form.coveredServiceIds ?? []).length > 0}>
+            <CoveredServicesEditor form={form} set={set} services={services} />
+          </Section>
         )}
 
-        {/* Deliverables */}
-        <div className="mt-5">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm font-semibold">Deliverables</p>
-            <button onClick={() => set({ deliverables: [...form.deliverables, { label: '', content_types: [], committed_quantity: 0, display_order: form.deliverables.length }] })}
-              className="text-xs inline-flex items-center gap-1 px-2 py-1 rounded-md bg-secondary hover:bg-secondary/70 transition-colors">
-              <Plus className="w-3.5 h-3.5" /> Add
-            </button>
-          </div>
-          {form.deliverables.length === 0 && <p className="text-xs text-muted-foreground/70">No typed deliverables — the headline quantity is used.</p>}
+        {/* Deliverables — the named breakdown of the committed quantity */}
+        <Section
+          title="Deliverables"
+          hint="Optional breakdown of what the quantity is made of — e.g. 12 Feed Posts + 3 Reels. Name each line and give it a quantity; together they replace the headline quantity above. Skip this and the headline number is used on its own."
+          badge={form.deliverables.length > 0 ? `${deliverableTotal} across ${form.deliverables.length}` : 'none'}
+          defaultOpen={form.deliverables.length > 0}>
           <div className="space-y-3">
             {form.deliverables.map((d, i) => (
               <div key={i} className="rounded-lg border border-border p-3 bg-secondary/20">
-                <div className="flex gap-2 items-start">
-                  <input value={d.label} onChange={e => setDeliverable(i, { label: e.target.value })} placeholder="Label e.g. Feed Posts" className={inputCls + ' flex-1'} />
+                <div className="flex gap-2 items-center">
+                  <input value={d.label} onChange={e => setDeliverable(i, { label: e.target.value })}
+                    placeholder="What is it? e.g. Feed Posts" className={`${inputBase} flex-1 min-w-0`} />
                   <input type="number" min="0" step="any" value={d.committed_quantity}
                     onChange={e => setDeliverable(i, { committed_quantity: parseFloat(e.target.value) || 0 })}
-                    placeholder="Qty" className={inputCls + ' w-24'} />
+                    aria-label="Quantity" title="How many per cycle"
+                    className={`${inputBase} w-20 shrink-0 text-center`} />
                   <button onClick={() => set({ deliverables: form.deliverables.filter((_, x) => x !== i) })}
+                    title="Remove this line"
                     className="p-2 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
                 </div>
-                <div className="flex flex-wrap gap-1.5 mt-2">
+                <p className="text-[11px] text-muted-foreground/60 mt-2 mb-1">Content types (optional)</p>
+                <div className="flex flex-wrap gap-1.5">
                   {CONTENT_TYPES.map(ct => {
                     const on = d.content_types.includes(ct)
                     return (
@@ -990,32 +1210,133 @@ function ItemEditor({
               </div>
             ))}
           </div>
-        </div>
+          <div className="flex items-center justify-between gap-3 mt-3">
+            <button onClick={() => set({ deliverables: [...form.deliverables, { label: '', content_types: [], committed_quantity: 0, display_order: form.deliverables.length }] })}
+              className="text-xs inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-secondary border border-border hover:bg-secondary/70 transition-colors">
+              <Plus className="w-3.5 h-3.5" /> Add a line
+            </button>
+            {form.deliverables.length > 0 && (
+              <span className="text-xs text-muted-foreground tabular-nums">
+                Commits <b className="text-foreground">{deliverableTotal}</b>
+                {isRetainer ? ' per cycle' : ' in total'}
+              </span>
+            )}
+          </div>
+        </Section>
 
         {/* Milestones */}
-        <div className="mt-5">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm font-semibold">Milestones</p>
-            <button onClick={() => set({ milestones: [...form.milestones, { label: '', display_order: form.milestones.length, due_date: null, visibility: 'internal' }] })}
-              className="text-xs inline-flex items-center gap-1 px-2 py-1 rounded-md bg-secondary hover:bg-secondary/70 transition-colors">
-              <Plus className="w-3.5 h-3.5" /> Add
-            </button>
-          </div>
-          {form.milestones.length === 0 && <p className="text-xs text-muted-foreground/70">Optional — steps for one-time projects (Research → Concept → Final Files).</p>}
+        <Section
+          title="Milestones"
+          hint="Steps to tick off as a one-time project moves along (Research → Concept → Final Files). Client-visible steps also appear on the client's side."
+          badge={form.milestones.length > 0 ? `${form.milestones.length}` : 'none'}
+          defaultOpen={form.milestones.length > 0}>
           <div className="space-y-2">
             {form.milestones.map((m, i) => (
-              <div key={i} className="flex gap-2 items-center">
-                <input value={m.label} onChange={e => setMilestone(i, { label: e.target.value })} placeholder="Milestone" className={inputCls + ' flex-1'} />
-                <input type="date" value={m.due_date || ''} onChange={e => setMilestone(i, { due_date: e.target.value || null })} className={inputCls + ' w-40'} />
-                <select value={m.visibility} onChange={e => setMilestone(i, { visibility: e.target.value as Visibility })} className={inputCls + ' w-32'}>
+              <div key={i} className="flex flex-wrap sm:flex-nowrap gap-2 items-center">
+                <input value={m.label} onChange={e => setMilestone(i, { label: e.target.value })}
+                  placeholder="Step e.g. Concept approved" className={`${inputBase} flex-1 min-w-0 w-full sm:w-auto`} />
+                <input type="date" value={m.due_date || ''} onChange={e => setMilestone(i, { due_date: e.target.value || null })}
+                  aria-label="Due date" className={`${inputBase} w-36 shrink-0`} />
+                <select value={m.visibility} onChange={e => setMilestone(i, { visibility: e.target.value as Visibility })}
+                  aria-label="Visibility" className={`${inputBase} w-28 shrink-0`}>
                   {VISIBILITY_TYPES.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}
                 </select>
                 <button onClick={() => set({ milestones: form.milestones.filter((_, x) => x !== i) })}
+                  title="Remove this step"
                   className="p-2 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
               </div>
             ))}
           </div>
+          <button onClick={() => set({ milestones: [...form.milestones, { label: '', display_order: form.milestones.length, due_date: null, visibility: 'internal' }] })}
+            className="mt-3 text-xs inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-secondary border border-border hover:bg-secondary/70 transition-colors">
+            <Plus className="w-3.5 h-3.5" /> Add a step
+          </button>
+        </Section>
+
+        {/* ── Advanced ── Nothing below is needed to save an item. Grouped so the
+            form reads as "define the commitment", then "tune it if you must". */}
+        <div className="flex items-center gap-3 mt-6 mb-1">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/60">Advanced</span>
+          <span className="h-px flex-1 bg-border" />
         </div>
+
+        <Section
+          title="End date & unused units"
+          badge={isRetainer ? CARRY_RULES.find(r => r.value === form.carry_forward_rule)?.label : (form.effective_to ? 'ends' : 'open-ended')}
+          defaultOpen={!!form.effective_to}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {!changeTerms && (
+              <div>
+                <label className={labelCls}>Ends <span className="text-muted-foreground/60">(optional)</span></label>
+                <input type="date" value={form.effective_to || ''} onChange={e => set({ effective_to: e.target.value || null })} className={inputCls} />
+                <p className="text-[11px] text-muted-foreground/70 mt-1">Blank = runs until the terms change.</p>
+              </div>
+            )}
+            {isRetainer && (
+              <div>
+                <label className={labelCls}>Carry-forward</label>
+                <select value={form.carry_forward_rule} onChange={e => set({ carry_forward_rule: e.target.value as CarryForwardRule })} className={inputCls}>
+                  {CARRY_RULES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+                <p className="text-[11px] text-muted-foreground/70 mt-1">
+                  What happens to units the client did not use by the end of the cycle.
+                </p>
+              </div>
+            )}
+          </div>
+        </Section>
+
+        <Section
+          title="Wording & extra work"
+          badge={form.invoice_label ? form.invoice_label : (form.extra_unit_price != null ? `+${currency} ${form.extra_unit_price}/unit` : 'defaults')}
+          defaultOpen={!!form.invoice_label || !!form.notes || form.extra_unit_price != null}>
+          <div className="grid grid-cols-1 gap-4">
+            <div>
+              <label className={labelCls}>Invoice name <span className="text-muted-foreground/60">(optional)</span></label>
+              <input value={form.invoice_label || ''}
+                onChange={e => set({ invoice_label: e.target.value })}
+                className={inputCls}
+                placeholder={
+                  (form.service_id && services.find(s => s.id === form.service_id)?.name)
+                    ? `Blank = "${services.find(s => s.id === form.service_id)!.name}" (service name)`
+                    : 'e.g. Brand Identity Development'
+                } />
+              <p className="text-[11px] text-muted-foreground/70 mt-1">
+                What the client reads on the invoice — the wording from the signed proposal.
+              </p>
+            </div>
+            {canViewPricing && (
+              <div>
+                <label className={labelCls}>Extra-unit price ({currency}) <span className="text-muted-foreground/60">(optional)</span></label>
+                <input type="number" min="0" step="any" value={form.extra_unit_price ?? ''}
+                  onChange={e => set({ extra_unit_price: e.target.value === '' ? null : parseFloat(e.target.value) })}
+                  placeholder="Blank = extra work not auto-billable" className={inputCls} />
+                <p className="text-[11px] text-muted-foreground/70 mt-1">
+                  Charged per task beyond the committed quantity, when a task is flagged as extra work.
+                </p>
+              </div>
+            )}
+            <div>
+              <label className={labelCls}>Notes <span className="text-muted-foreground/60">(optional)</span></label>
+              <input value={form.notes || ''} onChange={e => set({ notes: e.target.value })} className={inputCls} placeholder="Item context…" />
+            </div>
+          </div>
+        </Section>
+
+        {/* Team pay + cost-centre split. Both are internal money that never
+            reaches an invoice, so they belong together and behind one door. */}
+        {isRetainer && canViewPricing && (
+          <Section
+            title="Team pay & internal split"
+            hint={`Internal only — never billed, never an invoice line. The work value is what each covered task pays contributors (the client is still billed ${currency} 0 for it); the allocation splits the retainer across cost centres for reporting.`}
+            badge={form.work_unit_value != null ? `${currency} ${form.work_unit_value}/task` : 'not set'}
+            defaultOpen={form.work_unit_value != null || form.work_commission_pct != null
+              || form.creative_allocation_amount != null || form.management_allocation_amount != null}>
+            <WorkValueEditor form={form} set={set} currency={currency} />
+            <div className="my-4 h-px bg-border" />
+            <AllocationEditor form={form} set={set} currency={currency} />
+          </Section>
+        )}
 
         <div className="flex gap-3 mt-6">
           <button onClick={() => setForm(null)} disabled={saving}

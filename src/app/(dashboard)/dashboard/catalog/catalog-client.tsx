@@ -13,6 +13,7 @@ import {
   setPrimaryImage, deleteProductImage,
 } from './actions'
 import { ImageLightbox } from '@/components/ui/image-lightbox'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 const inputCls = 'w-full bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20'
 const labelCls = 'block text-xs font-medium text-muted-foreground mb-1.5'
@@ -132,6 +133,10 @@ function ProductCard({
   const [flash, setFlash] = useState('')
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
   const [imgBusy, setImgBusy] = useState<string | null>(null)
+  // In-app confirmation. NOT window.confirm: the desktop shell returns false
+  // from it immediately without ever drawing a dialog, so the delete button
+  // would silently do nothing there.
+  const [deleteImgTarget, setDeleteImgTarget] = useState<any | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   // Newest-first — uploading a new image should surface it ahead of older ones.
   const sortedImages = [...(product.images || [])].sort((a: any, b: any) => (b.created_at || '').localeCompare(a.created_at || ''))
@@ -180,7 +185,6 @@ function ProductCard({
   }
 
   async function handleDeleteImage(imageId: string) {
-    if (!confirm('Delete this image? This removes it permanently from storage.')) return
     setImgBusy(imageId)
     const res = await deleteProductImage(imageId)
     if (res.ok) {
@@ -372,7 +376,7 @@ function ProductCard({
                               <Star className="w-3 h-3" />
                             </button>
                           )}
-                          <button onClick={() => handleDeleteImage(img.id)} title="Delete"
+                          <button onClick={() => setDeleteImgTarget(img)} title="Delete"
                             className="p-1 rounded-md bg-white/10 hover:bg-red-500/40 text-white transition-colors">
                             <Trash2 className="w-3 h-3" />
                           </button>
@@ -398,6 +402,16 @@ function ProductCard({
         )}
       </div>
       {lightboxUrl && <ImageLightbox src={lightboxUrl} alt={product.name} onClose={() => setLightboxUrl(null)} />}
+      {deleteImgTarget && (
+        <ConfirmDialog
+          title="Delete this image?"
+          body={`It is erased from storage and disappears everywhere ${product.name} is shown, including offers already sent to clients.${deleteImgTarget.is_primary ? ' The next newest image becomes the main one.' : ''}`}
+          confirmLabel="Delete image"
+          danger
+          onConfirm={() => { const id = deleteImgTarget.id; setDeleteImgTarget(null); void handleDeleteImage(id) }}
+          onCancel={() => setDeleteImgTarget(null)}
+        />
+      )}
     </>
   )
 }

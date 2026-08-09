@@ -14,6 +14,7 @@ import { useRouter } from 'next/navigation'
 import { Plus, Trash2, ChevronDown, Crown, Loader2 } from 'lucide-react'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import AppSelect from '@/components/ui/app-select'
 import { ORG_UNIT_TYPES, ORG_UNIT_TYPE_LABEL, type OrgUnit, type OrgMember, type OrgUnitType } from '@/lib/org/units'
 import { saveUnit, deleteUnit, saveMember, removeMember, addScope, removeScope } from './actions'
@@ -44,6 +45,10 @@ export default function OrganizationClient(p: Props) {
   const [unitModal, setUnitModal] = useState<OrgUnit | 'new' | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [, startTransition] = useTransition()
+  // In-app confirmation. NOT window.confirm: the desktop shell returns false
+  // from it immediately without ever drawing a dialog, so Delete would sit
+  // there dead with nothing to explain why.
+  const [deleteUnitTarget, setDeleteUnitTarget] = useState<OrgUnit | null>(null)
   const refresh = () => startTransition(() => router.refresh())
 
   const cqid = (id: string) => p.employees.find(e => e.id === id)?.cqid ?? '—'
@@ -102,14 +107,7 @@ export default function OrganizationClient(p: Props) {
                 <div className="flex items-center gap-1.5">
                   <button onClick={() => setUnitModal(u)}
                     className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium hover:bg-secondary">Edit</button>
-                  <button onClick={async () => {
-                    if (!confirm(`Delete "${u.name}"? Its members and revenue mappings go with it.`)) return
-                    setBusy(u.id)
-                    const res = await deleteUnit(u.id)
-                    setBusy(null)
-                    if (!res.ok) { toastError('Could not delete', res.error); return }
-                    success('Unit deleted'); refresh()
-                  }} disabled={busy === u.id}
+                  <button onClick={() => setDeleteUnitTarget(u)} disabled={busy === u.id}
                     className="rounded-md p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 disabled:opacity-50">
                     {busy === u.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                   </button>
@@ -185,6 +183,28 @@ export default function OrganizationClient(p: Props) {
           onError={m => toastError('Could not save', m)}
         />
       )}
+      {deleteUnitTarget && (() => {
+        const u = deleteUnitTarget
+        const memberCount = p.members.filter(m => m.unitId === u.id).length
+        const scopeCount = p.scopeRows.filter(s => s.unit_id === u.id).length
+        return (
+          <ConfirmDialog
+            title={`Delete the "${u.name}" unit?`}
+            body={`Its ${memberCount} ${memberCount === 1 ? 'person' : 'people'} and ${scopeCount} revenue mapping${scopeCount === 1 ? '' : 's'} are removed with it. Any ownership rule that pays out on this unit's billing stops matching.`}
+            confirmLabel="Delete unit"
+            danger
+            onConfirm={async () => {
+              setDeleteUnitTarget(null)
+              setBusy(u.id)
+              const res = await deleteUnit(u.id)
+              setBusy(null)
+              if (!res.ok) { toastError('Could not delete', res.error); return }
+              success('Unit deleted'); refresh()
+            }}
+            onCancel={() => setDeleteUnitTarget(null)}
+          />
+        )
+      })()}
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </div>
   )

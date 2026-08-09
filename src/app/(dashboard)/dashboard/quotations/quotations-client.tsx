@@ -21,6 +21,7 @@ import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { TokenizedSearch, type SearchFacet } from '@/components/ui/tokenized-search'
 import { recordMatchesFacets, type FacetFieldDef } from '@/lib/search/match-facets'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -356,11 +357,26 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
     setSaving(false)
   }
 
+  // Approving or rejecting is an outcome, not a step: Approved unlocks
+  // "Convert to Invoice", Rejected closes the quote. A stray scroll over the
+  // row's dropdown used to commit either instantly, so those two confirm.
+  const [statusConfirm, setStatusConfirm] = useState<{ quo: Quotation; status: string } | null>(null)
+
+  function requestStatus(quo: Quotation, status: string) {
+    if (status !== 'approved' && status !== 'rejected') { void updateStatus(quo.id, status); return }
+    setStatusConfirm({ quo, status })
+  }
+
   // ── Status update ────────────────────────────────────────────────────────
   async function updateStatus(id: string, status: string) {
     await supabase.from('quotations').update({ status }).eq('id', id)
     setQuotations(prev => prev.map(q => (q.id === id ? { ...q, status } : q)))
   }
+
+  // Converting writes a real invoice + line items and moves the quotation to
+  // Converted — far too consequential for a bare icon click, so it always
+  // routes through this confirmation first.
+  const [convertConfirm, setConvertConfirm] = useState<Quotation | null>(null)
 
   // ── Convert quotation to invoice ─────────────────────────────────────────
   async function convertToInvoice(quo: Quotation) {
@@ -583,7 +599,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                   <div className="w-[180px] flex items-center justify-end gap-2" onClick={e => e.stopPropagation()}>
                     {quo.status === 'approved' && (
                       <button
-                        onClick={() => convertToInvoice(quo)}
+                        onClick={() => setConvertConfirm(quo)}
                         disabled={convertingId === quo.id}
                         className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 hover:bg-emerald-500/20 disabled:opacity-50 transition-all group/btn"
                         title="Convert to Invoice"
@@ -598,7 +614,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
 
                     <AppSelect
                       value={quo.status}
-                      onChange={e => updateStatus(quo.id, e.target.value)}
+                      onChange={e => requestStatus(quo, e.target.value)}
                       className="text-xs py-1.5 rounded-md h-8"
                       wrapperClassName="w-[120px]"
                     >
@@ -650,7 +666,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                     <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                       <AppSelect
                         value={quo.status}
-                        onChange={e => updateStatus(quo.id, e.target.value)}
+                        onChange={e => requestStatus(quo, e.target.value)}
                         className="text-xs py-1 rounded-md"
                         wrapperClassName="w-[110px]"
                       >
@@ -684,7 +700,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                         )}
                         {quo.status === 'approved' && (
                           <button
-                            onClick={() => convertToInvoice(quo)}
+                            onClick={() => setConvertConfirm(quo)}
                             disabled={convertingId === quo.id}
                             className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl gradient-bg text-white text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-all"
                           >
@@ -1018,6 +1034,31 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
           defaults={{ entityType: 'quotation', entityId: approvalQuote.id, title: `Approve quotation ${approvalQuote.quotation_number}` }}
           onClose={() => setApprovalQuote(null)}
           onCreated={() => setApprovalQuote(null)}
+        />
+      )}
+
+      {statusConfirm && (
+        <ConfirmDialog
+          title={statusConfirm.status === 'approved'
+            ? `Approve quotation ${statusConfirm.quo.quotation_number}?`
+            : `Reject quotation ${statusConfirm.quo.quotation_number}?`}
+          body={statusConfirm.status === 'approved'
+            ? 'Marks the quote accepted by the client and unlocks "Convert to Invoice". No invoice is created yet.'
+            : 'Closes this quote as not going ahead. It stays on record and can be set back to Sent later.'}
+          confirmLabel={statusConfirm.status === 'approved' ? 'Approve' : 'Reject'}
+          danger={statusConfirm.status === 'rejected'}
+          onConfirm={() => { const c = statusConfirm; setStatusConfirm(null); void updateStatus(c.quo.id, c.status) }}
+          onCancel={() => setStatusConfirm(null)}
+        />
+      )}
+
+      {convertConfirm && (
+        <ConfirmDialog
+          title={`Create invoice for ${convertConfirm.client?.name ?? 'this client'}?`}
+          body={`A draft invoice for ${formatCurrency(convertConfirm.total_amount, convertConfirm.currency)} is created from quotation ${convertConfirm.quotation_number}'s items, and the quotation moves to Converted. You can still edit the draft before sending it.`}
+          confirmLabel="Create draft invoice"
+          onConfirm={() => { const q = convertConfirm; setConvertConfirm(null); void convertToInvoice(q) }}
+          onCancel={() => setConvertConfirm(null)}
         />
       )}
     </div>

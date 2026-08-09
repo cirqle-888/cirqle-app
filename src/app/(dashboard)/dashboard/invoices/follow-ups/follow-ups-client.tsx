@@ -3,6 +3,7 @@
 import { useState, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { OverflowMenu } from '@/components/ui/overflow-menu'
 import Header from '@/components/layout/header'
 import AppSelect from '@/components/ui/app-select'
 import { useToast, ToastContainer } from '@/components/ui/toast'
@@ -19,6 +20,7 @@ import { copyToClipboard } from '@/lib/clipboard'
 import { setPartnerGreeting } from '@/app/(dashboard)/dashboard/partners/actions'
 import { setClientGreeting } from '@/app/(dashboard)/dashboard/invoices/follow-ups/actions'
 import type { MessageTemplates } from '@/lib/messaging/templates'
+import { formatDate } from '@/lib/utils/format-date'
 import {
   PhoneCall, MessageCircle, Send, Clock, AlertTriangle, CalendarClock,
   ChevronDown, ChevronRight, ExternalLink, Copy, Trash2, History,
@@ -85,11 +87,7 @@ function outcomeColor(o: string | null): string {
 // ── Formatting helpers ───────────────────────────────────────────────
 const fmtINR = (n: number | null) =>
   n == null ? '—' : `₹${Math.round(n).toLocaleString('en-IN')}`
-const fmtDate = (s: string | null) => {
-  if (!s) return '—'
-  const d = new Date(s)
-  return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-}
+const fmtDate = formatDate
 
 const GROUP_META: Record<FollowupGroup, { label: string; hint: string; icon: typeof BellRing; accent: string; dot: string }> = {
   needs_sent: { label: 'Needs to be sent', hint: 'Draft invoices not yet sent to the client', icon: Inbox,    accent: 'text-blue-600 dark:text-blue-400',   dot: 'bg-blue-500' },
@@ -463,10 +461,17 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
         </div>
 
         {setupNeeded && (
+          // A migration filename is a developer's problem, not the owner's.
+          // The plain-language state leads; the technical fix stays available
+          // one click away for whoever actually applies it.
           <div className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
-            Follow-up history is unavailable until the database migration runs. Apply
-            <code className="mx-1 px-1.5 py-0.5 rounded bg-amber-500/20 text-xs">20260616120000_invoice_followups.sql</code>
-            in the Supabase SQL editor. Grouping and reminders still work; logged notes will appear once the table exists.
+            <p>Saving follow-up notes isn&rsquo;t switched on yet. Grouping, reminders and sharing all work — only the written history is unavailable.</p>
+            <details className="mt-1.5">
+              <summary className="cursor-pointer select-none list-none text-xs opacity-70 hover:opacity-100">Technical details</summary>
+              <p className="mt-1 text-xs opacity-80">
+                Apply <code className="px-1.5 py-0.5 rounded bg-amber-500/20">20260616120000_invoice_followups.sql</code> in the Supabase SQL editor.
+              </p>
+            </details>
           </div>
         )}
 
@@ -925,19 +930,16 @@ function InvoiceCard(p: CardProps) {
               >
                 <MessageCircle className="w-3.5 h-3.5" /> Share invoice
               </button>
-              <button
-                onClick={p.onCopyInvoice}
-                title="Copy the message to paste into the WhatsApp pane"
-                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-secondary border border-border hover:bg-secondary/70 text-foreground transition-colors"
-              >
-                <Copy className="w-3.5 h-3.5" /> Copy message
-              </button>
-              <button
-                onClick={p.onToggleWa}
-                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-secondary border border-border hover:bg-secondary/70 text-foreground transition-colors"
-              >
-                <BellRing className="w-3.5 h-3.5" /> Reminder text
-              </button>
+              {/* Copy / reminder-text are alternatives to Share, not peers of
+                  it — behind "…" so the card leads with one obvious action. */}
+              <OverflowMenu
+                label="More sharing options"
+                items={[
+                  { label: 'Copy message', icon: Copy, onClick: p.onCopyInvoice },
+                  { label: 'Reminder text', icon: BellRing, onClick: p.onToggleWa },
+                  ...(history.length > 0 ? [{ label: p.historyOpen ? 'Hide history' : 'Show history', icon: History, onClick: p.onToggleHistory, separatorBefore: true }] : []),
+                ]}
+              />
             </>
           )}
           {!isDraftGroup && (
@@ -964,14 +966,6 @@ function InvoiceCard(p: CardProps) {
             {p.formOpen ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
             {p.formOpen ? 'Cancel' : 'Log follow-up'}
           </button>
-          {history.length > 0 && (
-            <button
-              onClick={p.onToggleHistory}
-              className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
-            >
-              <History className="w-3.5 h-3.5" /> History {p.historyOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-            </button>
-          )}
           <Link
             href={`/dashboard/invoices?id=${inv.id}`}
             className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors ml-auto"

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Plus, Trash2, Loader2, Check, X, Layers, ExternalLink } from 'lucide-react'
 import { upsertOfferGroup, deleteOfferGroup, type OfferGroupRow } from './actions'
 import { FigmaLink } from '@/components/offer/figma-link'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 // Matches the rest of this settings page. Theme TOKENS, not hardcoded white —
 // this page renders on a light background, where text-white is invisible.
@@ -59,6 +60,10 @@ export function OfferGroupsPanel({
   const [draft, setDraft] = useState<Draft | null>(null)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  // In-app confirmation. NOT window.confirm: the desktop shell returns false
+  // from it immediately without ever drawing a dialog, so Remove would
+  // silently do nothing there.
+  const [removeTarget, setRemoveTarget] = useState<OfferGroupRow | null>(null)
 
   const isPull = flowMode === 'pull'
 
@@ -102,7 +107,6 @@ export function OfferGroupsPanel({
   }
 
   async function remove(group: OfferGroupRow) {
-    if (!confirm(`Remove the “${group.name}” category? Products already saved under it stay in their campaigns and move back to the default list.`)) return
     const res = await deleteOfferGroup(group.id)
     if (!res.ok) { setErr(res.error || 'Could not delete'); return }
     update(groups.filter(g => g.id !== group.id))
@@ -164,7 +168,7 @@ export function OfferGroupsPanel({
                         className="shrink-0 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors px-2">
                   Edit
                 </button>
-                <button onClick={() => void remove(group)} title="Remove category"
+                <button onClick={() => setRemoveTarget(group)} title="Remove category"
                         className="shrink-0 p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors">
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -233,6 +237,16 @@ export function OfferGroupsPanel({
             </button>
           </div>
         </div>
+      )}
+      {removeTarget && (
+        <ConfirmDialog
+          title={`Remove the “${removeTarget.name}” category?`}
+          body="Products already saved under it stay in their campaigns and move back to the default list. Nothing the client submitted is lost."
+          confirmLabel="Remove category"
+          danger
+          onConfirm={() => { const g = removeTarget; setRemoveTarget(null); void remove(g) }}
+          onCancel={() => setRemoveTarget(null)}
+        />
       )}
     </div>
   )

@@ -43,6 +43,7 @@ import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { useToast, ToastContainer } from '@/components/ui/toast'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useRole } from '@/contexts/role-context'
 import type { Currency } from '@/types'
 import { formatTaskDate } from '@/lib/utils/format-date'
@@ -436,7 +437,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const saved = window.localStorage.getItem('invoices-stats-collapsed')
     if (saved === '1') return true
     if (saved === '0') return false
-    return window.innerWidth < 640 // default: collapsed on mobile, expanded on sm+
+    // Collapsed by default everywhere. Expanded, the stat tiles + mode tiles +
+    // stage cards + dues strip pushed the actual invoice list below the fold
+    // and put ~19 controls ahead of it. The summary line stays visible and one
+    // click brings the full panel back — the preference is remembered.
+    return true
   })
   function toggleStats() {
     setStatsCollapsed(prev => {
@@ -523,6 +528,10 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   })
 
   // ── Navigation guard: warn before leaving while new invoice form is open ──
+  // In-app confirmation. NOT window.confirm: the desktop shell returns false
+  // from it immediately without ever drawing a dialog, which silently trapped
+  // the user on this page — every sidebar click was refused with no prompt.
+  const [leaveGuard, setLeaveGuard] = useState<{ proceed: () => void } | null>(null)
   const newFormDirty = panelMode === 'new' && (
     newForm.client_id !== '' ||
     newForm.notes !== '' ||
@@ -540,9 +549,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const origReplace = window.history.replaceState.bind(window.history)
 
     function guard(proceed: () => void) {
-      if (window.confirm('You have unsaved changes on the new invoice. Leave and discard?')) {
-        proceed()
-      }
+      setLeaveGuard({ proceed })
     }
 
     window.history.pushState = function (...args: Parameters<typeof origPush>) {
@@ -556,6 +563,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       window.removeEventListener('beforeunload', beforeUnload)
       window.history.pushState    = origPush
       window.history.replaceState = origReplace
+      setLeaveGuard(null)
     }
   }, [newFormDirty])
 
@@ -697,6 +705,34 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     }
     setSelectedId(id === selectedId ? null : id)
     setPanelMode('detail')
+  }
+
+  /**
+   * Outcome-bearing status changes confirm first; ordinary progress
+   * (draft → reviewed → sent → paid) stays one click.
+   *
+   * `cancelled` and `bad_debt` write off real revenue, and reverting to
+   * `draft` pushes every linked task back to Done where it can be invoiced a
+   * second time — all three used to fire from a 10px chip with no warning.
+   */
+  function requestStatusChange(inv: Invoice, newStatus: string) {
+    const linkedTasks = (inv.items || []).filter(li => li.task_id).length
+    const amount = fmt(invTotalInr(inv))
+    const consequence: Record<string, string> = {
+      cancelled: `Writes off ${amount} — the invoice stops counting as revenue or as money owed.`,
+      bad_debt: `Marks ${amount} as never going to be collected. It stays on record but stops counting as money owed.`,
+      draft: linkedTasks > 0
+        ? `${linkedTasks} linked task${linkedTasks === 1 ? '' : 's'} return to Done and can be invoiced again — watch for a duplicate invoice.`
+        : 'The invoice returns to Draft and stops counting as sent.',
+    }
+    if (!consequence[newStatus]) { void updateStatus(inv.id, newStatus); return }
+    setConfirmModal({
+      title: `Set ${inv.invoice_number} to ${getStatusLabel(newStatus)}?`,
+      body: consequence[newStatus],
+      confirmLabel: `Set ${getStatusLabel(newStatus)}`,
+      danger: newStatus !== 'draft',
+      onConfirm: () => { setConfirmModal(null); void updateStatus(inv.id, newStatus) },
+    })
   }
 
   async function updateStatus(invoiceId: string, newStatus: string) {
@@ -3175,7 +3211,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 )}
                 <span className="w-px self-stretch bg-border/50 mx-0.5" />
                 {['draft', 'reviewed', 'sent', 'partial', 'paid', 'overdue', 'cancelled', 'bad_debt'].map(s => (
-                  <button key={s} onClick={() => updateStatus(inv.id, s)}
+                  <button key={s} onClick={() => requestStatusChange(inv, s)}
                     disabled={saving || inv.status === s}
                     title={`Set status to ${getStatusLabel(s)}`}
                     className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors disabled:opacity-30 self-center
@@ -5830,6 +5866,17 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     <div className="flex flex-col h-dvh bg-background text-foreground">
       <Header title="Invoices" />
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
+
+      {leaveGuard && (
+        <ConfirmDialog
+          title="Leave without creating this invoice?"
+          body="The lines, client and notes you entered are discarded. Nothing has been invoiced yet, so the work stays available to invoice later."
+          confirmLabel="Discard and leave"
+          danger
+          onConfirm={() => { const g = leaveGuard; setLeaveGuard(null); g.proceed() }}
+          onCancel={() => setLeaveGuard(null)}
+        />
+      )}
 
       {/* ── Confirmation modal ── */}
       {confirmModal && (

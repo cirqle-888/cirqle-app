@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import Combobox from '@/components/ui/combobox'
 import { useToast, ToastContainer } from '@/components/ui/toast'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   ArrowLeft, Plus, Copy, Check, Ban, RefreshCw, Link2, Building2, Megaphone,
   Globe, AlertTriangle, Loader2, Pencil, X,
@@ -41,6 +42,16 @@ export default function StandardRequestClient({
   const [newAgencyId, setNewAgencyId] = useState('')
   const [newLabel, setNewLabel] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
+  // In-app confirmation. NOT window.confirm: the desktop shell returns false
+  // from it immediately without ever drawing a dialog, so these buttons would
+  // silently do nothing there.
+  const [confirmPrompt, setConfirmPrompt] = useState<{
+    title: string
+    body: string
+    confirmLabel: string
+    danger?: boolean
+    onConfirm: () => void
+  } | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
   const [agencyForm, setAgencyForm] = useState<AgencyInput | null>(null)
   const [agencySaving, setAgencySaving] = useState(false)
@@ -83,7 +94,6 @@ export default function StandardRequestClient({
   }
 
   async function handleRevoke(link: any) {
-    if (!confirm('Revoke this link? Anyone using the URL will see "link expired".')) return
     setBusy(link.id)
     const res = await revokeIntakeLink(link.id)
     setBusy(null)
@@ -92,7 +102,6 @@ export default function StandardRequestClient({
   }
 
   async function handleRegenerate(link: any) {
-    if (!confirm('Regenerate? The old URL dies immediately and a new one is issued.')) return
     setBusy(link.id)
     const res = await regenerateIntakeLink(link.id)
     setBusy(null)
@@ -116,7 +125,6 @@ export default function StandardRequestClient({
   }
 
   async function handleAgencyDeactivate(a: any) {
-    if (!confirm(`Deactivate ${a.name}? Their intake links will be revoked too.`)) return
     const res = await deactivateAgency(a.id)
     if (res.ok) {
       setAgencies(prev => prev.filter(x => x.id !== a.id))
@@ -210,11 +218,23 @@ export default function StandardRequestClient({
                     className="p-1.5 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors">
                     {copied === l.id ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
                   </button>
-                  <button onClick={() => handleRegenerate(l)} disabled={busy === l.id} title="Regenerate (old URL dies)"
+                  <button onClick={() => setConfirmPrompt({
+                    title: 'Issue a new link and kill this one?',
+                    body: 'The URL you shared stops working immediately — anyone part-way through the form loses it. Send the replacement link before they try again.',
+                    confirmLabel: 'Regenerate link',
+                    danger: true,
+                    onConfirm: () => { void handleRegenerate(l) },
+                  })} disabled={busy === l.id} title="Regenerate (old URL dies)"
                     className="p-1.5 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40">
                     <RefreshCw className="w-3.5 h-3.5" />
                   </button>
-                  <button onClick={() => handleRevoke(l)} disabled={busy === l.id} title="Revoke"
+                  <button onClick={() => setConfirmPrompt({
+                    title: 'Revoke this intake link?',
+                    body: 'Anyone opening the URL sees "link expired" from now on. Requests already submitted through it are kept.',
+                    confirmLabel: 'Revoke link',
+                    danger: true,
+                    onConfirm: () => { void handleRevoke(l) },
+                  })} disabled={busy === l.id} title="Revoke"
                     className="p-1.5 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-400 transition-colors disabled:opacity-40">
                     <Ban className="w-3.5 h-3.5" />
                   </button>
@@ -284,7 +304,13 @@ export default function StandardRequestClient({
             <div className="flex items-center gap-1 shrink-0">
               <button onClick={() => setAgencyForm({ id: a.id, name: a.name, contact_name: a.contact_name || '', email: a.email || '', phone: a.phone || '' })}
                 className="p-1.5 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
-              <button onClick={() => handleAgencyDeactivate(a)}
+              <button onClick={() => setConfirmPrompt({
+                title: `Deactivate ${a.name}?`,
+                body: 'Every intake link issued to them is revoked at the same time, so they can no longer submit requests. Requests they already sent are kept.',
+                confirmLabel: 'Deactivate agency',
+                danger: true,
+                onConfirm: () => { void handleAgencyDeactivate(a) },
+              })}
                 className="p-1.5 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-400 transition-colors"><Ban className="w-3.5 h-3.5" /></button>
             </div>
           </div>
@@ -307,6 +333,16 @@ export default function StandardRequestClient({
         </details>
       )}
 
+      {confirmPrompt && (
+        <ConfirmDialog
+          title={confirmPrompt.title}
+          body={confirmPrompt.body}
+          confirmLabel={confirmPrompt.confirmLabel}
+          danger={confirmPrompt.danger}
+          onConfirm={() => { const fn = confirmPrompt.onConfirm; setConfirmPrompt(null); fn() }}
+          onCancel={() => setConfirmPrompt(null)}
+        />
+      )}
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </div>
   )

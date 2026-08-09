@@ -20,7 +20,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { MessageCircle, Bell, X, ArrowLeft, Send, Hash, Lock } from 'lucide-react'
+import { MessageCircle, Bell, X, ArrowLeft, Send, Hash, Lock, ChevronRight } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { usePermissions } from '@/contexts/permission-context'
 import { displayEmployee } from '@/lib/utils/employee-display'
@@ -52,6 +52,86 @@ function previewOf(kind: string, body: string): string {
   return body || ''
 }
 
+interface ClientGroup {
+  clientId: string
+  name: string
+  /** The client's own channel, when it has one. */
+  channel: ChatConversation | null
+  /** Its task / request / plan / campaign discussions. */
+  threads: ChatConversation[]
+  unreadTotal: number
+  /** Newest activity across the channel and every thread — for the row preview. */
+  lastAt: string | null
+}
+
+/**
+ * Same shape as the /dashboard/chat sidebar: channels and departments, then one
+ * row per CLIENT holding that client's discussions, then DMs. The widget used
+ * to render one flat recency-ordered pile, so a plan thread, a request thread
+ * and a DM sat side by side with no clue which client they belonged to.
+ */
+function buildNav(convs: ChatConversation[]) {
+  const isChannelish = (c: ChatConversation) => c.type === 'channel' || c.type === 'group'
+  const clientChannels = convs.filter(c => isChannelish(c) && c.category === 'client')
+  const discussions = convs.filter(c => c.category === 'discussion')
+
+  const groups = new Map<string, ClientGroup>()
+  const groupFor = (clientId: string, name: string): ClientGroup => {
+    let g = groups.get(clientId)
+    if (!g) { g = { clientId, name, channel: null, threads: [], unreadTotal: 0, lastAt: null }; groups.set(clientId, g) }
+    if (name && g.name === 'Client') g.name = name
+    return g
+  }
+  const touch = (g: ClientGroup, c: ChatConversation) => {
+    g.unreadTotal += c.unread
+    const at = c.lastMessage?.createdAt ?? null
+    if (at && (!g.lastAt || at > g.lastAt)) g.lastAt = at
+  }
+
+  for (const ch of clientChannels) {
+    if (!ch.clientId) continue
+    const g = groupFor(ch.clientId, ch.clientName ?? ch.name ?? 'Client')
+    g.channel = ch
+    touch(g, ch)
+  }
+  for (const d of discussions) {
+    // A room of type 'client' IS the client's channel, not a thread under it.
+    if (d.type === 'client') {
+      if (!d.clientId) continue
+      const g = groupFor(d.clientId, d.clientName ?? d.name ?? 'Client')
+      g.channel ??= d
+      touch(g, d)
+      continue
+    }
+    if (!d.clientId) continue
+    const g = groupFor(d.clientId, d.clientName ?? 'Client')
+    g.threads.push(d)
+    touch(g, d)
+  }
+
+  const grouped = new Set(
+    [...groups.values()].flatMap(g => [g.channel?.id, ...g.threads.map(t => t.id)]).filter(Boolean) as string[],
+  )
+  return {
+    channels: convs.filter(c => isChannelish(c) && (c.category ?? 'general') === 'general'),
+    departments: convs.filter(c => isChannelish(c) && c.category === 'department'),
+    clientGroups: [...groups.values()].sort((a, b) => a.name.localeCompare(b.name)),
+    // A client channel with no clientId can't be grouped — keep it reachable.
+    looseClientChannels: clientChannels.filter(c => !c.clientId),
+    // A discussion with no client at all would otherwise be unreachable.
+    otherDiscussions: discussions.filter(c => !grouped.has(c.id)),
+    dms: convs.filter(c => c.type === 'dm'),
+  }
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">
+      {children}
+    </p>
+  )
+}
+
 export function FloatingCommsWidget() {
   const { user, revealNames } = usePermissions()
   const employeeId = user.employeeId
@@ -77,6 +157,9 @@ export function FloatingCommsWidget() {
   const [notifs, setNotifs] = useState<NotificationRow[]>([])
   const [notifUnread, setNotifUnread] = useState(0)
   const [activeId, setActiveId] = useState<string | null>(null)
+  /** Drilled into one client's rooms. Survives opening a thread, so the thread's
+   *  back button returns to the client instead of the top of the list. */
+  const [clientId, setClientId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
   const [loadingThread, setLoadingThread] = useState(false)
@@ -85,9 +168,11 @@ export function FloatingCommsWidget() {
 
   const activeIdRef = useRef<string | null>(null)
   const openRef = useRef(false)
+  const convsRef = useRef<ChatConversation[]>([])
   const bottomRef = useRef<HTMLDivElement>(null)
   useEffect(() => { activeIdRef.current = activeId }, [activeId])
   useEffect(() => { openRef.current = open }, [open])
+  useEffect(() => { convsRef.current = convs }, [convs])
 
   const chatUnread = useMemo(() => convs.reduce((s, c) => s + (c.unread || 0), 0), [convs])
   const totalBadge = chatUnread + notifUnread
@@ -104,6 +189,11 @@ export function FloatingCommsWidget() {
   }, [])
 
   const openConversation = useCallback(async (convId: string) => {
+    // Anchor the back button: a room that belongs to a client returns to that
+    // client, anything else returns to the top of the list. This also keeps a
+    // toast-opened thread from backing into an unrelated client.
+    const conv = convsRef.current.find(c => c.id === convId)
+    setClientId(conv?.clientId ?? null)
     setActiveId(convId)
     setLoadingThread(true)
     setMessages([])
@@ -256,6 +346,27 @@ export function FloatingCommsWidget() {
   }
 
   const activeConv = convs.find(c => c.id === activeId) ?? null
+  const nav = useMemo(() => buildNav(convs), [convs])
+  const activeClient = clientId ? nav.clientGroups.find(g => g.clientId === clientId) ?? null : null
+
+  /** One list row — used for channels, client threads and DMs alike. */
+  const convRow = (c: ChatConversation, indented = false) => (
+    <button key={c.id} onClick={() => openConversation(c.id)}
+      className={`flex w-full items-center gap-3 border-b border-border/50 py-2.5 pr-3 text-left hover:bg-muted/50 ${indented ? 'pl-6' : 'pl-3'}`}>
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium">
+        {c.type === 'dm' ? convTitle(c).slice(0, 2).toUpperCase()
+          : c.isPrivate ? <Lock className="h-4 w-4" /> : <Hash className="h-4 w-4" />}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center justify-between gap-2">
+          <span className="truncate text-sm font-medium">{convTitle(c)}</span>
+          {c.lastMessage && <span className="shrink-0 text-[10px] text-muted-foreground">{timeLabel(c.lastMessage.createdAt)}</span>}
+        </span>
+        {c.lastMessage && <span className="block truncate text-xs text-muted-foreground">{c.lastMessage.body}</span>}
+      </span>
+      {c.unread > 0 && <span className="shrink-0 rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">{c.unread}</span>}
+    </button>
+  )
 
   return (
     <>
@@ -289,7 +400,7 @@ export function FloatingCommsWidget() {
         <div className="fixed bottom-20 right-5 z-50 flex h-[540px] max-h-[calc(100dvh-6rem)] w-[360px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl">
           {/* Tabs */}
           <div className="flex items-center border-b border-border">
-            <button onClick={() => { setTab('chat'); setActiveId(null) }}
+            <button onClick={() => { setTab('chat'); setActiveId(null); setClientId(null) }}
               className={`flex flex-1 items-center justify-center gap-1.5 py-2.5 text-sm font-medium ${tab === 'chat' ? 'border-b-2 border-foreground text-foreground' : 'text-muted-foreground'}`}>
               <MessageCircle className="h-4 w-4" /> Chat
               {chatUnread > 0 && <span className="rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">{chatUnread}</span>}
@@ -301,28 +412,76 @@ export function FloatingCommsWidget() {
             </button>
           </div>
 
-          {/* ── Chat tab ── */}
-          {tab === 'chat' && !activeId && (
-            <div className="flex-1 overflow-y-auto">
+          {/* ── Chat: top level — channels, clients, DMs ── */}
+          {tab === 'chat' && !activeId && !activeClient && (
+            <div className="flex-1 overflow-y-auto pb-2">
               {convs.length === 0 && <p className="p-6 text-center text-sm text-muted-foreground">No conversations yet.</p>}
-              {convs.map(c => (
-                <button key={c.id} onClick={() => openConversation(c.id)}
-                  className="flex w-full items-center gap-3 border-b border-border/50 px-3 py-2.5 text-left hover:bg-muted/50">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium">
-                    {c.type === 'dm' ? convTitle(c).slice(0, 2).toUpperCase()
-                      : c.isPrivate ? <Lock className="h-4 w-4" /> : <Hash className="h-4 w-4" />}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex items-center justify-between gap-2">
-                      <span className="truncate text-sm font-medium">{convTitle(c)}</span>
-                      {c.lastMessage && <span className="shrink-0 text-[10px] text-muted-foreground">{timeLabel(c.lastMessage.createdAt)}</span>}
+
+              {nav.channels.length > 0 && <SectionLabel>Channels</SectionLabel>}
+              {nav.channels.map(c => convRow(c))}
+
+              {nav.departments.length > 0 && <SectionLabel>Departments</SectionLabel>}
+              {nav.departments.map(c => convRow(c))}
+
+              {(nav.clientGroups.length > 0 || nav.looseClientChannels.length > 0) && <SectionLabel>Clients</SectionLabel>}
+              {nav.clientGroups.map(g => {
+                const rooms = g.threads.length + (g.channel ? 1 : 0)
+                return (
+                  <button key={g.clientId} onClick={() => setClientId(g.clientId)}
+                    className="flex w-full items-center gap-3 border-b border-border/50 px-3 py-2.5 text-left hover:bg-muted/50">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted">
+                      <Hash className="h-4 w-4" />
                     </span>
-                    {c.lastMessage && <span className="block truncate text-xs text-muted-foreground">{c.lastMessage.body}</span>}
-                  </span>
-                  {c.unread > 0 && <span className="shrink-0 rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">{c.unread}</span>}
-                </button>
-              ))}
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="truncate text-sm font-medium">{g.name}</span>
+                        {g.lastAt && <span className="shrink-0 text-[10px] text-muted-foreground">{timeLabel(g.lastAt)}</span>}
+                      </span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {rooms} {rooms === 1 ? 'conversation' : 'conversations'}
+                      </span>
+                    </span>
+                    {g.unreadTotal > 0 && <span className="shrink-0 rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">{g.unreadTotal}</span>}
+                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/50" />
+                  </button>
+                )
+              })}
+              {nav.looseClientChannels.map(c => convRow(c))}
+
+              {nav.otherDiscussions.length > 0 && <SectionLabel>Other discussions</SectionLabel>}
+              {nav.otherDiscussions.map(c => convRow(c))}
+
+              {nav.dms.length > 0 && <SectionLabel>Direct messages</SectionLabel>}
+              {nav.dms.map(c => convRow(c))}
             </div>
+          )}
+
+          {/* ── Chat: one client's rooms ── */}
+          {tab === 'chat' && !activeId && activeClient && (
+            <>
+              <div className="flex items-center gap-2 border-b border-border px-2 py-2">
+                <button onClick={() => setClientId(null)} aria-label="Back to conversations"
+                  className="rounded p-1 text-muted-foreground hover:text-foreground"><ArrowLeft className="h-4 w-4" /></button>
+                <span className="truncate text-sm font-semibold">{activeClient.name}</span>
+              </div>
+              <div className="flex-1 overflow-y-auto pb-2">
+                {activeClient.channel && (
+                  <>
+                    <SectionLabel>Channel</SectionLabel>
+                    {convRow(activeClient.channel)}
+                  </>
+                )}
+                {activeClient.threads.length > 0 && (
+                  <>
+                    <SectionLabel>Discussions</SectionLabel>
+                    {activeClient.threads.map(c => convRow(c, true))}
+                  </>
+                )}
+                {!activeClient.channel && activeClient.threads.length === 0 && (
+                  <p className="p-6 text-center text-sm text-muted-foreground">Nothing here yet.</p>
+                )}
+              </div>
+            </>
           )}
 
           {/* ── Chat thread ── */}

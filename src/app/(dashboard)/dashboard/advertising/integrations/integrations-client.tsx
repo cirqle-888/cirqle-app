@@ -6,6 +6,7 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { disconnectProvider, refreshAdAccounts, fetchActiveClients } from './actions'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   Loader2, Plus, RefreshCw, Trash2, FolderPlus,
   CheckCircle, XCircle, AlertTriangle, Link2, Zap, ListChecks,
@@ -72,6 +73,10 @@ export function IntegrationsClient({
   const [clients, setClients] = useState<{ id: string; name: string }[]>([])
   const [selectedClientForAuth, setSelectedClientForAuth] = useState<string>('')
   const [providerToConnect, setProviderToConnect] = useState<'meta' | 'google' | null>(null)
+  // In-app confirmation. NOT window.confirm: the desktop shell returns false
+  // from it immediately without ever drawing a dialog, so Disconnect would
+  // silently do nothing there.
+  const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null)
 
   const showToast = (type: 'success' | 'error', message: string) => {
     setToast({ type, message })
@@ -79,7 +84,6 @@ export function IntegrationsClient({
   }
 
   const handleDisconnect = async (id: string) => {
-    if (!confirm('Disconnect this provider? Active syncs will stop.')) return
     setIsDisconnecting(id)
     try {
       await disconnectProvider(id)
@@ -249,7 +253,7 @@ export function IntegrationsClient({
                     <Button
                       variant="destructive"
                       size="sm"
-                      onClick={() => handleDisconnect(conn.id)}
+                      onClick={() => setDisconnectTarget(conn.id)}
                       disabled={isDisconnecting === conn.id}
                     >
                       {isDisconnecting === conn.id
@@ -377,6 +381,17 @@ export function IntegrationsClient({
             </div>
           </div>
         </ModalOverlay>
+      )}
+
+      {disconnectTarget && (
+        <ConfirmDialog
+          title="Disconnect this ad account?"
+          body="Spend and performance figures stop updating for every campaign linked to it, and the numbers already pulled stay frozen at their last sync. You can reconnect later, but you will need to authorise access again."
+          confirmLabel="Disconnect"
+          danger
+          onConfirm={() => { const id = disconnectTarget; setDisconnectTarget(null); void handleDisconnect(id) }}
+          onCancel={() => setDisconnectTarget(null)}
+        />
       )}
     </div>
   )

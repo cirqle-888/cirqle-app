@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { X, RefreshCw, AlertTriangle, Check } from 'lucide-react'
 import { formatTaskDate } from '@/lib/utils/format-date'
 import { computeTaskAmount, resolvePricingType } from '@/lib/tasks/pricing'
@@ -167,9 +168,19 @@ export function RecalcBillingModal({ open, onClose, clients, services, clientPri
     return { willChange, willStillBeZero }
   }, [previewRows])
 
-  async function runApply() {
-    if (totalMatching == null) { await runPreview(); return }
-    if (!confirm(`Apply new billing amounts to ${totalMatching} task${totalMatching === 1 ? '' : 's'}? This will overwrite existing values.`)) return
+  // In-app confirmation, NOT window.confirm: the desktop shell returns false
+  // from native confirm without drawing a dialog, so Apply silently did
+  // nothing there. The dialog also reports how many rows actually CHANGE,
+  // which the old prompt never distinguished from how many matched.
+  const [confirmApply, setConfirmApply] = useState(false)
+
+  function runApply() {
+    if (totalMatching == null) { void runPreview(); return }
+    setConfirmApply(true)
+  }
+
+  async function applyBilling() {
+    setConfirmApply(false)
     setLoading(true); setError(null); setApplied(null)
     try {
       // Fetch ALL matching tasks (not just 30), then batch-update
@@ -389,6 +400,21 @@ export function RecalcBillingModal({ open, onClose, clients, services, clientPri
           </div>
         </div>
       </div>
+
+      {confirmApply && (
+        <ConfirmDialog
+          title={`Overwrite billing on ${totalMatching} task${totalMatching === 1 ? '' : 's'}?`}
+          body={
+            `${previewStats?.willChange ?? 0} of the ${previewRows?.length ?? 0} previewed task${(previewRows?.length ?? 0) === 1 ? '' : 's'} would change value. ` +
+            `Billing amounts are overwritten with the current price list and cannot be undone in bulk — ` +
+            `earnings and pending payroll for open months follow the new amounts. Closed months are not touched.`
+          }
+          confirmLabel="Overwrite billing"
+          danger
+          onConfirm={() => { void applyBilling() }}
+          onCancel={() => setConfirmApply(false)}
+        />
+      )}
     </ModalOverlay>
   )
 }

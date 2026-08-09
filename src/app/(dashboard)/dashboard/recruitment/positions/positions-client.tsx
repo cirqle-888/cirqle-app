@@ -5,6 +5,7 @@ import { Plus, Loader2, MapPin, Users as UsersIcon, Trash2, Pencil, X } from 'lu
 import { listPositions, createPosition, updatePosition, deletePosition, type PositionInput } from '@/lib/recruitment/actions'
 import type { JobPosition, PositionStatus, EmploymentType } from '@/lib/recruitment/types'
 import { useToast, ToastContainer } from '@/components/ui/toast'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 const inputCls = 'w-full bg-secondary border border-foreground/15 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40'
 
@@ -24,6 +25,10 @@ export default function PositionsClient({ canEdit, canDelete }: { canEdit: boole
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  // In-app confirmation. NOT window.confirm: the desktop shell returns false
+  // from it immediately without ever drawing a dialog, so Delete would sit
+  // there dead with no error to explain it.
+  const [deleteTarget, setDeleteTarget] = useState<JobPosition | null>(null)
   const [form, setForm] = useState<PositionInput>(emptyForm)
   const [, startTransition] = useTransition()
   const { toasts, dismiss, success, error: toastError } = useToast()
@@ -58,7 +63,6 @@ export default function PositionsClient({ canEdit, canDelete }: { canEdit: boole
   }
 
   function handleDelete(id: string) {
-    if (!confirm('Delete this position? Existing applications keep a snapshot of the title.')) return
     startTransition(async () => {
       const res = await deletePosition(id)
       if (res.ok) { success('Position deleted'); load() } else toastError('Could not delete', res.error)
@@ -139,13 +143,23 @@ export default function PositionsClient({ canEdit, canDelete }: { canEdit: boole
             {canEdit && (
               <div className="flex items-center gap-1 shrink-0">
                 <button onClick={() => startEdit(p)} className="p-1.5 text-muted-foreground hover:text-foreground rounded-lg hover:bg-foreground/[0.06]"><Pencil className="h-3.5 w-3.5" /></button>
-                {canDelete && <button onClick={() => handleDelete(p.id)} className="p-1.5 text-muted-foreground hover:text-destructive rounded-lg hover:bg-destructive/10"><Trash2 className="h-3.5 w-3.5" /></button>}
+                {canDelete && <button onClick={() => setDeleteTarget(p)} className="p-1.5 text-muted-foreground hover:text-destructive rounded-lg hover:bg-destructive/10"><Trash2 className="h-3.5 w-3.5" /></button>}
               </div>
             )}
           </div>
         ))}
         {positions.length === 0 && <p className="text-sm text-muted-foreground text-center py-10">No positions yet. Create one to start receiving applications.</p>}
       </div>
+      {deleteTarget && (
+        <ConfirmDialog
+          title={`Delete the "${deleteTarget.title}" posting?`}
+          body="It disappears from the public careers page and stops accepting new applicants. Applications already received are kept, along with the title they applied for."
+          confirmLabel="Delete position"
+          danger
+          onConfirm={() => { const id = deleteTarget.id; setDeleteTarget(null); handleDelete(id) }}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </div>
   )

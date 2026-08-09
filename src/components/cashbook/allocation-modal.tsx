@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { X, Plus, Trash2, CheckCircle2, ShieldAlert, Sparkles, TrendingUp, TrendingDown } from 'lucide-react'
 import Combobox from '@/components/ui/combobox'
 
@@ -258,8 +259,12 @@ export default function AllocationModal({ entryId, entryDate, entryClientId, amo
     }
   }
 
+  // In-app confirmation. NOT window.confirm: the desktop shell returns false
+  // from it immediately without ever drawing a dialog, so this button would
+  // silently do nothing there.
+  const [removeAllocId, setRemoveAllocId] = useState<string | null>(null)
+
   async function handleRemove(allocId: string) {
-    if (!confirm('Remove this allocation?')) return
     setSaving(true)
     const { error } = await supabase
       .from('cashbook_invoice_allocations')
@@ -355,7 +360,7 @@ export default function AllocationModal({ entryId, entryDate, entryClientId, amo
                     </div>
                     <div className="flex items-center gap-4">
                       <p className="font-mono text-sm font-semibold">₹{Number(a.allocated_amount).toLocaleString('en-IN', {minimumFractionDigits:2})}</p>
-                      <button onClick={() => handleRemove(a.id)} disabled={saving} className="text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50">
+                      <button onClick={() => setRemoveAllocId(a.id)} disabled={saving} className="text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50">
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
@@ -505,6 +510,16 @@ export default function AllocationModal({ entryId, entryDate, entryClientId, amo
           )}
         </div>
       </div>
+      {removeAllocId && (
+        <ConfirmDialog
+          title="Undo this invoice allocation?"
+          body="The payment goes back to unallocated cash in the book and the invoice's outstanding balance rises again. Nothing is refunded — only the link between the two is removed."
+          confirmLabel="Undo allocation"
+          danger
+          onConfirm={() => { const id = removeAllocId; setRemoveAllocId(null); void handleRemove(id) }}
+          onCancel={() => setRemoveAllocId(null)}
+        />
+      )}
     </ModalOverlay>
   )
 }

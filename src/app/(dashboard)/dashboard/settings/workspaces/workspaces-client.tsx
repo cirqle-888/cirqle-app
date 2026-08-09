@@ -7,6 +7,7 @@ import { navSections } from '@/lib/nav-sections'
 import { WORKSPACE_ICONS, WORKSPACE_COLORS, DASHBOARD_WIDGET_KEYS } from '@/lib/workspaces/catalogue'
 import { createWorkspace, updateWorkspace, deleteWorkspace, type Workspace } from '@/lib/workspaces/actions'
 import { useToast, ToastContainer } from '@/components/ui/toast'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import Header from '@/components/layout/header'
 
 const COLOR_SWATCH: Record<string, string> = {
@@ -36,6 +37,10 @@ export function WorkspacesClient({ initialWorkspaces, employees, canManage, myEm
   const [editing, setEditing] = useState<Workspace | 'new' | null>(null)
   const { toasts, dismiss, success: toastSuccess, error: toastErr } = useToast()
   const [, startTransition] = useTransition()
+  // In-app confirmation. NOT window.confirm: the desktop shell returns false
+  // from it immediately without ever drawing a dialog, so Delete would appear
+  // dead with no error to explain it.
+  const [deleteTarget, setDeleteTarget] = useState<Workspace | null>(null)
 
   const isMine = (ws: Workspace) => ws.ownerEmployeeId === myEmployeeId
   // Managers administer the shared workspaces (plus any personal ones of their
@@ -46,9 +51,6 @@ export function WorkspacesClient({ initialWorkspaces, employees, canManage, myEm
 
   const remove = (ws: Workspace) => {
     if (ws.isSystem) return
-    if (!confirm(isMine(ws)
-      ? `Delete your workspace "${ws.name}"?`
-      : `Delete workspace "${ws.name}"? Anyone using it falls back to "All Workspace".`)) return
     setList(prev => prev.filter(w => w.id !== ws.id))
     startTransition(async () => {
       const res = await deleteWorkspace(ws.id)
@@ -98,7 +100,7 @@ export function WorkspacesClient({ initialWorkspaces, employees, canManage, myEm
                 </button>
               )}
               {!ws.isSystem && editable(ws) && (
-                <button onClick={() => remove(ws)} className="rounded-lg p-1.5 text-muted-foreground hover:text-destructive" aria-label="Delete">
+                <button onClick={() => setDeleteTarget(ws)} className="rounded-lg p-1.5 text-muted-foreground hover:text-destructive" aria-label="Delete">
                   <Trash2 className="h-4 w-4" />
                 </button>
               )}
@@ -127,6 +129,18 @@ export function WorkspacesClient({ initialWorkspaces, employees, canManage, myEm
             toastSuccess('Workspace saved')
           }}
           onError={(msg) => toastErr(msg)}
+        />
+      )}
+      {deleteTarget && (
+        <ConfirmDialog
+          title={`Delete the "${deleteTarget.name}" workspace?`}
+          body={isMine(deleteTarget)
+            ? 'Your sidebar, widgets and landing page go back to the default view. Nothing else about your account changes.'
+            : `The ${deleteTarget.memberIds.length} ${deleteTarget.memberIds.length === 1 ? 'person' : 'people'} using it fall back to the All Workspace view. Their access and data are untouched.`}
+          confirmLabel="Delete workspace"
+          danger
+          onConfirm={() => { const ws = deleteTarget; setDeleteTarget(null); remove(ws) }}
+          onCancel={() => setDeleteTarget(null)}
         />
       )}
       <ToastContainer toasts={toasts} onDismiss={dismiss} />

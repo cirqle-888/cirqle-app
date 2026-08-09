@@ -16,6 +16,7 @@ import { downloadStatementPdf } from '@/lib/partners/statement-pdf'
 import { FavoriteToggle } from '@/components/ui/favorite-toggle'
 import CommissionPlanner from '@/components/partners/commission-planner'
 import type { BusinessPartner, PartnerDashboardData, PartnerStatementData, CommissionPayment } from '@/lib/partners/queries'
+import { formatDate } from '@/lib/utils/format-date'
 
 interface UnlinkedClient { id: string; name: string; code: string }
 interface Brand { companyName: string; primaryColor: string }
@@ -33,11 +34,7 @@ interface Props {
 }
 
 const fmtAmt = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
-const fmtDate = (s: string | null) => {
-  if (!s) return '—'
-  const d = new Date(s)
-  return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-}
+const fmtDate = formatDate
 
 export default function PartnerDashboardClient({ partner, dashboard, unlinkedClients, commissionPayments, initialGreetingName, brand, canEdit, canExport, canViewProfit }: Props) {
   const hasDrafts = dashboard.draftInvoices > 0

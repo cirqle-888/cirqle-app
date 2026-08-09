@@ -20,6 +20,8 @@ import {
 import {
   convertSheetCampaign, listCampaignRevisions, restoreCampaignRevision, type RevisionMeta,
 } from '@/app/(dashboard)/dashboard/offer-prepare/actions'
+import { formatDate } from '@/lib/utils/format-date'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 const BADGE_COLOR: Record<string, string> = {
   red:    'bg-red-500/15 text-red-400 border-red-500/30',
@@ -41,7 +43,7 @@ const LOG_TYPE_LABEL: Record<string, string> = {
 
 function fmtDate(d?: string | null) {
   if (!d) return ''
-  return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+  return formatDate(d)
 }
 function fmtDateTime(d: string) {
   return new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -89,6 +91,16 @@ export function CampaignCard({
   const [linkLoading, setLinkLoading] = useState(false)
   const [revisions, setRevisions] = useState<RevisionMeta[] | null>(null)
   const [revisionsError, setRevisionsError] = useState('')
+  // In-app confirmation. NOT window.confirm: the desktop shell returns false
+  // from it immediately without ever drawing a dialog, so these buttons would
+  // silently do nothing there, with no error to explain it.
+  const [confirmPrompt, setConfirmPrompt] = useState<{
+    title: string
+    body: string
+    confirmLabel: string
+    danger?: boolean
+    onConfirm: () => void
+  } | null>(null)
 
   async function loadRevisions() {
     if (revisions) return
@@ -98,7 +110,6 @@ export function CampaignCard({
   }
 
   async function handleRestore(rev: RevisionMeta) {
-    if (!confirm(`Restore version ${rev.revision_no} (${rev.product_count} products)? The current state is backed up first, so this can be undone.`)) return
     setBusy(true)
     const res = await restoreCampaignRevision(campaign.id, rev.id)
     if (!res.ok) alert(res.error || 'Could not restore.')
@@ -137,7 +148,6 @@ export function CampaignCard({
   }
 
   async function handleFinalise() {
-    if (!confirm('Mark this campaign as finalised? The client can still update it.')) return
     setBusy(true)
     const res = await finaliseCampaign(campaign.id)
     if (!res.ok) alert(res.error || 'Could not finalise.')
@@ -146,7 +156,6 @@ export function CampaignCard({
   }
 
   async function handleConvert() {
-    if (!confirm('Convert this to a Cirqle offer? It will stop tracking the client\u2019s Google Sheet, and future pulls will leave it alone.')) return
     setBusy(true)
     const res = await convertSheetCampaign(campaign.id)
     if (!res.ok) alert(res.error || 'Could not convert.')
@@ -155,7 +164,6 @@ export function CampaignCard({
   }
 
   async function handleArchive() {
-    if (!confirm('Archive this campaign? It will be hidden from the main view.')) return
     setBusy(true)
     const res = await archiveCampaign(campaign.id)
     if (!res.ok) alert(res.error || 'Could not archive.')
@@ -445,7 +453,12 @@ export function CampaignCard({
                     </p>
                   </div>
                   <button
-                    onClick={() => void handleRestore(rev)}
+                    onClick={() => setConfirmPrompt({
+                      title: `Roll back to version ${rev.revision_no}?`,
+                      body: `The current product list is replaced by the ${rev.product_count} products in that version. Today's list is saved as a new version first, so you can roll forward again.`,
+                      confirmLabel: 'Restore version',
+                      onConfirm: () => { void handleRestore(rev) },
+                    })}
                     disabled={busy}
                     className="shrink-0 text-[11px] px-2.5 py-1 rounded-lg bg-secondary text-muted-foreground border border-border hover:text-foreground transition-colors disabled:opacity-50"
                   >
@@ -460,7 +473,12 @@ export function CampaignCard({
           <div className="flex gap-2 pt-1 border-t border-border flex-wrap">
             {campaign.status === 'active' && (
               <button
-                onClick={handleFinalise}
+                onClick={() => setConfirmPrompt({
+                  title: 'Mark this campaign as finalised?',
+                  body: 'It moves out of the in-progress list and is treated as agreed. The client can still send updates, which will show up as changes to acknowledge.',
+                  confirmLabel: 'Mark finalised',
+                  onConfirm: () => { void handleFinalise() },
+                })}
                 disabled={busy}
                 className="text-xs px-3 py-2 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 hover:bg-emerald-500/20 transition-colors flex items-center gap-1.5 disabled:opacity-50"
               >
@@ -469,7 +487,12 @@ export function CampaignCard({
             )}
             {campaign.source === 'sheet_import' && (
               <button
-                onClick={handleConvert}
+                onClick={() => setConfirmPrompt({
+                  title: 'Convert this into a Cirqle offer?',
+                  body: 'It stops tracking the client\u2019s Google Sheet for good — later edits they make there are ignored, and future pulls leave this campaign alone. The products already pulled in stay.',
+                  confirmLabel: 'Convert to offer',
+                  onConfirm: () => { void handleConvert() },
+                })}
                 disabled={busy}
                 title="Stop tracking the client's sheet so this offer can be edited in Cirqle"
                 className="text-xs px-3 py-2 rounded-lg bg-sky-500/10 text-sky-400 border border-sky-500/25 hover:bg-sky-500/20 transition-colors flex items-center gap-1.5 disabled:opacity-50"
@@ -478,7 +501,12 @@ export function CampaignCard({
               </button>
             )}
             <button
-              onClick={handleArchive}
+              onClick={() => setConfirmPrompt({
+                title: 'Archive this campaign?',
+                body: 'It disappears from the main view and stops syncing, but nothing is deleted — the products, versions and history are all kept.',
+                confirmLabel: 'Archive campaign',
+                onConfirm: () => { void handleArchive() },
+              })}
               disabled={busy}
               className="text-xs px-3 py-2 rounded-lg bg-secondary text-muted-foreground border border-border hover:text-foreground transition-colors flex items-center gap-1.5 disabled:opacity-50"
             >
@@ -486,6 +514,16 @@ export function CampaignCard({
             </button>
           </div>
         </div>
+      )}
+      {confirmPrompt && (
+        <ConfirmDialog
+          title={confirmPrompt.title}
+          body={confirmPrompt.body}
+          confirmLabel={confirmPrompt.confirmLabel}
+          danger={confirmPrompt.danger}
+          onConfirm={() => { const fn = confirmPrompt.onConfirm; setConfirmPrompt(null); fn() }}
+          onCancel={() => setConfirmPrompt(null)}
+        />
       )}
     </div>
   )

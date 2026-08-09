@@ -381,11 +381,18 @@ export function TaskEditModal({
               {/* Delete confirmation zone */}
               {confirmDelete ? (
                 <div className="bg-red-500/10 border border-red-500/25 rounded-xl p-3 space-y-2">
-                  <p className="text-xs font-medium text-red-400">Delete this task permanently? This cannot be undone.</p>
+                  {/* Honest copy: serverDeleteTask soft-deletes into the
+                      45-day Trash — saying "permanently" here scared users
+                      away from a recoverable action. */}
+                  <p className="text-xs font-medium text-red-400">Move this task to Trash?</p>
+                  <p className="text-xs text-muted-foreground">
+                    It can be restored from Tasks → Trash for 45 days. Contribution scores on it
+                    stop counting and pending payroll is recalculated.
+                  </p>
                   <div className="flex gap-2 mt-3">
                     <Button type="button" variant="outline" onClick={() => setConfirmDelete(false)} className="flex-1">Keep task</Button>
                     <Button type="button" variant="destructive" onClick={handleDelete} loading={deleting} className="flex-1">
-                      Yes, delete
+                      Move to Trash
                     </Button>
                   </div>
                 </div>

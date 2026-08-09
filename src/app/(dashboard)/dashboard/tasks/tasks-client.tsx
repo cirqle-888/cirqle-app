@@ -68,6 +68,7 @@ import { useToast, ToastContainer } from '@/components/ui/toast'
 import { BatchActionBar, type BatchAction } from '@/components/ui/batch-action-bar'
 import { formatTaskDate, fullTaskDate } from '@/lib/utils/format-date'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { OverflowMenu } from '@/components/ui/overflow-menu'
 import { Button } from '@/components/ui/button'
 import { usePrivacy } from "@/contexts/privacy-context"
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from "@/lib/utils"
@@ -2121,60 +2122,32 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
               </button>
             ) : (
               <>
-                {/* External Requests inbox — requires requests.view permission */}
-                {can('requests.view') && (
-                  <Link
-                    href="/dashboard/requests"
-                    title={pendingRequestCount > 0 ? `${pendingRequestCount} pending request${pendingRequestCount !== 1 ? 's' : ''}` : 'External requests from clients & agencies'}
-                    className="relative flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-2 bg-secondary hover:bg-secondary/80 transition-colors"
-                  >
-                    <Inbox className="w-4 h-4 text-violet-400" />
-                    <span className="hidden sm:inline">Requests</span>
-                    {pendingRequestCount > 0 && (
-                      <span className="ml-0.5 min-w-[18px] h-[18px] px-1 inline-flex items-center justify-center rounded-full bg-violet-500 text-white text-[10px] font-bold leading-none">
-                        {pendingRequestCount}
-                      </span>
-                    )}
-                  </Link>
-                )}
-                {/* Workload Report — requires tasks.workload permission */}
-                {can('tasks.workload') && (
-                  <button
-                    onClick={() => setShowWorkload(true)}
-                    title="Workload Report"
-                    className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-2 bg-secondary hover:bg-secondary/80 transition-colors"
-                  >
-                    <Users className="w-4 h-4 text-blue-400" />
-                    <span className="hidden sm:inline">Workload</span>
-                  </button>
-                )}
-                {/* Trash — requires tasks.trash permission */}
-                {can('tasks.trash') && (() => {
-                  // Use live DB count (covers all soft-deleted, not just last 45 days)
-                  // Fall back to local list count while DB count is loading
-                  const liveCount = trashDbCount ?? trash.length
-                  const hasItems  = liveCount > 0
-                  return (
-                    <button
-                      onClick={() => setShowTrash(true)}
-                      title={hasItems ? `${liveCount} item${liveCount !== 1 ? 's' : ''} in Trash` : 'Trash (empty)'}
-                      className={`relative flex items-center gap-1.5 text-sm font-medium border rounded-lg px-3 py-2 transition-colors
-                        ${hasItems
-                          ? 'text-red-400 border-red-500/30 bg-red-500/5 hover:bg-red-500/10'
-                          : 'text-muted-foreground border-border bg-secondary hover:bg-secondary/80 hover:text-foreground'}`}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      <span className="hidden sm:inline">Trash</span>
-                      {/* Always show badge — red when items, muted when empty */}
-                      <span className={`text-[10px] rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 font-semibold transition-colors
-                        ${hasItems
-                          ? 'bg-red-500 text-white animate-pulse'
-                          : 'bg-foreground/10 text-muted-foreground/50'}`}>
-                        {trashDbCount === null ? '…' : liveCount}
-                      </span>
-                    </button>
-                  )
-                })()}
+                {/* Secondary destinations live behind "…" so the page title
+                    stops truncating to make room for them. Each keeps its own
+                    permission gate; nothing became harder to reach than one
+                    extra click. */}
+                <OverflowMenu
+                  items={[
+                    ...(can('requests.view') ? [{
+                      label: 'Client requests',
+                      icon: Inbox,
+                      badge: pendingRequestCount > 0 ? pendingRequestCount : undefined,
+                      onClick: () => { window.location.href = '/dashboard/requests' },
+                    }] : []),
+                    ...(can('tasks.workload') ? [{
+                      label: 'Workload report',
+                      icon: Users,
+                      onClick: () => setShowWorkload(true),
+                    }] : []),
+                    ...(can('tasks.trash') ? [{
+                      label: 'Trash',
+                      icon: Trash2,
+                      badge: trashDbCount === null ? '…' : (trashDbCount ?? trash.length),
+                      separatorBefore: true,
+                      onClick: () => setShowTrash(true),
+                    }] : []),
+                  ]}
+                />
                 {/* Add Task — requires tasks.create permission */}
                 {can('tasks.create') && (
                   <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90 transition-opacity">

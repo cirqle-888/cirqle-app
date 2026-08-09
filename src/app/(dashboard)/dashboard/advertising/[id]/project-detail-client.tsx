@@ -37,6 +37,7 @@ import { Archive, ArchiveRestore } from 'lucide-react'
 import { FavoriteToggle } from '@/components/ui/favorite-toggle'
 import { TimelineTab } from '@/components/activity/timeline-tab'
 import { DiscussButton } from '@/components/chat/discuss-button'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 type Project = AdProjectRow & { 
   client?: { id: string; name: string; code: string } | null,
@@ -97,6 +98,16 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, in
 
   const [deleting, setDeleting] = useState(false)
   const [archiving, setArchiving] = useState(false)
+  // In-app confirmation. NOT window.confirm: the desktop shell returns false
+  // from it immediately without ever drawing a dialog, so Archive and Delete
+  // would sit there dead with no error to explain it.
+  const [confirmPrompt, setConfirmPrompt] = useState<{
+    title: string
+    body: string
+    confirmLabel: string
+    danger?: boolean
+    onConfirm: () => void
+  } | null>(null)
 
   async function onStatus(v: string) {
     setStatus(v)
@@ -105,7 +116,6 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, in
   }
 
   async function onDelete() {
-    if (!confirm(`Delete "${project.campaign_name}"? This cannot be undone.`)) return
     setDeleting(true)
     const res = await softDeleteAdProject(project.id)
     if (res.ok) router.push('/dashboard/advertising')
@@ -114,7 +124,6 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, in
 
   async function onToggleArchive() {
     const isArchived = !!project.archived_at
-    if (!isArchived && !confirm(`Archive "${project.campaign_name}"? It will be hidden from active lists.`)) return
     setArchiving(true)
     const res = await setAdProjectArchived(project.id, !isArchived)
     setArchiving(false)
@@ -182,7 +191,12 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, in
             {perms.edit && (
               <>
                 <button
-                  onClick={onToggleArchive}
+                  onClick={() => project.archived_at ? void onToggleArchive() : setConfirmPrompt({
+                    title: `Archive "${project.campaign_name}"?`,
+                    body: 'The campaign drops out of active lists and stops appearing in day-to-day views. Its spend, metrics and invoices are untouched, and you can unarchive it at any time.',
+                    confirmLabel: 'Archive campaign',
+                    onConfirm: () => { void onToggleArchive() },
+                  })}
                   disabled={archiving}
                   title={project.archived_at ? 'Unarchive campaign' : 'Archive campaign'}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium hover:bg-secondary disabled:opacity-50 transition-colors"
@@ -191,7 +205,13 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, in
                   {project.archived_at ? 'Unarchive' : 'Archive'}
                 </button>
                 <button
-                  onClick={onDelete}
+                  onClick={() => setConfirmPrompt({
+                    title: `Delete "${project.campaign_name}"?`,
+                    body: 'The campaign and everything recorded against it — daily performance, notes and reports — stop being visible anywhere. This cannot be undone; archive it instead if you only want it out of the way.',
+                    confirmLabel: 'Delete campaign',
+                    danger: true,
+                    onConfirm: () => { void onDelete() },
+                  })}
                   disabled={deleting}
                   title="Delete campaign"
                   className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-500/20 dark:text-red-400 disabled:opacity-50 transition-colors"
@@ -250,6 +270,16 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, in
       )}
       {tab === 'timeline' && (
         <TimelineTab scope={{ projectId: project.id }} />
+      )}
+      {confirmPrompt && (
+        <ConfirmDialog
+          title={confirmPrompt.title}
+          body={confirmPrompt.body}
+          confirmLabel={confirmPrompt.confirmLabel}
+          danger={confirmPrompt.danger}
+          onConfirm={() => { const fn = confirmPrompt.onConfirm; setConfirmPrompt(null); fn() }}
+          onCancel={() => setConfirmPrompt(null)}
+        />
       )}
     </div>
   )
@@ -1086,9 +1116,12 @@ function ProjectReportsTab({
   }
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  // In-app confirmation. NOT window.confirm: the desktop shell returns false
+  // from it immediately without ever drawing a dialog, so Delete would sit
+  // there dead with no error to explain it.
+  const [deleteReportId, setDeleteReportId] = useState<string | null>(null)
 
   async function onDelete(reportId: string) {
-    if (!confirm('Delete this report permanently? The PDF/image files will also be removed.')) return
     setDeletingId(reportId)
     setError(null)
     try {
@@ -1211,7 +1244,7 @@ function ProjectReportsTab({
                   {r.image_url_portrait && <a href={r.image_url_portrait} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"><Download className="h-3 w-3" />Image</a>}
                   {canEdit && (
                     <button
-                      onClick={() => onDelete(r.id)}
+                      onClick={() => setDeleteReportId(r.id)}
                       disabled={deletingId === r.id}
                       title="Delete report"
                       className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:text-red-600 hover:border-red-300 disabled:opacity-50"
@@ -1225,6 +1258,16 @@ function ProjectReportsTab({
           </div>
         )}
       </div>
+      {deleteReportId && (
+        <ConfirmDialog
+          title="Delete this report?"
+          body="The generated PDF and image files are removed from storage for good. Anyone you already sent a copy to keeps theirs; you can generate a fresh report for the same dates at any time."
+          confirmLabel="Delete report"
+          danger
+          onConfirm={() => { const id = deleteReportId; setDeleteReportId(null); void onDelete(id) }}
+          onCancel={() => setDeleteReportId(null)}
+        />
+      )}
     </div>
   )
 }

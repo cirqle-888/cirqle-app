@@ -28,6 +28,7 @@ import {
   List, LayoutGrid, MoreVertical, CheckCircle, PlusIcon, FileDownIcon,
 } from 'lucide-react'
 import { useToast, ToastContainer } from '@/components/ui/toast'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import AppSelect from '@/components/ui/app-select'
 import Combobox from '@/components/ui/combobox'
 import { TitleAutocomplete } from '@/components/tasks/title-autocomplete'
@@ -37,6 +38,7 @@ const QuickCreateServiceModal = dynamic(() => import('@/components/tasks/quick-c
 import { usePermissions } from '@/contexts/permission-context'
 import { useRole } from '@/contexts/role-context'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { formatDate } from '@/lib/utils/format-date'
 const ActivityPanel = dynamic(() => import('@/components/activity/activity-panel'), { ssr: false })
 // Matches the loading strategy the task modal already uses for this button.
 const DiscussButton = dynamic(() => import('@/components/chat/discuss-button').then(m => m.DiscussButton), { ssr: false })
@@ -563,8 +565,22 @@ export default function ContributionsClient({
         )
       }
 
-      // Refresh server data so counts & payroll reflect the new scores
-      if (savedCount > 0) router.refresh()
+      // Money must never move invisibly. This repair path writes contribution
+      // scores AND restates pending payroll for the open months it touched, so
+      // it announces itself — previously the only trace was numbers quietly
+      // changing between two page loads.
+      if (savedCount > 0) {
+        const months = openMonths.size
+        toast.info(
+          `${savedCount} task${savedCount === 1 ? '' : 's'} rescored automatically`,
+          months > 0
+            ? `Earnings were missing or out of date on ${savedCount === 1 ? 'this task' : 'these tasks'}. Pending payroll for ${months} open month${months === 1 ? '' : 's'} was updated to match. Paid payslips were not touched.`
+            : `Earnings were missing or out of date. No payroll needed updating.`,
+          8000,
+        )
+        // Refresh server data so counts & payroll reflect the new scores
+        router.refresh()
+      }
     }
 
     doSilentRecalc()
@@ -877,7 +893,7 @@ export default function ContributionsClient({
       .map(s => s.calculated_at as string)
       .sort()
     return ds.length
-      ? new Date(ds[ds.length - 1]).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+      ? formatDate(ds[ds.length - 1])
       : null
   }, [scores, selectedTask])
 
@@ -1219,10 +1235,15 @@ export default function ContributionsClient({
     router.refresh()
   }
 
+  // In-app confirmation, NOT window.confirm: the desktop shell returns false
+  // from native confirm without drawing a dialog, so bulk delete silently did
+  // nothing there. The copy also names the earnings consequence, which the
+  // one-line native prompt never did.
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false)
+
   async function bulkDeleteTasks() {
     const ids = [...selectedTasks]
     if (ids.length === 0) return
-    if (!confirm(`Move ${ids.length} task${ids.length !== 1 ? 's' : ''} to trash?`)) return
     await Promise.all(ids.map(id =>
       supabase.from('tasks').update({ deleted_at: new Date().toISOString() }).eq('id', id)
     ))
@@ -1359,6 +1380,16 @@ export default function ContributionsClient({
 
     return (
       <PageShell>
+        {bulkDeleteConfirm && (
+          <ConfirmDialog
+            title={`Move ${selectedTasks.size} task${selectedTasks.size === 1 ? '' : 's'} to Trash?`}
+            body={`They can be restored from Tasks → Trash for 45 days. Contribution scores on them stop counting toward earnings, and pending payroll for any open month is recalculated. Paid payslips are not touched.`}
+            confirmLabel="Move to Trash"
+            danger
+            onConfirm={() => { setBulkDeleteConfirm(false); void bulkDeleteTasks() }}
+            onCancel={() => setBulkDeleteConfirm(false)}
+          />
+        )}
         <ToastContainer toasts={toast.toasts} onDismiss={toast.dismiss} />
         <PageChrome>
           <Header
@@ -2390,7 +2421,7 @@ export default function ContributionsClient({
                 <Clock className="w-3.5 h-3.5" /> Mark Pending
               </button>
               {canSeeFinancials && (
-                <button onClick={bulkDeleteTasks}
+                <button onClick={() => setBulkDeleteConfirm(true)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-500/15 text-red-400 hover:bg-red-500/25 text-xs font-semibold transition-colors border border-red-500/20">
                   <Trash2 className="w-3.5 h-3.5" /> Delete
                 </button>

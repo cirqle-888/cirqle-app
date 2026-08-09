@@ -136,7 +136,12 @@ export default function PricingMatrixClient({ clients, services }: Props) {
     <>
       <Header
         title="Pricing Matrix"
-        subtitle={`${allActiveClients.length} client${allActiveClients.length === 1 ? '' : 's'} · ${allActiveServices.length} service${allActiveServices.length === 1 ? '' : 's'}`}
+        subtitle={
+          // Which-tool-when: this screen sets the shared pool; the other two
+          // pay tools (per-person agreements, role rewards) are named so the
+          // three don't get confused for each other.
+          `${allActiveClients.length} client${allActiveClients.length === 1 ? '' : 's'} · ${allActiveServices.length} service${allActiveServices.length === 1 ? '' : 's'} — commission % here sets the shared pool for everyone; one person's special rate is an Employee Agreement, a role reward is Settings → Ownership`
+        }
         actions={
           <>
             <Link href="/dashboard/clients"

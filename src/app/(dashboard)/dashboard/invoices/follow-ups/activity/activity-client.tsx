@@ -5,6 +5,7 @@ import Link from 'next/link'
 import Header from '@/components/layout/header'
 import { History, Search, ExternalLink, Users, BarChart3 } from 'lucide-react'
 import { usePrivacy } from '@/contexts/privacy-context'
+import { formatDate } from '@/lib/utils/format-date'
 
 interface ActivityRow {
   id:                 string
@@ -37,11 +38,7 @@ const fmtDateTime = (s: string) => {
   const d = new Date(s)
   return isNaN(d.getTime()) ? '—' : d.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
-const fmtDate = (s: string | null) => {
-  if (!s) return null
-  const d = new Date(s)
-  return isNaN(d.getTime()) ? null : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-}
+const fmtDate = (s: string | null) => (s ? formatDate(s) : null)
 
 export default function ActivityClient({ rows, setupNeeded }: { rows: ActivityRow[]; setupNeeded: boolean }) {
   // Actor names respect the global privacy lock — real name only when unlocked, else CQID.

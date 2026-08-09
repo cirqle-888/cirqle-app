@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import type { AgreementProgressSummary } from '@/lib/agreements/progress'
+import { formatDate } from '@/lib/utils/format-date'
 
 // Lazy recharts — only loads when a client with retainer trend data is viewed.
 const ChartSkeleton = () => <div className="h-[220px] rounded-lg bg-secondary/40 animate-pulse" />
@@ -29,10 +30,7 @@ interface Props {
 }
 
 const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
-const fmtDate = (d?: string | null) => {
-  if (!d) return '—'
-  try { return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) } catch { return d }
-}
+const fmtDate = formatDate
 
 const INVOICE_STATUS_STYLE: Record<string, string> = {
   draft:   'bg-secondary text-muted-foreground border-border',

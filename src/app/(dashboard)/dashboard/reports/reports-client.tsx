@@ -417,9 +417,32 @@ export default function ReportsClient({
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <div>
-      <Header title="Reports & Performance" subtitle="Employee analytics & earnings breakdown" />
+      {/* The page is employee analytics, not a hub — the old title promised
+          every report and linked to none of them. Renamed to what it is, with
+          the siblings listed once so they are findable from here. */}
+      <Header title="Employee Performance" subtitle="Who earned what, and how the work was scored" />
 
       <div className="p-6 space-y-5">
+
+        {/* Sibling reports — this screen answers one question; these answer the rest. */}
+        <div className="flex flex-wrap gap-1.5 text-xs">
+          <span className="text-muted-foreground self-center mr-0.5">Other reports:</span>
+          {[
+            { href: '/dashboard/reports/contribution-analysis', label: 'Contribution Analysis' },
+            { href: '/dashboard/reports/role-earnings', label: 'Earnings by Role' },
+            { href: '/dashboard/reports/what-if', label: 'What-If Planner' },
+            { href: '/dashboard/health', label: 'Business Health' },
+            { href: '/dashboard/reports/client-profitability', label: 'Client Profitability' },
+            { href: '/dashboard/reports/cost-attribution', label: 'Cost & Tags' },
+            { href: '/dashboard/reports/company-ops', label: 'Company Operations' },
+            { href: '/dashboard/clients/ranking', label: 'Client Ranking' },
+          ].map(r => (
+            <a key={r.href} href={r.href}
+              className="rounded-lg border border-border px-2.5 py-1 text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors">
+              {r.label}
+            </a>
+          ))}
+        </div>
 
         {/* ── Top bar: date filter + employee pills ── */}
         <div className="flex items-start justify-between gap-4 flex-wrap">

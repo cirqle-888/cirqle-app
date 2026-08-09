@@ -38,6 +38,7 @@ import { DiscussButton } from '@/components/chat/discuss-button'
 import { CampaignCard } from '@/components/campaigns/campaign-card'
 import { useBatchSelection } from '@/lib/hooks/use-batch-selection'
 import { BatchActionBar, type BatchAction } from '@/components/ui/batch-action-bar'
+import { formatDate } from '@/lib/utils/format-date'
 
 // Task-driven 5-stage flow. Request status mirrors the linked task (see
 // requestStatusFromTask): New → On Going → Under Review → Completed → Cancelled.
@@ -111,7 +112,7 @@ const TRANSITIONS: Record<string, { to: RequestStatus; label: string }[]> = {
   cancelled:           [],
 }
 
-const fmtDate = (d?: string | null) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
+const fmtDate = formatDate
 const fmtDT = (d: string) => new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 const ago = (d: string) => {
   const h = Math.floor((Date.now() - new Date(d).getTime()) / 3600000)

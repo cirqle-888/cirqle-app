@@ -85,7 +85,7 @@ export function WorkspaceClient({ initialItems }: { initialItems: WorkspaceItem[
 
   return (
     <div>
-      <Header title="Workspace" subtitle="Your private planner — todos, notes and reminders" />
+      <Header title="My Planner" subtitle="Your private to-dos, notes and reminders — only you can see this" />
       <div className="mx-auto max-w-2xl px-4 py-6">
         {/* Quick add */}
         <div className="mb-6 rounded-2xl border border-border bg-card p-3">

@@ -25,6 +25,7 @@ import { displayEmployee } from '@/lib/utils/employee-display'
 import { ApprovalCard } from '@/components/approvals/approval-card'
 import { VoiceRecorderButton, VoiceBubble, type VoiceRecording } from '@/components/chat/voice'
 import { RequestApprovalDialog } from '@/components/approvals/request-approval-dialog'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   listConversations, createChannel, getOrCreateDm, joinChannel,
   listChatEmployees, getMessages, getThread, sendMessage, deleteMessage, editMessage, markRead,
@@ -951,6 +952,7 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
             setFilter={setWorkNavFilter} setSearch={setWorkNavSearch}
             togglePin={togglePin} onSelect={(id) => { setActiveId(id); setShowWorkNavMobile(false) }}
             onClose={() => setShowWorkNavMobile(false)}
+            onDelete={askDeleteConv}
           />
         </div>
       ) : null}
@@ -1752,9 +1754,11 @@ function NewConversationDialog({ mode, canCreateChannels, onClose, onCreated }: 
   )
 }
 
-function WorkNavigatorRow({ conv, active, onClick, isPinned, togglePin }: {
+function WorkNavigatorRow({ conv, active, onClick, isPinned, togglePin, onDelete }: {
   conv: ChatConversation; active: boolean; onClick: () => void;
   isPinned: boolean; togglePin: (e: React.MouseEvent) => void;
+  /** Close this discussion. Omitted when the caller may not delete it. */
+  onDelete?: (conv: ChatConversation, label: string) => void;
 }) {
   const badge = ENTITY_BADGE[conv.type]
   const Icon = badge?.Icon ?? Hash
@@ -1779,16 +1783,26 @@ function WorkNavigatorRow({ conv, active, onClick, isPinned, togglePin }: {
           </div>
         </div>
       </button>
-      <button onClick={togglePin} className={`mr-2 shrink-0 rounded p-1.5 transition-opacity hover:text-foreground ${isPinned ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-0 group-hover/row:opacity-100 focus:opacity-100'}`}>
+      <button onClick={togglePin} title={isPinned ? 'Unpin' : 'Pin to top'}
+        className={`shrink-0 rounded p-1.5 transition-opacity hover:text-foreground ${isPinned ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-0 group-hover/row:opacity-100 focus:opacity-100'}`}>
         <Pin className={`h-3.5 w-3.5 ${isPinned ? 'fill-current' : ''}`} />
       </button>
+      {onDelete && (
+        <button
+          onClick={e => { e.stopPropagation(); onDelete(conv, displayName) }}
+          title="Close this discussion"
+          className="mr-2 shrink-0 rounded p-1.5 text-muted-foreground opacity-0 transition-opacity hover:text-red-500 group-hover/row:opacity-100 focus:opacity-100">
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      )}
+      {!onDelete && <span className="mr-2" />}
     </div>
   )
 }
 
 function WorkNavigatorPanel({
   clientGroup, activeId, filter, search, pinnedIds,
-  setFilter, setSearch, togglePin, onSelect, onClose
+  setFilter, setSearch, togglePin, onSelect, onClose, onDelete
 }: {
   clientGroup: { name: string; threads: ChatConversation[] }
   activeId: string | null
@@ -1800,6 +1814,8 @@ function WorkNavigatorPanel({
   togglePin: (id: string, e: React.MouseEvent) => void
   onSelect: (id: string) => void
   onClose?: () => void
+  /** Close a discussion. Each row offers it only when that row allows it. */
+  onDelete?: (conv: ChatConversation, label: string) => void
 }) {
   const threads = useMemo(() => {
     let list = clientGroup.threads
@@ -1867,13 +1883,13 @@ function WorkNavigatorPanel({
         {pinned.length > 0 && (
           <div className="mb-4">
             <SectionLabel>📌 Pinned</SectionLabel>
-            {pinned.map(t => <WorkNavigatorRow key={t.id} conv={t} active={t.id === activeId} onClick={() => onSelect(t.id)} isPinned togglePin={e => togglePin(t.id, e)} />)}
+            {pinned.map(t => <WorkNavigatorRow key={t.id} conv={t} active={t.id === activeId} onClick={() => onSelect(t.id)} isPinned togglePin={e => togglePin(t.id, e)} onDelete={t.canDelete ? onDelete : undefined} />)}
           </div>
         )}
         {Object.entries(grouped).map(([label, list]) => list.length > 0 && (
           <div key={label} className="mb-4">
             <SectionLabel>{label}</SectionLabel>
-            {list.map(t => <WorkNavigatorRow key={t.id} conv={t} active={t.id === activeId} onClick={() => onSelect(t.id)} isPinned={false} togglePin={e => togglePin(t.id, e)} />)}
+            {list.map(t => <WorkNavigatorRow key={t.id} conv={t} active={t.id === activeId} onClick={() => onSelect(t.id)} isPinned={false} togglePin={e => togglePin(t.id, e)} onDelete={t.canDelete ? onDelete : undefined} />)}
           </div>
         ))}
       </div>
@@ -1895,6 +1911,10 @@ function MembersDialog({ conversation, me, onClose }: {
   const [filter, setFilter] = useState('')
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
+  // In-app confirmation. NOT window.confirm: the desktop shell returns false
+  // from it immediately without ever drawing a dialog, so Remove/Leave would
+  // silently do nothing there.
+  const [removeTarget, setRemoveTarget] = useState<{ employeeId: string; name?: string | null; cqid?: string | null } | null>(null)
 
   useEffect(() => {
     listChatEmployees().then(res => { if (res.ok) setEmployees(res.data) })
@@ -1974,17 +1994,7 @@ function MembersDialog({ conversation, me, onClose }: {
                   {canRemove(m.employeeId, m.role) && (
                     <button 
                       disabled={pending}
-                      onClick={() => {
-                        if (m.employeeId !== me.employeeId && !confirm(`Remove ${mask(m.name, m.cqid)} from this conversation?`)) return;
-                        if (m.employeeId === me.employeeId && !confirm(`Are you sure you want to leave this conversation?`)) return;
-                        
-                        startTransition(async () => {
-                          setError(null)
-                          const res = await removeMemberFromConversation(conversation.id, m.employeeId)
-                          if (!res.ok) setError(res.error)
-                          else if (m.employeeId === me.employeeId) onClose() // Close if self left
-                        })
-                      }}
+                      onClick={() => setRemoveTarget(m)}
                       className="rounded p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50">
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -2025,6 +2035,29 @@ function MembersDialog({ conversation, me, onClose }: {
             </>
           )}
         </div>
+        {removeTarget && (
+          <ConfirmDialog
+            title={removeTarget.employeeId === me.employeeId
+              ? 'Leave this conversation?'
+              : `Remove ${mask(removeTarget.name, removeTarget.cqid)}?`}
+            body={removeTarget.employeeId === me.employeeId
+              ? 'You stop receiving messages here and lose access to the history. Someone still in the conversation has to add you back.'
+              : 'They stop receiving new messages here and lose access to the history. You can add them back at any time.'}
+            confirmLabel={removeTarget.employeeId === me.employeeId ? 'Leave' : 'Remove'}
+            danger
+            onConfirm={() => {
+              const target = removeTarget
+              setRemoveTarget(null)
+              startTransition(async () => {
+                setError(null)
+                const res = await removeMemberFromConversation(conversation.id, target.employeeId)
+                if (!res.ok) setError(res.error)
+                else if (target.employeeId === me.employeeId) onClose() // Close if self left
+              })
+            }}
+            onCancel={() => setRemoveTarget(null)}
+          />
+        )}
       </div>
     </div>
   )

@@ -425,9 +425,19 @@ export default function PayrollClient({
     const liveCommission = record ? (monthCommissions[record.employee_id] || 0) : 0
     const liveNet = record ? Math.max(0, (record.base_salary || 0) + liveCommission + storedExtras(record) - (record.advances_deducted || 0) - (record.other_deductions || 0)) : 0
     const displayNet = liveNet || record?.net_salary || 0
+    // Full consequences up front: marking paid also writes the salary expense
+    // into the Cash Book (previously only revealed by the Undo dialog), and
+    // when the live recompute differs from the saved record, both figures are
+    // shown so the owner knows exactly which number is being committed.
+    const savedNet = record?.net_salary || 0
+    const drifted = liveNet > 0 && savedNet > 0 && Math.round(liveNet) !== Math.round(savedNet)
     setConfirmModal({
       title:        'Mark Salary as Paid',
-      body:         `Mark ${dn(emp) || 'this employee'}'s salary for ${monthName} ${record?.year ?? ''} as paid?\nNet: ₹${displayNet.toLocaleString('en-IN')}. This records today as the payment date.`,
+      body:         `Mark ${dn(emp) || 'this employee'}'s salary for ${monthName} ${record?.year ?? ''} as paid?\n` +
+        (drifted
+          ? `Current calculation: ₹${liveNet.toLocaleString('en-IN')} (saved record shows ₹${savedNet.toLocaleString('en-IN')} — the current figure is what gets paid).\n`
+          : `Net: ₹${displayNet.toLocaleString('en-IN')}.\n`) +
+        `Records today as the payment date and adds this amount as a salary expense in the Cash Book.`,
       confirmLabel: 'Mark Paid',
       onConfirm:    () => markPaid(id),
     })
@@ -757,27 +767,43 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                     className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40">
                     <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
                   </button>
+                  {/* This writes commission, ownership and net onto every
+                      PENDING payslip for the viewed month. As a bare ⚡ icon
+                      8px from the harmless refresh it was one mis-click from
+                      restating a month; now it is named and confirmed. */}
                   <button
-                    onClick={async () => {
-                      setRefreshing(true)
-                      const result = await recalculatePayrollForMonth({
-                        month: viewMonth,
-                        year: viewYear,
-                        source: 'manual_refresh'
-                      })
-                      setRefreshing(false)
-                      if (result.ok && result.data?.updated) {
-                        toastSuccess(`Recalculated payroll for ${MONTHS[viewMonth - 1]}`, `${result.data.updated} record${result.data.updated !== 1 ? 's' : ''} updated`)
-                        router.refresh()
-                      } else if (!result.ok) {
-                        toastError('Payroll refresh failed', result.error)
-                      }
-                    }}
+                    onClick={() => setConfirmModal({
+                      title: `Recalculate ${MONTHS[viewMonth - 1]} ${viewYear} payroll?`,
+                      body: `Re-reads contribution earnings and ownership awards, then updates commission and net on every PENDING payslip for this month. Already-paid payslips are never changed.`,
+                      confirmLabel: 'Recalculate month',
+                      onConfirm: async () => {
+                        setRefreshing(true)
+                        const result = await recalculatePayrollForMonth({
+                          month: viewMonth,
+                          year: viewYear,
+                          source: 'manual_refresh'
+                        })
+                        setRefreshing(false)
+                        if (result.ok) {
+                          const n = result.data?.updated ?? 0
+                          toastSuccess(
+                            `${MONTHS[viewMonth - 1]} payroll recalculated`,
+                            n > 0
+                              ? `${n} payslip${n !== 1 ? 's' : ''} updated`
+                              : 'Every pending payslip already matched — nothing changed.',
+                          )
+                          router.refresh()
+                        } else {
+                          toastError('Payroll refresh failed', result.error)
+                        }
+                      },
+                    })}
                     disabled={refreshing}
                     title="Recalculate pending payroll for this month"
-                    className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
+                    className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 text-[11px] font-medium"
                   >
                     <Zap className={`w-3.5 h-3.5 ${refreshing ? 'animate-pulse' : ''}`} />
+                    <span className="hidden sm:inline">Recalculate…</span>
                   </button>
                 </div>
               </div>
@@ -908,20 +934,34 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                       </div>
                       <div className="flex justify-between items-center font-semibold text-sm pt-2 mt-1 border-t border-border/60">
                         <span className="flex items-center gap-1.5 text-foreground">
-                          Net Payable
-                          {record && payrollOutOfSync(record) && (
-                            <button
-                              onClick={e => { e.stopPropagation(); handleRefreshPayroll(record.id) }}
-                              disabled={refreshingId === record.id}
-                              title="Live commission changed. Click to refresh."
-                              className="text-amber-500 hover:text-amber-600 dark:hover:text-amber-400 transition-colors disabled:opacity-50"
-                            >
-                              <RefreshCw className={`w-3.5 h-3.5 ${refreshingId === record.id ? 'animate-spin' : ''}`} />
-                            </button>
-                          )}
+                          Net payable
                         </span>
                         <span className="text-foreground tabular-nums">₹{(record?.net_salary ?? netEst).toLocaleString('en-IN')}</span>
                       </div>
+
+                      {/* The amount being written used to be invisible: a bare
+                          amber icon whose tooltip said only "live commission
+                          changed". Both figures are now on screen before the
+                          click, so nobody updates a payslip blind. */}
+                      {record && payrollOutOfSync(record) && (() => {
+                        const liveComm = monthCommissions[record.employee_id] || 0
+                        const liveNet = Math.max(0, (record.base_salary || 0) + liveComm + storedExtras(record) - (record.advances_deducted || 0) - (record.other_deductions || 0))
+                        return (
+                          <div className="flex items-center justify-between gap-2 -mt-1 pt-2 text-[11px] text-amber-600 dark:text-amber-400">
+                            <span className="min-w-0 truncate">
+                              Earnings changed since saved: ₹{Math.round(record.net_salary || 0).toLocaleString('en-IN')} → ₹{Math.round(liveNet).toLocaleString('en-IN')}
+                            </span>
+                            <button
+                              onClick={e => { e.stopPropagation(); handleRefreshPayroll(record.id) }}
+                              disabled={refreshingId === record.id}
+                              className="shrink-0 inline-flex items-center gap-1 rounded-md border border-amber-500/30 px-1.5 py-0.5 font-medium hover:bg-amber-500/10 disabled:opacity-50"
+                            >
+                              <RefreshCw className={`w-3 h-3 ${refreshingId === record.id ? 'animate-spin' : ''}`} />
+                              Update
+                            </button>
+                          </div>
+                        )
+                      })()}
                     </div>
 
                     {/* Attendance + next payday */}

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { X, RefreshCw, AlertTriangle, Check, CalendarIcon } from 'lucide-react'
 
@@ -29,16 +30,21 @@ export function RecalcCommissionsModal({ open, onClose, employees }: Props) {
     setResult(null)
   }, [open])
 
-  async function handleApply() {
+  // In-app confirmation, NOT window.confirm: the desktop shell returns false
+  // from native confirm without drawing a dialog, so Apply silently did
+  // nothing there — on a screen whose whole purpose is rewriting earnings.
+  const [confirmApply, setConfirmApply] = useState(false)
+
+  function handleApply() {
     if (!dateFrom || !dateTo) {
       setError('Please select both start and end dates.')
       return
     }
+    setConfirmApply(true)
+  }
 
-    if (!confirm('Are you sure you want to recalculate commissions for the selected period? This will override existing commission scores but will keep previous values in the audit trail.')) {
-      return
-    }
-
+  async function applyRecalc() {
+    setConfirmApply(false)
     setLoading(true)
     setError(null)
     setResult(null)
@@ -180,6 +186,17 @@ export function RecalcCommissionsModal({ open, onClose, employees }: Props) {
           </button>
         </div>
       </div>
+
+      {confirmApply && (
+        <ConfirmDialog
+          title="Recalculate commissions for this period?"
+          body={`Every scored task from ${dateFrom} to ${dateTo}${employeeId ? ' for the selected employee' : ' for all employees'} is re-scored, overwriting the stored earnings. Previous values stay in the audit trail, and pending payroll picks up the new figures. Closed months are not touched.`}
+          confirmLabel="Recalculate"
+          danger
+          onConfirm={() => { void applyRecalc() }}
+          onCancel={() => setConfirmApply(false)}
+        />
+      )}
     </ModalOverlay>
   )
 }

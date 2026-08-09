@@ -10,10 +10,12 @@
  */
 
 import { useState, useTransition } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Plus, Trash2, Loader2, Play, Eye, AlertTriangle, ChevronDown, Power } from 'lucide-react'
+import { Plus, Trash2, Loader2, Play, Eye, AlertTriangle, ChevronDown, Power, ArrowUpRight } from 'lucide-react'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import AppSelect from '@/components/ui/app-select'
 import type { OwnershipProgram, OwnershipRule, OwnershipBasis, OwnershipPeriodType, OwnershipScopeKind } from '@/lib/ownership/types'
 import { saveProgram, setProgramActive, deleteProgram, saveRule, deleteRule, previewMonth, runAwardsForMonth } from './actions'
@@ -32,6 +34,25 @@ const SCOPE_LABEL: Record<OwnershipScopeKind, string> = {
 const inr = (v: number) => `₹${Math.round(v).toLocaleString('en-IN')}`
 const today = () => new Date().toISOString().slice(0, 10)
 
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
+const pad2 = (n: number) => String(n).padStart(2, '0')
+
+/**
+ * `<input type="month">` can be cleared or hold a partial value, and month/year
+ * go straight into a money computation — so parse defensively and let the
+ * caller disable the buttons rather than running against NaN.
+ */
+function parsePeriod(value: string): { month: number; year: number } | null {
+  const [y, m] = value.split('-').map(Number)
+  if (!Number.isInteger(y) || !Number.isInteger(m) || m < 1 || m > 12) return null
+  return { month: m, year: y }
+}
+
+const periodLabel = (value: string) => {
+  const p = parsePeriod(value)
+  return p ? `${MONTH_NAMES[p.month - 1]} ${p.year}` : '—'
+}
+
 interface Props {
   programs: OwnershipProgram[]
   rules: OwnershipRule[]
@@ -49,11 +70,30 @@ export default function OwnershipClient(p: Props) {
   const router = useRouter()
   const { toasts, dismiss, success, error: toastError } = useToast()
   const [busy, setBusy] = useState<string | null>(null)
+  // In-app confirmation. NOT window.confirm: the desktop shell returns false
+  // from it immediately without ever drawing a dialog, so these delete buttons
+  // would sit there dead with nothing to explain why.
+  const [confirmPrompt, setConfirmPrompt] = useState<{
+    title: string
+    body: string
+    confirmLabel: string
+    danger?: boolean
+    onConfirm: () => void
+  } | null>(null)
   const [, startTransition] = useTransition()
   const [programModal, setProgramModal] = useState<OwnershipProgram | 'new' | null>(null)
   const [ruleModal, setRuleModal] = useState<{ programId: string; rule: OwnershipRule | null } | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [preview, setPreview] = useState<Awaited<ReturnType<typeof previewMonth>>['data'] | null>(null)
+  const [runConfirm, setRunConfirm] = useState(false)
+
+  // Which month Preview and Run act on. Defaults to today, so the common case
+  // is unchanged — but an unpaid earlier month is reachable, which it was not
+  // when both buttons were hard-wired to the current month.
+  const thisMonth = `${p.currentYear}-${pad2(p.currentMonth)}`
+  const [periodValue, setPeriodValue] = useState(thisMonth)
+  const period = parsePeriod(periodValue)
+  const label = periodLabel(periodValue)
 
   const refresh = () => startTransition(() => router.refresh())
 
@@ -72,23 +112,34 @@ export default function OwnershipClient(p: Props) {
   }
 
   async function onPreview() {
+    if (!period) return
     setBusy('preview')
-    const res = await previewMonth(p.currentMonth, p.currentYear)
+    const res = await previewMonth(period.month, period.year)
     setBusy(null)
     if (!res.ok) { toastError('Could not preview', res.error); return }
     setPreview(res.data ?? null)
   }
 
+  // "Run now" persists real award rows that payroll then pays — it must never
+  // fire straight off the button. The dialog restates the month (a mis-set
+  // picker pays the wrong period) and, when a preview was taken, its total.
+  function confirmRun() {
+    if (!period) return
+    setRunConfirm(true)
+  }
+
   async function onRun() {
+    if (!period) return
+    setRunConfirm(false)
     setBusy('run')
-    const res = await runAwardsForMonth(p.currentMonth, p.currentYear)
+    const res = await runAwardsForMonth(period.month, period.year)
     setBusy(null)
     if (!res.ok) { toastError('Could not run', res.error); return }
     if (res.data?.skipped === 'finalized') {
-      toastError('This month is closed', 'Awards keep the figures they were paid with. Reopen the month to recompute.')
+      toastError(`${label} is closed`, 'Awards keep the figures they were paid with. Reopen the month to recompute.')
       return
     }
-    success(`${res.data?.persisted ?? 0} award${res.data?.persisted === 1 ? '' : 's'} computed`, 'They will appear in this month’s payroll.')
+    success(`${res.data?.persisted ?? 0} award${res.data?.persisted === 1 ? '' : 's'} computed`, `They will appear in ${label}’s payroll.`)
     refresh()
   }
 
@@ -98,17 +149,49 @@ export default function OwnershipClient(p: Props) {
         <div>
           <h1 className="text-2xl font-bold">Ownership</h1>
           <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-            Revenue share, profit share, incentives and bonuses — all the same engine.
-            A program says what to measure and when; its rules say who earns and how much.
-            Awards are computed into payroll, never typed in.
+            Pay people a share of the business — revenue share, profit share, incentives and bonuses.
+            Amounts are calculated into payroll, never typed in by hand.
           </p>
+          {/* The engine detail and the which-tool-when comparison matter once,
+              when you are deciding where a rule belongs — not on every visit. */}
+          <details className="group mt-1.5">
+            <summary className="cursor-pointer select-none list-none text-xs text-muted-foreground hover:text-foreground">
+              How this differs from the Pricing Matrix and Employee Agreements
+            </summary>
+            <p className="text-xs text-muted-foreground mt-1.5 max-w-2xl leading-relaxed">
+              This screen pays <b>roles</b>, independent of tasks — someone running Accounts or HR earns
+              here even though they score no tasks. The share of a task&rsquo;s price that the people who
+              did the work split lives in the <b>Pricing Matrix</b>; one person&rsquo;s special rate on
+              particular work is an <b>Employee Agreement</b>. A program says what to measure and when;
+              its rules say who earns and how much.
+            </p>
+          </details>
+          {/* Preview answers "what would pay this month"; the report answers
+              "what has each role earned so far" from the stored awards. */}
+          <Link
+            href="/dashboard/reports/role-earnings"
+            className="inline-flex items-center gap-1 mt-2 text-xs text-muted-foreground hover:text-foreground"
+          >
+            What each role has earned <ArrowUpRight className="h-3 w-3" />
+          </Link>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={onPreview} disabled={busy !== null}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Changing the month drops any preview: a result labelled for one
+              month while the picker reads another is worse than none. `max`
+              stops a future month, which no period can have closed yet. */}
+          <input
+            type="month"
+            value={periodValue}
+            max={thisMonth}
+            onChange={e => { setPeriodValue(e.target.value); setPreview(null) }}
+            aria-label="Month to preview or run"
+            className="rounded-lg border border-border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+          />
+          <button onClick={onPreview} disabled={busy !== null || !period}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50">
             {busy === 'preview' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />} Preview
           </button>
-          <button onClick={onRun} disabled={busy !== null}
+          <button onClick={confirmRun} disabled={busy !== null || !period}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50">
             {busy === 'run' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />} Run now
           </button>
@@ -138,11 +221,11 @@ export default function OwnershipClient(p: Props) {
       {preview && (
         <div className="rounded-xl border border-border bg-card p-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold">If this month paid today</h2>
+            <h2 className="text-sm font-semibold">If {label} paid today</h2>
             <span className="text-sm font-semibold tabular-nums">{inr(preview.totalInr)}</span>
           </div>
           {preview.rows.length === 0 ? (
-            <p className="mt-2 text-xs text-muted-foreground">No program pays in this month.</p>
+            <p className="mt-2 text-xs text-muted-foreground">No program pays in {label}.</p>
           ) : (
             <div className="mt-2 divide-y divide-border text-xs">
               {preview.rows.map((r, i) => (
@@ -203,14 +286,19 @@ export default function OwnershipClient(p: Props) {
                   </button>
                   <button onClick={() => setProgramModal(prog)}
                     className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium hover:bg-secondary">Edit</button>
-                  <button onClick={async () => {
-                    if (!confirm(`Delete "${prog.name}"? Its rules and computed awards go with it.`)) return
-                    setBusy(prog.id)
-                    const res = await deleteProgram(prog.id)
-                    setBusy(null)
-                    if (!res.ok) { toastError('Could not delete', res.error); return }
-                    success('Program deleted'); refresh()
-                  }} disabled={busy === prog.id}
+                  <button onClick={() => setConfirmPrompt({
+                    title: `Delete the "${prog.name}" program?`,
+                    body: `Its ${progRules.length} rule${progRules.length === 1 ? '' : 's'} and every award already computed from it are removed. Nobody earns from this program again, and awards already paid out on past payslips are unaffected.`,
+                    confirmLabel: 'Delete program',
+                    danger: true,
+                    onConfirm: async () => {
+                      setBusy(prog.id)
+                      const res = await deleteProgram(prog.id)
+                      setBusy(null)
+                      if (!res.ok) { toastError('Could not delete', res.error); return }
+                      success('Program deleted'); refresh()
+                    },
+                  })} disabled={busy === prog.id}
                     className="rounded-md p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 disabled:opacity-50">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
@@ -236,12 +324,17 @@ export default function OwnershipClient(p: Props) {
                       <div className="flex items-center gap-1.5 shrink-0">
                         <button onClick={() => setRuleModal({ programId: prog.id, rule: r })}
                           className="rounded-lg border border-border px-2 py-1 text-xs hover:bg-secondary">Edit</button>
-                        <button onClick={async () => {
-                          if (!confirm('Delete this rule?')) return
-                          const res = await deleteRule(r.id)
-                          if (!res.ok) { toastError('Could not delete', res.error); return }
-                          refresh()
-                        }} className="rounded-md p-1 text-muted-foreground hover:text-red-500">
+                        <button onClick={() => setConfirmPrompt({
+                          title: 'Delete this rule?',
+                          body: `${r.employeeId ? employeeLabel(r.employeeId) : designationLabel(r.designationId!)} stops earning ${r.percent != null ? `${r.percent}%` : inr(r.fixedAmountInr ?? 0)} from "${prog.name}". Awards already on past payslips stay as they are.`,
+                          confirmLabel: 'Delete rule',
+                          danger: true,
+                          onConfirm: async () => {
+                            const res = await deleteRule(r.id)
+                            if (!res.ok) { toastError('Could not delete', res.error); return }
+                            refresh()
+                          },
+                        })} className="rounded-md p-1 text-muted-foreground hover:text-red-500">
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
@@ -277,6 +370,31 @@ export default function OwnershipClient(p: Props) {
         />
       )}
 
+      {runConfirm && period && (
+        <ConfirmDialog
+          title={`Compute ${label}'s awards into payroll?`}
+          body={
+            (preview
+              ? `Preview showed ${preview.rows.length} award${preview.rows.length === 1 ? '' : 's'} totalling ${inr(preview.totalInr)}. `
+              : '') +
+            `Existing awards for ${label} are replaced with freshly computed ones. Nothing is paid out by this — ` +
+            `the amounts appear on ${label}'s payslips when payroll is generated or recalculated. A closed month is never touched.`
+          }
+          confirmLabel="Compute awards"
+          onConfirm={() => { void onRun() }}
+          onCancel={() => setRunConfirm(false)}
+        />
+      )}
+      {confirmPrompt && (
+        <ConfirmDialog
+          title={confirmPrompt.title}
+          body={confirmPrompt.body}
+          confirmLabel={confirmPrompt.confirmLabel}
+          danger={confirmPrompt.danger}
+          onConfirm={() => { const fn = confirmPrompt.onConfirm; setConfirmPrompt(null); fn() }}
+          onCancel={() => setConfirmPrompt(null)}
+        />
+      )}
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </div>
   )
@@ -350,7 +468,7 @@ function ProgramModal({ initial, clients, services, categories, orgUnits, onClos
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1.5">Measure</label>
+              <label className="block text-xs font-medium text-muted-foreground mb-1.5">Pay a share of…</label>
               <AppSelect value={basis} onChange={e => {
                 const b = e.target.value as OwnershipBasis
                 setBasis(b)
@@ -362,7 +480,7 @@ function ProgramModal({ initial, clients, services, categories, orgUnits, onClos
               </AppSelect>
             </div>
             <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1.5">How often</label>
+              <label className="block text-xs font-medium text-muted-foreground mb-1.5">Pays…</label>
               <AppSelect value={periodType} onChange={e => setPeriodType(e.target.value as OwnershipPeriodType)}>
                 {(Object.keys(PERIOD_LABEL) as OwnershipPeriodType[]).map(t => (
                   <option key={t} value={t}>{PERIOD_LABEL[t]}</option>
@@ -371,17 +489,31 @@ function ProgramModal({ initial, clients, services, categories, orgUnits, onClos
             </div>
           </div>
 
+          {/* Scope defaults to the whole company, which is what a small agency
+              wants. Limiting a program to one client/service/team is real
+              power but rarely needed, so it opens on demand — and opens itself
+              when an existing program already uses it. */}
           {basis !== 'fixed' && (
-            <div className="grid grid-cols-2 gap-3">
+            <details open={scopeKind !== 'company'} className="group rounded-lg border border-border bg-secondary/20">
+              <summary className="flex items-center justify-between gap-2 px-3 py-2 cursor-pointer select-none list-none">
+                <span className="text-xs font-medium">
+                  Limit to one client, service or team
+                  <span className="text-muted-foreground font-normal ml-1.5">
+                    · {scopeKind === 'company' ? 'whole company' : SCOPE_LABEL[scopeKind]}
+                  </span>
+                </span>
+                <ChevronDown className="w-4 h-4 text-muted-foreground group-open:rotate-180 transition-transform" />
+              </summary>
+            <div className="grid grid-cols-2 gap-3 px-3 pb-3">
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Measured over</label>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Counted across</label>
                 <AppSelect value={scopeKind} onChange={e => { setScopeKind(e.target.value as OwnershipScopeKind); setScopeId('') }}>
                   {scopeOptions.map(s => <option key={s} value={s}>{SCOPE_LABEL[s]}</option>)}
                 </AppSelect>
               </div>
               {scopeKind !== 'company' && (
                 <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Which one</label>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Which one?</label>
                   <AppSelect value={scopeId} onChange={e => setScopeId(e.target.value)}>
                     <option value="">— select —</option>
                     {scopeList.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
@@ -389,6 +521,7 @@ function ProgramModal({ initial, clients, services, categories, orgUnits, onClos
                 </div>
               )}
             </div>
+            </details>
           )}
 
           {periodType === 'one_time' && (

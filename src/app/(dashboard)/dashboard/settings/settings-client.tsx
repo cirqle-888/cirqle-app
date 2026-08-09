@@ -28,6 +28,7 @@ import InfoTip from '@/components/ui/info-tip'
 import { usePrivacy, getStoredPin, setStoredPin, isForceLocked } from '@/contexts/privacy-context'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { useToast, ToastContainer } from '@/components/ui/toast'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { generateInviteToken, revokeInviteToken, archiveEmployee, restoreEmployee, adminResetPassword, updateEmployeeAvatar } from './employee-actions'
 import dynamic from 'next/dynamic'
 
@@ -100,13 +101,30 @@ const SETTINGS_TABS = [
 ] as const
 type SettingsTab = typeof SETTINGS_TABS[number]
 
+/**
+ * Display names for tabs whose internal id is engine vocabulary.
+ *
+ * The ids stay put — they key the render branches and the ?tab= deep links
+ * people have bookmarked — but nobody outside this codebase knows what
+ * "Groups & Params" or "Matching" mean. "Matching" was the worst: a bland
+ * Finance tab that opens a tool which rewrites every invoice allocation.
+ */
+const TAB_LABEL: Partial<Record<SettingsTab, string>> = {
+  'Groups & Params': 'Scoring Rules',
+  'Matching': 'Rebuild Payment Matching',
+}
+const tabLabel = (t: SettingsTab) => TAB_LABEL[t] ?? t
+
 // ─── Tab grouping (left rail) ────────────────────────────────────────────────
+// Rarely-touched, technical or destructive tabs sit in "Advanced" so the
+// everyday rail is short. Nothing is removed — every tab is one click away.
 const SETTINGS_GROUPS: { label: string; emoji: string; tabs: SettingsTab[] }[] = [
   { label: 'Organization',    emoji: '🏢', tabs: ['Company', 'Privacy & Security'] },
   { label: 'People',          emoji: '👥', tabs: ['Employees'] },
-  { label: 'Service Catalog', emoji: '📦', tabs: ['Services', 'Departments', 'Groups & Params', 'Tools'] },
-  { label: 'Finance',         emoji: '💸', tabs: ['Bank Accounts', 'Cash Categories', 'Exchange Rates', 'Matching'] },
+  { label: 'Service Catalog', emoji: '📦', tabs: ['Services', 'Departments'] },
+  { label: 'Finance',         emoji: '💸', tabs: ['Bank Accounts', 'Cash Categories'] },
   { label: 'Communication',   emoji: '💬', tabs: ['Message Templates'] },
+  { label: 'Advanced',        emoji: '⚙️', tabs: ['Groups & Params', 'Tools', 'Exchange Rates', 'Matching'] },
 ]
 
 const CURRENCIES: Currency[] = ['AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
@@ -353,6 +371,16 @@ export default function SettingsClient(props: Props) {
   const [inviteLink, setInviteLink] = useState<{ employeeId: string; cqid: string; url: string; expiresAt: string } | null>(null)
   const [inviteCopied, setInviteCopied] = useState(false)
   const [inviteBusy, setInviteBusy] = useState<string | null>(null)
+  // In-app confirmation. NOT window.confirm: the desktop shell returns false
+  // from it immediately without ever drawing a dialog, so these buttons would
+  // silently do nothing there, with no error to explain it.
+  const [confirmPrompt, setConfirmPrompt] = useState<{
+    title: string
+    body: string
+    confirmLabel: string
+    danger?: boolean
+    onConfirm: () => void
+  } | null>(null)
   const [resetPwdModal, setResetPwdModal] = useState<{ cqid: string; tempPassword: string } | null>(null)
   const [avatarModal, setAvatarModal] = useState<{ id: string; cqid: string; name: string | null; currentUrl: string | null } | null>(null)
   const [avatarPickerValue, setAvatarPickerValue] = useState<string | null>(null)
@@ -371,8 +399,17 @@ export default function SettingsClient(props: Props) {
     setEmployees(prev => prev.map((x: any) => x.id === emp.id ? { ...x, invite_token: res.data!.token, invite_token_expires_at: res.data!.expiresAt } : x))
   }
 
+  function askArchive(emp: any) {
+    setConfirmPrompt({
+      title: `Archive ${emp.cqid}?`,
+      body: 'They lose access immediately and stop appearing in pickers for new work. Their past tasks, contributions and payslips stay exactly as they are, and you can restore them at any time.',
+      confirmLabel: 'Archive',
+      danger: true,
+      onConfirm: () => { void handleArchive(emp) },
+    })
+  }
+
   async function handleArchive(emp: any) {
-    if (!confirm(`Archive ${emp.cqid}? They will be unable to log in. You can restore them anytime.`)) return
     setInviteBusy(emp.id)
     const res = await archiveEmployee(emp.id)
     setInviteBusy(null)
@@ -388,8 +425,17 @@ export default function SettingsClient(props: Props) {
     setEmployees(prev => prev.map((x: any) => x.id === emp.id ? { ...x, is_archived: false, is_active: true } : x))
   }
 
+  function askAdminResetPassword(emp: any) {
+    setConfirmPrompt({
+      title: `Reset the password for ${emp.cqid}?`,
+      body: 'Their current password stops working right away. A temporary one is shown to you once — pass it on so they can sign in and set their own.',
+      confirmLabel: 'Reset password',
+      danger: true,
+      onConfirm: () => { void handleAdminResetPassword(emp) },
+    })
+  }
+
   async function handleAdminResetPassword(emp: any) {
-    if (!confirm(`Reset password for ${emp.cqid}? A new temporary password will be generated and shown to you.`)) return
     setInviteBusy(emp.id)
     const res = await adminResetPassword(emp.id)
     setInviteBusy(null)
@@ -815,7 +861,7 @@ export default function SettingsClient(props: Props) {
             {SETTINGS_GROUPS.map(group => (
               <optgroup key={group.label} label={`${group.emoji}  ${group.label}`}>
                 {group.tabs.map(t => (
-                  <option key={t} value={t}>{t}</option>
+                  <option key={t} value={t}>{tabLabel(t)}</option>
                 ))}
               </optgroup>
             ))}
@@ -852,7 +898,7 @@ export default function SettingsClient(props: Props) {
                 {group.tabs.map(t => (
                   <button key={t} onClick={() => { setTab(t); setQuickEdit(false); window.history.replaceState(null, '', `?tab=${t.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`) }}
                     className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${tab === t ? 'bg-primary/15 text-primary font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-secondary'}`}>
-                    {t}
+                    {tabLabel(t)}
                   </button>
                 ))}
               </div>
@@ -1620,9 +1666,13 @@ export default function SettingsClient(props: Props) {
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold">Employees ({filteredEmployees.length}{empSearch ? `/${employees.length}` : ''})</h2>
                 <div className="flex items-center gap-2">
+                  {/* "Bulk Recalc" told you nothing about what it rewrites.
+                      The ellipsis signals that a dialog follows rather than an
+                      immediate write. */}
                   <button onClick={() => setShowRecalcCommissions(true)}
+                    title="Re-run commission earnings for a date range"
                     className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-border text-sm font-medium hover:bg-secondary transition-colors text-muted-foreground">
-                    <RefreshCw className="w-4 h-4" /> Bulk Recalc
+                    <RefreshCw className="w-4 h-4" /> Recalculate commissions…
                   </button>
                   <button onClick={() => openEmployeeForm()}
                     className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90">
@@ -1766,7 +1816,7 @@ export default function SettingsClient(props: Props) {
                       {/* Admin reset password — when registered */}
                       {emp.auth_id && !emp.is_archived && (
                         <button
-                          onClick={() => handleAdminResetPassword(emp)}
+                          onClick={() => askAdminResetPassword(emp)}
                           disabled={inviteBusy === emp.id}
                           title="Reset password (admin)"
                           className="p-1.5 rounded-lg hover:bg-blue-500/10 text-muted-foreground hover:text-blue-600 dark:hover:text-blue-400 transition-colors disabled:opacity-50"
@@ -1823,7 +1873,7 @@ export default function SettingsClient(props: Props) {
                         </button>
                       ) : (
                         <button
-                          onClick={() => handleArchive(emp)}
+                          onClick={() => askArchive(emp)}
                           disabled={inviteBusy === emp.id}
                           className="p-1.5 rounded-lg hover:bg-red-500/10 text-muted-foreground hover:text-red-600 dark:hover:text-red-400 transition-colors disabled:opacity-50"
                           title="Archive employee"
@@ -2941,10 +2991,12 @@ export default function SettingsClient(props: Props) {
               <div className="flex flex-col gap-1 border-b border-border/50 pb-4 mb-4">
                 <h2 className="text-lg font-semibold tracking-tight flex items-center gap-2">
                   <RefreshCw className="w-5 h-5 text-amber-500" />
-                  Allocation Rebuild
+                  Rebuild Payment Matching
                 </h2>
                 <p className="text-sm text-muted-foreground">
-                  Preview, approve, and commit a full per-client FIFO rebuild for invoice allocations.
+                  Re-links every recorded payment to its invoices, oldest first, for one client at a time.
+                  Use it only when a client&rsquo;s paid/outstanding figures look wrong — it rewrites that
+                  client&rsquo;s payment history. You preview and approve before anything is committed.
                 </p>
               </div>
               <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
@@ -3997,6 +4049,17 @@ export default function SettingsClient(props: Props) {
           open={showRecalcCommissions}
           onClose={() => setShowRecalcCommissions(false)}
           employees={employees}
+        />
+      )}
+
+      {confirmPrompt && (
+        <ConfirmDialog
+          title={confirmPrompt.title}
+          body={confirmPrompt.body}
+          confirmLabel={confirmPrompt.confirmLabel}
+          danger={confirmPrompt.danger}
+          onConfirm={() => { const fn = confirmPrompt.onConfirm; setConfirmPrompt(null); fn() }}
+          onCancel={() => setConfirmPrompt(null)}
         />
       )}
 

@@ -9,6 +9,7 @@ import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { Plus, Handshake, ChevronRight, Edit2 } from 'lucide-react'
 import { createPartner, updatePartner, type PartnerInput } from './actions'
 import type { BusinessPartner, PartnerSummary } from '@/lib/partners/queries'
+import { formatDate } from '@/lib/utils/format-date'
 
 interface ClientRow { id: string; name: string; code: string; business_partner_id: string | null }
 
@@ -21,11 +22,7 @@ interface Props {
 }
 
 const fmtAmt = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
-const fmtDate = (s: string | null) => {
-  if (!s) return '—'
-  const d = new Date(s)
-  return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-}
+const fmtDate = formatDate
 
 function Figure({ label, value, muted, tint }: { label: string; value: string; muted?: boolean; tint?: string }) {
   return (

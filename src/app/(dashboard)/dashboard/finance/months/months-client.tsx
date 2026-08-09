@@ -65,18 +65,23 @@ export default function MonthsClient({ cards, canManage, canSeeAmounts }: {
 
   const key = (c: MonthCard) => `${c.year}-${c.month}`
 
+  // Locking always confirms — not only the unpaid-payslip edge case. It is
+  // the single most consequential click on this screen (freezes profit and
+  // blocks every money writer for the month), so it must never fire from one
+  // stray click even when everything is paid.
   function onLock(c: MonthCard) {
-    if (c.payrollTotal > 0 && c.payrollPaid < c.payrollTotal) {
-      setConfirmPrompt({
-        title: `Lock ${MONTHS[c.month - 1]} ${c.year} with unpaid payslips?`,
-        body: `${c.payrollPaid} of ${c.payrollTotal} payslips are paid. Locking freezes the month anyway — unpaid payslips stay unpaid and can no longer be recalculated.`,
-        confirmLabel: 'Lock month',
-        danger: true,
-        onConfirm: () => { void applyLock(c) },
-      })
-      return
-    }
-    void applyLock(c)
+    const unpaid = c.payrollTotal > 0 && c.payrollPaid < c.payrollTotal
+    setConfirmPrompt({
+      title: unpaid
+        ? `Lock ${MONTHS[c.month - 1]} ${c.year} with unpaid payslips?`
+        : `Lock ${MONTHS[c.month - 1]} ${c.year}?`,
+      body: unpaid
+        ? `${c.payrollPaid} of ${c.payrollTotal} payslips are paid. Locking freezes the month anyway — unpaid payslips stay unpaid and can no longer be recalculated.`
+        : `Freezes this month's profit and blocks any new payment, expense, payroll or contribution change dated in it. You can reopen it later — the lock-time snapshot is kept for audit.`,
+      confirmLabel: 'Lock month',
+      danger: unpaid,
+      onConfirm: () => { void applyLock(c) },
+    })
   }
 
   async function applyLock(c: MonthCard) {

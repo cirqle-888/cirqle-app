@@ -10,6 +10,7 @@ import { usePrivacy } from '@/contexts/privacy-context'
 import { useToast } from '@/components/ui/toast'
 import { saveTaskContributions } from '@/app/(dashboard)/dashboard/contributions/actions'
 import { closedPeriodNotice } from '@/lib/payroll/correction-notice'
+import { formatDate } from '@/lib/utils/format-date'
 import {
   Minus, Plus, X, Check, Eye, EyeOff, Users,
   CheckCircle2, AlertCircle, Clock, ChevronRight, ChevronLeft,
@@ -566,7 +567,7 @@ export function ContributionEntryPanel({
             )}
             {lastUpdated && (
               <span className="text-[10px] text-muted-foreground/60">
-                · {new Date(lastUpdated).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                · {formatDate(lastUpdated)}
               </span>
             )}
           </div>
@@ -580,8 +581,11 @@ export function ContributionEntryPanel({
 
         {canSeeFinancials && poolBasisInr > 0 && (
           <div className="px-4 py-2 bg-foreground/[0.02] border-b border-border/50 flex items-center gap-2">
-            <span className="text-[11px] text-muted-foreground">
-              Pool ({serviceCommPct}% of ₹{poolBasisInr.toLocaleString('en-IN')}
+            <span
+              className="text-[11px] text-muted-foreground"
+              title={`Commission pool = ${serviceCommPct}% of the task's ${coveredWork ? 'retainer work value' : 'billed amount'}`}
+            >
+              Team share ({serviceCommPct}% of ₹{poolBasisInr.toLocaleString('en-IN')}
               {coveredWork ? ' retainer work value' : ''}):
             </span>
             <span className="text-xs font-bold gradient-text">₹{commissionPool.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
@@ -796,7 +800,7 @@ export function ContributionEntryPanel({
                               )}
                               {lastUpdated && (
                                 <span className="text-muted-foreground/70 ml-auto">
-                                  Saved {new Date(lastUpdated).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                  Saved {formatDate(lastUpdated)}
                                 </span>
                               )}
                             </div>
@@ -991,9 +995,9 @@ export function ContributionEntryPanel({
               <p className="text-[11px] text-amber-400">
                 {coveredWork ? (
                   <>This task is covered by a retainer, but its agreement item has no <strong>work value</strong> —
-                  commission pool is ₹0 so earnings will be ₹0. Set the work value on the agreement page.</>
+                  so there is nothing for the team to share and everyone earns ₹0. Set the work value on the agreement page.</>
                 ) : (
-                  <>No billing amount set on this task — commission pool is ₹0 so earnings will be ₹0.
+                  <>No price set on this task — so there is nothing for the team to share and everyone earns ₹0.
                   Switch to the <strong>Details</strong> tab to set the billing amount first, then scores will calculate correctly.</>
                 )}
               </p>
@@ -1008,7 +1012,7 @@ export function ContributionEntryPanel({
                   <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
                   <span className="text-xs font-bold">Live Calculation</span>
                 </div>
-                <span className="text-xs font-bold gradient-text">₹{calculatedResult.remainingPool.toFixed(0)} pool</span>
+                <span className="text-xs font-bold gradient-text">₹{calculatedResult.remainingPool.toFixed(0)} to share</span>
               </div>
               <div className="divide-y divide-border/30">
                 {calculatedResult.employeeEarnings.map((e: any) => {

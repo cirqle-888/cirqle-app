@@ -17,13 +17,10 @@ import { Wallet, Plus, Trash2, X } from 'lucide-react'
 import AppSelect from '@/components/ui/app-select'
 import { recordCommissionPayment, deleteCommissionPayment } from '@/app/(dashboard)/dashboard/partners/actions'
 import type { CommissionPayment } from '@/lib/partners/queries'
+import { formatDate } from '@/lib/utils/format-date'
 
 const fmt = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
-const fmtDate = (s: string | null) => {
-  if (!s) return '—'
-  const d = new Date(s)
-  return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-}
+const fmtDate = formatDate
 
 const BASIS_LABEL: Record<string, string> = {
   net_collected: 'net collected',

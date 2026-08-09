@@ -38,6 +38,8 @@ const ROUTE_LABELS: Record<string, string> = {
   partners:      'Business Partners',
   payroll:       'HR & Payroll',
   reports:       'Reports',
+  workspace:     'My Planner',
+  'role-earnings': 'Earnings by Role',
   import:        'Bulk Import',
   settings:      'Settings',
   health:        'Business Health',

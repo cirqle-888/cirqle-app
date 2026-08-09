@@ -20,6 +20,7 @@ import { OfferGroupsPanel } from './offer-groups-panel'
 import { PluginHealthPanel } from './plugin-health-panel'
 import { FigmaBindingHelp } from '@/components/offer/figma-binding-help'
 import { FigmaLink } from '@/components/offer/figma-link'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 const inputCls = 'w-full bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20'
 const labelCls = 'block text-xs font-medium text-muted-foreground mb-1.5'
@@ -114,6 +115,10 @@ function ClientCard({
   const [webhookSaving, setWebhookSaving] = useState(false)
   const [sheetUrlSaving, setSheetUrlSaving] = useState(false)
   const [resetting, setResetting] = useState(false)
+  // In-app confirmation. NOT window.confirm: the desktop shell returns false
+  // from it immediately without ever drawing a dialog, so this button would
+  // silently do nothing there.
+  const [confirmReset, setConfirmReset] = useState(false)
   const [testing, setTesting] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(!!client.offer_sheet_webhook_url)
@@ -196,7 +201,6 @@ function ClientCard({
   }
 
   async function handleResetToken() {
-    if (!confirm('Replace this client link? The old one stops working immediately and you will need to send them the new one.')) return
     setResetting(true)
     const res = await resetOfferToken(client.id)
     setResetting(false)
@@ -421,7 +425,7 @@ function ClientCard({
                     </div>
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={handleResetToken}
+                        onClick={() => setConfirmReset(true)}
                         disabled={resetting}
                         className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors disabled:opacity-50"
                       >
@@ -688,6 +692,16 @@ function ClientCard({
               </div>
         </div>
       )}
+      {confirmReset && (
+        <ConfirmDialog
+          title="Replace this client's intake link?"
+          body="The link they have stops working the moment you confirm — any page they have open will fail. You will need to send them the new link before they can submit anything again."
+          confirmLabel="Replace link"
+          danger
+          onConfirm={() => { setConfirmReset(false); void handleResetToken() }}
+          onCancel={() => setConfirmReset(false)}
+        />
+      )}
     </div>
   )
 }
@@ -698,6 +712,10 @@ function GlobalSyncCard({ initial }: { initial: { webhookUrl: string; secret: st
   const [urlDraft, setUrlDraft] = useState(initial.webhookUrl)
   const [saving, setSaving] = useState(false)
   const [rotating, setRotating] = useState(false)
+  // In-app confirmation. NOT window.confirm: the desktop shell returns false
+  // from it immediately without ever drawing a dialog, so this button would
+  // silently do nothing there.
+  const [confirmRotate, setConfirmRotate] = useState(false)
   const [open, setOpen] = useState(!initial.configured)
   const [msg, setMsg] = useState<{ type: Flash; text: string } | null>(null)
 
@@ -712,7 +730,6 @@ function GlobalSyncCard({ initial }: { initial: { webhookUrl: string; secret: st
   }
 
   async function handleRotate() {
-    if (!confirm('Generate a new secret? You must paste it into the Apps Script (SECRET) and redeploy, or syncs will fail.')) return
     setRotating(true)
     const res = await regenerateSheetSecret()
     setRotating(false)
@@ -769,7 +786,7 @@ function GlobalSyncCard({ initial }: { initial: { webhookUrl: string; secret: st
               <div className="flex items-center gap-2">
                 <input readOnly value={cfg.secret} className={`${inputCls} font-mono`} />
                 <CopyBtn text={cfg.secret} />
-                <button onClick={handleRotate} disabled={rotating} title="Generate a new secret"
+                <button onClick={() => setConfirmRotate(true)} disabled={rotating} title="Generate a new secret"
                   className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors shrink-0 disabled:opacity-50">
                   {rotating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                 </button>
@@ -778,6 +795,16 @@ function GlobalSyncCard({ initial }: { initial: { webhookUrl: string; secret: st
             </div>
           )}
         </div>
+      )}
+      {confirmRotate && (
+        <ConfirmDialog
+          title="Generate a new sync secret?"
+          body="Every client sheet stops syncing until you paste the new secret into the Apps Script and redeploy it. Do this only when you believe the current secret has leaked."
+          confirmLabel="Generate new secret"
+          danger
+          onConfirm={() => { setConfirmRotate(false); void handleRotate() }}
+          onCancel={() => setConfirmRotate(false)}
+        />
       )}
     </div>
   )

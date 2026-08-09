@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { AlertCircle, CheckCircle2, ShieldAlert, RefreshCw, History, Unlink, Trash2, RotateCcw, FileBarChart } from 'lucide-react'
 import { useToast, ToastContainer } from '@/components/ui/toast'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from "@/lib/utils"
 
@@ -20,6 +21,10 @@ export default function ReconciliationClient() {
   const [orphans, setOrphans] = useState<any[]>([])
   const [mismatches, setMismatches] = useState<any[]>([])
   const [softDeleted, setSoftDeleted] = useState<any[]>([])
+  // In-app confirmation. NOT window.confirm: the desktop shell returns false
+  // from it immediately without ever drawing a dialog, so the purge button
+  // would silently do nothing there.
+  const [purgeTarget, setPurgeTarget] = useState<any | null>(null)
   const [auditLog, setAuditLog] = useState<any[]>([])
 
   useEffect(() => { analyzeData() }, [])
@@ -173,7 +178,6 @@ export default function ReconciliationClient() {
   }
 
   async function permanentlyDelete(entryId: string) {
-    if (!confirm('Permanently delete this entry? This cannot be undone.')) return
     try {
       const { error } = await supabase.from('cashbook_entries').delete().eq('id', entryId)
       if (error) throw error
@@ -196,6 +200,16 @@ export default function ReconciliationClient() {
   return (
     <div className="space-y-6">
       <ToastContainer toasts={toast.toasts} onDismiss={toast.dismiss} />
+      {purgeTarget && (
+        <ConfirmDialog
+          title="Erase this deleted entry for good?"
+          body={`${purgeTarget.amount} ${purgeTarget.currency} dated ${purgeTarget.entry_date} leaves the cashbook permanently — it can no longer be restored, and it will not appear in any future audit or reconciliation.`}
+          confirmLabel="Erase permanently"
+          danger
+          onConfirm={() => { const id = purgeTarget.id; setPurgeTarget(null); void permanentlyDelete(id) }}
+          onCancel={() => setPurgeTarget(null)}
+        />
+      )}
       {/* Tabs */}
       <div className="flex gap-1 flex-wrap border-b border-border pb-0">
         {TABS.map(t => (
@@ -412,7 +426,7 @@ export default function ReconciliationClient() {
                                 Restore
                               </button>
                               <button
-                                onClick={() => permanentlyDelete(e.id)}
+                                onClick={() => setPurgeTarget(e)}
                                 className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive transition-colors"
                                 title="Permanently delete"
                               >

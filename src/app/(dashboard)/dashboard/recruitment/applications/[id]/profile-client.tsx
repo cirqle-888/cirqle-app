@@ -17,6 +17,8 @@ import { usePermissions } from '@/contexts/permission-context'
 import { displayEmployee } from '@/lib/utils/employee-display'
 import Combobox from '@/components/ui/combobox'
 import { useToast, ToastContainer } from '@/components/ui/toast'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { formatDate } from '@/lib/utils/format-date'
 
 interface Props {
   applicationId: string
@@ -27,10 +29,7 @@ interface Props {
 const inputCls = 'w-full bg-secondary border border-foreground/15 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40'
 const sectionCls = 'rounded-2xl border border-foreground/10 bg-card p-4 sm:p-5'
 
-function fmtDate(iso: string | null): string {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
-}
+const fmtDate = formatDate
 function fmtDateTime(iso: string): string {
   return new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 }
@@ -44,6 +43,10 @@ export default function ApplicantProfileClient({ applicationId, canEdit, canDele
   const [showOfferForm, setShowOfferForm] = useState(false)
   const [isPending, startTransition] = useTransition()
   const { toasts, dismiss, success, error: toastError } = useToast()
+  // In-app confirmation. NOT window.confirm: the desktop shell returns false
+  // from it immediately without ever drawing a dialog, so Delete would sit
+  // there dead with no error to explain it.
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const { revealNames, user } = usePermissions()
 
   const load = useCallback(() => {
@@ -97,7 +100,6 @@ export default function ApplicantProfileClient({ applicationId, canEdit, canDele
   }
 
   function handleDelete() {
-    if (!confirm('Permanently delete this application? This cannot be undone.')) return
     startTransition(async () => {
       const res = await deleteApplication(applicationId)
       if (res.ok) { success('Application deleted'); window.location.href = '/dashboard/recruitment/applications' }
@@ -121,7 +123,7 @@ export default function ApplicantProfileClient({ applicationId, canEdit, canDele
           <p className="text-sm text-muted-foreground">{app.positionTitle} · <span className="font-mono">{app.referenceNumber}</span></p>
         </div>
         {canDelete && (
-          <button onClick={handleDelete} className="text-muted-foreground hover:text-destructive p-2 rounded-lg hover:bg-destructive/10" title="Delete application">
+          <button onClick={() => setConfirmDelete(true)} className="text-muted-foreground hover:text-destructive p-2 rounded-lg hover:bg-destructive/10" title="Delete application">
             <Trash2 className="h-4 w-4" />
           </button>
         )}
@@ -330,6 +332,16 @@ export default function ApplicantProfileClient({ applicationId, canEdit, canDele
           </div>
         </div>
       </div>
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Delete this application for good?"
+          body="The candidate's details, notes, documents, interviews and offers are erased and cannot be recovered. If you only want them out of the pipeline, reject them instead."
+          confirmLabel="Delete application"
+          danger
+          onConfirm={() => { setConfirmDelete(false); handleDelete() }}
+          onCancel={() => setConfirmDelete(false)}
+        />
+      )}
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </div>
   )

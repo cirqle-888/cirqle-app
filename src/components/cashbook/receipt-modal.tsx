@@ -2,6 +2,7 @@
 
 import { useRef, useState, useEffect } from 'react'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { formatDate } from '@/lib/utils/format-date'
 import { X, Download, Share2, FileText, Loader2, Check, ChevronDown } from 'lucide-react'
 import {
   isDesktop, desktop, effectiveShareAction, rememberLastShareAction,
@@ -176,7 +177,7 @@ function drawReceipt(
   const { label: invoiceLabel, splitRows } = invoiceSection(input, opts.showOverallBalance)
 
   const dateLabel = input.dateISO
-    ? new Date(input.dateISO).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+    ? formatDate(input.dateISO)
     : ''
 
   // ── tiny helpers ──────────────────────────────────────────────
@@ -403,7 +404,7 @@ export default function ReceiptModal({ input, onClose }: Props) {
     : input.invoices.reduce((s, i) => s + Math.max(0, i.outstanding ?? 0), 0)
   const { label: invoiceLabel, splitRows } = invoiceSection(input, showOverallBalance)
   const dateLabel = input.dateISO
-    ? new Date(input.dateISO).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+    ? formatDate(input.dateISO)
     : ''
 
   function renderCanvas(): Promise<HTMLCanvasElement | null> {
