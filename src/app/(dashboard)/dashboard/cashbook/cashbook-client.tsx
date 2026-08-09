@@ -9,7 +9,7 @@ import { insertCashbookEntries, updateCashbookEntry, softDeleteCashbookEntry, fe
 import { SCOPE_FILTER_OPTIONS, matchesScopeFilter, getScopeFilterLabel, type ScopeFilterValue } from '@/components/ui/scope-filter'
 import { formatCompact, round2 } from '@/lib/calculations/currency'
 import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
-import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, RefreshCw, Landmark, CheckCircle, ArrowLeftRight, Copy, Users, Sparkles, ChevronDown } from 'lucide-react'
+import { Plus, X, TrendingUp, TrendingDown, Minus, Upload, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, RefreshCw, Landmark, CheckCircle, ArrowLeftRight, Copy, Users, Sparkles, ChevronDown, Repeat, ArrowUpRight } from 'lucide-react'
 import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
 import { ActiveFilterChips } from '@/components/ui/active-filter-chips'
 import { TokenizedSearch, type SearchFacet } from '@/components/ui/tokenized-search'
@@ -2298,6 +2298,33 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 </div>
               )}
 
+              {/* Two mechanisms used to answer "this repeats": this checkbox,
+                  which stamped out a fixed number of copies with no series to
+                  manage afterwards, and the Recurring Expenses rules, which
+                  keep posting and can be edited or paused in one place. The
+                  second is strictly better, so this now points at it.
+
+                  The fixed-copies path still exists underneath — the state and
+                  the save loop are untouched — so restoring the checkbox is a
+                  one-block revert if a use for it turns up. */}
+              {!formEditingId && (
+                <Link
+                  href="/dashboard/cashbook/recurring"
+                  className="flex items-center justify-between gap-2 rounded-xl border border-border/40 bg-foreground/[0.02] p-3 hover:border-violet-500/30 hover:bg-violet-500/5 transition-colors"
+                >
+                  <span className="min-w-0">
+                    <span className="text-xs font-medium flex items-center gap-1.5">
+                      <Repeat className="w-3.5 h-3.5 text-violet-500" />
+                      Use Recurring Expense
+                    </span>
+                    <span className="block text-[10px] text-muted-foreground mt-0.5">
+                      For rent, internet or subscriptions — set it once and it posts itself every month.
+                    </span>
+                  </span>
+                  <ArrowUpRight className="w-4 h-4 text-muted-foreground shrink-0" />
+                </Link>
+              )}
+
               {/* Everything below is optional bookkeeping detail: whose money
                   it is, spend labels, cost sharing and repeats. A normal entry
                   (type, category, amount, date, description) never needs it, so
@@ -2306,8 +2333,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               {(() => {
                 const advCount =
                   (form.scope && form.scope !== 'company' ? 1 : 0) +
-                  (form.tags?.length ? 1 : 0) +
-                  (recurringMonths > 0 ? 1 : 0)
+                  (form.tags?.length ? 1 : 0)
                 return (
                   <details open={advCount > 0} className="group rounded-xl border border-border bg-secondary/20">
                     <summary className="flex items-center justify-between gap-2 px-3 py-2.5 cursor-pointer select-none list-none">
@@ -2316,7 +2342,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                         <span className="text-muted-foreground font-normal ml-1.5">
                           {advCount > 0
                             ? `· ${advCount} set`
-                            : '· whose money, tags, split, repeat'}
+                            : '· whose money, tags, split'}
                         </span>
                       </span>
                       <ChevronDown className="w-4 h-4 text-muted-foreground group-open:rotate-180 transition-transform" />
@@ -2410,32 +2436,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               </div>
 
               {/* Recurring entry — hidden when editing an existing entry */}
-              {!formEditingId && <div className={`rounded-xl border p-3 transition-colors ${recurringMonths > 0 ? 'bg-violet-500/10 border-violet-500/30' : 'bg-foreground/[0.02] border-border/40'}`}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <input type="checkbox" id="recurring-toggle" checked={recurringMonths > 0}
-                      onChange={e => setRecurringMonths(e.target.checked ? 3 : 0)}
-                      className="w-4 h-4 rounded accent-violet-500 cursor-pointer" />
-                    <label htmlFor="recurring-toggle" className="text-xs font-medium cursor-pointer select-none">
-                      Repeat monthly
-                    </label>
-                  </div>
-                  {recurringMonths > 0 && (
-                    <div className="flex items-center gap-1.5 text-xs">
-                      <span className="text-muted-foreground">for</span>
-                      <input type="number" min={1} max={24} value={recurringMonths}
-                        onChange={e => setRecurringMonths(Math.max(1, Math.min(24, parseInt(e.target.value) || 1)))}
-                        className="w-12 bg-secondary border border-border rounded-md px-2 py-0.5 text-center text-xs focus:outline-none focus:border-violet-500/50" />
-                      <span className="text-muted-foreground">more months</span>
-                    </div>
-                  )}
-                </div>
-                {recurringMonths > 0 && (
-                  <p className="text-[10px] text-violet-400/80 mt-1.5">
-                    Will create {recurringMonths + 1} entries total (this month + {recurringMonths} copies)
-                  </p>
-                )}
-              </div>}
+
 
                     </div>
                   </details>
