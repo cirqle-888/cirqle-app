@@ -12,8 +12,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   emptyScenario, isScenarioEmpty, baselineRows, simulateScenario,
-  compareScenario, goalSeek, resolveIncrement,
-  type WhatIfRawInputs,
+  compareScenario, goalSeek, resolveIncrement, simulateOwnership,
+  type WhatIfRawInputs, type DraftOwnershipRule,
 } from './what-if'
 import type { EmployeeColumn } from './contribution-analysis'
 
@@ -331,5 +331,72 @@ describe('retainer-covered tasks', () => {
     s.billingGrowthPct = 50
     const t1 = simulateScenario(fixture(), s).find(r => r.task_id === 't1')!
     expect(t1.commission_pool).toBe(7500)   // 10000 × 1.5 × 50%
+  })
+})
+
+describe('lever: draft ownership roles', () => {
+  const role = (o: Partial<DraftOwnershipRule>): DraftOwnershipRule => ({
+    id: 'r1', label: 'Accounts', basis: 'billing', percent: 3, fixedAmountInr: null, ...o,
+  })
+
+  it('costs a percentage of simulated billing', () => {
+    expect(simulateOwnership([role({ percent: 3 })], { billingInr: 30000, profitInr: 20300 }))
+      .toMatchObject({ totalInr: 900, lines: [{ label: 'Accounts', measuredInr: 30000, costInr: 900 }] })
+  })
+
+  it('costs a percentage of simulated profit', () => {
+    expect(simulateOwnership([role({ basis: 'profit', percent: 20 })], { billingInr: 30000, profitInr: 20300 }).totalInr)
+      .toBe(4060)
+  })
+
+  it('pays a fixed role its flat amount, measuring nothing', () => {
+    const out = simulateOwnership(
+      [role({ basis: 'fixed', percent: null, fixedAmountInr: 1000 })],
+      { billingInr: 30000, profitInr: 20300 },
+    )
+    expect(out.lines[0]).toMatchObject({ measuredInr: 0, costInr: 1000 })
+  })
+
+  it('sums several hats', () => {
+    const out = simulateOwnership([
+      role({ id: 'a', label: 'Accounts', percent: 3 }),
+      role({ id: 'b', label: 'HR', basis: 'fixed', percent: null, fixedAmountInr: 1000 }),
+      role({ id: 'c', label: 'Management', basis: 'profit', percent: 20 }),
+    ], { billingInr: 30000, profitInr: 20300 })
+    expect(out.totalInr).toBe(900 + 1000 + 4060)
+    expect(out.lines.map(l => l.label)).toEqual(['Accounts', 'HR', 'Management'])
+  })
+
+  it('never bills a negative role cost in a loss month', () => {
+    expect(simulateOwnership([role({ basis: 'profit', percent: 20 })], { billingInr: 0, profitInr: -5000 }).totalInr)
+      .toBe(0)
+  })
+
+  it('subtracts the roles from simulated profit without feeding them back in', () => {
+    const raw = fixture()
+    const s = emptyScenario('s1', 'A')
+    s.draftOwnershipRules = [role({ basis: 'profit', percent: 20 })]
+    const cmp = compareScenario(baselineRows(raw), simulateScenario(raw, s), EMPLOYEES, null, s)
+    // Profit itself is untouched — the roles are paid OUT of it, not before it.
+    expect(cmp.profit.simulated).toBe(20300)
+    expect(cmp.ownershipCost.current).toBe(0)          // a draft role does not exist today
+    expect(cmp.ownershipCost.simulated).toBe(4060)
+    expect(cmp.profitAfterOwnership.simulated).toBe(20300 - 4060)
+    expect(cmp.profitAfterOwnership.current).toBe(20300)
+  })
+
+  it('costs nothing when no roles are drafted', () => {
+    const raw = fixture()
+    const s = emptyScenario('s1', 'A')
+    const cmp = compareScenario(baselineRows(raw), simulateScenario(raw, s), EMPLOYEES, null, s)
+    expect(cmp.ownershipCost.simulated).toBe(0)
+    expect(cmp.ownershipLines).toEqual([])
+    expect(isScenarioEmpty(s)).toBe(true)
+  })
+
+  it('counts a drafted role as a non-empty scenario', () => {
+    const s = emptyScenario('s1', 'A')
+    s.draftOwnershipRules = [role({})]
+    expect(isScenarioEmpty(s)).toBe(false)
   })
 })

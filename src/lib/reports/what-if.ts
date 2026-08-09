@@ -19,6 +19,8 @@ import {
   type EmployeeColumn, type Summary,
 } from './contribution-analysis'
 import type { CommissionAgreement, AgreementType } from '@/lib/calculations/agreements'
+import { earningFor } from '@/lib/ownership/compute'
+import type { OwnershipRule } from '@/lib/ownership/types'
 
 const r2 = (n: number) => Math.round(n * 100) / 100
 
@@ -41,6 +43,28 @@ export interface SalaryIncrement {
   value: number
 }
 
+/**
+ * A role you are considering paying for — "what would delegating Accounts cost".
+ *
+ * Deliberately NOT a real ownership rule: no employee, no dates, no scope. The
+ * question this lever answers is what a hat costs the business, which is the
+ * same answer whoever ends up wearing it. Creating the real program stays in
+ * Settings → Ownership; nothing here is ever applied.
+ *
+ * `collected` is absent by design — the planner simulates task billing and has
+ * no cash-receipt data to take a percentage of, and quietly substituting
+ * billing would understate a role in a month with poor collections.
+ */
+export interface DraftOwnershipRule {
+  /** local id, e.g. crypto.randomUUID() */
+  id: string
+  /** The hat: "Accounts", "HR", "Operations". */
+  label: string
+  basis: 'billing' | 'profit' | 'fixed'
+  percent: number | null
+  fixedAmountInr: number | null
+}
+
 export interface Scenario {
   id: string
   name: string
@@ -55,6 +79,8 @@ export interface Scenario {
   /** global "what if business grows/shrinks N%" — simulation-only, never applied */
   billingGrowthPct: number
   draftAgreements: DraftAgreement[]
+  /** roles you might delegate — simulation-only, never applied */
+  draftOwnershipRules: DraftOwnershipRule[]
 }
 
 export function emptyScenario(id: string, name: string): Scenario {
@@ -66,6 +92,7 @@ export function emptyScenario(id: string, name: string): Scenario {
     salaryIncrements: {},
     billingGrowthPct: 0,
     draftAgreements: [],
+    draftOwnershipRules: [],
   }
 }
 
@@ -77,6 +104,61 @@ export function isScenarioEmpty(s: Scenario): boolean {
     && Object.keys(s.salaryIncrements).length === 0
     && s.billingGrowthPct === 0
     && s.draftAgreements.length === 0
+    && (s.draftOwnershipRules?.length ?? 0) === 0
+}
+
+// ─── Ownership: what a delegated role would cost ──────────────────────────────
+
+export interface OwnershipCostLine {
+  ruleId: string
+  label: string
+  basis: DraftOwnershipRule['basis']
+  /** The amount the percentage was taken of (0 for a fixed award). */
+  measuredInr: number
+  costInr: number
+}
+
+export interface OwnershipCost {
+  lines: OwnershipCostLine[]
+  totalInr: number
+}
+
+/**
+ * What a set of draft roles would cost against a simulated period.
+ *
+ * Shares `earningFor` with the live ownership engine, so a role modelled here
+ * and the same role configured for real produce the same number from the same
+ * inputs — the planner can't flatter a decision the payroll run will then
+ * contradict.
+ *
+ * `profitInr` is the planner's profit (billing − contribution earnings). It is
+ * NOT the finance engine's profit, which also subtracts base salaries and
+ * company expenses, so a profit-basis role costs MORE here than it will in
+ * production. Callers must label it as such rather than presenting it as the
+ * company's profit share.
+ */
+export function simulateOwnership(
+  rules: DraftOwnershipRule[],
+  totals: { billingInr: number; profitInr: number },
+): OwnershipCost {
+  const lines = (rules ?? []).map(rule => {
+    const measured =
+      rule.basis === 'billing' ? totals.billingInr
+      : rule.basis === 'profit' ? totals.profitInr
+      : 0
+    return {
+      ruleId: rule.id,
+      label: rule.label,
+      basis: rule.basis,
+      measuredInr: r2(measured),
+      // The engine's own earning rule: fixed wins, percentages clamp at zero,
+      // and a percentage of a fixed-basis award earns nothing.
+      costInr: earningFor(rule.basis, measured, {
+        percent: rule.percent, fixedAmountInr: rule.fixedAmountInr,
+      } as OwnershipRule),
+    }
+  })
+  return { lines, totalInr: r2(lines.reduce((s, l) => s + l.costInr, 0)) }
 }
 
 // ─── Raw inputs (serializable — passed from the server page to the client) ────
@@ -245,6 +327,14 @@ export interface ScenarioComparison {
   payrollCost: MetricDelta
   /** profit ÷ payroll cost (0 when payroll cost is 0) */
   roi: MetricDelta
+  /** What the scenario's draft roles would cost. Current is always 0 — a draft
+   *  role does not exist yet, so there is nothing to compare it against. */
+  ownershipCost: MetricDelta
+  /** Profit once the draft roles are paid. Excludes any LIVE ownership
+   *  programs, which the planner does not model. */
+  profitAfterOwnership: MetricDelta
+  /** Per-role cost, for showing which hat is expensive. */
+  ownershipLines: OwnershipCostLine[]
   perEmployee: EmployeeImpact[]
   perClient: GroupImpact[]
   perService: GroupImpact[]
@@ -337,6 +427,14 @@ export function compareScenario(
     simPayroll > 0 ? r2(simulated.totalProfit / simPayroll * 100) : 0,
   )
 
+  // Draft roles are paid OUT of profit, so they are computed from the
+  // simulated profit and then subtracted from it — never fed back in, which
+  // would make profit depend on itself (the engine's circularity rule).
+  const ownership = simulateOwnership(scenario.draftOwnershipRules ?? [], {
+    billingInr: simulated.totalBilling,
+    profitInr: simulated.totalProfit,
+  })
+
   return {
     summary: { current, simulated },
     revenue: mkDelta(current.totalBilling, simulated.totalBilling),
@@ -345,6 +443,9 @@ export function compareScenario(
     marginPct,
     payrollCost: mkDelta(curPayroll, simPayroll),
     roi,
+    ownershipCost: mkDelta(0, ownership.totalInr),
+    profitAfterOwnership: mkDelta(current.totalProfit, r2(simulated.totalProfit - ownership.totalInr)),
+    ownershipLines: ownership.lines,
     perEmployee,
     perClient: groupImpacts(currentRows, simulatedRows, 'client'),
     perService: groupImpacts(currentRows, simulatedRows, 'service'),

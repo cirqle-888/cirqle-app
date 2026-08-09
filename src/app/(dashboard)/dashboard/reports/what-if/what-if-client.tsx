@@ -14,14 +14,14 @@ import Header from '@/components/layout/header'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { DateFilter, matchesDateFilter, getDateFilterLabel, type DateFilterValue } from '@/components/ui/date-filter'
 import {
-  Plus, X, Copy as CopyIcon, Target, AlertTriangle, CheckCircle2, Loader2, FlaskConical,
+  Plus, X, Copy as CopyIcon, Target, AlertTriangle, CheckCircle2, Loader2, FlaskConical, ChevronDown,
 } from 'lucide-react'
 import type { EmployeeColumn } from '@/lib/reports/contribution-analysis'
 import {
   emptyScenario, isScenarioEmpty, baselineRows, simulateScenario, compareScenario,
   goalSeek, resolveIncrement,
   type Scenario, type WhatIfRawInputs, type ScenarioComparison, type MetricDelta,
-  type DraftAgreement, type GoalMetric, type GoalLever,
+  type DraftAgreement, type DraftOwnershipRule, type GoalMetric, type GoalLever,
 } from '@/lib/reports/what-if'
 import type { AgreementType } from '@/lib/calculations/agreements'
 import { applyWhatIfScenario, type SelectedChange } from './apply-actions'
@@ -199,22 +199,52 @@ export default function WhatIfClient({ raw, employees: rawEmployees, baseSalarie
                 active={active}
                 updateActive={updateActive}
               />
-              <PairingLevers pairings={pairings} active={active} updateActive={updateActive} />
-              <BillingGrowthLever active={active} updateActive={updateActive} />
-              <DraftAgreementsPanel
-                employees={employees}
-                raw={raw}
-                active={active}
-                updateActive={updateActive}
-              />
-              <GoalSeekPanel
-                raw={filteredRaw}
-                active={active}
-                updateActive={updateActive}
-                employees={employees}
-                pairings={pairings}
-                baseSalaries={baseSalaries}
-              />
+              <LeverSection
+                title="Prices & commission"
+                subtitle="What if I charge a client more, or change a commission rate?"
+                active={Object.keys(active.commissionOverrides).length > 0 || Object.keys(active.priceOverrides).length > 0}
+              >
+                <PairingLevers pairings={pairings} active={active} updateActive={updateActive} />
+              </LeverSection>
+              <LeverSection
+                title="Business growth"
+                subtitle="What if overall volume goes up or down?"
+                active={active.billingGrowthPct !== 0}
+              >
+                <BillingGrowthLever active={active} updateActive={updateActive} />
+              </LeverSection>
+              <LeverSection
+                title="Roles to delegate"
+                subtitle="What would it cost to pay someone for Accounts, HR or Ops?"
+                active={(active.draftOwnershipRules ?? []).length > 0}
+              >
+                <DraftRolesLever active={active} updateActive={updateActive} />
+              </LeverSection>
+              <LeverSection
+                title="Draft agreements"
+                subtitle="Test a special rate for one person before creating it."
+                active={active.draftAgreements.length > 0}
+              >
+                <DraftAgreementsPanel
+                  employees={employees}
+                  raw={raw}
+                  active={active}
+                  updateActive={updateActive}
+                />
+              </LeverSection>
+              <LeverSection
+                title="Goal seek"
+                subtitle="Work backwards from a target profit or margin."
+              >
+                <GoalSeekPanel
+                  raw={filteredRaw}
+                  active={active}
+                  updateActive={updateActive}
+                  employees={employees}
+                  pairings={pairings}
+                  baseSalaries={baseSalaries}
+                />
+              </LeverSection>
             </div>
 
             {/* ── Right: comparison dashboard ── */}
@@ -389,6 +419,44 @@ function PairingLevers({ pairings, active, updateActive }: {
   )
 }
 
+/**
+ * Collapsible lever card.
+ *
+ * Six panels rendered fully expanded put simulation-only tools (goal seek,
+ * draft roles) in the way of the everyday question — "what if I give someone a
+ * raise". Each panel now states what it answers and opens on demand; a panel
+ * holding scenario changes opens itself so configured data is never hidden.
+ */
+function LeverSection({ title, subtitle, active: isActive, children, defaultOpen }: {
+  title: string
+  subtitle: string
+  active?: boolean
+  defaultOpen?: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen ?? false)
+  const show = open || isActive
+  return (
+    <div className={cardCls}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-start justify-between gap-2 text-left"
+      >
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+            {title}
+            {isActive && <span className="text-[10px] rounded-full bg-primary/15 text-primary px-1.5 py-0.5 font-medium">in use</span>}
+          </h3>
+          <p className="text-[11px] text-muted-foreground">{subtitle}</p>
+        </div>
+        <ChevronDown className={`h-4 w-4 shrink-0 mt-0.5 text-muted-foreground transition-transform ${show ? 'rotate-180' : ''}`} />
+      </button>
+      {show && <div className="mt-3">{children}</div>}
+    </div>
+  )
+}
+
 function BillingGrowthLever({ active, updateActive }: { active: Scenario; updateActive: (m: (s: Scenario) => Scenario) => void }) {
   return (
     <div className={cardCls}>
@@ -407,6 +475,115 @@ function BillingGrowthLever({ active, updateActive }: { active: Scenario; update
           <span className="text-sm text-muted-foreground">%</span>
         </div>
       </div>
+    </div>
+  )
+}
+
+const ROLE_BASIS_LABEL: Record<DraftOwnershipRule['basis'], string> = {
+  billing: '% of billing',
+  profit: '% of profit',
+  fixed: 'Fixed ₹',
+}
+
+/** inputCls without its `w-full` — that width fights flex sizing in a shared row. */
+const roleFieldCls = 'bg-secondary border border-border rounded-lg px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50'
+
+/**
+ * Draft roles — "what would delegating Accounts cost me".
+ *
+ * Deliberately identity-free: no employee, no dates, no scope. The cost of a
+ * hat is the same whoever wears it, and the real program still gets created in
+ * Settings → Ownership. Nothing here is ever applied.
+ */
+function DraftRolesLever({ active, updateActive }: { active: Scenario; updateActive: (m: (s: Scenario) => Scenario) => void }) {
+  const [form, setForm] = useState<{ label: string; basis: DraftOwnershipRule['basis']; value: string }>(
+    { label: '', basis: 'billing', value: '' },
+  )
+  const rules = active.draftOwnershipRules ?? []
+
+  function add() {
+    const value = Number(form.value)
+    if (!form.label.trim() || !(value > 0)) return
+    const rule: DraftOwnershipRule = {
+      id: crypto.randomUUID(),
+      label: form.label.trim(),
+      basis: form.basis,
+      percent: form.basis === 'fixed' ? null : value,
+      fixedAmountInr: form.basis === 'fixed' ? value : null,
+    }
+    updateActive(s => ({ ...s, draftOwnershipRules: [...(s.draftOwnershipRules ?? []), rule] }))
+    setForm({ label: '', basis: form.basis, value: '' })
+  }
+
+  return (
+    <div className={cardCls}>
+      <div className="mb-2">
+        <h3 className="text-sm font-semibold text-foreground">Roles to delegate</h3>
+        <p className="text-[11px] text-muted-foreground">
+          What a hat would cost if someone else wore it — simulation only, never applied.
+        </p>
+      </div>
+
+      {rules.length > 0 && (
+        <div className="space-y-1 mb-2">
+          {rules.map(r => (
+            <div key={r.id} className="flex items-center justify-between gap-2 bg-secondary/60 border border-border rounded-lg px-2.5 py-1.5">
+              <span className="min-w-0 truncate text-xs">
+                <span className="font-medium text-foreground">{r.label}</span>
+                <span className="text-muted-foreground ml-1.5">
+                  {r.basis === 'fixed' ? inr(r.fixedAmountInr ?? 0) : `${r.percent}% of ${r.basis}`}
+                </span>
+              </span>
+              <button
+                onClick={() => updateActive(s => ({
+                  ...s, draftOwnershipRules: (s.draftOwnershipRules ?? []).filter(x => x.id !== r.id),
+                }))}
+                className="text-muted-foreground hover:text-red-500 shrink-0"
+                aria-label={`Remove ${r.label}`}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* The name gets its own row: in a 380px lever column, sharing one row
+          with the basis select and the amount squeezed it to nothing. */}
+      <input
+        placeholder="Role, e.g. Accounts"
+        value={form.label}
+        onChange={e => setForm(f => ({ ...f, label: e.target.value }))}
+        className={`${inputCls} mb-1.5`}
+      />
+      <div className="flex items-center gap-1.5">
+        <select
+          value={form.basis}
+          onChange={e => setForm(f => ({ ...f, basis: e.target.value as DraftOwnershipRule['basis'] }))}
+          className={`${roleFieldCls} flex-1 min-w-0`}
+        >
+          {(Object.keys(ROLE_BASIS_LABEL) as DraftOwnershipRule['basis'][]).map(b => (
+            <option key={b} value={b}>{ROLE_BASIS_LABEL[b]}</option>
+          ))}
+        </select>
+        <input
+          type="number" min={0} step="0.01" placeholder={form.basis === 'fixed' ? '₹' : '%'}
+          value={form.value}
+          onChange={e => setForm(f => ({ ...f, value: e.target.value }))}
+          className={`${roleFieldCls} w-24 shrink-0 text-right`}
+        />
+        <button onClick={add} className="rounded-lg bg-primary/15 text-primary px-2 py-1.5 hover:bg-primary/25" aria-label="Add role">
+          <Plus className="h-4 w-4" />
+        </button>
+      </div>
+
+      {rules.some(r => r.basis === 'profit') && (
+        <p className="text-[11px] text-muted-foreground mt-2">
+          The planner&rsquo;s profit is billing minus contribution earnings. It does not subtract
+          base salaries or company expenses, so a %-of-profit role costs more here than it will
+          in payroll.
+        </p>
+      )}
     </div>
   )
 }
@@ -646,6 +823,14 @@ function TotalsComparison({ scenarios, comparisons, divisor, baseSalaries }: {
     { label: 'Margin %', get: c => c.marginPct, money: false },
     { label: 'ROI (profit ÷ payroll) %', get: c => c.roi, money: false },
   ]
+  // Only shown once a role is drafted — an always-visible ₹0 "role cost" row
+  // would read as a claim that delegation is free.
+  if ([...comparisons.values()].some(c => c.ownershipCost.simulated !== 0)) {
+    metrics.push(
+      { label: 'Role cost (draft)', get: c => c.ownershipCost, invert: true },
+      { label: 'Profit after roles', get: c => c.profitAfterOwnership },
+    )
+  }
   const fmt = (v: number, money: boolean) => (money ? inr(v / divisor) : pct1(v))
   return (
     <div className="bg-secondary/40 border border-border rounded-xl overflow-hidden">
