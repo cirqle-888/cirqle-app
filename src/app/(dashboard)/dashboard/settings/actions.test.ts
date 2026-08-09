@@ -2,6 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createEmployee, updateEmployee } from './actions'
 
 // Mock dependencies
+/** What the DB currently holds for the employee being edited. */
+export let storedDesignation: string | null = 'existing-role'
+export const setStoredDesignation = (v: string | null) => { storedDesignation = v }
+
 vi.mock('@/lib/supabase/admin', () => {
   return {
     createAdminClient: vi.fn(() => ({
@@ -11,6 +15,13 @@ vi.mock('@/lib/supabase/admin', () => {
             insert: vi.fn((data) => ({
               select: vi.fn(() => ({
                 single: vi.fn(() => Promise.resolve({ data: { id: 'mock-id', ...data }, error: null }))
+              }))
+            })),
+            // Reading the stored designation is how the self-demotion guard
+            // tells a real change from a form that merely echoes the field.
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                single: vi.fn(() => Promise.resolve({ data: { designation_id: storedDesignation }, error: null }))
               }))
             })),
             update: vi.fn((data) => ({
@@ -86,9 +97,44 @@ describe('Employee Settings Actions (SEC-01)', () => {
   it('prevents caller from changing their own designation', async () => {
     mockRequireAdmin.mockResolvedValue({ ok: true })
     mockRequirePermission.mockResolvedValue({ ok: true, employeeId: 'my-own-id' })
-    
+    setStoredDesignation('existing-role')
+
     const res = await updateEmployee('my-own-id', { designation_id: 'new-role' })
     expect(res.ok).toBe(false)
     expect(res.error).toMatch(/Cannot change your own designation/)
+  })
+
+  // REGRESSION: the guard used to test `designation_id !== undefined`, and the
+  // edit form posts the whole employee row — so the owner could not save any
+  // change to their own record (services, salary day, rating) and was told the
+  // designation was the problem.
+  it('lets the caller edit their own record when the designation is unchanged', async () => {
+    mockRequireAdmin.mockResolvedValue({ ok: true })
+    mockRequirePermission.mockResolvedValue({ ok: true, employeeId: 'my-own-id' })
+    setStoredDesignation('existing-role')
+
+    const res = await updateEmployee('my-own-id', {
+      designation_id: 'existing-role',   // echoed unchanged by the form
+      performance_rating: 95,
+    })
+    expect(res.ok).toBe(true)
+  })
+
+  it('treats null and undefined designations as the same value, not a change', async () => {
+    mockRequireAdmin.mockResolvedValue({ ok: true })
+    mockRequirePermission.mockResolvedValue({ ok: true, employeeId: 'my-own-id' })
+    setStoredDesignation(null)
+
+    const res = await updateEmployee('my-own-id', { designation_id: null, performance_rating: 80 })
+    expect(res.ok).toBe(true)
+  })
+
+  it('still lets an admin change SOMEONE ELSE\'s designation', async () => {
+    mockRequireAdmin.mockResolvedValue({ ok: true })
+    mockRequirePermission.mockResolvedValue({ ok: true, employeeId: 'my-own-id' })
+    setStoredDesignation('existing-role')
+
+    const res = await updateEmployee('someone-else', { designation_id: 'new-role' })
+    expect(res.ok).toBe(true)
   })
 })

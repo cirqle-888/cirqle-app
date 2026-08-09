@@ -103,17 +103,36 @@ export async function updateEmployee(
     if (!adminCheck.ok) return { ok: false, error: 'Only admins can set designations or compensation' }
   }
 
-  if (id === auth.employeeId && safeForm.designation_id !== undefined) {
+  const admin = createAdminClient()
+
+  // Read the stored designation once: it answers both "is this a real change?"
+  // (the self-demotion guard) and "how should this be logged?".
+  let designationChanged = false
+  if (safeForm.designation_id !== undefined) {
+    const { data: current, error: readErr } = await admin
+      .from('employees').select('designation_id').eq('id', id).single()
+    if (readErr) return { ok: false, error: 'Could not verify the current role — try again.' }
+    designationChanged = (current?.designation_id ?? null) !== (safeForm.designation_id ?? null)
+  }
+
+  // Self-demotion guard. It must fire on an actual CHANGE, not on the mere
+  // presence of the field: the edit form posts the whole employee row, so
+  // `designation_id` is always in the payload and testing `!== undefined`
+  // blocked every self-edit — services, salary day, performance rating, the
+  // lot — with a message about designations the user hadn't touched.
+  if (id === auth.employeeId && designationChanged) {
     return { ok: false, error: 'Cannot change your own designation' }
   }
 
-  const admin = createAdminClient()
   const { data, error } = await admin.from('employees').update(safeForm).eq('id', id).select().single()
   if (error) return { ok: false, error: error.message }
 
   // Log: employee record edited (fire-and-forget)
   // Log designation changes specifically so the timeline shows them clearly
-  const action = safeForm.designation_id ? 'designation_changed' : 'edited'
+  // Same presence-vs-change distinction as the guard above: the form always
+  // posts designation_id, so keying off its presence logged every ordinary
+  // edit as a role change and made the audit trail lie.
+  const action = designationChanged ? 'designation_changed' : 'edited'
   void logActivity({
     actorId:    auth.employeeId,
     subjectId:  id,
