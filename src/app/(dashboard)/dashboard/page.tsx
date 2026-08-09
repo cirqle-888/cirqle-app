@@ -49,6 +49,12 @@ export default async function DashboardPage() {
         .from('tasks')
         .select('id, billing_amount_inr, quantity, task_date, status, service_id, client:clients(id, name), service:services(id, name)')
         .not('status', 'eq', 'cancelled')
+        // Deleted work is not done work. Without this the Job Value, Count,
+        // Jobs Done chart and period comparisons all counted soft-deleted
+        // tasks, so the dashboard read HIGHER than every money engine (which
+        // all filter deleted_at) — July 2026 showed ₹28,650 against the
+        // ownership basis of ₹26,500, a ₹2,150 gap of six deleted tasks.
+        .is('deleted_at', null)
         .gte('task_date', analyticsFromStr)
         .order('task_date', { ascending: true })
         .order('id', { ascending: true })).then(r => r.data || [])
@@ -147,6 +153,9 @@ export default async function DashboardPage() {
           .from('tasks')
           .select('id, title, status, billing_amount_inr, task_date, client:clients(id, name), service:services(id, name)')
           .eq('task_date', todayStr)
+          // Same omission as the analytics query above — a task deleted today
+          // would still sit in the Today's Focus widget asking to be worked on.
+          .is('deleted_at', null)
           .order('status')
       : Promise.resolve({ data: [] }),
 
