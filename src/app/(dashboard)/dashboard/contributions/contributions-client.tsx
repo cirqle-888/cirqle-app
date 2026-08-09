@@ -251,7 +251,7 @@ export default function ContributionsClient({
   // Toggle helpers for the multi-select dropdowns.
   const toggleClient  = (id: string) => setFilterClients(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   const toggleService = (id: string) => setFilterServices(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
-  const [filterEmployeeMode, setFilterEmployeeMode] = useState<'worked' | 'solo' | 'any'>((searchParams.get('empmode') as any) || 'worked')
+  const [filterEmployeeMode, setFilterEmployeeMode] = useState<'worked' | 'solo' | 'any' | 'without'>((searchParams.get('empmode') as any) || 'worked')
   // "My Tasks" / "Not Assigned to Me" quick toggle — independent of the Employee
   // dropdown (which picks any single teammate). Available to anyone with an
   // employee record, not just role==='employee' — admins can contribute too.
@@ -837,7 +837,12 @@ export default function ContributionsClient({
       const doneCount = contributed ? contributed.size : 0
       if (filterEmployee) {
         const hasContributed = contributed?.has(filterEmployee)
-        if (filterEmployeeMode === 'solo') {
+        if (filterEmployeeMode === 'without') {
+          // Everyone EXCEPT this person: tasks they did not contribute to and
+          // are not assigned to. Answers "what did the rest of the team do".
+          const isAssigned = taskAssignmentMap[t.id]?.has(filterEmployee)
+          if (hasContributed || isAssigned) return false
+        } else if (filterEmployeeMode === 'solo') {
           // Only tasks where this employee is the SOLE contributor
           if (!hasContributed) return false
           if ((contributed?.size ?? 0) > 1) return false
@@ -1593,6 +1598,14 @@ export default function ContributionsClient({
                     title="Contributed or assigned"
                     className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition-all ${filterEmployeeMode === 'any' ? 'bg-primary text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
                     + Assigned
+                  </button>
+                  {/* "Everyone else" — the inverse of the three modes above, so
+                      one picker answers both "what did they do" and "what did
+                      the rest of the team do without them". */}
+                  <button type="button" onClick={() => setFilterEmployeeMode('without')}
+                    title="Tasks everyone EXCEPT this person worked on"
+                    className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition-all ${filterEmployeeMode === 'without' ? 'bg-rose-500 text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                    Everyone else
                   </button>
                 </div>
               )}
