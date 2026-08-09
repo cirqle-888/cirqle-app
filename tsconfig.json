@@ -33,6 +33,7 @@
   "exclude": [
     "node_modules",
     "_archive",
+    "docs/_archive",
     ".claude",
     "**/*.test.ts",
     "**/*.test.tsx",
