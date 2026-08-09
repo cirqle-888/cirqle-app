@@ -92,3 +92,22 @@ export interface PeriodAggregates {
   collectedInr: number
   profitInr: number
 }
+
+/**
+ * One measured line behind a basis amount — the composition an award is made of.
+ *
+ * A `billing` program measures tasks, so each line is a task. A `collected`
+ * program measures cash receipts, which carry a client but no task or service
+ * dimension, so those fields are null. `profit` and `fixed` have no line
+ * composition at all: profit is a company-wide residual, not a list of things.
+ */
+export interface BasisLine {
+  clientId: string | null
+  taskId: string | null
+  taskNumber: number | null
+  title: string | null
+  serviceId: string | null
+  /** task_date for billing, entry_date for collections. */
+  date: string
+  amountInr: number
+}

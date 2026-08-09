@@ -22,7 +22,7 @@ import { loadOrgGraph, resolveScope, matchesScope } from '@/lib/org/units'
 import { computeAwards, resolveParticipants } from './compute'
 import { monthsInPeriod, periodForBookingMonth, activeForPeriod } from './periods'
 import type {
-  OwnershipAward, OwnershipPeriod, OwnershipProgram, OwnershipRule, PeriodAggregates,
+  BasisLine, OwnershipAward, OwnershipPeriod, OwnershipProgram, OwnershipRule, PeriodAggregates,
 } from './types'
 
 const r2 = (n: number) => Math.round(n * 100) / 100
@@ -127,69 +127,147 @@ export async function loadPeriodAggregates(
     profitInr = p.profitInr
   }
 
+  // The measured amount is the SUM OF THE SAME LINES the composition view
+  // shows. Deriving both from one loader is what stops a breakdown that
+  // doesn't add up to the award it explains.
   if (program.basis === 'billing') {
-    // service_id → category, so a category- or unit-scoped program can filter
-    // on the discipline a task belongs to.
-    const svcCat = new Map<string, string | null>()
-    try {
-      const { data } = await admin.from('services').select('id, category_id')
-      for (const s of (data || []) as { id: string; category_id: string | null }[]) {
-        svcCat.set(s.id, s.category_id)
-      }
-    } catch { /* leave unmapped — category scoping then matches nothing */ }
-
-    let unitScope: ReturnType<typeof resolveScope> | null = null
-    if (program.scopeKind === 'org_unit' && program.scopeId) {
-      const { units, scopes } = await loadOrgGraph(admin)
-      unitScope = resolveScope(units, scopes, program.scopeId)
-    }
-
-    try {
-      const { data } = await admin
-        .from('tasks')
-        .select('billing_amount_inr, client_id, service_id')
-        .gte('task_date', period.start)
-        .lte('task_date', period.end)
-        .is('deleted_at', null)
-      for (const t of (data || []) as { billing_amount_inr: number | null; client_id: string | null; service_id: string | null }[]) {
-        const categoryId = t.service_id ? svcCat.get(t.service_id) ?? null : null
-        let include = false
-        switch (program.scopeKind) {
-          case 'company':          include = true; break
-          case 'client':           include = t.client_id === program.scopeId; break
-          case 'service':          include = t.service_id === program.scopeId; break
-          case 'service_category': include = categoryId === program.scopeId; break
-          case 'org_unit':
-            include = unitScope
-              ? matchesScope(unitScope, { clientId: t.client_id, serviceId: t.service_id, serviceCategoryId: categoryId })
-              : false     // unresolvable unit owns nothing — never everything
-            break
-        }
-        if (include) billingInr += Number(t.billing_amount_inr || 0)
-      }
-    } catch { /* leave 0 */ }
+    billingInr = sumLines(await loadBillingLines(admin, program, period, false))
   }
-
   if (program.basis === 'collected') {
-    // Cash actually received. Entries carry a client but no service dimension,
-    // which is why the table CHECK forbids service scopes on this basis.
-    try {
-      const lines = await fetchJournalLines(admin, { from: period.start, to: period.end })
-      let clientFilter: Set<string> | null = null
-      if (program.scopeKind === 'client' && program.scopeId) clientFilter = new Set([program.scopeId])
-      if (program.scopeKind === 'org_unit' && program.scopeId) {
-        const { units, scopes } = await loadOrgGraph(admin)
-        clientFilter = resolveScope(units, scopes, program.scopeId).clientIds
-      }
-      for (const l of lines) {
-        if (l.section !== 'revenue' || l.amountInr <= 0) continue
-        if (clientFilter && (!l.clientId || !clientFilter.has(l.clientId))) continue
-        collectedInr += l.amountInr
-      }
-    } catch { /* leave 0 */ }
+    collectedInr = sumLines(await loadCollectedLines(admin, program, period))
   }
 
   return { billingInr: r2(billingInr), collectedInr: r2(collectedInr), profitInr: r2(profitInr) }
+}
+
+const sumLines = (lines: BasisLine[]) => lines.reduce((s, l) => s + l.amountInr, 0)
+
+/**
+ * The lines a basis amount is made of, for showing WHERE an award came from.
+ *
+ * Returns the same rows `loadPeriodAggregates` sums, so a breakdown always
+ * reconciles to the award. Empty for `profit` and `fixed`: profit is a
+ * company-wide residual (billing − earnings − salaries − expenses) and a fixed
+ * award measures nothing, so neither decomposes into a list of things.
+ */
+export async function loadPeriodComposition(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin: SupabaseClient<any, any, any>,
+  program: OwnershipProgram,
+  period: OwnershipPeriod,
+): Promise<BasisLine[]> {
+  if (program.basis === 'billing') return loadBillingLines(admin, program, period, true)
+  if (program.basis === 'collected') return loadCollectedLines(admin, program, period)
+  return []
+}
+
+/**
+ * Tasks inside a billing program's scope for the period.
+ *
+ * `detail` controls only the SELECT: the hot path (every award, every month)
+ * asks for the three columns it needs to sum, while the composition view asks
+ * for the identifying columns too. The scope predicate below is shared, so the
+ * two can never disagree about which tasks belong to the program.
+ */
+async function loadBillingLines(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin: SupabaseClient<any, any, any>,
+  program: OwnershipProgram,
+  period: OwnershipPeriod,
+  detail: boolean,
+): Promise<BasisLine[]> {
+  // service_id → category, so a category- or unit-scoped program can filter
+  // on the discipline a task belongs to.
+  const svcCat = new Map<string, string | null>()
+  try {
+    const { data } = await admin.from('services').select('id, category_id')
+    for (const s of (data || []) as { id: string; category_id: string | null }[]) {
+      svcCat.set(s.id, s.category_id)
+    }
+  } catch { /* leave unmapped — category scoping then matches nothing */ }
+
+  let unitScope: ReturnType<typeof resolveScope> | null = null
+  if (program.scopeKind === 'org_unit' && program.scopeId) {
+    const { units, scopes } = await loadOrgGraph(admin)
+    unitScope = resolveScope(units, scopes, program.scopeId)
+  }
+
+  // Typed as `string` rather than a literal so the client's select parser
+  // treats the two shapes as one dynamic query instead of failing to reconcile
+  // the ternary's branches.
+  const select: string = detail
+    ? 'id, task_number, title, task_date, billing_amount_inr, client_id, service_id'
+    : 'billing_amount_inr, client_id, service_id'
+
+  const out: BasisLine[] = []
+  try {
+    const { data } = await admin
+      .from('tasks')
+      .select(select)
+      .gte('task_date', period.start)
+      .lte('task_date', period.end)
+      .is('deleted_at', null)
+    for (const t of (data || []) as unknown as Record<string, unknown>[]) {
+      const clientId = (t.client_id as string) ?? null
+      const serviceId = (t.service_id as string) ?? null
+      const categoryId = serviceId ? svcCat.get(serviceId) ?? null : null
+      let include = false
+      switch (program.scopeKind) {
+        case 'company':          include = true; break
+        case 'client':           include = clientId === program.scopeId; break
+        case 'service':          include = serviceId === program.scopeId; break
+        case 'service_category': include = categoryId === program.scopeId; break
+        case 'org_unit':
+          include = unitScope
+            ? matchesScope(unitScope, { clientId, serviceId, serviceCategoryId: categoryId })
+            : false     // unresolvable unit owns nothing — never everything
+          break
+      }
+      if (!include) continue
+      out.push({
+        clientId,
+        taskId: (t.id as string) ?? null,
+        taskNumber: t.task_number == null ? null : Number(t.task_number),
+        title: (t.title as string) ?? null,
+        serviceId,
+        date: (t.task_date as string) ?? period.start,
+        amountInr: Number(t.billing_amount_inr || 0),
+      })
+    }
+  } catch { /* leave empty — an unreadable period measures nothing */ }
+  return out
+}
+
+/** Revenue actually received inside a collected program's scope. */
+async function loadCollectedLines(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin: SupabaseClient<any, any, any>,
+  program: OwnershipProgram,
+  period: OwnershipPeriod,
+): Promise<BasisLine[]> {
+  const out: BasisLine[] = []
+  try {
+    // Cash actually received. Entries carry a client but no service dimension,
+    // which is why the table CHECK forbids service scopes on this basis.
+    const lines = await fetchJournalLines(admin, { from: period.start, to: period.end })
+    let clientFilter: Set<string> | null = null
+    if (program.scopeKind === 'client' && program.scopeId) clientFilter = new Set([program.scopeId])
+    if (program.scopeKind === 'org_unit' && program.scopeId) {
+      const { units, scopes } = await loadOrgGraph(admin)
+      clientFilter = resolveScope(units, scopes, program.scopeId).clientIds
+    }
+    for (const l of lines) {
+      if (l.section !== 'revenue' || l.amountInr <= 0) continue
+      if (clientFilter && (!l.clientId || !clientFilter.has(l.clientId))) continue
+      out.push({
+        clientId: l.clientId ?? null,
+        taskId: null, taskNumber: null, title: l.description ?? null, serviceId: null,
+        date: l.date,
+        amountInr: l.amountInr,
+      })
+    }
+  } catch { /* leave empty */ }
+  return out
 }
 
 // ── Computing + persisting ───────────────────────────────────────────────────
