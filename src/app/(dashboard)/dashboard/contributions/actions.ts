@@ -1,5 +1,6 @@
 'use server'
 
+import { revalidatePath } from 'next/cache'
 import { syncTaskAgreementEarnings } from '@/lib/sync/agreement-earnings'
 import { requireAnyPermission } from '@/lib/permissions/check'
 import { createAdminClient } from '@/lib/supabase/admin'
@@ -234,6 +235,7 @@ export async function saveTaskContributions(
       }
     }
 
+    revalidatePath('/dashboard/contributions')
     return {
       ok: true,
       preservedOverrides: overrides.length,
@@ -255,6 +257,7 @@ export async function saveTaskContributions(
     },
   })
 
+  revalidatePath('/dashboard/contributions')
   return { ok: true, preservedOverrides: overrides.length }
 }
 

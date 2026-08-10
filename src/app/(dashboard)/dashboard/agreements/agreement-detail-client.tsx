@@ -21,6 +21,7 @@ import {
 import {
   saveAgreementItem, changeAgreementItemTerms, deleteAgreementItem, toggleMilestone,
   setAgreementStatus, updateAgreementDetails, deleteAgreement, addAgreementNote,
+  linkTaskToAgreementItem, unlinkTaskFromAgreementItem, searchClientTasks,
   type AgreementItemInput, type AgreementDeliverableInput, type AgreementMilestoneInput,
 } from './actions'
 
@@ -186,7 +187,7 @@ const EVENT_LABEL: Record<string, string> = {
 
 export default function AgreementDetailClient({
   agreement, items: initialItems, events: initialEvents, progress, currentMonth,
-  services, canManage, canViewPricing,
+  services, tasks, canManage, canViewPricing,
 }: {
   agreement: Agreement
   items: Item[]
@@ -194,6 +195,7 @@ export default function AgreementDetailClient({
   progress: any | null
   currentMonth: string
   services: { id: string; name: string }[]
+  tasks: any[] // CoveredTask
   canManage: boolean
   canViewPricing: boolean
 }) {
@@ -438,8 +440,12 @@ export default function AgreementDetailClient({
                   key={it.id} it={it} currency={currency} canManage={canManage}
                   canViewPricing={canViewPricing} isDraft={isDraft} serviceName={serviceName}
                   busy={busy} defaultOpen={items.length === 1} history={termHistory.get(it.id) ?? []}
+                  tasks={tasks.filter(t => t.item_id === it.id)}
+                  agreementId={agreement.id}
+                  clientId={agreement.client_id}
                   onEdit={() => setItemForm(itemToForm(it, agreement.status))}
                   onChangeTerms={() => setItemForm(itemToForm(it, agreement.status, true))}
+                  onFixDetails={() => setItemForm(itemToForm(it, agreement.status, false, true))}
                   onDelete={() => handleDeleteItem(it)}
                   onToggleMilestone={handleToggleMilestone}
                 />
@@ -602,18 +608,23 @@ function Timeline({
 
 function ItemCard({
   it, currency, canManage, canViewPricing, isDraft, serviceName, busy, defaultOpen, history,
-  onEdit, onChangeTerms, onDelete, onToggleMilestone,
+  tasks, agreementId, clientId,
+  onEdit, onChangeTerms, onFixDetails, onDelete, onToggleMilestone,
 }: {
   it: Item; currency: string; canManage: boolean; canViewPricing: boolean; isDraft: boolean
   serviceName: Map<string, string>; busy: string | null; defaultOpen: boolean
   /** Closed terms this row replaced, oldest first. */
   history: Item[]
-  onEdit: () => void; onChangeTerms: () => void; onDelete: () => void
+  tasks: any[] // CoveredTask
+  agreementId: string
+  clientId: string
+  onEdit: () => void; onChangeTerms: () => void; onFixDetails: () => void; onDelete: () => void
   onToggleMilestone: (m: Milestone) => void
 }) {
   const [open, setOpen] = useState(defaultOpen)
   const [showDoneMs, setShowDoneMs] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
+  const [showLinkModal, setShowLinkModal] = useState(false)
   const headline = itemHeadline(it)
   const typeLabel = COMMITMENT_TYPES.find(t => t.value === it.commitment_type)?.label
   const service = it.service_id ? serviceName.get(it.service_id) || 'Service' : null
@@ -668,14 +679,14 @@ function ItemCard({
       {/* Pricing summary — client pays / team is paid / extras (retainer) */}
       {canViewPricing && it.commitment_type === 'retainer' &&
         (it.unit_price != null || it.work_unit_value != null || it.extra_unit_price != null) && (
-        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs bg-primary/[0.04] border border-primary/15 rounded-lg px-3 py-2">
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
           {it.unit_price != null && (
             <span className="text-muted-foreground">Client pays <b className="text-foreground">{currency} {it.unit_price}</b>/{it.cycle || 'cycle'}</span>
           )}
           <span className="text-muted-foreground">
             Work value {it.work_unit_value != null
               ? <b className="text-foreground">{currency} {it.work_unit_value}</b>
-              : <b className="text-amber-600 dark:text-amber-400">not set — covered tasks pay ₹0</b>}
+              : <b className="text-amber-600 dark:text-amber-400">not set</b>}
             {it.work_unit_value != null && '/task'}
           </span>
           {it.extra_unit_price != null && (
@@ -690,13 +701,13 @@ function ItemCard({
       {/* Internal allocation summary (retainer, operational only) */}
       {canViewPricing && it.commitment_type === 'retainer' &&
         (it.creative_allocation_amount != null || it.management_allocation_amount != null) && (
-        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs bg-secondary/30 rounded-lg px-3 py-2">
+        <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
           <span className="font-medium text-muted-foreground">Internal allocation</span>
           {it.creative_allocation_amount != null && (
-            <span>Creative <b>{currency} {it.creative_allocation_amount}</b></span>
+            <span className="text-muted-foreground">Creative <b>{currency} {it.creative_allocation_amount}</b></span>
           )}
           {it.management_allocation_amount != null && (
-            <span>Management <b>{currency} {it.management_allocation_amount}</b></span>
+            <span className="text-muted-foreground">Management <b>{currency} {it.management_allocation_amount}</b></span>
           )}
           {it.allocated_unit_value != null && (
             <span className="text-muted-foreground">
@@ -718,11 +729,11 @@ function ItemCard({
 
       {/* Deliverables */}
       {it.deliverables.length > 0 && (
-        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
           {it.deliverables.map((d, i) => (
-            <div key={d.id || i} className="flex items-center justify-between gap-2 text-sm bg-secondary/40 rounded-lg px-3 py-2">
-              <span className="truncate">{d.label}</span>
-              <span className="text-muted-foreground shrink-0">{d.committed_quantity}</span>
+            <div key={d.id || i} className="flex items-center justify-between gap-2 text-xs">
+              <span className="truncate text-muted-foreground">• {d.label}</span>
+              <span className="font-medium">{d.committed_quantity}</span>
             </div>
           ))}
         </div>
@@ -762,6 +773,90 @@ function ItemCard({
         </div>
       )}
 
+      {/* Tasks Covered */}
+      <div className="mt-4 border-t border-border/60 pt-3">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-foreground">Tasks Covered · {tasks.length}</span>
+            {it.committed_quantity != null && (
+              <>
+                <span className="text-muted-foreground/40">|</span>
+                <span className="text-[11px] text-muted-foreground">
+                  <span className="text-foreground font-medium">{tasks.length}</span> delivered
+                  {' · '}
+                  <span className="text-foreground font-medium">{Math.max(0, it.committed_quantity - tasks.length)}</span> remaining
+                </span>
+              </>
+            )}
+          </div>
+          {canManage && (
+            <button
+              onClick={() => setShowLinkModal(true)}
+              className="text-xs text-muted-foreground hover:text-foreground underline decoration-border hover:decoration-foreground underline-offset-2 transition-colors">
+              + Link existing task
+            </button>
+          )}
+        </div>
+        {tasks.length > 0 ? (
+          <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+            {tasks.map(t => (
+              <div key={t.id} className="flex items-center justify-between text-xs p-2 rounded-lg bg-secondary/30 border border-border/50">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <span className="font-medium truncate text-foreground">{t.title}</span>
+                    {t.task_number && <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">#{t.task_number}</span>}
+                    {t.is_manual ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 border border-amber-500/20">Manual</span>
+                    ) : (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-600 border border-green-500/20">Auto</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-muted-foreground/80">
+                    <span>{t.task_date}</span>
+                    <span>·</span>
+                    <span className="capitalize">{t.status.replace(/_/g, ' ')}</span>
+                    {t.contributors && t.contributors.length > 0 && (
+                      <>
+                        <span>·</span>
+                        <span className="truncate">{t.contributors.join(', ')}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                {canManage && t.is_manual && (
+                  <button
+                    onClick={async () => {
+                      if (confirm('Unlink this task?')) {
+                        const res = await unlinkTaskFromAgreementItem(agreementId, it.id, t.id)
+                        if (res.ok) alert('Task unlinked')
+                        else alert(res.error)
+                      }
+                    }}
+                    title="Unlink task"
+                    className="p-1.5 ml-2 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-md transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="py-4 text-center text-xs text-muted-foreground border border-dashed border-border/50 rounded-lg">
+            No tasks linked yet
+          </div>
+        )}
+      </div>
+
+      {showLinkModal && (
+        <TaskLinkModal
+          clientId={clientId}
+          agreementId={agreementId}
+          itemId={it.id}
+          onClose={() => setShowLinkModal(false)}
+        />
+      )}
+
       {/* Terms this row replaced — kept because past months were billed on them */}
       {history.length > 0 && (
         <div className="mt-4 border-t border-border/60 pt-3">
@@ -787,10 +882,24 @@ function ItemCard({
 
       {canManage && (
         <div className="mt-4 flex items-center gap-1.5">
-          <button onClick={isDraft ? onEdit : onChangeTerms}
-            className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg bg-secondary border border-border hover:bg-secondary/70 transition-colors">
-            <Pencil className="w-3.5 h-3.5" /> {isDraft ? 'Edit item' : 'Change terms'}
-          </button>
+          {isDraft ? (
+            <button onClick={onEdit}
+              className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg bg-secondary border border-border hover:bg-secondary/70 transition-colors">
+              <Pencil className="w-3.5 h-3.5" /> Edit item
+            </button>
+          ) : (
+            <>
+              <button onClick={onChangeTerms}
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg bg-secondary border border-border hover:bg-secondary/70 transition-colors">
+                <Pencil className="w-3.5 h-3.5" /> Change terms
+              </button>
+              <button onClick={onFixDetails}
+                title="Edit typos without creating a new terms history record"
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg text-muted-foreground hover:bg-secondary/50 transition-colors border border-transparent hover:border-border/50">
+                Fix details
+              </button>
+            </>
+          )}
           {isDraft && (
             <button onClick={onDelete} disabled={busy === 'item:' + it.id}
               className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors disabled:opacity-50">
@@ -858,14 +967,26 @@ function newItemForm(currency: string): ItemForm {
   }
 }
 
-function itemToForm(it: Item, status: AgreementStatus, changeTerms = false): ItemForm {
+function itemToForm(it: Item, status: AgreementStatus, changeTerms = false, forceEdit = false): ItemForm {
   const active = status !== 'draft' && status !== 'pending_approval'
+  let nextDate = it.effective_from
+  const isChangeTermsMode = (changeTerms || active) && !forceEdit
+
+  if (isChangeTermsMode) {
+    const todayStr = today()
+    nextDate = todayStr > it.effective_from ? todayStr : (() => {
+      const d = new Date(it.effective_from)
+      d.setDate(d.getDate() + 1)
+      return d.toISOString().slice(0, 10)
+    })()
+  }
+
   return {
-    _mode: changeTerms || active ? 'change_terms' : 'edit',
+    _mode: isChangeTermsMode ? 'change_terms' : 'edit',
     id: it.id,
     service_id: it.service_id, commitment_type: it.commitment_type,
     committed_quantity: it.committed_quantity, cycle: it.cycle,
-    effective_from: changeTerms || active ? today() : it.effective_from,
+    effective_from: nextDate,
     effective_to: it.effective_to,
     unit_price: it.unit_price ?? null, currency: it.currency || 'INR',
     carry_forward_rule: it.carry_forward_rule, extra_unit_price: it.extra_unit_price ?? null,
@@ -1108,8 +1229,8 @@ function ItemEditor({
           </div>
         )}
 
-        {/* Essentials — the six answers that define the commitment. Everything
-            else is optional and lives under Advanced. */}
+        {/* Setup */}
+        <Section title="Setup" defaultOpen={true}>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className={labelCls}>Commitment</label>
@@ -1163,12 +1284,12 @@ function ItemEditor({
             </div>
           )}
         </div>
+        </Section>
 
         {/* Covered services (retainer only) — a retainer can cover many services */}
         {isRetainer && (
           <Section
             title="Covered services"
-            hint="Pick the services this retainer pays for. Any task for this client on one of them, dated inside the term, counts as delivered automatically and is not invoiced separately — no manual linking."
             badge={`${(form.coveredServiceIds ?? []).length} selected`}
             defaultOpen={(form.coveredServiceIds ?? []).length > 0}>
             <CoveredServicesEditor form={form} set={set} services={services} />
@@ -1178,7 +1299,6 @@ function ItemEditor({
         {/* Deliverables — the named breakdown of the committed quantity */}
         <Section
           title="Deliverables"
-          hint="Optional breakdown of what the quantity is made of — e.g. 12 Feed Posts + 3 Reels. Name each line and give it a quantity; together they replace the headline quantity above. Skip this and the headline number is used on its own."
           badge={form.deliverables.length > 0 ? `${deliverableTotal} across ${form.deliverables.length}` : 'none'}
           defaultOpen={form.deliverables.length > 0}>
           <div className="space-y-3">
@@ -1227,7 +1347,6 @@ function ItemEditor({
         {/* Milestones */}
         <Section
           title="Milestones"
-          hint="Steps to tick off as a one-time project moves along (Research → Concept → Final Files). Client-visible steps also appear on the client's side."
           badge={form.milestones.length > 0 ? `${form.milestones.length}` : 'none'}
           defaultOpen={form.milestones.length > 0}>
           <div className="space-y-2">
@@ -1253,23 +1372,24 @@ function ItemEditor({
           </button>
         </Section>
 
-        {/* ── Advanced ── Nothing below is needed to save an item. Grouped so the
-            form reads as "define the commitment", then "tune it if you must". */}
-        <div className="flex items-center gap-3 mt-6 mb-1">
-          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/60">Advanced</span>
-          <span className="h-px flex-1 bg-border" />
-        </div>
-
+        {/* Advanced */}
         <Section
-          title="End date & unused units"
-          badge={isRetainer ? CARRY_RULES.find(r => r.value === form.carry_forward_rule)?.label : (form.effective_to ? 'ends' : 'open-ended')}
-          defaultOpen={!!form.effective_to}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          title="Advanced"
+          defaultOpen={
+            !!form.effective_to || !!form.invoice_label || !!form.notes || form.extra_unit_price != null
+            || form.work_unit_value != null || form.work_commission_pct != null
+            || form.creative_allocation_amount != null || form.management_allocation_amount != null
+          }
+        >
+          <div className="space-y-6">
+            {/* End date & unused units */}
+            <div>
+              <h3 className="text-sm font-medium mb-3">End date & unused units</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {!changeTerms && (
               <div>
                 <label className={labelCls}>Ends <span className="text-muted-foreground/60">(optional)</span></label>
                 <input type="date" value={form.effective_to || ''} onChange={e => set({ effective_to: e.target.value || null })} className={inputCls} />
-                <p className="text-[11px] text-muted-foreground/70 mt-1">Blank = runs until the terms change.</p>
               </div>
             )}
             {isRetainer && (
@@ -1278,19 +1398,15 @@ function ItemEditor({
                 <select value={form.carry_forward_rule} onChange={e => set({ carry_forward_rule: e.target.value as CarryForwardRule })} className={inputCls}>
                   {CARRY_RULES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>
-                <p className="text-[11px] text-muted-foreground/70 mt-1">
-                  What happens to units the client did not use by the end of the cycle.
-                </p>
               </div>
             )}
-          </div>
-        </Section>
+              </div>
+            </div>
 
-        <Section
-          title="Wording & extra work"
-          badge={form.invoice_label ? form.invoice_label : (form.extra_unit_price != null ? `+${currency} ${form.extra_unit_price}/unit` : 'defaults')}
-          defaultOpen={!!form.invoice_label || !!form.notes || form.extra_unit_price != null}>
-          <div className="grid grid-cols-1 gap-4">
+            {/* Wording & extra work */}
+            <div className="pt-4 border-t border-border/50">
+              <h3 className="text-sm font-medium mb-3">Wording & extra work</h3>
+              <div className="grid grid-cols-1 gap-4">
             <div>
               <label className={labelCls}>Invoice name <span className="text-muted-foreground/60">(optional)</span></label>
               <input value={form.invoice_label || ''}
@@ -1301,42 +1417,33 @@ function ItemEditor({
                     ? `Blank = "${services.find(s => s.id === form.service_id)!.name}" (service name)`
                     : 'e.g. Brand Identity Development'
                 } />
-              <p className="text-[11px] text-muted-foreground/70 mt-1">
-                What the client reads on the invoice — the wording from the signed proposal.
-              </p>
             </div>
             {canViewPricing && (
               <div>
                 <label className={labelCls}>Extra-unit price ({currency}) <span className="text-muted-foreground/60">(optional)</span></label>
                 <input type="number" min="0" step="any" value={form.extra_unit_price ?? ''}
                   onChange={e => set({ extra_unit_price: e.target.value === '' ? null : parseFloat(e.target.value) })}
-                  placeholder="Blank = extra work not auto-billable" className={inputCls} />
-                <p className="text-[11px] text-muted-foreground/70 mt-1">
-                  Charged per task beyond the committed quantity, when a task is flagged as extra work.
-                </p>
+                  className={inputCls} />
               </div>
             )}
             <div>
               <label className={labelCls}>Notes <span className="text-muted-foreground/60">(optional)</span></label>
               <input value={form.notes || ''} onChange={e => set({ notes: e.target.value })} className={inputCls} placeholder="Item context…" />
             </div>
+              </div>
+            </div>
+
+            {/* Team pay & internal split */}
+            {isRetainer && canViewPricing && (
+              <div className="pt-4 border-t border-border/50">
+                <h3 className="text-sm font-medium mb-1">Team pay & internal split</h3>
+                <WorkValueEditor form={form} set={set} currency={currency} />
+                <div className="my-4 h-px bg-border/50" />
+                <AllocationEditor form={form} set={set} currency={currency} />
+              </div>
+            )}
           </div>
         </Section>
-
-        {/* Team pay + cost-centre split. Both are internal money that never
-            reaches an invoice, so they belong together and behind one door. */}
-        {isRetainer && canViewPricing && (
-          <Section
-            title="Team pay & internal split"
-            hint={`Internal only — never billed, never an invoice line. The work value is what each covered task pays contributors (the client is still billed ${currency} 0 for it); the allocation splits the retainer across cost centres for reporting.`}
-            badge={form.work_unit_value != null ? `${currency} ${form.work_unit_value}/task` : 'not set'}
-            defaultOpen={form.work_unit_value != null || form.work_commission_pct != null
-              || form.creative_allocation_amount != null || form.management_allocation_amount != null}>
-            <WorkValueEditor form={form} set={set} currency={currency} />
-            <div className="my-4 h-px bg-border" />
-            <AllocationEditor form={form} set={set} currency={currency} />
-          </Section>
-        )}
 
         <div className="flex gap-3 mt-6">
           <button onClick={() => setForm(null)} disabled={saving}
@@ -1524,5 +1631,102 @@ function MonthSwitcher({
         >This month</button>
       )}
     </div>
+  )
+}
+
+function TaskLinkModal({
+  clientId, agreementId, itemId, onClose,
+}: {
+  clientId: string; agreementId: string; itemId: string; onClose: () => void
+}) {
+  const [query, setQuery] = useState('')
+  const [tasks, setTasks] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [linking, setLinking] = useState<string | null>(null)
+  const toaster = useToast()
+
+  // debounce search
+  useMemo(() => {
+    setLoading(true)
+    const t = setTimeout(async () => {
+      const res = await searchClientTasks(clientId, query)
+      if (res.ok) {
+        setTasks(res.data || [])
+      } else {
+        alert('Search failed: ' + res.error)
+      }
+      setLoading(false)
+    }, 300)
+    return () => clearTimeout(t)
+  }, [query, clientId])
+
+  return (
+    <ModalOverlay onClose={onClose} sheetOnMobile>
+      <div className="bg-card w-full sm:max-w-xl rounded-t-2xl sm:rounded-2xl border border-border shadow-xl p-5 sm:p-6 max-h-[85vh] flex flex-col">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold">Link existing task</h2>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground"><X className="w-4 h-4" /></button>
+        </div>
+        
+        <div className="mb-4">
+          <input
+            autoFocus
+            type="text"
+            placeholder="Search by title or #number…"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+          />
+        </div>
+
+        <div className="flex-1 overflow-y-auto min-h-[300px] border border-border/50 rounded-lg bg-secondary/20">
+          {loading ? (
+            <div className="p-6 text-center text-sm text-muted-foreground flex flex-col items-center justify-center h-full">
+              <Loader2 className="w-5 h-5 animate-spin mb-2" />
+              Searching tasks…
+            </div>
+          ) : tasks.length === 0 ? (
+            <div className="p-6 text-center text-sm text-muted-foreground h-full flex items-center justify-center">
+              No tasks found.
+            </div>
+          ) : (
+            <div className="divide-y divide-border/50">
+              {tasks.map(t => (
+                <div key={t.id} className="p-3 flex items-center justify-between hover:bg-secondary/40 transition-colors">
+                  <div className="min-w-0 pr-3">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <span className="font-medium text-sm truncate text-foreground">{t.title}</span>
+                      {t.task_number && <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground shrink-0">#{t.task_number}</span>}
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px] text-muted-foreground/80">
+                      <span>{formatTaskDate(t.task_date)}</span>
+                      <span>·</span>
+                      <span className="capitalize">{t.status.replace(/_/g, ' ')}</span>
+                    </div>
+                  </div>
+                  <button
+                    disabled={!!linking}
+                    onClick={async () => {
+                      setLinking(t.id)
+                      const res = await linkTaskToAgreementItem(agreementId, itemId, t.id)
+                      setLinking(null)
+                      if (res.ok) {
+                        toaster.success('Task linked')
+                        onClose()
+                      } else {
+                        toaster.error(res.error || 'Failed to link')
+                      }
+                    }}
+                    className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                  >
+                    {linking === t.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Link'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </ModalOverlay>
   )
 }

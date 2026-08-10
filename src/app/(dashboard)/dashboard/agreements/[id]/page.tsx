@@ -4,7 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import {
-  loadAgreementItems, loadAgreementEvents, loadClientMonthProgress,
+  loadAgreementItems, loadAgreementEvents, loadClientMonthProgress, loadAgreementTasks,
 } from '@/lib/agreements/server'
 import { stripAgreementItemListPricing } from '@/lib/permissions/strip'
 import AgreementDetailClient from '../agreement-detail-client'
@@ -50,10 +50,11 @@ export default async function AgreementDetailPage({
 
   const currentMonth = parseMonth(monthParam) ?? new Date().toISOString().slice(0, 7)
 
-  const [items, events, progress, servicesRes] = await Promise.all([
+  const [items, events, progress, tasks, servicesRes] = await Promise.all([
     loadAgreementItems(agreement.id).catch(() => []),
     loadAgreementEvents(agreement.id).catch(() => []),
     loadClientMonthProgress(agreement.client_id, currentMonth).catch(() => []),
+    loadAgreementTasks(agreement.id).catch(() => []),
     supabase.from('services').select('id, name').eq('is_active', true).order('name'),
   ])
 
@@ -69,6 +70,7 @@ export default async function AgreementDetailPage({
       progress={currentProgress}
       currentMonth={currentMonth}
       services={servicesRes.data || []}
+      tasks={tasks}
       canManage={canManage}
       canViewPricing={canViewPricing}
     />

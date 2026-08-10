@@ -254,3 +254,66 @@ export async function loadClientMonthProgress(
 
   return results
 }
+
+export type CoveredTask = {
+  id: string
+  task_number: string | null
+  title: string
+  task_date: string
+  status: string
+  item_id: string
+  is_manual: boolean
+  contributors: string[]
+}
+
+export async function loadAgreementTasks(agreementId: string): Promise<CoveredTask[]> {
+  const supabase = await createAdminClient()
+
+  // 1. Get all item IDs for the agreement
+  const { data: items } = await supabase
+    .from('client_agreement_items')
+    .select('id')
+    .eq('agreement_id', agreementId)
+
+  if (!items || items.length === 0) return []
+  const itemIds = items.map(i => i.id)
+
+  // 2. Fetch manually linked tasks
+  const { data: manualLinks } = await supabase
+    .from('client_agreement_tasks')
+    .select('item_id, task_id')
+    .in('item_id', itemIds)
+
+  const manualTaskIds = manualLinks ? manualLinks.map(l => l.task_id) : []
+
+  // 3. Fetch task details
+  let orQuery = `retainer_item_id.in.(${itemIds.join(',')})`
+  if (manualTaskIds.length > 0) {
+    orQuery += `,id.in.(${manualTaskIds.join(',')})`
+  }
+
+  const { data: tasks } = await supabase
+    .from('tasks')
+    .select('id, task_number, title, task_date, status, retainer_item_id, contributions(employee:employees(name))')
+    .or(orQuery)
+    .is('deleted_at', null)
+    .order('task_date', { ascending: false })
+
+  if (!tasks) return []
+
+  return tasks.map(t => {
+    const manualLink = manualLinks?.find(m => m.task_id === t.id)
+    return {
+      id: t.id,
+      task_number: t.task_number,
+      title: t.title,
+      task_date: t.task_date,
+      status: t.status,
+      item_id: manualLink ? manualLink.item_id : (t.retainer_item_id as string),
+      is_manual: !!manualLink,
+      contributors: (t.contributions as any[] || [])
+        .map(c => c.employee?.name)
+        .filter(Boolean) as string[]
+    }
+  })
+}

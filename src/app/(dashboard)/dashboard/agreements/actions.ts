@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission, loadCurrentUser, hasPermission } from '@/lib/permissions/check'
+import { requirePermission, requireAnyPermission, loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { recalcTaskCommissions } from '@/lib/sync/integrity'
 import { syncFeeLinesForAgreementItem } from '@/lib/agreements/fee-lines'
 import { PERMS } from '@/lib/permissions/keys'
@@ -604,4 +604,84 @@ export async function addAgreementNote(
 
   revalidatePath(`/dashboard/agreements/${agreementId}`)
   return { ok: true }
+}
+
+export async function linkTaskToAgreementItem(
+  agreementId: string,
+  itemId: string,
+  taskId: string,
+): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.AGREEMENTS_MANAGE)
+  if (!guard.ok) return guard
+
+  const supabase = await createClient()
+
+  // Verify the task exists, is not deleted, and matches the agreement's client.
+  const { data: agreement } = await supabase.from('client_agreements').select('client_id').eq('id', agreementId).single()
+  if (!agreement) return { ok: false, error: 'Agreement not found' }
+
+  const { data: task } = await supabase.from('tasks').select('client_id, deleted_at').eq('id', taskId).single()
+  if (!task) return { ok: false, error: 'Task not found' }
+  if (task.deleted_at) return { ok: false, error: 'Cannot link a deleted task' }
+  if (task.client_id !== agreement.client_id) return { ok: false, error: 'Task belongs to a different client' }
+
+  const { error } = await supabase.from('client_agreement_tasks').insert({
+    item_id: itemId,
+    task_id: taskId,
+  })
+
+  // 23505 = unique_violation
+  if (error?.code === '23505') return { ok: false, error: 'Task is already linked to this item' }
+  if (error) return { ok: false, error: error.message }
+
+  revalidatePath(`/dashboard/agreements/${agreementId}`)
+  return { ok: true }
+}
+
+export async function unlinkTaskFromAgreementItem(
+  agreementId: string,
+  itemId: string,
+  taskId: string,
+): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.AGREEMENTS_MANAGE)
+  if (!guard.ok) return guard
+
+  const supabase = await createClient()
+
+  const { error } = await supabase.from('client_agreement_tasks')
+    .delete()
+    .eq('item_id', itemId)
+    .eq('task_id', taskId)
+
+  if (error) return { ok: false, error: error.message }
+
+  revalidatePath(`/dashboard/agreements/${agreementId}`)
+  return { ok: true }
+}
+
+export async function searchClientTasks(clientId: string, query: string = '') {
+  const guard = await requireAnyPermission([PERMS.TASKS_VIEW_ALL, PERMS.TASKS_VIEW_OWN])
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const supabase = await createClient()
+
+  let q = supabase.from('tasks')
+    .select('id, task_number, title, status, task_date')
+    .eq('client_id', clientId)
+    .is('deleted_at', null)
+    .order('task_date', { ascending: false })
+    .limit(30)
+
+  if (query.trim()) {
+    const isNum = /^\d+$/.test(query.trim())
+    if (isNum) {
+      q = q.eq('task_number', parseInt(query.trim(), 10))
+    } else {
+      q = q.ilike('title', `%${query.trim()}%`)
+    }
+  }
+
+  const { data, error } = await q
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data: data ?? [] }
 }
