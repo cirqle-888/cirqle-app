@@ -297,17 +297,6 @@ export default function AgreementDetailClient({
   const extraBilled = progress?.totalExtraBilled ?? 0
   const pct = committed > 0 ? Math.min(100, Math.round((delivered / committed) * 100)) : 0
 
-  // At most one caveat about the period is worth a line — a stack of three
-  // explanations under the bar is what made this page feel heavy.
-  const periodHint =
-    progress && progress.periodLabel !== currentMonth
-      ? `Started mid-month on ${formatTaskDate(agreement.start_date)}, so that part month runs with the next one as a single cycle.`
-      : progress && isPartialMonth(currentMonth, agreement.start_date, agreement.end_date)
-        ? 'Part month — the commitment is prorated by active days.'
-        : progress == null && agreement.status === 'active'
-          ? 'Nothing recorded yet — figures fill in as covered tasks are completed.'
-          : null
-
   return (
     <div className="flex flex-col gap-5 p-5 md:p-8 max-w-6xl mx-auto w-full">
       {/* Header — identity and status first; everything else is one quiet line */}
@@ -410,7 +399,6 @@ export default function AgreementDetailClient({
         <div className="mt-2 h-1.5 rounded-full bg-secondary overflow-hidden">
           <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
         </div>
-        {periodHint && <p className="mt-2 text-[11px] text-muted-foreground/70">{periodHint}</p>}
       </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -428,14 +416,16 @@ export default function AgreementDetailClient({
             )}
           </div>
 
-          {items.length === 0 ? (
+          {items.filter(it => !progress?.items.find((pi: any) => pi.itemId === it.id)?.period?.inactive).length === 0 ? (
             <div className="px-5 py-10 text-center text-sm text-muted-foreground">
               <p>No items yet.</p>
               {canManage && <p className="text-xs mt-1">Add a retainer or one-time package to define what is committed.</p>}
             </div>
           ) : (
             <div className="divide-y divide-border">
-              {items.map(it => (
+              {items
+                .filter(it => !progress?.items.find((pi: any) => pi.itemId === it.id)?.period?.inactive)
+                .map(it => (
                 <ItemCard
                   key={it.id} it={it} currency={currency} canManage={canManage}
                   canViewPricing={canViewPricing} isDraft={isDraft} serviceName={serviceName}

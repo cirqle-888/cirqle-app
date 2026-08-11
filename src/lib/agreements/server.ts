@@ -6,7 +6,7 @@
 
 import { createAdminClient } from '@/lib/supabase/admin'
 import {
-  computeItemProgress, resolveDeliveryPeriod,
+  computeItemProgress, resolveDeliveryPeriod, resolveTermRows,
   type AgreementProgressSummary, type ItemProgressSummary, type DeliveryPeriod,
 } from './progress'
 import type { ClientAgreementItemRow } from './types'
@@ -121,31 +121,53 @@ export async function loadClientMonthProgress(
     
   if (!items || items.length === 0) return []
 
+  // 2.5 Fetch term_changed events to trace histories
+  const { data: events } = await supabase
+    .from('client_agreement_events')
+    .select('detail')
+    .in('agreement_id', agreementIds)
+    .eq('action', 'term_changed')
+
+  const successorOf = new Map<string, string>()
+  for (const ev of events || []) {
+    const from = (ev.detail as Record<string, any>)?.from_item_id
+    const to = (ev.detail as Record<string, any>)?.to_item_id
+    if (typeof from === 'string' && typeof to === 'string') {
+      successorOf.set(from, to)
+    }
+  }
+
   // Resolve the applicable term row for this month
   const activeItemsByAgreement = new Map<string, ClientAgreementItemRow[]>()
-  
-  for (const item of items) {
-    // Note: items are typically returned in creation order, but resolveTermRows handles overlapping logic
-    // We group them by item identifier but the schema generates new IDs per term row!
-    // Wait, the spec says "a change CLOSES the row and INSERTs a successor (with its deliverables re-created)". 
-    // So the item identity IS the `id` itself. Wait. If the row is replaced, how do we group them across time?
-    // The design says: "term_changed with {from_item_id, to_item_id}". 
-    // For a specific month M, we just find all items that overlap month M and apply them as active for that month.
-    
-    // Check if item is active in this month
-    const startOfMonth = `${month}-01`
-    const [y, m] = month.split('-').map(Number)
-    const endOfMonth = `${month}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`
-    
-    if (item.effective_from > endOfMonth) continue
-    if (item.effective_to && item.effective_to < startOfMonth) continue
-    
-    let list = activeItemsByAgreement.get(item.agreement_id)
-    if (!list) {
-      list = []
-      activeItemsByAgreement.set(item.agreement_id, list)
+
+  for (const agrId of agreementIds) {
+    const agrItems = items.filter(i => i.agreement_id === agrId)
+    const byId = new Map(agrItems.map(i => [i.id, i]))
+    const history = new Map<string, ClientAgreementItemRow[]>()
+
+    // Fold rows into chains representing a single conceptual item
+    for (const it of agrItems) {
+      let tipId = it.id
+      const walked = new Set([tipId])
+      while (successorOf.has(tipId)) {
+        const next = successorOf.get(tipId)!
+        if (!byId.has(next) || walked.has(next)) break // successor deleted or cycle
+        tipId = next
+        walked.add(tipId)
+      }
+      history.set(tipId, [...(history.get(tipId) || []), it])
     }
-    list.push(item)
+
+    // Pick the single active row for this month from each chain
+    const activeForMonth: ClientAgreementItemRow[] = []
+    for (const chain of history.values()) {
+      const activeTerm = resolveTermRows(month, chain)
+      if (activeTerm) activeForMonth.push(activeTerm)
+    }
+
+    if (activeForMonth.length > 0) {
+      activeItemsByAgreement.set(agrId, activeForMonth)
+    }
   }
 
   const activeItemIds = Array.from(activeItemsByAgreement.values()).flat().map(i => i.id)
@@ -174,9 +196,41 @@ export async function loadClientMonthProgress(
   // rejects the whole query (silently, via the caller's catch), zeroing all
   // progress.
   const periodByItem = new Map<string, DeliveryPeriod>()
+  const originalEffectiveByItem = new Map<string, string>()
+
   for (const agr of agreements) {
+    const agrItems = items.filter(i => i.agreement_id === agr.id)
+    const byId = new Map(agrItems.map(i => [i.id, i]))
+
+    // Build the chains to find original effective dates
+    const history = new Map<string, ClientAgreementItemRow[]>()
+    for (const it of agrItems) {
+      let tipId = it.id
+      const walked = new Set([tipId])
+      while (successorOf.has(tipId)) {
+        const next = successorOf.get(tipId)!
+        if (!byId.has(next) || walked.has(next)) break
+        tipId = next
+        walked.add(tipId)
+      }
+      history.set(tipId, [...(history.get(tipId) || []), it])
+    }
+
     for (const termRow of activeItemsByAgreement.get(agr.id) || []) {
-      periodByItem.set(termRow.id, resolveDeliveryPeriod(month, agr, termRow))
+      // Find the chain for this term row by looking up which tip it belongs to, or just scanning history values
+      let chain: ClientAgreementItemRow[] = []
+      for (const [tip, c] of history.entries()) {
+        if (c.some(r => r.id === termRow.id)) {
+          chain = c
+          break
+        }
+      }
+      // Sort to find the oldest
+      const sortedChain = [...chain].sort((a, b) => a.effective_from.localeCompare(b.effective_from))
+      const originalEffective = sortedChain.length > 0 ? sortedChain[0].effective_from : termRow.effective_from
+      originalEffectiveByItem.set(termRow.id, originalEffective)
+      
+      periodByItem.set(termRow.id, resolveDeliveryPeriod(month, agr, termRow, originalEffective))
     }
   }
   const windows = Array.from(periodByItem.values()).filter(p => !p.inactive)
@@ -227,6 +281,7 @@ export async function loadClientMonthProgress(
         tasks,
         carryInRemaining: carryIn,
         period: periodByItem.get(termRow.id),
+        originalEffectiveFrom: originalEffectiveByItem.get(termRow.id),
       })
 
       itemSummaries.push(summary)

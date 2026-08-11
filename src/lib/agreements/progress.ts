@@ -218,6 +218,7 @@ export function resolveDeliveryPeriod(
   month: string,
   agreement: ClientAgreementRow,
   termRow: ClientAgreementItemRow,
+  originalEffectiveFrom?: string,
 ): DeliveryPeriod {
   const plain = (inactive: boolean): DeliveryPeriod => ({
     start: `${month}-01`,
@@ -228,11 +229,13 @@ export function resolveDeliveryPeriod(
   })
 
   // A one_time item commits once, in the period holding its effective_from.
+  // If the term was edited later, we use the original creation date so it doesn't move months.
   if (termRow.commitment_type === 'one_time') {
-    const firstMonth = termRow.effective_from.slice(0, 7)
+    const effective = originalEffectiveFrom || termRow.effective_from
+    const firstMonth = effective.slice(0, 7)
     if (month !== firstMonth) return plain(true)
     return {
-      start: termRow.effective_from,
+      start: effective,
       end: lastDayOf(month),
       label: month,
       mergedStartStub: false,
@@ -309,13 +312,15 @@ export interface ComputeContext {
   tasks: SourceTask[]
   /** Unmet commitment rolled in from the previous month. */
   carryInRemaining: number
-  /** Defaults to `resolveDeliveryPeriod(month, agreement, termRow)`. */
+  /** Defaults to `resolveDeliveryPeriod(month, agreement, termRow, originalEffectiveFrom)`. */
   period?: DeliveryPeriod
+  /** The earliest effective_from date for this item's chain, so one_time items don't shift when edited. */
+  originalEffectiveFrom?: string
 }
 
 export function computeItemProgress(ctx: ComputeContext): ItemProgressSummary {
-  const { month, termRow, agreement, deliverables, tasks, carryInRemaining } = ctx
-  const period = ctx.period ?? resolveDeliveryPeriod(month, agreement, termRow)
+  const { month, termRow, agreement, deliverables, tasks, carryInRemaining, originalEffectiveFrom } = ctx
+  const period = ctx.period ?? resolveDeliveryPeriod(month, agreement, termRow, originalEffectiveFrom)
 
   // ── Committed ──────────────────────────────────────────────────────────────
   // Deliverables, when present, are the source of truth for the quantity.
