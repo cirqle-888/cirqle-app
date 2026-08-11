@@ -503,17 +503,28 @@ export function buildInvoiceParts(
     <tr>
       <td style="vertical-align:top;width:62%;padding-right:16px">
         <!-- Logo + Name + Tagline -->
-        <div style="display:flex;align-items:center;gap:0">
-          ${logoBlock}
-          ${showName ? `<div class="disp" style="font-size:22px;font-weight:800;color:#111;letter-spacing:-0.5px;margin-left:8px;line-height:1">${co.name}</div>` : ''}
-          ${showTagline && taglineL1 ? `
-          <div style="width:1.5px;height:40px;background:#c4c4c4;margin:0 12px;flex-shrink:0"></div>
-          <div class="disp" style="font-size:16px;line-height:1.25;color:#161616">
-            ${taglineL2
-              ? `<div style="font-weight:400">${taglineL1}</div><div style="font-weight:700">${taglineL2}</div>`
-              : `<div style="font-weight:600">${taglineL1}</div>`}
-          </div>` : ''}
-        </div>
+        <table style="border-collapse:collapse">
+          <tr>
+            <td style="padding:0;vertical-align:middle">
+              ${logoBlock}
+            </td>
+            ${showName ? `
+            <td style="padding:0 0 0 8px;vertical-align:middle">
+              <div class="disp" style="font-size:22px;font-weight:800;color:#111;letter-spacing:-0.5px;line-height:1">${co.name}</div>
+            </td>` : ''}
+            ${showTagline && taglineL1 ? `
+            <td style="padding:0 12px;vertical-align:middle">
+              <div style="width:1.5px;height:40px;background:#c4c4c4"></div>
+            </td>
+            <td style="padding:0;vertical-align:middle">
+              <div class="disp" style="font-size:16px;line-height:1.25;color:#161616">
+                ${taglineL2
+                  ? `<div style="font-weight:400">${taglineL1}</div><div style="font-weight:700">${taglineL2}</div>`
+                  : `<div style="font-weight:600">${taglineL1}</div>`}
+              </div>
+            </td>` : ''}
+          </tr>
+        </table>
         <!-- Phone + Website — same column, guaranteed to fit within 62% -->
         ${showContact && (co.phone || co.website) ? `
         <div style="display:flex;align-items:center;flex-wrap:wrap;gap:14px 22px;font-size:13px;font-weight:600;color:#111;margin-top:10px;letter-spacing:0.05px">
