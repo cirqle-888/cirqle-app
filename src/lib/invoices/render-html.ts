@@ -470,7 +470,23 @@ export function buildInvoiceParts(
   const bodyPad = '53px 64px 46px'
 
   // Tagline splits so the last word lands bold on its own line (e.g. "Creative & Marketing" / "Solutions")
-  const tagWords = (co.tagline || '').trim().split(/\s+/)
+  // Special case: if it ends in "What's Next", keep those two words together on the second line.
+  const rawTagline = (co.tagline || '').trim()
+  let taglineL1 = ''
+  let taglineL2 = ''
+  const whatsNextMatch = rawTagline.match(/(.*?\s)(What['’]s Next)$/i)
+  if (whatsNextMatch) {
+    taglineL1 = whatsNextMatch[1].trim()
+    taglineL2 = whatsNextMatch[2]
+  } else {
+    const tagWords = rawTagline.split(/\s+/)
+    if (tagWords.length > 1) {
+      taglineL1 = tagWords.slice(0, -1).join(' ')
+      taglineL2 = tagWords[tagWords.length - 1]
+    } else {
+      taglineL1 = rawTagline
+    }
+  }
 
   // Inline icons — rendered as <img> with data-URI SVGs so html2canvas rasterises
   // them identically to the browser preview (inline SVG elements are unreliable).
@@ -490,12 +506,12 @@ export function buildInvoiceParts(
         <div style="display:flex;align-items:center;gap:0">
           ${logoBlock}
           ${showName ? `<div class="disp" style="font-size:22px;font-weight:800;color:#111;letter-spacing:-0.5px;margin-left:8px;line-height:1">${co.name}</div>` : ''}
-          ${showTagline && tagWords[0] ? `
+          ${showTagline && taglineL1 ? `
           <div style="width:1.5px;height:40px;background:#c4c4c4;margin:0 12px;flex-shrink:0"></div>
           <div class="disp" style="font-size:16px;line-height:1.25;color:#161616">
-            ${tagWords.length > 1
-              ? `<div style="font-weight:400">${tagWords.slice(0, -1).join(' ')}</div><div style="font-weight:700">${tagWords[tagWords.length - 1]}</div>`
-              : `<div style="font-weight:600">${co.tagline}</div>`}
+            ${taglineL2
+              ? `<div style="font-weight:400">${taglineL1}</div><div style="font-weight:700">${taglineL2}</div>`
+              : `<div style="font-weight:600">${taglineL1}</div>`}
           </div>` : ''}
         </div>
         <!-- Phone + Website — same column, guaranteed to fit within 62% -->
