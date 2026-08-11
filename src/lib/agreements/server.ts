@@ -310,13 +310,13 @@ export async function loadClientMonthProgress(
   return results
 }
 
-export type CoveredTask = {
+export interface CoveredTask {
   id: string
-  task_number: string | null
+  task_number: number | null
   title: string
   task_date: string
   status: string
-  item_id: string
+  item_ids: string[]
   is_manual: boolean
   contributors: string[]
 }
@@ -357,15 +357,16 @@ export async function loadAgreementTasks(agreementId: string): Promise<CoveredTa
   if (!tasks) return []
 
   return tasks.map(t => {
-    const manualLink = manualLinks?.find(m => m.task_id === t.id)
+    const taskLinks = manualLinks?.filter(m => m.task_id === t.id) || []
+    const manualItemIds = taskLinks.map(m => m.item_id)
     return {
       id: t.id,
       task_number: t.task_number,
       title: t.title,
       task_date: t.task_date,
       status: t.status,
-      item_id: manualLink ? manualLink.item_id : (t.retainer_item_id as string),
-      is_manual: !!manualLink,
+      item_ids: manualItemIds.length > 0 ? manualItemIds : [t.retainer_item_id as string].filter(Boolean),
+      is_manual: manualItemIds.length > 0,
       contributors: (t.contributions as any[] || [])
         .map(c => c.employee?.name)
         .filter(Boolean) as string[]

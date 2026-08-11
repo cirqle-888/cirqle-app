@@ -430,7 +430,7 @@ export default function AgreementDetailClient({
                   key={it.id} it={it} currency={currency} canManage={canManage}
                   canViewPricing={canViewPricing} isDraft={isDraft} serviceName={serviceName}
                   busy={busy} defaultOpen={items.length === 1} history={termHistory.get(it.id) ?? []}
-                  tasks={tasks.filter(t => t.item_id === it.id)}
+                  tasks={tasks.filter(t => (t.item_ids || []).includes(it.id) || t.item_id === it.id)}
                   agreementId={agreement.id}
                   clientId={agreement.client_id}
                   onEdit={() => setItemForm(itemToForm(it, agreement.status))}
@@ -1197,13 +1197,13 @@ function ItemEditor({
     }
     const res = changeTerms && form.id
       ? await changeAgreementItemTerms(agreementId, form.id, payload)
-      : await saveAgreementItem(agreementId, payload)
+      : await saveAgreementItem(agreementId, payload, form._mode === 'fix_details')
     setSaving(false)
     if (res.ok) onSaved()
     else onError(res.ok ? '' : res.error)
   }
 
-  const title = form._mode === 'create' ? 'Add item' : changeTerms ? 'Change terms' : 'Edit item'
+  const title = form._mode === 'create' ? 'Add item' : changeTerms ? 'Change terms' : form._mode === 'fix_details' ? 'Fix details' : 'Edit item'
 
   return (
     <ModalOverlay onClose={() => !saving && setForm(null)} sheetOnMobile>

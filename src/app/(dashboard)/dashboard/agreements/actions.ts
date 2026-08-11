@@ -318,6 +318,7 @@ async function syncItemChildren(
 export async function saveAgreementItem(
   agreementId: string,
   item: AgreementItemInput,
+  fixDetails = false,
 ): Promise<ActionResult<string>> {
   const guard = await requirePermission(PERMS.AGREEMENTS_MANAGE)
   if (!guard.ok) return guard
@@ -337,7 +338,7 @@ export async function saveAgreementItem(
   const supabase = await createClient()
   const status = await agreementStatus(supabase, agreementId)
 
-  if (item.id && status && status !== 'draft' && status !== 'pending_approval') {
+  if (!fixDetails && item.id && status && status !== 'draft' && status !== 'pending_approval') {
     return {
       ok: false,
       error: 'This agreement is active — edit existing terms through "Change terms" instead.',
