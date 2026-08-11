@@ -816,7 +816,7 @@ function ItemCard({
                     {t.contributors && t.contributors.length > 0 && (
                       <>
                         <span>·</span>
-                        <span className="truncate">{t.contributors.map(c => dn(c)).join(', ')}</span>
+                        <span className="truncate">{t.contributors.map((c: any) => dn(c)).join(', ')}</span>
                       </>
                     )}
                   </div>
