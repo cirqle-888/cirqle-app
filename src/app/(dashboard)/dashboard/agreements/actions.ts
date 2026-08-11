@@ -9,6 +9,7 @@ import { syncFeeLinesForAgreementItem } from '@/lib/agreements/fee-lines'
 import { PERMS } from '@/lib/permissions/keys'
 import { generateAgreementNumber } from '@/lib/agreements/numbering'
 import { logAgreementEvent } from '@/lib/agreements/events'
+import { pickVersionForTask, planUnlink, type ItemVersionRow } from '@/lib/agreements/manual-link'
 import type {
   AgreementStatus, Visibility, RenewalType, CommitmentType, Cycle, CarryForwardRule,
 } from '@/lib/agreements/types'
@@ -630,9 +631,49 @@ export async function linkTaskToAgreementItem(
     task_id: taskId,
   })
 
-  // 23505 = unique_violation
-  if (error?.code === '23505') return { ok: false, error: 'Task is already linked to this item' }
-  if (error) return { ok: false, error: error.message }
+  // 23505 = unique_violation — the join row already exists. NOT a failure:
+  // legacy links (and repeated Change-terms duplicates) predate the stamp
+  // below, so "already linked" is exactly the state that needs healing.
+  // Fall through and stamp; only a genuinely new error aborts.
+  if (error && error.code !== '23505') return { ok: false, error: error.message }
+
+  // The join row above is what the agreement screen shows — but every money
+  // engine reads tasks.retainer_item_id. Without this stamp a manually linked
+  // task LOOKED covered while pooling from billing_amount_inr (0 for covered
+  // work), so the team earned nothing from it (task #1902).
+  //
+  // Only stamp when the engine currently sees nothing: existing coverage —
+  // auto-detected retainer coverage or an earlier manual link — always wins,
+  // so this can never clobber a task that is already paying correctly.
+  //
+  // Updating retainer_item_id fires the work-value trigger (BEFORE UPDATE OF
+  // retainer_item_id, migration 20260807110000), which stamps work_value_inr
+  // from the item's work_unit_value × quantity × fx. It does NOT fire the
+  // coverage trigger (client_id / service_id / task_date only), so detection
+  // cannot overwrite the stamp in the same write.
+  const { data: taskRow } = await supabase
+    .from('tasks').select('retainer_item_id, task_date').eq('id', taskId).single()
+  if (taskRow && taskRow.retainer_item_id == null) {
+    const { data: versions } = await supabase
+      .from('client_agreement_items')
+      .select('id, agreement_id, service_id, commitment_type, effective_from, effective_to')
+      .eq('agreement_id', agreementId)
+    const clicked = (versions ?? []).find(v => v.id === itemId)
+    const stampId = clicked
+      ? pickVersionForTask(clicked as ItemVersionRow, (versions ?? []) as ItemVersionRow[], taskRow.task_date ?? null)
+      : itemId
+    const { error: stampErr } = await supabase
+      .from('tasks').update({ retainer_item_id: stampId }).eq('id', taskId)
+    // PostgREST offers no transaction across the two writes; a failed stamp
+    // would silently reproduce the old display-only behaviour, so surface it.
+    if (stampErr) {
+      return { ok: false, error: `Task linked, but coverage could not be applied: ${stampErr.message}. Unlink and retry.` }
+    }
+    // The pool basis just changed (billing 0 → work value), so the stored
+    // scores are stale. recalcTaskCommissions has its own finalized-month
+    // guard, matching every other coverage-changing path in this file.
+    try { await recalcTaskCommissions(taskId) } catch { /* best-effort */ }
+  }
 
   revalidatePath(`/dashboard/agreements/${agreementId}`)
   return { ok: true }
@@ -654,6 +695,58 @@ export async function unlinkTaskFromAgreementItem(
     .eq('task_id', taskId)
 
   if (error) return { ok: false, error: error.message }
+
+  // Mirror of the link action's stamp: decide what the removal means for
+  // tasks.retainer_item_id. planUnlink's prime rule is that coverage this
+  // unlink did not create is never touched — auto-detected retainer coverage
+  // and links to other items stand. Only when the task pointed into the
+  // unlinked item's lineage does it either move to a surviving manual link or
+  // go back to the DB's auto-detection.
+  const { data: taskRow } = await supabase
+    .from('tasks').select('retainer_item_id, task_date').eq('id', taskId).single()
+  if (taskRow?.retainer_item_id) {
+    const { data: versions } = await supabase
+      .from('client_agreement_items')
+      .select('id, agreement_id, service_id, commitment_type, effective_from, effective_to')
+      .eq('agreement_id', agreementId)
+    const unlinked = (versions ?? []).find(v => v.id === itemId)
+
+    // Items still manually linked to this task after the deletion above.
+    const { data: remainingLinks } = await supabase
+      .from('client_agreement_tasks').select('item_id').eq('task_id', taskId)
+    const remainingIds = new Set((remainingLinks ?? []).map(r => r.item_id))
+    const { data: remainingItems } = remainingIds.size > 0
+      ? await supabase
+          .from('client_agreement_items')
+          .select('id, agreement_id, service_id, commitment_type, effective_from, effective_to')
+          .in('id', [...remainingIds])
+      : { data: [] as ItemVersionRow[] }
+
+    if (unlinked) {
+      const plan = planUnlink({
+        currentRetainerItemId: taskRow.retainer_item_id,
+        unlinked: unlinked as ItemVersionRow,
+        allAgreementItems: (versions ?? []) as ItemVersionRow[],
+        remainingLinkedItems: (remainingItems ?? []) as ItemVersionRow[],
+        taskDate: taskRow.task_date ?? null,
+      })
+      if (plan.kind === 'restamp') {
+        const { error: e } = await supabase
+          .from('tasks').update({ retainer_item_id: plan.itemId }).eq('id', taskId)
+        if (e) return { ok: false, error: `Unlinked, but coverage could not be updated: ${e.message}` }
+        try { await recalcTaskCommissions(taskId) } catch { /* best-effort */ }
+      } else if (plan.kind === 'redetect') {
+        // A no-op touch of task_date re-fires the DB coverage trigger, which
+        // recomputes retainer_item_id from scratch (an auto-covered retainer
+        // item, or NULL) and restamps work_value_inr — exactly the state the
+        // task would have if the manual link had never existed.
+        const { error: e } = await supabase
+          .from('tasks').update({ task_date: taskRow.task_date }).eq('id', taskId)
+        if (e) return { ok: false, error: `Unlinked, but coverage could not be cleared: ${e.message}` }
+        try { await recalcTaskCommissions(taskId) } catch { /* best-effort */ }
+      }
+    }
+  }
 
   revalidatePath(`/dashboard/agreements/${agreementId}`)
   return { ok: true }
