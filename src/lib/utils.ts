@@ -11,7 +11,8 @@ export function getDeliveryPaceText(currentMonth: string, remaining: number): st
   if (remaining <= 0) return null
   
   const today = startOfDay(new Date())
-  const monthDate = parseISO(`${currentMonth}-01`)
+  const normalizedMonth = currentMonth.slice(0, 7) // Ensure YYYY-MM
+  const monthDate = parseISO(`${normalizedMonth}-01`)
   const monthEnd = endOfMonth(monthDate)
   
   let daysRemaining = 0
