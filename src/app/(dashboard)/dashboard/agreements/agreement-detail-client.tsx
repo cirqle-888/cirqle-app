@@ -97,7 +97,7 @@ interface EventRow {
   detail: any; created_at: string
 }
 
-type ItemForm = AgreementItemInput & { _mode: 'create' | 'edit' | 'change_terms' }
+type ItemForm = AgreementItemInput & { _mode: 'create' | 'edit' | 'change_terms' | 'fix_details' }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
