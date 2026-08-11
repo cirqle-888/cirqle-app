@@ -19,11 +19,11 @@ import {
   type RenewalType, type Visibility,
 } from '@/lib/agreements/types'
 import {
-  saveAgreementItem, changeAgreementItemTerms, deleteAgreementItem, toggleMilestone,
-  setAgreementStatus, updateAgreementDetails, deleteAgreement, addAgreementNote,
+  saveAgreementItem, changeAgreementItemTerms, deleteAgreementItem, restampItemWorkValues,
   linkTaskToAgreementItem, unlinkTaskFromAgreementItem, searchClientTasks,
   type AgreementItemInput, type AgreementDeliverableInput, type AgreementMilestoneInput,
 } from './actions'
+import { usePrivacy } from '@/contexts/privacy-context'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -613,6 +613,7 @@ function ItemCard({
 }) {
   const [open, setOpen] = useState(defaultOpen)
   const [showDoneMs, setShowDoneMs] = useState(false)
+  const { dn } = usePrivacy()
   const [showHistory, setShowHistory] = useState(false)
   const [showLinkModal, setShowLinkModal] = useState(false)
   const headline = itemHeadline(it)
@@ -808,7 +809,7 @@ function ItemCard({
                     {t.contributors && t.contributors.length > 0 && (
                       <>
                         <span>·</span>
-                        <span className="truncate">{t.contributors.join(', ')}</span>
+                        <span className="truncate">{t.contributors.map(c => dn(c)).join(', ')}</span>
                       </>
                     )}
                   </div>

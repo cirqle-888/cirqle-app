@@ -318,7 +318,7 @@ export interface CoveredTask {
   status: string
   item_ids: string[]
   is_manual: boolean
-  contributors: string[]
+  contributors: { cqid: string | null; name: string }[]
 }
 
 export async function loadAgreementTasks(agreementId: string): Promise<CoveredTask[]> {
@@ -349,7 +349,7 @@ export async function loadAgreementTasks(agreementId: string): Promise<CoveredTa
 
   const { data: tasks } = await supabase
     .from('tasks')
-    .select('id, task_number, title, task_date, status, retainer_item_id, contributions(employee:employees(name))')
+    .select('id, task_number, title, task_date, status, retainer_item_id, contributions(employee:employees(cqid, name))')
     .or(orQuery)
     .is('deleted_at', null)
     .order('task_date', { ascending: false })
@@ -368,8 +368,8 @@ export async function loadAgreementTasks(agreementId: string): Promise<CoveredTa
       item_ids: manualItemIds.length > 0 ? manualItemIds : [t.retainer_item_id as string].filter(Boolean),
       is_manual: manualItemIds.length > 0,
       contributors: (t.contributions as any[] || [])
-        .map(c => c.employee?.name)
-        .filter(Boolean) as string[]
+        .map(c => c.employee ? { cqid: c.employee.cqid, name: c.employee.name } : null)
+        .filter(Boolean) as { cqid: string | null; name: string }[]
     }
   })
 }
