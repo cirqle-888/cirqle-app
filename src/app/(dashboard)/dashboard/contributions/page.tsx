@@ -95,7 +95,7 @@ export default async function ContributionsPage() {
     tasksRes, employeesRes, groupsRes, parametersRes, toolsRes,
     paramServicesRes, toolServicesRes, groupServicesRes,
     scoresRes, clientsRes, servicesRes, assignmentsRes,
-    contributorRecordsRes, taskToolRecordsRes, pricingRes,
+    contributorRecordsRes, taskToolRecordsRes, pricingRes, agreementsRes,
     visibilityBillingRes, visibilityContribRes, visibilityNamesRes,
     taskGroupAssignmentsRes, taskParamAssignmentsRes, performanceHistoryRes,
     employeeServicesRes, unitScope,
@@ -138,6 +138,7 @@ export default async function ContributionsPage() {
     timed('pricing', vis.tasksPricing
       ? supabase.from('client_service_pricing').select('client_id, service_id, commission_percentage, price, currency')
       : noData),
+    timed('agreements',             supabase.from('employee_commission_agreements').select('id, employee_id, client_id, service_id, agreement_type, agreement_value, currency, effective_from, effective_to, is_active').eq('is_active', true)),
     timed('vis_billing',            supabase.from('company_settings').select('value').eq('key', 'visibility_billing').maybeSingle()),
     timed('vis_contrib',            supabase.from('company_settings').select('value').eq('key', 'visibility_contributions').maybeSingle()),
     timed('vis_names',              supabase.from('company_settings').select('value').eq('key', 'visibility_employee_names').maybeSingle()),
@@ -272,6 +273,7 @@ export default async function ContributionsPage() {
       contributorRecords={outContributorRecords}
       taskToolRecords={taskToolRecordsRes.data || []}
       pricingMatrix={pricingRes.data || []}
+      agreements={agreementsRes.data || []}
       performanceHistory={performanceHistoryRes.data || []}
       visibilitySettings={{
         billing:        (visibilityBillingRes.data?.value as string) || 'all',

@@ -12,6 +12,7 @@ import { applyTaskAgreements, saveTaskContributions } from './actions'
 import { closedPeriodNotice } from '@/lib/payroll/correction-notice'
 import { calculateCommission } from '@/lib/calculations/commission'
 import { taskPoolBasisInr, isCoveredWorkTask, resolveCommissionPct } from '@/lib/calculations/work-value'
+import { matchAgreement, type CommissionAgreement } from '@/lib/calculations/agreements'
 import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
 import { taskCode, taskCodeMatches, nextTaskNumber } from '@/lib/utils/task-code'
 import { usePrivacy } from '@/contexts/privacy-context'
@@ -80,6 +81,7 @@ interface Props {
   pricingMatrix: { client_id: string; service_id: string; commission_percentage: number | null; price: number | null; currency: string | null }[]
   /** Agreement items covering these tasks — their work_commission_pct overrides the matrix. */
   agreementItems?: { id: string; work_commission_pct: number | null }[]
+  agreements?: CommissionAgreement[]
   performanceHistory: any[]
   visibilitySettings?: VisibilitySettings
   /**
@@ -174,7 +176,10 @@ export default function ContributionsClient({
   parameterServices, toolServices, groupServices: groupServicesFromDB,
   employeeServices = [],
   scores, clients, services, taskAssignments: taskAssignmentsFromDB,
-  contributorRecords, taskToolRecords, pricingMatrix, agreementItems = [], performanceHistory, visibilitySettings,
+  contributorRecords, taskToolRecords, pricingMatrix,
+  agreementItems = [],
+  agreements = [],
+  performanceHistory, visibilitySettings,
   permissionFlags,
 }: Props) {
 
@@ -1833,9 +1838,35 @@ export default function ContributionsClient({
                                 {(task.quantity ?? 1) > 1 && (
                                   <><span>·</span><span className="font-medium text-violet-400/80">×{task.quantity} qty</span></>
                                 )}
-                                {canSeeFinancials && showFinancials && taskPoolBasisInr(task) > 0 && (
-                                  <><span>·</span><span className="font-semibold text-foreground">₹{taskPoolBasisInr(task).toLocaleString('en-IN')}</span></>
-                                )}
+                                {canSeeFinancials && showFinancials && (() => {
+                                  const fixedAgs = employeesForTask(task).map(emp => {
+                                    const ag = matchAgreement(agreements, emp.id, task.client?.id || null, task.service_id || null, task.task_date)
+                                    return ag?.agreement_type === 'fixed_per_task' ? { emp, ag } : null
+                                  }).filter(Boolean) as { emp: any, ag: CommissionAgreement }[]
+
+                                  const poolValue = taskPoolBasisInr(task)
+
+                                  if (fixedAgs.length > 0) {
+                                    return fixedAgs.map(({ emp, ag }) => (
+                                      <span key={emp.id} className="inline-flex items-center gap-1">
+                                        <span>·</span>
+                                        <span className="font-semibold text-purple-600 dark:text-purple-400">
+                                          Agreed with {dn(emp)} {ag.currency === 'AED' ? 'AED ' : '₹'}{ag.agreement_value.toLocaleString('en-IN')}
+                                        </span>
+                                      </span>
+                                    ))
+                                  }
+
+                                  if (poolValue > 0) {
+                                    return (
+                                      <span className="inline-flex items-center gap-1">
+                                        <span>·</span>
+                                        <span className="font-semibold text-foreground">₹{poolValue.toLocaleString('en-IN')}</span>
+                                      </span>
+                                    )
+                                  }
+                                  return null
+                                })()}
                               </div>
 
                               {/* Tool tags — tools used on this task */}
