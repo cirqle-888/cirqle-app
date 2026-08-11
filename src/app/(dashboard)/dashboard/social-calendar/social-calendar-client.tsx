@@ -7,6 +7,8 @@ import Header from '@/components/layout/header'
 import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
+import { getDeliveryPaceText } from '@/lib/utils'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { refLabel } from '@/lib/requests/core'
 import { rollupAgreementProgress, type AgreementProgressSummary } from '@/lib/agreements/progress'
@@ -1197,6 +1199,11 @@ export default function SocialCalendarClient({
                 {agreementRollup.extra > 0 && (
                   <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-violet-500/12 text-violet-600 dark:text-violet-300 border border-violet-500/25">
                     +{agreementRollup.extra} extra
+                  </span>
+                )}
+                {agreementRollup.remaining > 0 && getDeliveryPaceText(selected.month, agreementRollup.remaining) && (
+                  <span className="text-muted-foreground bg-secondary/50 px-2 py-0.5 rounded border border-border/50">
+                    {getDeliveryPaceText(selected.month, agreementRollup.remaining)}
                   </span>
                 )}
               </div>

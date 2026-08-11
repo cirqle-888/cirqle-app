@@ -12,6 +12,7 @@ import {
   Play, Pause, CheckCircle2, Ban, RotateCcw, MessageSquarePlus, ExternalLink,
 } from 'lucide-react'
 import { formatTaskDate } from '@/lib/utils/format-date'
+import { getDeliveryPaceText } from '@/lib/utils'
 import {
   AGREEMENT_STATUS_CHIP, STATUS_LABEL, COMMITMENT_TYPES, CYCLES, CARRY_RULES,
   RENEWAL_TYPES, VISIBILITY_TYPES,
@@ -393,6 +394,11 @@ export default function AgreementDetailClient({
             )}
             {remaining > 0 && (
               <span className="font-medium text-amber-600 dark:text-amber-400 tabular-nums">{remaining} remaining</span>
+            )}
+            {remaining > 0 && getDeliveryPaceText(currentMonth, remaining) && (
+              <span className="text-muted-foreground bg-secondary/50 px-2 py-0.5 rounded border border-border/50">
+                {getDeliveryPaceText(currentMonth, remaining)}
+              </span>
             )}
           </span>
         </div>

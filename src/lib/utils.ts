@@ -5,6 +5,37 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+import { endOfMonth, differenceInDays, parseISO, startOfDay, isSameMonth, isPast } from 'date-fns'
+
+export function getDeliveryPaceText(currentMonth: string, remaining: number): string | null {
+  if (remaining <= 0) return null
+  
+  const today = startOfDay(new Date())
+  const monthDate = parseISO(`${currentMonth}-01`)
+  const monthEnd = endOfMonth(monthDate)
+  
+  let daysRemaining = 0
+  if (isSameMonth(today, monthDate)) {
+    daysRemaining = differenceInDays(monthEnd, today)
+  } else if (isPast(monthDate)) {
+    return 'Month ended'
+  } else {
+    daysRemaining = differenceInDays(monthEnd, monthDate) + 1
+  }
+
+  if (daysRemaining === 0) return `0 days remaining (due today!)`
+  
+  const pace = daysRemaining / remaining
+  let paceText = ''
+  if (pace >= 1) {
+    paceText = `Need 1 deliverable every ${pace.toFixed(1).replace(/\.0$/, '')} days`
+  } else {
+    paceText = `Need ${(1/pace).toFixed(1).replace(/\.0$/, '')} deliverables per day`
+  }
+  
+  return `${daysRemaining} days remaining · ${paceText}`
+}
+
 /**
  * Client display name with its unique code appended for disambiguation
  * (two clients can share a name; the code never repeats). e.g. "Sea Star · 015".
