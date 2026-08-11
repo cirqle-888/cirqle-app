@@ -358,16 +358,15 @@ export async function saveAgreementItem(
     extra_unit_price: item.extra_unit_price != null ? Number(item.extra_unit_price) : null,
     display_order: item.display_order ?? 0,
     notes: item.notes?.trim() || null,
-    // Internal allocation (retainer only). allocated_unit_value is a GENERATED
-    // column — never written here; the DB computes it.
+    // Internal allocation (allocated_unit_value is a GENERATED column)
     creative_allocation_amount:
-      item.commitment_type === 'retainer' && item.creative_allocation_amount != null
+      item.creative_allocation_amount != null
         ? Number(item.creative_allocation_amount) : null,
     management_allocation_amount:
-      item.commitment_type === 'retainer' && item.management_allocation_amount != null
+      item.management_allocation_amount != null
         ? Number(item.management_allocation_amount) : null,
     included_quantity:
-      item.commitment_type === 'retainer' && item.included_quantity != null
+      item.included_quantity != null
         ? Number(item.included_quantity) : null,
     work_unit_value: item.work_unit_value != null ? Number(item.work_unit_value) : null,
     work_commission_pct: item.work_commission_pct != null ? Number(item.work_commission_pct) : null,

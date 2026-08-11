@@ -666,12 +666,12 @@ function ItemCard({
       </p>
       {it.notes && <ClampText text={it.notes} className="mt-1 max-w-2xl text-xs" />}
 
-      {/* Pricing summary — client pays / team is paid / extras (retainer) */}
-      {canViewPricing && it.commitment_type === 'retainer' &&
+      {/* Pricing summary — client pays / team is paid / extras */}
+      {canViewPricing &&
         (it.unit_price != null || it.work_unit_value != null || it.extra_unit_price != null) && (
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
           {it.unit_price != null && (
-            <span className="text-muted-foreground">Client pays <b className="text-foreground">{currency} {it.unit_price}</b>/{it.cycle || 'cycle'}</span>
+            <span className="text-muted-foreground">Client pays <b className="text-foreground">{currency} {it.unit_price}</b>{it.commitment_type === 'retainer' ? `/${it.cycle || 'cycle'}` : ''}</span>
           )}
           <span className="text-muted-foreground">
             Work value {it.work_unit_value != null
@@ -688,8 +688,8 @@ function ItemCard({
         </div>
       )}
 
-      {/* Internal allocation summary (retainer, operational only) */}
-      {canViewPricing && it.commitment_type === 'retainer' &&
+      {/* Internal allocation summary (operational only) */}
+      {canViewPricing &&
         (it.creative_allocation_amount != null || it.management_allocation_amount != null) && (
         <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
           <span className="font-medium text-muted-foreground">Internal allocation</span>
@@ -1085,14 +1085,14 @@ function WorkValueEditor({
               className={inputCls} placeholder={autoValue != null ? `e.g. ${autoValue}` : 'e.g. 26.67'} />
             {autoValue != null && (
               <button type="button" onClick={() => set({ work_unit_value: autoValue })}
-                title={`Retainer ÷ included quantity = ${currency} ${autoValue}`}
+                title={`${form.commitment_type === 'retainer' ? 'Retainer' : 'Package fee'} ÷ included quantity = ${currency} ${autoValue}`}
                 className="shrink-0 text-xs px-2.5 rounded-lg border border-border bg-secondary hover:bg-secondary/70 transition-colors">
                 Auto: {autoValue}
               </button>
             )}
           </div>
           <p className="text-[11px] text-muted-foreground/70 mt-1">
-            Auto = {form.unit_price ?? '—'} retainer ÷ {included ?? '—'} included
+            Auto = {form.unit_price ?? '—'} {form.commitment_type === 'retainer' ? 'retainer' : 'package fee'} ÷ {included ?? '—'} included
           </p>
         </div>
         <div>
@@ -1424,7 +1424,7 @@ function ItemEditor({
             </div>
 
             {/* Team pay & internal split */}
-            {isRetainer && canViewPricing && (
+            {canViewPricing && (
               <div className="pt-4 border-t border-border/50">
                 <h3 className="text-sm font-medium mb-1">Team pay & internal split</h3>
                 <WorkValueEditor form={form} set={set} currency={currency} />
