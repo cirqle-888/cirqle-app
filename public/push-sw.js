@@ -9,10 +9,16 @@ self.addEventListener('push', (event) => {
     body: data.body || '',
     tag: data.tag || undefined,
     data: { url: data.url || '/dashboard' },
-    icon: '/icon-192.png',
-    badge: '/icon-192.png',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
   }
-  event.waitUntil(self.registration.showNotification(title, options))
+  event.waitUntil((async () => {
+    // If the app is focused right now, the page itself already alerted
+    // (chime + toast) — a system banner on top would be a double alert.
+    const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+    if (clientList.some((c) => c.focused)) return
+    await self.registration.showNotification(title, options)
+  })())
 })
 
 self.addEventListener('notificationclick', (event) => {

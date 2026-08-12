@@ -24,6 +24,7 @@ import { MessageCircle, Bell, X, ArrowLeft, Send, Hash, Lock, ChevronRight } fro
 import { createClient } from '@/lib/supabase/client'
 import { usePermissions } from '@/contexts/permission-context'
 import { displayEmployee } from '@/lib/utils/employee-display'
+import { installChimeUnlock, playChime } from '@/lib/notifications/chime'
 import {
   listConversations, getMessages, sendMessage, markRead,
   type ChatConversation, type ChatMessage,
@@ -34,6 +35,27 @@ import {
 } from '@/app/api/notifications/actions'
 
 type Tab = 'chat' | 'alerts'
+
+/** True inside the Cirqle Desktop (Electron) shell, where the app-wide
+ *  DesktopNotifier owns native notifications — the web Notification here
+ *  would double-alert. The in-app chime still plays (it IS the desktop
+ *  sound: the native banner is silent so audio never depends on OS
+ *  notification permission). */
+function inDesktopShell(): boolean {
+  if (typeof window === 'undefined') return false
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return typeof (window as any).__CIRQLE_DESKTOP__?.notify === 'function'
+}
+
+/** True while the user is actively reading conversation `convId` on the full
+ *  chat page (it publishes `__cirqleActiveConv`) — no toast/chime for a
+ *  message they're literally looking at. */
+function isActivelyViewing(convId: string): boolean {
+  if (typeof document === 'undefined') return false
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const active = (window as any).__cirqleActiveConv as string | null | undefined
+  return active === convId && document.visibilityState === 'visible'
+}
 
 function timeLabel(iso: string): string {
   const d = new Date(iso)
@@ -212,6 +234,36 @@ export function FloatingCommsWidget() {
     return () => { clearTimeout(t); clearInterval(id) }
   }, [refreshConvs, refreshNotifs])
 
+  // Unlock the chime's AudioContext on the first user gesture, and use the
+  // same gesture to ask for system-notification permission (a gesture-tied
+  // prompt is far more likely to be shown/granted than one on page load).
+  useEffect(() => {
+    const cleanupChime = installChimeUnlock()
+    const askOnce = () => {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'default' && !inDesktopShell()) {
+        void Notification.requestPermission().catch(() => {})
+      }
+      window.removeEventListener('pointerdown', askOnce)
+    }
+    window.addEventListener('pointerdown', askOnce, { passive: true })
+    return () => { cleanupChime(); window.removeEventListener('pointerdown', askOnce) }
+  }, [])
+
+  // System notification for a message/alert the user isn't looking at —
+  // browser only (desktop has native ones), and only when this tab isn't the
+  // thing they're focused on. Tag dedupes against the Web Push notification
+  // for the same conversation/alert, so a device with push enabled shows one
+  // banner, not two.
+  const systemNotify = useCallback((title: string, body: string, tag: string, onClick: () => void) => {
+    if (inDesktopShell()) return
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
+    if (document.visibilityState === 'visible' && document.hasFocus()) return
+    try {
+      const n = new Notification(title, { body, tag })
+      n.onclick = () => { window.focus(); onClick(); n.close() }
+    } catch { /* unsupported */ }
+  }, [])
+
   // Desktop toolbar bell click → open this widget on the Alerts tab, no
   // matter which page is currently showing.
   useEffect(() => {
@@ -275,10 +327,17 @@ export function FloatingCommsWidget() {
             }
             return [updated, ...prev.filter(c => c.id !== convId)]
           })
+          // Reading this conversation on the full chat page right now → the
+          // unread bump above is enough; no toast/chime/banner in their face.
+          if (isActivelyViewing(convId)) return
+          const preview = previewOf(kind, body).slice(0, 90)
+          playChime()
+          systemNotify('💬 New message', preview, `msg:${convId}`,
+            () => { setOpen(true); setTab('chat'); void openConversation(convId) })
           // Slide-in toast when the panel isn't showing that conversation.
           setToast({
             title: '💬 New message',
-            body: previewOf(kind, body).slice(0, 90),
+            body: preview,
             onClick: () => { setOpen(true); setTab('chat'); void openConversation(convId) },
           })
         })
@@ -288,6 +347,10 @@ export function FloatingCommsWidget() {
           const row = payload.new as unknown as NotificationRow
           setNotifs(prev => prev.some(n => n.id === row.id) ? prev : [row, ...prev].slice(0, 20))
           setNotifUnread(n => n + 1)
+          playChime()
+          systemNotify(row.title || '🔔 Notification', (row.message ?? '').slice(0, 120),
+            `notif:${(row as { source_key?: string | null }).source_key ?? row.id}`,
+            () => { setOpen(true); setTab('alerts'); if (row.link) router.push(row.link) })
           setToast({
             title: row.title || '🔔 Notification',
             body: (row.message ?? '').slice(0, 90),

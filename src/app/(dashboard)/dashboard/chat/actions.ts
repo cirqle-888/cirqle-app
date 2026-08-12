@@ -19,6 +19,7 @@ import { loadCurrentUser, hasPermission, requireAnyPermission } from '@/lib/perm
 import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
 import { createNotification } from '@/lib/notifications/create'
+import { sendWebPush } from '@/lib/push/send'
 import { transcribeAudio } from '@/lib/ai/transcribe'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -874,6 +875,29 @@ export async function sendMessage(
   }
 
   if (replySnapshot) afterReplyHooks(me, replySnapshot, conversationId, data.id)
+
+  // Device push (Web Push) to the other members, so a closed tab / phone still
+  // hears about the message — realtime only reaches OPEN tabs. Root messages
+  // only (thread replies stay quiet; a mention inside one already notified via
+  // createNotification, which pushes too — mentioned members are excluded here
+  // for the same reason). The tag collapses this with any in-tab Notification
+  // for the same conversation, and the SW skips the banner when the app is
+  // focused, so nobody gets alerted twice.
+  if (!parentId) {
+    const preview = text.length > 120 ? `${text.slice(0, 120)}…` : text
+    after(async () => {
+      await Promise.all(members
+        .filter(m => m.employeeId !== me.employeeId
+          && m.notifyLevel === 'all'
+          && !mentionIds.includes(m.employeeId))
+        .map(m => sendWebPush(m.employeeId, {
+          title: `💬 ${me.cqid}`,
+          body: preview,
+          url: `/dashboard/chat?c=${conversationId}`,
+          tag: `msg:${conversationId}`,
+        })))
+    })
+  }
 
   return {
     ok: true,

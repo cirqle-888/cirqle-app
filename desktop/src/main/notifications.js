@@ -43,7 +43,12 @@ ipcMain.on(CH.CIRQLE_NOTIFY, (_e, payload) => {
     const n = new Notification({
       title,
       body,
-      silent: false,          // play the system notification tone
+      // Silent banner: the Cirqle web view plays its own chime for every
+      // alert (Electron allows audio without a gesture), so sound arrives
+      // even when macOS notification permission was never granted — the
+      // usual reason "desktop has no notification sound". silent: false
+      // here would double up with that chime when permission IS granted.
+      silent: true,
       timeoutType: 'default',
       tag: payload?.tag ? String(payload.tag) : undefined,
     })

@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { Bell, Check, ExternalLink } from 'lucide-react'
 import { getMyNotifications, markNotificationRead, markAllNotificationsRead, type NotificationRow } from '@/app/api/notifications/actions'
 import { PushToggle } from '@/components/notifications/push-toggle'
+import { SoundToggle } from '@/components/notifications/sound-toggle'
 import { createClient } from '@/lib/supabase/client'
 import { usePermissions } from '@/contexts/permission-context'
 
@@ -154,7 +155,8 @@ export function NotificationBell({ isCollapsed = false }: { isCollapsed?: boolea
         >
           <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-border sticky top-0 bg-card">
             <h3 className="text-xs font-semibold text-foreground">Notifications</h3>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
+              <SoundToggle />
               <PushToggle />
               {unreadCount > 0 && (
                 <button onClick={handleMarkAllRead} className="text-[11px] text-violet-500 hover:underline flex items-center gap-1">
