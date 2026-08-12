@@ -226,8 +226,14 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
   const requestsBadge = useRequestsBadge()
 
   useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if (typeof window !== 'undefined' && (window as any).__CIRQLE_DESKTOP__) {
-      (window as any).__CIRQLE_DESKTOP__.updateLogo(logoUrl || '')
+      // Absolute URL only — the desktop toolbar is a file:// page, so a
+      // relative /path would resolve against the app bundle and 404.
+      let abs = ''
+      try { abs = logoUrl ? new URL(logoUrl, window.location.origin).href : '' } catch { abs = '' }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(window as any).__CIRQLE_DESKTOP__.updateLogo(abs)
     }
   }, [logoUrl])
 

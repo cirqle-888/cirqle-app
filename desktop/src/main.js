@@ -697,8 +697,14 @@ ipcMain.on(CH.WA_RENAME, (_e, { id, label }) => {
 })
 
 ipcMain.on(CH.CIRQLE_LOGO, (_e, url) => {
-  if (state.logoUrl !== url) {
-    state.logoUrl = url
+  // Only absolute http(s)/data URLs can render in the file:// toolbar chrome;
+  // anything else (relative path, junk) clears back to the bundled mark. The
+  // result is persisted, so a dead URL from an old deploy is also flushed out
+  // of layout.json the next time the page reports its logo.
+  const clean = (typeof url === 'string' && /^(https?:|data:image\/)/i.test(url)) ? url : ''
+  if (state.logoUrl !== clean) {
+    state.logoUrl = clean
+    saveSettings()
     if (chrome) chrome.webContents.send(CH.STATE, state)
   }
 })

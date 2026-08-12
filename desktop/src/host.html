@@ -244,7 +244,16 @@
   
   <script>
     const $ = (s) => document.querySelector(s)
-    
+
+    // Workspace logo: never leave a broken-image glyph. If the pushed URL is
+    // dead (e.g. a hashed asset from an old deploy persisted in layout.json),
+    // fall back to the bundled app mark.
+    const DEFAULT_LOGO = '../assets/icon.png'
+    const logoImg = $('#app-logo')
+    logoImg.onerror = () => {
+      if (!logoImg.src.endsWith('assets/icon.png')) logoImg.src = DEFAULT_LOGO
+    }
+
     // Bind simple static buttons
     document.querySelectorAll('[data-preset]').forEach((b) => (b.onclick = () => window.desk.preset(b.dataset.preset)))
     document.querySelectorAll('[data-reload]').forEach((b) => (b.onclick = () => window.desk.reload(b.dataset.reload)))
@@ -430,10 +439,12 @@
         })
       }
 
-      // 3. Update App Logo
-      const logoImg = $('#app-logo')
+      // 3. Update App Logo — an empty logoUrl (workspace has no logo, or the
+      // stored one was cleared) resets to the bundled mark.
       if (s.logoUrl && logoImg.src !== s.logoUrl) {
         logoImg.src = s.logoUrl
+      } else if (!s.logoUrl && !logoImg.src.endsWith('assets/icon.png')) {
+        logoImg.src = DEFAULT_LOGO
       }
 
       // Layout may have shifted the toolbar → refresh the fly-animation target.
