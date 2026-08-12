@@ -982,7 +982,12 @@ function itemToForm(it: Item, status: AgreementStatus, changeTerms = false, forc
   }
 
   return {
-    _mode: isChangeTermsMode ? 'change_terms' : 'edit',
+    // forceEdit is what the "Fix details" button passes — it must survive as
+    // its own mode, because that mode is exactly what tells the server to
+    // waive the active-agreement guard. Collapsing it to 'edit' meant Fix
+    // details hit that guard and was told to use Change terms — the very
+    // button it exists to be an alternative to.
+    _mode: isChangeTermsMode ? 'change_terms' : forceEdit ? 'fix_details' : 'edit',
     id: it.id,
     service_id: it.service_id, commitment_type: it.commitment_type,
     committed_quantity: it.committed_quantity, cycle: it.cycle,
