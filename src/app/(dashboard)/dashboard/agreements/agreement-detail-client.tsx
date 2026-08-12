@@ -1099,11 +1099,13 @@ function WorkValueEditor({
               items saved before this existed read exactly as they did. */}
           <label className={labelCls}>Work value per task ({workCur})</label>
           <div className="flex gap-2">
+            {/* inputBase, NOT inputCls: the latter carries w-full, which beats
+                w-24 and squeezed the amount field out of the row entirely. */}
             <select
               value={workCur}
               onChange={e => set({ work_unit_currency: e.target.value })}
               title="Currency the team is paid in for this work"
-              className={`${inputCls} w-24 shrink-0`}
+              className={`${inputBase} w-[5.5rem] shrink-0`}
             >
               {['INR', currency, ...WORK_CURRENCIES]
                 .filter((c, i, a) => c && a.indexOf(c) === i)
