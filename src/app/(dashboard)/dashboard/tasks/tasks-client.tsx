@@ -14,8 +14,9 @@ import dynamic from 'next/dynamic'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { getStatusColor, getStatusLabel } from '@/lib/utils/invoice'
-import { Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, RefreshCw, TrendingDown, Users, Ban, Search, ExternalLink, ChevronDown, ChevronLeft, ChevronRight, Layers, LayoutGrid, List, CalendarDays, MoreVertical, Building2, BarChart2, Copy, GripVertical, Settings2, ChevronUp, Inbox, Loader2, Repeat } from 'lucide-react'
+import { Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, RefreshCw, TrendingDown, Users, Ban, Search, ExternalLink, ChevronDown, ChevronLeft, ChevronRight, Layers, LayoutGrid, List, CalendarDays, MoreVertical, Building2, BarChart2, Copy, GripVertical, Settings2, ChevronUp, Inbox, Loader2 } from 'lucide-react'
 import { formatCurrency } from '@/lib/calculations/currency'
+import { CoveredValue } from '@/components/ui/covered-value'
 import Link from 'next/link'
 import Combobox from '@/components/ui/combobox'
 import { TitleAutocomplete } from '@/components/tasks/title-autocomplete'
@@ -150,58 +151,6 @@ interface Task {
  */
 function isCovered(t: { retainer_item_id?: string | null; bill_as_extra?: boolean }): boolean {
   return !!t.retainer_item_id && !t.bill_as_extra
-}
-
-/**
- * What a covered task shows instead of "AED 0.00" — which reads as an unpriced
- * task and had people believing the retainer work was unpaid. Zero is correct
- * for the CLIENT; the team is still paid, from the agreement's work value, so
- * that is the figure worth showing here.
- *
- * Quoted in the AGREEMENT's currency (tasks.work_value), not the INR the pool
- * maths runs in: the number should be checkable against the signed contract
- * without anyone reversing an exchange rate in their head.
- *
- * `divideBy` renders the per-unit rate for the Billing column, mirroring how an
- * uncovered task's rate is `billing_amount / quantity`.
- */
-function CoveredCell({ task, divideBy = 1 }: {
-  task: {
-    work_value?: number | null
-    work_value_currency?: string | null
-    work_value_inr?: number | null
-  }
-  divideBy?: number
-}) {
-  const native = task.work_value ?? null
-  const inr = task.work_value_inr ?? 0
-  const qty = divideBy || 1
-  const hasValue = native != null ? native > 0 : inr > 0
-
-  const shown = native != null
-    ? formatCurrency(native / qty, (task.work_value_currency || 'INR') as Currency)
-    : formatCurrency(inr / qty, 'INR' as Currency)
-
-  const tone = hasValue
-    ? 'bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/25'
-    : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25'
-
-  return (
-    <span
-      title={
-        hasValue
-          ? `Covered by retainer — the client pays the monthly fee, not this task. `
-            + `Work value ${shown} pays the team`
-            + (inr > 0 && native != null ? ` (₹${(inr / qty).toLocaleString('en-IN')}).` : '.')
-          : `Covered by retainer — the client pays the monthly fee, not this task. `
-            + `No work value is set on the agreement item yet, so this pays contributors nothing.`
-      }
-      className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border whitespace-nowrap ${tone}`}
-    >
-      <Repeat className="w-3 h-3 shrink-0" aria-hidden />
-      {hasValue ? shown : 'No work value'}
-    </span>
-  )
 }
 
 interface Service {
@@ -2047,7 +1996,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
               monthly fee is the invoice. Rendering a bare "AED 0.00" reads as a
               MISSING price, so say what it actually is (and what the team is
               paid from), instead of leaving people to guess. */}
-          {isCovered(task) ? <CoveredCell task={task} divideBy={task.quantity ?? 1} /> :
+          {isCovered(task) ? <CoveredValue task={task} divideBy={task.quantity ?? 1} /> :
             role !== 'team_lead' && inlineEditMode ? (
             <input type="number" defaultValue={task.billing_amount ?? 0} onBlur={async e => {
               const val = parseFloat(e.target.value) || 0
@@ -2067,7 +2016,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       case 'total': return (
         <td key={key} className="px-5 py-3.5 text-right font-medium" onClick={stopInline}>
           {isCovered(task)
-            ? <CoveredCell task={task} />
+            ? <CoveredValue task={task} />
             : formatCurrency(task.billing_amount ?? 0, task.currency as Currency)}
         </td>
       )

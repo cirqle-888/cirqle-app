@@ -12,6 +12,7 @@ import { applyTaskAgreements, saveTaskContributions } from './actions'
 import { closedPeriodNotice } from '@/lib/payroll/correction-notice'
 import { calculateCommission } from '@/lib/calculations/commission'
 import { taskPoolBasisInr, isCoveredWorkTask, resolveCommissionPct } from '@/lib/calculations/work-value'
+import { CoveredValue } from '@/components/ui/covered-value'
 import { matchAgreement, type CommissionAgreement } from '@/lib/calculations/agreements'
 import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
 import { taskCode, taskCodeMatches, nextTaskNumber } from '@/lib/utils/task-code'
@@ -1875,6 +1876,22 @@ export default function ContributionsClient({
                                         </span>
                                       </span>
                                     ))
+                                  }
+
+                                  // A covered task's money comes from the
+                                  // AGREEMENT, not from client billing. Showing
+                                  // it as a bare "₹519.91" made it look like an
+                                  // invoiced amount, so covered tasks get the
+                                  // same labelled badge the Tasks table uses —
+                                  // per-unit when quantity > 1, the full work
+                                  // value for a one-time item.
+                                  if (isCoveredWorkTask(task)) {
+                                    return (
+                                      <span className="inline-flex items-center gap-1">
+                                        <span>·</span>
+                                        <CoveredValue task={task} divideBy={task.quantity ?? 1} />
+                                      </span>
+                                    )
                                   }
 
                                   if (poolValue > 0) {

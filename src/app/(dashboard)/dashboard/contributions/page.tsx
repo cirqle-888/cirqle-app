@@ -50,6 +50,9 @@ export default async function ContributionsPage() {
   // page's financial stripping.
   // retainer_item_id/work_value_inr: covered tasks bill 0 but pool from the
   // agreement's work value. work_value_inr is money → pricing-visible only.
+  // work_value/work_value_currency are the SAME figure in the agreement's own
+  // currency, so the badge can be checked against the signed contract; they are
+  // money too, hence pricing-visible only.
   //
   // The commission override is fetched SEPARATELY below, never embedded:
   // PostgREST sees two relationships between tasks and client_agreement_items
@@ -57,7 +60,7 @@ export default async function ContributionsPage() {
   // table), so an unqualified embed fails with PGRST201 — and because the
   // embed is part of the main task select, that failure returned ZERO TASKS
   // for the whole page rather than merely dropping the override.
-  const taskSelectWithPricing    = 'id, task_number, title, client_id, service_id, billing_amount_inr, quantity, status, task_date, bill_as_extra, retainer_item_id, work_value_inr, parent_task_id, billing_mode, currency, client:clients(id, name, code), service:services(id, name)'
+  const taskSelectWithPricing    = 'id, task_number, title, client_id, service_id, billing_amount_inr, quantity, status, task_date, bill_as_extra, retainer_item_id, work_value_inr, work_value, work_value_currency, parent_task_id, billing_mode, currency, client:clients(id, name, code), service:services(id, name)'
   const taskSelectWithoutPricing = 'id, task_number, title, client_id, service_id, quantity, status, task_date, retainer_item_id, parent_task_id, client:clients(id, name, code), service:services(id, name)'
   // 24-month window bounds the otherwise unbounded task list. Contributions for
   // tasks older than 24 months should already be finalized; the editor here is
