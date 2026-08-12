@@ -255,9 +255,12 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
             employee_id: e.employeeId,
             score_percentage: e.scorePercentage,
             earnings_inr: e.earnings,
-            previous_earnings_inr: oldScore.earnings_inr || 0,
-            previous_score_percentage: oldScore.score_percentage || 0,
-            previous_performance_rating_used: (oldScore as any).previous_performance_rating_used || 100,
+            // Column names must match the table: previous_earnings /
+            // previous_performance_rating. The old payload named three columns
+            // that do not exist, so every upsert failed PGRST204 — silently,
+            // because the error was discarded (see below).
+            previous_earnings: oldScore.earnings_inr || 0,
+            previous_performance_rating: (oldScore as any).previous_performance_rating ?? null,
             recalculated_at: new Date().toISOString(),
             recalculated_by: userId || null
           })
@@ -273,7 +276,16 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
     })
 
     if (upsertBatch.length > 0) {
-      await supabase.from('contribution_scores').upsert(upsertBatch, { onConflict: 'task_id,employee_id' })
+      // The result was previously discarded, so a rejected write reported
+      // success and an updatedCount for rows that never changed. Every repair
+      // path built on this — the contributions self-heal, agreement re-stamps,
+      // payroll recalculation — believed it had fixed earnings it had not.
+      const { error: upsertErr } = await supabase
+        .from('contribution_scores').upsert(upsertBatch, { onConflict: 'task_id,employee_id' })
+      if (upsertErr) {
+        console.error('Task recalc upsert failed:', upsertErr)
+        return { error: `Failed to save recalculated earnings: ${upsertErr.message}` }
+      }
     }
 
     // Layer employee commission agreements on top (no-op without agreements).

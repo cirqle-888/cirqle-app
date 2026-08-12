@@ -418,6 +418,15 @@ export default function ContributionsClient({
     if (autoRecalcRan.current) return
     autoRecalcRan.current = true
 
+    // GUARD 1 — a viewer without pricing visibility is served a task payload
+    // WITHOUT work_value_inr or bill_as_extra (see the two selects in
+    // page.tsx). taskPoolBasisInr then reads a covered task's absent work
+    // value as 0, the pool is 0, and this repair path would SAVE ₹0 over real
+    // earnings. Money must never be recomputed from a payload deliberately
+    // stripped of it: if you cannot see the basis, you do not get to rewrite
+    // the result.
+    if (!permissionFlags?.pricing) return
+
     const taskIdsWithContribs = new Set(contributorRecords.map(c => c.task_id))
     const scoredTaskIds = new Set(scores.map(s => s.task_id))
 
@@ -515,6 +524,17 @@ export default function ContributionsClient({
             toolsUsed: taskToolsForCalc,
             contributions: contribArray,
           })
+          // GUARD 2 — independent of why: a repair that computes ₹0 for a task
+          // that currently has non-zero stored earnings is destroying data, not
+          // healing it. Skip and leave the existing figures alone. A genuine
+          // zero (no billing, no work value) is reached through an explicit
+          // save, not this background path.
+          const computedTotal = result.employeeEarnings.reduce((sum: number, e: any) => sum + (e.earnings || 0), 0)
+          const storedTotal = scores
+            .filter((sc: any) => sc.task_id === task.id)
+            .reduce((sum: number, sc: any) => sum + (sc.earnings_inr ?? 0), 0)
+          if (computedTotal === 0 && storedTotal > 0) continue
+
           if (result.employeeEarnings.length > 0) {
             // Score-only recalc through the guarded server action: preserves
             // manual overrides and refuses finalized payroll months, instead
