@@ -9,9 +9,16 @@
  *
  * Nothing is removed by using it — every action remains one click away, and
  * each keeps its own permission gate at the call site.
+ *
+ * The panel is PORTALLED to <body>. Header action rows are `overflow-x-auto`
+ * and <main> is `overflow-y-auto`, so an absolutely-positioned panel rendered
+ * in place is clipped by them: it mounts, reports a sane size and full
+ * opacity, and is still invisible and unclickable. Same reason FilterDropdown
+ * portals its panel.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { MoreHorizontal, type LucideIcon } from 'lucide-react'
 
 export interface OverflowItem {
@@ -27,6 +34,9 @@ export interface OverflowItem {
   separatorBefore?: boolean
 }
 
+const PANEL_W = 224
+const MARGIN = 8
+
 export function OverflowMenu({
   items,
   label = 'More actions',
@@ -37,46 +47,69 @@ export function OverflowMenu({
   align?: 'left' | 'right'
 }) {
   const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
 
-  // Close on outside click and on Escape — the two behaviours users expect of
-  // any menu, and the reason screens should not hand-roll their own.
+  // Position against the trigger in viewport coordinates, clamped so the panel
+  // can never hang off either edge on a narrow screen.
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current) return
+    const r = triggerRef.current.getBoundingClientRect()
+    const left = align === 'right' ? r.right - PANEL_W : r.left
+    setPos({
+      top: r.bottom + 6,
+      left: Math.max(MARGIN, Math.min(left, window.innerWidth - PANEL_W - MARGIN)),
+    })
+  }, [open, align])
+
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      const t = e.target as Node
+      if (panelRef.current?.contains(t) || triggerRef.current?.contains(t)) return
+      setOpen(false)
     }
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    // Scrolling or resizing moves the trigger out from under a fixed panel,
+    // so close rather than leave it stranded mid-air.
+    const onMove = () => setOpen(false)
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
+    window.addEventListener('resize', onMove)
+    window.addEventListener('scroll', onMove, true)
     return () => {
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', onMove)
+      window.removeEventListener('scroll', onMove, true)
     }
   }, [open])
 
   if (items.length === 0) return null
 
   return (
-    <div className="relative" ref={ref}>
+    <>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen(o => !o)}
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
         title={label}
-        className="flex items-center justify-center text-muted-foreground hover:text-foreground border border-border rounded-lg px-2.5 py-2 bg-secondary hover:bg-secondary/80 transition-colors"
+        className="shrink-0 flex items-center justify-center text-muted-foreground hover:text-foreground border border-border rounded-lg px-2.5 py-2 bg-secondary hover:bg-secondary/80 transition-colors"
       >
         <MoreHorizontal className="w-4 h-4" />
       </button>
 
-      {open && (
+      {open && pos && typeof document !== 'undefined' && createPortal(
         <div
+          ref={panelRef}
           role="menu"
-          className={`absolute z-50 mt-1.5 min-w-[13rem] rounded-xl border border-border bg-card p-1 shadow-lg animate-in fade-in zoom-in-95 ${
-            align === 'right' ? 'right-0' : 'left-0'
-          }`}
+          data-overflow-menu-panel="true"
+          style={{ position: 'fixed', top: pos.top, left: pos.left, width: PANEL_W }}
+          className="z-[120] rounded-xl border border-border bg-card p-1 shadow-lg"
         >
           {items.map((item, i) => {
             const Icon = item.icon
@@ -105,8 +138,9 @@ export function OverflowMenu({
               </div>
             )
           })}
-        </div>
+        </div>,
+        document.body,
       )}
-    </div>
+    </>
   )
 }
