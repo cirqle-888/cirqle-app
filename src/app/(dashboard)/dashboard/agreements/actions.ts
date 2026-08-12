@@ -236,6 +236,8 @@ export interface AgreementItemInput {
   included_quantity?: number | null
   /** Internal per-task value for covered work → contribution pool, never invoiced. */
   work_unit_value?: number | null
+  /** Currency the TEAM is paid in for this item's work. Null = item currency. */
+  work_unit_currency?: string | null
   /** Employee-pool % for this item's work. null = engine default (50). */
   work_commission_pct?: number | null
   /** Client-facing name on the invoice. null = fall back to the service name. */
@@ -371,6 +373,7 @@ export async function saveAgreementItem(
       item.included_quantity != null
         ? Number(item.included_quantity) : null,
     work_unit_value: item.work_unit_value != null ? Number(item.work_unit_value) : null,
+    work_unit_currency: item.work_unit_currency ?? null,
     work_commission_pct: item.work_commission_pct != null ? Number(item.work_commission_pct) : null,
     invoice_label: item.invoice_label?.trim() || null,
     updated_at: new Date().toISOString(),
@@ -382,7 +385,7 @@ export async function saveAgreementItem(
   const PRICING_KEYS = [
     'unit_price', 'currency', 'extra_unit_price',
     'creative_allocation_amount', 'management_allocation_amount',
-    'work_unit_value', 'work_commission_pct',
+    'work_unit_value', 'work_unit_currency', 'work_commission_pct',
   ] as const
   const updateRow: Record<string, unknown> = { ...itemRow }
   if (!canWritePricing) for (const k of PRICING_KEYS) delete updateRow[k]

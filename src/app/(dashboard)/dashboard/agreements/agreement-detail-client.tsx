@@ -37,6 +37,8 @@ const CONTENT_TYPES = [
 // `w-24` to a class string that already carries `w-full` is a coin toss in the
 // cascade — that is what shrank the deliverable name box to an empty pill.
 const inputBase = 'bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20'
+const WORK_CURRENCIES = ['INR', 'AED', 'SAR', 'QAR', 'USD', 'GBP', 'EUR'] as const
+
 const inputCls = `w-full ${inputBase}`
 const labelCls = 'block text-xs font-medium text-muted-foreground mb-1.5'
 
@@ -83,7 +85,7 @@ interface Item {
   extra_unit_price?: number | null; display_order: number; notes: string | null
   creative_allocation_amount?: number | null; management_allocation_amount?: number | null
   included_quantity?: number | null; allocated_unit_value?: number | null
-  work_unit_value?: number | null; work_commission_pct?: number | null
+  work_unit_value?: number | null; work_unit_currency?: string | null; work_commission_pct?: number | null
   invoice_label?: string | null
   coveredServices?: { id: string; name: string }[]
   deliverables: Deliverable[]; milestones: Milestone[]
@@ -959,7 +961,7 @@ function newItemForm(currency: string): ItemForm {
     unit_price: null, currency, carry_forward_rule: 'expire', extra_unit_price: null,
     display_order: 0, notes: '',
     creative_allocation_amount: null, management_allocation_amount: null, included_quantity: null,
-    work_unit_value: null, work_commission_pct: null, invoice_label: null,
+    work_unit_value: null, work_unit_currency: 'INR', work_commission_pct: null, invoice_label: null,
     coveredServiceIds: [],
     deliverables: [], milestones: [],
   }
@@ -1083,11 +1085,30 @@ function WorkValueEditor({
     ? Math.round((form.unit_price / included) * 100) / 100
     : null
 
+  // Team-pay currency: explicit choice, else the item's billing currency
+  // (pre-2026-08 rows) — the same COALESCE the DB stamp uses.
+  const workCur = form.work_unit_currency || currency
+
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
-          <label className={labelCls}>Work value per task ({currency})</label>
+          {/* Work value pays the TEAM; the item currency bills the CLIENT.
+              They are separate on purpose — paying in INR keeps payroll off
+              the FX ticker, where the same AED 20 stamped 518.09 one day and
+              518.71 the next. `workCur` falls back to the item currency so
+              items saved before this existed read exactly as they did. */}
+          <label className={labelCls}>Work value per task ({workCur})</label>
           <div className="flex gap-2">
+            <select
+              value={workCur}
+              onChange={e => set({ work_unit_currency: e.target.value })}
+              title="Currency the team is paid in for this work"
+              className={`${inputCls} w-24 shrink-0`}
+            >
+              {['INR', currency, ...WORK_CURRENCIES]
+                .filter((c, i, a) => c && a.indexOf(c) === i)
+                .map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
             <input type="number" min="0" step="any" value={form.work_unit_value ?? ''}
               onChange={e => set({ work_unit_value: e.target.value === '' ? null : parseFloat(e.target.value) })}
               className={inputCls} placeholder={autoValue != null ? `e.g. ${autoValue}` : 'e.g. 26.67'} />
