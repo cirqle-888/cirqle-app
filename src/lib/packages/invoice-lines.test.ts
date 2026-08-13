@@ -176,6 +176,15 @@ describe('one-time packages bill exactly once', () => {
     expect(r.feeLines[0].amount).toBe(150)
   })
 
+  it('dates the fee to the day the package was agreed, not the first task', () => {
+    // The commitment began 20 Jul; a logo task on the 23rd doesn't move that.
+    const r = plan({
+      packages: oneTime, items,
+      tasks: tasks(1, LOGO, '2026-07', 23), month: '2026-08',
+    })
+    expect(r.feeLines[0].lineDate).toBe('2026-07-20')
+  })
+
   it('does NOT bill again once it already carries a fee line somewhere', () => {
     const r = plan({ packages: oneTime, items, month: '2026-09', billed: new Set(['p2']) })
     expect(r.feeLines).toEqual([])

@@ -124,7 +124,14 @@ export function planPackageInvoice(input: PackageInvoiceInput): PackageInvoicePl
       description: cycle.isFirstCycle ? `${pkg.name} — first cycle` : pkg.name,
       amount: Number(pkg.price) || 0,
       currency: pkg.currency,
-      lineDate: earliestTaskDate(tasks, cycle) ?? pkg.start_date,
+      // A one-time fee (and an opening cycle's fee) is dated to the day the
+      // package was AGREED — that is the event being billed. Dating it to
+      // whichever task happened to land first reads as if the commitment
+      // started days later than it did. Ordinary monthly cycles keep the
+      // earliest work of the month, which is what those fees pay for.
+      lineDate: (pkg.billing_type === 'one_time' || cycle.isFirstCycle)
+        ? pkg.start_date
+        : (earliestTaskDate(tasks, cycle) ?? pkg.start_date),
     })
   }
 
