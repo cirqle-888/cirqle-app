@@ -51,13 +51,16 @@ export async function publishAdEvent(eventType: AdEventType, payload: AdEventPay
   const supabase = createAdminClient()
 
   if (payload.projectId) {
-    // Legacy logging for campaign timeline
-    await supabase.from('ad_events').insert({
+    // Campaign timeline. NOTE: the ad_events table columns are actor_id +
+    // detail (NOT created_by/metadata) — writing the wrong names made every
+    // event insert fail silently for months.
+    const { error } = await supabase.from('ad_events').insert({
       project_id: payload.projectId,
       event_type: eventType,
-      created_by: payload.employeeId || null,
-      metadata: payload.metadata || {}
+      actor_id: payload.employeeId || null,
+      detail: payload.metadata || {}
     })
+    if (error) console.warn('[publishAdEvent] insert failed:', error.message)
   }
 
   // Future: Switch case for webhooks / notification engine triggers based on eventType
@@ -78,11 +81,12 @@ export async function publishAdEventsBatch(events: { eventType: AdEventType; pay
   const rows = validEvents.map(e => ({
     project_id: e.payload.projectId,
     event_type: e.eventType,
-    created_by: e.payload.employeeId || null,
-    metadata: e.payload.metadata || {}
+    actor_id: e.payload.employeeId || null,
+    detail: e.payload.metadata || {}
   }))
 
-  await supabase.from('ad_events').insert(rows)
+  const { error } = await supabase.from('ad_events').insert(rows)
+  if (error) console.warn('[publishAdEventsBatch] insert failed:', error.message)
 
   for (const e of events) {
     if (e.eventType === 'sync_failed') {

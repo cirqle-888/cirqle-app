@@ -5,6 +5,7 @@ import { requirePermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { publishAdEvent } from '@/lib/advertising/events'
 import { getProvider } from '@/lib/advertising/providers'
+import { decryptToken } from '@/lib/integrations/tokens'
 
 export async function fetchProviderConnections(clientId?: string) {
   const guard = await requirePermission(PERMS.ADVERTISING_MANAGE_PROVIDERS)
@@ -81,11 +82,12 @@ export async function refreshAdAccounts(connectionId: string) {
   
   const { data: conn, error: connErr } = await admin.from('provider_connections').select('id,client_id,provider,access_token').eq('id', connectionId).single()
   if (connErr || !conn) throw new Error('Connection not found')
-  if (!conn.access_token) throw new Error('Missing access token')
+  const accessToken = decryptToken(conn.access_token)
+  if (!accessToken) throw new Error('Missing access token')
 
   try {
     const provider = getProvider(conn.provider)
-    const accounts = await provider.getAccounts(connectionId, conn.access_token)
+    const accounts = await provider.getAccounts(connectionId, accessToken)
 
     for (const acc of accounts) {
       if (acc.business_id) {

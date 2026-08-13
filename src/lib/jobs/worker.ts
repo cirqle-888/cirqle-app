@@ -3,6 +3,11 @@ import { syncProjectWorker } from '@/lib/advertising/workers/sync'
 import { refreshTokenWorker } from '@/lib/advertising/workers/token'
 import { sendNotificationWorker } from '@/lib/advertising/workers/notifications'
 import { generateReportWorker } from '@/lib/advertising/workers/reports'
+import {
+  socialLeadsBackfillWorker,
+  socialPublishPostWorker,
+  socialSyncAccountWorker,
+} from '@/lib/integrations/meta/workers'
 
 // Map of job_type to handler function
 const JOB_HANDLERS: Record<string, (job: DequeuedJob) => Promise<any>> = {
@@ -10,6 +15,9 @@ const JOB_HANDLERS: Record<string, (job: DequeuedJob) => Promise<any>> = {
   'advertising_refresh_token': refreshTokenWorker,
   'advertising_send_notification': sendNotificationWorker,
   'advertising_generate_report': generateReportWorker,
+  'social_sync_account': socialSyncAccountWorker,
+  'social_publish_post': socialPublishPostWorker,
+  'social_leads_backfill': socialLeadsBackfillWorker,
 }
 
 export async function processJobs(workerId: string, maxDurationMs: number = 45000) {

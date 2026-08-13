@@ -2,6 +2,7 @@ import { DequeuedJob, enqueueJob } from '@/lib/jobs/engine'
 import { createAdminClient } from '@/lib/supabase/server'
 import { getProvider } from '@/lib/advertising/providers'
 import { ingestMetrics } from '@/lib/advertising/pipeline'
+import { decryptToken } from '@/lib/integrations/tokens'
 
 
 export async function syncProjectWorker(job: DequeuedJob): Promise<any> {
@@ -34,8 +35,8 @@ export async function syncProjectWorker(job: DequeuedJob): Promise<any> {
   if (!connection) throw new Error(`Project ${project_id} missing connection array.`)
 
   const providerName = account.provider
-  const accessToken = connection.access_token
-  
+  const accessToken = decryptToken(connection.access_token)
+
   if (!accessToken || connection.status !== 'active') {
     throw new Error('No active connection or access token')
   }

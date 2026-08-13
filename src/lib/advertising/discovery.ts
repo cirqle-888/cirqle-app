@@ -11,6 +11,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getProvider } from '@/lib/advertising/providers'
+import { decryptToken } from '@/lib/integrations/tokens'
 
 export interface DiscoveryResult {
   discovered: number
@@ -45,7 +46,7 @@ export async function discoverAccountCampaigns(
   if (!account) return { discovered: 0, created: 0, updated: 0, error: 'Ad account not found' }
 
   const connection = Array.isArray(account.connection) ? account.connection[0] : account.connection
-  const token = connection?.access_token
+  const token = decryptToken(connection?.access_token)
   if (!token || connection?.status !== 'active') {
     return { discovered: 0, created: 0, updated: 0, error: 'No active connection / access token' }
   }
