@@ -175,7 +175,7 @@ export function CampaignMappingClient({
       {/* Header */}
       <div>
         <Link href="/dashboard/connections" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-2">
-          <ArrowLeft className="h-3.5 w-3.5" /> Integrations
+          <ArrowLeft className="h-3.5 w-3.5" /> Connections
         </Link>
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
@@ -369,7 +369,7 @@ function EmptyShell({ accountName, children }: { accountName?: string; children:
   return (
     <div className="space-y-4">
       <Link href="/dashboard/connections" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="h-3.5 w-3.5" /> Integrations
+        <ArrowLeft className="h-3.5 w-3.5" /> Connections
       </Link>
       <h1 className="text-2xl font-bold flex items-center gap-2"><ListChecks className="h-6 w-6 text-pink-500" /> Map Campaigns</h1>
       <div className="text-sm text-muted-foreground">{accountName}</div>
