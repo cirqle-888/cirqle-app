@@ -53,13 +53,17 @@ export function resolveActiveHref(sections: { items: NavItem[] }[], pathname: st
 }
 
 /**
- * SECTION DESIGN (2026-08 single-owner audit): the visible sections carry only
- * what live data shows is in daily use; everything rarely- or never-used moves
- * to the collapsed "Advanced" section at the bottom. NOTHING is removed —
- * every route stays reachable and every item keeps its permission gate, so
- * returning a feature to the main nav is a one-line move. Evidence at audit
- * time: recruitment/quotations/approvals/org-units had zero rows ever;
- * social calendar 5, partners 4, personal workspace 0.
+ * SECTION DESIGN (2026-08, revised): every item lives in the section named for
+ * its FUNCTION — no catch-all. The earlier layout parked eighteen rarely-used
+ * items in one flat "Advanced" list, which made the bottom of the sidebar a
+ * junk drawer nobody could scan. Instead, rarely-used sections simply default
+ * to collapsed (Recruitment, Insights, Tools), so the everyday nav stays short
+ * while everything keeps a predictable home.
+ *
+ * NOTHING is removed — every route stays reachable and every item keeps its
+ * permission gate. Daily-use evidence: Work + Finance + HR stay open;
+ * Marketing holds the social/content workflow (Social Calendar earned its
+ * promotion out of Advanced — it now drives package delivery planning).
  */
 export const navSections: NavSection[] = [
   {
@@ -98,12 +102,39 @@ export const navSections: NavSection[] = [
     ],
   },
   {
+    // The social/content workflow, together at last: plan the month, publish,
+    // measure, advertise. Social Calendar earned its way out of the old
+    // Advanced list — it now plans package deliverables day by day.
+    label: 'Marketing',
+    defaultOpen: false,
+    items: [
+      { label: 'Social Calendar', href: '/dashboard/social-calendar', icon: CalendarDays, requiredPerm: 'social.view', keywords: ['content', 'planner', 'posts', 'instagram', 'social media'] },
+      { label: 'Social',          href: '/dashboard/social',      icon: Share2, requiredPerm: 'social.view_insights', keywords: ['instagram', 'facebook', 'pages', 'insights', 'reach', 'publishing', 'meta'] },
+      { label: 'Advertising',     href: '/dashboard/advertising', icon: Megaphone, requiredPerm: 'advertising.view', keywords: ['campaigns', 'ads', 'marketing'] },
+      { label: 'Agency',          href: '/dashboard/agency',      icon: LayoutGrid, requiredPerm: 'reports.view', keywords: ['agency dashboard', 'all clients', 'overview', 'spend', 'leads', 'cpl', 'alerts'] },
+    ],
+  },
+  {
     label: 'HR',
     defaultOpen: true,
     items: [
       { label: 'HR & Payroll', href: '/dashboard/payroll',     icon: Users2, requiredPerm: 'payroll.view', keywords: ['salary', 'payslip', 'employees'] },
       // Performance Scorecards: score employees & applicants, apply ratings.
       { label: 'Performance',  href: '/dashboard/performance', icon: Gauge, requiredPerm: 'performance.manage', keywords: ['scorecard', 'rating', 'appraisal', 'review', 'applicant', 'cv', 'measure'] },
+    ],
+  },
+  {
+    // Hiring pipeline, in process order. Its own section rather than five rows
+    // inside HR: it is empty until hiring starts, and collapsed-by-default
+    // keeps it from padding a section that IS in daily use.
+    label: 'Recruitment',
+    defaultOpen: false,
+    items: [
+      { label: 'Open Positions', href: '/dashboard/recruitment/positions',    icon: Briefcase,     requiredPerm: 'recruitment.view' },
+      { label: 'Applications',   href: '/dashboard/recruitment/applications', icon: ClipboardList, requiredPerm: 'recruitment.view' },
+      { label: 'Interviews',     href: '/dashboard/recruitment/interviews',   icon: CalendarClock, requiredPerm: 'recruitment.view' },
+      { label: 'Offers',         href: '/dashboard/recruitment/offers',       icon: BadgeCheck,    requiredPerm: 'recruitment.view' },
+      { label: 'Hiring Reports', href: '/dashboard/recruitment/reports',      icon: PieChart,      requiredPerm: 'recruitment.view' },
     ],
   },
   {
@@ -123,54 +154,34 @@ export const navSections: NavSection[] = [
       { label: 'What-If Planner', href: '/dashboard/reports/what-if', icon: SlidersHorizontal, requiredPerm: 'reports.view', keywords: ['simulation', 'forecast', 'commission'] },
       // Business Health Center: cash/collections, overdue aging, client risk, cron status.
       { label: 'Business Health', href: '/dashboard/health', icon: Activity, requiredPerm: 'reports.view', keywords: ['cash flow', 'overdue', 'risk', 'cron'] },
+      // ── Specialist reports — every report lives HERE, not scattered ──
+      { label: 'Company Operations',   href: '/dashboard/reports/company-ops', icon: Building2, requiredPerm: 'reports.view', keywords: ['P&L', 'burn rate', 'runway'] },
+      { label: 'Client Profitability', href: '/dashboard/reports/client-profitability', icon: TrendingUp, requiredPerm: 'reports.view', keywords: ['margin', 'finance engine'] },
+      { label: 'Cost & Tags',          href: '/dashboard/reports/cost-attribution', icon: Tags, requiredPerm: 'reports.view', keywords: ['spend', 'attribution'] },
+      { label: 'Client Ranking',       href: '/dashboard/clients/ranking', icon: Award, requiredPerm: 'reports.view', keywords: ['reliability', 'scoring'] },
     ],
   },
   {
-    label: 'Apps',
+    // Occasional utilities and admin plumbing — real features without a weekly
+    // rhythm. Collapsed by default; promote anything that earns regular use.
+    label: 'Tools',
     defaultOpen: false,
     items: [
-      { label: 'Advertising',    href: '/dashboard/advertising', icon: Megaphone, requiredPerm: 'advertising.view', keywords: ['campaigns', 'ads', 'marketing'] },
-      { label: 'Social',         href: '/dashboard/social',      icon: Share2, requiredPerm: 'social.view_insights', keywords: ['instagram', 'facebook', 'pages', 'insights', 'reach', 'publishing', 'meta'] },
-      { label: 'Agency',         href: '/dashboard/agency',      icon: LayoutGrid, requiredPerm: 'reports.view', keywords: ['agency dashboard', 'all clients', 'overview', 'spend', 'leads', 'cpl', 'alerts'] },
-    ],
-  },
-  {
-    // Everything below is fully functional but rarely (or never yet) used —
-    // parked here so the everyday nav stays small. Promote an item back to its
-    // topical section the day it earns regular use.
-    label: 'Advanced',
-    defaultOpen: false,
-    items: [
-      // ── Occasional work tools ──
-      { label: 'My Planner',    href: '/dashboard/workspace',     icon: NotebookPen, keywords: ['workspace', 'todo', 'notes', 'reminders', 'personal'] },
-      { label: 'Approvals',     href: '/dashboard/approvals',     icon: ClipboardCheck },
-      { label: 'Social Calendar', href: '/dashboard/social-calendar', icon: CalendarDays, requiredPerm: 'social.view', keywords: ['content', 'planner', 'posts', 'instagram', 'social media'] },
-      { label: 'Apps Directory', href: '/dashboard/apps',        icon: Blocks, keywords: ['integrations', 'marketplace', 'standard request', 'intake links'] },
+      { label: 'My Planner',        href: '/dashboard/workspace',  icon: NotebookPen, keywords: ['workspace', 'todo', 'notes', 'reminders', 'personal'] },
+      { label: 'Approvals',         href: '/dashboard/approvals',  icon: ClipboardCheck },
+      { label: 'Quotations',        href: '/dashboard/quotations', icon: BookOpen, requiredPerm: 'billing.view_quotations' },
+      { label: 'Business Partners', href: '/dashboard/partners',   icon: Handshake, requiredPerm: 'finance.partner.view', keywords: ['vendors', 'suppliers'] },
+      { label: 'Apps Directory',    href: '/dashboard/apps',       icon: Blocks, keywords: ['integrations', 'marketplace', 'standard request', 'intake links'] },
       // Offer Flyer editor: FROZEN since the Cirqle Studio Figma plugin became
       // the primary design workflow — adminOnly keeps it off staff nav; the
       // permission is kept so a future unfreeze is a one-line revert.
-      { label: 'Offer Intake', href: '/dashboard/offer-prepare', icon: BadgePercent, requiredPerm: 'offer.prepare', adminOnly: true, keywords: ['prepare offer', 'weekly offer', 'sheet', 'whatsapp list', 'supermarket'] },
-      // ── Finance, rarely issued ──
-      { label: 'Quotations',        href: '/dashboard/quotations', icon: BookOpen, requiredPerm: 'billing.view_quotations' },
-      { label: 'Business Partners', href: '/dashboard/partners',   icon: Handshake, requiredPerm: 'finance.partner.view', keywords: ['vendors', 'suppliers'] },
-      // ── Recruitment (unused until hiring starts) ──
-      { label: 'Open Positions', href: '/dashboard/recruitment/positions',    icon: Briefcase,     requiredPerm: 'recruitment.view' },
-      { label: 'Applications',   href: '/dashboard/recruitment/applications', icon: ClipboardList, requiredPerm: 'recruitment.view' },
-      { label: 'Interviews',     href: '/dashboard/recruitment/interviews',   icon: CalendarClock, requiredPerm: 'recruitment.view' },
-      { label: 'Offers',         href: '/dashboard/recruitment/offers',       icon: BadgeCheck,    requiredPerm: 'recruitment.view' },
-      { label: 'Hiring Reports', href: '/dashboard/recruitment/reports',      icon: PieChart,      requiredPerm: 'recruitment.view' },
-      // ── Specialist reports ──
-      { label: 'Company Operations', href: '/dashboard/reports/company-ops', icon: Building2, requiredPerm: 'reports.view', keywords: ['P&L', 'burn rate', 'runway'] },
-      { label: 'Client Profitability', href: '/dashboard/reports/client-profitability', icon: TrendingUp, requiredPerm: 'reports.view', keywords: ['margin', 'finance engine'] },
-      { label: 'Cost & Tags', href: '/dashboard/reports/cost-attribution', icon: Tags, requiredPerm: 'reports.view', keywords: ['spend', 'attribution'] },
-      { label: 'Client Ranking', href: '/dashboard/clients/ranking', icon: Award, requiredPerm: 'reports.view', keywords: ['reliability', 'scoring'] },
-      { label: 'Activity', href: '/dashboard/activity', icon: History, requiredPerm: 'timeline.view_all', keywords: ['timeline', 'audit log'] },
-      // ── Admin utilities ──
+      { label: 'Offer Intake',      href: '/dashboard/offer-prepare', icon: BadgePercent, requiredPerm: 'offer.prepare', adminOnly: true, keywords: ['prepare offer', 'weekly offer', 'sheet', 'whatsapp list', 'supermarket'] },
+      { label: 'Activity',          href: '/dashboard/activity',   icon: History, requiredPerm: 'timeline.view_all', keywords: ['timeline', 'audit log'] },
       // Bulk Import is strictly admin-only — it can mass-create tasks,
       // contributions, and cashbook entries, so it shouldn't surface to
       // non-admin team members who might happen to hold `tasks.create`.
-      { label: 'Bulk Import', href: '/dashboard/import',   icon: Upload,   adminOnly: true, keywords: ['csv', 'mass import'] },
-      { label: 'Workspaces',  href: '/dashboard/settings/workspaces', icon: LayoutGrid, requiredPerm: 'workspaces.manage', keywords: ['teams'] },
+      { label: 'Bulk Import',       href: '/dashboard/import',     icon: Upload,   adminOnly: true, keywords: ['csv', 'mass import'] },
+      { label: 'Workspaces',        href: '/dashboard/settings/workspaces', icon: LayoutGrid, requiredPerm: 'workspaces.manage', keywords: ['teams'] },
     ],
   },
   {
