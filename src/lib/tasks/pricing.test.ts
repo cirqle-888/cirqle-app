@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
   computeTaskAmount, resolveTaskQuantity, resolveUnitPrice, resolvePricingType,
-  isBillingSuppressed, effectiveBillingAmount,
   type ServiceLike, type ClientPricingLike,
 } from './pricing'
 
@@ -93,32 +92,7 @@ describe('resolveTaskQuantity', () => {
   })
 })
 
-describe('coverage → what the client is charged', () => {
-  it('suppresses billing only while a retainer covers the task', () => {
-    expect(isBillingSuppressed({ covered: true,  billAsExtra: false })).toBe(true)
-    expect(isBillingSuppressed({ covered: true,  billAsExtra: true })).toBe(false)
-    expect(isBillingSuppressed({ covered: false, billAsExtra: false })).toBe(false)
-    expect(isBillingSuppressed({ covered: false, billAsExtra: true })).toBe(false)
-  })
-
-  it('zeroes a covered task so the client is not billed twice', () => {
-    // This is the rule the Edit modal was missing: it sent the raw 20 and the
-    // server refused the write, blocking even a title-only edit.
-    expect(effectiveBillingAmount(20, { covered: true, billAsExtra: false })).toBe(0)
-  })
-
-  it('bills a covered task normally once flagged as extra work', () => {
-    expect(effectiveBillingAmount(20, { covered: true, billAsExtra: true })).toBe(20)
-  })
-
-  it('leaves an uncovered task untouched', () => {
-    expect(effectiveBillingAmount(20, { covered: false, billAsExtra: false })).toBe(20)
-  })
-})
-
 describe('the Add Task and Edit Task paths agree', () => {
-  // Both forms now call the same two functions; this pins the shared result for
-  // the exact scenario that was broken — Elara's covered AED 20 poster.
   const scenario = { services, clientPricings, clientId: 'c-1', serviceId: 'svc-poster' }
 
   it('produces an identical amount and quantity from identical inputs', () => {
@@ -128,7 +102,5 @@ describe('the Add Task and Edit Task paths agree', () => {
 
     expect(amount).toBe(20)
     expect(qty).toBe(1)
-    expect(effectiveBillingAmount(amount, { covered: true, billAsExtra: false })).toBe(0)
-    expect(effectiveBillingAmount(amount, { covered: true, billAsExtra: true })).toBe(20)
   })
 })

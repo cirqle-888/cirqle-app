@@ -220,10 +220,6 @@ export function isRuleDormant(rule: BillingRule | null | undefined): boolean {
 
 /**
  * The calendar month a derived task bills for, as [start, endExclusive).
- *
- * Deliberately calendar-month and NOT the agreement's merged delivery period:
- * a handling fee is a monthly charge on that month's output, and tying it to
- * agreement cycles would make it undefined for clients with no agreement.
  */
 export function monthRange(taskDate: string): { start: string; endExclusive: string } {
   const [y, m] = taskDate.split('-').map(Number)
@@ -289,9 +285,8 @@ export interface BasisSum {
  * Sum the basis.
  *
  * Sums the STORED amounts, which are already the effective client charge —
- * a retainer-covered source bills 0, so it correctly contributes nothing to a
- * handling fee. Re-deriving list prices here would silently bill the client
- * for work their retainer already covers.
+ * re-deriving list prices here would let this drift from what the client is
+ * actually billed.
  */
 export function sumBasis(sources: BasisTaskLike[]): BasisSum {
   let inr = 0

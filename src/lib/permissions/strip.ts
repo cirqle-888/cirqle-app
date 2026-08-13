@@ -64,43 +64,16 @@ export function stripTaskPricing<T extends Record<string, any>>(task: T, canView
   const {
     billing_amount, billing_amount_inr, currency, loss_amount,
     billing_mode, billing_percent, billing_override, is_billable, honor_contributions,
-    work_value_inr, work_value, work_value_currency,
     ...rest
   } = task
   // Silence unused-binding linter warnings (these names exist only to destructure-out).
   void billing_amount; void billing_amount_inr; void currency; void loss_amount
   void billing_mode; void billing_percent; void billing_override; void is_billable; void honor_contributions
-  void work_value_inr; void work_value; void work_value_currency
   return rest as T
 }
 export function stripTaskListPricing<T extends Record<string, any>>(tasks: T[], canView: boolean): T[] {
   if (canView) return tasks
   return tasks.map(t => stripTaskPricing(t, false))
-}
-
-/**
- * Client agreements: unit_price / extra_unit_price / currency.
- * Committed quantities and progress stay visible — they are deliberately
- * non-financial (same call the app already makes for tasks.quantity).
- */
-export function stripAgreementItemPricing<T extends Record<string, any>>(item: T, canView: boolean): T {
-  if (canView || item == null) return item
-  // Strip client-facing pricing AND internal allocation money (operational, but
-  // still financial — must not leak to viewers without agreements.view_pricing).
-  const {
-    unit_price, extra_unit_price, currency,
-    creative_allocation_amount, management_allocation_amount, allocated_unit_value,
-    work_unit_value, work_commission_pct,
-    ...rest
-  } = item
-  void unit_price; void extra_unit_price; void currency
-  void creative_allocation_amount; void management_allocation_amount; void allocated_unit_value
-  void work_unit_value; void work_commission_pct
-  return rest as T
-}
-export function stripAgreementItemListPricing<T extends Record<string, any>>(items: T[], canView: boolean): T[] {
-  if (canView) return items
-  return items.map(i => stripAgreementItemPricing(i, false))
 }
 
 /** Contribution scores: earnings_inr */

@@ -14,7 +14,7 @@ import { recordPayment } from '@/lib/finance/record-payment'
 import type { RecordInvoicePaymentInput } from '@/lib/finance/record-payment'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { syncDraftInvoices, syncDraftInvoiceExpenses } from '@/lib/sync/integrity'
-import { syncAgreementFeeLines } from '@/lib/agreements/fee-lines'
+import { syncInvoicePackageLines } from '@/lib/packages/sync-invoice'
 
 interface ActionResult<T = void> {
   ok: boolean
@@ -123,18 +123,15 @@ export async function serverResyncInvoiceTasks(
     await syncDraftInvoiceExpenses(eid)
   }
 
-  // Agreement FEES (monthly retainer, one-time package price) are as much a
-  // part of this month's bill as the task and expense lines, and until this ran
-  // here they only ever appeared via the monthly cron — so a resync silently
-  // rebuilt two thirds of the invoice and left the fee stale or missing.
+  // Packages LAST, deliberately. The per-task sync above re-adds a line for
+  // every done task, including ones a package covers; this then collapses those
+  // back into the single fee line. Running it earlier would have the task sync
+  // undo it.
   let feeLines = 0
   try {
-    const fees = await syncAgreementFeeLines(admin, {
-      month: inv.billing_period_start.slice(0, 7),
-      clientId: inv.client_id,
-    })
-    feeLines = fees.added + fees.updated
-  } catch { /* fees are best-effort: never fail a resync over them */ }
+    const pkg = await syncInvoicePackageLines(admin, invoiceId)
+    feeLines = pkg.feeLines
+  } catch { /* best-effort: never fail a resync over package lines */ }
 
   revalidatePath('/dashboard/invoices')
   return { ok: true, data: { syncedTasks: allIds.length + allExpIds.length, feeLines } }

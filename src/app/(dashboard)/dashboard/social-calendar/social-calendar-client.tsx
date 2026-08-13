@@ -7,10 +7,10 @@ import Header from '@/components/layout/header'
 import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
-import { getDeliveryPaceText } from '@/lib/utils'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { refLabel } from '@/lib/requests/core'
-import { rollupAgreementProgress, type AgreementProgressSummary } from '@/lib/agreements/progress'
+import { planPackageCalendar, cadenceLabel, suggestPlacements } from '@/lib/packages/calendar-coverage'
+import type { PackageRow, PackageItemRow, PackageTaskLike } from '@/lib/packages/types'
 import CaptionCanvasEditor from './caption-canvas'
 import { DiscussButton } from '@/components/chat/discuss-button'
 import {
@@ -33,11 +33,12 @@ import {
 } from './actions'
 import {
   CalendarDays, Loader2, Plus, Send, Trash2, Archive, ExternalLink, RotateCcw, X,
+  Package as PackageIcon, CheckCircle2, AlertTriangle,
   Settings2, FileDown, FileSpreadsheet, FileText, Lightbulb, Upload, LayoutGrid,
   Link2, Clipboard, PanelRightClose, PanelRightOpen,
   Bold, Italic, Underline, Strikethrough, List, ListOrdered, Heading2, Quote,
   Link as LinkIcon, Highlighter, Palette, Smile, Eraser,
-  AlignLeft, AlignCenter, AlignRight, CalendarRange, Handshake, ChevronDown,
+  AlignLeft, AlignCenter, AlignRight, CalendarRange, ChevronDown,
 } from 'lucide-react'
 
 // ─── Types (mirror the page's selects) ────────────────────────────────────────
@@ -87,6 +88,10 @@ interface Props {
   calendars: CalendarRow[]
   selectedId: string | null
   initialItems: ItemRow[]
+  /** Packages this client has committed to, with their included lines. */
+  packages?: (PackageRow & { items: PackageItemRow[] })[]
+  /** Tasks already linked to those packages — what has actually been delivered. */
+  packageTasks?: (PackageTaskLike & { package_id: string })[]
   clients: { id: string; name: string; code: string }[]
   services?: { id: string; name: string }[]
   /** Variant tags used across every plan — autocomplete for the "Also as" field. */
@@ -106,9 +111,6 @@ interface Props {
   /** Branding/company keys for the PDF export (same template family as invoices). */
   companySettings?: Record<string, string>
   canManage: boolean
-  agreementProgress?: AgreementProgressSummary[]
-  /** Gates the whole agreements meter — hidden entirely without agreements.view. */
-  canViewAgreements?: boolean
 }
 
 // Service assignment is fully automatic (server-side, from the Service-defaults
@@ -425,6 +427,13 @@ const monthLabel = (month: string) => {
   return `${MONTH_NAMES[m - 1]} ${y}`
 }
 
+/** "2026-08-31" → "31 Aug". A package cycle can span months, so name the month. */
+const fmtDay = (date: string) => {
+  const [, m, d] = String(date ?? '').split('-').map(Number)
+  if (!m || !d) return '—'
+  return `${d} ${MONTH_NAMES[m - 1]}`
+}
+
 // serviceId deliberately absent: the server auto-assigns it from the content type.
 const EMPTY_ITEM: ItemInput = {
   scheduledDate: '', scheduledEndDate: '', title: '', contentType: 'post', platforms: [], caption: '', notes: '', variants: [], referenceUrls: [], captionCanvas: null, assignedEmployeeId: null,
@@ -498,7 +507,7 @@ function DroppableZone({ id, className, activeClassName, disabled, children }: {
 
 export default function SocialCalendarClient({
   migrated, calendars, selectedId, initialItems, clients, services = [], serviceMap = {}, companySettings = {}, canManage,
-  agreementProgress, canViewAgreements = false, knownVariants = [], employees = [],
+  knownVariants = [], employees = [], packages = [], packageTasks = [],
   employeeDepartments = {}, employeeServices = {}, departments = [],
 }: Props) {
   const router = useRouter()
@@ -507,12 +516,54 @@ export default function SocialCalendarClient({
   const selected = calendars.find(c => c.id === selectedId) ?? null
   const items = initialItems
 
-  // Agreements meter rollup — reuses the shared pure helper (no duplicated math).
-  // `agreementProgress` is already scoped to the selected plan's client + month.
-  const agreementRollup = useMemo(
-    () => rollupAgreementProgress(agreementProgress ?? []),
-    [agreementProgress],
-  )
+  // ── What the client's packages still need from this plan ──────────────────
+  //
+  // Derived from the live item list, so dragging a post into the month updates
+  // "still to plan" immediately rather than after a refresh.
+  const packageProgress = useMemo(() => {
+    if (!selected?.month || packages.length === 0) return []
+    const itemsByPackage = new Map<string, PackageItemRow[]>()
+    for (const p of packages) itemsByPackage.set(p.id, p.items ?? [])
+
+    const tasksByPackage = new Map<string, PackageTaskLike[]>()
+    for (const t of packageTasks) {
+      const arr = tasksByPackage.get(t.package_id)
+      if (arr) arr.push(t)
+      else tasksByPackage.set(t.package_id, [t])
+    }
+
+    return planPackageCalendar({
+      packages,
+      itemsByPackage,
+      tasksByPackage,
+      month: String(selected.month).slice(0, 7),
+      calendarItems: items.map(it => ({
+        id: it.id,
+        service_id: (it as { service_id?: string | null }).service_id ?? null,
+        scheduled_date: it.scheduled_date,
+        // An item that already became a linked task is delivered, not planned.
+        promotedTaskId: it.request?.promoted_task?.id ?? null,
+      })),
+      today: new Date().toISOString().slice(0, 10),
+    })
+  }, [selected?.month, packages, packageTasks, items])
+
+  // Placement hints, on by default and dismissible.
+  //
+  // Initialised to `true` rather than read from localStorage, so the server and
+  // the first client render agree; the stored preference is applied in an effect
+  // straight after. Reading storage in the initialiser would hydrate a different
+  // tree than the server sent.
+  const serviceNameById = (id: string) => services.find(s => s.id === id)?.name ?? 'Deliverable'
+
+  const [showHints, setShowHints] = useState(true)
+  useEffect(() => {
+    try { if (localStorage.getItem('social:planHints') === '0') setShowHints(false) } catch { /* no storage */ }
+  }, [])
+  const toggleHints = (next: boolean) => {
+    setShowHints(next)
+    try { localStorage.setItem('social:planHints', next ? '1' : '0') } catch { /* no storage */ }
+  }
 
   // ── New-plan modal ──────────────────────────────────────────────────────────
   const [showNewPlan, setShowNewPlan] = useState(false)
@@ -796,6 +847,58 @@ export default function SocialCalendarClient({
     return map
   }, [items])
 
+  /**
+   * Quiet placement hints — where the still-unplanned deliverables could go.
+   *
+   * A suggestion only. Nothing is written until the owner clicks one and types
+   * a title; auto-filling the month would count as "planned" and erase the very
+   * shortfall this is meant to surface.
+   */
+  const hintsByDate = useMemo(() => {
+    const out = new Map<string, { date: string; serviceId: string; count: number; catchUp: boolean }>()
+    if (!showHints || !canManage || packageProgress.length === 0) return out
+
+    const today = ymd(new Date())
+    for (const pp of packageProgress) {
+      // The services this package covers, so a day busy with unrelated work
+      // still reads as free for this one.
+      const covered = new Set(pp.perService.map(s => s.serviceId))
+      const days = grid.map(cell => {
+        const dayItems = itemsByDate.get(cell.key) ?? []
+        return {
+          key: cell.key,
+          inMonth: cell.inMonth,
+          load: dayItems.length + (continuationsByDate.get(cell.key)?.length ?? 0),
+          pkgLoad: dayItems.filter(i => {
+            const sid = (i as { service_id?: string | null }).service_id
+            return sid ? covered.has(sid) : false
+          }).length,
+        }
+      })
+
+      for (const p of suggestPlacements(pp, days, today)) {
+        const found = out.get(p.date)
+        // Several slots on one day collapse into a single row with a count, so
+        // a hint never changes a cell's height no matter how far behind we are.
+        if (found) { found.count += 1; found.catchUp = found.catchUp || p.catchUp }
+        else out.set(p.date, { date: p.date, serviceId: p.serviceId, count: 1, catchUp: p.catchUp })
+      }
+    }
+    return out
+  }, [showHints, canManage, packageProgress, grid, itemsByDate, continuationsByDate])
+
+  /**
+   * Name the service on a hint only when it is actually ambiguous.
+   *
+   * With one kind of deliverable outstanding, "+ Social Media…" truncated into
+   * eleven cells is repetition, not information — and repetition is exactly
+   * what makes a gentle nudge start to nag. A bare "+" reads as an empty slot.
+   */
+  const hintServicesAmbiguous = useMemo(
+    () => new Set([...hintsByDate.values()].map(h => h.serviceId)).size > 1,
+    [hintsByDate],
+  )
+
   const progressCounts = useMemo(() => {
     const counts: Record<ItemProgress, number> = {
       planned: 0, requested: 0, in_progress: 0, delivered: 0, done: 0, cancelled: 0,
@@ -1012,12 +1115,7 @@ export default function SocialCalendarClient({
               const opt = (c: (typeof calendars)[number]) => {
                 const total = c.items?.length ?? 0
                 const sent = c.items?.filter(i => i.request_id).length ?? 0
-                let sub = `${c.title ? c.title + ' · ' : ''}${total} items · ${sent} in requests`
-                if (c.id === selected?.id && agreementProgress && agreementProgress.length > 0) {
-                  const totalCommitted = agreementProgress.reduce((sum, a) => sum + (a.totalCommitted || 0), 0)
-                  const totalDelivered = agreementProgress.reduce((sum, a) => sum + (a.totalDelivered || 0), 0)
-                  sub = `${c.title ? c.title + ' · ' : ''}${totalDelivered}/${totalCommitted} Delivered`
-                }
+                const sub = `${c.title ? c.title + ' · ' : ''}${total} items · ${sent} in requests`
                 return { id: c.id, label: `${c.client?.name ?? 'Client'} — ${monthLabel(c.month)}`, sub }
               }
               // Grouped by relevance, not creation order: what's being planned
@@ -1160,54 +1258,155 @@ export default function SocialCalendarClient({
             </div>
           </div>
 
-          {/* ── Agreements progress meter (hidden without agreements.view) ── */}
-          {canViewAgreements && agreementRollup.activeAgreements > 0 && (
-            <div className="rounded-xl border border-border bg-card px-4 py-3">
-              <div className="flex items-center justify-between gap-3 mb-2">
-                <div className="flex items-center gap-2">
-                  <Handshake className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-sm font-semibold">Agreements Progress</span>
-                  <span className="text-xs text-muted-foreground">
-                    · {agreementRollup.activeAgreements} Active Agreement{agreementRollup.activeAgreements === 1 ? '' : 's'}
+          {/*
+            ── Package commitment ──
+            What this client is owed under a package, and whether the month on
+            screen actually delivers it. Without this the planner is filling a
+            calendar with no idea it is eight posts short of the retainer.
+          */}
+          {/*
+            Settled packages — commitment met, or the cycle closed. No decision
+            left to support, so however many there are they share ONE quiet
+            line of chips instead of a row each. The chip links to the
+            Packages page, which holds the full story.
+          */}
+          {packageProgress.some(pp => pp.remaining === 0 || pp.missed) && (
+            <div className="flex items-center gap-1.5 flex-wrap text-[10px] text-muted-foreground">
+              {packageProgress.filter(pp => pp.remaining === 0 || pp.missed).map(pp => (
+                <Link key={pp.packageId} href="/dashboard/packages"
+                  title={pp.remaining === 0
+                    ? `${pp.name} — all ${pp.included} delivered`
+                    : `${pp.name} — cycle closed, ${pp.remaining} of ${pp.included} not delivered`}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-border/50 bg-card/40 hover:text-foreground hover:border-border transition-colors">
+                  {pp.remaining === 0
+                    ? <CheckCircle2 className="w-2.5 h-2.5 text-emerald-500 shrink-0" />
+                    : <AlertTriangle className="w-2.5 h-2.5 text-amber-500 shrink-0" />}
+                  <span className="truncate max-w-[12rem]">{pp.name}</span>
+                  <span className="tabular-nums">
+                    {pp.remaining === 0 ? pp.included : `${pp.delivered}/${pp.included}`}
                   </span>
-                </div>
-                <span className="text-sm font-semibold tabular-nums">{agreementRollup.completionPct}%</span>
-              </div>
-
-              <div className="h-2 w-full rounded-full bg-secondary overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-emerald-500 transition-all"
-                  style={{ width: `${agreementRollup.completionPct}%` }}
-                />
-              </div>
-
-              <div className="mt-2.5 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs">
-                <span className="flex items-center gap-1.5">
-                  <span className="text-emerald-500">✓</span>
-                  <span className="text-muted-foreground">Delivered</span>
-                  <span className="font-semibold tabular-nums">{agreementRollup.delivered}</span>
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="text-amber-500">◐</span>
-                  <span className="text-muted-foreground">Remaining</span>
-                  <span className="font-semibold tabular-nums">{agreementRollup.remaining}</span>
-                </span>
-                <span className="text-muted-foreground/70">
-                  of {agreementRollup.committed} committed
-                </span>
-                {agreementRollup.extra > 0 && (
-                  <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-violet-500/12 text-violet-600 dark:text-violet-300 border border-violet-500/25">
-                    +{agreementRollup.extra} extra
-                  </span>
-                )}
-                {agreementRollup.remaining > 0 && getDeliveryPaceText(selected.month, agreementRollup.remaining) && (
-                  <span className="text-muted-foreground bg-secondary/50 px-2 py-0.5 rounded border border-border/50">
-                    {getDeliveryPaceText(selected.month, agreementRollup.remaining)}
-                  </span>
-                )}
-              </div>
+                </Link>
+              ))}
             </div>
           )}
+
+          {packageProgress.filter(pp => pp.remaining > 0 && !pp.missed).map(pp => {
+            const pct = pp.included > 0 ? Math.min(100, Math.round((pp.delivered / pp.included) * 100)) : 0
+            const plannedPct = pp.included > 0 ? Math.min(100 - pct, Math.round((pp.planned / pp.included) * 100)) : 0
+            const cadence = cadenceLabel(pp.cadence)
+
+            return (
+              <div key={pp.packageId} className="rounded-xl border border-border bg-card px-4 py-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <PackageIcon className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <span className="text-xs font-semibold">{pp.name}</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    {pp.deadline
+                      ? `${pp.isFirstCycle ? 'first cycle' : 'this cycle'} · ${fmtDay(pp.windowStart)} → ${fmtDay(pp.deadline)}`
+                      /* Open-ended one-off: it has a start but no due date, and
+                         inventing one would misstate the commitment. */
+                      : `one-off · from ${fmtDay(pp.windowStart)}`}
+                  </span>
+                  <Link href="/dashboard/packages"
+                    className="text-[11px] text-muted-foreground hover:text-foreground hover:underline ml-auto">
+                    Package
+                  </Link>
+                </div>
+
+                {/* Delivered (solid) then planned (hatched) against the commitment. */}
+                <div className="mt-2 h-1.5 w-full rounded-full bg-secondary overflow-hidden flex">
+                  <div className="h-full bg-emerald-500" style={{ width: `${pct}%` }} />
+                  <div className="h-full bg-emerald-500/35" style={{ width: `${plannedPct}%` }} />
+                </div>
+
+                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+                  <span>
+                    <span className="font-semibold tabular-nums">{pp.delivered}</span>
+                    <span className="text-muted-foreground"> of {pp.included} delivered</span>
+                  </span>
+                  {/* Already a task, just not finished — needs doing, not planning. */}
+                  {pp.scheduled > 0 && (
+                    <span className="text-blue-600 dark:text-blue-400">
+                      <span className="tabular-nums">{pp.scheduled}</span> in progress
+                    </span>
+                  )}
+                  {pp.planned > 0 && (
+                    <span className="text-muted-foreground">
+                      <span className="tabular-nums text-foreground">{pp.planned}</span> planned here
+                    </span>
+                  )}
+                  {/*
+                    The number that costs money: owed, and not on the calendar
+                    at all. Everything else on this screen is visible as a card;
+                    this is the only place the absence shows up.
+                  */}
+                  {pp.unplanned > 0 && (
+                    <span className="text-amber-600 dark:text-amber-400 font-medium">
+                      <span className="tabular-nums">{pp.unplanned}</span> still to plan
+                    </span>
+                  )}
+                  {/* The escape hatch, shown only on a package that actually has
+                      something to suggest — a package whose remaining work is
+                      already in hand has no days to offer. */}
+                  {canManage && pp.unplanned > 0 && (
+                    <button onClick={() => toggleHints(!showHints)}
+                      className="text-muted-foreground hover:text-foreground underline decoration-dotted underline-offset-2">
+                      {showHints ? 'hide suggested days' : 'suggest days'}
+                    </button>
+                  )}
+                  {pp.remaining === 0 && (
+                    <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                      Commitment met
+                    </span>
+                  )}
+                  {pp.missed ? (
+                    <span className="text-red-600 dark:text-red-400">
+                      {pp.remaining} undelivered — the cycle has closed
+                    </span>
+                  ) : cadence && pp.daysLeft !== null && (
+                    <span className="text-muted-foreground ml-auto inline-flex items-center gap-2">
+                      {/* Pace verdict: where a steady schedule says the cycle
+                          should be by today, versus what's actually finished. */}
+                      {pp.pace === 'behind' && (
+                        <span className="text-amber-600 dark:text-amber-400">
+                          {pp.behind} behind pace
+                        </span>
+                      )}
+                      {pp.pace === 'ahead' && (
+                        <span className="text-emerald-600 dark:text-emerald-400">ahead of pace</span>
+                      )}
+                      {pp.pace === 'on_track' && (
+                        <span className="text-emerald-600 dark:text-emerald-400">on pace</span>
+                      )}
+                      <span>{pp.daysLeft} day{pp.daysLeft === 1 ? '' : 's'} left · needs {cadence}</span>
+                    </span>
+                  )}
+                </div>
+
+                {/* Per included service, when the package commits to more than one. */}
+                {pp.perService.length > 1 && (
+                  <div className="mt-2 pt-2 border-t border-border/60 space-y-1">
+                    {pp.perService.map(s => (
+                      <div key={s.serviceId} className="flex items-center justify-between text-[11px]">
+                        <span className="text-muted-foreground truncate">
+                          {services.find(x => x.id === s.serviceId)?.name ?? 'Service'}
+                        </span>
+                        <span className="tabular-nums shrink-0 ml-3">
+                          <span className="font-medium">{s.delivered}</span>
+                          <span className="text-muted-foreground">/{s.included}</span>
+                          {s.unplanned > 0 && (
+                            <span className="ml-1.5 text-amber-600 dark:text-amber-400">
+                              {s.unplanned} to plan
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
 
           {/* ── View toggle ── */}
           <div className="flex items-center gap-1 -mt-1">
@@ -1235,6 +1434,7 @@ export default function SocialCalendarClient({
                 {grid.map(cell => {
                   const dayItems = itemsByDate.get(cell.key) ?? []
                   const spans = continuationsByDate.get(cell.key) ?? []
+                  const hint = hintsByDate.get(cell.key)
                   return (
                     <DroppableZone
                       key={cell.key}
@@ -1244,7 +1444,7 @@ export default function SocialCalendarClient({
                       activeClassName="bg-primary/10"
                     >
                       <div
-                        className={`h-full w-full p-1.5 ${canManage && cell.inMonth ? 'cursor-pointer hover:bg-secondary/30 transition-colors' : ''}`}
+                        className={`flex flex-col h-full w-full p-1.5 ${canManage && cell.inMonth ? 'cursor-pointer hover:bg-secondary/30 transition-colors' : ''}`}
                         onClick={() => {
                           if (!canManage || !cell.inMonth) return
                           setItemForm({ ...EMPTY_ITEM, scheduledDate: cell.key })
@@ -1298,6 +1498,52 @@ export default function SocialCalendarClient({
                             </button>
                           ))}
                         </div>
+
+                        {/*
+                          Placement hint — a suggestion, not a booking.
+
+                          `mt-auto` pins it to the bottom of the cell so it eats
+                          the slack a short day already has instead of growing
+                          the row; several suggestions on one day collapse into
+                          one row with a count, so the height never varies with
+                          how far behind the retainer is.
+
+                          Deliberately colourless and dashed: the owner asked for
+                          a gentle nudge, not a highlight, and a coloured chip
+                          here would compete with the real item cards.
+                        */}
+                        {hint && (
+                          <button
+                            onClick={e => {
+                              e.stopPropagation()
+                              setItemForm({
+                                ...EMPTY_ITEM,
+                                scheduledDate: cell.key,
+                                serviceId: hint.serviceId,
+                              })
+                              setCopyTab('text')
+                              setShowAllDesigners(false)
+                              setItemModal({ mode: 'add' })
+                            }}
+                            title={hint.catchUp
+                              ? `${serviceNameById(hint.serviceId)} — catch-up: the steady schedule had this done by now`
+                              : `${serviceNameById(hint.serviceId)} — suggested to keep the package on track`}
+                            /* Dashed = suggestion, always. The tint is one step
+                               louder than before (the owner asked for "a little
+                               bit highlighted"), amber-edged when it exists to
+                               recover a pace shortfall. */
+                            className={`mt-auto w-full flex items-center gap-1 rounded-sm border border-dashed px-1 py-0.5 text-[9px] transition-colors truncate ${
+                              hint.catchUp
+                                ? 'border-amber-500/50 bg-amber-500/[0.06] text-amber-600/80 dark:text-amber-400/80 hover:text-amber-600 dark:hover:text-amber-400 hover:border-amber-500'
+                                : 'border-primary/40 bg-primary/[0.04] text-primary/60 hover:text-primary hover:border-primary/70'}`}
+                          >
+                            <span className="shrink-0">+</span>
+                            {hintServicesAmbiguous && (
+                              <span className="truncate">{serviceNameById(hint.serviceId)}</span>
+                            )}
+                            {hint.count > 1 && <span className="ml-auto shrink-0 tabular-nums">×{hint.count}</span>}
+                          </button>
+                        )}
                       </div>
                     </DroppableZone>
                   )

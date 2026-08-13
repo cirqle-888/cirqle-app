@@ -31,10 +31,6 @@ vi.mock('@/lib/payroll/adjustments', () => ({
     return Promise.resolve({ recorded: recordedAdjustments })
   },
 }))
-vi.mock('@/lib/sync/agreement-earnings', () => ({
-  syncTaskAgreementEarnings: vi.fn(() => Promise.resolve({ changed: 0 })),
-}))
-
 vi.mock('@/lib/supabase/admin', () => ({
   createAdminClient: () => ({
     from: (table: string) => ({

@@ -3,16 +3,7 @@
  *
  * Pure and framework-free (no 'use client'/'use server') so the Add Task form,
  * the shared Edit Task modal, the bulk recalc tool, and server actions all run
- * the SAME arithmetic. Before this existed the formula was re-implemented four
- * times and had already drifted: the Edit modal recomputed the matrix price on
- * every save and pushed it over a retainer-covered task's zero, so the server's
- * anti-double-billing guard rejected the write and NO edit to a covered task —
- * not even a title change — could be saved.
- *
- * Two rules live here, and nowhere else:
- *   1. computeTaskAmount  — what the pricing matrix says the work is worth.
- *   2. effectiveBillingAmount — what the CLIENT is actually charged, which is
- *      zero while a retainer covers the task. Rule 2 always wraps rule 1.
+ * the SAME arithmetic.
  */
 
 export type PricingType =
@@ -86,38 +77,6 @@ export function resolveUnitPrice(args: {
   }
 }
 
-// ─── Agreement extra pricing ─────────────────────────────────────────────────
-
-export interface CoverageExtraPricing {
-  /** client_agreement_items.extra_unit_price for the covering item. */
-  extraUnitPrice?: number | null
-  /** The agreement item's currency. */
-  currency?: string | null
-}
-
-/**
- * A retainer-covered task flagged "Bill as extra" prices from the agreement's
- * extra_unit_price when one is agreed — per task, regardless of the service's
- * own pricing type. Without an agreed extra rate the base (matrix/default)
- * price stands. Mirrors serverFillTaskBilling's precedence exactly.
- */
-export function applyCoverageExtraPrice(
-  base: ResolvedPrice,
-  coverage: CoverageExtraPricing | null,
-  billAsExtra: boolean,
-): ResolvedPrice & { fromAgreementExtra: boolean } {
-  if (coverage && billAsExtra && coverage.extraUnitPrice != null && coverage.extraUnitPrice > 0) {
-    return {
-      pricingType: 'fixed_per_creative',
-      unitPrice: coverage.extraUnitPrice,
-      currency: coverage.currency || base.currency,
-      fromClientMatrix: false,
-      fromAgreementExtra: true,
-    }
-  }
-  return { ...base, fromAgreementExtra: false }
-}
-
 // ─── The formula ─────────────────────────────────────────────────────────────
 
 export interface AmountInputs {
@@ -137,7 +96,7 @@ export interface AmountInputs {
   percentRate?: number | null
 }
 
-/** What the pricing matrix says this work is worth. Ignores retainer coverage. */
+/** What the pricing matrix says this work is worth. */
 export function computeTaskAmount(i: AmountInputs): number {
   switch (i.pricingType) {
     case 'fixed_per_creative':
@@ -153,8 +112,7 @@ export function computeTaskAmount(i: AmountInputs): number {
 
 /**
  * The value stored in `tasks.quantity`. Each pricing type measures its work in
- * its own unit, and the agreement progress engine consumes this column, so a
- * task with 4 creatives must store 4 — not 1.
+ * its own unit, so a task with 4 creatives must store 4 — not 1.
  */
 export function resolveTaskQuantity(i: {
   pricingType: PricingType
@@ -170,26 +128,3 @@ export function resolveTaskQuantity(i: {
   }
 }
 
-// ─── Coverage: what the client is actually charged ───────────────────────────
-
-export interface CoverageState {
-  /** An active retainer covers this client + service + date. */
-  covered: boolean
-  /** The user chose to bill this one on top of the retainer. */
-  billAsExtra: boolean
-}
-
-/** True while the retainer absorbs the cost, so no client-price UI should show. */
-export function isBillingSuppressed(c: CoverageState): boolean {
-  return c.covered && !c.billAsExtra
-}
-
-/**
- * The amount to WRITE. Covered and not flagged extra bills at zero — the monthly
- * retainer is the invoice, and charging per task as well would bill the client
- * twice. Every save path must run its engine amount through this before
- * persisting; the server rejects a non-zero amount on a covered task.
- */
-export function effectiveBillingAmount(amount: number, coverage: CoverageState): number {
-  return isBillingSuppressed(coverage) ? 0 : amount
-}

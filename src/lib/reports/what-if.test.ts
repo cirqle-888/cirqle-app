@@ -49,7 +49,6 @@ function fixture(): WhatIfRawInputs {
     services: [{ id: 'S1', name: 'Logo' }],
     empRating: { e1: 70, e2: 100 },
     toolPctByTask: {},
-    agreements: [],
   }
 }
 
@@ -125,71 +124,6 @@ describe('lever: billing growth %', () => {
     // t1: 10000 × 1.1 × 0.9 = 9900 ; t2: 20000 × 1.1 = 22000
     expect(rows.find(r => r.task_id === 't1')!.billing_inr).toBe(9900)
     expect(rows.find(r => r.task_id === 't2')!.billing_inr).toBe(22000)
-  })
-})
-
-describe('lever: draft agreements', () => {
-  it('applies a draft percentage_of_billing agreement via the real resolution engine', () => {
-    const raw = fixture()
-    const s = emptyScenario('s1', 'A')
-    s.draftAgreements.push({
-      id: 'draft-1', employee_id: 'e1', client_id: 'A', service_id: 'S1',
-      agreement_type: 'percentage_of_billing', agreement_value: 15,
-    })
-    const rows = simulateScenario(raw, s)
-    const t1 = rows.find(r => r.task_id === 't1')!
-    // 10000 × 15% = 1500 replaces Alice's 2100 on t1
-    expect(t1.emp.e1.earn).toBe(1500)
-    expect(t1.emp.e1.source).toBe('agreement')
-    // t2 (client B) is outside the draft's scope
-    expect(rows.find(r => r.task_id === 't2')!.emp.e1.earn).toBe(5600)
-  })
-
-  it('loses to a more specific real agreement (honest specificity)', () => {
-    const raw = fixture()
-    raw.agreements = [{
-      id: 'real-1', employee_id: 'e1', client_id: 'A', service_id: 'S1',
-      agreement_type: 'fixed_per_task', agreement_value: 999,
-      currency: 'INR', effective_from: '2026-01-01', effective_to: null, is_active: true,
-    }]
-    const s = emptyScenario('s1', 'A')
-    // Draft is GLOBAL (less specific than the real exact-match agreement).
-    s.draftAgreements.push({
-      id: 'draft-1', employee_id: 'e1', client_id: null, service_id: null,
-      agreement_type: 'percentage_of_billing', agreement_value: 15,
-    })
-    const rows = simulateScenario(raw, s)
-    expect(rows.find(r => r.task_id === 't1')!.emp.e1.earn).toBe(999)
-  })
-
-  it('replaces a real agreement when the draft marks it replaced', () => {
-    const raw = fixture()
-    raw.agreements = [{
-      id: 'real-1', employee_id: 'e1', client_id: 'A', service_id: 'S1',
-      agreement_type: 'fixed_per_task', agreement_value: 999,
-      currency: 'INR', effective_from: '2026-01-01', effective_to: null, is_active: true,
-    }]
-    const s = emptyScenario('s1', 'A')
-    s.draftAgreements.push({
-      id: 'draft-1', employee_id: 'e1', client_id: 'A', service_id: 'S1',
-      agreement_type: 'fixed_per_task', agreement_value: 1200,
-      replaces_agreement_id: 'real-1',
-    })
-    const rows = simulateScenario(raw, s)
-    expect(rows.find(r => r.task_id === 't1')!.emp.e1.earn).toBe(1200)
-  })
-
-  it('never applies to manual overrides', () => {
-    const raw = fixture()
-    raw.scores[0].is_manual_override = true
-    const s = emptyScenario('s1', 'A')
-    s.draftAgreements.push({
-      id: 'draft-1', employee_id: 'e1', client_id: 'A', service_id: 'S1',
-      agreement_type: 'percentage_of_billing', agreement_value: 15,
-    })
-    const rows = simulateScenario(raw, s)
-    const t1 = rows.find(r => r.task_id === 't1')!
-    expect(t1.emp.e1.source).toBe('manual_override')
   })
 })
 
@@ -269,68 +203,6 @@ describe('helpers', () => {
     expect(resolveIncrement(30000, { mode: 'pct', value: 10 })).toBe(3000)
     expect(resolveIncrement(30000, { mode: 'amount', value: 2500 })).toBe(2500)
     expect(resolveIncrement(30000, undefined)).toBe(0)
-  })
-})
-
-// ─── Retainer-covered work ───────────────────────────────────────────────────
-// A covered task bills the client 0 and pools from the agreement's work value
-// instead. The planner must read that basis, or every retainer client
-// simulates at ₹0 earnings and ₹0 profit — understating the plan precisely
-// where a retainer makes the revenue most predictable.
-
-function coveredFixture(): WhatIfRawInputs {
-  const raw = fixture()
-  raw.tasks = [{
-    id: 'tc', task_number: 3, title: 'Covered post', task_date: '2026-06-15',
-    status: 'done', currency: 'AED',
-    billing_amount: 0, billing_amount_inr: 0,          // client pays via the retainer
-    client_id: 'A', service_id: 'S1',
-    retainer_item_id: 'item-1', bill_as_extra: false,
-    work_value_inr: 1000,
-  }]
-  raw.scores = [
-    { task_id: 'tc', employee_id: 'e1', score_percentage: 100, earnings_inr: 0, is_manual_override: false },
-  ]
-  raw.empRating = { e1: 100, e2: 100 }
-  return raw
-}
-
-describe('retainer-covered tasks', () => {
-  it('pools from the work value, not the zero billing', () => {
-    const [row] = baselineRows(coveredFixture())
-    // 1000 work value × 50% matrix commission
-    expect(row.commission_pool).toBe(500)
-    expect(row.emp.e1.earn).toBe(500)
-  })
-
-  it('does not report a covered task as ₹0 earnings', () => {
-    const [row] = baselineRows(coveredFixture())
-    expect(row.emp.e1.earn).toBeGreaterThan(0)
-  })
-
-  it('prefers the agreement commission override over the pricing matrix', () => {
-    const raw = coveredFixture()
-    raw.itemCommissionPct = { 'item-1': 20 }
-    const [row] = baselineRows(raw)
-    expect(row.commission_pool).toBe(200)   // 20%, not the matrix's 50%
-  })
-
-  it('holds the work value steady under the price and growth levers', () => {
-    // Charging the client more does not raise what the work is internally
-    // worth — scaling it would hand the team a raise nobody agreed to.
-    const raw = coveredFixture()
-    const base = baselineRows(raw)[0].commission_pool
-    const s = emptyScenario('s', 'S')
-    s.billingGrowthPct = 50
-    s.priceOverrides = { 'A|S1': { oldPrice: 100, newPrice: 200 } }
-    expect(simulateScenario(raw, s)[0].commission_pool).toBe(base)
-  })
-
-  it('still scales an ordinary billed task under the growth lever', () => {
-    const s = emptyScenario('s', 'S')
-    s.billingGrowthPct = 50
-    const t1 = simulateScenario(fixture(), s).find(r => r.task_id === 't1')!
-    expect(t1.commission_pool).toBe(7500)   // 10000 × 1.5 × 50%
   })
 })
 

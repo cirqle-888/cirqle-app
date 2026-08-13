@@ -29,6 +29,12 @@ export type NotificationType =
   | 'interview_reminder'
   | 'candidate_selected'
   | 'offer_accepted'
+  // Social Hub / Meta integration
+  | 'meta_lead_received'
+  | 'social_post_published'
+  | 'social_post_failed'
+  | 'social_sync_failed'
+  | 'meta_reauth_required'
 
 interface NotificationContent {
   type: NotificationType | (string & {})

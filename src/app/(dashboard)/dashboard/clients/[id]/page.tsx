@@ -1,13 +1,11 @@
 import { redirect, notFound } from 'next/navigation'
 import { createAdminClient, fetchAll } from '@/lib/supabase/server'
-import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
+import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
 import {
   loadServiceScope, isServiceRestricted, scopeRowsByService, scopeServiceList,
 } from '@/lib/scope/service-scope'
-import { loadAgreementOverview, loadClientMonthProgress } from '@/lib/agreements/server'
-import type { AgreementProgressSummary } from '@/lib/agreements/progress'
 import ClientDetailClient from './client-detail-client'
 
 export const dynamic = 'force-dynamic'
@@ -42,7 +40,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     notFound()
   }
 
-  const [invoicesRes, tasksRes, pricingRes, servicesRes, partnerRes] = await Promise.all([
+  const [invoicesRes, tasksRes, pricingRes, servicesRes, partnerRes, socialRes] = await Promise.all([
     showAmounts
       ? fetchAll(supabase.from('invoices')
           .select('id, invoice_number, status, total_amount, paid_amount, issue_date, due_date, created_at')
@@ -57,32 +55,14 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     client.business_partner_id
       ? supabase.from('business_partners').select('id, name, partner_code').eq('id', client.business_partner_id).maybeSingle()
       : Promise.resolve({ data: null }),
+    // Social Hub panel — safe columns only, never the access_token. Degrades to
+    // [] when the social_accounts migration has not been applied yet.
+    supabase.from('social_accounts')
+      .select('id, platform, name, username, profile_picture_url, followers_count, status, last_synced_at')
+      .eq('client_id', id).neq('status', 'disconnected')
+      .then((r) => r, () => ({ data: [] as any[] })),
   ])
   
-  const canViewAgreements = isAdmin || hasPermission(me, PERMS.AGREEMENTS_VIEW)
-  const canManageAgreements = isAdmin || hasPermission(me, PERMS.AGREEMENTS_MANAGE)
-  const canViewAgreementPricing = isAdmin || hasPermission(me, PERMS.AGREEMENTS_VIEW_PRICING)
-
-  // Overview + this-month progress + retainer analytics — per-client loaders,
-  // no N+1. All skipped when the viewer can't see agreements.
-  let agreements: Awaited<ReturnType<typeof loadAgreementOverview>> = []
-  let agreementProgress: AgreementProgressSummary[] = []
-  if (canViewAgreements) {
-    const currentMonth = new Date().toISOString().slice(0, 7)
-    const [overview, progress] = await Promise.all([
-      loadAgreementOverview({ clientId: id }).catch(err => {
-        console.error('Failed to load agreements', err)
-        return []
-      }),
-      loadClientMonthProgress(id, currentMonth).catch(err => {
-        console.error('Failed to load agreement progress', err)
-        return [] as AgreementProgressSummary[]
-      }),
-    ])
-    agreements = overview
-    agreementProgress = progress
-  }
-
   // A multi-department client is VISIBLE but partially rendered: the viewer
   // sees only their departments' slice. Tasks filter by the task's service
   // (tasks with no service stay — unclassified work is visible app-wide);
@@ -103,10 +83,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       services={scopeServiceList((servicesRes.data || []) as any[], scope)}
       partner={partnerRes.data as any}
       showAmounts={showAmounts}
-      agreements={agreements}
-      agreementProgress={agreementProgress}
-      canViewAgreements={canViewAgreements}
-      canManageAgreements={canManageAgreements}
+      socialAccounts={(socialRes.data || []) as any[]}
     />
   )
 }

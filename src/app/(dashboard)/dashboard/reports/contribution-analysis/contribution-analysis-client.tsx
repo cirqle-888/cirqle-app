@@ -182,9 +182,6 @@ function buildColumns(employees: EmployeeColumn[], dp: number): Col[] {
         if (!c || c.earn <= 0) return <span className="text-muted-foreground/40">₹0</span>
         return (
           <span className="inline-flex items-center gap-1 justify-end">
-            {c.source === 'agreement' && (
-              <span title="Employee commission agreement" className="text-[8px] font-bold leading-none px-1 py-0.5 rounded bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/25">A</span>
-            )}
             {c.source === 'manual_override' && (
               <span title="Manual override" className="text-[8px] font-bold leading-none px-1 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/25">M</span>
             )}

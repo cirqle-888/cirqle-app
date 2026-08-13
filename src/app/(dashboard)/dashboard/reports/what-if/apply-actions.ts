@@ -17,24 +17,12 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
-import type { AgreementType } from '@/lib/calculations/agreements'
 
 export type SelectedChange =
   | { kind: 'rating'; employeeId: string; employeeName: string; from: number; to: number }
   | { kind: 'base_salary'; employeeId: string; employeeName: string; from: number; to: number }
   | { kind: 'commission_pct'; clientId: string; serviceId: string; label: string; from: number; to: number }
   | { kind: 'price'; clientId: string; serviceId: string; label: string; from: number; to: number }
-  | {
-      kind: 'agreement'
-      employeeId: string
-      employeeName: string
-      clientId: string | null
-      serviceId: string | null
-      agreementType: AgreementType
-      agreementValue: number
-      effectiveFrom: string           // YYYY-MM-DD, chosen in the review UI
-      replacesAgreementId: string | null
-    }
 
 export interface ApplyInput {
   scenarioName: string
@@ -55,7 +43,6 @@ const PERM_FOR_KIND: Record<SelectedChange['kind'], string> = {
   base_salary: PERMS.PAYROLL_EDIT,
   commission_pct: PERMS.SETTINGS_ACCESS,
   price: PERMS.SETTINGS_ACCESS,
-  agreement: PERMS.EMPLOYEES_MANAGE_AGREEMENTS,
 }
 
 export async function applyWhatIfScenario(input: ApplyInput): Promise<ActionResult> {
@@ -104,33 +91,6 @@ export async function applyWhatIfScenario(input: ApplyInput): Promise<ActionResu
           ? { [field]: (data as Record<string, unknown>)[field], is_active: (data as Record<string, unknown>).is_active }
           : { [field]: null, is_active: false, missing_row: true },
         new_values: { [field]: c.to, is_active: true },
-      })
-    } else if (c.kind === 'agreement') {
-      if (c.replacesAgreementId) {
-        const { data } = await admin
-          .from('employee_commission_agreements')
-          .select('id, agreement_type, agreement_value, client_id, service_id, effective_from, effective_to, is_active')
-          .eq('id', c.replacesAgreementId).maybeSingle()
-        if (data) {
-          snapshotRecords.push({
-            table_name: 'employee_commission_agreements',
-            record_id: c.replacesAgreementId,
-            old_values: data as Record<string, unknown>,
-            new_values: { is_active: false, replaced_by_new_agreement: true },
-          })
-        }
-      }
-      // Brand-new agreements have no prior state — record the creation intent
-      // so a future restore knows to deactivate what this apply created.
-      snapshotRecords.push({
-        table_name: 'employee_commission_agreements',
-        record_id: `new:${c.employeeId}:${c.agreementType}`,
-        old_values: { created_by_apply: true },
-        new_values: {
-          employee_id: c.employeeId, client_id: c.clientId, service_id: c.serviceId,
-          agreement_type: c.agreementType, agreement_value: c.agreementValue,
-          effective_from: c.effectiveFrom,
-        },
       })
     }
   }
@@ -182,25 +142,6 @@ export async function applyWhatIfScenario(input: ApplyInput): Promise<ActionResu
           },
           { onConflict: 'client_id,service_id' },
         ))
-    } else if (c.kind === 'agreement') {
-      if (c.replacesAgreementId) {
-        const { error: deactErr } = await admin
-          .from('employee_commission_agreements')
-          .update({ is_active: false, updated_at: new Date().toISOString() })
-          .eq('id', c.replacesAgreementId)
-        if (deactErr) { failures.push(`deactivate agreement: ${deactErr.message}`); continue }
-      }
-      ;({ error } = await admin.from('employee_commission_agreements').insert({
-        employee_id: c.employeeId,
-        client_id: c.clientId,
-        service_id: c.serviceId,
-        agreement_type: c.agreementType,
-        agreement_value: c.agreementValue,
-        effective_from: c.effectiveFrom,
-        is_active: true,
-        notes: `Created from What-If scenario "${input.scenarioName}"`,
-        created_by: employeeId || null,
-      }))
     }
     if (error) failures.push(`${c.kind}: ${error.message}`)
     else applied++

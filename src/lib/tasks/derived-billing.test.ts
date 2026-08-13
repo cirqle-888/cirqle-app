@@ -5,7 +5,6 @@ import {
   BILLING_RULE_VERSION,
   type BillingRule, type BasisTaskLike,
 } from './derived-billing'
-import { effectiveBillingAmount } from './pricing'
 
 const POSTER = 'svc-poster'
 const REEL = 'svc-reel'
@@ -265,20 +264,13 @@ describe('state helpers', () => {
   })
 })
 
-// ─── Coverage composition ────────────────────────────────────────────────────
+// ─── Basis composition ────────────────────────────────────────────────────────
 
-describe('retainer coverage', () => {
-  it('bills zero when the derived task is itself retainer-covered', () => {
-    const basis = sumBasis([task({ billing_amount: 1000, billing_amount_inr: 1000 })])
-    const { billingAmount } = computeRule(rule({ percent: 30 }), basis)
-    expect(effectiveBillingAmount(billingAmount, { covered: true, billAsExtra: false })).toBe(0)
-    expect(effectiveBillingAmount(billingAmount, { covered: true, billAsExtra: true })).toBe(300)
-  })
-
-  it('contributes nothing from covered SOURCE tasks — the retainer already paid for them', () => {
+describe('basis composition', () => {
+  it('a zero-billing source task contributes nothing to the basis', () => {
     const basis = sumBasis([
-      task({ id: 'covered', billing_amount: 0, billing_amount_inr: 0 }),
-      task({ id: 'extra', billing_amount: 200, billing_amount_inr: 200 }),
+      task({ id: 'zero', billing_amount: 0, billing_amount_inr: 0 }),
+      task({ id: 'other', billing_amount: 200, billing_amount_inr: 200 }),
     ])
     expect(computeRule(rule({ percent: 50 }), basis).billingAmountInr).toBe(100)
   })

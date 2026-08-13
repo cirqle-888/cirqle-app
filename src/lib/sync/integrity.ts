@@ -1,34 +1,11 @@
 import { createTypedAdminClient } from '@/lib/supabase/server'
 import { calculateCommission } from '@/lib/calculations/commission'
 import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
-import { syncTaskAgreementEarnings } from '@/lib/sync/agreement-earnings'
 import { isTaskMonthProtected } from '@/lib/payroll/compute'
 import { getInvoiceDateForTaskMonth, toSequenceMonth } from '@/lib/invoices/numbering'
 import { fetchAll } from '@/lib/supabase/server'
-import { getTaskCoverage } from '@/lib/agreements/coverage'
-import { isCoveredWorkTask, taskPoolBasisInr, resolveCommissionPct } from '@/lib/calculations/work-value'
 
 const r2 = (n: number) => Math.round(n * 100) / 100
-
-/** work_commission_pct of the task's linked agreement item, or null. */
-async function agreementItemCommissionPct(
-  supabase: ReturnType<typeof createTypedAdminClient>,
-  retainerItemId: string | null | undefined,
-): Promise<number | null> {
-  if (!retainerItemId) return null
-  try {
-    // Cast: client_agreement_items post-dates the generated Database types
-    // (same convention as lib/agreements/coverage.ts).
-    const { data } = await (supabase as any)
-      .from('client_agreement_items')
-      .select('work_commission_pct')
-      .eq('id', retainerItemId)
-      .maybeSingle()
-    return (data as { work_commission_pct?: number | null } | null)?.work_commission_pct ?? null
-  } catch {
-    return null // pre-migration: column/table unreadable → default path
-  }
-}
 
 /**
  * Fallback refresh for tasks that have contribution SCORES but no raw
@@ -47,10 +24,9 @@ async function agreementItemCommissionPct(
 export async function refreshStoredEarningsFromBilling(taskId: string) {
   const supabase = createTypedAdminClient()
 
-  // Cast: retainer_item_id / work_value_inr post-date the generated types.
-  const { data: task } = await (supabase as any)
+  const { data: task } = await supabase
     .from('tasks')
-    .select('id, billing_amount_inr, client_id, service_id, task_date, retainer_item_id, bill_as_extra, work_value_inr')
+    .select('id, billing_amount_inr, client_id, service_id, task_date')
     .eq('id', taskId)
     .single()
   if (!task) return { updated: 0, message: 'Task not found' }
@@ -84,11 +60,7 @@ export async function refreshStoredEarningsFromBilling(taskId: string) {
       .maybeSingle()
     if (pricing?.commission_percentage != null) matrixPct = pricing.commission_percentage
   }
-  const commPct = resolveCommissionPct(
-    task as any,
-    await agreementItemCommissionPct(supabase, (task as any).retainer_item_id),
-    matrixPct,
-  )
+  const commPct = matrixPct ?? 50
 
   // Tool deductions (Σ active tool fixed_percentage), a flat % off the pool.
   let toolPct = 0
@@ -106,8 +78,7 @@ export async function refreshStoredEarningsFromBilling(taskId: string) {
   const rating = new Map<string, number>()
   for (const e of (emps || [])) rating.set(e.id, Number(e.performance_rating) || 100)
 
-  // Retainer-covered work pools from the stamped work value, not billing (0).
-  const pool = taskPoolBasisInr(task as any) * commPct / 100
+  const pool = (task.billing_amount_inr || 0) * commPct / 100
   const remainingPool = pool * (1 - toolPct / 100)
 
   let updated = 0
@@ -125,9 +96,6 @@ export async function refreshStoredEarningsFromBilling(taskId: string) {
     }
   }
 
-  // Layer employee commission agreements on top (no-op without agreements).
-  await syncTaskAgreementEarnings(taskId)
-
   return { updated, message: `Refreshed ${updated} score(s) from current billing` }
 }
 
@@ -144,11 +112,11 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
 
   // HISTORICAL EARNINGS PROTECTION — checked HERE, at the entry point, not
   // only in the refreshStoredEarningsFromBilling fallback below. This function
-  // has its OWN write path (the contribution_scores upsert further down, plus
-  // syncTaskAgreementEarnings), which is the branch taken whenever the task
-  // has raw contributions — i.e. the common case on every task save. Guarding
-  // only the callee left that path wide open for months whose payslips are
-  // already paid. Fails CLOSED on an unreadable task_date.
+  // has its OWN write path (the contribution_scores upsert further down),
+  // which is the branch taken whenever the task has raw contributions — i.e.
+  // the common case on every task save. Guarding only the callee left that
+  // path wide open for months whose payslips are already paid. Fails CLOSED
+  // on an unreadable task_date.
   if (await isTaskMonthProtected(supabase as any, task.task_date)) {
     return { updated: 0, message: 'Payroll for this month is finalized — earnings left unchanged' }
   }
@@ -194,21 +162,20 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
 
   const linkedGroupIds = groupServices.filter(gs => gs.service_id === task.service_id).map(gs => gs.group_id)
   const taskGroups = linkedGroupIds.length > 0 ? groups.filter(g => linkedGroupIds.includes(g.id)) : groups
+  
+  if (linkedGroupIds.length > 0 && taskGroups.length === 0) {
+    return { updated: 0, message: 'No active contribution groups for this service — earnings left unchanged' }
+  }
+
   const taskParams = parameters.filter(p => taskGroups.some(g => g.id === p.group_id))
 
   const pricing = pricingMatrix.find(p => p.client_id === task.client_id && p.service_id === task.service_id)
-  const commPct = resolveCommissionPct(
-    task as any,
-    await agreementItemCommissionPct(supabase, (task as any).retainer_item_id),
-    pricing?.commission_percentage ?? null,
-  )
+  const commPct = pricing?.commission_percentage ?? 50
   const rates = (ratesRes?.data || []).reduce((acc: any, r: any) => ({ ...acc, [r.currency]: Number(r.rate_to_inr) || 1 }), { INR: 1 })
 
-  // Retainer-covered work pools from the stamped work value (agreement page),
-  // never from billing (0) or the pricing matrix. The matrix fallback below
-  // remains for NON-covered tasks whose billing hasn't been filled yet.
-  let internalValueInr = taskPoolBasisInr(task as any)
-  if (!isCoveredWorkTask(task as any) && internalValueInr === 0 && pricing?.price) {
+  // Fall back to the pricing matrix only when billing hasn't been filled in yet.
+  let internalValueInr = task.billing_amount_inr || 0
+  if (internalValueInr === 0 && pricing?.price) {
     const qty = task.quantity || 1
     const priceRate = rates[pricing.currency || 'INR'] || 1
     internalValueInr = (pricing.price * qty) * priceRate
@@ -278,8 +245,8 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
     if (upsertBatch.length > 0) {
       // The result was previously discarded, so a rejected write reported
       // success and an updatedCount for rows that never changed. Every repair
-      // path built on this — the contributions self-heal, agreement re-stamps,
-      // payroll recalculation — believed it had fixed earnings it had not.
+      // path built on this — the contributions self-heal, payroll
+      // recalculation — believed it had fixed earnings it had not.
       const { error: upsertErr } = await supabase
         .from('contribution_scores').upsert(upsertBatch, { onConflict: 'task_id,employee_id' })
       if (upsertErr) {
@@ -287,9 +254,6 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
         return { error: `Failed to save recalculated earnings: ${upsertErr.message}` }
       }
     }
-
-    // Layer employee commission agreements on top (no-op without agreements).
-    await syncTaskAgreementEarnings(taskId)
 
     return { success: true, updatedCount: upsertBatch.length }
   } catch (err) {
@@ -312,10 +276,6 @@ export async function syncDraftInvoices(taskId: string) {
   
   if (!task) return { error: 'Task not found' }
 
-  // Retainer-covered tasks are NOT client-billable (the client pays the monthly
-  // retainer, not per covered post). Mirrors the DB invoice trigger's guard.
-  const coverage = await getTaskCoverage(supabase, taskId)
-
   // 1. Find all existing invoice items linked to this task
   const { data: items } = await supabase.from('invoice_items').select('id, invoice_id, quantity').eq('task_id', taskId)
   // `tasks.billing_amount` is the LINE TOTAL (rate × qty) — tasks carry no
@@ -326,8 +286,8 @@ export async function syncDraftInvoices(taskId: string) {
   const taskUnitPrice = Math.round((taskAmt / taskQty) * 100) / 100
   const invoiceIdsToRecalculate = new Set<string>()
 
-    if (coverage.covered || task.deleted_at || task.status === 'cancelled') {
-      // Covered, deleted, or cancelled → strip any draft line this task carries, and never add one.
+    if (task.deleted_at || task.status === 'cancelled') {
+      // Deleted or cancelled → strip any draft line this task carries, and never add one.
       if (items && items.length > 0) {
         const invoiceIds = Array.from(new Set(items.map(i => i.invoice_id).filter((id): id is string => id !== null)))
         const { data: invoices } = await supabase.from('invoices').select('id').in('id', invoiceIds).eq('status', 'draft')

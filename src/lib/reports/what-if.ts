@@ -2,11 +2,11 @@
  * What-If Planner — pure simulation engine.
  *
  * A Scenario is a plain-JSON set of hypothetical changes (rating overrides,
- * commission/price changes, salary increments, billing growth, draft
- * agreements). Simulation = transform the same raw inputs the Contribution
- * Analysis report uses, then re-run `buildAnalysisRows` — the exact engine
- * behind the live report — so simulated numbers can never drift from what
- * would really happen. Nothing here touches the database.
+ * commission/price changes, salary increments, billing growth). Simulation =
+ * transform the same raw inputs the Contribution Analysis report uses, then
+ * re-run `buildAnalysisRows` — the exact engine behind the live report — so
+ * simulated numbers can never drift from what would really happen. Nothing
+ * here touches the database.
  *
  * Every lever is one independent input transform, so future planning modules
  * (hiring impact, discount impact, goal-based planning…) plug in as new
@@ -18,25 +18,12 @@ import {
   type AnalysisRow, type RawTask, type RawScore, type RawPricing,
   type EmployeeColumn, type Summary,
 } from './contribution-analysis'
-import type { CommissionAgreement, AgreementType } from '@/lib/calculations/agreements'
 import { earningFor } from '@/lib/ownership/compute'
 import type { OwnershipRule } from '@/lib/ownership/types'
 
 const r2 = (n: number) => Math.round(n * 100) / 100
 
 // ─── Scenario shape (plain JSON — ready for future DB persistence) ────────────
-
-export interface DraftAgreement {
-  /** local id, e.g. crypto.randomUUID() — becomes the CommissionAgreement id in simulation */
-  id: string
-  employee_id: string
-  client_id: string | null
-  service_id: string | null
-  agreement_type: AgreementType
-  agreement_value: number
-  /** when set, the real agreement with this id is EXCLUDED from simulation (drafting a modification) */
-  replaces_agreement_id?: string | null
-}
 
 export interface SalaryIncrement {
   mode: 'amount' | 'pct'
@@ -78,7 +65,6 @@ export interface Scenario {
   salaryIncrements: Record<string, SalaryIncrement>
   /** global "what if business grows/shrinks N%" — simulation-only, never applied */
   billingGrowthPct: number
-  draftAgreements: DraftAgreement[]
   /** roles you might delegate — simulation-only, never applied */
   draftOwnershipRules: DraftOwnershipRule[]
 }
@@ -91,7 +77,6 @@ export function emptyScenario(id: string, name: string): Scenario {
     priceOverrides: {},
     salaryIncrements: {},
     billingGrowthPct: 0,
-    draftAgreements: [],
     draftOwnershipRules: [],
   }
 }
@@ -103,7 +88,6 @@ export function isScenarioEmpty(s: Scenario): boolean {
     && Object.keys(s.priceOverrides).length === 0
     && Object.keys(s.salaryIncrements).length === 0
     && s.billingGrowthPct === 0
-    && s.draftAgreements.length === 0
     && (s.draftOwnershipRules?.length ?? 0) === 0
 }
 
@@ -173,14 +157,6 @@ export interface WhatIfRawInputs {
   empRating: Record<string, number>
   /** taskId → Σ tool fixed_percentage */
   toolPctByTask: Record<string, number>
-  agreements: CommissionAgreement[]
-  /**
-   * agreementItemId → work_commission_pct. Without it, retainer-linked tasks
-   * simulate at the pricing-matrix rate while the live report uses the
-   * agreement's override — the two would disagree on identical inputs, which
-   * is exactly what this module promises cannot happen.
-   */
-  itemCommissionPct?: Record<string, number | null>
 }
 
 // ─── Simulation: transform inputs → re-run the real engine ────────────────────
@@ -203,7 +179,6 @@ export function simulateScenario(raw: WhatIfRawInputs, s: Scenario): AnalysisRow
 function runEngine(raw: WhatIfRawInputs, s: Scenario | null): AnalysisRow[] {
   let tasks = raw.tasks
   let pricing = raw.pricing
-  let agreements = raw.agreements
   const empRating = new Map(Object.entries(raw.empRating))
   const toolPctByTask = new Map(Object.entries(raw.toolPctByTask))
 
@@ -225,13 +200,6 @@ function runEngine(raw: WhatIfRawInputs, s: Scenario | null): AnalysisRow[] {
     }
 
     // Billing scaling: global growth % plus per-pairing price ratios.
-    //
-    // Deliberately does NOT scale work_value_inr, so retainer-covered tasks
-    // hold their pool basis under both levers. Charging a client more does not
-    // raise what the work is internally worth, and "business grows 10%" means
-    // more retainer clients or more posts, not a richer per-post value. Scaling
-    // it would quietly hand the team a raise nobody agreed to. Change the
-    // agreement's Work Value to model that instead.
     const growth = 1 + (s.billingGrowthPct || 0) / 100
     const priceKeys = Object.keys(s.priceOverrides)
     if (growth !== 1 || priceKeys.length > 0) {
@@ -248,28 +216,6 @@ function runEngine(raw: WhatIfRawInputs, s: Scenario | null): AnalysisRow[] {
         }
       })
     }
-
-    // Draft agreements: exclude any real agreement a draft replaces, then add
-    // the drafts as real-shaped agreements effective over all baseline dates.
-    // The genuine matchAgreement specificity/tie-break rules then apply — an
-    // honest preview of exactly what creating the agreement would do.
-    if (s.draftAgreements.length > 0) {
-      const replaced = new Set(s.draftAgreements.map(d => d.replaces_agreement_id).filter(Boolean))
-      agreements = agreements
-        .filter(a => !replaced.has(a.id))
-        .concat(s.draftAgreements.map(d => ({
-          id: d.id,
-          employee_id: d.employee_id,
-          client_id: d.client_id,
-          service_id: d.service_id,
-          agreement_type: d.agreement_type,
-          agreement_value: d.agreement_value,
-          currency: 'INR',
-          effective_from: '1900-01-01', // covers every baseline task date
-          effective_to: null,
-          is_active: true,
-        })))
-    }
   }
 
   return buildAnalysisRows(
@@ -283,8 +229,6 @@ function runEngine(raw: WhatIfRawInputs, s: Scenario | null): AnalysisRow[] {
     empRating,
     toolPctByTask,
     100,
-    agreements,
-    new Map(Object.entries(raw.itemCommissionPct || {})),
   )
 }
 

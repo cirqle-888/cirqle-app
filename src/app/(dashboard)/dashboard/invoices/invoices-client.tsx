@@ -1242,7 +1242,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       const fees = result.data?.feeLines || 0
       success(
         `Processed ${result.data?.syncedTasks || 0} tasks`
-          + (fees > 0 ? ` and ${fees} agreement fee line${fees === 1 ? '' : 's'}` : '') + '.',
+          + (fees > 0 ? ` and ${fees} package line${fees === 1 ? '' : 's'}` : '') + '.',
         `Invoice resynced`,
       )
       // Refresh list to pull updated items

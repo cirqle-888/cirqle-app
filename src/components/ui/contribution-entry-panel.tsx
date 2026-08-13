@@ -3,7 +3,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { calculateCommission } from '@/lib/calculations/commission'
-import { taskPoolBasisInr, isCoveredWorkTask, resolveCommissionPct } from '@/lib/calculations/work-value'
 import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
 import { cn, ROW_INTERACTIVE_CLASS } from '@/lib/utils'
 import { usePrivacy } from '@/contexts/privacy-context'
@@ -99,14 +98,6 @@ export function ContributionEntryPanel({
   const [performanceHistory, setPerformanceHistory] = useState<any[]>([])
   const [rates, setRates] = useState<any[]>([])
   const [pricingData, setPricingData] = useState<any>(null)
-  // Retainer coverage of this task (covered work pools from the agreement's
-  // work value, not billing). null = not covered / not yet loaded.
-  const [workValueTask, setWorkValueTask] = useState<{
-    retainer_item_id: string | null
-    bill_as_extra: boolean
-    work_value_inr: number | null
-    work_commission_pct: number | null
-  } | null>(null)
 
   const draftKey = `cirqle_draft_${task.id}`
 
@@ -131,29 +122,6 @@ export function ContributionEntryPanel({
         supabase.from('employee_performance_history').select('*').order('effective_from', { ascending: false }),
         supabase.from('exchange_rates').select('currency, rate_to_inr'),
       ])
-
-      // Retainer coverage + agreement work value (defensive: pre-migration or
-      // RLS-restricted viewers simply keep the billing-based path).
-      let wv: {
-        retainer_item_id: string | null; bill_as_extra: boolean
-        work_value_inr: number | null; work_commission_pct: number | null
-      } | null = null
-      try {
-        const { data: covRow } = await supabase
-          .from('tasks')
-          .select('retainer_item_id, bill_as_extra, work_value_inr, retainer_item:client_agreement_items(work_commission_pct)')
-          .eq('id', task.id)
-          .maybeSingle()
-        if (covRow) {
-          wv = {
-            retainer_item_id: (covRow as any).retainer_item_id ?? null,
-            bill_as_extra: !!(covRow as any).bill_as_extra,
-            work_value_inr: (covRow as any).work_value_inr ?? null,
-            work_commission_pct: (covRow as any).retainer_item?.work_commission_pct ?? null,
-          }
-        }
-      } catch { /* keep billing-based path */ }
-      setWorkValueTask(wv)
 
       setTools(toolsRes.data || [])
       setToolServices(toolSvcRes.data || [])
@@ -192,17 +160,9 @@ export function ContributionEntryPanel({
         setLastUpdated(dates[dates.length - 1] || null)
       }
 
-      // Agreement item override wins for retainer-linked tasks → matrix → 50.
       const matrixCommPct = (pricingRes as any)?.data?.commission_percentage ?? null
-      const commPct = wv
-        ? resolveCommissionPct(wv, wv.work_commission_pct, matrixCommPct)
-        : (matrixCommPct ?? 50)
-      setServiceCommPct(commPct)
-      setPredefinedCommPct(
-        wv?.retainer_item_id && wv.work_commission_pct != null
-          ? wv.work_commission_pct
-          : matrixCommPct,
-      )
+      setServiceCommPct(matrixCommPct ?? 50)
+      setPredefinedCommPct(matrixCommPct)
       setPricingData((pricingRes as any)?.data || null)
 
       if (contribRes.data?.length) {
@@ -336,13 +296,8 @@ export function ContributionEntryPanel({
         performance_rating: getEffectivePerformanceRating(e.id, task.task_date || new Date().toISOString(), performanceHistory, e.performance_rating ?? 100)
       }))
 
-      // Covered retainer work pools from the stamped agreement work value —
-      // never the pricing matrix (that would re-couple pay to client billing).
-      const covered = workValueTask ? isCoveredWorkTask(workValueTask) : false
-      let internalValueInr = workValueTask
-        ? taskPoolBasisInr({ ...workValueTask, billing_amount_inr: task.billing_amount_inr })
-        : (task.billing_amount_inr || 0)
-      if (!covered && internalValueInr === 0 && pricingData?.price) {
+      let internalValueInr = task.billing_amount_inr || 0
+      if (internalValueInr === 0 && pricingData?.price) {
         const qty = 1
         const priceRate = rates.find((r: any) => r.currency === pricingData.currency)?.rate_to_inr || 1
         internalValueInr = (pricingData.price * qty) * Number(priceRate)
@@ -359,7 +314,7 @@ export function ContributionEntryPanel({
         contributions: contribArray as any,
       })
     } catch { return null }
-  }, [contributions, toolsUsed, serviceCommPct, task, employees, groups, filteredParams, filteredTools, workValueTask, pricingData, rates])
+  }, [contributions, toolsUsed, serviceCommPct, task, employees, groups, filteredParams, filteredTools, pricingData, rates])
 
   function setContrib(paramId: string, empId: string, val: number) {
     setContributions(prev => ({ ...prev, [paramId]: { ...(prev[paramId] || {}), [empId]: Math.max(0, val) } }))
@@ -527,11 +482,7 @@ export function ContributionEntryPanel({
     return 'partial'
   }, [existingScores])
 
-  // Pool basis: agreement work value for covered retainer tasks, else billing.
-  const poolBasisInr = workValueTask
-    ? taskPoolBasisInr({ ...workValueTask, billing_amount_inr: task.billing_amount_inr })
-    : (task.billing_amount_inr || 0)
-  const coveredWork = workValueTask ? isCoveredWorkTask(workValueTask) : false
+  const poolBasisInr = task.billing_amount_inr || 0
   const commissionPool = poolBasisInr * (serviceCommPct / 100)
   const canSeeFinancials = showEarnings && showFinancials
 
@@ -583,10 +534,9 @@ export function ContributionEntryPanel({
           <div className="px-4 py-2 bg-foreground/[0.02] border-b border-border/50 flex items-center gap-2">
             <span
               className="text-[11px] text-muted-foreground"
-              title={`Commission pool = ${serviceCommPct}% of the task's ${coveredWork ? 'retainer work value' : 'billed amount'}`}
+              title={`Commission pool = ${serviceCommPct}% of the task's billed amount`}
             >
-              Team share ({serviceCommPct}% of ₹{poolBasisInr.toLocaleString('en-IN')}
-              {coveredWork ? ' retainer work value' : ''}):
+              Team share ({serviceCommPct}% of ₹{poolBasisInr.toLocaleString('en-IN')}):
             </span>
             <span className="text-xs font-bold gradient-text">₹{commissionPool.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
           </div>
@@ -993,13 +943,8 @@ export function ContributionEntryPanel({
             <div className="bg-amber-500/10 border border-amber-500/25 rounded-xl px-4 py-3 flex items-start gap-2">
               <span className="text-amber-400 mt-0.5 shrink-0">⚠</span>
               <p className="text-[11px] text-amber-400">
-                {coveredWork ? (
-                  <>This task is covered by a retainer, but its agreement item has no <strong>work value</strong> —
-                  so there is nothing for the team to share and everyone earns ₹0. Set the work value on the agreement page.</>
-                ) : (
-                  <>No price set on this task — so there is nothing for the team to share and everyone earns ₹0.
-                  Switch to the <strong>Details</strong> tab to set the billing amount first, then scores will calculate correctly.</>
-                )}
+                No price set on this task — so there is nothing for the team to share and everyone earns ₹0.
+                Switch to the <strong>Details</strong> tab to set the billing amount first, then scores will calculate correctly.
               </p>
             </div>
           )}

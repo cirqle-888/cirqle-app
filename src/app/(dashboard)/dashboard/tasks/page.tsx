@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic'
 // visit, so per-row weight is multiplied by ~2,000; `*` also dragged along
 // scope, created_by, updated_at, billing_exchange_rate and contributions_locked,
 // which nothing on the page renders. Add new columns here deliberately.
-const ADMIN_TASK_SELECT = `id, task_number, title, description, client_id, service_id, status, billing_amount, billing_amount_inr, quantity, currency, task_date, created_at, deleted_at, is_recurring, recurring_interval, recurring_end_date, recurring_parent_id, cancelled_by, cancellation_notes, honor_contributions, loss_amount, completion_pct, parent_task_id, variant_type, variant_label, billing_mode, billing_percent, billing_override, is_billable, bill_as_extra, retainer_item_id, work_value, work_value_inr, work_value_currency, billing_rule, billing_snapshot, client:clients(id, name, code), service:services(id, name)`
+const ADMIN_TASK_SELECT = `id, task_number, title, description, client_id, service_id, status, billing_amount, billing_amount_inr, quantity, currency, task_date, created_at, deleted_at, is_recurring, recurring_interval, recurring_end_date, recurring_parent_id, cancelled_by, cancellation_notes, honor_contributions, loss_amount, completion_pct, parent_task_id, variant_type, variant_label, billing_mode, billing_percent, billing_override, is_billable, package_id, billing_rule, billing_snapshot, client:clients(id, name, code), service:services(id, name)`
 
 // Employee select — explicit column list with ALL financial fields stripped.
 // These never enter the client JS state for employees:
@@ -324,6 +324,15 @@ export default async function TasksPage({
   // ?q=… deep link (e.g. "View Task #42" from a request) pre-fills the search.
   const initialSearch = typeof sp?.q === 'string' ? sp.q : ''
 
+  // Structured deep link, used by the Packages page to open exactly the work a
+  // package covers: ?client=<id>&service=<id>&from=<date>&to=<date>. A name in
+  // ?q= would also match a different client with a similar name; ids can't.
+  const one = (k: string) => (typeof sp?.[k] === 'string' ? (sp[k] as string) : '')
+  const initialClient = one('client')
+  const initialService = one('service')
+  const from = one('from'), to = one('to')
+  const initialDateRange = from && to ? { from, to } : null
+
   return (
     <>
     {vis.tasksPricing && <PricingPendingBanner clients={pendingPricing.clients} services={pendingPricing.services} />}
@@ -332,6 +341,9 @@ export default async function TasksPage({
       requestRefByTaskId={requestRefByTaskId}
       pendingRequestCount={pendingRequestCount}
       initialSearch={initialSearch}
+      initialClient={initialClient}
+      initialService={initialService}
+      initialDateRange={initialDateRange}
       dbTaskTotal={dbCountRes.count ?? undefined}
       initialTasks={initialTasks}
       initialTrash={initialTrash}

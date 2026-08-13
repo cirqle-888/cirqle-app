@@ -20,7 +20,6 @@ import { logActivity } from '@/lib/activity/log'
 import { PERMS } from '@/lib/permissions/keys'
 import { revalidatePath } from 'next/cache'
 import { recalcTaskCommissions, syncDraftInvoices } from '@/lib/sync/integrity'
-import { getTaskCoverage, getRetainerCoverageInfo, type RetainerCoverageInfo } from '@/lib/agreements/coverage'
 import { computeTaskAmount, resolvePricingType } from '@/lib/tasks/pricing'
 import { parseBillingRule, isDerivedTask } from '@/lib/tasks/derived-billing'
 import {
@@ -30,6 +29,7 @@ import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { recalculatePayrollForMonth } from '@/app/(dashboard)/dashboard/payroll/actions'
 import { syncRequestStatusFromTask, syncRequestStatusFromTasks } from '@/lib/requests/task-sync'
 import { retryWithoutScope, withoutScope } from '@/lib/finance/classify'
+import { activePackagesForClient, type PackageOption } from '@/lib/packages/queries'
 
 const REVALIDATE = '/dashboard/tasks'
 
@@ -448,20 +448,19 @@ export async function serverCancelTask(
 }
 
 /**
- * Live retainer-coverage lookup for the task modal. Returns the card figures
- * when the client+service+date is covered by an active retainer, else null.
- * Money fields are nulled for viewers without agreements.view_pricing.
+ * Packages this client has running on this date, for the task form's
+ * "Part of package" picker.
+ *
+ * Read-only and unguarded beyond the page's own gate: it returns a name and a
+ * currency, nothing a task editor cannot already see. Returns [] when the
+ * client has no package, which is how the form knows to render nothing.
  */
-export async function fetchRetainerCoverage(
+export async function fetchClientPackages(
   clientId: string | null,
-  serviceId: string | null,
   taskDate: string | null,
-): Promise<RetainerCoverageInfo | null> {
-  const me = await loadCurrentUser().catch(() => null)
-  const isAdmin = me?.isAdmin ?? false
-  const pricingVisible = isAdmin || hasPermission(me, PERMS.AGREEMENTS_VIEW_PRICING)
+): Promise<PackageOption[]> {
   const admin = createAdminClient()
-  return getRetainerCoverageInfo(admin, { clientId, serviceId, taskDate, pricingVisible })
+  return activePackagesForClient(admin, clientId, taskDate)
 }
 
 export async function serverFillTaskBilling(
@@ -485,24 +484,6 @@ export async function serverFillTaskBilling(
 
   if (!serviceId) return
 
-  // Retainer-covered tasks carry NO client amount — the monthly retainer is the
-  // charge. Zero any auto-filled amount and let the invoice sync strip any line.
-  const coverage = await getTaskCoverage(admin, taskId)
-  if (coverage.covered) {
-    await admin.from('tasks').update({ billing_amount: 0, billing_amount_inr: 0 }).eq('id', taskId)
-    // Covered tasks still pay contributors (from the agreement's work value,
-    // stamped by trigger), so earnings AND pending payroll must refresh.
-    await recalcTaskCommissions(taskId)
-    await syncDraftInvoices(taskId)
-    await syncDerived(admin, await readTaskScope(admin, taskId), 'covered task priced')
-    const { data: t } = await admin.from('tasks').select('task_date').eq('id', taskId).maybeSingle()
-    if (t?.task_date) {
-      const d = new Date(t.task_date)
-      void recalculatePayrollForMonth({ month: d.getMonth() + 1, year: d.getFullYear(), source: 'task_edit' }).catch(() => {})
-    }
-    return
-  }
-
   const { data: svc } = await admin
     .from('services')
     .select('default_price, default_currency, pricing_type')
@@ -510,29 +491,12 @@ export async function serverFillTaskBilling(
     .maybeSingle()
   if (!svc) return
 
-  // Resolve the UNIT price + currency. A retainer-linked EXTRA task prices
-  // from the agreement item's extra_unit_price when one is agreed; otherwise
-  // the per-client Pricing Matrix wins; otherwise the service default. NOTE:
-  // all of these are *per creative / per unit* — quantity is applied below.
+  // Resolve the UNIT price + currency: the per-client Pricing Matrix wins;
+  // otherwise the service default. NOTE: both are *per creative / per unit* —
+  // quantity is applied below.
   let unitPrice: number | null = svc.default_price ?? null
   let unitCurrency = svc.default_currency || 'INR'
-  let extraPriced = false
-  if (coverage.retainerItemId && !coverage.covered) {
-    // bill_as_extra on a retainer-covered client+service
-    try {
-      const { data: item } = await admin
-        .from('client_agreement_items')
-        .select('extra_unit_price, currency')
-        .eq('id', coverage.retainerItemId)
-        .maybeSingle()
-      if (item?.extra_unit_price != null && item.extra_unit_price > 0) {
-        unitPrice = item.extra_unit_price
-        unitCurrency = item.currency || unitCurrency
-        extraPriced = true
-      }
-    } catch { /* fall through to matrix/default */ }
-  }
-  if (!extraPriced && clientId) {
+  if (clientId) {
     const { data: cp } = await admin
       .from('client_service_pricing')
       .select('price, currency')
@@ -547,9 +511,7 @@ export async function serverFillTaskBilling(
   // engine so this auto-fill can never drift from what the task forms show.
   // Percentage-of-spend needs the client's ad spend, which isn't available here,
   // so we leave that billing alone rather than guess.
-  // Agreement extra prices are always per task, regardless of the service's
-  // own pricing type (a 'retainer' service would otherwise ignore quantity).
-  const pt = extraPriced ? 'fixed_per_creative' : resolvePricingType(svc.pricing_type)
+  const pt = resolvePricingType(svc.pricing_type)
   if (pt === 'percentage_of_spend') return
   const qty = quantity || 1
   const amount = computeTaskAmount({ pricingType: pt, unitPrice, quantity: qty, hours: qty })
@@ -597,9 +559,6 @@ export async function serverInlineTaskUpdate(
     }
   }
 
-  const inlineConflict = await coverageBillingConflict(admin, taskId, updates.billing_amount)
-  if (inlineConflict) return { ok: false, error: inlineConflict }
-
   if (updates.billing_amount !== undefined && currencyForInrConversion) {
     updates.billing_amount_inr = await toInr(admin, updates.billing_amount, currencyForInrConversion)
   }
@@ -635,64 +594,19 @@ export interface SaveTaskInput {
   billingAmountInr?: number
   quantity?:    number
   currency?:    string
-  /**
-   * Whether a retainer-covered task is billed on top of the retainer. Sent only
-   * when the caller actually knows the coverage state, so an unaware surface
-   * cannot silently flip a client from covered to charged.
-   */
-  billAsExtra?: boolean
   taskDate:     string | null
+  /**
+   * Package this task is delivered under, or null for "bill separately".
+   * `undefined` means "leave as-is" — only a surface that actually shows the
+   * picker should send it, so a form without one cannot silently unlink a task.
+   */
+  packageId?:   string | null
   /**
    * Derived-billing rule ("30% of Social Media Poster this month"). When
    * present the server computes the amount from it and IGNORES billingAmount —
    * a client-side sum must never be able to overwrite the computed figure.
    */
   billingRule?: unknown
-}
-
-/**
- * Refuses a non-zero billing amount on a retainer-covered task that is not
- * flagged as extra work.
- *
- * The coverage engine zeroes billing on covered tasks so the client is not
- * charged twice — once in the retainer fee, once per task. Nothing stopped a
- * manual edit from writing an amount straight back over that, which is how task
- * #1883 (Elara) came to bill AED 20 on top of a AED 400 retainer.
- *
- * We reject rather than auto-correct: silently zeroing loses the user's intent,
- * and silently setting bill_as_extra would start charging a client without
- * anyone deciding to. Returns null when the write is allowed.
- */
-async function coverageBillingConflict(
-  admin: ReturnType<typeof createAdminClient>,
-  taskId: string,
-  billingAmount: number | undefined,
-  /**
-   * The flag being written in this same save, when the caller supplied one.
-   * Without it, ticking "Bill as extra" and entering a price in one action was
-   * rejected: the guard read the row's OLD flag, which was still false.
-   */
-  incomingBillAsExtra?: boolean,
-): Promise<string | null> {
-  if (billingAmount === undefined || billingAmount <= 0) return null
-  if (incomingBillAsExtra === true) return null
-
-  const { data: task } = await admin
-    .from('tasks')
-    .select('retainer_item_id, bill_as_extra')
-    .eq('id', taskId)
-    .maybeSingle()
-
-  if (!task?.retainer_item_id) return null   // not covered — bill freely
-  if (incomingBillAsExtra === false) {
-    // Explicitly returning to retainer coverage while sending a price.
-    return 'This task is covered by the client’s retainer, so it bills at 0. ' +
-           'Turn on “Bill as extra work” to charge for it on top of the retainer.'
-  }
-  if (task.bill_as_extra) return null        // explicitly extra work — bill freely
-
-  return 'This task is covered by the client’s retainer, so it bills at 0. ' +
-         'To charge for it on top of the retainer, tick “Bill as extra” first.'
 }
 
 async function toInr(
@@ -732,11 +646,6 @@ export async function serverSaveTask(
     isDerived = true
   }
 
-  const conflict = isDerived
-    ? null   // amount is computed, never taken from the caller
-    : await coverageBillingConflict(admin, input.taskId, input.billingAmount, input.billAsExtra)
-  if (conflict) return { ok: false, error: conflict }
-
   // A derived task ignores any incoming amount — see SaveTaskInput.billingRule.
   const acceptAmount = !isDerived && input.billingAmount !== undefined
   const billingInr = acceptAmount
@@ -757,7 +666,7 @@ export async function serverSaveTask(
       ...(ruleJson !== undefined ? { billing_mode: 'percent_of_services', billing_rule: ruleJson } : {}),
       ...(input.quantity         !== undefined ? { quantity:           input.quantity } : {}),
       ...(input.currency         !== undefined ? { currency:           input.currency } : {}),
-      ...(input.billAsExtra      !== undefined ? { bill_as_extra:      input.billAsExtra } : {}),
+      ...(input.packageId        !== undefined ? { package_id:         input.packageId } : {}),
       task_date:          input.taskDate || null,
     })
     .eq('id', input.taskId)

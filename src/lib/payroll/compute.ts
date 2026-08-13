@@ -11,7 +11,6 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { loadActiveAgreements, syncTaskAgreementEarnings } from '@/lib/sync/agreement-earnings'
 import { fetchAll } from '@/lib/supabase/server'
 
 const r2 = (n: number) => Math.round(n * 100) / 100
@@ -112,8 +111,7 @@ export async function isTaskMonthProtected(
  * SAFETY (same rules as refreshStoredEarningsFromBilling / the engine):
  *  - only rows with score_percentage > 0 are recomputed — earnings-only
  *    imports (score% = 0, flat ₹ amount) are NEVER touched;
- *  - manual-override rows are left exactly as the admin set them;
- *  - employee commission agreements are re-applied on top for changed tasks.
+ *  - manual-override rows are left exactly as the admin set them.
  */
 export async function refreshMonthStoredEarnings(
   admin: SupabaseClient,
@@ -180,7 +178,6 @@ export async function refreshMonthStoredEarnings(
   }
 
   let refreshed = 0
-  const changedTasks = new Set<string>()
   for (const s of scores) {
     const t: any = taskById.get(s.task_id)
     if (!t) continue
@@ -196,15 +193,7 @@ export async function refreshMonthStoredEarnings(
         .update({ earnings_inr: newEarn })
         .eq('task_id', s.task_id)
         .eq('employee_id', s.employee_id)
-      if (!error) { refreshed++; changedTasks.add(s.task_id) }
-    }
-  }
-
-  // Re-layer commission agreements on the tasks we touched (no-op without any).
-  if (changedTasks.size > 0) {
-    const { available, agreements } = await loadActiveAgreements(admin as any)
-    if (available && agreements.length > 0) {
-      for (const taskId of changedTasks) await syncTaskAgreementEarnings(taskId)
+      if (!error) { refreshed++ }
     }
   }
 

@@ -25,7 +25,6 @@ const read = (p: string) => readFileSync(join(root, p), 'utf8')
 const HISTORICAL_READERS = [
   'src/lib/payroll/compute.ts',
   'src/lib/sync/integrity.ts',
-  'src/lib/sync/agreement-earnings.ts',
   'src/app/api/recalc-commissions/route.ts',
 ]
 
@@ -107,7 +106,6 @@ describe('every writer of earnings_inr guards finalized payroll BEFORE writing',
   it.each([
     ['src/lib/sync/integrity.ts', 'recalcTaskCommissions', 'return'],
     ['src/lib/sync/integrity.ts', 'refreshStoredEarningsFromBilling', 'return'],
-    ['src/lib/sync/agreement-earnings.ts', 'syncTaskAgreementEarnings', 'return'],
     ['src/lib/payroll/compute.ts', 'refreshMonthStoredEarnings', 'return'],
     ['src/app/api/recalc-commissions/route.ts', 'POST', 'filter'],
   ])('%s → %s', (file, fn, style) => {

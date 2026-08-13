@@ -9,13 +9,9 @@ import AppSelect from './app-select'
 import Combobox from './combobox'
 import { Button } from './button'
 import { TaskBillingSection } from './task-billing-section'
-import { useRetainerCoverage } from '@/lib/tasks/use-retainer-coverage'
 import { DerivedBillingPanel } from './derived-billing-panel'
 import { parseBillingRule, type BillingRule } from '@/lib/tasks/derived-billing'
-import {
-  computeTaskAmount, resolveTaskQuantity, resolveUnitPrice, effectiveBillingAmount,
-  applyCoverageExtraPrice,
-} from '@/lib/tasks/pricing'
+import { computeTaskAmount, resolveTaskQuantity, resolveUnitPrice } from '@/lib/tasks/pricing'
 
 const ContributionEntryPanel = dynamic(
   () => import('./contribution-entry-panel').then(m => m.ContributionEntryPanel),
@@ -87,7 +83,7 @@ export function TaskEditModal({
     spend: String(task.billing_amount_inr ?? 0),
     description: task.description ?? '',
     status: task.status ?? 'pending',
-    bill_as_extra: !!task.bill_as_extra,
+    package_id: (task.package_id as string | null) ?? null,
   })
 
   // Derived billing ("Handling = 30% of posters"): the rule is edited here and
@@ -117,14 +113,10 @@ export function TaskEditModal({
     return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update) }
   }, [])
 
-  // Pricing + coverage come from the shared engine/hook — never re-derived here.
-  const basePrice = resolveUnitPrice({
+  // Pricing comes from the shared engine — never re-derived here.
+  const { pricingType: pt, unitPrice, currency: unitCurrency } = resolveUnitPrice({
     services, clientPricings, clientId: form.client_id, serviceId: form.service_id,
   })
-  const coverage = useRetainerCoverage(form.client_id, form.service_id, form.task_date)
-  // "Bill as extra" prices from the agreement's extra rate when one is agreed.
-  const { pricingType: pt, unitPrice, currency: unitCurrency } =
-    applyCoverageExtraPrice(basePrice, coverage, form.bill_as_extra)
 
   // Variant tasks (revision / concept / size) bill as a derived share of their
   // PARENT task and freeze that amount at creation. Editing them here must NEVER
@@ -146,14 +138,7 @@ export function TaskEditModal({
     // qty is always derived from the employee-visible input fields so that
     // non-admin edits also update the quantity column correctly.
     const qty = resolveTaskQuantity({ pricingType: pt, ...form })
-    // The pricing matrix says what the work is worth; coverage decides what the
-    // CLIENT is charged. Sending the raw matrix price over a retainer-covered
-    // task's zero is what made every save here fail — including edits that
-    // touched nothing financial at all.
-    const amount = effectiveBillingAmount(
-      computeTaskAmount({ pricingType: pt, unitPrice, ...form }),
-      { covered: !!coverage, billAsExtra: form.bill_as_extra },
-    )
+    const amount = computeTaskAmount({ pricingType: pt, unitPrice, ...form })
 
     const res = await serverSaveTask({
       taskId:           task.id,
@@ -177,15 +162,12 @@ export function TaskEditModal({
         } : {}),
         quantity: qty,
       }),
-      // A billing decision: sent only by pricing-visible users, and only once
-      // coverage is known — so a save can never silently start (or stop)
-      // charging a client. Employees without pricing access never send it, and
-      // their rows may not even load the flag.
-      ...(showFinancials && (coverage || form.bill_as_extra)
-        ? { billAsExtra: form.bill_as_extra } : {}),
       // The rule, not an amount: the server recomputes from it and ignores any
       // billingAmount for derived tasks.
       ...(isDerived && showFinancials && derivedRule ? { billingRule: derivedRule } : {}),
+      // Always sent, including null — clearing the link back to "bill
+      // separately" is a real edit and must not be read as "leave unchanged".
+      packageId:        form.package_id,
       taskDate:         form.task_date || null,
     })
 
@@ -356,9 +338,9 @@ export function TaskEditModal({
                 hours={form.hours}
                 spend={form.spend}
                 onChange={patch => setForm(p => ({ ...p, ...patch }))}
-                coverage={coverage}
-                billAsExtra={form.bill_as_extra}
-                onBillAsExtraChange={v => setForm(p => ({ ...p, bill_as_extra: v }))}
+                taskDate={form.task_date}
+                packageId={form.package_id}
+                onPackageChange={pid => setForm(p => ({ ...p, package_id: pid }))}
                 showFinancials={showFinancials}
                 lockedAmount={isVariant ? variantBillingInr : null}
                 lockedCurrency={(task.currency as string) || 'INR'}

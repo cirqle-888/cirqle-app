@@ -3,12 +3,11 @@ import { createAdminClient, fetchAll } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import type { RawTask, RawScore, RawPricing, EmployeeColumn } from '@/lib/reports/contribution-analysis'
-import type { CommissionAgreement } from '@/lib/calculations/agreements'
 import type { WhatIfRawInputs } from '@/lib/reports/what-if'
 import { defaultWindow, scoreWindowFor } from '@/lib/reports/date-bounds'
 import WhatIfClient from './what-if-client'
 
-// Scores/agreements change whenever contributions are saved — always read fresh.
+// Scores change whenever contributions are saved — always read fresh.
 export const dynamic = 'force-dynamic'
 
 export default async function WhatIfPage() {
@@ -36,11 +35,7 @@ export default async function WhatIfPage() {
     fetchAll(
       supabase
         .from('tasks')
-        // Coverage fields are load-bearing, not extra: a retainer-covered task
-        // bills 0 and pools from work_value_inr instead. Omit them and every
-        // covered task simulates at ₹0 earnings and ₹0 profit, silently
-        // understating the plan for any retainer client.
-        .select('id, task_number, title, task_date, status, currency, billing_amount, billing_amount_inr, client_id, service_id, retainer_item_id, bill_as_extra, work_value_inr')
+        .select('id, task_number, title, task_date, status, currency, billing_amount, billing_amount_inr, client_id, service_id')
         .is('deleted_at', null)
         // Egress guard: the planner models the business as it runs TODAY, and
         // multi-year-old tasks only distort that baseline — so the fetch is
@@ -90,38 +85,6 @@ export default async function WhatIfPage() {
     if (pct) toolPctByTask[tt.task_id] = (toolPctByTask[tt.task_id] || 0) + pct
   }
 
-  // Active employee commission agreements (defensive — table may not exist pre-migration).
-  let agreements: CommissionAgreement[] = []
-  try {
-    const { data, error } = await supabase
-      .from('employee_commission_agreements')
-      .select('id, employee_id, client_id, service_id, agreement_type, agreement_value, currency, effective_from, effective_to, is_active')
-      .eq('is_active', true)
-    if (!error && data) agreements = data as CommissionAgreement[]
-  } catch { /* pre-migration — planner runs without agreements */ }
-
-  // Agreement-item commission overrides, so a retainer-linked task simulates
-  // at the same rate the live report charges it. Separate query, never an
-  // embed: tasks and client_agreement_items have two relationships and an
-  // unqualified embed fails PGRST201, taking the whole task list with it.
-  const itemCommissionPct: Record<string, number | null> = {}
-  try {
-    const retainerItemIds = Array.from(new Set(
-      ((tasksRes.data || []) as { retainer_item_id?: string | null }[])
-        .map(t => t.retainer_item_id)
-        .filter(Boolean) as string[],
-    ))
-    if (retainerItemIds.length > 0) {
-      const { data } = await supabase
-        .from('client_agreement_items')
-        .select('id, work_commission_pct')
-        .in('id', retainerItemIds)
-      for (const i of (data || []) as { id: string; work_commission_pct: number | null }[]) {
-        itemCommissionPct[i.id] = i.work_commission_pct ?? null
-      }
-    }
-  } catch { /* pre-migration — planner falls back to the pricing matrix */ }
-
   type PricingRow = { client_id: string; service_id: string; commission_percentage: number | null; price: number | null }
   const pricingRows = (pricingRes.data || []) as PricingRow[]
 
@@ -133,8 +96,6 @@ export default async function WhatIfPage() {
     services: (servicesRes.data || []) as { id: string; name: string }[],
     empRating,
     toolPctByTask,
-    agreements,
-    itemCommissionPct,
   }
 
   // client|service → current price (feeds the price lever; 0/undefined hides it for that pairing)
@@ -153,7 +114,6 @@ export default async function WhatIfPage() {
         rating: hasPermission(me, PERMS.PAYROLL_EDIT),
         salary: hasPermission(me, PERMS.PAYROLL_EDIT),
         pricing: hasPermission(me, PERMS.SETTINGS_ACCESS),
-        agreements: hasPermission(me, PERMS.EMPLOYEES_MANAGE_AGREEMENTS),
       }}
     />
   )

@@ -156,14 +156,13 @@ export default function OwnershipClient(p: Props) {
               when you are deciding where a rule belongs — not on every visit. */}
           <details className="group mt-1.5">
             <summary className="cursor-pointer select-none list-none text-xs text-muted-foreground hover:text-foreground">
-              How this differs from the Pricing Matrix and Employee Agreements
+              How this differs from the Pricing Matrix
             </summary>
             <p className="text-xs text-muted-foreground mt-1.5 max-w-2xl leading-relaxed">
               This screen pays <b>roles</b>, independent of tasks — someone running Accounts or HR earns
               here even though they score no tasks. The share of a task&rsquo;s price that the people who
-              did the work split lives in the <b>Pricing Matrix</b>; one person&rsquo;s special rate on
-              particular work is an <b>Employee Agreement</b>. A program says what to measure and when;
-              its rules say who earns and how much.
+              did the work split lives in the <b>Pricing Matrix</b>. A program says what to measure and
+              when; its rules say who earns and how much.
             </p>
           </details>
           {/* Preview answers "what would pay this month"; the report answers

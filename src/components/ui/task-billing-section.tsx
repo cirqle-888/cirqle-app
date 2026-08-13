@@ -5,26 +5,25 @@
  *
  * Rendered identically by the Add Task form, the shared Edit Task modal, and
  * therefore the Contributions task editor. It owns the whole money area of a
- * task form: retainer coverage, the "Bill as extra" decision, the pricing-type
- * card, the quantity inputs, and the price explanation.
- *
- * Do not re-implement any of this in a form. Previously the coverage card and
- * the Bill-as-extra toggle existed only inside the Add Task modal, so the Edit
- * modal recomputed the raw service price on save, tripped the server's
- * anti-double-billing guard, and could not save a covered task at all. A second
- * copy of this JSX is how that happens again.
+ * task form: the pricing-type card, the quantity inputs, and the price
+ * explanation. Do not re-implement any of this in a form.
  *
  * The arithmetic lives in `@/lib/tasks/pricing`; this file only renders it.
+ *
+ * The one exception is the package picker, which loads its own options. It
+ * lives HERE rather than in each host form because both forms must offer the
+ * identical choice — the two drifting apart is a bug this component already
+ * exists to prevent.
  */
 
-import type { ReactNode } from 'react'
-import Link from 'next/link'
-import { CheckCircle, ExternalLink, Hash, Clock } from 'lucide-react'
-import type { RetainerCoverageInfo } from '@/lib/agreements/coverage'
+import { useEffect, useState, type ReactNode } from 'react'
+import { CheckCircle, Hash, Clock, Package as PackageIcon, AlertTriangle } from 'lucide-react'
 import {
-  computeTaskAmount, resolveUnitPrice, isBillingSuppressed, applyCoverageExtraPrice,
+  computeTaskAmount, resolveUnitPrice,
   type ClientPricingLike, type ServiceLike,
 } from '@/lib/tasks/pricing'
+import { fetchClientPackages } from '@/app/(dashboard)/dashboard/tasks/actions'
+import type { PackageOption } from '@/lib/packages/queries'
 
 const inputCls =
   'w-full bg-background border border-input rounded-lg px-3 py-2 text-sm shadow-sm ' +
@@ -43,9 +42,12 @@ export interface TaskBillingSectionProps {
   spend: string
   onChange: (patch: { quantity?: string; hours?: string; spend?: string }) => void
 
-  coverage: RetainerCoverageInfo | null
-  billAsExtra: boolean
-  onBillAsExtraChange: (next: boolean) => void
+  /** The task's date — decides which packages are running when it was done. */
+  taskDate?: string | null
+  /** Currently linked package, or '' for "bill separately". */
+  packageId?: string | null
+  /** Omit to hide the picker entirely (e.g. a surface that cannot save it). */
+  onPackageChange?: (packageId: string | null) => void
 
   /** False for users without pricing access: quantity inputs, no money. */
   showFinancials?: boolean
@@ -70,21 +72,35 @@ export interface TaskBillingSectionProps {
 export function TaskBillingSection({
   services, clientPricings = [], clientId, serviceId,
   quantity, hours, spend, onChange,
-  coverage, billAsExtra, onBillAsExtraChange,
+  taskDate, packageId, onPackageChange,
   showFinancials = true,
   lockedAmount = null, lockedCurrency, lockedNote,
   amount, unitPriceDisplay, footer,
 }: TaskBillingSectionProps) {
-  const { pricingType, unitPrice, currency, fromClientMatrix, fromAgreementExtra } =
-    applyCoverageExtraPrice(
-      resolveUnitPrice({ services, clientPricings, clientId, serviceId }),
-      coverage, billAsExtra,
-    )
-  const suppressed = isBillingSuppressed({ covered: !!coverage, billAsExtra })
+  const { pricingType, unitPrice, currency, fromClientMatrix } =
+    resolveUnitPrice({ services, clientPricings, clientId, serviceId })
   const engineAmount = computeTaskAmount({ pricingType, unitPrice, quantity, hours, spend })
   const total = amount ?? engineAmount
   const shownUnit = unitPriceDisplay ?? unitPrice
   const serviceSelected = services.some(s => s.id === serviceId)
+
+  // Packages this client has running on the task's date. Loaded here so both
+  // host forms offer exactly the same choice.
+  const [packages, setPackages] = useState<PackageOption[]>([])
+  useEffect(() => {
+    if (!onPackageChange || !clientId) { setPackages([]); return }
+    let cancelled = false
+    fetchClientPackages(clientId, taskDate ?? null)
+      .then(rows => { if (!cancelled) setPackages(rows) })
+      .catch(() => { if (!cancelled) setPackages([]) })
+    return () => { cancelled = true }
+  }, [clientId, taskDate, onPackageChange])
+
+  const chosen = packages.find(p => p.id === packageId)
+  // The task's service isn't in the package. It would still link, but it can
+  // never be covered by the fee — so say so rather than let it look included.
+  const serviceOutsidePackage =
+    !!chosen && !!serviceId && !chosen.serviceIds.includes(serviceId)
 
   const creativesInput = (
     <div>
@@ -115,106 +131,54 @@ export function TaskBillingSection({
 
   return (
     <>
-      {/* ── Covered by an active retainer: the retainer IS the invoice ──────── */}
-      {coverage && suppressed && (
-        <div className="rounded-xl border border-green-500/30 bg-green-500/5 p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <CheckCircle className="w-4 h-4 text-green-500" />
-              <span className="text-xs font-semibold uppercase tracking-wide text-green-600 dark:text-green-400">
-                Covered by Retainer
-              </span>
-            </div>
-            <Link href={`/dashboard/agreements/${coverage.agreementId}`} target="_blank"
-              className="text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-              {coverage.agreementNumber} <ExternalLink className="w-3 h-3" />
-            </Link>
-          </div>
-          {showFinancials && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {coverage.monthlyRetainer != null && (
-                <div>
-                  <div className="text-[10px] text-muted-foreground">Monthly retainer</div>
-                  <div className="font-semibold text-sm">{coverage.currency} {coverage.monthlyRetainer}</div>
-                </div>
-              )}
-              {coverage.creativeAllocation != null && (
-                <div>
-                  <div className="text-[10px] text-muted-foreground">Creative allocation</div>
-                  <div className="font-semibold text-sm">{coverage.currency} {coverage.creativeAllocation}</div>
-                </div>
-              )}
-              {coverage.workUnitValue != null ? (
-                <div>
-                  <div className="text-[10px] text-muted-foreground">Work value (pays team)</div>
-                  <div className="font-semibold text-sm">
-                    {coverage.currency} {coverage.workUnitValue}
-                    <span className="text-[10px] text-muted-foreground font-normal"> /task</span>
-                  </div>
-                </div>
-              ) : coverage.allocatedUnitValue != null && (
-                <div>
-                  <div className="text-[10px] text-muted-foreground">Allocated unit value</div>
-                  <div className="font-semibold text-sm">
-                    {coverage.currency} {coverage.allocatedUnitValue}
-                    <span className="text-[10px] text-muted-foreground font-normal"> /unit</span>
-                  </div>
-                </div>
-              )}
-              <div>
-                <div className="text-[10px] text-muted-foreground">Usage</div>
-                <div className="font-semibold text-sm">
-                  {coverage.delivered} of {coverage.includedQuantity ?? '—'}
-                  <span className="text-[10px] text-muted-foreground font-normal"> · {coverage.remaining} left</span>
-                </div>
-              </div>
-            </div>
-          )}
-          {pricingType === 'fixed_per_creative' && <div className="max-w-[180px]">{creativesInput}</div>}
-          {/* Commitment used up → suggest billing this one as extra work. */}
-          {showFinancials && coverage.includedQuantity != null && coverage.remaining === 0 && (
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
-              <p className="text-[11px] text-amber-700 dark:text-amber-300">
-                All {coverage.includedQuantity} included tasks are used this period — this looks like
-                extra work{coverage.extraUnitPrice != null
-                  ? ` (agreed extra rate: ${coverage.currency} ${coverage.extraUnitPrice}/task)` : ''}.
-              </p>
-            </div>
-          )}
-          <div className="flex items-center justify-between pt-1 border-t border-green-500/15">
+      {/* ── Part of a package? ────────────────────────────────────────────────
+          Only appears when this client actually has one running on this date,
+          so it costs nothing on the overwhelming majority of tasks. Choosing a
+          package changes INVOICING only: the task keeps its Pricing-Matrix
+          price and pays the team exactly as it would otherwise. */}
+      {onPackageChange && packages.length > 0 && (
+        <div className="rounded-xl border border-violet-500/25 bg-violet-500/5 p-3 space-y-2">
+          <label className="flex items-center gap-1.5 text-xs font-medium text-violet-600 dark:text-violet-300">
+            <PackageIcon className="w-3.5 h-3.5" /> Part of a package
+          </label>
+          <select
+            value={packageId ?? ''}
+            onChange={e => onPackageChange(e.target.value || null)}
+            className={inputCls}
+          >
+            <option value="">Bill this task separately</option>
+            {packages.map(p => (
+              <option key={p.id} value={p.id}>
+                {p.name}{p.billingType === 'monthly' ? ' (monthly)' : ' (one-time)'}
+              </option>
+            ))}
+          </select>
+
+          {chosen && !serviceOutsidePackage && (
             <p className="text-[11px] text-muted-foreground">
-              No client charge — the monthly retainer is the invoice.
+              Rolled into the <strong>{chosen.name}</strong>{' '}
+              line on the invoice instead of billing on its own.
+              Beyond what&rsquo;s included it bills{' '}
+              {chosen.extraTaskPrice != null
+                ? `${chosen.currency} ${chosen.extraTaskPrice}`
+                : 'at the normal price'}.
             </p>
-            {/* Charging on top of the retainer is a billing decision — reserved
-                for users who can see pricing in the first place. */}
-            {showFinancials && (
-              <button type="button" onClick={() => onBillAsExtraChange(true)}
-                className="text-[11px] font-medium text-amber-600 dark:text-amber-400 hover:underline whitespace-nowrap">
-                Bill as extra work →
-              </button>
-            )}
-          </div>
+          )}
+
+          {serviceOutsidePackage && (
+            <p className="text-[11px] text-amber-600 dark:text-amber-400 flex items-start gap-1.5">
+              <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+              <span>
+                This service isn&rsquo;t part of <strong>{chosen!.name}</strong>, so the package fee won&rsquo;t
+                cover it and it will bill on its own. Add the service to the package, or bill separately.
+              </span>
+            </p>
+          )}
         </div>
       )}
 
-      {/* ── Covered but deliberately billed on top ──────────────────────────── */}
-      {coverage && billAsExtra && showFinancials && (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-2.5 flex items-center justify-between gap-3">
-          <p className="text-xs text-amber-700 dark:text-amber-300">
-            Extra work beyond the {coverage.includedQuantity ?? ''} included — this task bills the client
-            {fromAgreementExtra
-              ? <> at the agreed extra rate ({coverage.currency} {coverage.extraUnitPrice}/task).</>
-              : ' normally.'}
-          </p>
-          <button type="button" onClick={() => onBillAsExtraChange(false)}
-            className="text-[11px] font-medium text-muted-foreground hover:text-foreground whitespace-nowrap">
-            Back to retainer
-          </button>
-        </div>
-      )}
-
-      {/* ── Pricing card — hidden while the retainer absorbs the cost ───────── */}
-      {!suppressed && showFinancials && serviceSelected && (
+      {/* ── Pricing card ──────────────────────────────────────────────────── */}
+      {showFinancials && serviceSelected && (
         <div className={`rounded-xl border p-4 space-y-3 ${
           pricingType === 'fixed_per_creative'  ? 'bg-blue-500/5 border-blue-500/20' :
           pricingType === 'retainer'            ? 'bg-green-500/5 border-green-500/20' :
@@ -238,9 +202,7 @@ export function TaskBillingSection({
               </span>
             </div>
             <span className="text-xs text-muted-foreground">
-              {fromAgreementExtra
-                ? `Agreement extra rate: ${currency} ${shownUnit}`
-                : pricingType === 'percentage_of_spend'
+              {pricingType === 'percentage_of_spend'
                 ? shownUnit > 0 ? `Your rate: ${shownUnit}%` : 'No % set'
                 : fromClientMatrix
                   ? `Client price: ${currency} ${shownUnit}`
@@ -302,7 +264,7 @@ export function TaskBillingSection({
       )}
 
       {/* ── No pricing access: quantity only, so financials stay hidden ─────── */}
-      {!showFinancials && !suppressed && serviceSelected && (
+      {!showFinancials && serviceSelected && (
         pricingType === 'fixed_per_creative' ? creativesInput :
         pricingType === 'hourly' ? (
           <div>

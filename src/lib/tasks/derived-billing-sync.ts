@@ -27,7 +27,6 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { logActivity } from '@/lib/activity/log'
 import { isTaskMonthProtected } from '@/lib/payroll/compute'
 import { recalcTaskCommissions, syncDraftInvoices } from '@/lib/sync/integrity'
-import { effectiveBillingAmount } from '@/lib/tasks/pricing'
 import {
   parseBillingRule, monthRange, isBasisTask, sumBasis, computeRule,
   isDerivedTask, isFrozenByStatus,
@@ -35,14 +34,12 @@ import {
 } from './derived-billing'
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- the tasks columns used
-   here (billing_rule, retainer_item_id, work_value_inr) post-date the
-   generated Database types; same casting convention as lib/agreements/*. */
+   here (billing_rule) post-date the generated Database types. */
 type Admin = SupabaseClient<any, any, any>
 
 const TASK_FIELDS =
   'id, task_number, title, client_id, service_id, task_date, status, quantity, deleted_at, ' +
-  'billing_mode, billing_rule, billing_amount, billing_amount_inr, currency, ' +
-  'retainer_item_id, bill_as_extra'
+  'billing_mode, billing_rule, billing_amount, billing_amount_inr, currency'
 
 export interface RecomputeOutcome {
   ok: boolean
@@ -119,14 +116,8 @@ export async function recomputeDerivedTask(
   const basis = sumBasis(basisTasks)
   const computed = computeRule(rule, basis)
 
-  // The derived task's OWN retainer coverage still applies: if a retainer
-  // already covers this service for this client, the handling fee is inside it.
-  const covered = {
-    covered: !!(task as any).retainer_item_id,
-    billAsExtra: !!(task as any).bill_as_extra,
-  }
-  const billingAmount = effectiveBillingAmount(computed.billingAmount, covered)
-  const billingAmountInr = effectiveBillingAmount(computed.billingAmountInr, covered)
+  const billingAmount = computed.billingAmount
+  const billingAmountInr = computed.billingAmountInr
 
   const fromInr = Number((task as any).billing_amount_inr) || 0
   const changed = Math.abs(fromInr - billingAmountInr) > 0.005

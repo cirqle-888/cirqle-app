@@ -16,7 +16,6 @@ import { createClient } from '@/lib/supabase/client'
 import { getStatusColor, getStatusLabel } from '@/lib/utils/invoice'
 import { Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, RefreshCw, TrendingDown, Users, Ban, Search, ExternalLink, ChevronDown, ChevronLeft, ChevronRight, Layers, LayoutGrid, List, CalendarDays, MoreVertical, Building2, BarChart2, Copy, GripVertical, Settings2, ChevronUp, Inbox, Loader2 } from 'lucide-react'
 import { formatCurrency } from '@/lib/calculations/currency'
-import { CoveredValue } from '@/components/ui/covered-value'
 import Link from 'next/link'
 import Combobox from '@/components/ui/combobox'
 import { TitleAutocomplete } from '@/components/tasks/title-autocomplete'
@@ -56,11 +55,7 @@ import {
   checkPossibleDuplicateTask,
 } from './actions'
 import { TaskBillingSection } from '@/components/ui/task-billing-section'
-import { useRetainerCoverage } from '@/lib/tasks/use-retainer-coverage'
-import {
-  computeTaskAmount, resolveTaskQuantity, resolvePricingType,
-  isBillingSuppressed, effectiveBillingAmount, applyCoverageExtraPrice,
-} from '@/lib/tasks/pricing'
+import { computeTaskAmount, resolveTaskQuantity, resolvePricingType } from '@/lib/tasks/pricing'
 import {
   emptyBillingRule, isBasisTask, sumBasis, computeRule, findDuplicateRules,
   type BillingRule,
@@ -136,21 +131,10 @@ interface Task {
   billing_percent?: number | null
   billing_override?: boolean
   is_billable?: boolean
-  retainer_item_id?: string | null   // set by DB coverage trigger (Phase 2)
-  bill_as_extra?: boolean            // covered task billed as extra work
-  work_value_inr?: number | null     // internal value covered work pays the team from
-  work_value?: number | null         // …the same figure in the agreement's own currency
-  work_value_currency?: string | null
+  /** Package this task is delivered under. Affects invoicing only, never price. */
+  package_id?: string | null
   client?: { id: string; name: string; code: string }
   service?: { id: string; name: string }
-}
-
-/**
- * Retainer-covered and not flagged extra: the client is charged nothing for
- * this task because the monthly retainer already covers it.
- */
-function isCovered(t: { retainer_item_id?: string | null; bill_as_extra?: boolean }): boolean {
-  return !!t.retainer_item_id && !t.bill_as_extra
 }
 
 interface Service {
@@ -178,6 +162,12 @@ interface Props {
   requestRefByTaskId?: Record<string, { id: string; ref_no: number }>
   /** Pre-filled search (?q=… deep link, e.g. "#42" from a request). */
   initialSearch?: string
+  /** Pre-selected client filter (?client=<id>), e.g. from a package's task link. */
+  initialClient?: string
+  /** Pre-selected service filter (?service=<id>). */
+  initialService?: string
+  /** Pre-selected date range (?from=&to=), e.g. a package's billing cycle. */
+  initialDateRange?: { from: string; to: string } | null
   /** Count of new/unstarted external requests — badge on the Requests button. */
   pendingRequestCount?: number
   dbTaskTotal?: number
@@ -267,7 +257,7 @@ const EMPTY_FORM = {
   billing_override: false,                                                       // true when user types a custom amount
   is_billable: true,                                                             // false = internal/non-billable concept
   manual_billing_amount: '',                                                     // user-typed override amount
-  bill_as_extra: false,                                                          // retainer-covered task billed as extra work
+  package_id: null as string | null,                                             // delivered under a package (invoicing only)
   // ── Derived billing ("Handling = 30% of this month's posters") ──
   derived_on: false,                                                             // the rule section is switched on
   derived_service_ids: [] as string[],                                           // source services
@@ -346,7 +336,7 @@ function SortablePanelRow({ id, label, onUp, onDown, isFirst, isLast }: {
   )
 }
 
-export default function TasksClient({ promotionRequest, requestRefByTaskId = {}, pendingRequestCount = 0, initialSearch = '', dbTaskTotal, initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, myTaskIds, visibilitySettings, permissionFlags }: Props) {
+export default function TasksClient({ promotionRequest, requestRefByTaskId = {}, pendingRequestCount = 0, initialSearch = '', initialClient = '', initialService = '', initialDateRange = null, dbTaskTotal, initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, myTaskIds, visibilitySettings, permissionFlags }: Props) {
   const { role, employee: currentEmployee } = useRole()
   const { can } = usePermissions()
   const { toasts, dismiss, success, error: toastError } = useToast()
@@ -554,8 +544,8 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
   const [saving, setSaving] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
   const [filterStatus, setFilterStatus] = useState('')
-  const [filterClient, setFilterClient] = useState('')
-  const [filterService, setFilterService] = useState('')
+  const [filterClient, setFilterClient] = useState(initialClient)
+  const [filterService, setFilterService] = useState(initialService)
   // Tokenized search: field-scoped facet pills + operators. `searchQ` is derived
   // from the generic ('any') facets so the existing #number/DB-mode logic keeps
   // working unchanged; named-field facets are applied separately in filteredTasks.
@@ -728,7 +718,9 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
   // View mode & assignee filter
   const [viewMode, setViewMode] = useState<'table' | 'board' | 'calendar'>('table')
   const [filterAssignee, setFilterAssignee] = useState('')
-  const [filterDate, setFilterDate] = useState<DateFilterValue>(null)
+  const [filterDate, setFilterDate] = useState<DateFilterValue>(
+    initialDateRange ? { type: 'range', from: initialDateRange.from, to: initialDateRange.to } : null,
+  )
   // "My Tasks" / "Not Assigned to Me" quick toggle — independent of the Assignee
   // dropdown (which picks any single teammate). Available to anyone with an
   // employee record, not just role==='employee' — admins can be assignees too.
@@ -822,26 +814,12 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
   // Derived: selected service object
   const selectedService = services.find(s => s.id === form.service_id)
 
-  // Retainer coverage + the "is the client charged?" rule both come from the
-  // shared modules, so this form and the Edit modal can never disagree.
-  const coverage = useRetainerCoverage(form.client_id, form.service_id, form.task_date)
-  const suppressBilling = isBillingSuppressed({ covered: !!coverage, billAsExtra: form.bill_as_extra })
-
-  // Derived: unit price — agreement extra rate (when billed as extra) first,
-  // then client-specific matrix, then service default. Shared engine.
+  // Derived: unit price — client-specific matrix first, then service default.
+  // Shared engine, so this form and the Edit modal can never disagree.
   const clientPrice = clientPricings.find(p => p.client_id === form.client_id && p.service_id === form.service_id)
-  const resolvedPrice = applyCoverageExtraPrice(
-    {
-      pricingType: resolvePricingType(selectedService?.pricing_type),
-      unitPrice: clientPrice?.price ?? selectedService?.default_price ?? 0,
-      currency: clientPrice?.currency || selectedService?.default_currency || 'INR',
-      fromClientMatrix: !!clientPrice,
-    },
-    coverage, form.bill_as_extra,
-  )
-  const pricingType = resolvedPrice.pricingType
-  const unitPrice = resolvedPrice.unitPrice
-  const unitCurrency = resolvedPrice.currency as Currency
+  const pricingType = resolvePricingType(selectedService?.pricing_type)
+  const unitPrice = clientPrice?.price ?? selectedService?.default_price ?? 0
+  const unitCurrency = (clientPrice?.currency || selectedService?.default_currency || 'INR') as Currency
 
   // Derived: parent task (when creating a variant)
   const parentTask = useMemo(
@@ -1120,7 +1098,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       billing_override:  !!task.billing_override,
       is_billable:       task.is_billable !== false,
       manual_billing_amount: task.billing_amount_inr != null ? String(task.billing_amount_inr) : '',
-      bill_as_extra:     !!task.bill_as_extra,
+      package_id:        task.package_id ?? null,
       // Derived billing is edited in TaskEditModal, not this legacy form state.
       derived_on: false,
       derived_service_ids: [],
@@ -1135,7 +1113,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
   // Editing goes through <TaskEditModal>, which renders the shared
   // TaskBillingSection and saves via serverSaveTask. The old handler carried a
   // fifth copy of the pricing formula and wrote billing straight from the
-  // browser, bypassing the retainer-coverage guard entirely.
+  // browser.
 
   async function initiateDelete(id: string) {
     // Check if this task has any contribution scores — if so we show a stronger warning.
@@ -1374,13 +1352,12 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       scope: deriveWorkScope(form.client_id && form.client_id !== INTERNAL_CLIENT ? form.client_id : null),
       service_id: form.service_id,
       status: form.status,
-      // Retainer-covered (not extra) → no client amount; the retainer is the charge.
-      billing_amount: effectiveBillingAmount(computedAmount, { covered: !!coverage, billAsExtra: form.bill_as_extra }),
-      billing_amount_inr: effectiveBillingAmount(computedAmount, { covered: !!coverage, billAsExtra: form.bill_as_extra }),
+      billing_amount: computedAmount,
+      billing_amount_inr: computedAmount,
       quantity: qty,
       currency: unitCurrency,
-      // Only sent once the coverage migration exists (coverage != null proves it).
-      ...(coverage || form.bill_as_extra ? { bill_as_extra: form.bill_as_extra } : {}),
+      // Invoicing only — the price above still came from the Pricing Matrix.
+      ...(form.package_id ? { package_id: form.package_id } : {}),
       task_date: form.task_date,
       is_recurring: form.is_recurring,
       recurring_interval: form.is_recurring ? form.recurring_interval : null,
@@ -1992,12 +1969,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       )
       case 'billing': return (
         <td key={key} className="px-5 py-3.5 text-right font-medium" onClick={stopInline}>
-          {/* A retainer-covered task bills the client nothing by design — the
-              monthly fee is the invoice. Rendering a bare "AED 0.00" reads as a
-              MISSING price, so say what it actually is (and what the team is
-              paid from), instead of leaving people to guess. */}
-          {isCovered(task) ? <CoveredValue task={task} divideBy={task.quantity ?? 1} /> :
-            role !== 'team_lead' && inlineEditMode ? (
+          {role !== 'team_lead' && inlineEditMode ? (
             <input type="number" defaultValue={task.billing_amount ?? 0} onBlur={async e => {
               const val = parseFloat(e.target.value) || 0
               if (val !== task.billing_amount) {
@@ -2015,9 +1987,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       )
       case 'total': return (
         <td key={key} className="px-5 py-3.5 text-right font-medium" onClick={stopInline}>
-          {isCovered(task)
-            ? <CoveredValue task={task} />
-            : formatCurrency(task.billing_amount ?? 0, task.currency as Currency)}
+          {formatCurrency(task.billing_amount ?? 0, task.currency as Currency)}
         </td>
       )
       case 'status': return (
@@ -5045,8 +5015,8 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
               </div>
 
               {/* Financial section — ONE shared component, identical to the
-                  Edit Task modal. Coverage, Bill-as-extra, pricing card and
-                  quantity inputs all live in task-billing-section.tsx. */}
+                  Edit Task modal. Pricing card and quantity inputs all live
+                  in task-billing-section.tsx. */}
               <TaskBillingSection
                 services={services}
                 clientPricings={clientPricings}
@@ -5056,9 +5026,9 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                 hours={form.hours}
                 spend={form.spend}
                 onChange={patch => setForm(p => ({ ...p, ...patch }))}
-                coverage={coverage}
-                billAsExtra={form.bill_as_extra}
-                onBillAsExtraChange={v => setForm(p => ({ ...p, bill_as_extra: v }))}
+                taskDate={form.task_date}
+                packageId={form.package_id}
+                onPackageChange={pid => setForm(p => ({ ...p, package_id: pid }))}
                 showFinancials={showBilling}
                 amount={computedAmount}
                 unitPriceDisplay={displayUnitPrice}
@@ -5108,10 +5078,8 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                       )}
               />
 
-              {/* Pricing summary card. Hidden while a retainer absorbs the cost —
-                  quoting the service price directly under "No client charge"
-                  reads as a contradiction, and it is not what gets invoiced. */}
-              {!suppressBilling && showBilling && selectedService && (
+              {/* Pricing summary card. */}
+              {showBilling && selectedService && (
                 <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-3 flex items-center justify-between">
                   <div className="text-xs text-muted-foreground">
                     <span className="font-medium text-foreground">{selectedService.name}</span>

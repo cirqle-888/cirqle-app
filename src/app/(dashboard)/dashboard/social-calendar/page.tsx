@@ -2,8 +2,6 @@ import { redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
-import { loadClientMonthProgress } from '@/lib/agreements/server'
-import type { AgreementProgressSummary } from '@/lib/agreements/progress'
 import SocialCalendarClient from './social-calendar-client'
 
 export const dynamic = 'force-dynamic'
@@ -23,7 +21,6 @@ export default async function SocialCalendarPage({
   const isAdmin = me?.isAdmin ?? false
   const canView = isAdmin || hasPermission(me, PERMS.SOCIAL_VIEW)
   if (me && !canView) redirect('/dashboard')
-  const canViewAgreements = isAdmin || hasPermission(me, PERMS.AGREEMENTS_VIEW)
 
   const sp = searchParams ? await searchParams : undefined
   const requestedCalendarId = typeof sp?.calendar === 'string' ? sp.calendar : null
@@ -178,6 +175,38 @@ export default async function SocialCalendarPage({
   const clients = (await admin
     .from('clients').select('id, name, code').eq('is_active', true).order('name')).data || []
 
+  // ── Package commitments for the plan on screen ────────────────────────────
+  //
+  // A content plan for a client on a retainer is planning against a promise:
+  // 15 posts this cycle, of which some are already done. The calendar cannot
+  // show what is still owed without knowing that promise, so it is loaded here
+  // and the client re-derives progress from its live item list.
+  //
+  // Degrades to nothing when the package tables aren't migrated — the calendar
+  // is useful without them and must not fail because of them.
+  let packages: any[] = []
+  let packageTasks: any[] = []
+  const selectedCalendar = calendars.find(c => c.id === selectedId) ?? null
+  if (selectedCalendar?.client_id) {
+    try {
+      const { data: pkgs, error } = await admin
+        .from('client_packages')
+        .select('*, items:client_package_items(*)')
+        .eq('client_id', selectedCalendar.client_id)
+        .is('deleted_at', null)
+      if (!error && pkgs?.length) {
+        packages = pkgs
+        const ids = pkgs.map((p: { id: string }) => p.id)
+        const { data: linked } = await admin
+          .from('tasks')
+          .select('id, package_id, service_id, task_date, task_number, status')
+          .in('package_id', ids)
+          .is('deleted_at', null)
+        packageTasks = linked || []
+      }
+    } catch { /* packages not migrated — the calendar simply shows no commitment */ }
+  }
+
   // Services power the item modal's Service picker — the same catalogue the
   // Requests form uses, so calendar items align with request types.
   const services = (await admin
@@ -197,26 +226,14 @@ export default async function SocialCalendarPage({
     }
   } catch { /* unset or malformed — keyword fallback covers it */ }
 
-  // Agreement meter data — a single per-client+month loader (no N+1), and only
-  // when the viewer may see agreements at all (otherwise the widget is hidden).
-  let agreementProgress: AgreementProgressSummary[] = []
-  if (selectedId && canViewAgreements) {
-    const cal = calendars.find(c => c.id === selectedId)
-    if (cal) {
-      try {
-        agreementProgress = await loadClientMonthProgress(cal.client_id, cal.month.substring(0, 7))
-      } catch (e) {
-        console.error('Failed to load agreement progress', e)
-      }
-    }
-  }
-
   return (
     <SocialCalendarClient
       migrated={migrated}
       calendars={calendars}
       selectedId={selectedId}
       initialItems={items}
+      packages={packages}
+      packageTasks={packageTasks}
       clients={clients as any[]}
       services={services as any[]}
       knownVariants={knownVariants}
@@ -227,8 +244,6 @@ export default async function SocialCalendarPage({
       serviceMap={serviceMap}
       companySettings={companySettings}
       canManage={isAdmin || hasPermission(me, PERMS.SOCIAL_MANAGE)}
-      agreementProgress={agreementProgress}
-      canViewAgreements={canViewAgreements}
     />
   )
 }

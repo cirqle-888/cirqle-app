@@ -1,28 +1,12 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { syncTaskAgreementEarnings } from '@/lib/sync/agreement-earnings'
 import { requireAnyPermission } from '@/lib/permissions/check'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { PERMS } from '@/lib/permissions/keys'
 import { isTaskMonthProtected } from '@/lib/payroll/compute'
 import { recordAdjustments } from '@/lib/payroll/adjustments'
 import { logActivity } from '@/lib/activity/log'
-
-/**
- * Apply employee commission agreements to a task's stored earnings after the
- * contributions client has saved the base contribution scores. No-op when there
- * are no active agreements (or pre-migration) — so nothing changes for tasks
- * whose contributors have no agreement.
- */
-export async function applyTaskAgreements(taskId: string): Promise<{ ok: boolean; changed: number }> {
-  try {
-    const { changed } = await syncTaskAgreementEarnings(taskId)
-    return { ok: true, changed }
-  } catch {
-    return { ok: false, changed: 0 }
-  }
-}
 
 // ─── Phase 3.0 — server-side contribution writes ─────────────────────────────
 

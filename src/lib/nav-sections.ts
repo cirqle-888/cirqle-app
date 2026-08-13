@@ -12,7 +12,8 @@ import {
   Settings, TrendingUp, Upload, Inbox, PhoneCall, Award, Activity, Blocks, Megaphone, Handshake,
   SlidersHorizontal, MessageSquare, ClipboardCheck, NotebookPen, LayoutGrid,
   Briefcase, ClipboardList, CalendarClock, CalendarDays, BadgeCheck, PieChart, Building2, Tags, History, Sparkles,
-  BadgePercent, FileSignature, CalendarRange, HardHat, Repeat,
+  BadgePercent, CalendarRange, HardHat, Repeat, Package as PackageIcon,
+  Share2, UserPlus, Gauge,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -75,6 +76,7 @@ export const navSections: NavSection[] = [
       { label: 'Requests',      href: '/dashboard/requests',      icon: Inbox, requiredPerm: 'requests.view' },
       { label: 'Tasks',         href: '/dashboard/tasks',         icon: CheckSquare },
       { label: 'Clients',       href: '/dashboard/clients',       icon: Users2, requiredPerm: 'clients.view' },
+      { label: 'Leads',         href: '/dashboard/leads',         icon: UserPlus, requiredPerm: 'leads.view', keywords: ['crm', 'meta leads', 'lead ads', 'prospects', 'enquiries'] },
       { label: 'Contributions', href: '/dashboard/contributions', icon: TrendingUp },
       { label: 'Chat',          href: '/dashboard/chat',          icon: MessageSquare, requiredPerm: 'chat.access' },
     ],
@@ -83,9 +85,9 @@ export const navSections: NavSection[] = [
     label: 'Finance',
     defaultOpen: true,
     items: [
-      // Commercial flow: Quotations → Agreements → Invoices (design §12 #7).
+      // Commercial flow: Quotations → Packages → Invoices (design §12 #7).
       // Quotations sits in Advanced until one is actually issued.
-      { label: 'Agreements',        href: '/dashboard/agreements', icon: FileSignature, requiredPerm: 'agreements.view', keywords: ['contract', 'retainer', 'commitment', 'package', 'promised'] },
+      { label: 'Packages',          href: '/dashboard/packages',   icon: PackageIcon, requiredPerm: 'packages.view', keywords: ['agreement', 'retainer', 'commitment', 'bundle', 'committed', 'promised'] },
       { label: 'Invoices',          href: '/dashboard/invoices',   icon: FileText, requiredPerm: 'billing.view_invoices' },
       { label: 'Follow-ups',        href: '/dashboard/invoices/follow-ups', icon: PhoneCall, requiredPerm: 'billing.view_invoices' },
       { label: 'Cash Book',         href: '/dashboard/cashbook',   icon: Wallet,   requiredPerm: 'cashbook.view', keywords: ['expenses', 'bank', 'transactions'] },
@@ -93,7 +95,15 @@ export const navSections: NavSection[] = [
       // The monthly control centre: profit composition, payroll status,
       // corrections and the lock action for each financial period.
       { label: 'Months',            href: '/dashboard/finance/months', icon: CalendarRange, requiredPerm: 'payroll.view', keywords: ['financial timeline', 'period', 'close', 'lock', 'profit', 'month end'] },
-      { label: 'HR & Payroll',      href: '/dashboard/payroll', icon: Users2, requiredPerm: 'payroll.view', keywords: ['salary', 'payslip', 'employees'] },
+    ],
+  },
+  {
+    label: 'HR',
+    defaultOpen: true,
+    items: [
+      { label: 'HR & Payroll', href: '/dashboard/payroll',     icon: Users2, requiredPerm: 'payroll.view', keywords: ['salary', 'payslip', 'employees'] },
+      // Performance Scorecards: score employees & applicants, apply ratings.
+      { label: 'Performance',  href: '/dashboard/performance', icon: Gauge, requiredPerm: 'performance.manage', keywords: ['scorecard', 'rating', 'appraisal', 'review', 'applicant', 'cv', 'measure'] },
     ],
   },
   {
@@ -120,6 +130,8 @@ export const navSections: NavSection[] = [
     defaultOpen: false,
     items: [
       { label: 'Advertising',    href: '/dashboard/advertising', icon: Megaphone, requiredPerm: 'advertising.view', keywords: ['campaigns', 'ads', 'marketing'] },
+      { label: 'Social',         href: '/dashboard/social',      icon: Share2, requiredPerm: 'social.view_insights', keywords: ['instagram', 'facebook', 'pages', 'insights', 'reach', 'publishing', 'meta'] },
+      { label: 'Agency',         href: '/dashboard/agency',      icon: LayoutGrid, requiredPerm: 'reports.view', keywords: ['agency dashboard', 'all clients', 'overview', 'spend', 'leads', 'cpl', 'alerts'] },
     ],
   },
   {

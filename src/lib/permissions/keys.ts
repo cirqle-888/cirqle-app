@@ -112,11 +112,29 @@ export const PERMS = {
   SOCIAL_VIEW:   'social.view',
   SOCIAL_MANAGE: 'social.manage',
 
-  // Client Agreements — the parent commercial commitment record
-  // (CLIENT_AGREEMENTS_DESIGN.md; migration 20260722120000)
-  AGREEMENTS_VIEW:         'agreements.view',
-  AGREEMENTS_MANAGE:       'agreements.manage',
-  AGREEMENTS_VIEW_PRICING: 'agreements.view_pricing',
+  // Social Hub — connected Meta assets (Pages/Instagram), insights, publishing
+  /** Connect/disconnect Meta assets (Pages, Instagram accounts) for clients. */
+  SOCIAL_CONNECT:       'social.connect',
+  /** View social dashboards: reach, views, engagement, content performance. */
+  SOCIAL_VIEW_INSIGHTS: 'social.view_insights',
+  /** Create/edit social posts and send them for approval. */
+  SOCIAL_PUBLISH:       'social.publish',
+  /** Approve posts and schedule/publish them to Meta. */
+  SOCIAL_APPROVE:       'social.approve',
+
+  // Leads CRM — Meta Lead Ads land here (migration 20260812123000)
+  /** Open the Leads module (list + client lead sections). */
+  LEADS_VIEW:   'leads.view',
+  /** Create/edit/assign leads, change status, configure automation rules. */
+  LEADS_MANAGE: 'leads.manage',
+
+  // Packages — a committed bundle of work: one agreed price, a list of what's
+  // included, and a bulk invoice line. Replaces the retired Client Agreements
+  // module (migration 20260814110000).
+  /** Open the Packages module: what's committed, delivered and still owed. */
+  PACKAGES_VIEW:   'packages.view',
+  /** Create/edit/close packages and set their price and extra-work rate. */
+  PACKAGES_MANAGE: 'packages.manage',
 
   // Service Scope — cross-module restriction (see src/lib/scope/service-scope.ts).
   // Dimension-qualified names so a future scope.by_branch sits beside these.
@@ -213,6 +231,10 @@ export const PERMS = {
   RECRUITMENT_DELETE:    'recruitment.delete',
   RECRUITMENT_INTERVIEW: 'recruitment.interview',
   RECRUITMENT_ADMIN:     'recruitment.admin',
+
+  // Performance Scorecards (migration 028)
+  /** Open the Performance page, score employees/applicants, edit criteria and apply ratings. */
+  PERFORMANCE_MANAGE:    'performance.manage',
 } as const
 
 export type PermKey = typeof PERMS[keyof typeof PERMS]
@@ -229,7 +251,6 @@ export const FINANCIAL_VISIBILITY_PERMS = [
   PERMS.BILLING_VIEW_AMOUNTS,
   PERMS.BILLING_VIEW_LINE_PRICING,
   PERMS.CASHBOOK_VIEW_AMOUNTS,
-  PERMS.AGREEMENTS_VIEW_PRICING,
 ] as const
 
 /**
@@ -249,7 +270,9 @@ export const CRITICAL_PERMS: ReadonlySet<string> = new Set<string>([
   PERMS.BILLING_VIEW_AMOUNTS,
   PERMS.BILLING_VIEW_PRICING,
   PERMS.BILLING_VIEW_LINE_PRICING,
-  PERMS.AGREEMENTS_VIEW_PRICING,
+  // A package's whole point is its agreed price, so there is no field-level
+  // split here — seeing the page means seeing what the client pays.
+  PERMS.PACKAGES_VIEW,
   PERMS.CASHBOOK_VIEW_AMOUNTS,
   // Advertising money layers (migration 027)
   PERMS.ADVERTISING_VIEW_FINANCIALS,

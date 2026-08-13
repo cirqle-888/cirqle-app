@@ -22,7 +22,7 @@ import {
   setEmployeeServices, setServiceEmployees, setEmployeeServiceCategories,
   createServiceCategory, updateServiceCategory, setServiceCategoryActive, reorderServiceCategories,
 } from './actions'
-import { Plus, X, Edit2, Archive, ArchiveRestore, Save, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Mail, Send, RotateCcw as ResetKey, RefreshCw, Star, Building2, MapPin, Users, Handshake } from 'lucide-react'
+import { Plus, X, Edit2, Archive, ArchiveRestore, Save, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Mail, Send, RotateCcw as ResetKey, RefreshCw, Star, Building2, MapPin, Users } from 'lucide-react'
 import type { Currency } from '@/types'
 import InfoTip from '@/components/ui/info-tip'
 import { usePrivacy, getStoredPin, setStoredPin, isForceLocked } from '@/contexts/privacy-context'
@@ -1857,10 +1857,6 @@ export default function SettingsClient(props: Props) {
                       <button onClick={() => openEmployeeForm(emp)} className="p-1.5 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground" title="Edit">
                         <Edit2 className="w-4 h-4" />
                       </button>
-
-                      <Link href={`/dashboard/employees/${emp.id}/agreements`} className="p-1.5 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground" title="Commission Agreements">
-                        <Handshake className="w-4 h-4" />
-                      </Link>
 
                       {emp.is_archived ? (
                         <button

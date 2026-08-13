@@ -40,28 +40,11 @@ export default async function ContributionsPage() {
   // viewer holds `tasks.view_pricing` — otherwise they're stripped from the
   // payload before it leaves the server.
   // quantity is a count, not a price — included in both variants (see Qty display in contributions-client.tsx).
-  // client_id and bill_as_extra are required by the shared TaskEditModal:
-  // without them the Client field renders empty and the retainer-coverage
-  // lookup never fires, so a covered task silently loses its coverage card.
   // client_id is required by the shared TaskEditModal: without it the Client
-  // field renders empty and the retainer-coverage lookup never fires, so a
-  // covered task silently loses its coverage card. bill_as_extra/billing_mode/
-  // currency ride along only for pricing-visible viewers, mirroring the tasks
-  // page's financial stripping.
-  // retainer_item_id/work_value_inr: covered tasks bill 0 but pool from the
-  // agreement's work value. work_value_inr is money → pricing-visible only.
-  // work_value/work_value_currency are the SAME figure in the agreement's own
-  // currency, so the badge can be checked against the signed contract; they are
-  // money too, hence pricing-visible only.
-  //
-  // The commission override is fetched SEPARATELY below, never embedded:
-  // PostgREST sees two relationships between tasks and client_agreement_items
-  // (the retainer_item_id FK, and the legacy client_agreement_tasks join
-  // table), so an unqualified embed fails with PGRST201 — and because the
-  // embed is part of the main task select, that failure returned ZERO TASKS
-  // for the whole page rather than merely dropping the override.
-  const taskSelectWithPricing    = 'id, task_number, title, client_id, service_id, billing_amount_inr, quantity, status, task_date, bill_as_extra, retainer_item_id, work_value_inr, work_value, work_value_currency, parent_task_id, billing_mode, currency, client:clients(id, name, code), service:services(id, name)'
-  const taskSelectWithoutPricing = 'id, task_number, title, client_id, service_id, quantity, status, task_date, retainer_item_id, parent_task_id, client:clients(id, name, code), service:services(id, name)'
+  // field renders empty. billing_mode/currency ride along only for
+  // pricing-visible viewers, mirroring the tasks page's financial stripping.
+  const taskSelectWithPricing    = 'id, task_number, title, client_id, service_id, billing_amount_inr, quantity, status, task_date, parent_task_id, billing_mode, currency, client:clients(id, name, code), service:services(id, name)'
+  const taskSelectWithoutPricing = 'id, task_number, title, client_id, service_id, quantity, status, task_date, parent_task_id, client:clients(id, name, code), service:services(id, name)'
   // 24-month window bounds the otherwise unbounded task list. Contributions for
   // tasks older than 24 months should already be finalized; the editor here is
   // for active/recent work. HAR showed this query was the slowest (2060ms) when
@@ -98,7 +81,7 @@ export default async function ContributionsPage() {
     tasksRes, employeesRes, groupsRes, parametersRes, toolsRes,
     paramServicesRes, toolServicesRes, groupServicesRes,
     scoresRes, clientsRes, servicesRes, assignmentsRes,
-    contributorRecordsRes, taskToolRecordsRes, pricingRes, agreementsRes,
+    contributorRecordsRes, taskToolRecordsRes, pricingRes,
     visibilityBillingRes, visibilityContribRes, visibilityNamesRes,
     taskGroupAssignmentsRes, taskParamAssignmentsRes, performanceHistoryRes,
     employeeServicesRes, unitScope,
@@ -141,7 +124,6 @@ export default async function ContributionsPage() {
     timed('pricing', vis.tasksPricing
       ? supabase.from('client_service_pricing').select('client_id, service_id, commission_percentage, price, currency')
       : noData),
-    timed('agreements',             supabase.from('employee_commission_agreements').select('id, employee_id, client_id, service_id, agreement_type, agreement_value, currency, effective_from, effective_to, is_active').eq('is_active', true)),
     timed('vis_billing',            supabase.from('company_settings').select('value').eq('key', 'visibility_billing').maybeSingle()),
     timed('vis_contrib',            supabase.from('company_settings').select('value').eq('key', 'visibility_contributions').maybeSingle()),
     timed('vis_names',              supabase.from('company_settings').select('value').eq('key', 'visibility_employee_names').maybeSingle()),
@@ -237,29 +219,8 @@ export default async function ContributionsPage() {
     }, unitTaskIds)
   }
 
-  // Agreement-item commission overrides for retainer-linked tasks. A SEPARATE
-  // query, never an embed (see the select comment above). Defensive: on any
-  // error the tasks simply fall back to the pricing matrix / default 50, which
-  // is what happened before this existed.
-  const retainerItemIds = Array.from(new Set(
-    (outTasks as { retainer_item_id?: string | null }[])
-      .map(t => t.retainer_item_id)
-      .filter(Boolean) as string[],
-  ))
-  let agreementItems: { id: string; work_commission_pct: number | null }[] = []
-  if (retainerItemIds.length > 0) {
-    try {
-      const { data } = await supabase
-        .from('client_agreement_items')
-        .select('id, work_commission_pct')
-        .in('id', retainerItemIds)
-      agreementItems = (data as typeof agreementItems) || []
-    } catch { /* fall back to the pricing matrix */ }
-  }
-
   return (
     <ContributionsClient
-      agreementItems={agreementItems}
       tasks={outTasks}
       employees={outEmployees}
       groups={groupsRes.data || []}
@@ -276,7 +237,6 @@ export default async function ContributionsPage() {
       contributorRecords={outContributorRecords}
       taskToolRecords={taskToolRecordsRes.data || []}
       pricingMatrix={pricingRes.data || []}
-      agreements={agreementsRes.data || []}
       performanceHistory={performanceHistoryRes.data || []}
       visibilitySettings={{
         billing:        (visibilityBillingRes.data?.value as string) || 'all',

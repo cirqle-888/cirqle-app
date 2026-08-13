@@ -2,11 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { calculateCommission } from '@/lib/calculations/commission'
 import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
-import { syncTaskAgreementEarnings } from '@/lib/sync/agreement-earnings'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { isMonthFinalized } from '@/lib/payroll/compute'
 import { fetchAll } from '@/lib/supabase/server'
-import { taskPoolBasisInr, resolveCommissionPct } from '@/lib/calculations/work-value'
 
 export async function POST(req: NextRequest) {
   try {
@@ -55,7 +53,7 @@ export async function POST(req: NextRequest) {
     // 2. Fetch tasks in date range with their raw contributions, tool usage, and previous scores
     let tasksQuery = supabase
       .from('tasks')
-      .select('id, client_id, service_id, billing_amount_inr, task_date, status, retainer_item_id, bill_as_extra, work_value_inr')
+      .select('id, client_id, service_id, billing_amount_inr, task_date, status')
       .gte('task_date', dateFrom)
       .lte('task_date', dateTo)
 
@@ -92,21 +90,6 @@ export async function POST(req: NextRequest) {
     }
 
     const taskIds = tasks.map(t => t.id)
-
-    // Agreement-item commission overrides for retainer-linked tasks (one query).
-    const retainerItemIds = Array.from(new Set(
-      tasks.map(t => (t as any).retainer_item_id).filter(Boolean) as string[]
-    ))
-    const itemPct = new Map<string, number | null>()
-    if (retainerItemIds.length > 0) {
-      try {
-        const { data: items } = await supabase
-          .from('client_agreement_items')
-          .select('id, work_commission_pct')
-          .in('id', retainerItemIds)
-        for (const i of items || []) itemPct.set(i.id, (i as any).work_commission_pct ?? null)
-      } catch { /* pre-migration → default path */ }
-    }
 
     // Chunk fetching for large arrays if needed, but assuming reasonable range < 2000 tasks
     const [contribsRes, taskToolsRes, scoresRes] = await Promise.all([
@@ -161,11 +144,7 @@ export async function POST(req: NextRequest) {
       const pricing = pricingMatrix.find(
         p => p.client_id === task.client_id && p.service_id === task.service_id
       )
-      const commPct = resolveCommissionPct(
-        task as any,
-        (task as any).retainer_item_id ? (itemPct.get((task as any).retainer_item_id) ?? null) : null,
-        pricing?.commission_percentage ?? null,
-      )
+      const commPct = pricing?.commission_percentage ?? 50
 
       const usedToolIds = toolsByTask[task.id] || new Set()
       const linkedToolIds = toolServices
@@ -190,8 +169,7 @@ export async function POST(req: NextRequest) {
       try {
         const result = calculateCommission({
           taskId: task.id,
-          // Covered retainer work pools from the stamped work value, not billing (0).
-          billingAmountINR: taskPoolBasisInr(task as any),
+          billingAmountINR: task.billing_amount_inr || 0,
           serviceCommissionPct: commPct,
           employees: effectiveEmployees as any,
           groups: taskGroups as any,
@@ -267,14 +245,6 @@ export async function POST(req: NextRequest) {
           console.error("Upsert chunk error:", error)
           return NextResponse.json({ error: error.message }, { status: 500 })
         }
-      }
-    }
-
-    // Layer employee commission agreements on top of the recomputed base
-    // earnings (no-op without agreements). Only the tasks we just processed.
-    for (const task of tasks) {
-      if (byTask[task.id]?.length) {
-        try { await syncTaskAgreementEarnings(task.id) } catch { /* best-effort */ }
       }
     }
 

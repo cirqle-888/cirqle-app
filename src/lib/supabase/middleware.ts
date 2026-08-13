@@ -8,11 +8,16 @@ import { Database } from '../../types/supabase'
  */
 const ROUTE_PERMS: Array<[RegExp, string]> = [
   [/^\/dashboard\/activity/,                'timeline.view_all'],
+  [/^\/dashboard\/leads/,                   'leads.view'],
+  [/^\/dashboard\/agency/,                  'reports.view'],
+  [/^\/dashboard\/social(?!-calendar)/,     'social.view_insights'],
   [/^\/dashboard\/chat/,                    'chat.access'],
   [/^\/dashboard\/recruitment/,             'recruitment.view'],
   [/^\/dashboard\/cashbook/,                'cashbook.view'],
   [/^\/dashboard\/partners/,                'finance.partner.view'],
   [/^\/dashboard\/payroll/,                 'payroll.view'],
+  [/^\/dashboard\/performance/,             'performance.manage'],
+  [/^\/dashboard\/packages/,                'packages.view'],
   [/^\/dashboard\/invoices/,                'billing.view_invoices'],
   [/^\/dashboard\/quotations/,              'billing.view_quotations'],
   [/^\/dashboard\/settings\/designations/,  'settings.manage_designations'],
@@ -205,6 +210,10 @@ export async function updateSession(request: NextRequest) {
                                                          // request (including the original cleanup-product-images) was getting
                                                          // 307-redirected to /login before reaching the route's own auth check —
                                                          // i.e. silently never executing in production.
+                  || pathname.startsWith('/api/webhooks/') // Provider webhooks (Meta leadgen etc.) — authenticated by
+                                                         // X-Hub-Signature-256 HMAC (app secret) inside the route itself.
+                                                         // Meta's servers carry no session cookie; without this exemption
+                                                         // every delivery would be 307-redirected to /login and dropped.
                   || pathname.startsWith('/api/figma/') // Cirqle Studio Figma plugin — its own offer_sheet_secret bearer auth
                                                          // (fail-closed in the routes). Same bug class as /api/cron/ above: the
                                                          // plugin's iframe carries no session cookies, so without this exemption

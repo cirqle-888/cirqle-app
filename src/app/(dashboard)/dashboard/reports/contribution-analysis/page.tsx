@@ -5,7 +5,6 @@ import {
   buildAnalysisRows,
   type RawTask, type RawScore, type RawPricing, type EmployeeColumn,
 } from '@/lib/reports/contribution-analysis'
-import type { CommissionAgreement } from '@/lib/calculations/agreements'
 import { resolveFetchWindow, scoreWindowFor } from '@/lib/reports/date-bounds'
 import ContributionAnalysisClient from './contribution-analysis-client'
 
@@ -43,7 +42,7 @@ export default async function ContributionAnalysisPage({
       (() => {
         let q = supabase
           .from('tasks')
-          .select('id, task_number, title, task_date, status, currency, billing_amount, billing_amount_inr, client_id, service_id, retainer_item_id, bill_as_extra, work_value_inr')
+          .select('id, task_number, title, task_date, status, currency, billing_amount, billing_amount_inr, client_id, service_id')
           .is('deleted_at', null)
         if (win.from) q = q.gte('task_date', win.from)
         if (win.to) q = q.lte('task_date', win.to)
@@ -137,37 +136,6 @@ export default async function ContributionAnalysisPage({
     if (pct) toolPctByTask.set(tt.task_id, (toolPctByTask.get(tt.task_id) || 0) + pct)
   }
 
-  // Active employee commission agreements (defensive — table may not exist
-  // pre-migration). Empty ⇒ the report behaves exactly as before.
-  let agreements: CommissionAgreement[] = []
-  try {
-    const { data, error } = await supabase
-      .from('employee_commission_agreements')
-      .select('id, employee_id, client_id, service_id, agreement_type, agreement_value, currency, effective_from, effective_to, is_active')
-      .eq('is_active', true)
-    if (!error && data) agreements = data as CommissionAgreement[]
-  } catch { /* table missing pre-migration — ignore */ }
-
-  // Agreement-item commission overrides for retainer-linked tasks. Defensive:
-  // empty pre-migration, so behaviour is unchanged.
-  const itemCommissionPct = new Map<string, number | null>()
-  try {
-    const retainerItemIds = Array.from(new Set(
-      ((tasksRes.data || []) as RawTask[])
-        .map(t => t.retainer_item_id)
-        .filter(Boolean) as string[]
-    ))
-    if (retainerItemIds.length > 0) {
-      const { data: items } = await supabase
-        .from('client_agreement_items')
-        .select('id, work_commission_pct')
-        .in('id', retainerItemIds)
-      for (const i of (items || []) as { id: string; work_commission_pct: number | null }[]) {
-        itemCommissionPct.set(i.id, i.work_commission_pct ?? null)
-      }
-    }
-  } catch { /* pre-migration — default commission path */ }
-
   const rows = buildAnalysisRows(
     (tasksRes.data || []) as RawTask[],
     (scoresRes.data || []) as RawScore[],
@@ -179,8 +147,6 @@ export default async function ContributionAnalysisPage({
     empRating,
     toolPctByTask,
     100,           // defaultPerformanceRating
-    agreements,
-    itemCommissionPct,
   )
 
   // ── Saved layouts (personal + system default) ──────────────────────────────

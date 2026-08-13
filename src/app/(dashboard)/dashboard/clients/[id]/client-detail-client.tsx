@@ -9,8 +9,8 @@ import {
   Mail, Phone, MapPin, Globe, ExternalLink, Award, Tag, Plus, AlertTriangle,
 } from 'lucide-react'
 import dynamic from 'next/dynamic'
-import type { AgreementProgressSummary } from '@/lib/agreements/progress'
 import { formatDate } from '@/lib/utils/format-date'
+import { ClientSocialSection, type ClientSocialAccount } from '@/components/social-hub/client-social-section'
 
 // Lazy recharts — only loads when a client with retainer trend data is viewed.
 const ChartSkeleton = () => <div className="h-[220px] rounded-lg bg-secondary/40 animate-pulse" />
@@ -23,10 +23,7 @@ interface Props {
   services: { id: string; name: string; is_active: boolean }[]
   partner: { id: string; name: string; partner_code: string } | null
   showAmounts: boolean
-  agreements?: any[]
-  agreementProgress?: AgreementProgressSummary[]
-  canViewAgreements?: boolean
-  canManageAgreements?: boolean
+  socialAccounts?: ClientSocialAccount[]
 }
 
 const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
@@ -50,53 +47,11 @@ const TASK_STATUS_STYLE: Record<string, string> = {
   cancelled:   'bg-red-500/10 text-red-400 border-red-500/25',
 }
 
-const AGREEMENT_STATUS_CHIP: Record<string, string> = {
-  draft: 'bg-secondary text-muted-foreground border-border',
-  active: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/25',
-  paused: 'bg-amber-500/10 text-amber-500 border-amber-500/25',
-  completed: 'bg-blue-500/10 text-blue-500 border-blue-500/25',
-  cancelled: 'bg-red-500/10 text-red-500 border-red-500/25',
-}
-
-const HEALTH_DOT: Record<string, string> = { green: 'bg-emerald-500', amber: 'bg-amber-500', red: 'bg-red-500' }
-const HEALTH_BAR: Record<string, string> = { green: 'bg-emerald-500', amber: 'bg-amber-500', red: 'bg-red-500' }
-const HEALTH_LABEL: Record<string, string> = { green: 'On track', amber: 'Near limit', red: 'Exceeded' }
-const FIN_STYLE: Record<string, string> = {
-  healthy: 'text-emerald-600 dark:text-emerald-400',
-  warning: 'text-amber-600 dark:text-amber-400',
-  loss: 'text-red-600 dark:text-red-400',
-}
-const nativeMoney = (cur: string, n: number | null | undefined) => n == null ? null : `${cur} ${Math.round(n).toLocaleString('en-US')}`
-const inrMoney = (n: number | null | undefined) => n == null ? null : `₹${Math.round(n).toLocaleString('en-IN')}`
-
-/** Operational retainer dashboard row (Phase 3). Read-only; money already
- *  stripped upstream for viewers without agreements.view_pricing. */
-
-/** Shape the Agreements card reads off each overview row (loadAgreementOverview). */
-interface AgreementCardRow {
-  id: string
-  title: string
-  agreement_number: string
-  status: string
-  start_date: string
-  end_date: string | null
-  renewal_type: string | null
-  updated_at: string | null
-}
-
 export default function ClientDetailClient({
   client, invoices, tasks, pricing, services, partner, showAmounts,
-  agreements, agreementProgress, canViewAgreements = false, canManageAgreements = false,
+  socialAccounts = [],
 }: Props) {
   const { ds } = usePrivacy()
-
-  // Map agreementId → this-month progress summary (active/paused only). Pure
-  // lookup over the loader's output — no recomputation of progress here.
-  const progressById = useMemo(() => {
-    const m = new Map<string, AgreementProgressSummary>()
-    for (const p of agreementProgress ?? []) m.set(p.agreementId, p)
-    return m
-  }, [agreementProgress])
 
   const kpi = useMemo(() => {
     let billed = 0, paid = 0, drafts = 0
@@ -209,94 +164,6 @@ export default function ClientDetailClient({
               </div>
             )}
 
-            {canViewAgreements && (
-              <div className="bg-card border border-border rounded-2xl overflow-hidden">
-                <div className="px-5 py-3.5 border-b border-border/60 flex items-center justify-between">
-                  <h2 className="text-sm font-semibold">Agreements & Packages</h2>
-                  <div className="flex items-center gap-3">
-                    {canManageAgreements && (agreements?.length ?? 0) > 0 && (
-                      <Link
-                        href={`/dashboard/agreements?newClient=${client.id}`}
-                        className="text-xs font-medium text-primary hover:underline flex items-center gap-1"
-                      >
-                        <Plus className="w-3 h-3" /> Create
-                      </Link>
-                    )}
-                    <Link href="/dashboard/agreements" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
-                      Manage <ExternalLink className="w-3 h-3" />
-                    </Link>
-                  </div>
-                </div>
-
-                {(agreements?.length ?? 0) === 0 ? (
-                  <div className="px-5 py-10 text-center">
-                    <Handshake className="w-8 h-8 mx-auto text-muted-foreground/40" />
-                    <p className="mt-3 text-sm text-muted-foreground">No agreements found</p>
-                    {canManageAgreements && (
-                      <Link
-                        href={`/dashboard/agreements?newClient=${client.id}`}
-                        className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-                      >
-                        <Plus className="w-3.5 h-3.5" /> Create Agreement
-                      </Link>
-                    )}
-                  </div>
-                ) : (
-                  <div className="divide-y divide-border/40">
-                    {(agreements as AgreementCardRow[]).map((agr) => {
-                      const prog = progressById.get(agr.id)
-                      const committed = prog?.totalCommitted ?? 0
-                      const delivered = prog?.totalDelivered ?? 0
-                      const remaining = prog?.totalRemaining ?? Math.max(0, committed - delivered)
-                      const pct = committed > 0 ? Math.min(100, Math.round((delivered / committed) * 100)) : 0
-                      const showBar = !!prog && committed > 0
-                      return (
-                        <div key={agr.id} className="px-5 py-3 hover:bg-secondary/40 transition-colors">
-                          <div className="flex items-center gap-3">
-                            <Link href={`/dashboard/agreements/${agr.id}`} className="min-w-0 flex-1">
-                              <p className="text-sm font-medium truncate hover:underline">{agr.title}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {agr.agreement_number} · {fmtDate(agr.start_date)} &rarr; {agr.end_date ? fmtDate(agr.end_date) : 'Ongoing'}
-                                {agr.renewal_type ? ` · ${agr.renewal_type} renewal` : ''}
-                              </p>
-                            </Link>
-                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border capitalize shrink-0 ${AGREEMENT_STATUS_CHIP[agr.status] || AGREEMENT_STATUS_CHIP.draft}`}>
-                              {agr.status}
-                            </span>
-                            <a
-                              href={`/dashboard/agreements/${agr.id}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              onClick={e => e.stopPropagation()}
-                              title="Open in new tab"
-                              className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
-                            >
-                              <ExternalLink className="w-3.5 h-3.5" />
-                            </a>
-                          </div>
-
-                          {showBar && (
-                            <div className="mt-2">
-                              <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-1">
-                                <span>{delivered} / {committed} delivered · {remaining} remaining</span>
-                                <span className="font-semibold text-foreground tabular-nums">{pct}%</span>
-                              </div>
-                              <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
-                                <div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
-                              </div>
-                            </div>
-                          )}
-
-                          <p className="mt-1.5 text-[10px] text-muted-foreground/60">
-                            Updated {fmtDate(agr.updated_at)}
-                          </p>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
 
             <div className="bg-card border border-border rounded-2xl overflow-hidden">
               <div className="px-5 py-3.5 border-b border-border/60 flex items-center justify-between">
@@ -347,6 +214,8 @@ export default function ClientDetailClient({
                 </a>
               )}
             </div>
+
+            <ClientSocialSection accounts={socialAccounts} />
 
             {showAmounts && (
               <div className="bg-card border border-border rounded-2xl overflow-hidden">

@@ -21,9 +21,8 @@ import {
   emptyScenario, isScenarioEmpty, baselineRows, simulateScenario, compareScenario,
   goalSeek, resolveIncrement,
   type Scenario, type WhatIfRawInputs, type ScenarioComparison, type MetricDelta,
-  type DraftAgreement, type DraftOwnershipRule, type GoalMetric, type GoalLever,
+  type DraftOwnershipRule, type GoalMetric, type GoalLever,
 } from '@/lib/reports/what-if'
-import type { AgreementType } from '@/lib/calculations/agreements'
 import { applyWhatIfScenario, type SelectedChange } from './apply-actions'
 
 // ─── Formatting ────────────────────────────────────────────────────────────────
@@ -52,13 +51,7 @@ interface Props {
   baseSalaries: Record<string, number> | null
   /** client|service → current price (pairings without a price hide the price lever) */
   currentPrices: Record<string, number>
-  canApply: { rating: boolean; salary: boolean; pricing: boolean; agreements: boolean }
-}
-
-const AGREEMENT_TYPE_LABEL: Record<AgreementType, string> = {
-  fixed_per_task: 'Fixed ₹ per task',
-  percentage_of_billing: '% of billing',
-  percentage_of_pool: '% of commission pool',
+  canApply: { rating: boolean; salary: boolean; pricing: boolean }
 }
 
 let scenarioSeq = 1
@@ -219,18 +212,6 @@ export default function WhatIfClient({ raw, employees: rawEmployees, baseSalarie
                 active={(active.draftOwnershipRules ?? []).length > 0}
               >
                 <DraftRolesLever active={active} updateActive={updateActive} />
-              </LeverSection>
-              <LeverSection
-                title="Draft agreements"
-                subtitle="Test a special rate for one person before creating it."
-                active={active.draftAgreements.length > 0}
-              >
-                <DraftAgreementsPanel
-                  employees={employees}
-                  raw={raw}
-                  active={active}
-                  updateActive={updateActive}
-                />
               </LeverSection>
               <LeverSection
                 title="Goal seek"
@@ -588,102 +569,6 @@ function DraftRolesLever({ active, updateActive }: { active: Scenario; updateAct
   )
 }
 
-function DraftAgreementsPanel({ employees, raw, active, updateActive }: {
-  employees: EmployeeColumn[]
-  raw: WhatIfRawInputs
-  active: Scenario
-  updateActive: (m: (s: Scenario) => Scenario) => void
-}) {
-  const [form, setForm] = useState<{ employee_id: string; client_id: string; service_id: string; agreement_type: AgreementType; value: string; replaces: string }>({
-    employee_id: '', client_id: '', service_id: '', agreement_type: 'percentage_of_pool', value: '', replaces: '',
-  })
-
-  const empAgreements = raw.agreements.filter(a => a.employee_id === form.employee_id)
-
-  function addDraft() {
-    if (!form.employee_id || !form.value) return
-    const draft: DraftAgreement = {
-      id: `draft-${Date.now()}`,
-      employee_id: form.employee_id,
-      client_id: form.client_id || null,
-      service_id: form.service_id || null,
-      agreement_type: form.agreement_type,
-      agreement_value: Number(form.value),
-      replaces_agreement_id: form.replaces || null,
-    }
-    updateActive(s => ({ ...s, draftAgreements: [...s.draftAgreements, draft] }))
-    setForm({ employee_id: '', client_id: '', service_id: '', agreement_type: 'percentage_of_pool', value: '', replaces: '' })
-  }
-
-  const empName = (id: string) => employees.find(e => e.id === id)?.name || '—'
-  const clientName = (id: string | null) => id ? (raw.clients.find(c => c.id === id)?.name || '—') : 'All clients'
-  const serviceName = (id: string | null) => id ? (raw.services.find(s => s.id === id)?.name || '—') : 'All services'
-
-  return (
-    <div className={cardCls}>
-      <h3 className="text-sm font-semibold text-foreground mb-1">Draft agreements</h3>
-      <p className="text-[11px] text-muted-foreground mb-3">Test a commission agreement before creating it — the real resolution rules (specificity, manual-override protection) apply.</p>
-
-      {active.draftAgreements.length > 0 && (
-        <div className="space-y-1.5 mb-3">
-          {active.draftAgreements.map(d => (
-            <div key={d.id} className="flex items-start justify-between gap-2 bg-background/60 border border-border rounded-lg px-2.5 py-2">
-              <div className="text-[11px]">
-                <p className="font-medium text-foreground">{empName(d.employee_id)} — {AGREEMENT_TYPE_LABEL[d.agreement_type]} · {d.agreement_type === 'fixed_per_task' ? inr(d.agreement_value) : `${d.agreement_value}%`}</p>
-                <p className="text-muted-foreground">{clientName(d.client_id)} · {serviceName(d.service_id)}{d.replaces_agreement_id ? ' · replaces an existing agreement' : ''}</p>
-              </div>
-              <button onClick={() => updateActive(s => ({ ...s, draftAgreements: s.draftAgreements.filter(x => x.id !== d.id) }))} className="text-muted-foreground hover:text-destructive shrink-0 mt-0.5">
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="space-y-2">
-        <select value={form.employee_id} onChange={e => setForm(f => ({ ...f, employee_id: e.target.value, replaces: '' }))} className={inputCls}>
-          <option value="">Select employee…</option>
-          {/* eslint-disable-next-line no-restricted-syntax -- `employees` is pre-masked with dn() in WhatIfClient's useMemo, so this `.name` IS the CQID when locked. */}
-          {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-        </select>
-        {form.employee_id && (
-          <>
-            <div className="grid grid-cols-2 gap-2">
-              <select value={form.client_id} onChange={e => setForm(f => ({ ...f, client_id: e.target.value }))} className={inputCls}>
-                <option value="">All clients</option>
-                {raw.clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-              <select value={form.service_id} onChange={e => setForm(f => ({ ...f, service_id: e.target.value }))} className={inputCls}>
-                <option value="">All services</option>
-                {raw.services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <select value={form.agreement_type} onChange={e => setForm(f => ({ ...f, agreement_type: e.target.value as AgreementType }))} className={inputCls}>
-                {(Object.keys(AGREEMENT_TYPE_LABEL) as AgreementType[]).map(t => <option key={t} value={t}>{AGREEMENT_TYPE_LABEL[t]}</option>)}
-              </select>
-              <input type="number" min={0} placeholder={form.agreement_type === 'fixed_per_task' ? '₹ per task' : '%'} value={form.value} onChange={e => setForm(f => ({ ...f, value: e.target.value }))} className={inputCls} />
-            </div>
-            {empAgreements.length > 0 && (
-              <select value={form.replaces} onChange={e => setForm(f => ({ ...f, replaces: e.target.value }))} className={inputCls}>
-                <option value="">New agreement (keep existing ones)</option>
-                {empAgreements.map(a => (
-                  <option key={a.id} value={a.id}>
-                    Replace: {AGREEMENT_TYPE_LABEL[a.agreement_type]} {a.agreement_type === 'fixed_per_task' ? inr(a.agreement_value) : `${a.agreement_value}%`} ({clientName(a.client_id)} · {serviceName(a.service_id)})
-                  </option>
-                ))}
-              </select>
-            )}
-            <button onClick={addDraft} disabled={!form.value} className="w-full text-xs font-medium border border-border rounded-lg py-1.5 text-foreground hover:bg-secondary disabled:opacity-40">
-              + Add draft to scenario
-            </button>
-          </>
-        )}
-      </div>
-    </div>
-  )
-}
-
 // ─── Goal Seek ─────────────────────────────────────────────────────────────────
 
 function GoalSeekPanel({ raw, active, updateActive, employees, pairings, baseSalaries }: {
@@ -949,11 +834,6 @@ function GroupTable({ title, groups, divisor }: { title: string; groups: Scenari
 
 // ─── Apply review modal (Stage 2: Review → Snapshot → Apply) ──────────────────
 
-function firstOfNextMonth(): string {
-  const d = new Date()
-  return new Date(d.getFullYear(), d.getMonth() + 1, 1).toISOString().slice(0, 10)
-}
-
 function ApplyReviewModal({ active, cmp, raw, employees, baseSalaries, pairings, canApply, onClose }: {
   active: Scenario
   cmp: ScenarioComparison
@@ -994,30 +874,17 @@ function ApplyReviewModal({ active, cmp, raw, employees, baseSalaries, pairings,
       const [clientId, serviceId] = key.split('|')
       list.push({ allowed: canApply.pricing, change: { kind: 'price', clientId, serviceId, label: pairingLabel(key), from: pr.oldPrice, to: pr.newPrice } })
     }
-    for (const d of active.draftAgreements) {
-      list.push({
-        allowed: canApply.agreements,
-        change: {
-          kind: 'agreement', employeeId: d.employee_id, employeeName: empName(d.employee_id),
-          clientId: d.client_id, serviceId: d.service_id,
-          agreementType: d.agreement_type, agreementValue: d.agreement_value,
-          effectiveFrom: firstOfNextMonth(), replacesAgreementId: d.replaces_agreement_id ?? null,
-        },
-      })
-    }
     return list
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, raw, baseSalaries, pairings, canApply])
 
   const [selected, setSelected] = useState<Set<number>>(() => new Set(allChanges.map((c, i) => (c.allowed ? i : -1)).filter(i => i >= 0)))
-  const [effectiveFrom, setEffectiveFrom] = useState(firstOfNextMonth())
   const [notes, setNotes] = useState('')
   const [confirmText, setConfirmText] = useState('')
   const [busy, setBusy] = useState(false)
   const [outcome, setOutcome] = useState<{ ok: boolean; message: string } | null>(null)
 
   const hasRatingChange = allChanges.some((c, i) => selected.has(i) && c.change.kind === 'rating')
-  const hasAgreementChange = allChanges.some((c, i) => selected.has(i) && c.change.kind === 'agreement')
 
   function describe(c: SelectedChange): { group: string; text: string } {
     switch (c.kind) {
@@ -1025,10 +892,6 @@ function ApplyReviewModal({ active, cmp, raw, employees, baseSalaries, pairings,
       case 'base_salary': return { group: 'Employee changes', text: `${c.employeeName}: base salary ${inr(c.from)} → ${inr(c.to)}` }
       case 'commission_pct': return { group: 'Pricing changes', text: `${c.label}: commission ${c.from}% → ${c.to}%` }
       case 'price': return { group: 'Pricing changes', text: `${c.label}: price ${inr(c.from)} → ${inr(c.to)} (future tasks only)` }
-      case 'agreement': return {
-        group: 'Agreement changes',
-        text: `${c.employeeName}: ${c.replacesAgreementId ? 'replace agreement with' : 'new'} ${AGREEMENT_TYPE_LABEL[c.agreementType]} ${c.agreementType === 'fixed_per_task' ? inr(c.agreementValue) : `${c.agreementValue}%`}`,
-      }
     }
   }
 
@@ -1048,7 +911,7 @@ function ApplyReviewModal({ active, cmp, raw, employees, baseSalaries, pairings,
     setOutcome(null)
     const changes = allChanges
       .filter((_, i) => selected.has(i))
-      .map(c => (c.change.kind === 'agreement' ? { ...c.change, effectiveFrom } : c.change))
+      .map(c => c.change)
     const res = await applyWhatIfScenario({
       scenarioName: active.name,
       notes: notes.trim() || null,
@@ -1117,13 +980,6 @@ function ApplyReviewModal({ active, cmp, raw, employees, baseSalaries, pairings,
                 <p className="text-[11px] text-muted-foreground bg-secondary/60 border border-border rounded-lg px-3 py-2">
                   Billing growth ({active.billingGrowthPct > 0 ? '+' : ''}{active.billingGrowthPct}%) is a simulation assumption about future volume — it is never applied to production.
                 </p>
-              )}
-
-              {hasAgreementChange && (
-                <div>
-                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1.5">Agreements effective from</label>
-                  <input type="date" value={effectiveFrom} onChange={e => setEffectiveFrom(e.target.value)} className={inputCls} />
-                </div>
               )}
 
               {/* Financial impact */}
