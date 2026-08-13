@@ -355,11 +355,12 @@ export function IntegrationsClient({
                 </h2>
               </div>
               <p className="text-sm text-muted-foreground mt-1">
-                Select the client workspace to associate with this ad account.
+                Where this login is filed. Everything it can reach is imported,
+                then assigned per account — this does not limit what comes in.
               </p>
             </div>
             <div className="p-6">
-              <label className="text-sm font-medium mb-2 block">Client Workspace</label>
+              <label className="text-sm font-medium mb-2 block">File this connection under</label>
               <select
                 className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 value={selectedClientForAuth}
@@ -371,6 +372,18 @@ export function IntegrationsClient({
               </select>
               <p className="text-xs text-muted-foreground mt-2">
                 You&apos;ll be redirected to {providerToConnect === 'meta' ? 'Facebook' : 'Google'} to authorise access.
+              </p>
+              {/*
+                One connection row exists per (client, provider). Managing every
+                client from one agency login means picking a DIFFERENT client
+                next time silently creates a second connection holding a second
+                copy of the same token — which is exactly how this account ended
+                up with two. Say so, rather than letting it happen quietly.
+              */}
+              <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 leading-relaxed">
+                Managing several clients from one {providerToConnect === 'meta' ? 'Meta' : 'Google'} login?
+                Always pick the same client here. A different one creates a
+                second connection with a duplicate token.
               </p>
             </div>
             <div className="p-6 border-t bg-muted/50 flex gap-2 justify-end">

@@ -121,6 +121,25 @@ export async function GET(req: NextRequest) {
       const accountsData = await accountsRes.json()
 
       if (accountsRes.ok && Array.isArray(accountsData.data) && conn) {
+        // One agency login reaches every client's ad accounts, so the
+        // connection's client is only a default for accounts never seen before.
+        // Without this, every reconnect or token refresh resets an account the
+        // owner had deliberately pointed at its real client.
+        const alreadyAssigned = new Map<string, string>()
+        {
+          const ids = accountsData.data.map((a: { account_id: string }) => a.account_id)
+          if (ids.length) {
+            const { data: existing } = await admin
+              .from('ad_accounts')
+              .select('account_id, client_id')
+              .eq('provider', 'meta')
+              .in('account_id', ids)
+            for (const row of existing ?? []) {
+              if (row.client_id) alreadyAssigned.set(row.account_id, row.client_id)
+            }
+          }
+        }
+
         for (const acc of accountsData.data) {
           // Upsert business if present
           let businessRowId: string | null = null
@@ -145,7 +164,7 @@ export async function GET(req: NextRequest) {
             {
               connection_id: conn.id,
               business_id: businessRowId,
-              client_id: targetClientId,
+              client_id: alreadyAssigned.get(acc.account_id) ?? targetClientId,
               provider: 'meta',
               account_id: acc.account_id,
               name: acc.name,
