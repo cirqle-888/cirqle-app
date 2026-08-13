@@ -26,7 +26,7 @@ import {
 import { PlatformIcon } from '@/components/social-hub/platform-icon'
 import {
   syncAccountNow, toggleAccountFlag, disconnectSocialAccount,
-  refreshSocialAccountsForConnection,
+  refreshSocialAccountsForConnection, assignAccountClient,
 } from './actions'
 
 export interface SocialAccountRow {
@@ -137,6 +137,27 @@ export default function SocialClient({
     followers: accounts.reduce((s, a) => s + Number(a.followers_count ?? 0), 0),
     attention: accounts.filter(a => accountHealth(a) !== 'green').length,
   }), [accounts])
+
+  const [assigningId, setAssigningId] = useState<string | null>(null)
+  const handleAssign = async (a: SocialAccountRow, clientId: string) => {
+    if (clientId === a.client_id) return
+    setAssigningId(a.id)
+    try {
+      const res = await assignAccountClient(a.id, clientId)
+      if (res.ok) {
+        const clientName = clients.find(c => c.id === clientId)?.name ?? '—'
+        // Move the card to its new client group immediately.
+        setAccounts(prev => prev.map(x => x.id === a.id
+          ? { ...x, client_id: clientId, client_name: clientName }
+          : x))
+        toast.success('Account assigned', `${a.name} → ${clientName}`)
+      } else {
+        toast.error('Could not assign', res.error)
+      }
+    } finally {
+      setAssigningId(null)
+    }
+  }
 
   const handleSync = async (a: SocialAccountRow) => {
     setSyncing(a.id)
@@ -328,6 +349,25 @@ export default function SocialClient({
                             <p className="text-[10px] text-muted-foreground">Views 30d</p>
                           </div>
                         </div>
+
+                        {/*
+                          One agency login sees every client's Pages, so
+                          discovery can only guess the owner. This is where the
+                          guess gets corrected — and re-discovery preserves it.
+                        */}
+                        {canConnect && (
+                          <div className="mt-3 flex items-center gap-2">
+                            <span className="text-[10px] text-muted-foreground shrink-0">Client</span>
+                            <select
+                              value={a.client_id}
+                              disabled={assigningId === a.id}
+                              onChange={e => handleAssign(a, e.target.value)}
+                              className="flex-1 min-w-0 rounded-md border border-border bg-background px-2 py-1 text-[11px] disabled:opacity-50"
+                            >
+                              {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                            </select>
+                          </div>
+                        )}
 
                         <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
                           <span>

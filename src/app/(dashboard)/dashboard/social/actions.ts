@@ -31,6 +31,50 @@ interface ActionResult<T = void> {
 /** Columns safe to read for logging/scoping — never the token. */
 const ACCOUNT_META = 'id, client_id, platform, name, status'
 
+// ── Assign to a client ───────────────────────────────────────────────────────
+
+/**
+ * Point a discovered account at the client it actually belongs to.
+ *
+ * One agency Meta login sees every client's Pages, so discovery can only guess
+ * an owner (the connection's client). This is the correction — and discovery
+ * preserves it on every later re-scan, so it sticks.
+ */
+export async function assignAccountClient(
+  accountId: string,
+  clientId: string,
+): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.SOCIAL_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+  const { data: client } = await admin
+    .from('clients').select('id, name').eq('id', clientId).maybeSingle()
+  if (!client) return { ok: false, error: 'Client not found.' }
+
+  const { data: account, error } = await admin
+    .from('social_accounts')
+    .update({ client_id: clientId })
+    .eq('id', accountId)
+    .select(ACCOUNT_META)
+    .single()
+  if (error) return { ok: false, error: error.message }
+
+  void logActivity({
+    actorId: guard.employeeId,
+    entityType: 'client',
+    entityId: clientId,
+    clientId,
+    category: 'crm',
+    action: 'social_account_assigned',
+    detail: { account: account.name, platform: account.platform, client: client.name },
+  }).catch(() => {})
+
+  revalidatePath(REVALIDATE)
+  revalidatePath('/dashboard/agency')
+  return { ok: true }
+}
+
 // ── Sync now ─────────────────────────────────────────────────────────────────
 
 export async function syncAccountNow(

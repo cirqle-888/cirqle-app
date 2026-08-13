@@ -80,13 +80,33 @@ export async function discoverSocialAccounts(
 
   const now = new Date().toISOString()
 
+  // One agency login sees EVERY client's Pages, so the connection's client is
+  // only a default for accounts we've never seen. An account the owner has
+  // already assigned to its real client must keep that assignment — otherwise
+  // every re-discovery (token refresh, reconnect) silently bulldozes the
+  // manual mapping back to whichever client the connection happens to carry.
+  const externalIds = [
+    ...pages.map(p => p.id),
+    ...pages.map(p => p.instagram_business_account?.id).filter(Boolean) as string[],
+  ]
+  const assignedClient = new Map<string, string>()
+  if (externalIds.length) {
+    const { data: existing } = await admin
+      .from('social_accounts')
+      .select('external_id, client_id')
+      .in('external_id', externalIds)
+    for (const row of existing ?? []) {
+      if (row.client_id) assignedClient.set(row.external_id, row.client_id)
+    }
+  }
+
   for (const page of pages) {
     try {
       const { data: pageRow, error: pageErr } = await admin
         .from('social_accounts')
         .upsert(
           {
-            client_id: clientId,
+            client_id: assignedClient.get(page.id) ?? clientId,
             connection_id: connectionId,
             provider: 'meta',
             platform: 'facebook_page',
@@ -114,7 +134,7 @@ export async function discoverSocialAccounts(
       if (ig?.id) {
         const { error: igErr } = await admin.from('social_accounts').upsert(
           {
-            client_id: clientId,
+            client_id: assignedClient.get(ig.id) ?? clientId,
             connection_id: connectionId,
             provider: 'meta',
             platform: 'instagram',
