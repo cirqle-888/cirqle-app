@@ -16,8 +16,10 @@ export default async function PerformancePage() {
   const admin = createAdminClient()
   const [criteriaRes, employeesRes, applicantsRes, assessmentsRes, scoresRes] = await Promise.all([
     admin.from('perf_criteria').select('*').eq('is_active', true).order('sort'),
-    admin.from('employees').select('id, name, cqid, performance_rating, joined_date')
-      .eq('is_active', true).eq('is_archived', false).order('name'),
+    // `name` is deliberately NOT selected — employee names are private and the
+    // picker shows CQIDs only, so the name never reaches the browser at all.
+    admin.from('employees').select('id, cqid, performance_rating, joined_date')
+      .eq('is_active', true).eq('is_archived', false).order('cqid'),
     admin.from('job_applications').select('id, full_name, position_title, stage')
       .neq('stage', 'rejected').order('created_at', { ascending: false }).limit(100),
     admin.from('perf_assessments').select('*').order('created_at', { ascending: false }).limit(200),

@@ -101,7 +101,7 @@ export default function PerformanceClient({
   const subjectLabel = (a: PerfAssessment) => {
     if (a.employee_id) {
       const e = employees.find(x => x.id === a.employee_id)
-      return e ? `${e.name} (${e.cqid})` : 'Employee'
+      return e ? e.cqid : 'Employee'
     }
     if (a.application_id) {
       const p = applicants.find(x => x.id === a.application_id)
@@ -219,7 +219,7 @@ export default function PerformanceClient({
           <AppSelect value={subject} onChange={e => { setSubject(e.target.value); setQuickName('') }} wrapperClassName="w-64">
             <option value="">Choose employee or applicant…</option>
             <optgroup label="Employees">
-              {employees.map(e => <option key={e.id} value={`e:${e.id}`}>{e.name} ({e.cqid}) — {e.performance_rating}%</option>)}
+              {employees.map(e => <option key={e.id} value={`e:${e.id}`}>{e.cqid} — {e.performance_rating}%</option>)}
             </optgroup>
             <optgroup label="Applicants">
               {applicants.map(a => <option key={a.id} value={`a:${a.id}`}>{a.full_name} — {a.position_title}</option>)}
