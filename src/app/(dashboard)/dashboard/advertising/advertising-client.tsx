@@ -344,7 +344,7 @@ export default function AdvertisingClient({
         </div>
         <div className="flex items-center gap-2">
           <Link
-            href="/dashboard/advertising/integrations"
+            href="/dashboard/connections"
             className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium hover:border-pink-500/40 transition-colors"
           >
             <Link2 className="h-4 w-4 text-pink-500" />
@@ -525,7 +525,7 @@ export default function AdvertisingClient({
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {filteredCards.map(c => <CampaignCard key={c.p.id} card={c} walletOn={walletSupported} showBilling={perms.viewBilling} />)}
             <Link
-              href="/dashboard/advertising/integrations"
+              href="/dashboard/connections"
               className="group rounded-xl border border-dashed border-border bg-card/50 p-5 flex flex-col items-center justify-center gap-2 hover:border-pink-500/40 hover:bg-card transition-all text-center"
             >
               <div className="h-10 w-10 rounded-xl bg-pink-500/10 flex items-center justify-center">
@@ -883,7 +883,7 @@ function EmptyState({ canCreate }: { canCreate: boolean }) {
         </p>
         <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
           <Link
-            href="/dashboard/advertising/integrations"
+            href="/dashboard/connections"
             className="inline-flex items-center gap-2 rounded-lg gradient-bg px-4 py-2.5 text-sm font-medium text-white hover:opacity-90"
           >
             <Link2 className="h-4 w-4" />

@@ -174,7 +174,7 @@ export function CampaignMappingClient({
     <div className="space-y-5">
       {/* Header */}
       <div>
-        <Link href="/dashboard/advertising/integrations" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-2">
+        <Link href="/dashboard/connections" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-2">
           <ArrowLeft className="h-3.5 w-3.5" /> Integrations
         </Link>
         <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -368,7 +368,7 @@ export function CampaignMappingClient({
 function EmptyShell({ accountName, children }: { accountName?: string; children: React.ReactNode }) {
   return (
     <div className="space-y-4">
-      <Link href="/dashboard/advertising/integrations" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+      <Link href="/dashboard/connections" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="h-3.5 w-3.5" /> Integrations
       </Link>
       <h1 className="text-2xl font-bold flex items-center gap-2"><ListChecks className="h-6 w-6 text-pink-500" /> Map Campaigns</h1>

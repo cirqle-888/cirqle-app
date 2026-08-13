@@ -4,8 +4,8 @@ import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 
 import { Loader2, RefreshCw } from 'lucide-react'
-import { fetchProviderConnections } from '../integrations/actions'
-import { fetchSyncLogs, triggerManualSync, saveCampaignMapping, fetchAdAccounts } from '../integrations/tab-actions'
+import { fetchProviderConnections } from '@/app/(dashboard)/dashboard/connections/actions'
+import { fetchSyncLogs, triggerManualSync, saveCampaignMapping, fetchAdAccounts } from '@/app/(dashboard)/dashboard/connections/tab-actions'
 import { formatDistanceToNow } from 'date-fns'
 
 export function IntegrationsTab({ project, canEdit, onChange }: { project: any, canEdit: boolean, onChange: () => void }) {

@@ -39,7 +39,7 @@ export function ClientSocialSection({ accounts }: { accounts: ClientSocialAccoun
       {accounts.length === 0 ? (
         <p className="text-xs text-muted-foreground leading-relaxed">
           No Meta assets connected. Connect this client&apos;s Facebook Pages and Instagram accounts from the{' '}
-          <Link href="/dashboard/advertising/integrations" className="text-primary hover:underline">integrations</Link> page.
+          <Link href="/dashboard/connections" className="text-primary hover:underline">integrations</Link> page.
         </p>
       ) : (
         <div className="space-y-2">

@@ -31,6 +31,7 @@ const ROUTE_LABELS: Record<string, string> = {
   contributions: 'Contributions',
   invoices:      'Invoices',
   packages:      'Packages',
+  connections:   'Connections',
   quotations:    'Quotations',
   cashbook:      'Cash Book',
   recurring:     'Recurring Expenses',

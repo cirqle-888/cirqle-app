@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
   const error = url.searchParams.get('error')
 
   if (error || !code) {
-    return NextResponse.redirect(new URL('/dashboard/advertising/integrations?error=auth_failed', req.url))
+    return NextResponse.redirect(new URL('/dashboard/connections?error=auth_failed', req.url))
   }
 
   const clientId = process.env.GOOGLE_ADS_CLIENT_ID
@@ -24,13 +24,13 @@ export async function GET(req: NextRequest) {
     // 1. Require a signed-in employee session (the person completing the flow)
     const user = await loadCurrentUser().catch(() => null)
     if (!user) {
-      return NextResponse.redirect(new URL('/dashboard/advertising/integrations?error=not_signed_in', req.url))
+      return NextResponse.redirect(new URL('/dashboard/connections?error=not_signed_in', req.url))
     }
 
     // 2. Verify HMAC-signed state (rejects forged/expired states)
     const state = verifyOAuthState<{ clientId: string; employeeId: string }>(stateParam)
     if (!state) {
-      return NextResponse.redirect(new URL('/dashboard/advertising/integrations?error=invalid_state', req.url))
+      return NextResponse.redirect(new URL('/dashboard/connections?error=invalid_state', req.url))
     }
     const targetClientId = state.clientId
     const employeeId = user.employeeId // attribute to the live session, not the state payload
@@ -93,9 +93,9 @@ export async function GET(req: NextRequest) {
       metadata: { provider: 'google', client_id: targetClientId }
     })
 
-    return NextResponse.redirect(new URL('/dashboard/advertising/integrations?success=google_connected', req.url))
+    return NextResponse.redirect(new URL('/dashboard/connections?success=google_connected', req.url))
   } catch (err: any) {
     console.error('[Google Callback Error]', err)
-    return NextResponse.redirect(new URL('/dashboard/advertising/integrations?error=server_error', req.url))
+    return NextResponse.redirect(new URL('/dashboard/connections?error=server_error', req.url))
   }
 }

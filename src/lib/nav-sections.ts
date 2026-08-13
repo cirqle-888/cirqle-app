@@ -112,6 +112,9 @@ export const navSections: NavSection[] = [
       { label: 'Social',          href: '/dashboard/social',      icon: Share2, requiredPerm: 'social.view_insights', keywords: ['instagram', 'facebook', 'pages', 'insights', 'reach', 'publishing', 'meta'] },
       { label: 'Advertising',     href: '/dashboard/advertising', icon: Megaphone, requiredPerm: 'advertising.view', keywords: ['campaigns', 'ads', 'marketing'] },
       { label: 'Agency',          href: '/dashboard/agency',      icon: LayoutGrid, requiredPerm: 'reports.view', keywords: ['agency dashboard', 'all clients', 'overview', 'spend', 'leads', 'cpl', 'alerts'] },
+      // The Meta connection feeds Social Hub, Leads AND Advertising, so it
+      // lives beside them — not buried inside any one of them.
+      { label: 'Connections',     href: '/dashboard/connections', icon: Blocks, requiredPerm: 'advertising.manage_providers', keywords: ['integrations', 'meta', 'oauth', 'connect', 'facebook', 'google ads', 'token', 'ad accounts'] },
     ],
   },
   {

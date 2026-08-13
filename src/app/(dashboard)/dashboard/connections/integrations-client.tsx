@@ -306,7 +306,7 @@ export function IntegrationsClient({
                   </div>
                   <div className="mt-4 space-y-2">
                     <Link
-                      href={`/dashboard/advertising/integrations/${acc.id}/campaigns`}
+                      href={`/dashboard/connections/${acc.id}/campaigns`}
                       className={buttonVariants({ className: 'w-full' })}
                     >
                       <ListChecks className="mr-2 h-4 w-4" />

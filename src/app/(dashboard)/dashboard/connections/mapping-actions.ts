@@ -14,7 +14,7 @@ type MapResult = { success: true; projectId: string } | { success: false; error:
 type Ok = { success: true } | { success: false; error: string }
 
 function mappingPath(accountId: string) {
-  return `/dashboard/advertising/integrations/${accountId}/campaigns`
+  return `/dashboard/connections/${accountId}/campaigns`
 }
 
 // ── Read ────────────────────────────────────────────────────────────────────
@@ -176,7 +176,7 @@ async function mapCampaignCore(
     projectId = created.id
 
     // Automatically create a linked task for this new campaign
-    const { createCampaignTask } = await import('../actions')
+    const { createCampaignTask } = await import('@/app/(dashboard)/dashboard/advertising/actions')
     await createCampaignTask(admin, {
       projectId: projectId,
       campaignName: camp.name,

@@ -14,14 +14,12 @@ import { PERMS } from '@/lib/permissions/keys'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
-import AppSelect from '@/components/ui/app-select'
-import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { ToastContainer, useToast } from '@/components/ui/toast'
 import { formatDistanceToNow } from 'date-fns'
 import {
   RefreshCw, Loader2, BarChart3, Users, AlertTriangle,
-  CalendarClock, XCircle, Share2, Plus, Unplug, ExternalLink,
+  CalendarClock, XCircle, Share2, Plus, Unplug,
 } from 'lucide-react'
 import { PlatformIcon } from '@/components/social-hub/platform-icon'
 import {
@@ -103,8 +101,6 @@ export default function SocialClient({
   const [refreshing, setRefreshing] = useState<string | null>(null)
   const [toggling, setToggling] = useState<string | null>(null)
   const [disconnectTarget, setDisconnectTarget] = useState<SocialAccountRow | null>(null)
-  const [connectOpen, setConnectOpen] = useState(false)
-  const [connectClientId, setConnectClientId] = useState(clients[0]?.id ?? '')
 
   // Flash message from the OAuth redirect, then clean the URL.
   useEffect(() => {
@@ -222,12 +218,6 @@ export default function SocialClient({
     }
   }
 
-  const connectMeta = () => {
-    if (!connectClientId) return
-    setConnectOpen(false)
-    window.location.href = `/api/auth/meta/login?client_id=${connectClientId}`
-  }
-
   const showConnect = canConnect && can(PERMS.SOCIAL_CONNECT)
 
   return (
@@ -236,9 +226,13 @@ export default function SocialClient({
         title="Social Hub"
         subtitle="Connected Facebook Pages & Instagram accounts"
         actions={showConnect ? (
-          <Button size="sm" onClick={() => setConnectOpen(true)}>
-            <Plus className="w-4 h-4 mr-1.5" /> Connect Meta
-          </Button>
+          /* Connecting is owned by Connections — one place holds the tokens,
+             refresh and deletion. This is a signpost, not a second flow. */
+          <Link href="/dashboard/connections">
+            <Button size="sm">
+              <Plus className="w-4 h-4 mr-1.5" /> Connect Meta
+            </Button>
+          </Link>
         ) : undefined}
       />
 
@@ -278,7 +272,9 @@ export default function SocialClient({
               body={showConnect
                 ? 'Connect a client\'s Meta assets to pull Facebook Pages and Instagram accounts into the hub.'
                 : 'No Meta assets have been connected yet. Ask someone with the Connect Social Accounts permission to link a client.'}
-              action={showConnect ? { label: 'Connect Meta', onClick: () => setConnectOpen(true) } : undefined}
+              action={showConnect
+                ? { label: 'Connect Meta', onClick: () => { window.location.href = '/dashboard/connections' } }
+                : undefined}
             />
           </div>
         ) : (
@@ -444,32 +440,6 @@ export default function SocialClient({
           ))
         )}
       </div>
-
-      {/* ── Connect Meta: pick the client first ── */}
-      {connectOpen && (
-        <ModalOverlay onClose={() => setConnectOpen(false)}>
-          <div className="bg-background rounded-2xl shadow-2xl p-6 max-w-sm w-full">
-            <h3 className="font-semibold text-sm mb-1">Connect Meta</h3>
-            <p className="text-xs text-muted-foreground mb-4 leading-relaxed">
-              Pick the client these Facebook Pages / Instagram accounts belong to,
-              then sign in with a Meta account that manages them.
-            </p>
-            {clients.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No active clients found.</p>
-            ) : (
-              <AppSelect value={connectClientId} onChange={e => setConnectClientId(e.target.value)}>
-                {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </AppSelect>
-            )}
-            <div className="flex justify-end gap-2 mt-5">
-              <Button variant="ghost" size="sm" onClick={() => setConnectOpen(false)}>Cancel</Button>
-              <Button size="sm" onClick={connectMeta} disabled={!connectClientId}>
-                Continue to Meta <ExternalLink className="w-3.5 h-3.5 ml-1.5" />
-              </Button>
-            </div>
-          </div>
-        </ModalOverlay>
-      )}
 
       {disconnectTarget && (
         <ConfirmDialog

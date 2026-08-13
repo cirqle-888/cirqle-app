@@ -27,26 +27,26 @@ export async function GET(req: NextRequest) {
 
   if (error || !code) {
     const msg = errorReason === 'user_denied' ? 'auth_denied' : 'auth_failed'
-    return NextResponse.redirect(new URL(`/dashboard/advertising/integrations?error=${msg}`, req.url))
+    return NextResponse.redirect(new URL(`/dashboard/connections?error=${msg}`, req.url))
   }
 
   const clientId = process.env.META_APP_ID || process.env.META_CLIENT_ID
   const clientSecret = process.env.META_APP_SECRET || process.env.META_CLIENT_SECRET
   if (!clientId || !clientSecret) {
-    return NextResponse.redirect(new URL('/dashboard/advertising/integrations?error=not_configured', req.url))
+    return NextResponse.redirect(new URL('/dashboard/connections?error=not_configured', req.url))
   }
 
   try {
     // 1. Require a signed-in employee session (the person completing the flow)
     const user = await loadCurrentUser().catch(() => null)
     if (!user) {
-      return NextResponse.redirect(new URL('/dashboard/advertising/integrations?error=not_signed_in', req.url))
+      return NextResponse.redirect(new URL('/dashboard/connections?error=not_signed_in', req.url))
     }
 
     // 2. Verify HMAC-signed state (rejects forged/expired states)
     const state = verifyOAuthState<{ clientId: string; employeeId: string }>(stateParam)
     if (!state) {
-      return NextResponse.redirect(new URL('/dashboard/advertising/integrations?error=invalid_state', req.url))
+      return NextResponse.redirect(new URL('/dashboard/connections?error=invalid_state', req.url))
     }
     const targetClientId = state.clientId
     const employeeId = user.employeeId // attribute to the live session, not the state payload
@@ -189,12 +189,12 @@ export async function GET(req: NextRequest) {
     })
 
     return NextResponse.redirect(
-      new URL('/dashboard/advertising/integrations?success=meta_connected', req.url),
+      new URL('/dashboard/connections?success=meta_connected', req.url),
     )
   } catch (err: any) {
     console.error('[Meta OAuth Callback]', err)
     return NextResponse.redirect(
-      new URL('/dashboard/advertising/integrations?error=server_error', req.url),
+      new URL('/dashboard/connections?error=server_error', req.url),
     )
   }
 }
