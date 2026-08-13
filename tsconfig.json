@@ -40,6 +40,8 @@
     "vitest.config.ts",
     "figma-plugin",
     "scripts",
-    "test_fetch.ts"
+    "test_fetch.ts",
+    "scratch",
+    "scratch_query.ts"
   ]
 }
