@@ -6,6 +6,7 @@ import { Bell, Check, ExternalLink } from 'lucide-react'
 import { getMyNotifications, markNotificationRead, markAllNotificationsRead, type NotificationRow } from '@/app/api/notifications/actions'
 import { PushToggle } from '@/components/notifications/push-toggle'
 import { SoundToggle } from '@/components/notifications/sound-toggle'
+import { useVisibleInterval } from '@/lib/hooks/use-visible-interval'
 import { createClient } from '@/lib/supabase/client'
 import { usePermissions } from '@/contexts/permission-context'
 
@@ -43,11 +44,12 @@ export function NotificationBell({ isCollapsed = false }: { isCollapsed?: boolea
 
   // Load once, then rely on realtime (below). A slow poll stays only as a
   // reconnect/missed-event safety net.
-  useEffect(() => {
-    void refresh()
-    const id = setInterval(refresh, 120000)
-    return () => clearInterval(id)
-  }, [refresh])
+  //
+  // EGRESS: this polls exactly the same getMyNotifications() as the floating
+  // comms widget, which is mounted on every dashboard page — so the two ran
+  // back-to-back every 120s. Visibility-gated and slowed to 300s; realtime
+  // (below) is what actually keeps the badge live.
+  useVisibleInterval(() => { void refresh() }, 300_000)
 
   // Realtime: new notifications for me land instantly (migration 023 published
   // the table). Prepends the row + bumps the badge with no poll lag.

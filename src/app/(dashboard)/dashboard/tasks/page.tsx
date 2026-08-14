@@ -24,10 +24,32 @@ const ADMIN_TASK_SELECT = `id, task_number, title, description, client_id, servi
 // Quantity is kept because it represents task count, not money.
 const EMPLOYEE_TASK_SELECT = `id, title, task_number, status, task_date, client_id, service_id, quantity, description, created_at, updated_at, parent_task_id, variant_type, variant_label, completion_pct, is_recurring, recurring_interval, recurring_end_date, recurring_parent_id, cancelled_by, cancellation_notes, client:clients(id, name, code), service:services(id, name)`
 
+// Statuses that represent live work. These are ALWAYS loaded in full no matter
+// how old they are — an eighteen-month-old task still sitting in `pending` has
+// to appear on the board, or the board lies.
+const LIVE_TASK_STATUSES = ['pending', 'in_progress', 'delivered'] as const
+
+// How far back to load *settled* tasks (done / invoiced / cancelled) for the
+// in-memory working set. Anything older is still fully reachable — tasks-client
+// falls back to a server-side DB search whenever `dbTaskTotal > tasks.length`,
+// which bounding this fetch is precisely what activates.
+//
+// EGRESS: this is the single biggest lever on the page. Previously this
+// function pulled EVERY task row on EVERY visit (the select alone carries
+// `description` and the `billing_snapshot` jsonb), under `force-dynamic`, with
+// only a 30s router cache in front of it. Tune with TASKS_HISTORY_MONTHS.
+const TASKS_HISTORY_MONTHS = Number(process.env.TASKS_HISTORY_MONTHS) || 12
+
+function historyCutoffISO(months: number): string {
+  const d = new Date()
+  d.setMonth(d.getMonth() - months)
+  return d.toISOString().slice(0, 10)
+}
+
 // Supabase enforces a server-side max-rows cap (default 1,000) that overrides
-// any client `.limit()` value. To fetch every task we paginate with `.range()`
-// in chunks of 1,000 until we hit a partial page. Capped at 50,000 as a
-// runaway-safety guard (10× more than any real agency should hit).
+// any client `.limit()` value. To fetch the working set we paginate with
+// `.range()` in chunks of 1,000 until we hit a partial page. Capped at 50,000
+// as a runaway-safety guard (10× more than any real agency should hit).
 async function fetchAllTasks(
   supabase: ReturnType<typeof createAdminClient>,
   hasDeletedAt: boolean,
@@ -36,11 +58,17 @@ async function fetchAllTasks(
   const PAGE = 1000
   const MAX_PAGES = 50
   const all: any[] = []
+  const cutoff = historyCutoffISO(TASKS_HISTORY_MONTHS)
+  // "Every live task, whatever its age" OR "anything dated inside the window".
+  // `task_date.is.null` keeps undated rows, which a bare `gte` would drop.
+  const windowFilter =
+    `status.in.(${LIVE_TASK_STATUSES.join(',')}),task_date.gte.${cutoff},task_date.is.null`
 
   for (let page = 0; page < MAX_PAGES; page++) {
     let q = supabase
       .from('tasks')
       .select(selectClause)
+      .or(windowFilter)
       .order('task_number', { ascending: false, nullsFirst: false })
       .order('id', { ascending: true })
       .range(page * PAGE, (page + 1) * PAGE - 1)

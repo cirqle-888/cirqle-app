@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { useRouter } from 'next/navigation'
 import { MessageCircle, Bell, X, ArrowLeft, Send, Hash, Lock, ChevronRight } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { useVisibleInterval } from '@/lib/hooks/use-visible-interval'
 import { usePermissions } from '@/contexts/permission-context'
 import { displayEmployee } from '@/lib/utils/employee-display'
 import { installChimeUnlock, playChime } from '@/lib/notifications/chime'
@@ -226,13 +227,14 @@ export function FloatingCommsWidget() {
     setConvs(prev => prev.map(c => c.id === convId ? { ...c, unread: 0 } : c))
   }, [])
 
-  useEffect(() => {
-    // Kick off the first load on the next tick (avoids a sync setState in the
-    // effect body per the react-compiler rule) + a slow fallback refresh.
-    const t = setTimeout(() => { void refreshConvs(); void refreshNotifs() }, 0)
-    const id = setInterval(() => { void refreshConvs(); void refreshNotifs() }, 120_000)
-    return () => { clearTimeout(t); clearInterval(id) }
-  }, [refreshConvs, refreshNotifs])
+  // EGRESS: this widget is mounted by the dashboard layout, so this poll ran on
+  // EVERY page for EVERY user — and listConversations() is an N+1 (two queries
+  // per conversation, and entity rooms are created per task/request/client, so
+  // the count only grows). At 120s in every open-but-ignored tab it was the
+  // app's idle floor. Realtime already delivers live messages; this is only a
+  // reconnect safety net, so it now pauses while the tab is hidden, catches up
+  // once on focus, and ticks at 300s instead of 120s while visible.
+  useVisibleInterval(() => { void refreshConvs(); void refreshNotifs() }, 300_000)
 
   // Unlock the chime's AudioContext on the first user gesture, and use the
   // same gesture to ask for system-notification permission (a gesture-tied

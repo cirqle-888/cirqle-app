@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
+import { getCompanySettings } from '@/lib/settings/company-settings'
 import SocialCalendarClient from './social-calendar-client'
 
 export const dynamic = 'force-dynamic'
@@ -216,11 +217,12 @@ export default async function SocialCalendarPage({
   // Full settings map: the PDF export borrows the invoice template's branding
   // keys (logo, colors, company identity), and the content-type → service
   // defaults live under 'social_content_type_services'.
-  let companySettings: Record<string, string> = {}
+  // EGRESS: shared 5-minute cache (getCompanySettings) rather than an
+  // unfiltered select on every render — the PDF branding keys live alongside
+  // the base64 logo blobs in this table.
+  const companySettings: Record<string, string> = await getCompanySettings()
   let serviceMap: Record<string, string> = {}
   try {
-    const { data } = await admin.from('company_settings').select('key, value')
-    companySettings = Object.fromEntries((data || []).map((r: { key: string; value: string }) => [r.key, r.value]))
     if (companySettings.social_content_type_services) {
       serviceMap = JSON.parse(companySettings.social_content_type_services)
     }

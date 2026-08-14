@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { getPartner, getPartnerDashboard, listUnlinkedClients, listCommissionPayments } from '@/lib/partners/queries'
+import { getCompanySettings } from '@/lib/settings/company-settings'
 import PartnerDashboardClient from './partner-dashboard-client'
 
 export const dynamic = 'force-dynamic'
@@ -27,15 +28,15 @@ export default async function PartnerDetailPage({ params }: { params: Promise<{ 
     } catch { /* ignore */ }
   }
 
-  const [dashboard, unlinkedClients, settingsRes, commissionPayments] = await Promise.all([
+  // EGRESS: getCompanySettings() is a shared 5-minute cache. This page only
+  // needs two branding strings, but the old unfiltered select pulled every row
+  // — including the base64 logo blobs — on each render.
+  const [dashboard, unlinkedClients, settings, commissionPayments] = await Promise.all([
     getPartnerDashboard(id),
     listUnlinkedClients(),
-    createAdminClient().from('company_settings').select('key, value'),
+    getCompanySettings(),
     listCommissionPayments(id),
   ])
-
-  const settings: Record<string, string> = {}
-  ;(settingsRes.data || []).forEach((s: { key: string; value: string }) => { settings[s.key] = s.value })
 
   return (
     <PartnerDashboardClient

@@ -14,7 +14,8 @@
  * status — it only reads it back through joins.
  */
 
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, revalidateTag } from 'next/cache'
+import { COMPANY_SETTINGS_TAG } from '@/lib/settings/company-settings'
 import { resolveImageExt, IMAGE_UPLOAD_ERROR, IMAGE_EXT_BY_TYPE, MAX_IMAGE_BYTES } from '@/lib/uploads'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission } from '@/lib/permissions/check'
@@ -162,6 +163,9 @@ export async function saveContentTypeServiceMap(
     .upsert({ key: SERVICE_MAP_KEY, value: JSON.stringify(clean) }, { onConflict: 'key' })
   if (error) return { ok: false, error: error.message }
 
+  // Shared company-settings cache (lib/settings/company-settings.ts) — bust it
+  // so the calendar picks up the new content-type -> service map immediately.
+  revalidateTag(COMPANY_SETTINGS_TAG, 'max')
   revalidatePath(REVALIDATE)
   return { ok: true }
 }

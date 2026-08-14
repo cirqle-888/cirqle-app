@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { renderInvoiceHtml } from '@/lib/invoices/render-html'
+import { getCompanySettings } from '@/lib/settings/company-settings'
 import PublicInvoiceView from './public-invoice-view'
 
 import { Metadata } from 'next'
@@ -78,9 +79,9 @@ export default async function PublicInvoicePage({ params }: { params: Promise<{ 
   // Don't expose cancelled / written-off invoices publicly.
   if (!inv || ['cancelled', 'bad_debt'].includes(inv.status)) return <Unavailable />
 
-  const { data: settingsRows } = await admin.from('company_settings').select('key, value')
-  const settings: Record<string, string> = {}
-  ;(settingsRows || []).forEach((s: any) => { settings[s.key] = s.value })
+  // EGRESS: this is a PUBLIC route, so it is the one most exposed to repeat
+  // hits. Shared 5-minute cache; the invoice template needs the full key set.
+  const settings = await getCompanySettings()
 
   const html = renderInvoiceHtml(inv, settings)
   const companyName = settings.company_name || 'Cirqle Works'

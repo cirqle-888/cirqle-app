@@ -4,7 +4,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission, resolveCurrentEmployeeId, requireAdmin } from '@/lib/permissions/check'
 import { logActivity } from '@/lib/activity/log'
 import { syncRatesToDb, ratesAreStale } from '@/lib/fx/sync'
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, revalidateTag } from 'next/cache'
+import { COMPANY_SETTINGS_TAG } from '@/lib/settings/company-settings'
 import { invalidateUserCache } from '@/lib/permissions/check'
 import { logScopeChanges, diffAssignments } from '@/lib/scope/audit'
 import { todayISO } from '@/lib/utils/local-date'
@@ -29,6 +30,10 @@ export async function upsertCompanySettings(
       admin.from('company_settings').upsert({ key, value }, { onConflict: 'key' }),
     ),
   )
+  // Bust the shared 5-minute company-settings cache (see
+  // lib/settings/company-settings.ts) so branding/template edits appear at once
+  // instead of after the TTL.
+  revalidateTag(COMPANY_SETTINGS_TAG, 'max')
   void logActivity({
     actorId: auth.employeeId, entityType: 'setting', action: 'changed',
     detail: { label: entries.map(e => e.key).join(', ') },

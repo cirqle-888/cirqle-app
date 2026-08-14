@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility } from '@/lib/permissions/strip'
 import { templatesFromSettings } from '@/lib/messaging/templates'
+import { getCompanySettings } from '@/lib/settings/company-settings'
 import FollowUpsClient, { type FUPartner } from './follow-ups-client'
 
 export const dynamic = 'force-dynamic'
@@ -74,10 +75,10 @@ export default async function FollowUpsPage() {
     } catch { /* partners feature not set up — page still works, just no partner view */ }
   }
 
-  // Company name for the WhatsApp reminder text.
-  const { data: settingsRows } = await supabase.from('company_settings').select('key, value')
-  const settings: Record<string, string> = {}
-  ;(settingsRows || []).forEach((s: any) => { settings[s.key] = s.value })
+  // Company name + message templates for the WhatsApp reminder text.
+  // EGRESS: shared 5-minute cache instead of an unfiltered per-render select
+  // that dragged the base64 logo rows along with it.
+  const settings = await getCompanySettings()
   const companyName = settings.company_name || 'Cirqle Works'
   const templates = templatesFromSettings(settings)
 

@@ -12,6 +12,7 @@
  * ?c=<id> deep links (used by mention notifications).
  */
 
+import { useVisibleInterval } from '@/lib/hooks/use-visible-interval'
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import {
@@ -155,11 +156,11 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
     else setListError(res.error)
   }, [])
 
-  useEffect(() => {
-    const t0 = setTimeout(refreshList, 0)
-    const t = setInterval(refreshList, 30_000)
-    return () => { clearTimeout(t0); clearInterval(t) }
-  }, [refreshList])
+  // EGRESS: listConversations() is an N+1 (last-message + unread count per
+  // conversation). Every 30s in a tab left open all day was the most expensive
+  // poll in the app. Realtime carries live messages; this is the safety net,
+  // so it now pauses while hidden and ticks at 90s while visible.
+  useVisibleInterval(refreshList, 90_000)
 
   // ── Open a conversation ────────────────────────────────────────────────────
   const openConversation = useCallback((id: string) => {

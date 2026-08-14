@@ -63,7 +63,13 @@ vi.mock('@/lib/fx/sync', () => ({
 }))
 
 vi.mock('next/cache', () => ({
-  revalidatePath: vi.fn()
+  revalidatePath: vi.fn(),
+  // upsertCompanySettings busts the shared company-settings cache.
+  revalidateTag: vi.fn(),
+  // actions.ts imports COMPANY_SETTINGS_TAG from lib/settings/company-settings,
+  // which builds its cached reader with unstable_cache at module load. Pass the
+  // function straight through so importing this module doesn't blow up.
+  unstable_cache: <T>(fn: T) => fn
 }))
 
 vi.mock('@/lib/scope/audit', () => ({

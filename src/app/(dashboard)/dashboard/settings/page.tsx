@@ -26,7 +26,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     supabase.from('employees').select('*').order('cqid'),
     supabase.from('bank_accounts').select('*').order('name'),
     supabase.from('cashbook_categories').select('*').order('type').order('name'),
-    supabase.from('company_settings').select('*'),
+    // EGRESS: explicit columns — the table only has key/value payload worth
+    // shipping, and select('*') dragged bookkeeping columns along too.
+    supabase.from('company_settings').select('key, value'),
     supabase.from('exchange_rates').select('*'),
     // parameter_services is dead data (no write path exists) — params are
     // scoped to services via their group (group_services); nothing loads it here.

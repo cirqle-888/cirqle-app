@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { fetchSyncStatus, triggerManualSync, toggleSyncStatus } from './actions'
 import { Play, Pause, RefreshCw, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
+import { useVisibleInterval } from '@/lib/hooks/use-visible-interval'
 
 export function SyncStatusPanel({ clientId }: { clientId?: string }) {
   const [projects, setProjects] = useState<any[]>([])
@@ -22,12 +23,13 @@ export function SyncStatusPanel({ clientId }: { clientId?: string }) {
     }
   }
 
-  useEffect(() => {
-    loadData()
-    // Poll every 10 seconds for sync updates
-    const interval = setInterval(loadData, 10000)
-    return () => clearInterval(interval)
-  }, [clientId])
+  // EGRESS: this was a flat 10s poll — 360 requests/hour per open tab — and
+  // every call goes through requirePermission() -> supabase.auth.getUser()
+  // before it even reaches the small ad_projects select, so the round-trip
+  // count mattered far more than the payload. Now visibility-gated at 30s: a
+  // sync you are watching still updates promptly, a tab left open overnight
+  // costs nothing.
+  useVisibleInterval(() => { void loadData() }, 30_000)
 
   const handleSyncNow = async (id: string) => {
     try {

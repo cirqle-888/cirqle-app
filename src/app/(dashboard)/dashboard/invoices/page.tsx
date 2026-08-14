@@ -3,6 +3,7 @@ import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility, stripInvoiceList } from '@/lib/permissions/strip'
 import { getPendingPricing } from '@/lib/pricing/pending'
 import { PricingPendingBanner } from '@/components/pricing/pricing-pending-banner'
+import { getCompanySettings } from '@/lib/settings/company-settings'
 import InvoicesClient from './invoices-client'
 
 export const dynamic = 'force-dynamic'
@@ -51,9 +52,9 @@ export default async function InvoicesPage() {
       .select('id, name')
       .eq('is_active', true)
       .order('name'),
-    supabase
-      .from('company_settings')
-      .select('key, value'),
+    // EGRESS: shared 5-minute cache. The unfiltered select used to drag the
+    // base64 branding blobs across on every render of this page.
+    getCompanySettings(),
     supabase
       .from('exchange_rates')
       .select('*'),
@@ -64,9 +65,8 @@ export default async function InvoicesPage() {
       .order('name'),
   ])
 
-  // Convert settings array to a key→value map
-  const settings: Record<string, string> = {}
-  ;(settingsRes.data || []).forEach(s => { settings[s.key] = s.value })
+  // Already a key→value map (getCompanySettings).
+  const settings: Record<string, string> = settingsRes
 
   // Server-side strip: when the user lacks view_amounts and/or view_line_pricing,
   // the corresponding ₹ fields are deleted from the payload BEFORE serialisation

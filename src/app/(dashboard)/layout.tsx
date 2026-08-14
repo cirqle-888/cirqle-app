@@ -17,6 +17,7 @@ import { isBirthdayToday } from '@/lib/utils/birthday'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { listFavoritesForEmployee } from '@/lib/favorites/queries'
 import { getMyWorkspaceState } from '@/lib/workspaces/actions'
+import { unstable_cache } from 'next/cache'
 import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { navSections, isNavItemVisible, resolveActiveHref } from '@/lib/nav-sections'
@@ -24,8 +25,16 @@ import { hasPermission } from '@/lib/permissions/check'
 // Workspace logo URL fetch — pulls both dark and light variants.
 // Service-role client so RLS on company_settings can't block it.
 // Returns nulls on any failure so the Sidebar falls back to the default mark.
-async function fetchLogoUrls(): Promise<{ logoUrl: string | null; logoUrlDark: string | null; faviconUrl: string | null }> {
-  try {
+//
+// EGRESS: this layout wraps EVERY dashboard route, so before caching this ran a
+// fresh Postgres round-trip on every single navigation for every user. That is
+// cheap when the values are https:// URLs and ruinous when they are base64 data
+// URLs (the Settings uploader writes those — see settings-client.tsx), because
+// then the whole image crosses the wire on every page view. These three values
+// change perhaps twice a year, so they are cached process-wide for 5 minutes.
+// Call revalidateTag('company-settings') after saving branding to bust it.
+const getLogoUrls = unstable_cache(
+  async (): Promise<{ logoUrl: string | null; logoUrlDark: string | null; faviconUrl: string | null }> => {
     const admin = createAdminClient()
     const { data } = await admin
       .from('company_settings')
@@ -37,6 +46,14 @@ async function fetchLogoUrls(): Promise<{ logoUrl: string | null; logoUrlDark: s
       logoUrlDark: map['logo_url_dark'] || null,
       faviconUrl:  map['favicon_url']   || null,
     }
+  },
+  ['company-logo-urls'],
+  { revalidate: 300, tags: ['company-settings'] },
+)
+
+async function fetchLogoUrls(): Promise<{ logoUrl: string | null; logoUrlDark: string | null; faviconUrl: string | null }> {
+  try {
+    return await getLogoUrls()
   } catch {
     return { logoUrl: null, logoUrlDark: null, faviconUrl: null }
   }

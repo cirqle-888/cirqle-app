@@ -302,20 +302,40 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   // 1200 ms coalesces the burst into a single refetch while still feeling live.
   // Unique channel name per mount so React Strict Mode's dev double-effect
   // remount doesn't collide with an in-flight removeChannel.
+  //
+  // EGRESS: `router.refresh()` re-runs the 500-invoice server query above —
+  // by far the heaviest response in the app. Three unfiltered whole-table
+  // subscriptions meant ANY invoice_items write by ANY user (every task hitting
+  // 'done' writes one) re-downloaded the whole list into EVERY open tab. Two
+  // brakes now sit in front of that:
+  //   1. a much longer debounce, so a batch generate coalesces into one refetch;
+  //   2. a hard skip while the tab is hidden — a backgrounded Invoices tab is
+  //      the single worst offender, and the visibilitychange handler below
+  //      refreshes once on return so it still can't go stale.
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null
+    let pendingWhileHidden = false
+
+    const doRefresh = () => { timer = null; pendingWhileHidden = false; router.refresh() }
     const trigger = () => {
+      if (document.visibilityState === 'hidden') { pendingWhileHidden = true; return }
       if (timer) clearTimeout(timer)
-      timer = setTimeout(() => { timer = null; router.refresh() }, 1200)
+      timer = setTimeout(doRefresh, 4000)
     }
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && pendingWhileHidden) doRefresh()
+    }
+
     const channel = supabase
       .channel(`invoices-live-${crypto.randomUUID()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices' }, trigger)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'invoice_items' }, trigger)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'invoice_expense_items' }, trigger)
       .subscribe()
+    document.addEventListener('visibilitychange', onVisible)
     return () => {
       if (timer) clearTimeout(timer)
+      document.removeEventListener('visibilitychange', onVisible)
       supabase.removeChannel(channel)
     }
   }, [supabase, router])
