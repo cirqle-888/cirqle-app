@@ -97,6 +97,11 @@ interface Props {
     employee_id: string
     /** Stripped from payload when viewer lacks `contributions.view_earnings`. */
     earnings_inr?: number
+    /** This employee's share of the task's pool, as a percentage. */
+    score_percentage?: number | null
+    /** True when someone typed the earning instead of the pool deriving it. */
+    is_manual_override?: boolean | null
+    earning_source?: string | null
     calculated_at: string
     task?: { id?: string; task_date: string; title?: string; status?: string } | null
   }[]
@@ -105,6 +110,8 @@ interface Props {
     title: string
     task_date: string
     status: string
+    /** Absent unless the viewer holds `tasks.view_pricing`. */
+    billing_amount_inr?: number | null
     client?: { name: string } | null
     service?: { name: string } | null
   }[]
@@ -185,6 +192,8 @@ export default function PayrollClient({
   const [viewMonth, setViewMonth] = useState(now.getMonth() + 1)
   const [viewYear, setViewYear]   = useState(now.getFullYear())
   const [selectedEmp, setSelectedEmp]         = useState<Employee | null>(null)
+  /** Attendance day drilled into inside the employee modal (YYYY-MM-DD). */
+  const [selectedDay, setSelectedDay]         = useState<string | null>(null)
   const [generatePreview, setGeneratePreview] = useState<any[] | null>(null)
   const [payslipModal, setPayslipModal] = useState<{ employeeId: string } | null>(null)
   const [bulkPayslipConfirm, setBulkPayslipConfirm] = useState(false)
@@ -370,13 +379,23 @@ export default function PayrollClient({
   }
 
   /** Tasks with contribution scores for this employee in selected month */
+  /**
+   * This employee's tasks for the month, each paired with the contribution
+   * score that produced its earning — so the modal can show not just WHAT was
+   * earned but how it was derived (task value × share).
+   */
   function getEmpMonthTasks(empId: string) {
-    const taskIds = new Set(
-      liveScores
-        .filter(s => s.employee_id === empId && (s.task?.task_date || s.calculated_at || '').startsWith(monthKey))
-        .map(s => s.task_id)
-    )
-    return allTasks.filter(t => taskIds.has(t.id))
+    const scoreByTask = new Map<string, typeof liveScores[number]>()
+    for (const s of liveScores) {
+      if (s.employee_id !== empId) continue
+      if (!(s.task?.task_date || s.calculated_at || '').startsWith(monthKey)) continue
+      if (s.task_id) scoreByTask.set(s.task_id, s)
+    }
+    return allTasks
+      .filter(t => scoreByTask.has(t.id))
+      .map(t => ({ ...t, score: scoreByTask.get(t.id)! }))
+      // Biggest earners first — the useful reading order on a pay review.
+      .sort((a, b) => (b.score.earnings_inr ?? 0) - (a.score.earnings_inr ?? 0))
   }
 
   // ── Month navigation ──────────────────────────────────────────────────────
@@ -385,6 +404,8 @@ export default function PayrollClient({
     const d = new Date(viewYear, viewMonth - 1 + dir, 1)
     setViewMonth(d.getMonth() + 1)
     setViewYear(d.getFullYear())
+    // The drilled-into day belongs to the month we just left.
+    setSelectedDay(null)
   }
 
   // ── Auto-generate ─────────────────────────────────────────────────────────
@@ -1595,7 +1616,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                     </p>
                   </div>
                 </div>
-                <button onClick={() => setSelectedEmp(null)} className="text-muted-foreground hover:text-foreground p-1.5 rounded-lg hover:bg-foreground/5">
+                <button onClick={() => { setSelectedEmp(null); setSelectedDay(null) }} className="text-muted-foreground hover:text-foreground p-1.5 rounded-lg hover:bg-foreground/5">
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -1640,13 +1661,28 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                   </div>
                 </div>
 
-                {/* Attendance calendar */}
+                {/* Attendance calendar.
+
+                    The month stepper drives the WHOLE modal (and the page
+                    behind it), not just this grid — one month concept, so the
+                    commission card can never disagree with the task list
+                    below it. */}
                 <div>
-                  <h3 className="text-xs font-semibold text-muted-foreground uppercase mb-3 flex items-center gap-2">
+                  <h3 className="text-xs font-semibold text-muted-foreground uppercase mb-3 flex items-center gap-2 flex-wrap">
                     <Calendar className="w-3.5 h-3.5" />
                     Attendance — {MONTHS[viewMonth - 1]} {viewYear}
                     <span className="text-[11px] normal-case font-normal text-muted-foreground/60">
                       {workedDays.size} of {daysInMon} days with contributions
+                    </span>
+                    <span className="ml-auto flex items-center gap-1">
+                      <button onClick={() => navigateMonth(-1)} aria-label="Previous month"
+                        className="p-1 rounded-md border border-foreground/10 text-muted-foreground hover:text-foreground hover:bg-foreground/5 transition-colors">
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => navigateMonth(1)} aria-label="Next month"
+                        className="p-1 rounded-md border border-foreground/10 text-muted-foreground hover:text-foreground hover:bg-foreground/5 transition-colors">
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
                     </span>
                   </h3>
                   <div className="flex flex-wrap gap-1.5">
@@ -1655,51 +1691,169 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                       const dateStr = `${viewYear}-${String(viewMonth).padStart(2, '0')}-${String(d).padStart(2, '0')}`
                       const worked  = workedDays.has(dateStr)
                       const isToday = dateStr === now.toISOString().split('T')[0]
+                      const isOpen  = selectedDay === dateStr
+                      // Only a day with work is worth opening; the rest stay
+                      // inert rather than offering an empty panel.
                       return (
-                        <div key={d} title={`${d} ${MONTHS[viewMonth - 1]}`}
+                        <button key={d} type="button"
+                          disabled={!worked}
+                          onClick={() => setSelectedDay(isOpen ? null : dateStr)}
+                          title={worked ? `${d} ${MONTHS[viewMonth - 1]} — see what was done` : `${d} ${MONTHS[viewMonth - 1]}`}
                           className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-medium border transition-all
-                            ${worked   ? 'bg-green-500/20 text-green-700 dark:text-green-300 border-green-500/30' :
-                              isToday  ? 'bg-blue-500/15 text-blue-400 border-blue-500/20' :
-                                         'bg-foreground/[0.02] text-muted-foreground/30 border-foreground/[0.04]'}`}>
+                            ${isOpen   ? 'bg-green-500/40 text-green-100 border-green-400 ring-2 ring-green-400/40' :
+                              worked   ? 'bg-green-500/20 text-green-700 dark:text-green-300 border-green-500/30 hover:bg-green-500/30 cursor-pointer' :
+                              isToday  ? 'bg-blue-500/15 text-blue-400 border-blue-500/20 cursor-default' :
+                                         'bg-foreground/[0.02] text-muted-foreground/30 border-foreground/[0.04] cursor-default'}`}>
                           {d}
-                        </div>
+                        </button>
                       )
                     })}
                   </div>
                   <div className="flex gap-5 mt-2.5">
-                    <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><span className="w-2.5 h-2.5 rounded-sm bg-green-500/20 border border-green-500/30" /> Has contributions</span>
+                    <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><span className="w-2.5 h-2.5 rounded-sm bg-green-500/20 border border-green-500/30" /> Has contributions — click to open</span>
                     <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><span className="w-2.5 h-2.5 rounded-sm bg-foreground/[0.02] border border-foreground/[0.04]" /> No data</span>
                   </div>
+
+                  {/* One day's work, in full. */}
+                  {selectedDay && (() => {
+                    const dayTasks = empTasks.filter(t => t.task_date === selectedDay)
+                    const dayEarned = dayTasks.reduce((sum, t) => sum + (t.score.earnings_inr ?? 0), 0)
+                    const [, , dd] = selectedDay.split('-')
+                    return (
+                      <div className="mt-3 rounded-xl border border-green-500/25 bg-green-500/[0.04] p-3">
+                        <div className="flex items-center gap-2 mb-2 flex-wrap">
+                          <p className="text-xs font-semibold">
+                            {Number(dd)} {MONTHS[viewMonth - 1]} {viewYear}
+                          </p>
+                          <span className="text-[11px] text-muted-foreground">
+                            {dayTasks.length} task{dayTasks.length === 1 ? '' : 's'}
+                          </span>
+                          {showAmounts && dayEarned > 0 && (
+                            <span className="ml-auto text-[11px] text-green-400 font-semibold tabular-nums">
+                              ₹{Math.round(dayEarned).toLocaleString('en-IN')}
+                            </span>
+                          )}
+                          <button onClick={() => setSelectedDay(null)}
+                            className="text-muted-foreground hover:text-foreground p-0.5 rounded">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                        {dayTasks.length === 0 ? (
+                          // A contribution dated by calculated_at rather than by
+                          // the task's own date lands here — say so plainly.
+                          <p className="text-[11px] text-muted-foreground">
+                            Contributions were recorded on this day, but their tasks are dated differently.
+                          </p>
+                        ) : (
+                          <div className="space-y-1.5">
+                            {dayTasks.map(t => (
+                              <div key={t.id} className="flex items-start gap-2.5">
+                                <div className="w-1 h-1 rounded-full bg-green-400 shrink-0 mt-1.5" />
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-xs truncate">{t.title}</p>
+                                  <p className="text-[10px] text-muted-foreground truncate">
+                                    {t.client?.name}
+                                    {t.service?.name && <> · {t.service.name}</>}
+                                    {t.score.score_percentage != null && <> · {t.score.score_percentage}% share</>}
+                                  </p>
+                                </div>
+                                {showAmounts && t.score.earnings_inr != null && (
+                                  <span className="text-[11px] text-green-400 font-medium tabular-nums shrink-0">
+                                    ₹{Math.round(t.score.earnings_inr).toLocaleString('en-IN')}
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </div>
 
-                {/* Tasks this month */}
-                {empTasks.length > 0 && (
+                {/* Tasks this month — with what each one actually earned.
+                    The commission card above is a single number; this is the
+                    line-by-line evidence behind it, which is what a pay query
+                    ("why is my commission this?") actually needs. */}
+                {empTasks.length > 0 && (() => {
+                  const taskEarned = empTasks.reduce((sum, t) => sum + (t.score.earnings_inr ?? 0), 0)
+                  // Earnings can exist without a matching task row (a task
+                  // outside the fetch window). Say so rather than letting the
+                  // list silently disagree with the commission card.
+                  const unlisted = Math.round(commission - taskEarned)
+                  return (
                   <div>
-                    <h3 className="text-xs font-semibold text-muted-foreground uppercase mb-3 flex items-center gap-1.5">
-                      <FileText className="w-3.5 h-3.5" /> Tasks with Scores — {MONTHS[viewMonth - 1]}
+                    <h3 className="text-xs font-semibold text-muted-foreground uppercase mb-3 flex items-center gap-1.5 flex-wrap">
+                      <FileText className="w-3.5 h-3.5" /> Task earnings — {MONTHS[viewMonth - 1]}
                       <span className="text-[11px] normal-case font-normal ml-1">{empTasks.length} tasks</span>
+                      {showAmounts && (
+                        <span className="ml-auto text-[11px] normal-case font-normal">
+                          <span className="text-muted-foreground">from tasks </span>
+                          <span className="text-green-400 font-semibold tabular-nums">₹{Math.round(taskEarned).toLocaleString('en-IN')}</span>
+                        </span>
+                      )}
                     </h3>
-                    <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
-                      {empTasks.map(t => (
-                        <div key={t.id} className="flex items-center gap-3 bg-foreground/[0.02] border border-foreground/[0.05] rounded-lg px-3 py-2">
-                          <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+
+                    <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                      {empTasks.map(t => {
+                        const earned = t.score.earnings_inr
+                        const share  = t.score.score_percentage
+                        const value  = t.billing_amount_inr
+                        return (
+                        <div key={t.id} className="flex items-start gap-3 bg-foreground/[0.02] border border-foreground/[0.05] rounded-lg px-3 py-2">
+                          <div className={`w-1.5 h-1.5 rounded-full shrink-0 mt-1.5 ${
                             t.status === 'paid'      ? 'bg-green-400'  :
                             t.status === 'invoiced'  ? 'bg-blue-400'   :
                             t.status === 'delivered' ? 'bg-purple-400' : 'bg-amber-400'
                           }`} />
                           <div className="flex-1 min-w-0">
                             <p className="text-xs font-medium truncate">{t.title}</p>
-                            <p className="text-[11px] text-muted-foreground">{t.client?.name} · {t.task_date}</p>
+                            <p className="text-[11px] text-muted-foreground truncate">
+                              {t.client?.name}
+                              {t.service?.name && <> · {t.service.name}</>}
+                              {' · '}{t.task_date}
+                            </p>
+                            {/* How the money was derived. Each part is shown
+                                only when the viewer is allowed to see it, so a
+                                partial permission set degrades to fewer facts
+                                rather than to a misleading figure. */}
+                            {(value != null || share != null) && (
+                              <p className="text-[10px] text-muted-foreground/80 mt-0.5 tabular-nums">
+                                {value != null && <>Task ₹{Math.round(value).toLocaleString('en-IN')}</>}
+                                {value != null && share != null && ' · '}
+                                {share != null && <>{share}% share</>}
+                                {t.score.is_manual_override && (
+                                  <span className="ml-1.5 text-amber-400">manual override</span>
+                                )}
+                              </p>
+                            )}
                           </div>
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${
-                            t.status === 'paid'     ? 'bg-green-500/15 text-green-400' :
-                            t.status === 'invoiced' ? 'bg-blue-500/15 text-blue-400'  : 'bg-secondary text-muted-foreground'
-                          }`}>{t.status}</span>
+                          <div className="shrink-0 text-right">
+                            {showAmounts && earned != null && (
+                              <p className="text-xs font-semibold text-green-400 tabular-nums">
+                                ₹{Math.round(earned).toLocaleString('en-IN')}
+                              </p>
+                            )}
+                            <span className={`inline-block mt-0.5 text-[10px] px-1.5 py-0.5 rounded ${
+                              t.status === 'paid'     ? 'bg-green-500/15 text-green-400' :
+                              t.status === 'invoiced' ? 'bg-blue-500/15 text-blue-400'  : 'bg-secondary text-muted-foreground'
+                            }`}>{t.status}</span>
+                          </div>
                         </div>
-                      ))}
+                        )
+                      })}
                     </div>
+
+                    {showAmounts && Math.abs(unlisted) >= 1 && (
+                      <p className="text-[10px] text-muted-foreground mt-2">
+                        {unlisted > 0
+                          ? `₹${unlisted.toLocaleString('en-IN')} of this month's commission comes from earnings whose task isn't listed above (older than the task window, or deleted).`
+                          : `The listed tasks total ₹${Math.abs(unlisted).toLocaleString('en-IN')} more than the commission card — recalculate payroll to resync.`}
+                      </p>
+                    )}
                   </div>
-                )}
+                  )
+                })()}
 
                 {/* Activity timeline */}
                 <div className="bg-foreground/[0.02] border border-foreground/[0.06] rounded-xl p-4">

@@ -65,7 +65,7 @@ export default async function PayrollPage() {
     fetchAll(stablePaginationQuery(
       supabase
         .from('contribution_scores')
-        .select('task_id, employee_id, earnings_inr, calculated_at, task:tasks(id, task_date, title, status)')
+        .select('task_id, employee_id, earnings_inr, score_percentage, is_manual_override, earning_source, calculated_at, task:tasks(id, task_date, title, status)')
         .gte('calculated_at', scoresWindowFromStr)
         .order('calculated_at', { ascending: false })
     )),
@@ -75,7 +75,7 @@ export default async function PayrollPage() {
     fetchAll(stablePaginationQuery(
       supabase
         .from('tasks')
-        .select('id, title, task_date, status, client:clients(name), service:services(name)')
+        .select('id, title, task_date, status, billing_amount_inr, client:clients(name), service:services(name)')
         .in('status', ['done', 'invoiced', 'paid'])
         .gte('task_date', `${currentYear - 1}-01-01`)
         .order('task_date', { ascending: false })
@@ -100,6 +100,12 @@ export default async function PayrollPage() {
     vis.contributionEarnings,
   )
 
+  // Task billing value is pricing data, not payroll data — gate it on the same
+  // permission the Tasks page uses rather than letting it ride in on
+  // payroll.view_amounts. Without it the modal simply omits the derivation row.
+  const allTasks = (tasksRes.data || []).map((t: Record<string, unknown>) =>
+    vis.tasksPricing ? t : { ...t, billing_amount_inr: undefined })
+
   return (
     <PayrollClient
       employees={employeesRes.data || []}
@@ -108,7 +114,7 @@ export default async function PayrollPage() {
       credits={credits}
       deductions={deductions}
       contributionScores={contributionScores}
-      allTasks={(tasksRes.data || []) as any[]}
+      allTasks={allTasks as any[]}
       showAmounts={vis.payrollAmounts}
     />
   )
