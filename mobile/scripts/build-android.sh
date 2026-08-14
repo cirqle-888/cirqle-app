@@ -4,8 +4,10 @@
 # an AAB. Signs them if mobile/keystore.properties exists (see gen-keystore.sh);
 # otherwise builds unsigned and warns.
 #
-# Requirements: Node, a JDK 17, and the Android SDK (ANDROID_HOME / an installed
-# Android Studio). Nothing here touches web or desktop code.
+# Requirements: Node 22+, a JDK 21, and the Android SDK (ANDROID_HOME / an
+# installed Android Studio). Capacitor 8 compiles against Java 21 and its CLI
+# declares engines.node >= 22 — older toolchains fail before the build starts.
+# Nothing here touches web or desktop code.
 #
 # Usage:  bash mobile/scripts/build-android.sh
 # Output: mobile/android/app/build/outputs/apk/release/app-release.apk

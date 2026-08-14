@@ -36,15 +36,20 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Capacitor 8's CLI declares engines.node >= 22 — on Node 20 the
+          # install fails the engine check and `cap add` never runs.
+          node-version: 22
           cache: npm
           cache-dependency-path: mobile/package-lock.json
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          # Capacitor 8 compiles with sourceCompatibility/targetCompatibility
+          # VERSION_21, and AGP 8.13 requires a JDK 21 toolchain. JDK 17 fails
+          # the Gradle build outright.
+          java-version: 21
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3

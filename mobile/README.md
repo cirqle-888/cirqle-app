@@ -31,9 +31,15 @@ npm install
 ## 1. Prerequisites (all free)
 
 **Android (any OS — Windows / Mac / Linux):**
-- Node.js 18+
+- Node.js 22+ (Capacitor 8's CLI requires it)
+- JDK 21 (Capacitor 8 compiles against Java 21)
 - [Android Studio](https://developer.android.com/studio) (free) — installs the
   Android SDK and includes a JDK.
+
+Capacitor 8 generates the project against **compileSdk/targetSdk 36
+(Android 16)**, which Google Play requires for uploads from 31 August 2026,
+and raises **minSdk to 24 (Android 7.0)** — Android 5.x and 6.x devices can no
+longer install the app.
 
 **iOS (Mac only):**
 - Xcode from the Mac App Store (free)
