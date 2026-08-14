@@ -11,7 +11,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { fetchAll } from '@/lib/supabase/server'
+import { fetchAll, fetchAllIn } from '@/lib/supabase/server'
 
 const r2 = (n: number) => Math.round(n * 100) / 100
 
@@ -132,27 +132,35 @@ export async function refreshMonthStoredEarnings(
     if (await isMonthFinalized(admin, m, y)) return { refreshed: 0, skipped: 'finalized' }
   }
 
-  const { data: tasks } = await admin
-    .from('tasks')
-    .select('id, billing_amount_inr, client_id, service_id')
-    .gte('task_date', monthStart)
-    .lt('task_date', nextMonthStart)
-    .is('deleted_at', null)
+  const { data: tasks } = await fetchAll(
+    admin
+      .from('tasks')
+      .select('id, billing_amount_inr, client_id, service_id')
+      .gte('task_date', monthStart)
+      .lt('task_date', nextMonthStart)
+      .is('deleted_at', null)
+      .order('id')
+  )
   if (!tasks || tasks.length === 0) return { refreshed: 0 }
   const taskById = new Map(tasks.map((t: any) => [t.id, t]))
   const taskIds = tasks.map((t: any) => t.id)
 
   // Scores worth recomputing: score% > 0 and not manually overridden.
-  const scores: any[] = []
-  const CHUNK = 200
-  for (let i = 0; i < taskIds.length; i += CHUNK) {
-    const { data } = await admin
+  //
+  // Chunked AND paged: chunking alone bounds the URL but not the response, and
+  // one chunk of tasks can match more than 1,000 scores once a task carries
+  // several contributors. A score missing from this read keeps its stale
+  // earnings while the refresh reports success.
+  const { data: scoreRows } = await fetchAllIn(
+    ids => admin
       .from('contribution_scores')
       .select('task_id, employee_id, score_percentage, earnings_inr, is_manual_override')
-      .in('task_id', taskIds.slice(i, i + CHUNK))
+      .in('task_id', ids)
       .gt('score_percentage', 0)
-    if (data) scores.push(...data.filter((s: any) => !s.is_manual_override))
-  }
+      .order('task_id'),
+    taskIds,
+  )
+  const scores = scoreRows.filter((s: any) => !s.is_manual_override)
   if (scores.length === 0) return { refreshed: 0 }
 
   // Reference data — mirrors buildAnalysisRows (the report) exactly.
@@ -166,7 +174,10 @@ export async function refreshMonthStoredEarnings(
   const [pricingRes, empRes, taskToolsRes, toolsRes] = await Promise.all([
     fetchAll(admin.from('client_service_pricing').select('client_id, service_id, commission_percentage').order('client_id').order('service_id')),
     admin.from('employees').select('id, performance_rating'),
-    admin.from('task_tools').select('task_id, tool_id').in('task_id', taskIds),
+    fetchAllIn(
+      ids => admin.from('task_tools').select('task_id, tool_id').in('task_id', ids).order('task_id'),
+      taskIds,
+    ),
     admin.from('tools').select('id, fixed_percentage, is_active'),
   ])
   const pmap = new Map((pricingRes.data || []).map((p: any) => [`${p.client_id}|${p.service_id}`, p.commission_percentage]))
@@ -224,38 +235,48 @@ export async function computeMonthlyCommissions(
   }
 
   // 1) Task-linked scores: find this month's task ids, then sum their scores.
-  const { data: monthTasks, error: tasksErr } = await admin
-    .from('tasks')
-    .select('id')
-    .gte('task_date', monthStart)
-    .lt('task_date', nextMonthStart)
-    .is('deleted_at', null)
+  // Every read below is paged and every error is propagated. This function
+  // decides what people are paid, so a short read is not a degraded result —
+  // it is a wrong one, and it under-pays whoever's rows went missing. Failing
+  // the whole computation is the only safe response.
+  const { data: monthTasks, error: tasksErr } = await fetchAll(
+    admin
+      .from('tasks')
+      .select('id')
+      .gte('task_date', monthStart)
+      .lt('task_date', nextMonthStart)
+      .is('deleted_at', null)
+      .order('id')
+  )
   if (tasksErr) return { ok: false, error: tasksErr.message }
 
   const taskIds = (monthTasks ?? []).map((t: any) => t.id)
   if (taskIds.length > 0) {
-    const CHUNK = 200
-    for (let i = 0; i < taskIds.length; i += CHUNK) {
-      const chunk = taskIds.slice(i, i + CHUNK)
-      const { data: scores, error: scoresErr } = await admin
+    const { data: scores, error: scoresErr } = await fetchAllIn(
+      ids => admin
         .from('contribution_scores')
         .select('employee_id, earnings_inr')
-        .in('task_id', chunk)
-      if (scoresErr) return { ok: false, error: scoresErr.message }
-      scores?.forEach((s: any) => {
-        commissionByEmployee[s.employee_id] =
-          (commissionByEmployee[s.employee_id] || 0) + (s.earnings_inr || 0)
-      })
-    }
+        .in('task_id', ids)
+        .order('task_id'),
+      taskIds,
+    )
+    if (scoresErr) return { ok: false, error: scoresErr.message }
+    scores.forEach((s: any) => {
+      commissionByEmployee[s.employee_id] =
+        (commissionByEmployee[s.employee_id] || 0) + (s.earnings_inr || 0)
+    })
   }
 
   // 2) Orphan scores (no task_id) — bucketed by calculated_at.
-  const { data: orphanScores, error: orphanErr } = await admin
-    .from('contribution_scores')
-    .select('employee_id, earnings_inr, calculated_at')
-    .is('task_id', null)
-    .gte('calculated_at', monthStart)
-    .lt('calculated_at', nextMonthStart)
+  const { data: orphanScores, error: orphanErr } = await fetchAll(
+    admin
+      .from('contribution_scores')
+      .select('employee_id, earnings_inr, calculated_at')
+      .is('task_id', null)
+      .gte('calculated_at', monthStart)
+      .lt('calculated_at', nextMonthStart)
+      .order('calculated_at')
+  )
   if (orphanErr) return { ok: false, error: orphanErr.message }
   orphanScores?.forEach((s: any) => {
     commissionByEmployee[s.employee_id] =

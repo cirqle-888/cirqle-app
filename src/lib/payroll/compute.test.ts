@@ -2,7 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { refreshMonthStoredEarnings } from './compute'
 
 vi.mock('@/lib/supabase/server', () => ({
-  fetchAll: vi.fn(async (query) => await query)
+  fetchAll: vi.fn(async (query) => await query),
+  // The mock chain ignores `.in()` and returns the whole table, so one call
+  // with every id reproduces what the real chunk-and-page loop accumulates.
+  fetchAllIn: vi.fn(async (makeQuery: (ids: string[]) => any, ids: string[]) =>
+    ids?.length ? await makeQuery(ids) : { data: [] }
+  ),
 }))
 
 function createMockAdmin(dataMap: Record<string, any>, updates: any[] = []) {

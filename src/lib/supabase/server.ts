@@ -85,13 +85,19 @@ function getQueryTable(query: any): string | null {
   return typeof t === 'string' && t ? t : null
 }
 
-export async function fetchAll(query: any) {
+export async function fetchAll(query: any): Promise<{ data: any[]; error?: any }> {
   const table = getQueryTable(query)
   if (table && MISSING_TABLES.has(table)) {
     // Skip the round-trip — we already know this table doesn't exist.
     return { data: [] as any[] }
   }
 
+  // Returned alongside the rows so a caller that must not proceed on a partial
+  // read can say so. Historically this was logged and dropped, which is fine
+  // for a display list and wrong for anything that computes money: a failed
+  // page and an empty table were indistinguishable. Callers that ignore the
+  // field keep their previous behaviour.
+  let failure: any
   const allData: any[] = []
   const PAGE = 1000
   // Fetch up to 100,000 rows max to prevent infinite loops
@@ -109,6 +115,7 @@ export async function fetchAll(query: any) {
         }
       } else {
         console.error('[fetchAll] Error fetching data:', error)
+        failure = error
       }
       break
     }
@@ -125,7 +132,7 @@ export async function fetchAll(query: any) {
     console.warn('[fetchAll] Duplicate rows detected — ensure query has a stable .order("id") before calling fetchAll.')
   }
 
-  return { data: allData }
+  return { data: allData, error: failure }
 }
 
 /**
@@ -158,13 +165,16 @@ export async function fetchAllIn(
   makeQuery: (idChunk: string[]) => any,
   ids: string[],
   chunkSize = 100,
-): Promise<{ data: any[] }> {
+): Promise<{ data: any[]; error?: any }> {
   const unique = Array.from(new Set(ids ?? []))
   if (unique.length === 0) return { data: [] }
 
   const allData: any[] = []
   for (let i = 0; i < unique.length; i += chunkSize) {
-    const { data } = await fetchAll(makeQuery(unique.slice(i, i + chunkSize)))
+    const { data, error } = await fetchAll(makeQuery(unique.slice(i, i + chunkSize)))
+    // Stop at the first failed chunk. Continuing would return a result that
+    // looks complete but is missing whole id ranges.
+    if (error) return { data: allData, error }
     if (data) allData.push(...data)
   }
   return { data: allData }
