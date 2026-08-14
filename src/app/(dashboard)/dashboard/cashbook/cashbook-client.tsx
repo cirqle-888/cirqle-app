@@ -30,6 +30,7 @@ import { useRole } from '@/contexts/role-context'
 import type { ReceiptInput } from '@/components/cashbook/receipt-modal'
 
 import Link from 'next/link'
+import { todayISO } from '@/lib/utils/local-date'
 
 // Allocation modals (253 + 313 lines) only mount when an admin clicks Allocate
 // on an entry. Split off the initial cashbook chunk.
@@ -329,7 +330,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     rate: '',
     amountInr: '',
     rateSource: 'settings' as RateSource,
-    entry_date: new Date().toISOString().split('T')[0],
+    entry_date: todayISO(),
     description: '',
     reference: '',
     // How this receipt splits across invoices, in ₹. One line is the ordinary
@@ -569,7 +570,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         ))
         setShowForm(false)
         setFormEditingId(null)
-        setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: new Date().toISOString().split('T')[0], description: '', reference: '', allocations: [], client_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [] })
+        setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: todayISO(), description: '', reference: '', allocations: [], client_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [] })
         setDescTouched(false)
       }
       setSaving(false)
@@ -665,7 +666,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       setEntries(prev => [...[...allInserted].reverse(), ...prev])
       setShowForm(false)
       setRecurringMonths(0)
-      setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: new Date().toISOString().split('T')[0], description: '', reference: '', allocations: [], client_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [] })
+      setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: todayISO(), description: '', reference: '', allocations: [], client_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [] })
       setDescTouched(false)
       // The entry saved but the DB rejected the split (over-allocation, or an
       // invoice that was settled from another tab meanwhile). Say so — the
@@ -715,10 +716,10 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
 
     // Recalculate INR using the (preserved or new) exchange rate
     const amount_inr = isBase ? amount : round2(amount * exchange_rate)
-    const rate_date = editForm.entry_date ?? originalEntry.entry_date ?? new Date().toISOString().split('T')[0]
+    const rate_date = editForm.entry_date ?? originalEntry.entry_date ?? todayISO()
 
     const result = await updateCashbookEntry(editingRow, {
-      entry_date: editForm.entry_date ?? originalEntry.entry_date ?? new Date().toISOString().split('T')[0],
+      entry_date: editForm.entry_date ?? originalEntry.entry_date ?? todayISO(),
       amount,
       amount_inr,
       currency: cur,
@@ -774,7 +775,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     }
   }
 
-  const today = new Date().toISOString().split('T')[0]
+  const today = todayISO()
   // Pending invoices for the Invoice picker — narrowed to a single client when
   // the user picks one in the Client filter. Sorted overdue-first then by due
   // date so the most-pressing receivables surface at the top.

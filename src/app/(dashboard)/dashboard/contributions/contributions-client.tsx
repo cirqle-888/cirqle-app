@@ -42,6 +42,7 @@ const ActivityPanel = dynamic(() => import('@/components/activity/activity-panel
 // Matches the loading strategy the task modal already uses for this button.
 const DiscussButton = dynamic(() => import('@/components/chat/discuss-button').then(m => m.DiscussButton), { ssr: false })
 import { PageShell, PageContent, StickyToolbar, PageChrome } from '@/components/layout/page-shell'
+import { todayISO } from '@/lib/utils/local-date'
 
 // Heavy task editor — only mount when opened; bundle splits off the
 // contributions route chunk.
@@ -210,7 +211,7 @@ export default function ContributionsClient({
     title: '',
     client_id: '',
     service_id: '',
-    task_date: new Date().toISOString().split('T')[0],
+    task_date: todayISO(),
     billing_amount_inr: '',
     status: 'pending',
   })
@@ -1269,7 +1270,7 @@ export default function ContributionsClient({
       task_number: nextTaskNumber(maxRow.data?.task_number),
       title: task.title,
       status: 'pending',
-      task_date: new Date().toISOString().split('T')[0],
+      task_date: todayISO(),
       quantity: task.quantity || 1,
     }
     if (task.client?.id) payload.client_id = task.client.id
@@ -1306,7 +1307,7 @@ export default function ContributionsClient({
     const payload: any = {
       title: addTaskForm.title.trim(),
       status: addTaskForm.status,
-      task_date: addTaskForm.task_date || new Date().toISOString().split('T')[0],
+      task_date: addTaskForm.task_date || todayISO(),
     }
     if (addTaskForm.client_id) payload.client_id = addTaskForm.client_id
     if (addTaskForm.service_id) payload.service_id = addTaskForm.service_id
@@ -1322,7 +1323,7 @@ export default function ContributionsClient({
     if (data) {
       setLocalTasks(prev => [data, ...prev])
       setShowAddTask(false)
-      setAddTaskForm({ title: '', client_id: '', service_id: '', task_date: new Date().toISOString().split('T')[0], billing_amount_inr: '', status: 'pending' })
+      setAddTaskForm({ title: '', client_id: '', service_id: '', task_date: todayISO(), billing_amount_inr: '', status: 'pending' })
     }
     setAddingTask(false)
   }

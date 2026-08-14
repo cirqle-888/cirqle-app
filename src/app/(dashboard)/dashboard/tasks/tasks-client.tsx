@@ -68,6 +68,7 @@ import { OverflowMenu } from '@/components/ui/overflow-menu'
 import { Button } from '@/components/ui/button'
 import { usePrivacy } from "@/contexts/privacy-context"
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from "@/lib/utils"
+import { daysFromTodayISO, todayISO } from '@/lib/utils/local-date'
 
 // Heavy modals — only mount when opened. Bundle is split off the tasks route
 // chunk so the initial page download stays leaner. ssr:false because modals
@@ -244,7 +245,7 @@ const EMPTY_FORM = {
   hours: '1',
   spend: '',       // for percentage_of_spend: client's total ad spend
   currency: 'INR' as Currency,
-  task_date: new Date().toISOString().split('T')[0],
+  task_date: todayISO(),
   is_recurring: false,
   recurring_interval: 'monthly',
   recurring_end_date: '',
@@ -590,7 +591,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       description: promotionRequest.description,
       client_id: promotionRequest.client_id || '',
       service_id: promotionRequest.service_id || '',
-      task_date: promotionRequest.due_date || new Date().toISOString().split('T')[0],
+      task_date: promotionRequest.due_date || todayISO(),
     })
     setPromotingRequestId(promotionRequest.id)
     setShowForm(true)
@@ -1257,7 +1258,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
         billing_amount: task.billing_amount,
         billing_amount_inr: task.billing_amount_inr,
         currency: task.currency,
-        task_date: new Date().toISOString().split('T')[0],
+        task_date: todayISO(),
         quantity: task.quantity || 1,
         scope: deriveWorkScope(task.client_id),
       }
@@ -1479,7 +1480,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
       // that cron needs.
 
       setShowForm(false)
-      setForm({ ...EMPTY_FORM, task_date: new Date().toISOString().split('T')[0] })
+      setForm({ ...EMPTY_FORM, task_date: todayISO() })
       success(`Task #${tn} added`)
     } else if (error) {
       // Surface the DB error to the user (e.g. missing variant columns if migration 002 wasn't run yet).
@@ -1771,7 +1772,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
     if (myScope === 'not_mine') t = t.filter(task => !myTaskIdSet.has(task.id))
     if (sortBy === 'today_first') {
       // Today at top → upcoming ascending (soonest next) → past descending (most recent first)
-      const today = new Date().toISOString().split('T')[0]
+      const today = todayISO()
       t = [...t].sort((a, b) => {
         const aDate = a.task_date || ''
         const bDate = b.task_date || ''
@@ -5003,8 +5004,8 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                 <input type="date" value={form.task_date} onChange={e => setForm(p => ({ ...p, task_date: e.target.value }))} className={inputCls} />
                 <div className="flex gap-1.5 mt-1.5">
                   {[
-                    { label: 'Today',     date: new Date().toISOString().split('T')[0] },
-                    { label: 'Yesterday', date: new Date(Date.now() - 864e5).toISOString().split('T')[0] },
+                    { label: 'Today',     date: todayISO() },
+                    { label: 'Yesterday', date: daysFromTodayISO(-1) },
                   ].map(q => (
                     <button key={q.label} type="button" onClick={() => setForm(p => ({ ...p, task_date: q.date }))}
                       className={`px-2.5 py-1 text-[10px] rounded-lg border transition-colors ${form.task_date === q.date ? 'bg-violet-500/20 border-violet-500/40 text-violet-700 dark:text-violet-300' : 'border-foreground/15 text-muted-foreground hover:border-foreground/20'}`}>

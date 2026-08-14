@@ -27,6 +27,7 @@ import {
   Plus, X, Phone, Inbox, BellRing, CircleDollarSign, CheckCircle2, CreditCard,
   TrendingUp, Handshake,
 } from 'lucide-react'
+import { todayISO } from '@/lib/utils/local-date'
 
 // ── Types ────────────────────────────────────────────────────────────
 export interface FUPartner {
@@ -801,7 +802,7 @@ function InvoiceCard(p: CardProps) {
   // Inline payment (card-local state)
   const [payOpen, setPayOpen]     = useState(false)
   const [payAmount, setPayAmount] = useState('')
-  const [payDate, setPayDate]     = useState(() => new Date().toISOString().split('T')[0])
+  const [payDate, setPayDate]     = useState(() => todayISO())
   const [payMethod, setPayMethod] = useState('bank_transfer')
   const [payRef, setPayRef]       = useState('')
   const togglePay = () => {

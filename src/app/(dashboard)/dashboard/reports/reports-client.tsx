@@ -46,6 +46,7 @@ const TeamScoreBar = dynamic(
 )
 import type { DateFilterValue } from '@/components/ui/date-filter'
 import { TrendingUp, TrendingDown, Award, Target, ChevronDown, ChevronUp, ExternalLink, Download, Printer } from 'lucide-react'
+import { todayISO } from '@/lib/utils/local-date'
 
 interface Employee { id: string; cqid: string; name?: string; performance_rating: number }
 interface Score {
@@ -400,7 +401,7 @@ export default function ReportsClient({
         getQualityBand(s.score_percentage),
       ]),
     ]
-    downloadCSV(rows, `${empName}_tasks_${new Date().toISOString().split('T')[0]}.csv`)
+    downloadCSV(rows, `${empName}_tasks_${todayISO()}.csv`)
   }
 
   function exportMonthlyCSV() {
@@ -411,7 +412,7 @@ export default function ReportsClient({
       String(Math.round(row.total || 0)),
     ])
     const totalRow = ['TOTAL', ...employees.map(e => String(Math.round(monthTotals[e.id] || 0))), String(Math.round(monthTotals.total || 0))]
-    downloadCSV([headerRow, ...dataRows, totalRow], `month_wise_earnings_${new Date().toISOString().split('T')[0]}.csv`)
+    downloadCSV([headerRow, ...dataRows, totalRow], `month_wise_earnings_${todayISO()}.csv`)
   }
 
   // ─────────────────────────────────────────────────────────────────────────

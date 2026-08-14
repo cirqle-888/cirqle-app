@@ -28,6 +28,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { FormField, FormLabel, FormControl } from '@/components/ui/form'
 import dynamic from 'next/dynamic'
+import { todayISO } from '@/lib/utils/local-date'
 
 const ClientEditModal = dynamic(() => import('@/components/ui/client-edit-modal').then(mod => mod.ClientEditModal), { ssr: false })
 
@@ -230,7 +231,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
   const [form, setForm] = useState({
     client_id: '',
     currency: 'INR' as Currency,
-    issue_date: new Date().toISOString().split('T')[0],
+    issue_date: todayISO(),
     valid_until: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     notes: '',
     terms: 'Payment due within 7 days of approval.',
@@ -347,7 +348,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
       setForm({
         client_id: '',
         currency: 'INR',
-        issue_date: new Date().toISOString().split('T')[0],
+        issue_date: todayISO(),
         valid_until: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         notes: '',
         terms: 'Payment due within 7 days of approval.',
@@ -394,7 +395,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
 
       // 2. Generate invoice number
       const clientCode = quo.client?.code || '001'
-      const issueDate = new Date().toISOString().split('T')[0]
+      const issueDate = todayISO()
       const dueDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
       const invoiceNumber = await generateInvoiceNumber(supabase, clientCode, issueDate)
 

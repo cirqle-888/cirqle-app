@@ -75,6 +75,7 @@ const ReceiptModal = dynamic(
   { ssr: false },
 )
 import type { ReceiptInput } from '@/components/cashbook/receipt-modal'
+import { lastDayOfMonthISO, monthStartISO, todayISO } from '@/lib/utils/local-date'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface StatementLedgerRow {
@@ -382,7 +383,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
   const [payForm, setPayForm] = useState({
     amount: '', currency: 'INR' as Currency, rate: '', amountInr: '', rateSource: 'settings' as RateSource,
-    payment_date: new Date().toISOString().split('T')[0],
+    payment_date: todayISO(),
     payment_method: 'bank_transfer', reference: '', notes: '', bank_account_id: defaultBankAccountId,
   })
 
@@ -411,7 +412,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   // New invoice form (manual override)
   const [newForm, setNewForm] = useState({
     client_id: '', currency: 'INR' as Currency,
-    issue_date: new Date().toISOString().split('T')[0],
+    issue_date: todayISO(),
     due_date: '', notes: '',
     items: [{ description: '', quantity: 1, unit_price: 0, total: 0, service_id: '' }],
   })
@@ -464,9 +465,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   // Generate invoice from date range
   const [genForm, setGenForm] = useState({
     client_id: '', mode: 'range' as 'range' | 'day',
-    date_from: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
-    date_to: new Date().toISOString().split('T')[0],
-    specific_date: new Date().toISOString().split('T')[0],
+    date_from: monthStartISO(),
+    date_to: todayISO(),
+    specific_date: todayISO(),
   })
   const [genTasks, setGenTasks] = useState<any[]>([])
   const [genLoading, setGenLoading] = useState(false)
@@ -522,9 +523,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     mode: 'month' as 'month' | 'year' | 'range' | 'day' | 'all',
     month: new Date().toISOString().slice(0, 7),
     year: String(new Date().getFullYear()),
-    date_from: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
-    date_to: new Date().toISOString().split('T')[0],
-    specific_date: new Date().toISOString().split('T')[0],
+    date_from: monthStartISO(),
+    date_to: todayISO(),
+    specific_date: todayISO(),
   })
 
   // ── Navigation guard: warn before leaving while new invoice form is open ──
@@ -1184,7 +1185,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       ))
       const label = isAdvancePayment ? `Advance ${fmt(foreign, payForm.currency)} recorded` : `Payment of ${fmt(foreign, payForm.currency)} recorded — added to Cashbook`
       success(label)
-      setPayForm({ amount: '', currency: (inv.currency || 'INR') as Currency, rate: '', amountInr: '', rateSource: 'settings', payment_date: new Date().toISOString().split('T')[0], payment_method: 'bank_transfer', reference: '', notes: '', bank_account_id: defaultBankAccountId })
+      setPayForm({ amount: '', currency: (inv.currency || 'INR') as Currency, rate: '', amountInr: '', rateSource: 'settings', payment_date: todayISO(), payment_method: 'bank_transfer', reference: '', notes: '', bank_account_id: defaultBankAccountId })
       setIsAdvancePayment(false)
       setPanelMode('detail')
     } catch (err: any) {
@@ -1506,7 +1507,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       setInvoices(prev => [full as any, ...prev])
       setSelectedId(inv.id)
       setPanelMode('detail')
-      setNewForm({ client_id: '', currency: 'INR', issue_date: new Date().toISOString().split('T')[0], due_date: '', notes: '', items: [{ description: '', quantity: 1, unit_price: 0, total: 0, service_id: '' }] })
+      setNewForm({ client_id: '', currency: 'INR', issue_date: todayISO(), due_date: '', notes: '', items: [{ description: '', quantity: 1, unit_price: 0, total: 0, service_id: '' }] })
       success('Invoice created')
     } finally {
       setSaving(false)
@@ -1578,7 +1579,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       // value as billing_period_start, which could land on any day of the month
       // and never match the month-truncated value the trigger writes — silently
       // producing a SECOND draft for a month that already had one.
-      const earliestDate = selected.reduce((min, t) => (t.task_date && t.task_date < min ? t.task_date : min), selected[0].task_date || new Date().toISOString().split('T')[0])
+      const earliestDate = selected.reduce((min, t) => (t.task_date && t.task_date < min ? t.task_date : min), selected[0].task_date || todayISO())
       const taskMonth = earliestDate.slice(0, 7)
       const billingPeriod = buildBillingPeriod(taskMonth)
       const invoiceDate = getInvoiceDateForTaskMonth(taskMonth)
@@ -1897,7 +1898,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         // Auto-add unbilled client expense outflows for the same task month
         const [taskYr, taskMo] = group.month.split('-').map(Number)
         const monthStart = group.month + '-01'
-        const monthEnd = new Date(taskYr, taskMo, 0).toISOString().split('T')[0]
+        const monthEnd = lastDayOfMonthISO(taskYr, taskMo)
         const { data: expEntries } = await supabase
           .from('cashbook_entries')
           .select('id, amount_inr, description, currency, amount')
