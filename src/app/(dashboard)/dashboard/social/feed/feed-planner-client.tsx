@@ -26,6 +26,8 @@ import {
   FEED_STATUS_CHIP, FEED_STATUS_LABEL, type FeedTile,
 } from '@/lib/social/feed-grid'
 import { analyseHarmony, type TileColor, type HarmonyReport } from '@/lib/social/feed-harmony'
+import { aspectClass, FEED_ASPECT_OPTIONS, type FeedAspect } from '@/lib/social/feed-aspect'
+import { setFeedAspect } from './actions'
 import {
   addFeedCreative, moveFeedTile, unplaceFeedTile, deleteFeedCreative,
   sendFeedForApproval, createFeedShareLink,
@@ -95,7 +97,7 @@ const fmtDate = (iso: string | null) => {
 
 export default function FeedPlannerClient({
   accounts, selectedId, profile, tiles, plannedCount, publishedCount,
-  shareLinks, canPlan,
+  shareLinks, canPlan, aspect,
 }: {
   accounts: Account[]
   selectedId: string | null
@@ -105,6 +107,7 @@ export default function FeedPlannerClient({
   publishedCount: number
   shareLinks: { id: string; token: string; label: string | null; expires_at: string | null }[]
   canPlan: boolean
+  aspect: FeedAspect
 }) {
   const router = useRouter()
   const { toasts, dismiss, success, error: toastError } = useToast()
@@ -117,6 +120,9 @@ export default function FeedPlannerClient({
   const [harmony, setHarmony] = useState<HarmonyReport | null>(null)
   const [checking, setChecking] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<FeedTile | null>(null)
+  // Instagram has changed its grid crop before; this is a setting so the next
+  // change is a dropdown rather than a code change.
+  const tileAspect = aspectClass(aspect)
 
   const plannedIds = useMemo(
     () => tiles.filter(t => t.kind === 'planned').map(t => t.id),
@@ -232,6 +238,12 @@ export default function FeedPlannerClient({
    * of the grid. Runs on demand rather than on every render — it decodes every
    * image, which is not something to do while someone is dragging tiles.
    */
+  async function changeAspect(next: string) {
+    const res = await setFeedAspect(next)
+    if (res.ok) { success('Grid ratio updated', 'The client preview matches too.'); router.refresh() }
+    else toastError('Could not change the ratio', res.error)
+  }
+
   async function runHarmonyCheck() {
     setChecking(true)
     try {
@@ -286,13 +298,27 @@ export default function FeedPlannerClient({
       />
 
       <div className="p-4 md:p-6 space-y-4 max-w-3xl">
-        {accounts.length > 1 && (
-          <AppSelect value={selectedId ?? ''} onChange={e => switchAccount(e.target.value)} wrapperClassName="max-w-xs">
-            {accounts.map(a => (
-              <option key={a.id} value={a.id}>{a.username ? `@${a.username}` : a.name}</option>
-            ))}
-          </AppSelect>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {accounts.length > 1 && (
+            <AppSelect value={selectedId ?? ''} onChange={e => switchAccount(e.target.value)} wrapperClassName="max-w-xs">
+              {accounts.map(a => (
+                <option key={a.id} value={a.id}>{a.username ? `@${a.username}` : a.name}</option>
+              ))}
+            </AppSelect>
+          )}
+          {/* Instagram has changed its grid crop before and will again — so it
+              is a setting here, not a constant in the code. */}
+          {canPlan && (
+            <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              Grid crop
+              <AppSelect value={aspect} onChange={e => changeAspect(e.target.value)} wrapperClassName="w-40">
+                {FEED_ASPECT_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </AppSelect>
+            </label>
+          )}
+        </div>
 
         {/* Profile header — the mock exists so the grid is judged in context,
             the way the client will actually meet it. */}
@@ -410,7 +436,7 @@ export default function FeedPlannerClient({
                     onDragOver={e => { if (planned && dragId) { e.preventDefault(); setOverIndex(idx) } }}
                     onDrop={e => { if (planned && dragId) { e.preventDefault(); void drop(idx) } }}
                     onClick={() => setDetail(t)}
-                    className={`relative aspect-square group cursor-pointer overflow-hidden bg-secondary transition-all ${
+                    className={`relative ${tileAspect} group cursor-pointer overflow-hidden bg-secondary transition-all ${
                       isDragging ? 'opacity-30' : ''
                     } ${overIndex === idx && dragId && !isDragging ? 'ring-2 ring-primary ring-inset' : ''}`}
                   >
@@ -487,7 +513,7 @@ export default function FeedPlannerClient({
             onClick={e => e.stopPropagation()}>
             {detail.imageUrl && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={detail.imageUrl} alt="" className="w-full aspect-square object-cover" />
+              <img src={detail.imageUrl} alt="" className={`w-full ${tileAspect} object-cover`} />
             )}
             <div className="p-4 space-y-3">
               <div className="flex items-center gap-2 flex-wrap">

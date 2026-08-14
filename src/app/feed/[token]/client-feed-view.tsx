@@ -12,6 +12,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { FeedTile } from '@/lib/social/feed-grid'
+import { aspectClass, type FeedAspect } from '@/lib/social/feed-aspect'
 import { clientApproveCreative, clientRequestChanges } from './actions'
 import { Check, MessageSquare, X, Loader2, Play, CheckCircle2 } from 'lucide-react'
 
@@ -47,7 +48,7 @@ function clientLabel(status: FeedTile['status']): { text: string; cls: string } 
 }
 
 export default function ClientFeedView({
-  token, agencyName, label, account, tiles, plannedCount, publishedCount,
+  token, agencyName, label, account, tiles, plannedCount, publishedCount, aspect,
 }: {
   token: string
   agencyName: string
@@ -56,7 +57,11 @@ export default function ClientFeedView({
   tiles: FeedTile[]
   plannedCount: number
   publishedCount: number
+  aspect: FeedAspect
 }) {
+  // Instagram's grid crop is a setting, so the client sees the same shape the
+  // agency planned against.
+  const tileAspect = aspectClass(aspect)
   const router = useRouter()
   const [open, setOpen] = useState<FeedTile | null>(null)
   const [busy, setBusy] = useState(false)
@@ -145,7 +150,7 @@ export default function ClientFeedView({
                 const badge = clientLabel(t.status)
                 return (
                   <button key={t.key} onClick={() => setOpen(t)}
-                    className="relative aspect-square overflow-hidden bg-secondary group">
+                    className={`relative ${tileAspect} overflow-hidden bg-secondary group`}>
                     {t.imageUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={t.imageUrl} alt="" className="w-full h-full object-cover" />
@@ -197,7 +202,7 @@ export default function ClientFeedView({
             onClick={e => e.stopPropagation()}>
             {open.imageUrl && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={open.imageUrl} alt="" className="w-full aspect-square object-cover" />
+              <img src={open.imageUrl} alt="" className={`w-full ${tileAspect} object-cover`} />
             )}
             <div className="p-4 space-y-3">
               <div className="flex items-center gap-2">

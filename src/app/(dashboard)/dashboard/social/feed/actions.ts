@@ -17,6 +17,7 @@ import { requirePermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
 import { reorderGrid, isReadyForApproval } from '@/lib/social/feed-grid'
+import { parseFeedAspect, FEED_ASPECT_KEY } from '@/lib/social/feed-aspect'
 
 const REVALIDATE = '/dashboard/social/feed'
 
@@ -298,6 +299,35 @@ export async function revokeFeedShareLink(id: string): Promise<ActionResult> {
   const admin = createAdminClient()
   const { error } = await admin
     .from('feed_share_links').update({ revoked_at: new Date().toISOString() }).eq('id', id)
+  if (error) return { ok: false, error: error.message }
+
+  revalidatePath(REVALIDATE)
+  return { ok: true }
+}
+
+// ── Grid crop ────────────────────────────────────────────────────────────────
+
+/**
+ * Set the aspect ratio the feed grid renders at.
+ *
+ * Instagram has changed its profile crop before and will again. Storing it in
+ * company_settings means the next change is a dropdown, not a code change and a
+ * deploy — and both the planner and the client's approval view read the same
+ * key, so the two can never show different shapes.
+ */
+export async function setFeedAspect(aspect: string): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.SOCIAL_PLAN_FEED)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  // Validate against the known set — never write an arbitrary string into a
+  // key that drives layout.
+  const parsed = parseFeedAspect(aspect)
+  if (parsed !== aspect) return { ok: false, error: 'Unsupported ratio.' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('company_settings')
+    .upsert({ key: FEED_ASPECT_KEY, value: parsed }, { onConflict: 'key' })
   if (error) return { ok: false, error: error.message }
 
   revalidatePath(REVALIDATE)

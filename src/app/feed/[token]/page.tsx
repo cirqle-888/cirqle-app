@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { buildFeedGrid } from '@/lib/social/feed-grid'
+import { parseFeedAspect, FEED_ASPECT_KEY } from '@/lib/social/feed-aspect'
 import ClientFeedView from './client-feed-view'
 
 export const dynamic = 'force-dynamic'
@@ -83,6 +84,15 @@ export default async function ClientFeedPage({
     published: (published ?? []) as never,
   })
 
+  // The SAME setting the planner uses — the client must see the crop the
+  // agency approved, not a different one.
+  let aspectRaw: string | null = null
+  try {
+    const { data } = await admin
+      .from('company_settings').select('value').eq('key', FEED_ASPECT_KEY).maybeSingle()
+    aspectRaw = data?.value ?? null
+  } catch { /* unset */ }
+
   // The agency's own name, for a header the client recognises.
   let agencyName = 'Your agency'
   try {
@@ -100,6 +110,7 @@ export default async function ClientFeedPage({
       tiles={grid.tiles}
       plannedCount={grid.plannedCount}
       publishedCount={grid.publishedCount}
+      aspect={parseFeedAspect(aspectRaw)}
     />
   )
 }

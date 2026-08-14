@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { buildFeedGrid } from '@/lib/social/feed-grid'
+import { parseFeedAspect, FEED_ASPECT_KEY } from '@/lib/social/feed-aspect'
 import FeedPlannerClient from './feed-planner-client'
 
 export const dynamic = 'force-dynamic'
@@ -80,6 +81,15 @@ export default async function FeedPlannerPage({
     } catch { /* table arrives with the same migration */ }
   }
 
+  // Instagram has changed its grid crop before and will again — so the ratio
+  // is a setting, not a constant. One dropdown, no deploy.
+  let aspectRaw: string | null = null
+  try {
+    const { data } = await admin
+      .from('company_settings').select('value').eq('key', FEED_ASPECT_KEY).maybeSingle()
+    aspectRaw = data?.value ?? null
+  } catch { /* unset — the parser falls back to the default */ }
+
   const grid = buildFeedGrid({
     planned: planned as never,
     published: published as never,
@@ -95,6 +105,7 @@ export default async function FeedPlannerPage({
       publishedCount={grid.publishedCount}
       shareLinks={shareLinks as never}
       canPlan={canPlan}
+      aspect={parseFeedAspect(aspectRaw)}
     />
   )
 }
