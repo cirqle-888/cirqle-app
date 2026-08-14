@@ -4,7 +4,7 @@ import { calculateCommission } from '@/lib/calculations/commission'
 import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { isMonthFinalized } from '@/lib/payroll/compute'
-import { fetchAll } from '@/lib/supabase/server'
+import { fetchAll, fetchAllIn } from '@/lib/supabase/server'
 
 export async function POST(req: NextRequest) {
   try {
@@ -51,13 +51,19 @@ export async function POST(req: NextRequest) {
     const performanceHistory = historyRes.data || []
 
     // 2. Fetch tasks in date range with their raw contributions, tool usage, and previous scores
-    let tasksQuery = supabase
-      .from('tasks')
-      .select('id, client_id, service_id, billing_amount_inr, task_date, status')
-      .gte('task_date', dateFrom)
-      .lte('task_date', dateTo)
-
-    const { data: allTasksInRange } = await tasksQuery
+    // Paged, not a bare select: this route takes an arbitrary date range, and a
+    // wide one matches far more than the 1,000 rows PostgREST returns by
+    // default. Truncation here is invisible and expensive — the tasks that fell
+    // off the end keep their stale earnings while the caller is told the
+    // recalculation succeeded.
+    const { data: allTasksInRange } = await fetchAll(
+      supabase
+        .from('tasks')
+        .select('id, client_id, service_id, billing_amount_inr, task_date, status')
+        .gte('task_date', dateFrom)
+        .lte('task_date', dateTo)
+        .order('id')
+    )
     if (!allTasksInRange || allTasksInRange.length === 0) {
       return NextResponse.json({ updated: 0, message: 'No tasks found in date range' })
     }
@@ -91,11 +97,28 @@ export async function POST(req: NextRequest) {
 
     const taskIds = tasks.map(t => t.id)
 
-    // Chunk fetching for large arrays if needed, but assuming reasonable range < 2000 tasks
+    // Chunked AND paged (fetchAllIn). A bare `.in(taskIds)` loses rows two ways
+    // at this size: the id list overflows the request URL, and the response is
+    // capped at 1,000 rows regardless.
+    //
+    // The contribution_scores read is the one that must never come back short.
+    // Every score is matched into `scoresByTaskEmp` below, and a score missing
+    // from that map is treated as brand new — which skips the
+    // `is_manual_override` guard and overwrites a hand-set figure with a
+    // recomputed one, with no previous_* values recorded to undo it.
     const [contribsRes, taskToolsRes, scoresRes] = await Promise.all([
-      supabase.from('contributions').select('task_id, employee_id, parameter_id, value').in('task_id', taskIds).gt('value', 0),
-      supabase.from('task_tools').select('task_id, tool_id').in('task_id', taskIds),
-      supabase.from('contribution_scores').select('*').in('task_id', taskIds)
+      fetchAllIn(
+        ids => supabase.from('contributions').select('task_id, employee_id, parameter_id, value').in('task_id', ids).gt('value', 0).order('task_id'),
+        taskIds,
+      ),
+      fetchAllIn(
+        ids => supabase.from('task_tools').select('task_id, tool_id').in('task_id', ids).order('task_id'),
+        taskIds,
+      ),
+      fetchAllIn(
+        ids => supabase.from('contribution_scores').select('*').in('task_id', ids).order('task_id'),
+        taskIds,
+      ),
     ])
 
     const allContribs = contribsRes.data || []

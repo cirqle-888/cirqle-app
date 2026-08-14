@@ -128,6 +128,48 @@ export async function fetchAll(query: any) {
   return { data: allData }
 }
 
+/**
+ * The `.in(column, ids)` companion to {@link fetchAll}.
+ *
+ * A plain `.in()` lookup has TWO independent ceilings, and hitting either one
+ * loses rows silently — no error, just a short array:
+ *
+ *  1. URL length. Every UUID costs ~37 chars in the query string, so a few
+ *     hundred ids overflow PostgREST's request line.
+ *  2. The 1,000-row response cap. Even a modest id list can match far more
+ *     than 1,000 rows — 200 tasks with 6 contributors each is 1,200.
+ *
+ * Chunking alone fixes (1) and leaves (2); `fetchAll` alone fixes (2) and
+ * leaves (1). This does both: the ids are chunked, and every chunk is paged
+ * to exhaustion.
+ *
+ * `makeQuery` must build a FRESH query per call — a PostgREST builder cannot
+ * be re-filtered once it has been awaited.
+ *
+ *   const { data } = await fetchAllIn(
+ *     ids => admin.from('contributions').select('task_id, value').in('task_id', ids).order('task_id'),
+ *     taskIds,
+ *   )
+ *
+ * Order the query by a stable column: `fetchAll` pages with `.range()`, and an
+ * unordered PostgREST result can repeat or skip rows across page boundaries.
+ */
+export async function fetchAllIn(
+  makeQuery: (idChunk: string[]) => any,
+  ids: string[],
+  chunkSize = 100,
+): Promise<{ data: any[] }> {
+  const unique = Array.from(new Set(ids ?? []))
+  if (unique.length === 0) return { data: [] }
+
+  const allData: any[] = []
+  for (let i = 0; i < unique.length; i += chunkSize) {
+    const { data } = await fetchAll(makeQuery(unique.slice(i, i + chunkSize)))
+    if (data) allData.push(...data)
+  }
+  return { data: allData }
+}
+
 // Dev-only: log each missing-table once per process so the user knows what's
 // happening, instead of either silent (confusing) or repeated (noise).
 const MISSING_TABLES_LOGGED = new Set<string>()
