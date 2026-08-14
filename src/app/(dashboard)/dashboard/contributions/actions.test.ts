@@ -12,6 +12,9 @@ const loggedActivity: any[] = []
 const recordAdjustmentsCalls: { month: number; year: number }[] = []
 let recordedAdjustments = 0
 
+vi.mock('next/cache', () => ({
+  revalidatePath: vi.fn(),
+}))
 vi.mock('@/lib/permissions/check', () => ({
   requireAnyPermission: (...a: any[]) => mockGuard(...a),
   requirePermission: (...a: any[]) => mockGuard(...a),
