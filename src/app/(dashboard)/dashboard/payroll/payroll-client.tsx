@@ -20,6 +20,7 @@ import {
 import { sendBulkPayslips } from '@/lib/payslip/actions'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { useToast, ToastContainer } from '@/components/ui/toast'
+import { todayISO } from '@/lib/utils/local-date'
 
 // Heavy bulk-generate modal (773 lines) — only mounts when an admin clicks
 // the action. Splitting it off the initial payroll chunk reduces the entry
@@ -232,12 +233,12 @@ export default function PayrollClient({
     base_salary: '', commission_earned: '', advances_deducted: '0', other_deductions: '0', notes: '',
   })
   const [advForm, setAdvForm] = useState({
-    employee_id: '', amount: '', advance_date: now.toISOString().split('T')[0],
+    employee_id: '', amount: '', advance_date: todayISO(now),
     reason: '', repayment_type: 'deduct_from_salary',
   })
   const [creditForm, setCreditForm] = useState({
     entity_type: 'employee', entity_id: '', credit_type: 'given',
-    amount: '', credit_date: now.toISOString().split('T')[0], notes: '',
+    amount: '', credit_date: todayISO(now), notes: '',
   })
 
   const supabase = createClient()
@@ -593,7 +594,7 @@ export default function PayrollClient({
       const emp = empList.find(e => e.id === a.employee_id)
       return [dn(emp) || '', a.amount, a.advance_date, a.reason || '', a.repayment_type || '', a.status || '']
     })
-    dl([header, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n'), `advances-${now.toISOString().split('T')[0]}.csv`)
+    dl([header, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n'), `advances-${todayISO(now)}.csv`)
   }
 
   // ── Salary slip ───────────────────────────────────────────────────────────
@@ -1690,7 +1691,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                       const d       = i + 1
                       const dateStr = `${viewYear}-${String(viewMonth).padStart(2, '0')}-${String(d).padStart(2, '0')}`
                       const worked  = workedDays.has(dateStr)
-                      const isToday = dateStr === now.toISOString().split('T')[0]
+                      const isToday = dateStr === todayISO(now)
                       const isOpen  = selectedDay === dateStr
                       // Only a day with work is worth opening; the rest stay
                       // inert rather than offering an empty panel.

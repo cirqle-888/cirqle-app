@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { Calendar, ChevronDown, ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { toISODate } from '@/lib/utils/local-date'
 
 export type DateFilterValue =
   | null
@@ -291,7 +292,10 @@ export function DateFilter({ value, onChange, className = '', compact = false }:
               <div className="grid grid-cols-3 gap-1.5">
                 {[-2, -1, 0].map(offset => {
                   const d = new Date(); d.setDate(d.getDate() + offset)
-                  const iso = d.toISOString().slice(0, 10)
+                  // Local calendar day, not the UTC one: toISOString() here made
+                  // "Today" select yesterday between midnight and 05:30 IST,
+                  // while the preset matching below compares local dates.
+                  const iso = toISODate(d)
                   const label = offset === 0 ? 'Today' : offset === -1 ? 'Yesterday' : d.toLocaleDateString('en', { weekday: 'short', day: 'numeric' })
                   return (
                     <button key={offset} type="button" onClick={() => setSingleDay(iso)}

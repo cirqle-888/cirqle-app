@@ -42,7 +42,7 @@ const ActivityPanel = dynamic(() => import('@/components/activity/activity-panel
 // Matches the loading strategy the task modal already uses for this button.
 const DiscussButton = dynamic(() => import('@/components/chat/discuss-button').then(m => m.DiscussButton), { ssr: false })
 import { PageShell, PageContent, StickyToolbar, PageChrome } from '@/components/layout/page-shell'
-import { todayISO } from '@/lib/utils/local-date'
+import { todayISO, toISODate } from '@/lib/utils/local-date'
 
 // Heavy task editor — only mount when opened; bundle splits off the
 // contributions route chunk.
@@ -2017,7 +2017,11 @@ export default function ContributionsClient({
                 } else if (boardDateGranularity === 'weekly') {
                   const d = new Date(t.task_date + 'T00:00:00')
                   const ws = new Date(d); ws.setDate(d.getDate() - d.getDay())
-                  const key = ws.toISOString().split('T')[0]
+                  // `ws` is LOCAL midnight on the week's Sunday, so serialising
+                  // it through UTC named the Saturday before — every week, not
+                  // just some. The board grouped on that key and labelled the
+                  // column "Week of <Saturday>".
+                  const key = toISODate(ws)
                   pushTo(key, `Week of ${fmt(key)}`, 'bg-blue-500/15 border-blue-500/20 text-blue-700 dark:text-blue-300', 'W', t)
                 } else if (boardDateGranularity === 'monthly') {
                   const key = t.task_date.substring(0, 7)
