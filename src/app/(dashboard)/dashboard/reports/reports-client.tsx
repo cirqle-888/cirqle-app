@@ -436,6 +436,8 @@ export default function ReportsClient({
             { href: '/dashboard/reports/client-profitability', label: 'Client Profitability' },
             { href: '/dashboard/reports/cost-attribution', label: 'Cost & Tags' },
             { href: '/dashboard/reports/company-ops', label: 'Company Operations' },
+            { href: '/dashboard/reports/department-pnl', label: 'Department P&L' },
+            { href: '/dashboard/reports/department-growth', label: 'Departments' },
             { href: '/dashboard/clients/ranking', label: 'Client Ranking' },
           ].map(r => (
             <a key={r.href} href={r.href}
