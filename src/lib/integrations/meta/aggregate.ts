@@ -8,6 +8,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { ownerTypeOf } from '@/lib/assets/ownership'
+import { toISODate } from '@/lib/utils/local-date'
 
 /**
  * Does this row belong to a real client (as opposed to Cirqle, or nothing yet)?
@@ -78,7 +79,7 @@ function pct(cur: number, prev: number): number | null {
   return Math.round(((cur - prev) / prev) * 1000) / 10
 }
 const iso = (d: Date) => d.toISOString()
-const isoDate = (d: Date) => d.toISOString().slice(0, 10)
+const isoDate = (d: Date) =>toISODate( d)
 
 /**
  * Build a per-client rollup over `days` (with the previous equal window for

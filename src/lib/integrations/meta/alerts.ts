@@ -8,6 +8,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { buildAgencyRollups } from './aggregate'
 import { notifyAdmins } from '@/lib/notifications/create'
+import { todayISO } from '@/lib/utils/local-date'
 
 interface AlertRule { id: string; client_id: string | null; metric: string; threshold: number; is_active: boolean }
 
@@ -25,7 +26,7 @@ export async function evaluateMetaAlerts(admin: SupabaseClient, days = 30): Prom
 
   const { rollups } = await buildAgencyRollups(admin, days)
   const byClient = new Map(rollups.map((r) => [r.clientId, r]))
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayISO()
 
   let triggered = 0
   const fire = async (clientName: string, clientId: string, metric: string, title: string, message: string) => {

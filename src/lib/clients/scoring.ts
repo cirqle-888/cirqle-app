@@ -58,6 +58,7 @@ export interface ClientScore {
 }
 
 import { recognisedRevenue } from '@/lib/finance/invoice-revenue'
+import { toISODate } from '@/lib/utils/local-date'
 
 const LIVE_STATUSES = ['sent', 'partial', 'overdue']            // currently with the client, unpaid
 // Counts toward revenue/frequency. `bad_debt` belongs here: the work WAS billed,
@@ -81,7 +82,7 @@ export function computeClientScores(
   tasks:       ScoringTask[],
   today:       Date = new Date(),
 ): ClientScore[] {
-  const todayIso = today.toISOString().slice(0, 10)
+  const todayIso =toISODate( today)
 
   // ── Index everything by invoice / client for O(1) lookups ──────────────
   const lastPaymentByInvoice = new Map<string, string>()
@@ -193,8 +194,8 @@ export function computeClientScores(
     const lastActivity = [lastTaskDate, lastInvoiceDate].filter(Boolean).sort().pop() || null
     const recentActivityDays = lastActivity ? daysBetween(lastActivity, todayIso) : null
 
-    const cutoff90 = new Date(today.getTime() - 90 * day).toISOString().slice(0, 10)
-    const cutoff180 = new Date(today.getTime() - 180 * day).toISOString().slice(0, 10)
+    const cutoff90 =toISODate( new Date(today.getTime() - 90 * day))
+    const cutoff180 =toISODate( new Date(today.getTime() - 180 * day))
     const recentRevenue = billed.filter(i => i.issue_date && i.issue_date >= cutoff90).reduce((s, i) => s + recognisedRevenue(i), 0)
     const priorRevenue = billed.filter(i => i.issue_date && i.issue_date >= cutoff180 && i.issue_date < cutoff90).reduce((s, i) => s + recognisedRevenue(i), 0)
     const revenueTrendPct = priorRevenue > 0

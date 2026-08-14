@@ -21,6 +21,7 @@ import { logActivity } from '@/lib/activity/log'
 import { createNotification } from '@/lib/notifications/create'
 import { sendWebPush } from '@/lib/push/send'
 import { transcribeAudio } from '@/lib/ai/transcribe'
+import { todayISO } from '@/lib/utils/local-date'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1356,7 +1357,7 @@ export async function sendVoiceMessage(input: {
   const { error: attErr } = await admin.from('message_attachments').insert({
     message_id: msg.id,
     storage_path: input.storagePath,
-    file_name: `voice-note-${new Date().toISOString().slice(0, 10)}.webm`,
+    file_name: `voice-note-${todayISO()}.webm`,
     mime_type: input.mimeType || 'audio/webm',
     size_bytes: input.sizeBytes,
   })

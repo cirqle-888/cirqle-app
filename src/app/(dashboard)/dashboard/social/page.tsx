@@ -4,6 +4,7 @@ import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import SocialClient from './social-client'
 import type { SocialAccountRow } from './social-client'
+import { toISODate } from '@/lib/utils/local-date'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,7 +40,7 @@ export default async function SocialHubPage({
 
   const since = new Date()
   since.setDate(since.getDate() - 30)
-  const sinceStr = since.toISOString().slice(0, 10)
+  const sinceStr =toISODate( since)
 
   const weekEnd = new Date()
   weekEnd.setDate(weekEnd.getDate() + 7)

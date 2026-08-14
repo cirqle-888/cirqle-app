@@ -23,13 +23,14 @@ import { createManualRequest } from '@/app/(dashboard)/dashboard/requests/action
 import { logRequestActivity } from '@/lib/requests/core'
 import { logActivity } from '@/lib/activity/log'
 import { deriveWorkScope, retryWithoutScope, withoutScope } from '@/lib/finance/classify'
+import { todayISO } from '@/lib/utils/local-date'
 
 interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
 
 const REVALIDATE = '/dashboard/advertising'
 const VALID_STATUS = ['draft', 'pending_approval', 'active', 'paused', 'completed', 'cancelled']
 
-const today = () => new Date().toISOString().slice(0, 10)
+const today = () => todayISO()
 
 /** Convert an amount to INR via exchange_rates (mirrors tasks/actions.ts toInr). */
 async function toInr(admin: SupabaseClient, amount: number, currency?: string | null): Promise<number> {

@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import AccountDashboardClient from './account-dashboard-client'
+import { toISODate } from '@/lib/utils/local-date'
 
 export const dynamic = 'force-dynamic'
 
@@ -48,7 +49,7 @@ export default async function SocialAccountPage({
   const now = new Date()
   const curFrom = new Date(now.getTime() - days * 24 * 60 * 60_000)
   const prevFrom = new Date(now.getTime() - 2 * days * 24 * 60 * 60_000)
-  const fmt = (d: Date) => d.toISOString().slice(0, 10)
+  const fmt = (d: Date) =>toISODate( d)
 
   const [dailyRes, mediaRes] = await Promise.all([
     admin

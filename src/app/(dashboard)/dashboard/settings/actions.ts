@@ -7,6 +7,7 @@ import { syncRatesToDb, ratesAreStale } from '@/lib/fx/sync'
 import { revalidatePath } from 'next/cache'
 import { invalidateUserCache } from '@/lib/permissions/check'
 import { logScopeChanges, diffAssignments } from '@/lib/scope/audit'
+import { todayISO } from '@/lib/utils/local-date'
 
 interface ActionResult<T = void> {
   ok: boolean
@@ -1193,7 +1194,7 @@ export async function upsertExchangeRate(
         currency,
         rate_to_inr: rate,
         rate_source: 'manual',
-        rate_date: new Date().toISOString().slice(0, 10),
+        rate_date: todayISO(),
         last_updated: new Date().toISOString(),
       },
       { onConflict: 'currency' },

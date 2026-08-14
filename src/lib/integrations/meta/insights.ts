@@ -19,6 +19,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { metaGraph, metaGraphAll, MetaApiError, redactTokens } from './client'
 import { decryptToken } from '@/lib/integrations/tokens'
+import { toISODate } from '@/lib/utils/local-date'
 
 export interface SyncAccountResult {
   ok: boolean
@@ -28,7 +29,7 @@ export interface SyncAccountResult {
 }
 
 function isoDate(d: Date): string {
-  return d.toISOString().split('T')[0]
+  return toISODate(d)
 }
 
 /** Resolve the API token for a social account row (page token → connection user token). */

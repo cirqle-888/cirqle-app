@@ -17,6 +17,7 @@ import { recomputeCampaignBilling } from '@/lib/advertising/billing'
 import { logActivity } from '@/lib/activity/log'
 import { retryWithoutScope, withoutScope, type FinanceScope } from '@/lib/finance/classify'
 import { computeEqualSplit } from '@/lib/finance/splits'
+import { todayISO } from '@/lib/utils/local-date'
 
 const REVALIDATE = '/dashboard/cashbook'
 
@@ -737,7 +738,7 @@ export async function fetchLiveRate(
     return { ok: false, error: `No live rate available for ${currency}` }
   }
 
-  const rateDate = fetched.rateDate ?? new Date().toISOString().slice(0, 10)
+  const rateDate = fetched.rateDate ?? todayISO()
 
   // Persist so Settings / exchange_rates table stays current.
   const admin = createAdminClient()

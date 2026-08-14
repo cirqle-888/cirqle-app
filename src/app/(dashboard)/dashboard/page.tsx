@@ -8,6 +8,7 @@ import { PricingPendingBanner } from '@/components/pricing/pricing-pending-banne
 import { summarizeFollowups } from '@/lib/followups/grouping'
 import { getMyNotifications } from '@/app/api/notifications/actions'
 import DashboardClient from './dashboard-client'
+import { toISODate, todayISO } from '@/lib/utils/local-date'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,19 +19,19 @@ export default async function DashboardPage() {
   // the per-query RLS planning overhead on the database side.
   const supabase = createAdminClient()
 
-  const todayStr = new Date().toISOString().slice(0, 10)
+  const todayStr = todayISO()
   // Analytics window: last 36 months — prevents unbounded 50K+ row fetches.
   // The dashboard "best month" insight operates within this window.
   const analyticsFrom = new Date()
   analyticsFrom.setMonth(analyticsFrom.getMonth() - 36)
-  const analyticsFromStr = analyticsFrom.toISOString().slice(0, 10)
+  const analyticsFromStr =toISODate( analyticsFrom)
   // Display-widget window: last 90 days. Used by the active-tasks / to-be-invoiced
   // / unscored-done widgets which are intentionally "recent work" lists — older
   // rows would never surface in the UI anyway. Caps an otherwise unbounded fetch
   // of every non-cancelled task ever created.
   const displayFrom = new Date()
   displayFrom.setDate(displayFrom.getDate() - 90)
-  const displayFromStr = displayFrom.toISOString().slice(0, 10)
+  const displayFromStr =toISODate( displayFrom)
 
   const me = await loadCurrentUser().catch(() => null)
   const isAdmin = me?.isAdmin ?? false
@@ -328,7 +329,7 @@ export default async function DashboardPage() {
   if (isAdmin) {
     try {
       const now = new Date()
-      const stripFrom = new Date(now.getFullYear(), now.getMonth() - 3, 1).toISOString().slice(0, 10)
+      const stripFrom =toISODate( new Date(now.getFullYear(), now.getMonth() - 3, 1))
       const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
       const journal = await fetchJournalLines(supabase, { from: stripFrom })
       companyOps = computeCompanyOpsStrip(journal, { month: thisMonthKey, bankBalanceInr: bankBalance })

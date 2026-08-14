@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { getProvider } from '@/lib/advertising/providers'
 import { ingestMetrics } from '@/lib/advertising/pipeline'
 import { decryptToken } from '@/lib/integrations/tokens'
+import { toISODate } from '@/lib/utils/local-date'
 
 
 export async function syncProjectWorker(job: DequeuedJob): Promise<any> {
@@ -45,9 +46,9 @@ export async function syncProjectWorker(job: DequeuedJob): Promise<any> {
 
   // Sync a trailing 7 day window
   const d = new Date()
-  const endDate = d.toISOString().split('T')[0]
+  const endDate =toISODate( d)
   d.setDate(d.getDate() - 7)
-  const startDate = d.toISOString().split('T')[0]
+  const startDate =toISODate( d)
 
   const pStartedAt = new Date().toISOString()
   await admin.from('ad_projects').update({ sync_status: 'running' }).eq('id', project.id)

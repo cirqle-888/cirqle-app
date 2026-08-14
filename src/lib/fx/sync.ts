@@ -10,6 +10,7 @@
  * client. Set `FX_API_URL` to swap to the keyed endpoint if rate limits bite.
  */
 import { createAdminClient } from '@/lib/supabase/admin'
+import { todayISO } from '@/lib/utils/local-date'
 
 // INR is the base currency; we track a rate_to_inr for each of these.
 const FX_CURRENCIES = ['USD', 'EUR', 'SAR', 'AED', 'GBP', 'QAR'] as const
@@ -58,7 +59,7 @@ export async function fetchRates(): Promise<{
 
     const rateDate = json.time_last_update_utc
       ? new Date(json.time_last_update_utc).toISOString().slice(0, 10)
-      : new Date().toISOString().slice(0, 10)
+      : todayISO()
 
     return { ok: true, rates, rateDate }
   } catch (e) {

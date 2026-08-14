@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { duePeriods, type RecurringRule } from '@/lib/finance/recurring-schedule'
 import { notifyAdmins } from '@/lib/notifications/create'
 import { logCronRun } from '@/lib/cron/log'
+import { todayISO } from '@/lib/utils/local-date'
 
 /**
  * Recurring-expense auto-posting cron.
@@ -59,7 +60,7 @@ export async function GET(req: NextRequest) {
   }
 
   const admin = createAdminClient()
-  const todayStr = new Date().toISOString().split('T')[0]
+  const todayStr = todayISO()
 
   const { data: rules, error: rulesErr } = await admin
     .from('recurring_expenses')

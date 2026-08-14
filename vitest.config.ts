@@ -5,6 +5,11 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: true,
+    // TZ is deliberately NOT pinned here. Calendar dates resolve in
+    // Asia/Kolkata explicitly (src/lib/utils/local-date.ts), so the suite must
+    // pass whatever clock the machine is on — CI, a laptop, or Vercel's UTC.
+    // Pinning it would hide exactly the process-timezone dependence the date
+    // work removed. See src/lib/utils/ist-business-dates.test.ts.
     // Agent worktrees under .claude/ contain full copies of src, so vitest was
     // discovering and running the same suites two or three times over (118 test
     // files for ~45 real ones). Excluding them roughly halves the run without

@@ -22,6 +22,7 @@ import { computeMonthlyCommissions } from '@/lib/payroll/compute'
 import { pendingAdjustmentTotals, settleAdjustments } from '@/lib/payroll/adjustments'
 import { computeMonthlyOwnership } from '@/lib/ownership/engine'
 import { retryWithoutScope, withoutScope } from '@/lib/finance/classify'
+import { todayISO } from '@/lib/utils/local-date'
 
 const REVALIDATE = '/dashboard/payroll'
 
@@ -375,7 +376,7 @@ export async function markPayrollPaid(
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const admin = createAdminClient()
-  const today = new Date().toISOString().split('T')[0]
+  const today = todayISO()
 
   const updates: Record<string, unknown> = { status: 'paid', paid_date: today }
   // Write the live figures whenever ANY variable component is present. The

@@ -6,6 +6,7 @@ import { notifyAdmins } from '@/lib/notifications/create'
 import { logCronRun } from '@/lib/cron/log'
 import { parseBillingRule, isRuleDormant } from '@/lib/tasks/derived-billing'
 import { recomputeDerivedTask } from '@/lib/tasks/derived-billing-sync'
+import { todayISO } from '@/lib/utils/local-date'
 
 /**
  * Recurring-task JUST-IN-TIME generation cron.
@@ -53,7 +54,7 @@ export async function GET(req: NextRequest) {
   }
 
   const admin = createAdminClient()
-  const todayStr = new Date().toISOString().split('T')[0]
+  const todayStr = todayISO()
 
   // Active recurring series — the parent row itself, not its instances.
   const { data: parents, error: parentsErr } = await admin

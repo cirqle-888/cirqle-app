@@ -13,6 +13,7 @@ import { requireAnyPermission } from '@/lib/permissions/check'
 import { logActivity } from '@/lib/activity/log'
 import { revalidatePath } from 'next/cache'
 import { recordPayment as libRecordPayment } from '@/lib/finance/record-payment'
+import { toISODate, todayISO } from '@/lib/utils/local-date'
 
 const ROUTE = '/dashboard/invoices/follow-ups'
 const WRITE_PERMS = ['billing.edit', 'billing.view_workflow']
@@ -105,7 +106,7 @@ export async function markInvoiceSent(
     if (!dueDate) {
       const base = inv.issue_date ? new Date(inv.issue_date) : new Date()
       base.setDate(base.getDate() + 30)
-      dueDate = base.toISOString().split('T')[0]
+      dueDate =toISODate( base)
     }
 
     const prevStatus = inv.status
@@ -209,8 +210,8 @@ export async function recordPayment(
       amountInr: amountInr,
       exchangeRate: invRate,
       rateSource: 'follow-ups',
-      rateDate: new Date().toISOString().split('T')[0],
-      paymentDate: input.paymentDate || new Date().toISOString().split('T')[0],
+      rateDate: todayISO(),
+      paymentDate: input.paymentDate || todayISO(),
       paymentMethod: input.method || 'bank_transfer',
       reference: input.reference || null,
       notes: 'Recorded via Follow-ups',

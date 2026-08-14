@@ -11,6 +11,7 @@ import { publishAdEvent, publishAdEventsBatch, AdEventType, AdEventPayload } fro
 import { AdDailyMetricRow } from './types'
 import { notifyAdmins, notifyAdminsBatch } from '@/lib/notifications/create'
 import { aggregateMetrics } from './reporting'
+import { todayISO } from '@/lib/utils/local-date'
 
 export interface IngestRow {
   projectId: string
@@ -182,7 +183,7 @@ export async function ingestMetrics(
             title: 'Low ROAS Alert',
             message: `${label} ROAS is ${agg.roas.toFixed(2)}, below threshold ${lowRoasThreshold}.`,
             link: `/dashboard/advertising/${pid}`,
-            sourceKey: `low_roas_${pid}_${new Date().toISOString().slice(0,10)}`
+            sourceKey: `low_roas_${pid}_${todayISO()}`
           })
         }
 
@@ -192,7 +193,7 @@ export async function ingestMetrics(
             title: 'High CPC Alert',
             message: `${label} CPC is ${agg.cpc.toFixed(2)}, above threshold ${highCpcThreshold}.`,
             link: `/dashboard/advertising/${pid}`,
-            sourceKey: `high_cpc_${pid}_${new Date().toISOString().slice(0,10)}`
+            sourceKey: `high_cpc_${pid}_${todayISO()}`
           })
         }
       }

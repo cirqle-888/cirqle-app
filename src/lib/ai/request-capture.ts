@@ -10,8 +10,9 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { callGroqJSON } from './groq'
+import { toISODate, todayISO } from '@/lib/utils/local-date'
 
-const today = () => new Date().toISOString().split('T')[0]
+const today = () => todayISO()
 
 /** Find a client by (fuzzy) name — exact match wins, else shortest contains-match. */
 export async function findClient(admin: SupabaseClient, name?: string | null) {
@@ -78,7 +79,7 @@ export function normalizeDate(d?: string | null): string | null {
   if (!d) return null
   const s = d.trim().toLowerCase()
   if (s === 'today') return today()
-  if (s === 'tomorrow') { const t = new Date(); t.setDate(t.getDate() + 1); return t.toISOString().split('T')[0] }
+  if (s === 'tomorrow') { const t = new Date(); t.setDate(t.getDate() + 1); return toISODate(t) }
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
   return null
 }

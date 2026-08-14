@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createAdminClient, fetchAll } from '@/lib/supabase/server'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import ReportsClient from './reports-client'
+import { toISODate } from '@/lib/utils/local-date'
 
 // Always fetch fresh data — scores get written when contributions are saved
 export const dynamic = 'force-dynamic'
@@ -27,7 +28,7 @@ export default async function ReportsPage() {
   // things down interactively when the user selects a period.
   const taskWindowFrom = new Date()
   taskWindowFrom.setMonth(taskWindowFrom.getMonth() - 24)
-  const taskWindowFromStr = taskWindowFrom.toISOString().slice(0, 10)
+  const taskWindowFromStr =toISODate( taskWindowFrom)
 
   const employeesQuery = isAdmin || !employeeId
     ? supabase.from('employees').select('id, cqid, name, performance_rating').eq('is_active', true).order('cqid')

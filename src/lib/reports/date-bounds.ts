@@ -23,6 +23,7 @@
  */
 
 import type { DateFilterValue } from '@/components/ui/date-filter'
+import { toISODate, todayISO, monthStartISO, monthEndISO, lastDayOfMonthISO, daysFromTodayISO } from '@/lib/utils/local-date'
 
 export interface DateWindow {
   /** Inclusive YYYY-MM-DD, or null for unbounded. */
@@ -32,10 +33,13 @@ export interface DateWindow {
   label: string | null
 }
 
-const iso = (d: Date) => {
-  const y = d.getFullYear()
-  return `${y}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
+// Windows are bounded on the India business calendar, not on whatever clock the
+// process runs at. Vercel runs Node at UTC, so reading `now`'s LOCAL fields
+// here put "today" 5.5 hours behind the office — a report opened before 05:30
+// IST covered the wrong day, and "this month" opened on the 1st only after
+// lunch. `filter.year`/`filter.month`/`filter.from` are user-supplied and
+// already absolute, so they stay untouched.
+const iso = toISODate
 
 export const UNBOUNDED: DateWindow = { from: null, to: null, label: null }
 
@@ -54,28 +58,21 @@ export function parseDateParam(raw: string | string[] | undefined): DateFilterVa
 
 /** The [from, to] window a DateFilterValue covers (both inclusive). */
 export function windowForFilter(filter: DateFilterValue, now = new Date()): DateWindow {
-  const today = new Date(now); today.setHours(12, 0, 0, 0)
-  const day = (delta: number) => { const d = new Date(today); d.setDate(d.getDate() + delta); return iso(d) }
+  const day = (delta: number) => daysFromTodayISO(delta, now)
 
   switch (filter?.type) {
     case 'today':     return { from: day(0), to: day(0), label: 'today' }
     case 'yesterday': return { from: day(-1), to: day(-1), label: 'yesterday' }
     case 'last7':     return { from: day(-6), to: day(0), label: 'the last 7 days' }
     case 'last30':    return { from: day(-29), to: day(0), label: 'the last 30 days' }
-    case 'thisMonth': {
-      const from = new Date(today.getFullYear(), today.getMonth(), 1)
-      const to = new Date(today.getFullYear(), today.getMonth() + 1, 0)
-      return { from: iso(from), to: iso(to), label: 'this month' }
-    }
-    case 'lastMonth': {
-      const from = new Date(today.getFullYear(), today.getMonth() - 1, 1)
-      const to = new Date(today.getFullYear(), today.getMonth(), 0)
-      return { from: iso(from), to: iso(to), label: 'last month' }
-    }
+    case 'thisMonth':
+      return { from: monthStartISO(0, now), to: monthEndISO(0, now), label: 'this month' }
+    case 'lastMonth':
+      return { from: monthStartISO(-1, now), to: monthEndISO(-1, now), label: 'last month' }
     case 'month': {
-      const from = new Date(filter.year, filter.month, 1)
-      const to = new Date(filter.year, filter.month + 1, 0)
-      return { from: iso(from), to: iso(to), label: `${iso(from).slice(0, 7)}` }
+      // filter.month is 0-indexed; lastDayOfMonthISO takes it 1-indexed.
+      const from = `${filter.year}-${String(filter.month + 1).padStart(2, '0')}-01`
+      return { from, to: lastDayOfMonthISO(filter.year, filter.month + 1), label: from.slice(0, 7) }
     }
     case 'range': return { from: filter.from, to: filter.to, label: `${filter.from} → ${filter.to}` }
     case 'day':   return { from: filter.date, to: filter.date, label: filter.date }
@@ -85,9 +82,9 @@ export function windowForFilter(filter: DateFilterValue, now = new Date()): Date
 
 /** The default window when the URL names none: last 12 months. */
 export function defaultWindow(now = new Date()): DateWindow {
-  const to = new Date(now); to.setHours(12, 0, 0, 0)
-  const from = new Date(to); from.setFullYear(from.getFullYear() - 1)
-  return { from: iso(from), to: iso(to), label: 'the last 12 months' }
+  const to = todayISO(now)
+  const [y, m, d] = to.split('-')
+  return { from: `${Number(y) - 1}-${m}-${d}`, to, label: 'the last 12 months' }
 }
 
 /** One-call resolution of the `?date=` param into a fetch window. */

@@ -27,6 +27,7 @@ import {
   isTerminalRequestStatus, isClosedRequestStatus, suggestServiceId,
   sanitizeCaptionHtml, captionHtmlToText, sanitizeCaptionCanvas,
 } from '@/lib/social/plan'
+import { todayISO } from '@/lib/utils/local-date'
 
 const REVALIDATE = '/dashboard/social-calendar'
 const MIGRATION_HINT = 'Apply migration 20260716120000_social_calendar.sql first.'
@@ -647,7 +648,7 @@ export async function getRefUploadUrl(
       allowedMimeTypes: Object.keys(IMAGE_EXT_BY_TYPE),
     })
   } catch { /* exists */ }
-  const path = `${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}.${ext}`
+  const path = `${todayISO()}/${crypto.randomUUID()}.${ext}`
   const { data, error } = await admin.storage.from('social-refs').createSignedUploadUrl(path)
   if (error || !data) return { ok: false, error: 'Could not prepare the upload.' }
   const { data: pub } = admin.storage.from('social-refs').getPublicUrl(path)

@@ -7,6 +7,7 @@ import {
   loadUnitScope, isUnitScoped, scopeRowsByUnitMember, scopeTasksByUnit, unitTaskIdsFrom,
 } from '@/lib/scope/unit-scope'
 import ContributionsClient from './contributions-client'
+import { toISODate } from '@/lib/utils/local-date'
 
 export const dynamic = 'force-dynamic'
 
@@ -51,7 +52,7 @@ export default async function ContributionsPage() {
   // unbounded — capping dropped it to <500ms for a typical workload.
   const contribWindowFrom = new Date()
   contribWindowFrom.setMonth(contribWindowFrom.getMonth() - 24)
-  const contribWindowFromStr = contribWindowFrom.toISOString().slice(0, 10)
+  const contribWindowFromStr =toISODate( contribWindowFrom)
   const tasksQuery = supabase
     .from('tasks')
     .select(vis.tasksPricing ? taskSelectWithPricing : taskSelectWithoutPricing)

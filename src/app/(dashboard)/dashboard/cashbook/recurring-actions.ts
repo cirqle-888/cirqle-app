@@ -24,6 +24,7 @@ import { requirePermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
 import { nextDueDate, type RecurringRule } from '@/lib/finance/recurring-schedule'
+import { todayISO } from '@/lib/utils/local-date'
 
 const REVALIDATE = '/dashboard/cashbook'
 
@@ -70,7 +71,7 @@ export interface RecurringExpenseRow {
 /** Rules with derived next-due / last-posted, for the panel. */
 export async function listRecurringExpenses(): Promise<ActionResult<RecurringExpenseRow[]>> {
   const admin = createAdminClient()
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayISO()
   try {
     const { data, error } = await admin
       .from('recurring_expenses')

@@ -13,6 +13,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
  */
 
 import type { AutoMetric, AutoResult } from './types'
+import { toISODate } from '@/lib/utils/local-date'
 
 /** Relative weights of each metric inside the composite (re-normalized over available ones). */
 const WEIGHTS: Record<string, number> = {
@@ -50,7 +51,7 @@ export async function computeAutoForEmployees(
 ): Promise<Record<string, AutoResult>> {
   const since = new Date(now)
   since.setMonth(since.getMonth() - WINDOW_MONTHS)
-  const sinceDate = since.toISOString().slice(0, 10)
+  const sinceDate =toISODate( since)
 
   const [tasksRes, scoresRes, requestsRes, revisionsRes] = await Promise.all([
     admin.from('tasks')

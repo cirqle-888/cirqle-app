@@ -14,6 +14,7 @@ import { requirePermission } from '@/lib/permissions/check'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { getPartnerStatementData, type PartnerStatementData } from '@/lib/partners/queries'
+import { todayISO } from '@/lib/utils/local-date'
 
 interface ActionResult<T = void> {
   ok: boolean
@@ -237,7 +238,7 @@ export async function recordCommissionPayment(input: CommissionPaymentInput): Pr
   const { error } = await admin.from('partner_commission_payments').insert({
     partner_id:  input.partnerId,
     amount_inr:  input.amountInr,
-    paid_on:     input.paidOn || new Date().toISOString().slice(0, 10),
+    paid_on:     input.paidOn || todayISO(),
     method:      input.method || null,
     reference:   input.reference || null,
     percent:     input.percent,

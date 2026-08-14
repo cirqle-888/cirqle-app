@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { FIGMA_CORS_HEADERS as CORS_HEADERS, figmaOptions, verifyFigmaAuth, logFigmaEvent } from '../_lib/auth'
 import { saveCampaign, type ProductInput } from '@/app/intake/offer/[token]/actions'
+import { todayISO } from '@/lib/utils/local-date'
 
 /**
  * POST /api/figma/campaign — save an offer parsed in the Cirqle Studio plugin
@@ -221,7 +222,7 @@ export async function POST(req: NextRequest) {
       }
     })
 
-    const today = new Date().toISOString().slice(0, 10)
+    const today = todayISO()
     const dateType = body?.dateType === 'range' ? 'range' : 'single'
 
     // Snapshot what this save is about to replace — the client's active

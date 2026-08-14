@@ -6,6 +6,7 @@
  */
 
 import type { ScheduleFrequency, ReportType } from './types'
+import { toISODate } from '@/lib/utils/local-date'
 
 /**
  * Computes the next UTC run time for a given frequency and delivery hour.
@@ -142,5 +143,5 @@ export function computeComparisonRange(
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function toISO(d: Date): string {
-  return d.toISOString().slice(0, 10)
+  return toISODate(d)
 }

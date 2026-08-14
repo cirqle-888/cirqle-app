@@ -9,6 +9,7 @@ import { createAdminClient, fetchAll } from '@/lib/supabase/server'
 import { buildClientProfitability } from '@/lib/finance/client-profitability'
 import { BAD_DEBT_STATUS, badDebtLoss } from '@/lib/finance/invoice-revenue'
 import type { ClientProfitabilityInput, ClientProfitabilityRow } from '@/lib/finance/types'
+import { todayISO } from '@/lib/utils/local-date'
 
 export interface BusinessPartner {
   id: string
@@ -549,7 +550,7 @@ export async function getPartnerStatementData(partnerId: string): Promise<Partne
 
   return {
     partner,
-    statementDate: new Date().toISOString().slice(0, 10),
+    statementDate: todayISO(),
     rows,
     totalOutstanding,
   }

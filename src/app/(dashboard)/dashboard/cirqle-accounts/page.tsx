@@ -4,6 +4,7 @@ import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { loadAllAssets } from '@/lib/assets/registry'
 import CirqleAccountsClient from './cirqle-accounts-client'
+import { toISODate } from '@/lib/utils/local-date'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,7 +34,7 @@ export default async function CirqleAccountsPage() {
   let reach = 0, views = 0, interactions = 0
   if (socialIds.length) {
     try {
-      const since = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10)
+      const since =toISODate( new Date(Date.now() - 30 * 86_400_000))
       const { data } = await admin
         .from('social_account_insights_daily')
         .select('reach, views, total_interactions')

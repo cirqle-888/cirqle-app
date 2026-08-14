@@ -24,6 +24,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { notifyAdmins } from '@/lib/notifications/create'
 import { OFFER_SHEET_HEADERS, buildOfferSheetRows } from '@/lib/offer-sheet'
 import { extractSheetId, resolveDestinations, type OfferGroup, type RoutedProduct } from './routing'
+import { todayISO } from '@/lib/utils/local-date'
 
 // Re-exported so existing importers (offer-intake settings actions, tests)
 // keep their import path while the pure logic lives in routing.ts.
@@ -154,7 +155,7 @@ export async function syncCampaignToSheet(
       title: `Sheet sync failed — ${client?.name || 'client'}`,
       message: errMsg,
       link: '/dashboard/requests',
-      sourceKey: `offer_sync_failed:${campaignId}:${new Date().toISOString().slice(0, 10)}`,
+      sourceKey: `offer_sync_failed:${campaignId}:${todayISO()}`,
     })
   }
 

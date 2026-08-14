@@ -8,6 +8,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { PackageRow } from './types'
+import { todayISO } from '@/lib/utils/local-date'
 
 /** The shape the task form needs to offer a choice. */
 export interface PackageOption {
@@ -37,7 +38,7 @@ export async function activePackagesForClient(
   date: string | null | undefined,
 ): Promise<PackageOption[]> {
   if (!clientId) return []
-  const on = date || new Date().toISOString().slice(0, 10)
+  const on = date || todayISO()
 
   try {
     const { data, error } = await admin

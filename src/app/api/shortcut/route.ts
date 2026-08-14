@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { aiParse, findClient, findService, normalizeDate } from '@/lib/ai/request-capture'
+import { todayISO } from '@/lib/utils/local-date'
 
 /**
  * Quick-action API for iOS/iPadOS Shortcuts (and any HTTP client).
@@ -24,7 +25,7 @@ import { aiParse, findClient, findService, normalizeDate } from '@/lib/ai/reques
  */
 
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status })
-const today = () => new Date().toISOString().split('T')[0]
+const today = () => todayISO()
 
 /** Constant-ish-time token check. */
 function authorized(req: NextRequest): boolean {
