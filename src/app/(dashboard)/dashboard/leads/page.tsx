@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { createAdminClient } from '@/lib/supabase/server'
+import { createAdminClient, columnExists } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import LeadsClient from './leads-client'
@@ -33,12 +33,19 @@ export default async function LeadsPage({
 
   const supabase = createAdminClient()
 
+  // Client CRM: Cirqle's own lead-ad leads belong on Cirqle Accounts, not here.
+  // Probed rather than assumed so this file is safe to deploy BEFORE the
+  // ownership migration — without the column every lead is client-owned, which
+  // is exactly the behaviour that existed before.
+  const hasOwnerType = await columnExists(supabase, 'leads', 'owner_type')
+
   // Latest 500 leads, filtered by the URL params (deep-linkable).
   let leadsQuery = supabase
     .from('leads')
     .select('*')
     .order('created_at', { ascending: false })
     .limit(500)
+  if (hasOwnerType) leadsQuery = leadsQuery.eq('owner_type', 'client')
   if (statusParam) leadsQuery = leadsQuery.eq('status', statusParam)
   if (clientParam) leadsQuery = leadsQuery.eq('client_id', clientParam)
   if (assignedParam === 'unassigned') leadsQuery = leadsQuery.is('assigned_to', null)
@@ -60,8 +67,13 @@ export default async function LeadsPage({
       .order('display_order')
       .order('created_at'),
     // Minimal columns — the 30-day KPI strip only needs status + source.
-    supabase.from('leads').select('status, source').gte('created_at', since30d).limit(10000),
-    supabase.from('leads').select('id', { count: 'exact', head: true }),
+    (hasOwnerType
+      ? supabase.from('leads').select('status, source').eq('owner_type', 'client')
+      : supabase.from('leads').select('status, source')
+    ).gte('created_at', since30d).limit(10000),
+    hasOwnerType
+      ? supabase.from('leads').select('id', { count: 'exact', head: true }).eq('owner_type', 'client')
+      : supabase.from('leads').select('id', { count: 'exact', head: true }),
   ])
 
   // KPI rollups computed server-side so the client component stays lean.

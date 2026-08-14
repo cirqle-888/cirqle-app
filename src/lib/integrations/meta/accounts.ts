@@ -6,6 +6,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { metaGraph, metaGraphAll, redactTokens } from './client'
+import { resolveDiscoveredOwner } from '@/lib/assets/ownership'
 import { encryptToken } from '@/lib/integrations/tokens'
 
 export interface SocialDiscoveryResult {
@@ -89,15 +90,33 @@ export async function discoverSocialAccounts(
     ...pages.map(p => p.id),
     ...pages.map(p => p.instagram_business_account?.id).filter(Boolean) as string[],
   ]
-  const assignedClient = new Map<string, string>()
+  const existingByExternalId = new Map<string, { owner_type?: string | null; client_id?: string | null; assigned_at?: string | null }>()
+  // Ownership columns arrive with migration 20260814140000. Probed, not
+  // assumed: writing owner_type before it exists would fail the upsert and
+  // break Meta connect outright, so pre-migration we fall back to the previous
+  // behaviour (client_id only).
+  let hasOwnership = true
   if (externalIds.length) {
-    const { data: existing } = await admin
+    const { data: existing, error } = await admin
       .from('social_accounts')
-      .select('external_id, client_id')
+      .select('external_id, client_id, owner_type, assigned_at')
       .in('external_id', externalIds)
-    for (const row of existing ?? []) {
-      if (row.client_id) assignedClient.set(row.external_id, row.client_id)
+    if (error) {
+      hasOwnership = false
+      const { data: legacy } = await admin
+        .from('social_accounts')
+        .select('external_id, client_id')
+        .in('external_id', externalIds)
+      for (const row of legacy ?? []) existingByExternalId.set(row.external_id, row)
+    } else {
+      for (const row of existing ?? []) existingByExternalId.set(row.external_id, row)
     }
+  }
+
+  /** Owner to write for a discovered asset — a human decision always wins. */
+  const ownerFor = (externalId: string) => {
+    const resolved = resolveDiscoveredOwner(existingByExternalId.get(externalId) ?? null, clientId ?? null)
+    return hasOwnership ? resolved : { client_id: resolved.client_id ?? clientId }
   }
 
   for (const page of pages) {
@@ -106,7 +125,7 @@ export async function discoverSocialAccounts(
         .from('social_accounts')
         .upsert(
           {
-            client_id: assignedClient.get(page.id) ?? clientId,
+            ...ownerFor(page.id),
             connection_id: connectionId,
             provider: 'meta',
             platform: 'facebook_page',
@@ -134,7 +153,7 @@ export async function discoverSocialAccounts(
       if (ig?.id) {
         const { error: igErr } = await admin.from('social_accounts').upsert(
           {
-            client_id: assignedClient.get(ig.id) ?? clientId,
+            ...ownerFor(ig.id),
             connection_id: connectionId,
             provider: 'meta',
             platform: 'instagram',

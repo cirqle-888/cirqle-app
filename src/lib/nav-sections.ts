@@ -13,7 +13,7 @@ import {
   SlidersHorizontal, MessageSquare, ClipboardCheck, NotebookPen, LayoutGrid,
   Briefcase, ClipboardList, CalendarClock, CalendarDays, BadgeCheck, PieChart, Building2, Tags, History, Sparkles,
   BadgePercent, CalendarRange, HardHat, Repeat, Package as PackageIcon,
-  Share2, UserPlus, Gauge,
+  Share2, UserPlus, Gauge, ShieldCheck,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -80,7 +80,6 @@ export const navSections: NavSection[] = [
       { label: 'Requests',      href: '/dashboard/requests',      icon: Inbox, requiredPerm: 'requests.view' },
       { label: 'Tasks',         href: '/dashboard/tasks',         icon: CheckSquare },
       { label: 'Clients',       href: '/dashboard/clients',       icon: Users2, requiredPerm: 'clients.view' },
-      { label: 'Leads',         href: '/dashboard/leads',         icon: UserPlus, requiredPerm: 'leads.view', keywords: ['crm', 'meta leads', 'lead ads', 'prospects', 'enquiries'] },
       { label: 'Contributions', href: '/dashboard/contributions', icon: TrendingUp },
       { label: 'Chat',          href: '/dashboard/chat',          icon: MessageSquare, requiredPerm: 'chat.access' },
     ],
@@ -108,13 +107,16 @@ export const navSections: NavSection[] = [
     label: 'Marketing',
     defaultOpen: false,
     items: [
-      { label: 'Social Calendar', href: '/dashboard/social-calendar', icon: CalendarDays, requiredPerm: 'social.view', keywords: ['content', 'planner', 'posts', 'instagram', 'social media'] },
-      { label: 'Social',          href: '/dashboard/social',      icon: Share2, requiredPerm: 'social.view_insights', keywords: ['instagram', 'facebook', 'pages', 'insights', 'reach', 'publishing', 'meta'] },
-      { label: 'Advertising',     href: '/dashboard/advertising', icon: Megaphone, requiredPerm: 'advertising.view', keywords: ['campaigns', 'ads', 'marketing'] },
-      { label: 'Agency',          href: '/dashboard/agency',      icon: LayoutGrid, requiredPerm: 'reports.view', keywords: ['agency dashboard', 'all clients', 'overview', 'spend', 'leads', 'cpl', 'alerts'] },
-      // The Meta connection feeds Social Hub, Leads AND Advertising, so it
-      // lives beside them — not buried inside any one of them.
-      { label: 'Connections',     href: '/dashboard/connections', icon: Blocks, requiredPerm: 'advertising.manage_providers', keywords: ['integrations', 'meta', 'oauth', 'connect', 'facebook', 'google ads', 'token', 'ad accounts'] },
+      // Order mirrors the workflow: connect once, decide whose each asset is,
+      // keep our own separate — then the modules that consume those assets.
+      { label: 'Connections',      href: '/dashboard/connections',     icon: Blocks, requiredPerm: 'advertising.manage_providers', keywords: ['integrations', 'meta', 'oauth', 'connect', 'facebook', 'google ads', 'token', 'ad accounts'] },
+      { label: 'Asset Assignment', href: '/dashboard/assets',          icon: Building2, requiredPerm: 'assets.assign', keywords: ['assign', 'ownership', 'unassigned', 'pages', 'ad accounts', 'lead forms', 'which client'] },
+      { label: 'Cirqle Accounts',  href: '/dashboard/cirqle-accounts', icon: ShieldCheck, requiredPerm: 'assets.view_cirqle', keywords: ['our own', 'agency', 'internal', 'own marketing', 'cirqle owned'] },
+      { label: 'Social',           href: '/dashboard/social',          icon: Share2, requiredPerm: 'social.view_insights', keywords: ['instagram', 'facebook', 'pages', 'insights', 'reach', 'publishing', 'meta'] },
+      { label: 'Social Calendar',  href: '/dashboard/social-calendar', icon: CalendarDays, requiredPerm: 'social.view', keywords: ['content', 'planner', 'posts', 'instagram', 'social media'] },
+      { label: 'Leads',            href: '/dashboard/leads',           icon: UserPlus, requiredPerm: 'leads.view', keywords: ['crm', 'meta leads', 'lead ads', 'prospects', 'enquiries'] },
+      { label: 'Advertising',      href: '/dashboard/advertising',     icon: Megaphone, requiredPerm: 'advertising.view', keywords: ['campaigns', 'ads', 'marketing'] },
+      { label: 'Agency',           href: '/dashboard/agency',          icon: LayoutGrid, requiredPerm: 'reports.view', keywords: ['agency dashboard', 'all clients', 'overview', 'spend', 'leads', 'cpl', 'alerts'] },
     ],
   },
   {

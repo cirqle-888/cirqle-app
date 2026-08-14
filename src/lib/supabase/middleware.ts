@@ -14,6 +14,8 @@ const ROUTE_PERMS: Array<[RegExp, string]> = [
   // Platform connections (Meta OAuth, ad-account/campaign mapping). Moved out
   // of /dashboard/advertising/integrations — same permission as before.
   [/^\/dashboard\/connections/,             'advertising.manage_providers'],
+  [/^\/dashboard\/assets/,                  'assets.assign'],
+  [/^\/dashboard\/cirqle-accounts/,         'assets.view_cirqle'],
   [/^\/dashboard\/chat/,                    'chat.access'],
   [/^\/dashboard\/recruitment/,             'recruitment.view'],
   [/^\/dashboard\/cashbook/,                'cashbook.view'],

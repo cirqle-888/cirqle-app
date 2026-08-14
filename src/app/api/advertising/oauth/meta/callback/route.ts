@@ -7,6 +7,7 @@ import { GRAPH_URL, META_API_VERSION, metaGraph } from '@/lib/integrations/meta/
 import { encryptToken } from '@/lib/integrations/tokens'
 import { discoverSocialAccounts, fetchGrantedScopes } from '@/lib/integrations/meta/accounts'
 import { logActivity } from '@/lib/activity/log'
+import { resolveDiscoveredOwner } from '@/lib/assets/ownership'
 
 /**
  * Meta OAuth callback handler.
@@ -125,18 +126,16 @@ export async function GET(req: NextRequest) {
         // connection's client is only a default for accounts never seen before.
         // Without this, every reconnect or token refresh resets an account the
         // owner had deliberately pointed at its real client.
-        const alreadyAssigned = new Map<string, string>()
+        const existingAdAccounts = new Map<string, { owner_type?: string | null; client_id?: string | null; assigned_at?: string | null }>()
         {
           const ids = accountsData.data.map((a: { account_id: string }) => a.account_id)
           if (ids.length) {
             const { data: existing } = await admin
               .from('ad_accounts')
-              .select('account_id, client_id')
+              .select('account_id, client_id, owner_type, assigned_at')
               .eq('provider', 'meta')
               .in('account_id', ids)
-            for (const row of existing ?? []) {
-              if (row.client_id) alreadyAssigned.set(row.account_id, row.client_id)
-            }
+            for (const row of existing ?? []) existingAdAccounts.set(row.account_id, row)
           }
         }
 
@@ -164,7 +163,7 @@ export async function GET(req: NextRequest) {
             {
               connection_id: conn.id,
               business_id: businessRowId,
-              client_id: alreadyAssigned.get(acc.account_id) ?? targetClientId,
+              ...resolveDiscoveredOwner(existingAdAccounts.get(acc.account_id) ?? null, targetClientId ?? null),
               provider: 'meta',
               account_id: acc.account_id,
               name: acc.name,

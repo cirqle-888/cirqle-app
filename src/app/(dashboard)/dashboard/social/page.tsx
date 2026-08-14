@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { createAdminClient } from '@/lib/supabase/server'
+import { createAdminClient, columnExists } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import SocialClient from './social-client'
@@ -31,6 +31,12 @@ export default async function SocialHubPage({
 
   const admin = createAdminClient()
 
+  // Client-owned only — Cirqle's own assets have their own page, and untriaged
+  // ones belong on Asset Assignment until someone decides. Probed rather than
+  // assumed so this file is safe to deploy BEFORE the ownership migration runs;
+  // without the column every account is client-owned, exactly as before.
+  const hasOwnerType = await columnExists(admin, 'social_accounts', 'owner_type')
+
   const since = new Date()
   since.setDate(since.getDate() - 30)
   const sinceStr = since.toISOString().slice(0, 10)
@@ -42,13 +48,16 @@ export default async function SocialHubPage({
     admin
       .from('social_accounts')
       .select(`
-        id, client_id, connection_id, platform, external_id, name, username,
+        id, client_id, owner_type, connection_id, platform, external_id, name, username,
         profile_picture_url, followers_count, status, publishing_enabled,
         insights_enabled, last_synced_at, last_error,
         client:clients(name)
       `)
       .order('created_at', { ascending: true })
-      .limit(500),
+      .limit(500)
+      .then(r => hasOwnerType
+        ? { ...r, data: (r.data ?? []).filter((a: { owner_type?: string }) => (a.owner_type ?? 'client') === 'client') }
+        : r),
     admin
       .from('social_account_insights_daily')
       .select('account_id, reach, views, total_interactions')

@@ -136,6 +136,14 @@ export const PERMS = {
   /** Create/edit/close packages and set their price and extra-work rate. */
   PACKAGES_MANAGE: 'packages.manage',
 
+  // Marketing asset ownership (migration 20260814140000). Assigning an asset
+  // moves reporting, leads and billing between parties, so it is its own key
+  // rather than riding on social.manage.
+  /** Change which client owns a Page, IG account, ad account or lead form. */
+  ASSETS_ASSIGN:      'assets.assign',
+  /** See Cirqle's own accounts and internal marketing performance. */
+  ASSETS_VIEW_CIRQLE: 'assets.view_cirqle',
+
   // Service Scope — cross-module restriction (see src/lib/scope/service-scope.ts).
   // Dimension-qualified names so a future scope.by_branch sits beside these.
   /**

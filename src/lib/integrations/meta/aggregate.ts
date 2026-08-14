@@ -7,6 +7,17 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { ownerTypeOf } from '@/lib/assets/ownership'
+
+/**
+ * Does this row belong to a real client (as opposed to Cirqle, or nothing yet)?
+ *
+ * Uses the shared ownership rule so client isolation is defined in exactly one
+ * place — see @/lib/assets/ownership and its cross-client leakage tests.
+ */
+function belongsToAnyClient(row: { owner_type?: string | null; client_id?: string | null }): boolean {
+  return ownerTypeOf(row as never) === 'client' && !!row.client_id
+}
 
 export interface WindowPair<T> { cur: T; prev: T }
 
@@ -76,9 +87,16 @@ export async function buildAgencyRollups(
 
   const [clientsRes, accountsRes, insightsRes, leadsRes, projectsRes, metricsRes, reportsRes] = await Promise.all([
     admin.from('clients').select('id, name').eq('is_active', true),
-    admin.from('social_accounts').select('id, client_id, status, last_synced_at').neq('status', 'disconnected'),
+    // owner_type is selected so Cirqle's own and untriaged assets can be kept
+    // OUT of client rollups below — a client total must never include them.
+    // owner_type is selected so Cirqle's own and untriaged assets stay OUT of
+    // client rollups. Falls back to the pre-migration shape rather than failing
+    // the whole dashboard if the column is not there yet.
+    admin.from('social_accounts').select('id, client_id, owner_type, status, last_synced_at').neq('status', 'disconnected')
+      .then(r => r.error ? admin.from('social_accounts').select('id, client_id, status, last_synced_at').neq('status', 'disconnected') : r),
     admin.from('social_account_insights_daily').select('account_id, metric_date, reach, views, total_interactions, followers_count').gte('metric_date', isoDate(prevFrom)),
-    admin.from('leads').select('client_id, created_at').gte('created_at', iso(prevFrom)),
+    admin.from('leads').select('client_id, owner_type, created_at').gte('created_at', iso(prevFrom))
+      .then(r => r.error ? admin.from('leads').select('client_id, created_at').gte('created_at', iso(prevFrom)) : r),
     admin.from('ad_projects').select('id, client_id').is('deleted_at', null),
     admin.from('ad_daily_metrics').select('project_id, metric_date, spend, revenue, impressions, clicks, leads').gte('metric_date', isoDate(prevFrom)),
     admin.from('ad_reports').select('id, status').in('status', ['generating', 'pending']).then((r) => r, () => ({ data: [] as any[] })),
@@ -93,9 +111,17 @@ export async function buildAgencyRollups(
     .gte('published_at', iso(curFrom))
     .then((r) => (r.data ?? []) as { client_id: string }[], () => [])
 
-  // account_id → client_id
+  // account_id → client_id, for CLIENT-owned accounts only.
+  //
+  // An account owned by Cirqle, or not yet triaged, contributes to no client.
+  // Leaving it out here is what keeps agency reach/leads totals honest: an
+  // asset reclassified as Cirqle's keeps its old client_id, so filtering on
+  // client_id alone would still leak it.
   const accountClient = new Map<string, string>()
-  for (const a of accounts) accountClient.set(a.id, a.client_id)
+  for (const a of accounts) {
+    if (!belongsToAnyClient(a)) continue
+    accountClient.set(a.id, a.client_id)
+  }
   // project_id → client_id
   const projectClient = new Map<string, string>()
   for (const p of (projectsRes.data ?? []) as any[]) projectClient.set(p.id, p.client_id)
@@ -132,6 +158,7 @@ export async function buildAgencyRollups(
 
   // Leads cur/prev
   for (const row of (leadsRes.data ?? []) as any[]) {
+    if (!belongsToAnyClient(row)) continue
     const r = map.get(row.client_id)
     if (!r) continue
     if (iso(new Date(row.created_at)) >= iso(curFrom)) r.leads += 1
