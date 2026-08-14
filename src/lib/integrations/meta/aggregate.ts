@@ -63,6 +63,14 @@ export interface AgencyTotals {
   reportsPending: number
   syncFailures: number
   accountsNeedReauth: number
+  /**
+   * Cirqle's OWN marketing, kept strictly beside the client figures above —
+   * never folded into them. The agency needs to see its own performance; a
+   * client total that quietly includes it is simply wrong.
+   */
+  cirqle: { accounts: number; reach: number; views: number; leads: number }
+  /** Assets discovered but not yet assigned — in nobody's numbers until triaged. */
+  unassignedAssets: number
 }
 
 function pct(cur: number, prev: number): number | null {
@@ -104,6 +112,12 @@ export async function buildAgencyRollups(
 
   const clients = (clientsRes.data ?? []) as { id: string; name: string }[]
   const accounts = (accountsRes.data ?? []) as any[]
+
+  // Three buckets, no overlap — see @/lib/assets/ownership and its tests.
+  const cirqleAccountIds = new Set(
+    accounts.filter(a => ownerTypeOf(a) === 'cirqle').map(a => a.id as string),
+  )
+  const unassignedAssets = accounts.filter(a => ownerTypeOf(a) === 'unassigned').length
   const socialPublished = await admin
     .from('social_posts')
     .select('client_id')
@@ -226,6 +240,20 @@ export async function buildAgencyRollups(
   // Totals
   const totalSpend = rollups.reduce((t, r) => t + r.spend, 0)
   const totalAdLeads = rollups.reduce((t, r) => t + r.adLeads, 0)
+  // Cirqle's own reach/views, summed from the SAME insight rows the client
+  // rollups used — but only for accounts we own, and kept out of every client
+  // figure above.
+  let cirqleReach = 0, cirqleViews = 0
+  for (const row of (insightsRes.data ?? []) as any[]) {
+    if (!cirqleAccountIds.has(row.account_id)) continue
+    if (String(row.metric_date) < curCutDate) continue
+    cirqleReach += Number(row.reach ?? 0)
+    cirqleViews += Number(row.views ?? 0)
+  }
+  const cirqleLeads = ((leadsRes.data ?? []) as any[])
+    .filter(r => (r.owner_type ?? 'client') === 'cirqle' && iso(curFrom) <= String(r.created_at))
+    .length
+
   const totals: AgencyTotals = {
     clients: clients.length,
     connectedAccounts: accounts.filter((a) => a.status === 'connected').length,
@@ -238,6 +266,13 @@ export async function buildAgencyRollups(
     reportsPending: ((reportsRes as any).data ?? []).length,
     syncFailures: rollups.reduce((t, r) => t + r.syncFailures, 0),
     accountsNeedReauth: rollups.reduce((t, r) => t + r.accountsNeedReauth, 0),
+    cirqle: {
+      accounts: cirqleAccountIds.size,
+      reach: cirqleReach,
+      views: cirqleViews,
+      leads: cirqleLeads,
+    },
+    unassignedAssets,
   }
 
   return { rollups, totals }

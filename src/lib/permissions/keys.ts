@@ -121,6 +121,8 @@ export const PERMS = {
   SOCIAL_PUBLISH:       'social.publish',
   /** Approve posts and schedule/publish them to Meta. */
   SOCIAL_APPROVE:       'social.approve',
+  /** Arrange creatives in the Instagram feed grid and share it for approval. */
+  SOCIAL_PLAN_FEED:     'social.plan_feed',
 
   // Leads CRM — Meta Lead Ads land here (migration 20260812123000)
   /** Open the Leads module (list + client lead sections). */

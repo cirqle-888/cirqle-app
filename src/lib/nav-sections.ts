@@ -13,7 +13,7 @@ import {
   SlidersHorizontal, MessageSquare, ClipboardCheck, NotebookPen, LayoutGrid,
   Briefcase, ClipboardList, CalendarClock, CalendarDays, BadgeCheck, PieChart, Building2, Tags, History, Sparkles,
   BadgePercent, CalendarRange, HardHat, Repeat, Package as PackageIcon,
-  Share2, UserPlus, Gauge, ShieldCheck,
+  Share2, UserPlus, Gauge, ShieldCheck, Grid3x3,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -113,6 +113,9 @@ export const navSections: NavSection[] = [
       { label: 'Asset Assignment', href: '/dashboard/assets',          icon: Building2, requiredPerm: 'assets.assign', keywords: ['assign', 'ownership', 'unassigned', 'pages', 'ad accounts', 'lead forms', 'which client'] },
       { label: 'Cirqle Accounts',  href: '/dashboard/cirqle-accounts', icon: ShieldCheck, requiredPerm: 'assets.view_cirqle', keywords: ['our own', 'agency', 'internal', 'own marketing', 'cirqle owned'] },
       { label: 'Social',           href: '/dashboard/social',          icon: Share2, requiredPerm: 'social.view_insights', keywords: ['instagram', 'facebook', 'pages', 'insights', 'reach', 'publishing', 'meta'] },
+      // Sits beside Social Calendar: the calendar answers WHEN, the planner
+      // answers HOW THE GRID LOOKS — the two halves of planning a feed.
+      { label: 'Feed Planner',     href: '/dashboard/social/feed',     icon: Grid3x3, requiredPerm: 'social.plan_feed', keywords: ['instagram grid', 'feed preview', 'mockup', 'creatives', 'profile', 'aesthetic', 'layout'] },
       { label: 'Social Calendar',  href: '/dashboard/social-calendar', icon: CalendarDays, requiredPerm: 'social.view', keywords: ['content', 'planner', 'posts', 'instagram', 'social media'] },
       { label: 'Leads',            href: '/dashboard/leads',           icon: UserPlus, requiredPerm: 'leads.view', keywords: ['crm', 'meta leads', 'lead ads', 'prospects', 'enquiries'] },
       { label: 'Advertising',      href: '/dashboard/advertising',     icon: Megaphone, requiredPerm: 'advertising.view', keywords: ['campaigns', 'ads', 'marketing'] },

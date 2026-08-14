@@ -81,7 +81,12 @@ export default function AgencyClient({
       />
 
       <div className="px-4 sm:px-6 pb-16 max-w-[1500px] mx-auto w-full space-y-4">
-        {/* Totals */}
+        {/* CLIENT performance. Labelled explicitly because these figures now
+            deliberately EXCLUDE Cirqle's own accounts and anything untriaged —
+            a total that silently mixed them would misstate what clients got. */}
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Client performance
+        </p>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5">
           <Tile icon={<Users className="w-4 h-4" />} label="Clients" value={String(totals.clients)} sub={`${totals.connectedAccounts} accounts`} />
           <Tile icon={<TrendingUp className="w-4 h-4" />} label="Total reach" value={compact(totals.totalReach)} />
@@ -90,6 +95,42 @@ export default function AgencyClient({
           <Tile label="Avg CPL" value={totals.avgCpl != null ? `₹${totals.avgCpl}` : '—'} />
           <Tile label="Content published" value={String(totals.contentPublished)} />
         </div>
+        {/* CIRQLE performance — our own marketing, side by side but never
+            added in. Hidden entirely when we own nothing, so the section only
+            appears once it means something. */}
+        {totals.cirqle.accounts > 0 && (
+          <>
+            <div className="flex items-center gap-2 pt-1">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-primary">
+                Cirqle performance
+              </p>
+              <span className="text-[10px] text-muted-foreground">
+                our own accounts — excluded from every client figure above
+              </span>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+              <Tile label="Our accounts" value={String(totals.cirqle.accounts)} />
+              <Tile label="Our reach" value={compact(totals.cirqle.reach)} />
+              <Tile label="Our views" value={compact(totals.cirqle.views)} />
+              <Tile label="Our leads" value={compact(totals.cirqle.leads)} />
+            </div>
+          </>
+        )}
+
+        {/* Unassigned — the number that costs money by sitting there, because
+            until an asset has an owner its reach and spend land in no report. */}
+        {totals.unassignedAssets > 0 && (
+          <Link href="/dashboard/assets"
+            className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-300 hover:bg-amber-500/15 transition-colors">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+            <span>
+              <strong>{totals.unassignedAssets}</strong> discovered asset{totals.unassignedAssets === 1 ? '' : 's'} not
+              assigned to anyone — {totals.unassignedAssets === 1 ? 'it appears' : 'they appear'} in no report until triaged.
+            </span>
+            <span className="ml-auto underline shrink-0">Assign</span>
+          </Link>
+        )}
+
         {(totals.accountsNeedReauth > 0 || totals.syncFailures > 0 || totals.reportsPending > 0) && (
           <div className="flex flex-wrap gap-2 text-xs">
             {totals.accountsNeedReauth > 0 && <span className="px-2.5 py-1 rounded-md bg-red-500/10 text-red-400 border border-red-500/20 inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{totals.accountsNeedReauth} account(s) need re-auth</span>}

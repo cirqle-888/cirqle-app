@@ -10,6 +10,8 @@ const ROUTE_PERMS: Array<[RegExp, string]> = [
   [/^\/dashboard\/activity/,                'timeline.view_all'],
   [/^\/dashboard\/leads/,                   'leads.view'],
   [/^\/dashboard\/agency/,                  'reports.view'],
+  // More specific first: the planner has its own permission.
+  [/^\/dashboard\/social\/feed/,           'social.plan_feed'],
   [/^\/dashboard\/social(?!-calendar)/,     'social.view_insights'],
   // Platform connections (Meta OAuth, ad-account/campaign mapping). Moved out
   // of /dashboard/advertising/integrations — same permission as before.
@@ -207,6 +209,7 @@ export async function updateSession(request: NextRequest) {
                   || pathname.startsWith('/portal')
                   || pathname.startsWith('/intake')   // client/agency request portal — tokenized, no login
                   || pathname.startsWith('/i/')        // public hosted invoice — tokenized, no login
+                  || pathname.startsWith('/feed/')     // client feed approval — tokenized, no login
                   || pathname.startsWith('/start/')    // client hub — single link to all that client's intake apps
                   || pathname.startsWith('/careers')   // public job application form — no login
                   || pathname.startsWith('/api/shortcut') // iOS Shortcuts API — its own bearer-token auth
