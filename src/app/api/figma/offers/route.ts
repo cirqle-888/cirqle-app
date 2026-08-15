@@ -78,7 +78,23 @@ export async function GET(req: NextRequest) {
     const services = ((serviceRows as { id: string; name: string | null }[] | null) || [])
       .map(s => ({ id: s.id, name: s.name || '' }))
 
-    return NextResponse.json({ ok: true, offers, services }, { headers: CORS_HEADERS })
+    // The client list rides along too — and it is deliberately NOT derived
+    // from the campaigns above. The plugin used to build its Client dropdown
+    // out of the active offers, which deadlocked the very flow the plugin
+    // exists to replace: with no active campaign there was no client to pick,
+    // so the first offer of a cycle could never be saved from Figma ("pick a
+    // client at the top" — pointing at an empty, disabled dropdown). Photo
+    // upload and catalog search are gated on the same clientId, so they went
+    // with it. Same rationale as `services` for sending it here.
+    const { data: clientRows } = await admin
+      .from('clients')
+      .select('id, name')
+      .eq('is_active', true)
+      .order('name')
+    const clients = ((clientRows as { id: string; name: string | null }[] | null) || [])
+      .map((c) => ({ id: c.id, name: c.name || 'Unnamed client' }))
+
+    return NextResponse.json({ ok: true, offers, services, clients }, { headers: CORS_HEADERS })
   } catch (err) {
     // The plugin promises "never crash, always explain" — hold the server to
     // the same bar instead of letting Next return an opaque 500 page.

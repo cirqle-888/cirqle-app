@@ -37,12 +37,16 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST https://app.cirqle.work/api/fig
 
 ## 2 · Plugin — Build tab
 
-Pre-flight: a card on the **current page** with `#product`, `#offerprice`,
-`#mrp` text layers and an `#imageurl` shape.
+Pre-flight: a card on the **current page** with `#product`, `#price1`
+(plus `#price2` for paise), `#mrp` text layers and an `#imageurl` shape —
+exactly what **+ New card template** generates, so pressing that button is
+the fastest way to set this up in an empty file. (`#offerprice` is the
+single-field alternative to the `#price1`/`#price2` pair, not a requirement.)
 
 | # | Step | Expected |
 |---|------|----------|
-| 1 | URL + token → **Connect** | Chip **Connected**; Client fills. Token field is masked. |
+| 1 | URL + token → **Connect** | Chip **Connected**; Client fills with **every active client in the workspace**, not only those with an offer open. Token field is masked. |
+| 1a | Connect to a workspace with **zero** active campaigns | Client still fills; Offer shows `— no active offer for this client —`; a paste can be saved and becomes the first campaign. (Regression guard: this used to be an unbreakable deadlock.) |
 | 2 | Sea Star → Offer dropdown | The weekly offer, "· 22 products". |
 | 3 | **Load Offers** | Chip **22 Products**; Page dropdown fills. |
 | 4 | **Preview** | 22 rows: page, name, price, MRP, badge, image ✓/—. Spot-check Mamypoko 305/399, Sunplus 409/499, Santoor Hand Wash badge `B1G1`. |
@@ -87,6 +91,30 @@ Pre-flight: a price sticker built as a component set with a `Digits` property
 | 10 | Select 30 cards for a 22-product offer | 22 filled; the extra 8 **left untouched**, not blanked. Log says so. |
 | 11 | Select 10 cards for a 22-product offer | 10 filled; log warns "12 product(s) had no card to go in". |
 
+### Bulk product shots (⇈ Shots)
+
+Pairing is the whole feature: a photo filed under the wrong product is
+invisible until a flyer goes out with it, so **nothing uploads until the
+table has been looked at**.
+
+| # | Step | Expected |
+|---|------|----------|
+| 8u | Select ~20 loose cut-outs named after their products, press **⇈ Shots** | A pairing table: thumbnail, matched product name, layer name, and a row dropdown each. Header reads "N photos · N paired · N waiting for you". |
+| 8v | A cut-out named `Cashew 240` against the row `Cashew 240 100 gm` (after **+ Weight → name**) | Matched. Token overlap is scored against the *shorter* name, so the added weight doesn't break it. |
+| 8v-1 | A legacy flyer cell: layer called `Group 9685`, with the text `NESTLE MILKYBAR 75GM` inside it | Matched. When the layer name is one of Figma's own (`Group`/`Frame`/`Image`/`Object`/`Rectangle`/`Mask group`…), the most name-like **text** inside the node is used instead — that text is the only real identifier in an untagged file. |
+| 8v-2 | A cut-out with no text inside it at all | **Unmatched** — nothing to read, so it waits for the designer. |
+| 8v-3 | A cell whose longest text is a badge (`BUY 1 GET 1 FREE`) | Harmless: the badge matches no product row, so the photo stays unpaired rather than landing on the wrong product. |
+| 8w | A layer named `Image 12` / `Group 8504` | **Unmatched**, dropdown outlined amber, never uploaded. |
+| 8x | A photo whose name matches two rows equally (`Rice` against `Rice Ponni` + `Rice Basmati`) | **Unmatched** — a tie is refused rather than guessed. |
+| 8y | Two photos that both match one row | The first claims it; the second is left unmatched. |
+| 8z | Select a built flyer card, or a whole block of them | Each card's `#imageurl` is a photo and its `#product` **text** names it — a finished flyer pairs itself with no renaming. Order is reading order. |
+| 8aa | Select the generated `Cirqle Product Card` component set | 12 photos found, hint `Product Name` on each, **0 paired** (placeholder text matches nothing) — proof the hold-back works. |
+| 8ab-1 | Press **Pair in order** | Photo 1 takes row 1, photo 2 row 2, and so on, in reading order. Any photo past the end of the sheet stays unpaired and the log says how many. This is the fast path for legacy flyers, where no layer carries a product name. |
+| 8ab | Pair one by hand from the dropdown | Amber outline clears, the header count moves, and the button becomes "Upload 1 paired photo". |
+| 8ac | Press Upload with one photo deliberately broken | The batch continues; the failed row keeps its reason on the line, the log says how many failed, and pressing Upload again does **not** re-upload the ones that worked. |
+| 8ad | Upload with no client selected | Refused with "pick the client at the top of the Build tab". Scanning and pairing still work without one — only the upload needs it. |
+| 8ae | After a successful batch | Each row carries its new photo into the next **Save to Cirqle**, and the photos turn up in **+ Catalog** search. |
+
 ---
 
 ## 3 · Plugin — Paste tab
@@ -107,6 +135,8 @@ Everything here uses **Split to columns**. Nothing leaves the machine.
 | 14b | Same selection **without** the header | Falls back to position: Product / Price / MRP / Weight. Blank cells still hold their place. |
 | 14c | Copy the same range from Excel | Identical result — both apps put tabs on the clipboard. |
 | 14d | Paste a CSV file's text, `Product,SALE,MRP` first line | Header read the same way. `"Rice, broken",44,60` stays three cells, the comma kept inside the name. |
+| 14d-1 | CSV where ONE name is quoted because it holds a comma, e.g. `Product,SALE,MRP,Weight` / `Cashew 240,93,120,100gm` / `"Rice, broken",44,60,1kg` | All rows split into 4 columns. Regression guard: the quoted comma used to make the block's comma counts uneven, the whole paste fell back to loose text, and **`Cashew 240,…` collapsed into one cell** — name mangled, price silently lost. |
+| 14d-2 | A ragged CSV (one row has an extra cell) | Rows still split; any row that came out the wrong width but reads as CSV at the block's width is re-read, and the log says `N row(s) read as CSV — their names end in a number.` |
 | 14e | Mixed WhatsApp text: `Cashew 240  93`, `Pista 149`, `Rice Ponni 11,50`, `Rice Basmati 1,250` | Four rows. `11,50` → **11.50**, `1,250` → **1250**. A comma between digits never splits a line. |
 | 14f | Paste only a header row | Refused: "Only a header row was pasted." |
 | 15 | Change a column dropdown (e.g. Price → MRP) | Rows re-derive immediately. |

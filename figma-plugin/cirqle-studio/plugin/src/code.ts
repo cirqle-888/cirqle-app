@@ -126,6 +126,271 @@ function descendantsOf(root: SceneNode): SceneNode[] {
   return self
 }
 
+
+/**
+ * Figma's own auto-generated layer names, which say nothing about content.
+ * Tested against three real client files: essentially every layer in them is
+ * one of these, which is why matching on layer names alone scored 0.
+ */
+function isPlaceholderName(name: string): boolean {
+  const s = String(name || '').trim().toLowerCase()
+  if (!s) return true
+  return /^(group|frame|image|object|rectangle|ellipse|vector|line|polygon|star|slice|mask group|component|instance|union|subtract|intersect|exclude)\b[\s\d-]*$/.test(s)
+}
+
+/**
+ * The most name-like text inside a node: the longest string that isn't a
+ * price or a quantity.
+ *
+ * Untagged flyer artwork keeps the product name as ordinary text right under
+ * the cut-out ("NEEFO RICE POWDER 1KG"), and in a legacy file that text is
+ * the ONLY thing identifying the product — every layer is called `Group 9683`.
+ * Reading it turns bulk pairing from "nothing matches, do all twenty by hand"
+ * into something that mostly matches itself.
+ *
+ * A wrong guess here is harmless by construction: the matcher only assigns a
+ * row when the name genuinely scores, so a badge like "BUY 1 GET 1 FREE"
+ * matches nothing and that photo simply waits for the designer.
+ */
+function nameLikeTextIn(node: SceneNode): string {
+  let best = ''
+  let bestLetters = 0
+  for (const n of descendantsOf(node)) {
+    if (!isText(n)) continue
+    const raw = String((n as TextNode).characters || '').replace(/\s+/g, ' ').trim()
+    if (raw.length < 3) continue
+    // Letters, not length — "48.90", "₹135" and "1pc" carry almost none.
+    const letters = raw.replace(/[^A-Za-z]/g, '').length
+    if (letters < 3) continue
+    if (letters > bestLetters) { best = raw; bestLetters = letters }
+  }
+  return best
+}
+
+/**
+ * Every photo worth uploading under one selected node.
+ *
+ * A node holding `#imageurl` layers is a card (or a whole block of them):
+ * the photos are those layers, in reading order, each named by its own
+ * card. Anything else is taken at face value — the selected node IS the
+ * cut-out, which is how the single ↑ Shot has always worked.
+ */
+function photoCandidates(root: SceneNode): { node: SceneNode; hint: string }[] {
+  const scope = labelScopeOf(root)
+  const photos = photoNodesIn(root)
+  const labels = labelsIn(scope, true)
+
+  /* Label-driven pairing — the right way round when a whole flyer is selected.
+   *
+   * Selecting an A4 finds every image fill inside it: 102 of them on a real
+   * Sea Star page, because balloons, badges, the header and the QR code all
+   * paint images too. Walking photo→label there produces 80 rows of
+   * decoration for 20 products. Walking label→photo instead asks the only
+   * question that matters — "which picture belongs to THIS product name?" —
+   * and yields one candidate per product, dropping the noise for free.
+   *
+   * Only when the flyer is clearly labelled AND clearly over-full of images;
+   * a handful of hand-picked cut-outs still takes the direct path below. */
+  if (labels.length >= 2 && photos.length > labels.length) {
+    const byId: Record<string, string> = {}
+    const used: Record<string, boolean> = {}
+    const chosen: SceneNode[] = []
+    for (const label of labels) {
+      const best = bestPhotoFor(label, photos, used)
+      if (!best) continue
+      used[best.id] = true
+      byId[best.id] = label.text
+      chosen.push(best)
+    }
+    if (chosen.length) {
+      return readingOrder(chosen).map(node => ({ node, hint: byId[node.id] || '' }))
+    }
+  }
+
+  return photos.map(img => ({ node: img, hint: hintForPhoto(img, root, scope) }))
+}
+
+/**
+ * The picture that belongs to a product name: sitting above it, sharing its
+ * column, and — among everything that qualifies — the biggest. Size is the
+ * tie-breaker that separates the product shot from the "1pc" badge and the
+ * little tricolour sticker pinned to the same cell.
+ */
+function bestPhotoFor(label: Label, photos: SceneNode[], used: Record<string, boolean>): SceneNode | null {
+  const lb = label.box
+  let best: SceneNode | null = null
+  let bestGap = Infinity
+  let bestArea = 0
+  for (const p of photos) {
+    if (used[p.id]) continue
+    const b = p.absoluteBoundingBox
+    if (!b || b.width <= 0 || b.height <= 0) continue
+
+    // STRICTLY above the caption. This one test is what excludes the cell's
+    // background rectangle and the flyer's backdrop: a background sits BEHIND
+    // the label, so its lower edge falls below the label's top.
+    const gap = lb.y - (b.y + b.height)
+    if (gap < 0) continue
+    if (gap > Math.max(b.height, 60) * 1.5) continue
+
+    // Sharing the caption's column, not merely brushing past it.
+    const overlap = Math.min(b.x + b.width, lb.x + lb.width) - Math.max(b.x, lb.x)
+    if (overlap < Math.min(b.width, lb.width) * 0.6) continue
+
+    // A banner spanning several cells is decoration, not a product shot.
+    if (b.width > lb.width * 3) continue
+
+    // Biggest wins. Nearest-wins was tried and is wrong: these flyers pin a
+    // small tricolour ribbon just above every caption, closer than the shot
+    // itself, so proximity picks the decoration every time. Once backgrounds
+    // are excluded by the strictly-above test above, the largest remaining
+    // picture in the caption's column IS the product.
+    const area = b.width * b.height
+    if (area > bestArea) { bestGap = gap; bestArea = area; best = p }
+  }
+  return best
+}
+
+/** Does this node paint an actual image? */
+function hasImageFill(node: SceneNode): boolean {
+  const fills = (node as unknown as { fills?: unknown }).fills
+  if (!fills || !Array.isArray(fills)) return false
+  for (const f of fills as { type?: string; visible?: boolean }[]) {
+    if (f && f.type === 'IMAGE' && f.visible !== false) return true
+  }
+  return false
+}
+
+/**
+ * The photos under one selected node.
+ *
+ * Three shapes, in order of how much they can be trusted:
+ *
+ *  1 · `#imageurl` layers — a plugin-built card says exactly where its photo is.
+ *  2 · **Nodes that paint an image.** Their real flyers have no photo component
+ *      at all: a product shot is a plain `Rectangle 24560` with an image fill,
+ *      sitting as a SIBLING of the cell that names it. Picking these out is
+ *      what stops a bulk upload from filing an entire product cell — price
+ *      badge, caption and all — as the catalog photo.
+ *  3 · Nothing image-like inside, so the node itself IS the cut-out. That is
+ *      how the single ↑ Shot has always behaved.
+ */
+function photoNodesIn(root: SceneNode): SceneNode[] {
+  const all = descendantsOf(root)
+  const tagged = all.filter(n => layerToken(n.name) === IMAGE_TOKEN)
+  if (tagged.length) return readingOrder(tagged)
+  const filled = all.filter(hasImageFill)
+  if (filled.length) return readingOrder(filled)
+  return [root]
+}
+
+/**
+ * How far out to look for the text that names a photo: the enclosing frame,
+ * because that is the flyer. A photo rectangle's name lives beside it, not
+ * inside it, so ancestry alone can never find it.
+ */
+function labelScopeOf(node: SceneNode): SceneNode {
+  let cur: BaseNode | null = node
+  let last: SceneNode = node
+  let guard = 0
+  while (cur && cur.type !== 'PAGE' && cur.type !== 'DOCUMENT' && guard++ < 24) {
+    last = cur as SceneNode
+    if (cur.type === 'FRAME' || cur.type === 'COMPONENT' || cur.type === 'COMPONENT_SET') {
+      return cur as SceneNode
+    }
+    cur = cur.parent
+  }
+  return last
+}
+
+type Label = { text: string; box: { x: number; y: number; width: number; height: number } }
+
+/** Every candidate product label in a scope — tagged ones only, or any text. */
+const labelCache: { id: string; tagged: Label[]; loose: Label[] } = { id: '', tagged: [], loose: [] }
+
+function labelsIn(scope: SceneNode, taggedOnly: boolean): Label[] {
+  if (labelCache.id !== scope.id) {
+    const tagged: Label[] = []
+    const loose: Label[] = []
+    for (const n of descendantsOf(scope)) {
+      if (!isText(n)) continue
+      const box = n.absoluteBoundingBox
+      if (!box) continue
+      const raw = String((n as TextNode).characters || '').replace(/\s+/g, ' ').trim()
+      if (!raw) continue
+      if (layerToken(n.name) === '#product') tagged.push({ text: raw, box })
+      // Letters, not length — "48.90", "₹135" and "1pc" carry almost none.
+      if (raw.replace(/[^A-Za-z]/g, '').length >= 3) loose.push({ text: raw, box })
+    }
+    labelCache.id = scope.id
+    labelCache.tagged = tagged
+    labelCache.loose = loose
+  }
+  return taggedOnly ? labelCache.tagged : labelCache.loose
+}
+
+/**
+ * The label that belongs to a photo, chosen by POSITION.
+ *
+ * Flyer convention, and the one their files follow: the name sits directly
+ * under the photo, sharing its column. So candidates must overlap the photo
+ * horizontally, and the smallest gap below it wins; a label above is allowed
+ * but penalised, and anything further than about two photo-heights away is
+ * not a label at all — better to leave the photo unpaired than to guess.
+ */
+function nearestLabelFor(img: SceneNode, pool: Label[]): string {
+  const b = img.absoluteBoundingBox
+  if (!b || !pool.length) return ''
+  const limit = Math.max(b.height, 60) * 2
+  let best = ''
+  let bestScore = Infinity
+  for (const label of pool) {
+    const tb = label.box
+    const overlap = Math.min(b.x + b.width, tb.x + tb.width) - Math.max(b.x, tb.x)
+    if (overlap <= 0) continue
+    const below = tb.y - (b.y + b.height)
+    const above = b.y - (tb.y + tb.height)
+    const score = below >= 0 ? below : (above >= 0 ? above * 3 : 0)
+    if (score > limit) continue
+    if (score < bestScore) { bestScore = score; best = label.text }
+  }
+  return best
+}
+
+/** A `#product` text on an ancestor of the photo — a plugin-built card. */
+function productTextInAncestors(img: SceneNode, stopAt: SceneNode): string {
+  let cur: BaseNode | null = img.parent
+  let guard = 0
+  while (cur && cur.type !== 'PAGE' && cur.type !== 'DOCUMENT' && guard++ < 24) {
+    const hit = descendantsOf(cur as SceneNode)
+      .filter(n => layerToken(n.name) === '#product' && isText(n))
+      .map(n => (n as TextNode).characters.trim())
+      .filter(Boolean)[0]
+    if (hit) return hit
+    if (cur.id === stopAt.id) break
+    cur = cur.parent
+  }
+  return ''
+}
+
+function hintForPhoto(img: SceneNode, root: SceneNode, scope: SceneNode): string {
+  // 1 · the card owns a #product text — plugin-built cards name their own photo
+  const owned = productTextInAncestors(img, root)
+  if (owned) return owned
+  // 2 · the nearest #product text by position. Their PRODUCT component already
+  //     holds a text layer called #product, it just isn't an ancestor of the
+  //     photo rectangle — so geometry is what connects the two.
+  const tagged = nearestLabelFor(img, labelsIn(scope, true))
+  if (tagged) return tagged
+  // 3 · the nearest ordinary caption, for artwork with no tags at all
+  const loose = nearestLabelFor(img, labelsIn(scope, false))
+  if (loose) return loose
+  // 4 · nothing nearby: the node's own name, or text inside it
+  const own = String(img.name || '').trim()
+  const scraped = nameLikeTextIn(img)
+  return (isPlaceholderName(own) && scraped) ? scraped : (own || scraped)
+}
+
 /**
  * Every font in a text node must load before characters can change; a mixed-
  * font node needs each range font. Missing fonts are surfaced as a fix-it
@@ -736,13 +1001,45 @@ function matchVariantValue(fact: FactName, facts: ProductFacts, values: string[]
   return null
 }
 
+/**
+ * A component set's variant properties, or null when Figma refuses to give
+ * them up.
+ *
+ * `variantGroupProperties` is a GETTER that THROWS on a set with conflicting
+ * or incomplete variants — Figma's own "Component set has existing errors".
+ * Real client files are full of those (a half-finished price sticker, a
+ * variant deleted mid-edit), and one of them used to take down the entire
+ * variant scan with "Unexpected plugin error [Action: scan-variants]", so the
+ * template could not be read at all and nothing could be built from that
+ * file. A broken set is now skipped BY NAME and everything else still works.
+ */
+const brokenVariantSets: Record<string, boolean> = {}
+
+function variantGroupsOf(set: ComponentSetNode): { [name: string]: { values: string[] } } | null {
+  try {
+    const groups = set.variantGroupProperties
+    if (!groups) return null
+    return groups as { [name: string]: { values: string[] } }
+  } catch {
+    brokenVariantSets[set.name || 'an unnamed component set'] = true
+    return null
+  }
+}
+
+/** The names of every component set skipped this scan, then forget them. */
+function takeBrokenVariantSets(): string[] {
+  const names = Object.keys(brokenVariantSets)
+  for (const n of names) delete brokenVariantSets[n]
+  return names
+}
+
 /** The variant set an instance belongs to, or null when it isn't in one. */
 async function variantSetOf(node: SceneNode): Promise<ComponentSetNode | null> {
   if (node.type !== 'INSTANCE') return null
   const main = await (node as InstanceNode).getMainComponentAsync()
   if (!main || !main.parent || main.parent.type !== 'COMPONENT_SET') return null
   const set = main.parent as unknown as ComponentSetNode
-  return set.variantGroupProperties ? set : null
+  return variantGroupsOf(set) ? set : null
 }
 
 // NOT exported: a single `export` anywhere makes tsc emit `export {}`, which
@@ -909,7 +1206,8 @@ async function applyVariants(
   for (const node of descendantsOf(card)) {
     const set = await variantSetOf(node)
     if (!set) continue
-    const groups = set.variantGroupProperties as { [name: string]: { values: string[] } }
+    const groups = variantGroupsOf(set)
+    if (!groups) continue
     const next: { [name: string]: string } = {}
     let anyActive = false
 
@@ -1041,7 +1339,8 @@ async function scanVariants(template: SceneNode): Promise<VariantInfo[]> {
   for (const node of descendantsOf(template)) {
     const set = await variantSetOf(node)
     if (!set) continue
-    const groups = set.variantGroupProperties as { [name: string]: { values: string[] } }
+    const groups = variantGroupsOf(set)
+    if (!groups) continue
     for (const property of Object.keys(groups)) {
       const key = choiceKey(set.name, property)
       if (!found[key]) {
@@ -1898,9 +2197,14 @@ figma.ui.onmessage = async (msg: any) => {
         break
       case 'scan-variants': {
         const node = (await figma.getNodeByIdAsync(msg.templateId)) as SceneNode | null
+        const properties = node && !node.removed ? await scanVariants(node) : []
         figma.ui.postMessage({
           type: 'variants',
-          properties: node && !node.removed ? await scanVariants(node) : [],
+          properties,
+          // Named, not silent: if a sticker refuses to switch later, the
+          // designer needs to know THIS set is the reason and that the fix
+          // is in Figma (open the set, resolve its variant conflict).
+          brokenSets: takeBrokenVariantSets(),
         })
         break
       }
@@ -1946,6 +2250,83 @@ figma.ui.onmessage = async (msg: any) => {
         }
         break
       }
+      /* ------------------------------------------------------------ *
+       * Bulk product shots — pass 1: find every uploadable photo in the
+       * selection and send back a THUMBNAIL each, never the full export.
+       *
+       * Thirty 2× PNGs held in memory at once is how a plugin gets killed,
+       * and most of them would be thrown away anyway once the designer
+       * skips a few rows in the pairing table. So this pass is cheap
+       * (96px wide) and the real export happens one node at a time, during
+       * the upload itself, via 'export-node'.
+       *
+       * Every shape the designer might select is handled by
+       * photoCandidates(): loose cut-outs, built cards (where the card's
+       * own #product text names the photo), and whole blocks of cards.
+       * ------------------------------------------------------------ */
+      case 'export-bulk-scan': {
+        const sel = figma.currentPage.selection
+        if (!sel.length) {
+          figma.ui.postMessage({
+            type: 'bulk-scan',
+            error: 'Nothing is selected on the canvas.',
+          })
+          break
+        }
+        const seen: Record<string, boolean> = {}
+        const shots: { id: string; name: string; hint: string; thumb: number[] | null }[] = []
+        for (const root of sel) {
+          for (const cand of photoCandidates(root)) {
+            if (seen[cand.node.id]) continue
+            seen[cand.node.id] = true
+            if (typeof cand.node.exportAsync !== 'function') continue
+            let thumb: number[] | null = null
+            try {
+              const bytes = await cand.node.exportAsync({ format: 'PNG', constraint: { type: 'WIDTH', value: 96 } })
+              thumb = Array.from(bytes)
+            } catch {
+              thumb = null   // unpreviewable is not unuploadable — carry on
+            }
+            shots.push({ id: cand.node.id, name: cand.node.name || 'photo', hint: cand.hint, thumb })
+          }
+        }
+        if (!shots.length) {
+          figma.ui.postMessage({
+            type: 'bulk-scan',
+            error: 'Nothing in that selection can be exported as a photo.',
+          })
+          break
+        }
+        figma.ui.postMessage({ type: 'bulk-scan', shots })
+        break
+      }
+
+      /* Full-resolution export of ONE node, by id — the upload loop's
+       * per-photo fetch. Same 2× scale the single ↑ Shot uses. */
+      case 'export-node': {
+        const nodeId = String(msg.nodeId || '')
+        const node = (await figma.getNodeByIdAsync(nodeId)) as SceneNode | null
+        if (!node || typeof node.exportAsync !== 'function') {
+          figma.ui.postMessage({
+            type: 'node-png',
+            nodeId,
+            error: 'That layer is gone from the canvas — rescan and try again.',
+          })
+          break
+        }
+        try {
+          const bytes = await node.exportAsync({ format: 'PNG', constraint: { type: 'SCALE', value: 2 } })
+          figma.ui.postMessage({ type: 'node-png', nodeId, bytes, name: node.name || 'product' })
+        } catch (err) {
+          figma.ui.postMessage({
+            type: 'node-png',
+            nodeId,
+            error: 'Could not export that layer: ' + (err instanceof Error ? err.message : String(err)),
+          })
+        }
+        break
+      }
+
       case 'notify':
         figma.notify(String(msg.message || ''))
         break

@@ -376,6 +376,7 @@
         <button class="tool" id="tool-add" title="Add an empty row">+ Row</button>
         <button class="tool" id="tool-catalog" title="Search the client's product database and insert a product (name, weight, photo prefilled)">+ Catalog</button>
         <button class="tool" id="tool-shot" title="Upload the selected canvas node as this product's cleaned photo: select ONE grid row and ONE node on the canvas, then press. The PNG is saved to the product database for reuse.">↑ Shot</button>
+        <button class="tool" id="tool-shots" title="Upload MANY photos at once: select the cut-outs (or whole built cards, or a frame holding them) on the canvas and press. Each photo is matched to a product row by name — you confirm the pairing before anything uploads.">⇈ Shots</button>
         <button class="tool" id="tool-dup" title="Copy the selected rows — use it to print the same product on more than one page">Duplicate</button>
         <button class="tool" id="tool-del" title="Delete selected rows">Delete</button>
         <span class="tool-sep"></span>
@@ -391,6 +392,25 @@
       <div id="catalog-row" style="display:none;margin-top:6px">
         <input type="text" id="catalog-q" placeholder="Search the product database…" style="width:100%">
         <div id="catalog-results" style="max-height:180px;overflow-y:auto;margin-top:4px"></div>
+      </div>
+      <!-- Bulk photo upload — the pairing table. Contextual: opens from the
+           ⇈ Shots tool and closes itself once the batch is done. Nothing
+           uploads until the designer has looked at this list, because an
+           auto-match is a guess and a wrong guess writes a photo onto the
+           wrong product in the database. -->
+      <div id="shots-box" style="display:none;margin-top:6px;padding:8px;border:1px solid rgba(127,127,127,.35);border-radius:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+          <b id="shots-title">Photos found</b>
+          <span id="shots-summary" style="font-size:11px;opacity:.75"></span>
+        </div>
+        <div id="shots-list" style="max-height:260px;overflow-y:auto;margin-top:6px"></div>
+        <div style="display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap">
+          <button class="tool" id="shots-upload">Upload matched</button>
+          <button class="tool" id="shots-automatch">Re-match by name</button>
+          <button class="tool" id="shots-inorder" title="Pair photo 1 with row 1, photo 2 with row 2… Photos are already in reading order (top row left-to-right, then down), so this is the fast path for old flyers where no layer carries a product name.">Pair in order</button>
+          <button class="tool" id="shots-cancel">Close</button>
+          <span id="shots-progress" style="font-size:11px;opacity:.8"></span>
+        </div>
       </div>
       <div id="plan-row" style="display:none;gap:5px;margin-top:6px;align-items:center;flex-wrap:wrap">
         <input type="text" id="plan-per" value="16" style="width:74px"
@@ -894,12 +914,22 @@ async function connect() {
     const data = await api('/api/figma/offers')
     state.offers = data.offers || []
     state.services = data.services || []
+    // Clients come from the workspace, not from the active offers — see
+    // fillClientDropdown. An older server that doesn't send them yet falls
+    // back to the offer-derived list there, so this stays deploy-order safe.
+    state.clients = data.clients || []
+    state.connectedOnce = true
     fillServiceDropdown()
+    updateEditingChip()
     chip('chip-conn', 'Connected', 'on')
     foldSetup(true)
     fillClientDropdown()
     log('Connected. ' + state.offers.length + ' active offer' + (state.offers.length === 1 ? '' : 's') + '.', 'ok')
-    if (!state.offers.length) logFix('No active campaigns right now — save an offer in Cirqle first.')
+    if (!state.offers.length) {
+      logFix(state.clients.length
+        ? 'No active offers yet — pick the client above and paste this week\'s list on the Paste offer tab to create one.'
+        : 'No active campaigns right now — save an offer in Cirqle first.')
+    }
   } catch (e) {
     chip('chip-conn', 'Offline', 'err')
     foldSetup(false)   // the fields are what needs fixing — reopen them
@@ -934,12 +964,30 @@ $('paste-service').onchange = () => {
 }
 
 function fillClientDropdown() {
+  // Every ACTIVE client in the workspace — not only the ones that happen to
+  // have an offer open. Deriving this list from state.offers meant a fresh
+  // cycle (nothing active) left the dropdown empty and disabled, so Save
+  // refused with "pick a client at the top" and nothing could ever be
+  // created from Figma. Offer-derived names are still merged in so a client
+  // that has an offer but was since deactivated stays reachable, and so an
+  // older server that doesn't send `clients` behaves exactly as before.
   const seen = new Map()
+  for (const c of (state.clients || [])) {
+    if (c && c.id && !seen.has(c.id)) seen.set(c.id, c.name || 'Unnamed client')
+  }
   for (const o of state.offers) {
-    if (!seen.has(o.clientId)) seen.set(o.clientId, o.clientName)
+    if (o.clientId && !seen.has(o.clientId)) seen.set(o.clientId, o.clientName)
   }
   const sel = $('client')
   sel.innerHTML = ''
+  if (seen.size === 0) {
+    // Never leave a blank box with no explanation — the pre-connect state
+    // says "— connect first —", so the empty state says why it is empty.
+    const none = document.createElement('option')
+    none.value = ''
+    none.textContent = '— no clients in this workspace —'
+    sel.appendChild(none)
+  }
   for (const [id, name] of seen) {
     const opt = document.createElement('option')
     opt.value = id
@@ -965,7 +1013,13 @@ function fillOfferDropdown() {
     opt.textContent = o.campaignName + ' · ' + o.productCount + ' products · ' + o.pageCount + ' page' + (o.pageCount === 1 ? '' : 's')
     sel.appendChild(opt)
   }
-  sel.disabled = sel.options.length === 0
+  if (sel.options.length === 0) {
+    const none = document.createElement('option')
+    none.value = ''
+    none.textContent = clientId ? '— no active offer for this client —' : '— pick a client first —'
+    sel.appendChild(none)
+  }
+  sel.disabled = !sel.options[0] || sel.options[0].value === ''
   // A different offer means the loaded campaign is stale.
   state.campaign = null
   state.validated = false
@@ -1612,6 +1666,17 @@ function fillSheetFromCampaign() {
 /** The "editing existing" chip is contextual — visible only when a save
  *  would UPDATE the loaded offer rather than create a new one. */
 function updateEditingChip() {
+  // A restored draft can carry the campaign id of an offer that has since
+  // been archived — the chip then promised "saving updates it" about
+  // something that no longer exists. Once connected, only an offer still in
+  // the active list counts as being edited.
+  // Gated on having connected at least once, NOT on the offer list being
+  // non-empty: a workspace with zero active offers is exactly the case where
+  // nothing can be loaded, and it was still claiming to edit one.
+  if (state.sheetCampaignId && state.connectedOnce &&
+      !state.offers.some(o => String(o.campaignId) === String(state.sheetCampaignId))) {
+    state.sheetCampaignId = null
+  }
   const editing = !!state.sheetCampaignId
   $('editing-chip').style.display = editing ? 'block' : 'none'
   $('paste-save').textContent = editing ? 'Save changes to Cirqle' : 'Save to Cirqle'
@@ -2011,7 +2076,14 @@ function detectBlockDelimiter(lines) {
   if (!rows.length) return null
   // Sheets and Excel always put tabs on the clipboard, for every copied range.
   if (rows.some(l => l.includes('\t'))) return 'tab'
-  const counts = rows.map(l => (l.match(/,/g) || []).length)
+  // Count DELIMITER commas only. A quoted cell containing a comma
+  // ("Rice, broken",44,60) used to add to this raw count, the counts went
+  // uneven, and the WHOLE block fell back to loose text — which then
+  // swallowed every row whose name ends in a number: "Cashew 240,93,120" has
+  // no comma the per-line rules recognise (they all sit between digits, the
+  // "Rice 1,250" guard), so the line stayed one cell and the price was lost
+  // silently. parseCsvLine already respects quotes; reuse it.
+  const counts = rows.map(l => parseCsvLine(l).length - 1)
   const n = counts[0]
   if (n < 1 || !counts.every(c => c === n)) return null   // uneven → loose text
   if (n >= 2) return 'csv'
@@ -2181,6 +2253,7 @@ function splitToTable() {
   // Pass 1 — peel off section headers and carry their pack size / day down
   // the lines that follow, exactly as the AI path's pre-pass does.
   let rowsRaw = []
+  let rawLines = []          // the untouched source line behind each row
   let meta = []
   let curWeight = null, curDay = null
   const sections = []
@@ -2198,6 +2271,7 @@ function splitToTable() {
     const cells = splitLine(line, delim)
     if (!cells) continue
     rowsRaw.push(cells)
+    rawLines.push(line)
     meta.push({ weight: curWeight, day: curDay })
   }
 
@@ -2205,6 +2279,35 @@ function splitToTable() {
     reportError('Nothing to split.', 'Split to columns', 'Paste the offer text above first.')
     return
   }
+
+  // Rescue pass — a ragged block (a row with a different column count) leaves
+  // no block delimiter, and a row whose product name ends in digits then has
+  // no comma the per-line rules will split on: every comma in
+  // "Cashew 240,93,120,100gm" sits between digits, which is the guard that
+  // keeps "Rice 1,250" one product at twelve-fifty. Rather than let such a
+  // row stay one cell and lose its price in silence, re-read it as CSV when
+  // that yields exactly the width the rest of the block agreed on. Guarded at
+  // 3+ columns so a two-column WhatsApp list can never match — there
+  // "Rice 1,250" must keep its comma.
+  let rescued = 0
+  if (!delim) {
+    const widths = {}
+    for (const r of rowsRaw) widths[r.length] = (widths[r.length] || 0) + 1
+    let k = 0
+    for (const w of Object.keys(widths)) {
+      if (Number(w) >= 3 && widths[w] > (widths[k] || 0)) k = Number(w)
+    }
+    if (k >= 3) {
+      for (let i = 0; i < rowsRaw.length; i++) {
+        if (rowsRaw[i].length === k) continue
+        const line = rawLines[i] || ''
+        if (!line.includes(',')) continue
+        const re = parseCsvLine(line)
+        if (re.length === k) { rowsRaw[i] = re; rescued++ }
+      }
+    }
+  }
+
   let maxCols = Math.max(...rowsRaw.map(r => r.length))
 
   let header = null
@@ -2231,7 +2334,8 @@ function splitToTable() {
   log(
     'Split ' + rowsRaw.length + ' row(s) into ' + state.colRoles.length + ' column(s).' +
     (header ? ' Columns read from your header row (' + header.filter(Boolean).join(' · ') + ').' : '') +
-    (sections.length ? ' Sections: ' + sections.join(' · ') + '.' : ''),
+    (sections.length ? ' Sections: ' + sections.join(' · ') + '.' : '') +
+    (rescued ? ' ' + rescued + ' row(s) read as CSV — their names end in a number.' : ''),
     'ok'
   )
   const days = [...new Set(meta.map(m => m.day).filter(Boolean))]
@@ -2414,6 +2518,16 @@ function pushUndo() {
   undoStack.push(JSON.stringify(state.parsed))
   if (undoStack.length > 100) undoStack.shift()
   redoStack.length = 0
+}
+/**
+ * Drop the step pushUndo() just recorded when the action turned out to be a
+ * no-op (pressing an idempotent tool a second time, re-casing already-cased
+ * names). Without this, ⌘Z spends a press undoing nothing at all — which
+ * reads as "undo is broken" rather than "there was nothing to undo".
+ */
+function dropUndoIfUnchanged() {
+  if (!undoStack.length) return
+  if (undoStack[undoStack.length - 1] === JSON.stringify(state.parsed)) undoStack.pop()
 }
 function gridUndo() {
   if (!undoStack.length) return
@@ -3307,6 +3421,7 @@ document.querySelectorAll('.tool[data-case]').forEach(btn => {
       // because "100gm" reads as one unit token and would stay lowercase.
       if (p.weight) p.weight = formatProductName(prettyWeight(p.weight), mode)
     })
+    dropUndoIfUnchanged()
     renderTable()
     log('Re-cased ' + targetRows().length + ' row(s) — name and weight.', 'ok')
   }
@@ -3319,6 +3434,7 @@ $('tool-trim').onclick = () => {
     p.name = String(p.name || '').replace(/\s+/g, ' ').trim()
     if (p.weight) p.weight = String(p.weight).replace(/\s+/g, '').trim()
   })
+  dropUndoIfUnchanged()
   renderTable()
 }
 
@@ -3351,6 +3467,7 @@ $('tool-weight').onclick = () => {
     p.name = (String(p.name || '').trim() + ' ' + pretty).trim()
     changed++
   })
+  if (!changed) dropUndoIfUnchanged()
   renderTable()
   log(changed ? ('Added weight to ' + changed + ' name(s).') : 'All targeted names already carry their weight.', 'ok')
 }
@@ -3416,27 +3533,29 @@ $('tool-shot').onclick = () => {
 async function uploadShot(bytes, rowIndex) {
   const row = state.parsed[rowIndex]
   const clientId = $('client').value
-  if (!row || !clientId) return
-  const name = String(row.name || '').trim()
-  log('Uploading "' + name + '" photo (' + Math.round(bytes.length / 1024) + ' KB)…')
-  if (bytes.length > 8 * 1024 * 1024) {
-    reportError('That export is over 8 MB.', 'Upload shot', 'Export a smaller node (or reduce its size) and try again.')
+  // Both of these used to `return` in silence: the designer pressed ↑ Shot,
+  // watched the export happen, and never learned why no photo arrived.
+  if (!row) {
+    reportError('That grid row is gone.', 'Upload shot', 'Pick the row again, reselect the image, then press ↑ Shot.')
     return
   }
+  if (!clientId) {
+    reportError('No client selected.', 'Upload shot', 'Pick the client at the top of the Build tab — the photo is filed under that client in the product database.')
+    return
+  }
+  const name = String(row.name || '').trim()
+  log('Uploading "' + name + '" photo (' + Math.round(bytes.length / 1024) + ' KB)…')
   try {
-    const signed = await api('/api/figma/image-upload', { mode: 'sign', fileName: name + '.png', clientId })
-    const put = await fetch(signed.uploadUrl, { method: 'PUT', headers: { 'Content-Type': 'image/png' }, body: bytes })
-    if (!put.ok) throw { what: 'The photo upload failed (HTTP ' + put.status + ').', where: 'Upload shot', fix: 'Check your connection, then press ↑ Shot again.' }
-    const confirmed = await api('/api/figma/image-upload', {
-      mode: 'confirm', path: signed.path, publicUrl: signed.publicUrl,
-      productName: name, clientId, setPrimary: true,
-    })
+    // Same filing path as the bulk uploader, deliberately shared — two
+    // copies of "put the bytes, then register the product" is two things to
+    // keep in step.
+    const confirmed = await putProductPhoto(bytes, name, clientId)
     row._imageUrl = confirmed.imageUrl
     scheduleDraftSave()
     log('✓ ' + confirmed.message + ' It will ride along on the next save.', 'ok')
   } catch (e) {
     if (e && e.data && e.data.disabled) {
-      $('tool-shot').style.display = 'none'
+      hidePhotoUploadTools()
       reportError('Photo upload is turned off for this workspace.', 'Upload shot', '')
       return
     }
@@ -3445,6 +3564,462 @@ async function uploadShot(bytes, rowIndex) {
     // Health-panel breadcrumb — best-effort, ignored if the server is the problem.
     api('/api/figma/image-upload', { mode: 'report-failure', error: e.what || String(e) }).catch(() => {})
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * Bulk product shots — many photos into the product database in one go.
+ *
+ * The hard part is not the upload, it is knowing WHICH product each photo
+ * belongs to. Three sources are handled, and all three end in the same
+ * confirmation table:
+ *
+ *   · loose cut-outs      → matched on the layer's own name
+ *   · built flyer cards   → the card's #product text names the photo, so a
+ *                           finished flyer pairs itself with no renaming
+ *   · a frame of either   → scanned through, in reading order
+ *
+ * Names in the wild are messy ("Cashew 240 100 gm" vs "cashew-240"), so
+ * matching runs exact → normalised → token-overlap, and REFUSES to guess
+ * when two rows score the same. Anything unmatched is held back rather
+ * than uploaded somewhere plausible: a wrong photo on a real product is
+ * worse than no photo, and it is invisible until a flyer goes out with it.
+ * ------------------------------------------------------------------ */
+state.shots = null        // [{ id, name, hint, thumbUrl, rowIndex, status, note }]
+state.shotsBusy = false
+
+/** Strip everything that differs between "Cashew 240 100 gm" and "cashew-240". */
+function shotNorm(s) {
+  return String(s == null ? '' : s)
+    .toLowerCase()
+    .replace(/\.(png|jpe?g|webp)$/i, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+function shotTokens(s) {
+  return shotNorm(s).split(' ').filter(t => t.length > 1)
+}
+
+/**
+ * Best row for one photo, or null when there is no confident answer.
+ * Returns null on a tie too — an ambiguous match is exactly the case where
+ * a human glance is cheap and a wrong guess is expensive.
+ */
+function matchRowFor(text, takenRows) {
+  const want = shotNorm(text)
+  if (!want) return null
+  const wantTokens = shotTokens(text)
+  let best = null, bestScore = 0, tied = false
+  for (let i = 0; i < state.parsed.length; i++) {
+    if (takenRows[i]) continue
+    const name = state.parsed[i].name
+    const got = shotNorm(name)
+    if (!got) continue
+    let score = 0
+    if (got === want) score = 100
+    else if (got.startsWith(want) || want.startsWith(got)) score = 80
+    else {
+      const gotTokens = shotTokens(name)
+      if (!gotTokens.length || !wantTokens.length) continue
+      const shared = gotTokens.filter(t => wantTokens.indexOf(t) >= 0).length
+      if (!shared) continue
+      // Overlap as a share of the SHORTER name, so "Cashew 240" still
+      // matches the row "Cashew 240 100 gm" after + Weight → name ran.
+      score = Math.round((shared / Math.min(gotTokens.length, wantTokens.length)) * 70)
+      if (score < 45) continue
+    }
+    if (score > bestScore) { best = i; bestScore = score; tied = false }
+    else if (score === bestScore) tied = true
+  }
+  return tied ? null : best
+}
+
+/** Re-run matching across the whole batch, best scores claimed first. */
+function autoMatchShots() {
+  if (!state.shots) return
+  const taken = {}
+  for (const s of state.shots) { s.rowIndex = null }
+  // Two passes: exact/prefix names claim their row before fuzzy ones get
+  // a chance to steal it.
+  for (const pass of [true, false]) {
+    for (const s of state.shots) {
+      if (s.rowIndex != null || s.status === 'done') continue
+      const text = s.hint || s.name
+      const exact = shotNorm(text)
+      const isStrong = state.parsed.some((p, i) => !taken[i] && shotNorm(p.name) === exact)
+      if (pass !== isStrong) continue
+      const idx = matchRowFor(text, taken)
+      if (idx != null) { s.rowIndex = idx; taken[idx] = true }
+    }
+  }
+  renderShots()
+}
+
+/** The product name a row suggests — the single source of truth for the default. */
+function rowNameFor(shot) {
+  const row = shot && shot.rowIndex != null ? (state.parsed || [])[shot.rowIndex] : null
+  return row ? String(row.name || '').trim() : ''
+}
+
+/**
+ * Keep the filing name in step with the pairing, without ever discarding a
+ * name that was typed by hand. Re-pairing a photo re-suggests; editing pins.
+ */
+function syncShotNames() {
+  for (const s of (state.shots || [])) {
+    if (s.status === 'done' || s.nameEdited) continue
+    s.dbName = rowNameFor(s)
+  }
+}
+
+/** The name that will actually be written to product_catalog. */
+function finalNameFor(shot) {
+  return String(shot.dbName || '').trim()
+}
+
+function shotsCounts() {
+  const all = state.shots || []
+  const live = all.filter(s => s.status !== 'done')
+  return {
+    total: all.length,
+    // "Ready" means paired AND named — a photo with no name can't be filed,
+    // and inventing one is exactly what must not happen.
+    matched: live.filter(s => s.rowIndex != null && finalNameFor(s)).length,
+    nameless: live.filter(s => s.rowIndex != null && !finalNameFor(s)).length,
+    unmatched: live.filter(s => s.rowIndex == null).length,
+    done: all.filter(s => s.status === 'done').length,
+    failed: all.filter(s => s.status === 'failed').length,
+  }
+}
+
+function renderShots() {
+  syncShotNames()
+  const box = $('shots-list')
+  box.innerHTML = ''
+  const rows = state.parsed || []
+  for (let n = 0; n < (state.shots || []).length; n++) {
+    const s = state.shots[n]
+    const line = document.createElement('div')
+    line.style.cssText = 'display:flex;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid rgba(127,127,127,.18)'
+
+    const img = document.createElement('div')
+    img.style.cssText = 'width:38px;height:38px;flex:0 0 38px;border-radius:6px;background:rgba(127,127,127,.15);background-size:contain;background-position:center;background-repeat:no-repeat'
+    if (s.thumbUrl) img.style.backgroundImage = 'url(' + s.thumbUrl + ')'
+    line.appendChild(img)
+
+    // Built with text nodes, not innerHTML — these strings are product names
+    // and layer names the designer typed, and one stray "<" should not be
+    // able to rewrite the panel.
+    const label = document.createElement('div')
+    label.style.cssText = 'flex:1 1 auto;min-width:0;font-size:11px;line-height:1.35'
+    const ELLIPSIS = 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis'
+    const top = document.createElement('div')
+    top.style.cssText = ELLIPSIS
+    top.textContent = s.hint || s.name
+    const sub = document.createElement('div')
+    sub.style.cssText = 'opacity:.6;' + ELLIPSIS
+    sub.textContent = s.name + (s.note ? ' · ' + s.note : '')
+    if (s.status === 'failed') sub.style.color = '#c0392b'
+    label.appendChild(top)
+    label.appendChild(sub)
+
+    /* The name this photo will be FILED under — shown before upload, not
+     * guessed after it. Defaults to the paired row and stays in step with it;
+     * typing here pins the name so re-pairing no longer overwrites it. The
+     * suggestion line keeps the row's own wording visible for comparison, and
+     * "row name" puts it back in one click. */
+    if (s.status !== 'done') {
+      const suggested = rowNameFor(s)
+      const nameRow = document.createElement('div')
+      nameRow.style.cssText = 'display:flex;gap:4px;align-items:center;margin-top:3px'
+
+      const nameInput = document.createElement('input')
+      nameInput.type = 'text'
+      nameInput.value = s.dbName || ''
+      nameInput.placeholder = suggested ? suggested : 'Type the product name to file this under'
+      nameInput.title = 'The name this photo is saved under in the product database.'
+      nameInput.style.cssText = 'flex:1 1 auto;min-width:0;font-size:11px;padding:2px 4px'
+      if (!finalNameFor(s) && s.rowIndex != null) nameInput.style.borderColor = 'rgba(255,170,0,.9)'
+      nameInput.oninput = () => {
+        s.dbName = nameInput.value
+        s.nameEdited = true
+        refreshShotsFooter()
+      }
+      nameRow.appendChild(nameInput)
+
+      // Always rendered when a row is paired, never conditionally on "has been
+      // edited": typing only refreshes the footer (rebuilding the list would
+      // steal focus mid-word), so a button that appears on edit would not
+      // appear until something else redrew.
+      if (suggested) {
+        const reset = document.createElement('button')
+        reset.className = 'tool'
+        reset.textContent = '↺ row name'
+        reset.title = 'Reset to the product name on the paired sheet row: ' + suggested
+        reset.style.cssText = 'flex:0 0 auto;font-size:10px;padding:1px 5px'
+        reset.onclick = () => { s.dbName = suggested; s.nameEdited = false; renderShots() }
+        nameRow.appendChild(reset)
+      }
+      label.appendChild(nameRow)
+
+      const hintLine = document.createElement('div')
+      hintLine.style.cssText = 'opacity:.55;font-size:10px;margin-top:1px;' + ELLIPSIS
+      hintLine.textContent = suggested
+        ? 'Suggested from product row: ' + suggested
+        : (s.rowIndex == null ? 'Pair a row, or type a name to file it under.'
+                              : 'That row has no product name — type one here.')
+      label.appendChild(hintLine)
+    }
+    line.appendChild(label)
+
+    if (s.status === 'done') {
+      const ok = document.createElement('div')
+      ok.style.cssText = 'flex:0 0 150px;font-size:11px;color:#1a7f37'
+      ok.textContent = '✓ ' + (finalNameFor(s) || 'uploaded')
+      line.appendChild(ok)
+    } else {
+      const sel = document.createElement('select')
+      sel.style.cssText = 'flex:0 0 150px;font-size:11px'
+      const skip = document.createElement('option')
+      skip.value = ''
+      skip.textContent = '— not yet paired —'
+      sel.appendChild(skip)
+      for (let i = 0; i < rows.length; i++) {
+        const opt = document.createElement('option')
+        opt.value = String(i)
+        opt.textContent = (i + 1) + ' · ' + (rows[i].name || '(no name)')
+        sel.appendChild(opt)
+      }
+      sel.value = s.rowIndex == null ? '' : String(s.rowIndex)
+      if (s.rowIndex == null) sel.style.borderColor = 'rgba(255,170,0,.8)'
+      sel.onchange = () => {
+        s.rowIndex = sel.value === '' ? null : parseInt(sel.value, 10)
+        s.note = ''
+        renderShots()
+      }
+      line.appendChild(sel)
+    }
+    box.appendChild(line)
+  }
+
+  refreshShotsFooter()
+}
+
+/**
+ * Counts and the button only — called on every keystroke in a name field, so
+ * it must NOT rebuild the list (that would steal focus mid-word).
+ */
+function refreshShotsFooter() {
+  const c = shotsCounts()
+  $('shots-summary').textContent =
+    c.total + ' photo' + (c.total === 1 ? '' : 's') + ' · ' + c.matched + ' ready' +
+    (c.nameless ? ' · ' + c.nameless + ' need a name' : '') +
+    (c.unmatched ? ' · ' + c.unmatched + ' waiting for you' : '') +
+    (c.done ? ' · ' + c.done + ' uploaded' : '') +
+    (c.failed ? ' · ' + c.failed + ' failed' : '')
+  $('shots-upload').disabled = state.shotsBusy || c.matched === 0
+  $('shots-upload').textContent = c.matched
+    ? 'Upload ' + c.matched + ' photo' + (c.matched === 1 ? '' : 's')
+    : (c.nameless ? 'Name them first' : 'Nothing paired yet')
+}
+
+$('tool-shots').onclick = () => {
+  // No client check here on purpose — scanning and pairing are free, and a
+  // designer should be able to line the batch up before worrying about which
+  // client it lands under. The Upload button is where that actually matters.
+  if (!state.parsed.length) {
+    reportError('The sheet is empty.', 'Bulk upload', 'Load or paste the offer first — photos are matched against its product names.')
+    return
+  }
+  clearShotThumbs()
+  state.shots = null
+  $('shots-box').style.display = 'block'
+  $('shots-list').innerHTML = ''
+  $('shots-summary').textContent = ''
+  $('shots-progress').textContent = ''
+  $('shots-title').textContent = 'Scanning the selection…'
+  post({ type: 'export-bulk-scan' })
+}
+
+$('shots-cancel').onclick = () => {
+  clearShotThumbs()
+  state.shots = null
+  $('shots-box').style.display = 'none'
+}
+$('shots-automatch').onclick = () => autoMatchShots()
+
+/**
+ * Pair by POSITION — photo 1 to row 1, photo 2 to row 2, and so on.
+ *
+ * Name matching is worthless on a legacy flyer: tested against three real
+ * client files (HAPPYMART, GOODWILL, SEASTAR) every single layer was called
+ * `Group 9550`, `Image 11`, `Object` or `Mask group`, so nothing matched at
+ * all. But the photos come back in reading order — top row left to right,
+ * then down — which is the same order the products sit in the sheet. For a
+ * flyer built in Cirqle order that lines them up in one press, and the
+ * designer still confirms every row before anything uploads.
+ */
+$('shots-inorder').onclick = () => {
+  if (!state.shots) return
+  const rows = state.parsed || []
+  let n = 0
+  for (const s of state.shots) {
+    if (s.status === 'done') continue
+    s.rowIndex = n < rows.length ? n : null
+    s.note = ''
+    n++
+  }
+  renderShots()
+  const spare = Math.max(0, n - rows.length)
+  log('Paired ' + Math.min(n, rows.length) + ' photo(s) in reading order.', 'ok')
+  if (spare) logFix(spare + ' photo(s) ran past the end of the sheet and are unpaired — check the order before uploading.')
+  else logFix('Check the thumbnails against the names before uploading — order pairing is a guess about how the flyer was laid out.')
+}
+
+/** The feature flag is off — both entry points go, not just the single one. */
+function hidePhotoUploadTools() {
+  $('tool-shot').style.display = 'none'
+  $('tool-shots').style.display = 'none'
+  $('shots-box').style.display = 'none'
+}
+
+/** Blob URLs are not garbage — release them when the table goes away. */
+function clearShotThumbs() {
+  for (const s of (state.shots || [])) {
+    if (s.thumbUrl) { try { URL.revokeObjectURL(s.thumbUrl) } catch (e) {} }
+  }
+}
+
+function receiveBulkScan(msg) {
+  if (msg.error) {
+    $('shots-box').style.display = 'none'
+    reportError(msg.error, 'Bulk upload', 'Select the cleaned cut-outs, the built cards, or a frame holding them, then press ⇈ Shots again.')
+    return
+  }
+  state.shots = (msg.shots || []).map(s => ({
+    id: s.id,
+    name: s.name || 'photo',
+    hint: s.hint || s.name || '',
+    thumbUrl: s.thumb && s.thumb.length
+      ? URL.createObjectURL(new Blob([new Uint8Array(s.thumb)], { type: 'image/png' }))
+      : null,
+    rowIndex: null,
+    dbName: '',        // the name this photo is FILED under in the database
+    nameEdited: false, // true once typed into, so re-pairing stops overwriting it
+    status: 'pending',
+    note: '',
+  }))
+  $('shots-title').textContent = 'Photos found — check the pairing'
+  autoMatchShots()
+  const c = shotsCounts()
+  log('Found ' + c.total + ' photo(s) in the selection · ' + c.matched + ' matched to a product by name.', 'ok')
+  if (c.unmatched) logFix(c.unmatched + ' could not be matched confidently — pair them in the list (or leave them; nothing unpaired is uploaded).')
+  if (c.nameless) logFix(c.nameless + ' paired row(s) have no product name — type the name to file the photo under, in the list.')
+}
+
+/** One node's full-resolution PNG, fetched on demand from the main thread. */
+function exportNode(nodeId) {
+  return new Promise((resolve, reject) => {
+    const done = (ev) => {
+      const m = ev.data.pluginMessage
+      if (!m || m.type !== 'node-png' || m.nodeId !== nodeId) return
+      window.removeEventListener('message', done)
+      clearTimeout(timer)
+      if (m.error) reject({ what: m.error, where: 'Bulk upload', fix: 'Rescan with ⇈ Shots.' })
+      else resolve(new Uint8Array(m.bytes))
+    }
+    const timer = setTimeout(() => {
+      window.removeEventListener('message', done)
+      reject({ what: 'That layer took too long to export.', where: 'Bulk upload', fix: 'Try a smaller node, or upload it on its own with ↑ Shot.' })
+    }, 30000)
+    window.addEventListener('message', done)
+    post({ type: 'export-node', nodeId })
+  })
+}
+
+/**
+ * The upload itself, shared with the single ↑ Shot so both paths file a
+ * photo identically. Returns the stored URL.
+ */
+async function putProductPhoto(bytes, productName, clientId) {
+  if (bytes.length > 8 * 1024 * 1024) {
+    throw { what: '"' + productName + '" exports to over 8 MB.', where: 'Upload shot', fix: 'Export a smaller node and retry just that one.' }
+  }
+  const signed = await api('/api/figma/image-upload', { mode: 'sign', fileName: productName + '.png', clientId })
+  const put = await fetch(signed.uploadUrl, { method: 'PUT', headers: { 'Content-Type': 'image/png' }, body: bytes })
+  if (!put.ok) throw { what: 'The photo upload failed (HTTP ' + put.status + ').', where: 'Upload shot', fix: 'Check your connection and retry.' }
+  const confirmed = await api('/api/figma/image-upload', {
+    mode: 'confirm', path: signed.path, publicUrl: signed.publicUrl,
+    productName, clientId, setPrimary: true,
+  })
+  return confirmed
+}
+
+$('shots-upload').onclick = async () => {
+  if (state.shotsBusy) return
+  const clientId = $('client').value
+  if (!clientId) {
+    reportError('No client selected.', 'Bulk upload', 'Pick the client at the top of the Build tab, then upload.')
+    return
+  }
+  // Paired AND named. A photo whose row has no product name is held back
+  // rather than filed under something invented — the table already flags it.
+  const queue = (state.shots || []).filter(s => s.rowIndex != null && s.status !== 'done' && finalNameFor(s))
+  if (!queue.length) return
+
+  state.shotsBusy = true
+  renderShots()
+  let ok = 0, failed = 0
+  // Sequential on purpose: each photo is a signed URL, a PUT of a few MB and
+  // a catalog write. Firing twenty of those at once is how a slow connection
+  // turns into twenty timeouts instead of nineteen successes.
+  for (let i = 0; i < queue.length; i++) {
+    const s = queue[i]
+    const row = state.parsed[s.rowIndex]
+    // The name shown in the table IS the name written to product_catalog —
+    // whether it came from the row or was typed by hand. No second guess.
+    const name = finalNameFor(s)
+    $('shots-progress').textContent = 'Uploading ' + (i + 1) + ' of ' + queue.length + '…'
+    if (!name) {
+      s.status = 'failed'; s.note = 'needs a product name'; failed++
+      renderShots()
+      continue
+    }
+    try {
+      const bytes = await exportNode(s.id)
+      const confirmed = await putProductPhoto(bytes, name, clientId)
+      if (row) row._imageUrl = confirmed.imageUrl
+      s.status = 'done'
+      s.note = ''
+      ok++
+    } catch (e) {
+      if (e && e.data && e.data.disabled) {
+        hidePhotoUploadTools()
+        reportError('Photo upload is turned off for this workspace.', 'Bulk upload', '')
+        state.shotsBusy = false
+        $('shots-progress').textContent = ''
+        return
+      }
+      // One bad photo never stops the batch — that is the whole point of
+      // uploading twenty at once.
+      s.status = 'failed'
+      s.note = (e && e.what) || String(e)
+      failed++
+    }
+    renderShots()
+  }
+  state.shotsBusy = false
+  $('shots-progress').textContent = ''
+  scheduleDraftSave()
+  renderShots()
+
+  if (ok) log('✓ ' + ok + ' photo(s) saved to the product database. They ride along on the next save.', 'ok')
+  if (failed) {
+    log('✗ ' + failed + ' photo(s) failed — they are still listed above with the reason.', 'err')
+    logFix('Fix what the line says and press Upload again; the ones that worked are not re-uploaded.')
+    api('/api/figma/image-upload', { mode: 'report-failure', error: failed + ' of ' + queue.length + ' bulk uploads failed' }).catch(() => {})
+  }
+  const left = shotsCounts().unmatched
+  if (left) logFix(left + ' photo(s) are still unpaired and were not uploaded.')
 }
 
 let catalogTimer = null
@@ -4027,6 +4602,12 @@ onmessage = (event) => {
         uploadShot(new Uint8Array(msg.bytes), state.shotRow)
       }
       break
+    case 'bulk-scan':
+      receiveBulkScan(msg)
+      break
+    case 'node-png':
+      // Consumed by exportNode's own one-shot listener; nothing to do here.
+      break
     case 'rename-done':
       log('✓ Tagged ' + msg.token + (msg.variants > 1
         ? ' across ' + msg.variants + ' variants (' + msg.renamed + ' layers renamed).'
@@ -4035,6 +4616,14 @@ onmessage = (event) => {
     case 'variants':
       state.variantProps = msg.properties || []
       renderVariants()
+      // A component set Figma itself calls broken can't be read, so its
+      // variants will never switch. Say which one, and where the fix is —
+      // this used to surface as "Unexpected plugin error [scan-variants]".
+      if (msg.brokenSets && msg.brokenSets.length) {
+        log('⚠ Skipped ' + msg.brokenSets.length + ' component set(s) Figma reports as having errors: ' +
+            msg.brokenSets.join(', ') + '.', 'warn')
+        logFix('Their variants cannot switch until the conflict is fixed in Figma — open the set and resolve the duplicate/incomplete variant. Everything else in the template still works.')
+      }
       break
     case 'groups':
       state.groupCounts = msg.counts || null
