@@ -54,6 +54,20 @@ async function fetchAllTasks(
   supabase: ReturnType<typeof createAdminClient>,
   hasDeletedAt: boolean,
   selectClause: string,
+  /**
+   * Opt-in escape hatch (`?history=all`). Loads every task regardless of age,
+   * exactly as this function did before the window was introduced.
+   *
+   * SECURITY: this is deliberately a SERVER-side widening. It reuses this same
+   * admin-client query and therefore stays behind the identical downstream
+   * pipeline — stripTaskListPricing, filterTasksByVisibility and
+   * scopeTasksByUnit all still run on the result. It is NOT the browser
+   * DB-search path (that one uses the RLS-scoped anon client, which cannot
+   * reproduce the service/unit visibility model and so remains admin-only).
+   * Widening the window therefore cannot reveal a task the viewer could not
+   * already see; it only changes how far back we look.
+   */
+  fullHistory = false,
 ) {
   const PAGE = 1000
   const MAX_PAGES = 50
@@ -68,10 +82,10 @@ async function fetchAllTasks(
     let q = supabase
       .from('tasks')
       .select(selectClause)
-      .or(windowFilter)
       .order('task_number', { ascending: false, nullsFirst: false })
       .order('id', { ascending: true })
       .range(page * PAGE, (page + 1) * PAGE - 1)
+    if (!fullHistory) q = q.or(windowFilter)
     if (hasDeletedAt) q = q.is('deleted_at', null)
 
     const { data, error } = await q
@@ -133,6 +147,11 @@ export default async function TasksPage({
   // or missing portal tables simply yields no prefill.
   let promotionRequest: any = null
   const sp = searchParams ? await searchParams : undefined
+  // `?history=all` widens the task window from TASKS_HISTORY_MONTHS to everything.
+  // This is the on-demand path for reaching settled tasks older than the window —
+  // notably the only one available to employees, for whom the browser DB search is
+  // (correctly) disabled. See fetchAllTasks' `fullHistory` note.
+  const fullHistory = sp?.history === 'all'
   const fromRequest = typeof sp?.fromRequest === 'string' ? sp.fromRequest : null
   if (fromRequest) {
     try {
@@ -217,7 +236,7 @@ export default async function TasksPage({
     groupsRes, paramsRes, groupServicesRes, paramServicesRes,
     taskGroupsRes, taskGroupAssignmentsRes, taskParamAssignmentsRes, myTaskIds,
     visibilityBillingRes, visibilityContribRes, visibilityNamesRes, myServiceIds, unitScope] = await Promise.all([
-    fetchAllTasks(supabase, hasDeletedAt, selectClause),
+    fetchAllTasks(supabase, hasDeletedAt, selectClause, fullHistory),
     // Real DB count of all tasks (used for the "DB search" fallback in the UI).
     hasDeletedAt
       ? supabase.from('tasks').select('id', { count: 'exact', head: true }).is('deleted_at', null)
@@ -373,6 +392,7 @@ export default async function TasksPage({
       initialService={initialService}
       initialDateRange={initialDateRange}
       dbTaskTotal={dbCountRes.count ?? undefined}
+      fullHistory={fullHistory}
       initialTasks={initialTasks}
       initialTrash={initialTrash}
       clients={clientsRes.data || []}

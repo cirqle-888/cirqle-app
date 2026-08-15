@@ -172,6 +172,8 @@ interface Props {
   /** Count of new/unstarted external requests — badge on the Requests button. */
   pendingRequestCount?: number
   dbTaskTotal?: number
+  /** True when the page was rendered with `?history=all` (window bypassed). */
+  fullHistory?: boolean
   initialTasks: Task[]
   initialTrash: (Task & { deleted_at: string })[]
   clients: { id: string; name: string; code: string }[]
@@ -337,8 +339,20 @@ function SortablePanelRow({ id, label, onUp, onDown, isFirst, isLast }: {
   )
 }
 
-export default function TasksClient({ promotionRequest, requestRefByTaskId = {}, pendingRequestCount = 0, initialSearch = '', initialClient = '', initialService = '', initialDateRange = null, dbTaskTotal, initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, myTaskIds, visibilitySettings, permissionFlags }: Props) {
+export default function TasksClient({ promotionRequest, requestRefByTaskId = {}, pendingRequestCount = 0, initialSearch = '', initialClient = '', initialService = '', initialDateRange = null, dbTaskTotal, fullHistory = false, initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, myTaskIds, visibilitySettings, permissionFlags }: Props) {
   const { role, employee: currentEmployee } = useRole()
+  // Browser DB search runs through the anon/RLS client, which cannot reproduce
+  // the server's service- and unit-scoped visibility model — so it is, and must
+  // remain, unavailable to employees (runDbSearch guards on this too). Employees
+  // reach older tasks through `?history=all`, which widens the SERVER query and
+  // keeps every visibility filter in place.
+  //
+  // This flag also fixes a real defect: the affordances below used to key only on
+  // `dbTaskTotal > tasks.length`, so any viewer with a partial set — every
+  // service-scoped employee even before the history window existed — was shown a
+  // "Search DB" button that silently did nothing.
+  const canDbSearch = role !== 'employee'
+
   const { can } = usePermissions()
   const { toasts, dismiss, success, error: toastError } = useToast()
   const { dn } = usePrivacy()
@@ -1810,6 +1824,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
   // result is definitive and a DB round-trip would just be wasted latency.
   useEffect(() => {
     if (dbMode) return                    // already in DB mode, don't re-trigger
+    if (!canDbSearch) return              // employees: runDbSearch is a no-op for them
     if (!searchQ.trim() && !filterClient) return  // need at least a search or client filter
     if (filteredTasks.length > 0) return  // local results exist — no need to hit DB
     // Skip if loaded set is complete (DB has nothing extra)
@@ -2513,12 +2528,26 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                 </div>
               )}
 
-              {/* ── Search Database button ──
-                  Only shown when not all tasks are loaded (i.e. DB has more rows
-                  than memory). With ≤10K tasks total this never appears since
-                  page.tsx now paginates the full set into memory. */}
+              {/* ── Search Database / Load full history ──
+                  Shown when the in-memory set is smaller than the DB (either the
+                  12-month task window, or visibility scoping trimming the list).
+                  Admins get the browser DB search; employees get the server-side
+                  full-history reload, because DB search cannot honour their
+                  scoping. Hidden entirely once everything is loaded. */}
               {(() => {
                 const allLoaded = dbTaskTotal != null && dbTaskTotal <= tasks.length
+                if (!canDbSearch) {
+                  if (fullHistory || allLoaded) return null
+                  return (
+                    <Link
+                      href="/dashboard/tasks?history=all"
+                      title="Load every task, including settled ones older than the default window"
+                      className="flex items-center gap-1.5 h-[34px] px-3 rounded-xl text-xs font-medium border border-violet-500/30 bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 transition-colors shrink-0"
+                    >
+                      <Clock size={12} /> Load full history
+                    </Link>
+                  )
+                }
                 if (allLoaded && !dbMode) return null
                 return !dbMode ? (
                   <button
@@ -2673,7 +2702,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                   <p className="text-sm text-muted-foreground mb-3">
                     {dbMode ? 'No tasks found in database matching your filters.' : 'No tasks found.'}
                   </p>
-                  {!dbMode && dbTaskTotal != null && dbTaskTotal > tasks.length && (
+                  {!dbMode && canDbSearch && dbTaskTotal != null && dbTaskTotal > tasks.length && (
                     <button
                       onClick={() => runDbSearch(0)}
                       disabled={dbModeLoading}
@@ -2682,6 +2711,15 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                       <Search size={12} />
                       {dbModeLoading ? 'Searching database…' : 'Search entire database with these filters'}
                     </button>
+                  )}
+                  {!dbMode && !canDbSearch && !fullHistory && dbTaskTotal != null && dbTaskTotal > tasks.length && (
+                    <Link
+                      href="/dashboard/tasks?history=all"
+                      className="inline-flex items-center gap-1.5 text-xs text-violet-400 hover:text-violet-700 dark:text-violet-300 border border-violet-500/30 hover:border-violet-500/50 rounded-lg px-3 py-1.5 transition-colors bg-violet-500/5 hover:bg-violet-500/10"
+                    >
+                      <Clock size={12} />
+                      Load full history
+                    </Link>
                   )}
                 </td></tr>
               )}
