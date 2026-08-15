@@ -1877,6 +1877,20 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
     return counts
   }, [tasks, filterClient, filterService, filterDate, assigneeTaskIdSet])
 
+  // Settled statuses (done / invoiced / cancelled) are only loaded inside the
+  // TASKS_HISTORY_MONTHS window, so their counts are a FLOOR, not a total. Live
+  // statuses are always loaded in full at any age, so those stay exact.
+  // Presenting a windowed number as if it were authoritative is what made
+  // "Done 830" read as fact when the database holds 1,750 — mark it instead.
+  const countsArePartial = !fullHistory && dbTaskTotal != null && dbTaskTotal > tasks.length
+  const EXACT_COUNT_STATUSES = ['pending', 'in_progress', 'delivered']
+  const isPartialCount = (key: string) => countsArePartial && !EXACT_COUNT_STATUSES.includes(key)
+  const fmtStatusCount = (key: string, n: number) => isPartialCount(key) ? `${n}+` : `${n}`
+  const partialCountTitle = (key: string, label: string, n: number) =>
+    isPartialCount(key)
+      ? `${n} ${label.toLowerCase()} tasks loaded. Older ones sit outside the default history window — use "Load full history" (or "Search DB") for the true total.`
+      : undefined
+
   // Client filter options: merge active clients (from props) with any unique clients
   // found in loaded tasks — this ensures inactive clients like old imported ones still appear
   const clientFilterOptions = useMemo(() => {
@@ -2475,8 +2489,8 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
               {/* Status chips — compact */}
               <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
                 className="sm:hidden h-[30px] px-2 rounded-xl text-xs font-medium bg-secondary border border-border text-foreground focus:outline-none cursor-pointer w-full">
-                <option value="">All ({statusCounts.all})</option>
-                {STATUSES.filter(s => CORE_STATUSES.includes(s) || (statusCounts[s] ?? 0) > 0).map(s => <option key={s} value={s}>{getStatusLabel(s)} ({statusCounts[s] ?? 0})</option>)}
+                <option value="">All ({fmtStatusCount('', statusCounts.all)})</option>
+                {STATUSES.filter(s => CORE_STATUSES.includes(s) || (statusCounts[s] ?? 0) > 0).map(s => <option key={s} value={s}>{getStatusLabel(s)} ({fmtStatusCount(s, statusCounts[s] ?? 0)})</option>)}
               </select>
               {([
                 { key: '', label: 'All' },
@@ -2487,6 +2501,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                 const active = filterStatus === key
                 return (
                   <button key={key} onClick={() => setFilterStatus(key)}
+                    title={partialCountTitle(key, label, count)}
                     className={`hidden sm:flex h-[30px] px-2.5 rounded-xl text-xs font-medium transition-colors cursor-pointer items-center gap-1 shrink-0 ${
                       active ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground'
                     }`}
@@ -2494,7 +2509,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                     {label}
                     <span className={`text-[10px] font-semibold px-1 py-0.5 rounded ${
                       active ? 'bg-foreground/20 text-white' : 'bg-border/50 opacity-60'
-                    }`}>{count}</span>
+                    }`}>{fmtStatusCount(key, count)}</span>
                   </button>
                 )
               })}
