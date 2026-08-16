@@ -8,7 +8,7 @@ import Header from '@/components/layout/header'
 import AppSelect from '@/components/ui/app-select'
 import { createClient as createSupabaseClient } from '@/lib/supabase/client'
 import {
-  upsertCompanySettings,
+  upsertCompanySettings, createBrandingUploadUrl,
   createEmployee, updateEmployee,
   createClient, updateClient, upsertClientServicePricings, deactivateClientServices,
   createService, updateService, deactivateService, reactivateService, quickEditService,
@@ -851,7 +851,7 @@ export default function SettingsClient(props: Props) {
           <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1">Section</label>
           <select
             value={tab}
-            onChange={e => {
+            onChange={async e => {
               const t = e.target.value as SettingsTab
               setTab(t); setQuickEdit(false)
               window.history.replaceState(null, '', `?tab=${t.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`)
@@ -1002,12 +1002,16 @@ export default function SettingsClient(props: Props) {
                         Upload logo
                         <input
                           type="file" accept="image/*" className="hidden"
-                          onChange={e => {
+                          onChange={async e => {
                             const file = e.target.files?.[0]
                             if (!file) return
-                            const reader = new FileReader()
-                            reader.onload = ev => setCompanySettings(p => ({ ...p, logo_url: ev.target?.result as string }))
-                            reader.readAsDataURL(file)
+                                                        const supabase = createSupabaseClient()
+                            const prep = await createBrandingUploadUrl({ key: 'logo_url', fileName: file.name })
+                            if (!prep.ok || !prep.data) { alert('Upload failed: ' + prep.error); return }
+                            const { error: upErr } = await supabase.storage.from('company-branding').uploadToSignedUrl(prep.data.storagePath, prep.data.token, file)
+                            if (upErr) { alert('Upload failed: ' + upErr.message); return }
+                            const { data: pubData } = supabase.storage.from('company-branding').getPublicUrl(prep.data.storagePath)
+                            setCompanySettings(p => ({ ...p, logo_url: pubData.publicUrl }))
                           }}
                         />
                       </label>
@@ -1041,12 +1045,16 @@ export default function SettingsClient(props: Props) {
                         Upload dark logo
                         <input
                           type="file" accept="image/*" className="hidden"
-                          onChange={e => {
+                          onChange={async e => {
                             const file = e.target.files?.[0]
                             if (!file) return
-                            const reader = new FileReader()
-                            reader.onload = ev => setCompanySettings(p => ({ ...p, logo_url_dark: ev.target?.result as string }))
-                            reader.readAsDataURL(file)
+                                                        const supabase = createSupabaseClient()
+                            const prep = await createBrandingUploadUrl({ key: 'logo_url_dark', fileName: file.name })
+                            if (!prep.ok || !prep.data) { alert('Upload failed: ' + prep.error); return }
+                            const { error: upErr } = await supabase.storage.from('company-branding').uploadToSignedUrl(prep.data.storagePath, prep.data.token, file)
+                            if (upErr) { alert('Upload failed: ' + upErr.message); return }
+                            const { data: pubData } = supabase.storage.from('company-branding').getPublicUrl(prep.data.storagePath)
+                            setCompanySettings(p => ({ ...p, logo_url_dark: pubData.publicUrl }))
                           }}
                         />
                       </label>
@@ -1091,12 +1099,16 @@ export default function SettingsClient(props: Props) {
                       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                       Upload favicon
                       <input type="file" accept="image/*,.svg,.ico" className="hidden"
-                        onChange={e => {
+                        onChange={async e => {
                           const file = e.target.files?.[0]
                           if (!file) return
-                          const reader = new FileReader()
-                          reader.onload = ev => setCompanySettings(p => ({ ...p, favicon_url: ev.target?.result as string }))
-                          reader.readAsDataURL(file)
+                                                      const supabase = createSupabaseClient()
+                            const prep = await createBrandingUploadUrl({ key: 'favicon_url', fileName: file.name })
+                            if (!prep.ok || !prep.data) { alert('Upload failed: ' + prep.error); return }
+                            const { error: upErr } = await supabase.storage.from('company-branding').uploadToSignedUrl(prep.data.storagePath, prep.data.token, file)
+                            if (upErr) { alert('Upload failed: ' + upErr.message); return }
+                            const { data: pubData } = supabase.storage.from('company-branding').getPublicUrl(prep.data.storagePath)
+                            setCompanySettings(p => ({ ...p, favicon_url: pubData.publicUrl }))
                         }}
                       />
                     </label>
@@ -1174,12 +1186,16 @@ export default function SettingsClient(props: Props) {
                       Upload custom QR
                       <input
                         type="file" accept="image/*" className="hidden"
-                        onChange={e => {
+                        onChange={async e => {
                           const file = e.target.files?.[0]
                           if (!file) return
-                          const reader = new FileReader()
-                          reader.onload = ev => setCompanySettings(p => ({ ...p, invoice_qr_image_url: ev.target?.result as string }))
-                          reader.readAsDataURL(file)
+                                                      const supabase = createSupabaseClient()
+                            const prep = await createBrandingUploadUrl({ key: 'invoice_qr_image_url', fileName: file.name })
+                            if (!prep.ok || !prep.data) { alert('Upload failed: ' + prep.error); return }
+                            const { error: upErr } = await supabase.storage.from('company-branding').uploadToSignedUrl(prep.data.storagePath, prep.data.token, file)
+                            if (upErr) { alert('Upload failed: ' + upErr.message); return }
+                            const { data: pubData } = supabase.storage.from('company-branding').getPublicUrl(prep.data.storagePath)
+                            setCompanySettings(p => ({ ...p, invoice_qr_image_url: pubData.publicUrl }))
                         }}
                       />
                     </label>
@@ -1489,12 +1505,16 @@ export default function SettingsClient(props: Props) {
                           <label className="block text-[10px] font-medium text-muted-foreground mb-1">Top Image</label>
                           <label className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-secondary border border-border text-xs text-muted-foreground hover:text-foreground hover:border-border/80 cursor-pointer transition-colors">
                             Upload Top
-                            <input type="file" accept="image/*" className="hidden" onChange={e => {
+                            <input type="file" accept="image/*" className="hidden" onChange={async e => {
                               const file = e.target.files?.[0]
                               if (!file) return
-                              const reader = new FileReader()
-                              reader.onload = ev => setCompanySettings(p => ({ ...p, invoice_bg_image_top_url: ev.target?.result as string }))
-                              reader.readAsDataURL(file)
+                                                          const supabase = createSupabaseClient()
+                            const prep = await createBrandingUploadUrl({ key: 'invoice_bg_image_top_url', fileName: file.name })
+                            if (!prep.ok || !prep.data) { alert('Upload failed: ' + prep.error); return }
+                            const { error: upErr } = await supabase.storage.from('company-branding').uploadToSignedUrl(prep.data.storagePath, prep.data.token, file)
+                            if (upErr) { alert('Upload failed: ' + upErr.message); return }
+                            const { data: pubData } = supabase.storage.from('company-branding').getPublicUrl(prep.data.storagePath)
+                            setCompanySettings(p => ({ ...p, invoice_bg_image_top_url: pubData.publicUrl }))
                             }} />
                           </label>
                           {companySettings['invoice_bg_image_top_url'] && (
@@ -1508,12 +1528,16 @@ export default function SettingsClient(props: Props) {
                           <label className="block text-[10px] font-medium text-muted-foreground mb-1">Bottom Image</label>
                           <label className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-secondary border border-border text-xs text-muted-foreground hover:text-foreground hover:border-border/80 cursor-pointer transition-colors">
                             Upload Bottom
-                            <input type="file" accept="image/*" className="hidden" onChange={e => {
+                            <input type="file" accept="image/*" className="hidden" onChange={async e => {
                               const file = e.target.files?.[0]
                               if (!file) return
-                              const reader = new FileReader()
-                              reader.onload = ev => setCompanySettings(p => ({ ...p, invoice_bg_image_bottom_url: ev.target?.result as string }))
-                              reader.readAsDataURL(file)
+                                                          const supabase = createSupabaseClient()
+                            const prep = await createBrandingUploadUrl({ key: 'invoice_bg_image_bottom_url', fileName: file.name })
+                            if (!prep.ok || !prep.data) { alert('Upload failed: ' + prep.error); return }
+                            const { error: upErr } = await supabase.storage.from('company-branding').uploadToSignedUrl(prep.data.storagePath, prep.data.token, file)
+                            if (upErr) { alert('Upload failed: ' + upErr.message); return }
+                            const { data: pubData } = supabase.storage.from('company-branding').getPublicUrl(prep.data.storagePath)
+                            setCompanySettings(p => ({ ...p, invoice_bg_image_bottom_url: pubData.publicUrl }))
                             }} />
                           </label>
                           {companySettings['invoice_bg_image_bottom_url'] && (
@@ -1854,6 +1878,9 @@ export default function SettingsClient(props: Props) {
                         </svg>
                       </button>
 
+                      <Link href={`/dashboard/employees/${emp.id}`} className="p-1.5 rounded-lg hover:bg-blue-500/10 text-muted-foreground hover:text-blue-600 dark:hover:text-blue-400 transition-colors" title="View Profile">
+                        <UserCog className="w-4 h-4" />
+                      </Link>
                       <button onClick={() => openEmployeeForm(emp)} className="p-1.5 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground" title="Edit">
                         <Edit2 className="w-4 h-4" />
                       </button>

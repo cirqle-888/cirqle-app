@@ -1,3 +1,4 @@
+import { resolveEarning, CommissionAgreement } from '@/lib/agreements/resolve-earning'
 /**
  * Contribution Analysis Report — shared types + pure helpers.
  *
@@ -9,7 +10,7 @@
  * summary / export), so everything here is pure and isomorphic.
  */
 
-export type EarningSource = 'contribution' | 'manual_override'
+export type EarningSource = 'contribution' | 'manual_override' | 'agreement'
 
 // ─── Column / row shapes ──────────────────────────────────────────────────────
 
@@ -98,7 +99,9 @@ export interface RawPricing {
   commission_percentage: number | null
 }
 
-const r2 = (n: number) => Math.round(n * 100) / 100
+// Canonical money rounding — a local Math.round(n * 100) / 100 disagrees at
+// the .xx5 midpoints (1.005 -> 1.00 instead of 1.01). See currency.ts round2.
+import { round2 as r2 } from '@/lib/calculations/currency'
 
 /**
  * Assemble one AnalysisRow per task. Pure — runs on the server during the page
@@ -119,6 +122,8 @@ export function buildAnalysisRows(
   toolPctByTask: Map<string, number> = new Map(),
   /** Rating assumed when an employee has no record (neutral = no penalty). */
   defaultPerformanceRating = 100,
+  agreements: CommissionAgreement[] = [],
+  rates: Record<string, number> = {}
 ): AnalysisRow[] {
   // HISTORICAL READER CONTRACT: `pricing` must be passed in UNFILTERED by
   // is_active. is_active governs what a client may be SOLD today, never what
@@ -166,11 +171,22 @@ export function buildAnalysisRows(
       // Recomputed from CURRENT billing + rating so the report always matches
       // the live Contributions page, even after a billing/quantity edit (stored
       // earnings_inr can be stale until the contribution is re-saved).
-      const earn = r2(remainingPool * (pct / 100) * (rating / 100))
-      const source: EarningSource = s.is_manual_override ? 'manual_override' : 'contribution'
+      const normalEarn = r2(remainingPool * (pct / 100) * (rating / 100))
+      const resolved = resolveEarning({
+        employeeId: s.employee_id,
+        taskDate: t.task_date!,
+        clientId: t.client_id,
+        serviceId: t.service_id,
+        normalEarning: normalEarn,
+        isManualOverride: s.is_manual_override || false,
+        agreements,
+        billingAmountInr: billing_inr,
+        remainingPool,
+        rates
+      })
 
-      emp[s.employee_id] = { pct: r2(pct), earn, source }
-      total_earnings += earn
+      emp[s.employee_id] = { pct: r2(pct), earn: resolved.earnings_inr, source: resolved.earning_source }
+      total_earnings += resolved.earnings_inr
       if (pct > 0) contributors++
     }
     total_earnings = r2(total_earnings)
@@ -282,7 +298,7 @@ export type SortKey =
 /** Employee earnings as a % of the task's INR billing (revenue share). */
 export function empShare(row: AnalysisRow, employeeId: string): number {
   const earn = row.emp[employeeId]?.earn ?? 0
-  return row.billing_inr > 0 ? Math.round(earn / row.billing_inr * 100 * 100) / 100 : 0
+  return row.billing_inr > 0 ? r2((earn / row.billing_inr) * 100) : 0
 }
 
 function sortValue(row: AnalysisRow, key: SortKey): number | string {

@@ -5,7 +5,10 @@ import { isTaskMonthProtected } from '@/lib/payroll/compute'
 import { getInvoiceDateForTaskMonth, toSequenceMonth } from '@/lib/invoices/numbering'
 import { fetchAll } from '@/lib/supabase/server'
 
-const r2 = (n: number) => Math.round(n * 100) / 100
+// Canonical money rounding — a local Math.round(n * 100) / 100 disagrees at
+// the .xx5 midpoints (1.005 -> 1.00 instead of 1.01). See currency.ts round2.
+import { round2 as r2 } from '@/lib/calculations/currency'
+import { resolveEarning, CommissionAgreement } from '@/lib/agreements/resolve-earning'
 
 /**
  * Fallback refresh for tasks that have contribution SCORES but no raw
@@ -78,6 +81,12 @@ export async function refreshStoredEarningsFromBilling(taskId: string) {
   const rating = new Map<string, number>()
   for (const e of (emps || [])) rating.set(e.id, Number(e.performance_rating) || 100)
 
+  // Fetch agreements & rates for resolveEarning
+  const { data: agreementsData } = await supabase.from('employee_commission_agreements').select('*').in('employee_id', empIds).eq('is_active', true)
+  const agreements = (agreementsData || []) as CommissionAgreement[]
+  const { data: ratesData } = await supabase.from('exchange_rates').select('currency, rate_to_inr')
+  const rates = (ratesData || []).reduce((acc: any, r: any) => ({ ...acc, [r.currency]: Number(r.rate_to_inr) || 1 }), { INR: 1 })
+
   const pool = (task.billing_amount_inr || 0) * commPct / 100
   const remainingPool = pool * (1 - toolPct / 100)
 
@@ -87,10 +96,33 @@ export async function refreshStoredEarningsFromBilling(taskId: string) {
     // touch manual overrides (same rule as the full engine).
     if (!(s.score_percentage && s.score_percentage > 0)) continue
     if (s.is_manual_override) continue
-    const newEarn = r2(remainingPool * (s.score_percentage / 100) * ((rating.get(s.employee_id!) ?? 100) / 100))
-    if (Math.abs((s.earnings_inr || 0) - newEarn) > 0.01) {
+    
+    const normalEarn = r2(remainingPool * (s.score_percentage / 100) * ((rating.get(s.employee_id!) ?? 100) / 100))
+    
+    const resolved = resolveEarning({
+      employeeId: s.employee_id!,
+      taskDate: task.task_date!,
+      clientId: task.client_id,
+      serviceId: task.service_id,
+      normalEarning: normalEarn,
+      isManualOverride: false,
+      agreements,
+      billingAmountInr: task.billing_amount_inr || 0,
+      remainingPool,
+      rates
+    })
+
+    if (
+      Math.abs((s.earnings_inr || 0) - resolved.earnings_inr) > 0.01 ||
+      (s as any).earning_source !== resolved.earning_source ||
+      (s as any).agreement_id !== resolved.agreement_id
+    ) {
       await supabase.from('contribution_scores')
-        .update({ earnings_inr: newEarn })
+        .update({ 
+          earnings_inr: resolved.earnings_inr,
+          earning_source: resolved.earning_source,
+          agreement_id: resolved.agreement_id
+        })
         .eq('task_id', taskId).eq('employee_id', s.employee_id!)
       updated++
     }
@@ -131,7 +163,7 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
 
   // 3. Fetch Reference Data
   const [
-    employeesRes, groupsRes, parametersRes, toolsRes, toolServicesRes, groupServicesRes, pricingRes, historyRes, taskToolsRes, oldScoresRes, ratesRes
+    employeesRes, groupsRes, parametersRes, toolsRes, toolServicesRes, groupServicesRes, pricingRes, historyRes, taskToolsRes, oldScoresRes, ratesRes, agreementsRes
   ] = await Promise.all([
     supabase.from('employees').select('id, cqid, name, performance_rating, role'),
     // Active-only — the scoring UIs (contributions page, task edit panel) are
@@ -146,7 +178,8 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
     (supabase as any).from('employee_performance_history').select('*').order('effective_from', { ascending: false }),
     supabase.from('task_tools').select('tool_id').eq('task_id', taskId),
     supabase.from('contribution_scores').select('*').eq('task_id', taskId),
-    supabase.from('exchange_rates').select('currency, rate_to_inr')
+    supabase.from('exchange_rates').select('currency, rate_to_inr'),
+    supabase.from('employee_commission_agreements').select('*').eq('is_active', true)
   ])
 
   const employees = employeesRes.data || []
@@ -159,6 +192,7 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
   const performanceHistory = historyRes.data || []
   const taskToolsData = taskToolsRes.data || []
   const oldScores = oldScoresRes.data || []
+  const agreements = (agreementsRes?.data || []) as CommissionAgreement[]
 
   const linkedGroupIds = groupServices.filter(gs => gs.service_id === task.service_id).map(gs => gs.group_id)
   const taskGroups = linkedGroupIds.length > 0 ? groups.filter(g => linkedGroupIds.includes(g.id)) : groups
@@ -206,22 +240,44 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
 
     const upsertBatch: any[] = []
 
+    // Calculate remaining pool for agreements (billing - tool deductions)
+    const toolPct = taskToolsForCalc.reduce((sum, t) => sum + (t.used ? Number(t.tool.fixed_percentage || 0) : 0), 0)
+    const pool = internalValueInr * commPct / 100
+    const remainingPool = pool * (1 - toolPct / 100)
+
     result.employeeEarnings.forEach(e => {
       const oldScore = oldScores.find(s => s.employee_id === e.employeeId)
       
-      if (oldScore) {
-        if (oldScore.is_manual_override) return // Do not touch manual overrides
+      if (oldScore && oldScore.is_manual_override) return // Do not touch manual overrides
 
+      const resolved = resolveEarning({
+        employeeId: e.employeeId,
+        taskDate: task.task_date!,
+        clientId: task.client_id,
+        serviceId: task.service_id,
+        normalEarning: e.earnings,
+        isManualOverride: false,
+        agreements,
+        billingAmountInr: internalValueInr,
+        remainingPool,
+        rates
+      })
+
+      if (oldScore) {
         const hasDiff = 
-          Math.abs((oldScore.earnings_inr || 0) - e.earnings) > 0.01 ||
-          Math.abs((oldScore.score_percentage || 0) - e.scorePercentage) > 0.01
+          Math.abs((oldScore.earnings_inr || 0) - resolved.earnings_inr) > 0.01 ||
+          Math.abs((oldScore.score_percentage || 0) - e.scorePercentage) > 0.01 ||
+          (oldScore as any).earning_source !== resolved.earning_source ||
+          (oldScore as any).agreement_id !== resolved.agreement_id
 
         if (hasDiff) {
           upsertBatch.push({
             task_id: task.id,
             employee_id: e.employeeId,
             score_percentage: e.scorePercentage,
-            earnings_inr: e.earnings,
+            earnings_inr: resolved.earnings_inr,
+            earning_source: resolved.earning_source,
+            agreement_id: resolved.agreement_id,
             // Column names must match the table: previous_earnings /
             // previous_performance_rating. The old payload named three columns
             // that do not exist, so every upsert failed PGRST204 — silently,
@@ -237,7 +293,9 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
           task_id: task.id,
           employee_id: e.employeeId,
           score_percentage: e.scorePercentage,
-          earnings_inr: e.earnings,
+          earnings_inr: resolved.earnings_inr,
+          earning_source: resolved.earning_source,
+          agreement_id: resolved.agreement_id,
         })
       }
     })
