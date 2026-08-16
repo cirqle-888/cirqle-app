@@ -17,7 +17,7 @@ export default function EmployeeProfileClient({ employee, agreements: initialAgr
   const [editingId, setEditingId] = useState<string | null>(null)
   
   const [form, setForm] = useState<any>({})
-  const { toast } = useToast()
+  const toast = useToast()
   const supabase = createSupabaseClient()
 
   const openForm = (a?: CommissionAgreement) => {
@@ -55,7 +55,7 @@ export default function EmployeeProfileClient({ employee, agreements: initialAgr
   const saveAgreement = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!canManageAgreements) {
-      return toast('error', 'Unauthorized to manage agreements')
+      return toast.error('Unauthorized to manage agreements')
     }
     
     // Warn on percentage > 100
@@ -81,14 +81,14 @@ export default function EmployeeProfileClient({ employee, agreements: initialAgr
 
     if (editingId) {
       const { error } = await supabase.from('employee_commission_agreements').update(payload).eq('id', editingId)
-      if (error) return toast('error', 'Failed to update agreement')
+      if (error) return toast.error('Failed to update agreement')
       setAgreements(agreements.map(a => a.id === editingId ? { ...a, ...payload } : a))
-      toast('success', 'Agreement updated')
+      toast.success('Agreement updated')
     } else {
       const { data, error } = await supabase.from('employee_commission_agreements').insert(payload).select().single()
-      if (error) return toast('error', 'Failed to create agreement')
+      if (error) return toast.error('Failed to create agreement')
       setAgreements([data, ...agreements])
-      toast('success', 'Agreement created')
+      toast.success('Agreement created')
     }
     
     setShowForm(false)
