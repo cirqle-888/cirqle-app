@@ -9,6 +9,7 @@ export interface CommissionAgreement {
   effective_from: string
   effective_to: string | null
   is_active: boolean
+  notes?: string | null
   created_at: string
 }
 
