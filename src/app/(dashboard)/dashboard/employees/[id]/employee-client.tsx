@@ -96,7 +96,7 @@ export default function EmployeeProfileClient({ employee, agreements: initialAgr
 
   return (
     <main className="min-h-screen bg-background">
-      <ToastContainer />
+      <ToastContainer toasts={toast.toasts} onDismiss={toast.dismiss} />
       <Header />
       
       <div className="max-w-6xl mx-auto px-4 py-8">
