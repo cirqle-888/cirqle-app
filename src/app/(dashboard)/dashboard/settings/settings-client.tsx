@@ -25,6 +25,7 @@ import {
 import { Plus, X, Edit2, Archive, ArchiveRestore, Save, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Mail, Send, RotateCcw as ResetKey, RefreshCw, Star, Building2, MapPin, Users } from 'lucide-react'
 import type { Currency } from '@/types'
 import InfoTip from '@/components/ui/info-tip'
+import { resolveBrandingUrl } from '@/lib/utils/branding'
 import { usePrivacy, getStoredPin, setStoredPin, isForceLocked } from '@/contexts/privacy-context'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { useToast, ToastContainer } from '@/components/ui/toast'
@@ -1008,10 +1009,9 @@ export default function SettingsClient(props: Props) {
                                                         const supabase = createSupabaseClient()
                             const prep = await createBrandingUploadUrl({ key: 'logo_url', fileName: file.name })
                             if (!prep.ok || !prep.data) { alert('Upload failed: ' + prep.error); return }
-                            const { error: upErr } = await supabase.storage.from('company-branding').uploadToSignedUrl(prep.data.storagePath, prep.data.token, file)
+                            const { error: upErr } = await supabase.storage.from('company-branding').uploadToSignedUrl(prep.data!.storagePath, prep.data!.token, file)
                             if (upErr) { alert('Upload failed: ' + upErr.message); return }
-                            const { data: pubData } = supabase.storage.from('company-branding').getPublicUrl(prep.data.storagePath)
-                            setCompanySettings(p => ({ ...p, logo_url: pubData.publicUrl }))
+                            setCompanySettings(p => ({ ...p, logo_url: `storage:company-branding/${prep.data!.storagePath}` }))
                           }}
                         />
                       </label>
@@ -1026,7 +1026,7 @@ export default function SettingsClient(props: Props) {
                     {companySettings['logo_url'] && (
                       <div className="mt-2 flex items-center gap-2">
                         {/* Preview on white — this is the light-mode logo */}
-                        <img src={companySettings['logo_url']} alt="Light logo preview" className="h-10 object-contain rounded-lg border border-border bg-white p-1.5" />
+                        <img src={resolveBrandingUrl(companySettings['logo_url'])} alt="Light logo preview" className="h-10 object-contain rounded-lg border border-border bg-white p-1.5" />
                         <button type="button" onClick={() => setCompanySettings(p => ({ ...p, logo_url: '' }))}
                           className="text-xs text-red-400 hover:text-red-700 dark:text-red-300 transition-colors">Remove</button>
                       </div>
@@ -1051,10 +1051,9 @@ export default function SettingsClient(props: Props) {
                                                         const supabase = createSupabaseClient()
                             const prep = await createBrandingUploadUrl({ key: 'logo_url_dark', fileName: file.name })
                             if (!prep.ok || !prep.data) { alert('Upload failed: ' + prep.error); return }
-                            const { error: upErr } = await supabase.storage.from('company-branding').uploadToSignedUrl(prep.data.storagePath, prep.data.token, file)
+                            const { error: upErr } = await supabase.storage.from('company-branding').uploadToSignedUrl(prep.data!.storagePath, prep.data!.token, file)
                             if (upErr) { alert('Upload failed: ' + upErr.message); return }
-                            const { data: pubData } = supabase.storage.from('company-branding').getPublicUrl(prep.data.storagePath)
-                            setCompanySettings(p => ({ ...p, logo_url_dark: pubData.publicUrl }))
+                            setCompanySettings(p => ({ ...p, logo_url_dark: `storage:company-branding/${prep.data!.storagePath}` }))
                           }}
                         />
                       </label>
@@ -1069,7 +1068,7 @@ export default function SettingsClient(props: Props) {
                     {companySettings['logo_url_dark'] ? (
                       <div className="mt-2 flex items-center gap-2">
                         {/* Preview on dark bg — this is the dark-mode logo */}
-                        <img src={companySettings['logo_url_dark']} alt="Dark logo preview" className="h-10 object-contain rounded-lg border border-border bg-[#0b1120] p-1.5" />
+                        <img src={resolveBrandingUrl(companySettings['logo_url_dark'])} alt="Dark logo preview" className="h-10 object-contain rounded-lg border border-border bg-[#0b1120] p-1.5" />
                         <button type="button" onClick={() => setCompanySettings(p => ({ ...p, logo_url_dark: '' }))}
                           className="text-xs text-red-400 hover:text-red-700 dark:text-red-300 transition-colors">Remove</button>
                       </div>
@@ -1105,10 +1104,9 @@ export default function SettingsClient(props: Props) {
                                                       const supabase = createSupabaseClient()
                             const prep = await createBrandingUploadUrl({ key: 'favicon_url', fileName: file.name })
                             if (!prep.ok || !prep.data) { alert('Upload failed: ' + prep.error); return }
-                            const { error: upErr } = await supabase.storage.from('company-branding').uploadToSignedUrl(prep.data.storagePath, prep.data.token, file)
+                            const { error: upErr } = await supabase.storage.from('company-branding').uploadToSignedUrl(prep.data!.storagePath, prep.data!.token, file)
                             if (upErr) { alert('Upload failed: ' + upErr.message); return }
-                            const { data: pubData } = supabase.storage.from('company-branding').getPublicUrl(prep.data.storagePath)
-                            setCompanySettings(p => ({ ...p, favicon_url: pubData.publicUrl }))
+                            setCompanySettings(p => ({ ...p, favicon_url: `storage:company-branding/${prep.data!.storagePath}` }))
                         }}
                       />
                     </label>
@@ -1123,7 +1121,7 @@ export default function SettingsClient(props: Props) {
                   {companySettings['favicon_url'] && (
                     <div className="mt-2 flex items-center gap-2">
                       <div className="w-8 h-8 rounded border border-border bg-secondary p-0.5 flex items-center justify-center overflow-hidden">
-                        <img src={companySettings['favicon_url']} alt="Favicon preview" className="w-full h-full object-contain" />
+                        <img src={resolveBrandingUrl(companySettings['favicon_url'])} alt="Favicon preview" className="w-full h-full object-contain" />
                       </div>
                       <span className="text-xs text-muted-foreground">Preview (32×32)</span>
                       <button type="button" onClick={() => setCompanySettings(p => ({ ...p, favicon_url: '' }))}
@@ -1192,10 +1190,9 @@ export default function SettingsClient(props: Props) {
                                                       const supabase = createSupabaseClient()
                             const prep = await createBrandingUploadUrl({ key: 'invoice_qr_image_url', fileName: file.name })
                             if (!prep.ok || !prep.data) { alert('Upload failed: ' + prep.error); return }
-                            const { error: upErr } = await supabase.storage.from('company-branding').uploadToSignedUrl(prep.data.storagePath, prep.data.token, file)
+                            const { error: upErr } = await supabase.storage.from('company-branding').uploadToSignedUrl(prep.data!.storagePath, prep.data!.token, file)
                             if (upErr) { alert('Upload failed: ' + upErr.message); return }
-                            const { data: pubData } = supabase.storage.from('company-branding').getPublicUrl(prep.data.storagePath)
-                            setCompanySettings(p => ({ ...p, invoice_qr_image_url: pubData.publicUrl }))
+                            setCompanySettings(p => ({ ...p, invoice_qr_image_url: `storage:company-branding/${prep.data!.storagePath}` }))
                         }}
                       />
                     </label>
@@ -1209,7 +1206,7 @@ export default function SettingsClient(props: Props) {
                   />
                   {companySettings['invoice_qr_image_url'] && (
                     <div className="mt-2 flex items-center gap-2">
-                      <img src={companySettings['invoice_qr_image_url']} alt="QR preview" className="h-16 object-contain rounded border border-border bg-white p-1" />
+                      <img src={resolveBrandingUrl(companySettings['invoice_qr_image_url'])} alt="QR preview" className="h-16 object-contain rounded border border-border bg-white p-1" />
                       <button type="button" onClick={() => setCompanySettings(p => ({ ...p, invoice_qr_image_url: '' }))}
                         className="text-xs text-red-400 hover:text-red-700 dark:text-red-300 transition-colors">Remove</button>
                     </div>
@@ -1277,7 +1274,7 @@ export default function SettingsClient(props: Props) {
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex items-center gap-2">
                         {(companySettings['logo_url_light'] || companySettings['logo_url']) && companySettings['invoice_show_logo'] !== 'false' ? (
-                          <img src={companySettings['logo_url_light'] || companySettings['logo_url']} alt="logo" style={{ height: 36, objectFit: 'contain' }} />
+                          <img src={resolveBrandingUrl(companySettings['logo_url_light'] || companySettings['logo_url'])} alt="logo" style={{ height: 36, objectFit: 'contain' }} />
                         ) : (
                           <svg width="32" height="32" viewBox="0 0 42 42" xmlns="http://www.w3.org/2000/svg">
                             <circle cx="21" cy="21" r="20" fill="none" stroke={companySettings['invoice_primary_color'] || '#1a2744'} strokeWidth="2.5"/>
@@ -1511,15 +1508,14 @@ export default function SettingsClient(props: Props) {
                                                           const supabase = createSupabaseClient()
                             const prep = await createBrandingUploadUrl({ key: 'invoice_bg_image_top_url', fileName: file.name })
                             if (!prep.ok || !prep.data) { alert('Upload failed: ' + prep.error); return }
-                            const { error: upErr } = await supabase.storage.from('company-branding').uploadToSignedUrl(prep.data.storagePath, prep.data.token, file)
+                            const { error: upErr } = await supabase.storage.from('company-branding').uploadToSignedUrl(prep.data!.storagePath, prep.data!.token, file)
                             if (upErr) { alert('Upload failed: ' + upErr.message); return }
-                            const { data: pubData } = supabase.storage.from('company-branding').getPublicUrl(prep.data.storagePath)
-                            setCompanySettings(p => ({ ...p, invoice_bg_image_top_url: pubData.publicUrl }))
+                            setCompanySettings(p => ({ ...p, invoice_bg_image_top_url: `storage:company-branding/${prep.data!.storagePath}` }))
                             }} />
                           </label>
                           {companySettings['invoice_bg_image_top_url'] && (
                             <div className="mt-2 flex items-center justify-between">
-                              <img src={companySettings['invoice_bg_image_top_url']} alt="Top preview" className="h-10 object-contain rounded border border-border bg-white" />
+                              <img src={resolveBrandingUrl(companySettings['invoice_bg_image_top_url'])} alt="Top preview" className="h-10 object-contain rounded border border-border bg-white" />
                               <button type="button" onClick={() => setCompanySettings(p => ({ ...p, invoice_bg_image_top_url: '' }))} className="text-[10px] text-red-400 hover:text-red-700 dark:text-red-300">Remove</button>
                             </div>
                           )}
@@ -1534,15 +1530,14 @@ export default function SettingsClient(props: Props) {
                                                           const supabase = createSupabaseClient()
                             const prep = await createBrandingUploadUrl({ key: 'invoice_bg_image_bottom_url', fileName: file.name })
                             if (!prep.ok || !prep.data) { alert('Upload failed: ' + prep.error); return }
-                            const { error: upErr } = await supabase.storage.from('company-branding').uploadToSignedUrl(prep.data.storagePath, prep.data.token, file)
+                            const { error: upErr } = await supabase.storage.from('company-branding').uploadToSignedUrl(prep.data!.storagePath, prep.data!.token, file)
                             if (upErr) { alert('Upload failed: ' + upErr.message); return }
-                            const { data: pubData } = supabase.storage.from('company-branding').getPublicUrl(prep.data.storagePath)
-                            setCompanySettings(p => ({ ...p, invoice_bg_image_bottom_url: pubData.publicUrl }))
+                            setCompanySettings(p => ({ ...p, invoice_bg_image_bottom_url: `storage:company-branding/${prep.data!.storagePath}` }))
                             }} />
                           </label>
                           {companySettings['invoice_bg_image_bottom_url'] && (
                             <div className="mt-2 flex items-center justify-between">
-                              <img src={companySettings['invoice_bg_image_bottom_url']} alt="Bottom preview" className="h-10 object-contain rounded border border-border bg-white" />
+                              <img src={resolveBrandingUrl(companySettings['invoice_bg_image_bottom_url'])} alt="Bottom preview" className="h-10 object-contain rounded border border-border bg-white" />
                               <button type="button" onClick={() => setCompanySettings(p => ({ ...p, invoice_bg_image_bottom_url: '' }))} className="text-[10px] text-red-400 hover:text-red-700 dark:text-red-300">Remove</button>
                             </div>
                           )}

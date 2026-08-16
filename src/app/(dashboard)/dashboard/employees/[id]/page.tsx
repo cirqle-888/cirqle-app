@@ -1,7 +1,7 @@
 import { createTypedAdminClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import EmployeeProfileClient from './employee-client'
-import { checkServerPermission } from '@/lib/permissions/check'
+import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 
 export default async function EmployeeProfilePage({ params }: { params: { id: string } }) {
   const supabase = createTypedAdminClient()
@@ -17,7 +17,8 @@ export default async function EmployeeProfilePage({ params }: { params: { id: st
 
   // Ensure they have permission to view this page. Basic employee view is generally available,
   // but we can check if they can manage agreements to show that tab.
-  const canManageAgreements = await checkServerPermission('employees.manage_agreements')
+  const user = await loadCurrentUser()
+  const canManageAgreements = hasPermission(user, 'employees.manage_agreements')
 
   const [agreementsRes, clientsRes, servicesRes] = await Promise.all([
     supabase.from('employee_commission_agreements').select('*').eq('employee_id', id).order('created_at', { ascending: false }),

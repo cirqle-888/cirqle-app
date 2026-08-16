@@ -1300,3 +1300,24 @@ export async function upsertMatrixCell(
 
   return { ok: true }
 }
+
+export async function createBrandingUploadUrl(input: {
+  key: string
+  fileName: string
+}): Promise<ActionResult<{ signedUrl: string; token: string; storagePath: string }>> {
+  const auth = await requirePermission('settings.manage_company')
+  if (!auth.ok) return { ok: false, error: auth.error }
+
+  const safeName = (input.fileName || 'file').replace(/[^\w.\- ]+/g, '_').slice(0, 120)
+  const ts = Date.now()
+  // deterministic cache-busting path: key/v{timestamp}_{filename}
+  const storagePath = `${input.key}/v${ts}_${safeName}`
+
+  const admin = createAdminClient()
+  const { data, error } = await admin.storage
+    .from('company-branding')
+    .createSignedUploadUrl(storagePath)
+
+  if (error || !data) return { ok: false, error: error?.message ?? 'Could not create upload URL.' }
+  return { ok: true, data: { signedUrl: data.signedUrl, token: data.token, storagePath } }
+}
