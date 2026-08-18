@@ -7,6 +7,7 @@ import { PERMS } from '@/lib/permissions/keys'
 import { isTaskMonthProtected } from '@/lib/payroll/compute'
 import { recordAdjustments } from '@/lib/payroll/adjustments'
 import { logActivity } from '@/lib/activity/log'
+import { recalcTaskCommissions } from '@/lib/sync/integrity'
 
 // ─── Phase 3.0 — server-side contribution writes ─────────────────────────────
 
@@ -163,6 +164,12 @@ export async function saveTaskContributions(
       const { error } = await admin.from('contribution_scores').insert(rows)
       if (error) return { ok: false, error: error.message }
     }
+
+    // Re-run the commission engine so that employee commission agreements
+    // override the client-computed earnings. Without this, the ₹ figure written
+    // above is the standard contribution-based earning, and agreements are
+    // silently ignored until a manual recalc from Settings.
+    await recalcTaskCommissions(input.taskId, guard.employeeId)
 
     // NOT in a closed period. Task status is an input to revenue reporting, so
     // flipping a historical task to done as a side effect of a correction would
