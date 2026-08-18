@@ -5,6 +5,8 @@ import { getEffectivePerformanceRating } from '@/lib/calculations/performance-hi
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { isMonthFinalized } from '@/lib/payroll/compute'
 import { fetchAll, fetchAllIn } from '@/lib/supabase/server'
+import { resolveEarning } from '@/lib/agreements/resolve-earning'
+import type { CommissionAgreement } from '@/lib/agreements/resolve-earning'
 
 export async function POST(req: NextRequest) {
   try {
@@ -23,7 +25,7 @@ export async function POST(req: NextRequest) {
 
     // 1. Fetch reference data
     const [
-      employeesRes, groupsRes, parametersRes, toolsRes, toolServicesRes, groupServicesRes, pricingRes, historyRes
+      employeesRes, groupsRes, parametersRes, toolsRes, toolServicesRes, groupServicesRes, pricingRes, historyRes, ratesRes, agreementsRes
     ] = await Promise.all([
       supabase.from('employees').select('id, cqid, name, performance_rating, role'),
       // Active-only — must match the scoring UIs and recalcTaskCommissions
@@ -38,7 +40,9 @@ export async function POST(req: NextRequest) {
       // is_active governs what may be SOLD, never what was EARNED — filtering
       // here would reprice every past task on a deactivated pair.
       fetchAll(supabase.from('client_service_pricing').select('client_id, service_id, commission_percentage').order('client_id').order('service_id')),
-      supabase.from('employee_performance_history').select('*').order('effective_from', { ascending: false })
+      supabase.from('employee_performance_history').select('*').order('effective_from', { ascending: false }),
+      supabase.from('exchange_rates').select('currency, rate_to_inr'),
+      supabase.from('employee_commission_agreements').select('*').eq('is_active', true)
     ])
 
     const employees = employeesRes.data || []
@@ -49,6 +53,8 @@ export async function POST(req: NextRequest) {
     const groupServices = groupServicesRes.data || []
     const pricingMatrix = pricingRes.data || []
     const performanceHistory = historyRes.data || []
+    const rates = (ratesRes?.data || []).reduce((acc: any, r: any) => ({ ...acc, [r.currency]: Number(r.rate_to_inr) || 1 }), { INR: 1 })
+    const agreements = (agreementsRes?.data || []) as CommissionAgreement[]
 
     // 2. Fetch tasks in date range with their raw contributions, tool usage, and previous scores
     // Paged, not a bare select: this route takes an arbitrary date range, and a
@@ -204,21 +210,40 @@ export async function POST(req: NextRequest) {
         totalProcessed++
 
         if (result.employeeEarnings.length > 0) {
+          const toolPct = taskToolsForCalc.reduce((sum, t) => sum + (t.used ? Number((t.tool as any).fixed_percentage || 0) : 0), 0)
+          const pool = (task.billing_amount_inr || 0) * commPct / 100
+          const remainingPool = pool * (1 - toolPct / 100)
+
           result.employeeEarnings.forEach(e => {
             const oldScore = scoresByTaskEmp[`${task.id}:${e.employeeId}`]
             
             // Recompute what performance rating was used for this run
             const perfUsed = getEffectivePerformanceRating(e.employeeId, task.task_date, performanceHistory, employees.find(em => em.id === e.employeeId)?.performance_rating ?? 100)
 
-            if (oldScore) {
-              if (oldScore.is_manual_override) {
-                // Do not recalculate manually locked override scores
-                return;
-              }
+            if (oldScore && oldScore.is_manual_override) {
+              // Do not recalculate manually locked override scores
+              return;
+            }
 
+            const resolved = resolveEarning({
+              employeeId: e.employeeId,
+              taskDate: task.task_date!,
+              clientId: task.client_id,
+              serviceId: task.service_id,
+              normalEarning: e.earnings,
+              isManualOverride: false,
+              agreements,
+              billingAmountInr: task.billing_amount_inr || 0,
+              remainingPool,
+              rates
+            })
+
+            if (oldScore) {
               const hasDiff = 
-                Math.abs((oldScore.earnings_inr || 0) - e.earnings) > 0.01 ||
-                Math.abs((oldScore.score_percentage || 0) - e.scorePercentage) > 0.01
+                Math.abs((oldScore.earnings_inr || 0) - resolved.earnings_inr) > 0.01 ||
+                Math.abs((oldScore.score_percentage || 0) - e.scorePercentage) > 0.01 ||
+                (oldScore as any).earning_source !== resolved.earning_source ||
+                (oldScore as any).agreement_id !== resolved.agreement_id
 
               if (hasDiff) {
                 // Keep history of previous values
@@ -226,16 +251,18 @@ export async function POST(req: NextRequest) {
                   task_id: task.id,
                   employee_id: e.employeeId,
                   score_percentage: e.scorePercentage,
-                  earnings_inr: e.earnings,
-                  previous_earnings_inr: oldScore.earnings_inr || 0,
-                  previous_score_percentage: oldScore.score_percentage || 0,
-                  previous_performance_rating_used: oldScore.previous_performance_rating_used || 100, // if no previous value exists
+                  earnings_inr: resolved.earnings_inr,
+                  earning_source: resolved.earning_source,
+                  agreement_id: resolved.agreement_id,
+                  // We map previous_earnings_inr to previous_earnings because 
+                  // previous_earnings is the correct column name.
+                  previous_earnings: oldScore.earnings_inr || 0,
+                  
+                  previous_performance_rating: (oldScore as any).previous_performance_rating ?? null,
                   recalculated_at: new Date().toISOString(),
                   recalculated_by: user.employeeId
                 })
                 updateCount++
-              } else {
-                // Unchanged - we don't necessarily need to touch it
               }
             } else {
               // Completely new score
@@ -243,7 +270,9 @@ export async function POST(req: NextRequest) {
                 task_id: task.id,
                 employee_id: e.employeeId,
                 score_percentage: e.scorePercentage,
-                earnings_inr: e.earnings,
+                earnings_inr: resolved.earnings_inr,
+                earning_source: resolved.earning_source,
+                agreement_id: resolved.agreement_id
                 // No previous values to log since it didn't exist
               })
               insertCount++
