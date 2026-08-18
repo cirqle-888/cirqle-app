@@ -86,7 +86,7 @@ export default function EmployeeProfileClient({ employee, agreements: initialAgr
         setAgreements(agreements.map(a => a.id === editingId ? { ...a, ...payload } : a))
         toast.success('Agreement updated')
       } else {
-        setAgreements([res.data, ...agreements])
+        if (res.data) setAgreements([res.data, ...agreements])
         toast.success('Agreement created')
       }
     } catch (err: any) {
