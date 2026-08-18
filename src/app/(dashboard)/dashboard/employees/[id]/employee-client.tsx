@@ -9,6 +9,7 @@ import { ModalOverlay } from '@/components/ui/modal-overlay'
 import AppSelect from '@/components/ui/app-select'
 import { ChevronLeft, Plus, Edit2, Archive, ArchiveRestore } from 'lucide-react'
 import type { CommissionAgreement } from '@/lib/agreements/resolve-earning'
+import { saveCommissionAgreement } from './actions'
 
 export default function EmployeeProfileClient({ employee, agreements: initialAgreements, clients, services, canManageAgreements }: any) {
   const [activeTab, setActiveTab] = useState<'details' | 'agreements'>('details')
@@ -79,16 +80,18 @@ export default function EmployeeProfileClient({ employee, agreements: initialAgr
       is_active: form.is_active
     }
 
-    if (editingId) {
-      const { error } = await supabase.from('employee_commission_agreements').update(payload).eq('id', editingId)
-      if (error) return toast.error('Failed to update agreement')
-      setAgreements(agreements.map(a => a.id === editingId ? { ...a, ...payload } : a))
-      toast.success('Agreement updated')
-    } else {
-      const { data, error } = await supabase.from('employee_commission_agreements').insert(payload).select().single()
-      if (error) return toast.error('Failed to create agreement')
-      setAgreements([data, ...agreements])
-      toast.success('Agreement created')
+    try {
+      const res = await saveCommissionAgreement(payload, editingId)
+      if (editingId) {
+        setAgreements(agreements.map(a => a.id === editingId ? { ...a, ...payload } : a))
+        toast.success('Agreement updated')
+      } else {
+        setAgreements([res.data, ...agreements])
+        toast.success('Agreement created')
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save agreement')
+      return
     }
     
     setShowForm(false)
