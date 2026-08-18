@@ -3,9 +3,9 @@ import { notFound } from 'next/navigation'
 import EmployeeProfileClient from './employee-client'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 
-export default async function EmployeeProfilePage({ params }: { params: { id: string } }) {
+export default async function EmployeeProfilePage({ params }: { params: Promise<{ id: string }> }) {
   const supabase = createTypedAdminClient()
-  const { id } = params
+  const { id } = await params
 
   const { data: employee } = await supabase
     .from('employees')
