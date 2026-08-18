@@ -22,7 +22,7 @@ import {
   setEmployeeServices, setServiceEmployees, setEmployeeServiceCategories,
   createServiceCategory, updateServiceCategory, setServiceCategoryActive, reorderServiceCategories,
 } from './actions'
-import { Plus, X, Edit2, Archive, ArchiveRestore, Save, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Mail, Send, RotateCcw as ResetKey, RefreshCw, Star, Building2, MapPin, Users } from 'lucide-react'
+import { Plus, X, Edit2, Archive, ArchiveRestore, Save, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Mail, Send, RotateCcw as ResetKey, RefreshCw, Star, Building2, MapPin, Users , UserCog } from 'lucide-react'
 import type { Currency } from '@/types'
 import InfoTip from '@/components/ui/info-tip'
 import { resolveBrandingUrl } from '@/lib/utils/branding'
