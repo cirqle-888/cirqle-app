@@ -113,3 +113,31 @@ export function daysFromTodayISO(delta: number, now: Date = new Date()): string 
   anchor.setUTCDate(anchor.getUTCDate() + delta)
   return `${anchor.getUTCFullYear()}-${pad2(anchor.getUTCMonth() + 1)}-${pad2(anchor.getUTCDate())}`
 }
+
+/**
+ * `delta` days from a `YYYY-MM-DD` date, staying on the calendar.
+ *
+ * The counterpart to {@link daysFromTodayISO} for a date you already hold —
+ * a net-30 due date off an invoice's issue date, a quotation's validity
+ * window. Terms are counted from the date on the document, so a back-dated
+ * invoice gets a correct (possibly already overdue) due date instead of one
+ * 30 days from whenever someone happened to press the button.
+ *
+ * Pure string-in/string-out, so no instant and no timezone are involved at
+ * all: the input is already a calendar date, and re-deriving one through
+ * `new Date(...).toISOString()` is what shifts it a day.
+ *
+ * Returns '' for a malformed input rather than 'NaN-NaN-NaN' — callers store
+ * this straight into a date column, and an empty string is rejected loudly
+ * while a NaN string silently becomes NULL.
+ */
+export function addDaysISO(iso: string, delta: number): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec((iso || '').trim())
+  if (!m) return ''
+  const [, y, mo, d] = m
+  // Noon-anchored UTC for the same DST reason as daysFromTodayISO.
+  const anchor = new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d), 12))
+  if (Number.isNaN(anchor.getTime())) return ''
+  anchor.setUTCDate(anchor.getUTCDate() + delta)
+  return `${anchor.getUTCFullYear()}-${pad2(anchor.getUTCMonth() + 1)}-${pad2(anchor.getUTCDate())}`
+}

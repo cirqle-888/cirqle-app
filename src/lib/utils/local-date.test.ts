@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   toISODate, todayISO, monthStartISO, monthEndISO, lastDayOfMonthISO, daysFromTodayISO,
+  addDaysISO,
 } from './local-date'
 
 /**
@@ -83,6 +84,43 @@ describe('daysFromTodayISO', () => {
   it('crosses month and year boundaries', () => {
     expect(daysFromTodayISO(-1, at('2026-08-01T01:00:00+05:30'))).toBe('2026-07-31')
     expect(daysFromTodayISO(1, at('2026-12-31T23:00:00+05:30'))).toBe('2027-01-01')
+  })
+})
+
+describe('addDaysISO', () => {
+  it('counts terms from the date on the document', () => {
+    // Net-30 off an issue date, which is the whole reason it takes a string:
+    // a back-dated invoice must get a back-dated (already overdue) due date.
+    expect(addDaysISO('2026-08-15', 30)).toBe('2026-09-14')
+    expect(addDaysISO('2026-01-01', 14)).toBe('2026-01-15')
+    expect(addDaysISO('2026-08-15', 0)).toBe('2026-08-15')
+  })
+
+  it('steps backwards for a negative delta', () => {
+    expect(addDaysISO('2026-08-01', -1)).toBe('2026-07-31')
+  })
+
+  it('crosses month, year and leap-day boundaries', () => {
+    expect(addDaysISO('2026-12-31', 1)).toBe('2027-01-01')
+    expect(addDaysISO('2026-01-31', 1)).toBe('2026-02-01')
+    // 2028 is a leap year — 28 Feb + 1 is the 29th, not 1 March.
+    expect(addDaysISO('2028-02-28', 1)).toBe('2028-02-29')
+    expect(addDaysISO('2026-02-28', 1)).toBe('2026-03-01')
+  })
+
+  it('is independent of the host timezone', () => {
+    // The input is already a calendar date, so no instant is involved and
+    // there is nothing for a process timezone to shift. This is the property
+    // the old `new Date(iso).toISOString()` round-trip did not have.
+    expect(addDaysISO('2026-08-15', 30)).toBe('2026-09-14')
+  })
+
+  it('returns empty string for malformed input rather than a NaN date', () => {
+    // These land straight in a date column: '' is rejected loudly, whereas
+    // 'NaN-NaN-NaN' silently becomes NULL.
+    for (const bad of ['', '  ', 'not-a-date', '2026-8-15', '15-08-2026', '2026-08-15T00:00:00Z']) {
+      expect(addDaysISO(bad, 30)).toBe('')
+    }
   })
 })
 
