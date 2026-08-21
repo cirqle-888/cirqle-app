@@ -106,3 +106,48 @@ export function detectPlatform(): 'ios' | 'other' {
   if (typeof navigator === 'undefined') return 'other'
   return /iP(hone|ad|od)/.test(navigator.userAgent) ? 'ios' : 'other'
 }
+
+// ── Corridor geometry (§10 "On The Way" — how far a shop sits off a route) ─────
+// Local equirectangular projection around `origin`, good for the short offsets
+// we care about (metres–kilometres). Returns metres.
+function toLocalXY(origin: LatLng, pt: LatLng): [number, number] {
+  const R = 6_371_000
+  const x = toRad(pt.longitude - origin.longitude) * Math.cos(toRad(origin.latitude)) * R
+  const y = toRad(pt.latitude - origin.latitude) * R
+  return [x, y]
+}
+
+/** Shortest distance (metres) from a point to a polyline path. Infinity if empty. */
+export function distanceToPathMeters(p: LatLng, path: LatLng[]): number {
+  if (path.length === 0) return Infinity
+  if (path.length === 1) return distanceMeters(p, path[0])
+  let min = Infinity
+  for (let i = 0; i < path.length - 1; i++) {
+    const [ax, ay] = toLocalXY(p, path[i])
+    const [bx, by] = toLocalXY(p, path[i + 1])
+    // p itself is the projection origin → its local coords are (0,0).
+    const dx = bx - ax, dy = by - ay
+    const len2 = dx * dx + dy * dy
+    let t = len2 ? ((-ax) * dx + (-ay) * dy) / len2 : 0
+    t = Math.max(0, Math.min(1, t))
+    const cx = ax + t * dx, cy = ay + t * dy
+    const d = Math.hypot(cx, cy)
+    if (d < min) min = d
+  }
+  return min
+}
+
+/** Centroid of a set of points (for locality coverage overlays). Null if empty. */
+export function centroid(points: LatLng[]): LatLng | null {
+  if (points.length === 0) return null
+  const s = points.reduce((a, p) => ({ latitude: a.latitude + p.latitude, longitude: a.longitude + p.longitude }), { latitude: 0, longitude: 0 })
+  return { latitude: s.latitude / points.length, longitude: s.longitude / points.length }
+}
+
+/** Human duration: "8 min", "1 h 20 min". */
+export function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds)) return '—'
+  const m = Math.round(seconds / 60)
+  if (m < 60) return `${m} min`
+  return `${Math.floor(m / 60)} h ${m % 60} min`
+}

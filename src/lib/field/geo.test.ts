@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   distanceMeters, bearingDegrees, compassPoint, formatDistance,
   nearestWithin, isValidLatLng, buildNavigationUrl,
+  distanceToPathMeters, centroid, formatDuration,
 } from './geo'
 
 describe('field/geo', () => {
@@ -62,5 +63,26 @@ describe('field/geo', () => {
     const g = buildNavigationUrl(a, { platform: 'other' })
     expect(g).toContain('google.com/maps/dir/')
     expect(g).toContain(`${a.latitude},${a.longitude}`)
+  })
+
+  it('distanceToPathMeters: on-path ≈ 0, off-path ≈ perpendicular offset', () => {
+    const path = [{ latitude: 12.93, longitude: 77.60 }, { latitude: 12.93, longitude: 77.62 }] // east-west line
+    const onLine = { latitude: 12.93, longitude: 77.61 }
+    expect(distanceToPathMeters(onLine, path)).toBeLessThan(5)
+    const offLine = { latitude: 12.9318, longitude: 77.61 } // ~200 m north of the line
+    const d = distanceToPathMeters(offLine, path)
+    expect(d).toBeGreaterThan(150)
+    expect(d).toBeLessThan(260)
+  })
+
+  it('centroid averages points and returns null when empty', () => {
+    expect(centroid([])).toBeNull()
+    const c = centroid([{ latitude: 0, longitude: 0 }, { latitude: 2, longitude: 4 }])
+    expect(c).toEqual({ latitude: 1, longitude: 2 })
+  })
+
+  it('formatDuration switches to hours past 60 min', () => {
+    expect(formatDuration(480)).toBe('8 min')
+    expect(formatDuration(4800)).toBe('1 h 20 min')
   })
 })

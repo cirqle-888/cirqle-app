@@ -27,6 +27,7 @@ import {
   type FieldCategory, type FieldStatus, type FieldLikelihood,
   type FieldContact, type FieldVisit,
 } from '@/lib/field/types'
+import { distanceMeters } from '@/lib/field/geo'
 
 const REVALIDATE = '/dashboard/field-marketing'
 
@@ -151,6 +152,7 @@ export interface UpdatePlacePatch {
   name?: string
   category?: FieldCategory
   likelihood?: FieldLikelihood | null
+  priority?: 'A' | 'B' | 'C' | null
   address?: string | null
   area?: string | null
   notes?: string | null
@@ -170,6 +172,7 @@ export async function updatePlace(id: string, patch: UpdatePlacePatch): Promise<
   }
   if (patch.category !== undefined && isCategory(patch.category)) updates.category = patch.category
   if (patch.likelihood !== undefined) updates.likelihood = isLikelihood(patch.likelihood) ? patch.likelihood : null
+  if (patch.priority !== undefined) updates.priority = (['A', 'B', 'C'] as const).includes(patch.priority as 'A') ? patch.priority : null
   if (patch.address !== undefined) updates.address = patch.address?.trim() || null
   if (patch.area !== undefined) updates.area = patch.area?.trim() || null
   if (patch.notes !== undefined) updates.notes = patch.notes?.trim() || null
@@ -371,6 +374,87 @@ export async function logVisit(
   }
 }
 
+// ── Quick Visit — one-tap field logging (§3) ─────────────────────────────────────
+// Logs a visit + rolls status/likelihood/follow-up onto the place + optional
+// contact, in a single call. Complements (does not replace) the detailed logVisit.
+
+export interface QuickVisitInput {
+  outcome: string                    // FIELD_OUTCOMES value or a free label
+  status?: FieldStatus | null        // final (possibly user-adjusted) status
+  likelihood?: FieldLikelihood | null
+  notes?: string | null
+  latitude?: number | null
+  longitude?: number | null
+  nextFollowupAt?: string | null
+  contactName?: string | null
+  contactPhone?: string | null
+}
+
+export async function quickVisit(
+  placeId: string,
+  input: QuickVisitInput,
+): Promise<ActionResult<{ visit: FieldVisit; last_visit_at: string; status: FieldStatus | null; likelihood: FieldLikelihood | null; next_followup_at: string | null; contact: FieldContact | null }>> {
+  const guard = await requirePermission(PERMS.FIELD_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+  const now = new Date().toISOString()
+  const status = isStatus(input.status) ? input.status : null
+  const likelihood = isLikelihood(input.likelihood) ? input.likelihood : null
+
+  let followIso: string | null = null
+  if (input.nextFollowupAt) {
+    const d = new Date(input.nextFollowupAt)
+    if (!Number.isNaN(d.getTime())) followIso = d.toISOString()
+  }
+
+  const { data: visit, error } = await admin
+    .from('field_visits')
+    .insert({
+      place_id: placeId,
+      visited_by: guard.employeeId ?? null,
+      visited_at: now,
+      outcome: input.outcome?.trim() || null,
+      notes: input.notes?.trim() || null,
+      latitude: input.latitude ?? null,
+      longitude: input.longitude ?? null,
+      next_followup_at: followIso,
+    })
+    .select('*').single()
+  if (error) return { ok: false, error: error.message }
+
+  const placePatch: Record<string, unknown> = { last_visit_at: now }
+  if (status) placePatch.status = status
+  if (likelihood) placePatch.likelihood = likelihood
+  if (input.nextFollowupAt !== undefined) placePatch.next_followup_at = followIso
+  await admin.from('field_places').update(placePatch).eq('id', placeId)
+
+  let contact: FieldContact | null = null
+  if (input.contactPhone?.trim() || input.contactName?.trim()) {
+    const { data: c } = await admin.from('field_place_contacts').insert({
+      place_id: placeId,
+      name: input.contactName?.trim() || null,
+      phone: input.contactPhone?.trim() || null,
+      created_by: guard.employeeId ?? null,
+    }).select('*').single()
+    contact = (c as FieldContact) ?? null
+  }
+
+  logPlace(guard.employeeId, placeId, 'note_added', null, { quick_visit: true, outcome: input.outcome })
+  revalidatePath(REVALIDATE)
+  return {
+    ok: true,
+    data: {
+      visit: visit as FieldVisit,
+      last_visit_at: now,
+      status,
+      likelihood,
+      next_followup_at: input.nextFollowupAt !== undefined ? followIso : null,
+      contact,
+    },
+  }
+}
+
 // ── On-demand detail (contacts + visit history) ──────────────────────────────────
 
 export async function getPlaceDetail(
@@ -389,6 +473,76 @@ export async function getPlaceDetail(
     data: {
       contacts: (contactsRes.data || []) as FieldContact[],
       visits: (visitsRes.data || []) as FieldVisit[],
+    },
+  }
+}
+
+// ── Daily field report (§14) — computed from field_visits, no schema change ──────
+
+export interface DailyReportVisit {
+  placeId: string; name: string; area: string | null
+  outcome: string | null; status: string; likelihood: string | null; at: string
+}
+export async function getDailyReport(dayIso?: string): Promise<ActionResult<{
+  date: string
+  visits: DailyReportVisit[]
+  newProspects: number
+  contactsCollected: number
+  followupsCreated: number
+  distanceM: number
+}>> {
+  const guard = await requirePermission(PERMS.FIELD_VIEW)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const me = guard.employeeId
+  const admin = createAdminClient()
+  const base = dayIso ? new Date(dayIso) : new Date()
+  const start = new Date(base.getFullYear(), base.getMonth(), base.getDate())
+  const end = new Date(start.getTime() + 86_400_000)
+  const startIso = start.toISOString(), endIso = end.toISOString()
+
+  const [visitsRes, contactsRes, newRes] = await Promise.all([
+    admin.from('field_visits').select('place_id, outcome, visited_at, latitude, longitude, next_followup_at')
+      .eq('visited_by', me).gte('visited_at', startIso).lt('visited_at', endIso).order('visited_at'),
+    admin.from('field_place_contacts').select('id', { count: 'exact', head: true })
+      .eq('created_by', me).gte('created_at', startIso).lt('created_at', endIso),
+    admin.from('field_places').select('id', { count: 'exact', head: true })
+      .eq('created_by', me).gte('created_at', startIso).lt('created_at', endIso),
+  ])
+  const visits = (visitsRes.data || []) as { place_id: string; outcome: string | null; visited_at: string; latitude: number | null; longitude: number | null; next_followup_at: string | null }[]
+
+  const placeIds = [...new Set(visits.map(v => v.place_id))]
+  const placeMap = new Map<string, { name: string; area: string | null; status: string; likelihood: string | null }>()
+  if (placeIds.length) {
+    const { data: pls } = await admin.from('field_places').select('id, name, area, status, likelihood').in('id', placeIds)
+    for (const p of (pls || []) as { id: string; name: string; area: string | null; status: string; likelihood: string | null }[]) {
+      placeMap.set(p.id, { name: p.name, area: p.area, status: p.status, likelihood: p.likelihood })
+    }
+  }
+
+  let distanceM = 0
+  let prev: { latitude: number; longitude: number } | null = null
+  for (const v of visits) {
+    if (v.latitude != null && v.longitude != null) {
+      const cur = { latitude: v.latitude, longitude: v.longitude }
+      if (prev) distanceM += distanceMeters(prev, cur)
+      prev = cur
+    }
+  }
+
+  const out: DailyReportVisit[] = visits.map(v => {
+    const p = placeMap.get(v.place_id)
+    return { placeId: v.place_id, name: p?.name ?? 'Place', area: p?.area ?? null, outcome: v.outcome, status: p?.status ?? '', likelihood: p?.likelihood ?? null, at: v.visited_at }
+  })
+
+  return {
+    ok: true,
+    data: {
+      date: startIso,
+      visits: out,
+      newProspects: newRes.count ?? 0,
+      contactsCollected: contactsRes.count ?? 0,
+      followupsCreated: visits.filter(v => v.next_followup_at).length,
+      distanceM,
     },
   }
 }

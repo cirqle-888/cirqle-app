@@ -25,6 +25,7 @@ export interface FieldPlace {
   category: FieldCategory
   status: FieldStatus
   likelihood: FieldLikelihood | null
+  priority: 'A' | 'B' | 'C' | null
   latitude: number
   longitude: number
   address: string | null
@@ -72,6 +73,8 @@ export interface FieldTerritory {
   color: string
   assigned_to: string | null
   geojson: unknown | null
+  parent_id: string | null
+  kind: TerritoryKind
   created_at: string
 }
 
@@ -127,4 +130,59 @@ export const LIKELIHOOD_CHIP: Record<FieldLikelihood, string> = {
   hot: 'bg-red-500/15 text-red-400',
   warm: 'bg-amber-500/15 text-amber-400',
   cold: 'bg-sky-500/15 text-sky-400',
+}
+
+// ── Priority (A/B/C column on field_places) ──────────────────────────────────
+export const PRIORITY_LABEL: Record<string, string> = { A: 'High', B: 'Medium', C: 'Low' }
+export const PRIORITY_CHIP: Record<string, string> = {
+  A: 'bg-red-500/15 text-red-400',
+  B: 'bg-amber-500/15 text-amber-400',
+  C: 'bg-slate-500/15 text-slate-400',
+}
+/** Numeric weight for scoring (higher = more important). */
+export const PRIORITY_WEIGHT: Record<string, number> = { A: 3, B: 2, C: 1 }
+
+// ── Smart visit outcomes (§4) ────────────────────────────────────────────────
+// Stored verbatim in field_visits.outcome (free text). Each carries a SUGGESTED
+// status/likelihood/follow-up that pre-fills Quick Visit — the rep can override,
+// and an explicit override is never silently replaced.
+export interface FieldOutcome {
+  value: string
+  label: string
+  /** Suggested pipeline status to roll the place up to. */
+  status: FieldStatus
+  /** Suggested conversion likelihood (omit = leave unchanged). */
+  likelihood?: FieldLikelihood
+  /** Suggests scheduling a follow-up (Quick Visit pre-selects "Tomorrow"). */
+  followup?: boolean
+  tone: 'positive' | 'neutral' | 'negative'
+}
+
+export const FIELD_OUTCOMES: FieldOutcome[] = [
+  { value: 'interested',        label: 'Interested',              status: 'interested',     likelihood: 'warm', followup: true,  tone: 'positive' },
+  { value: 'very_interested',   label: 'Very Interested',         status: 'interested',     likelihood: 'hot',  followup: true,  tone: 'positive' },
+  { value: 'asked_quotation',   label: 'Asked for Quotation',     status: 'negotiating',    likelihood: 'hot',  followup: true,  tone: 'positive' },
+  { value: 'catalogue_shared',  label: 'Catalogue Shared',        status: 'interested',     likelihood: 'warm', followup: true,  tone: 'positive' },
+  { value: 'price_concern',     label: 'Price Concern',           status: 'negotiating',    likelihood: 'warm', followup: true,  tone: 'neutral'  },
+  { value: 'owner_available',   label: 'Owner Available',         status: 'visited',        followup: false,                    tone: 'neutral'  },
+  { value: 'owner_unavailable', label: 'Owner Unavailable',       status: 'revisit',        followup: true,  tone: 'neutral'  },
+  { value: 'dm_unavailable',    label: 'Decision Maker Unavailable', status: 'revisit',     followup: true,  tone: 'neutral'  },
+  { value: 'call_later',        label: 'Call Later',              status: 'revisit',        followup: true,  tone: 'neutral'  },
+  { value: 'revisit_required',  label: 'Revisit Required',        status: 'revisit',        followup: true,  tone: 'neutral'  },
+  { value: 'contact_collected', label: 'Contact Collected',       status: 'visited',        followup: false,                    tone: 'neutral'  },
+  { value: 'competitor',        label: 'Already Using Competitor', status: 'not_interested', likelihood: 'cold', followup: false, tone: 'negative' },
+  { value: 'not_interested',    label: 'Not Interested',          status: 'not_interested', likelihood: 'cold', followup: false, tone: 'negative' },
+  { value: 'converted',         label: 'Converted',               status: 'converted',      likelihood: 'hot',  followup: false, tone: 'positive' },
+]
+
+export const OUTCOME_BY_VALUE: Record<string, FieldOutcome> = Object.fromEntries(FIELD_OUTCOMES.map(o => [o.value, o]))
+
+// ── Territory hierarchy (field_territories.parent_id + kind) ─────────────────
+export type TerritoryKind = 'region' | 'area' | 'locality' | 'route'
+export interface TerritoryNode {
+  id: string
+  name: string
+  kind: TerritoryKind
+  parent_id: string | null
+  color: string
 }

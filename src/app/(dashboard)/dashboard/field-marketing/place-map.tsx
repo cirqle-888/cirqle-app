@@ -37,6 +37,8 @@ interface PlaceMapProps {
   fitSignal?: number
   /** Change `nonce` to imperatively fly the map to a point (e.g. "Locate me"). */
   flyTo?: { latitude: number; longitude: number; zoom?: number; nonce: number } | null
+  /** Active route polyline (Plan / On-The-Way / Route Session). */
+  routeLine?: { latitude: number; longitude: number }[] | null
   className?: string
 }
 
@@ -66,7 +68,7 @@ function userIcon(): L.DivIcon {
 
 export default function PlaceMap({
   places, selectedId, userLocation, addMode, draftPin,
-  onSelect, onMapClick, fitSignal, flyTo, className,
+  onSelect, onMapClick, fitSignal, flyTo, routeLine, className,
 }: PlaceMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
@@ -75,6 +77,7 @@ export default function PlaceMap({
   const userMarkerRef = useRef<L.Marker | null>(null)
   const accuracyRef = useRef<L.Circle | null>(null)
   const draftMarkerRef = useRef<L.Marker | null>(null)
+  const routeLayerRef = useRef<L.Polyline | null>(null)
   // Latest callbacks read through refs so the mount effect can run exactly once.
   // Synced in an effect (not during render) per the react-hooks/refs rule.
   const onSelectRef = useRef(onSelect)
@@ -166,6 +169,17 @@ export default function PlaceMap({
     map.setView([flyTo.latitude, flyTo.longitude], flyTo.zoom ?? 15, { animate: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flyTo?.nonce])
+
+  // ── Active route polyline ───────────────────────────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    if (!routeLine || routeLine.length < 2) { routeLayerRef.current?.remove(); routeLayerRef.current = null; return }
+    const latlngs = routeLine.map((p) => [p.latitude, p.longitude] as [number, number])
+    if (routeLayerRef.current) routeLayerRef.current.setLatLngs(latlngs)
+    else routeLayerRef.current = L.polyline(latlngs, { color: '#6366f1', weight: 5, opacity: 0.85 }).addTo(map)
+    try { map.fitBounds(L.latLngBounds(latlngs), { padding: [56, 56], maxZoom: 15 }) } catch { /* single-point / invalid bounds */ }
+  }, [routeLine])
 
   // ── "You are here" marker + accuracy circle ─────────────────────────────────
   useEffect(() => {

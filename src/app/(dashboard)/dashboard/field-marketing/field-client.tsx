@@ -22,11 +22,12 @@ import { ToastContainer, useToast } from '@/components/ui/toast'
 import { formatDistanceToNow, format } from 'date-fns'
 import {
   MapPin, Search, Plus, Crosshair, Navigation, Phone, Mail, X, Trash2, Loader2,
-  CheckCircle2, Clock, Building2, LocateFixed, Map as MapIcon, ClipboardList,
+  CheckCircle2, Clock, Building2, LocateFixed, Map as MapIcon, ClipboardList, Zap,
 } from 'lucide-react'
 import {
   FIELD_STATUSES, FIELD_CATEGORIES, FIELD_LIKELIHOODS,
   STATUS_LABEL, STATUS_CHIP, STATUS_COLOR, CATEGORY_LABEL, LIKELIHOOD_LABEL, LIKELIHOOD_CHIP,
+  PRIORITY_LABEL, PRIORITY_CHIP,
   type FieldPlace, type FieldStatus, type FieldCategory, type FieldLikelihood,
   type FieldContact, type FieldVisit, type FieldTerritory,
 } from '@/lib/field/types'
@@ -37,6 +38,12 @@ import {
   addContact, deleteContact, logVisit, getPlaceDetail, deletePlace,
   convertPlaceToClient, saveTerritory, deleteTerritory,
 } from './actions'
+import {
+  NearbyPanel, FollowupsCenter, CoveragePanel, QuickVisitSheet, QuickVisitPicker,
+  FieldBottomBar, FieldToolbar,
+} from './field-panels'
+import { NextBestCard, PlanDaySheet, OnTheWaySheet, RouteSessionBar } from './field-routing'
+import { DailyReportPanel } from './field-analytics'
 
 const PlaceMap = dynamic(() => import('./place-map'), {
   ssr: false,
@@ -77,9 +84,25 @@ export default function FieldClient({
   const [status, setStatus] = useState('')
   const [category, setCategory] = useState('')
   const [assigned, setAssigned] = useState('')
-  const [territory, setTerritory] = useState('')
   const [dueOnly, setDueOnly] = useState(false)
   const [q, setQ] = useState('')
+  // Hierarchy filters (Region → Area → Locality) — cascading.
+  const [region, setRegion] = useState('')
+  const [area, setArea] = useState('')
+  const [locality, setLocality] = useState('')
+
+  // Field-productivity panels + quick-visit target
+  const [panel, setPanel] = useState<null | 'nearby' | 'followups' | 'coverage' | 'quickpick' | 'nextbest' | 'plan' | 'ontheway' | 'report'>(null)
+  const [quickPlace, setQuickPlace] = useState<FieldPlace | null>(null)
+
+  // Active route session (§13) — persisted to localStorage so it survives reload.
+  const [route, setRoute] = useState<{ stops: string[]; destination: { label: string; latitude: number; longitude: number } | null; index: number } | null>(null)
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { try { const v = localStorage.getItem('field.routeSession.v1'); if (v) setRoute(JSON.parse(v)) } catch { /* ignore */ } }, [])
+  useEffect(() => { try { if (route) localStorage.setItem('field.routeSession.v1', JSON.stringify(route)); else localStorage.removeItem('field.routeSession.v1') } catch { /* ignore */ } }, [route])
+  function startRoute(stops: string[], destination: { label: string; latitude: number; longitude: number } | null = null) {
+    setRoute({ stops, destination, index: 0 }); setPanel(null); setFitSignal((n) => n + 1)
+  }
 
   // Map / selection / GPS
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -107,6 +130,21 @@ export default function FieldClient({
     return m
   }, [territories])
 
+  // ── Territory hierarchy (Region → Area → Locality) for the cascading filters ──
+  const regions = useMemo(() => territories.filter(t => t.kind === 'region').sort((a, b) => a.name.localeCompare(b.name)), [territories])
+  const areas = useMemo(() => territories.filter(t => t.kind === 'area' && (!region || t.parent_id === region)).sort((a, b) => a.name.localeCompare(b.name)), [territories, region])
+  const localities = useMemo(() => territories.filter(t => (t.kind === 'locality' || t.kind === 'route') && (!area || t.parent_id === area)).sort((a, b) => a.name.localeCompare(b.name)), [territories, area])
+  const territoryChildren = useMemo(() => {
+    const m = new Map<string, string[]>()
+    for (const t of territories) if (t.parent_id) { const a = m.get(t.parent_id) ?? []; a.push(t.id); m.set(t.parent_id, a) }
+    return m
+  }, [territories])
+  const descendantIds = useMemo(() => (rootId: string): Set<string> => {
+    const out = new Set<string>(); const stack = [rootId]
+    while (stack.length) { const id = stack.pop()!; out.add(id); for (const c of territoryChildren.get(id) ?? []) stack.push(c) }
+    return out
+  }, [territoryChildren])
+
   // ── Live GPS (watchPosition works in browser + Capacitor WebView) ────────────
   useEffect(() => {
     if (typeof navigator === 'undefined' || !('geolocation' in navigator)) return
@@ -129,13 +167,15 @@ export default function FieldClient({
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase()
+    // Most-specific hierarchy node selected → only places whose territory is in its subtree.
+    const hierRoot = locality || area || region
+    const allowed = hierRoot ? descendantIds(hierRoot) : null
     return places.filter((p) => {
       if (status && p.status !== status) return false
       if (category && p.category !== category) return false
       if (assigned === 'unassigned' && p.assigned_to) return false
       else if (assigned && assigned !== 'unassigned' && p.assigned_to !== assigned) return false
-      if (territory === 'none' && p.territory_id) return false
-      else if (territory && territory !== 'none' && p.territory_id !== territory) return false
+      if (allowed && (!p.territory_id || !allowed.has(p.territory_id))) return false
       if (dueOnly && !isDue(p)) return false
       if (needle) {
         const hay = `${p.name} ${p.address ?? ''} ${p.area ?? ''} ${p.notes ?? ''}`.toLowerCase()
@@ -144,7 +184,7 @@ export default function FieldClient({
       return true
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [places, status, category, assigned, territory, dueOnly, q, nowMs])
+  }, [places, status, category, assigned, dueOnly, q, region, area, locality, descendantIds, nowMs])
 
   // Sort the list by distance when we have a position, else newest first.
   const listed = useMemo(() => {
@@ -168,6 +208,20 @@ export default function FieldClient({
   }, [places, nowMs])
 
   const selected = selectedId ? places.find((p) => p.id === selectedId) ?? null : null
+
+  // Active route → resolved stops + a map polyline (start → stops → destination).
+  const routeStops = useMemo(
+    () => (route ? (route.stops.map((id) => places.find((p) => p.id === id)).filter(Boolean) as FieldPlace[]) : []),
+    [route, places],
+  )
+  const routeLine = useMemo(() => {
+    if (!route) return null
+    const pts: { latitude: number; longitude: number }[] = []
+    if (userLoc) pts.push({ latitude: userLoc.latitude, longitude: userLoc.longitude })
+    for (const p of routeStops) pts.push({ latitude: p.latitude, longitude: p.longitude })
+    if (route.destination) pts.push({ latitude: route.destination.latitude, longitude: route.destination.longitude })
+    return pts.length >= 2 ? pts : null
+  }, [route, routeStops, userLoc])
 
   // ── optimistic patch ─────────────────────────────────────────────────────────
   function patch(id: string, p: Partial<FieldPlace>) {
@@ -193,6 +247,24 @@ export default function FieldClient({
     startTransition(async () => {
       const res = await assignPlace(p.id, employeeId)
       if (!res.ok) { toast.error('Could not assign', res.error); patch(p.id, { assigned_to: p.assigned_to }) }
+    })
+  }
+  function onPriority(p: FieldPlace, next: 'A' | 'B' | 'C' | null) {
+    patch(p.id, { priority: next })
+    startTransition(async () => {
+      const res = await updatePlace(p.id, { priority: next })
+      if (!res.ok) { toast.error('Could not update priority', res.error); patch(p.id, { priority: p.priority }) }
+    })
+  }
+  // Open Quick Visit for a place from any panel/row.
+  function openQuick(p: FieldPlace) { setQuickPlace(p) }
+  function openFromPanel(p: FieldPlace) { setPanel(null); setSelectedId(p.id) }
+  function rescheduleFollowup(p: FieldPlace, iso: string) {
+    patch(p.id, { next_followup_at: iso })
+    startTransition(async () => {
+      const res = await setFollowup(p.id, iso)
+      if (!res.ok) { toast.error('Could not reschedule', res.error); patch(p.id, { next_followup_at: p.next_followup_at }) }
+      else toast.success('Follow-up rescheduled')
     })
   }
 
@@ -235,6 +307,13 @@ export default function FieldClient({
         subtitle="Direct marketing on the map — visits, follow-ups and coverage"
         actions={
           <div className="flex items-center gap-2">
+            <FieldToolbar
+              onNearby={() => setPanel('nearby')}
+              onNextBest={() => setPanel('nextbest')}
+              onPlan={() => setPanel('plan')}
+              onOnTheWay={() => setPanel('ontheway')}
+              onQuick={() => setPanel('quickpick')}
+            />
             <Button size="sm" variant="secondary" onClick={locateMe}><LocateFixed className="w-4 h-4 mr-1.5" />Locate me</Button>
             {canManage && (
               <Button size="sm" onClick={addMode ? cancelAdd : beginAdd}>
@@ -245,7 +324,7 @@ export default function FieldClient({
         }
       />
 
-      <div className="px-4 sm:px-6 pb-16 max-w-[1500px] mx-auto w-full">
+      <div className="px-4 sm:px-6 pb-28 lg:pb-16 max-w-[1500px] mx-auto w-full">
         {/* KPI strip */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 mb-4">
           <KpiTile label="Places" value={kpis.total} icon={MapPin} />
@@ -253,6 +332,16 @@ export default function FieldClient({
           <KpiTile label="In play" sub="interested/negotiating" value={kpis.interested} icon={ClipboardList} />
           <KpiTile label="Converted" value={kpis.converted} icon={Building2} />
           <KpiTile label="Follow-ups due" value={kpis.due} icon={Clock} highlight={kpis.due > 0} />
+        </div>
+
+        {/* Secondary actions (reachable on every size; the bottom bar carries the 5 primary) */}
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <button onClick={() => setPanel('followups')} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs border bg-secondary border-border text-muted-foreground hover:text-foreground">
+            <Clock className="w-3.5 h-3.5" />Follow-ups{kpis.due ? <span className="ml-0.5 min-w-4 h-4 px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold grid place-items-center">{kpis.due}</span> : null}
+          </button>
+          <button onClick={() => setPanel('coverage')} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs border bg-secondary border-border text-muted-foreground hover:text-foreground"><MapPin className="w-3.5 h-3.5" />Coverage</button>
+          <button onClick={() => setPanel('report')} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs border bg-secondary border-border text-muted-foreground hover:text-foreground"><ClipboardList className="w-3.5 h-3.5" />Today’s report</button>
+          {route && <button onClick={() => setPanel(null)} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs border border-primary/40 bg-primary/10 text-primary">Route active · {Math.min(route.index, route.stops.length)}/{route.stops.length}</button>}
         </div>
 
         {geoDenied && (
@@ -281,11 +370,22 @@ export default function FieldClient({
             <option value="unassigned">Unassigned</option>
             {employees.map((e) => <option key={e.id} value={e.id}>{e.cqid || e.name}</option>)}
           </AppSelect>
-          {territories.length > 0 && (
-            <AppSelect value={territory} onChange={(e) => setTerritory(e.target.value)} wrapperClassName="w-auto">
+          {regions.length > 0 && (
+            <AppSelect value={region} onChange={(e) => { setRegion(e.target.value); setArea(''); setLocality('') }} wrapperClassName="w-auto">
+              <option value="">All regions</option>
+              {regions.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </AppSelect>
+          )}
+          {areas.length > 0 && (
+            <AppSelect value={area} onChange={(e) => { setArea(e.target.value); setLocality('') }} wrapperClassName="w-auto">
               <option value="">All areas</option>
-              <option value="none">No territory</option>
-              {territories.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              {areas.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </AppSelect>
+          )}
+          {localities.length > 0 && (
+            <AppSelect value={locality} onChange={(e) => setLocality(e.target.value)} wrapperClassName="w-auto">
+              <option value="">All localities</option>
+              {localities.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </AppSelect>
           )}
           <button onClick={() => setDueOnly((v) => !v)}
@@ -321,6 +421,7 @@ export default function FieldClient({
               onMapClick={onMapClick}
               fitSignal={fitSignal}
               flyTo={flyTo}
+              routeLine={routeLine}
               className="absolute inset-0"
             />
             {addMode && (
@@ -377,8 +478,10 @@ export default function FieldClient({
           onClose={() => setSelectedId(null)}
           onStatus={(s) => onStatus(selected, s)}
           onLikelihood={(l) => onLikelihood(selected, l)}
+          onPriority={(pr) => onPriority(selected, pr)}
           onAssign={(id) => onAssign(selected, id)}
           onNavigate={() => navigateTo(selected)}
+          onQuickVisit={() => openQuick(selected)}
           onPatch={(pp) => patch(selected.id, pp)}
           onDelete={() => setConfirmDelete(selected)}
           toast={toast}
@@ -400,7 +503,7 @@ export default function FieldClient({
               if (!res.ok || !res.data) { toast.error('Could not add place', res.error); resolve(false); return }
               const newPlace: FieldPlace = {
                 id: res.data.id, name: input.name, category: (input.category ?? 'shop') as FieldCategory,
-                status: 'not_visited', likelihood: input.likelihood ?? null,
+                status: 'not_visited', likelihood: input.likelihood ?? null, priority: null,
                 latitude: input.latitude, longitude: input.longitude,
                 address: input.address ?? null, area: input.area ?? null, google_place_id: null,
                 assigned_to: input.assignedTo ?? null, territory_id: input.territoryId ?? null,
@@ -433,6 +536,7 @@ export default function FieldClient({
                 const row: FieldTerritory = {
                   id: res.data!.id, name: input.name, color: input.color || '#6366f1',
                   assigned_to: input.assignedTo ?? null, geojson: null,
+                  parent_id: existing?.parent_id ?? null, kind: existing?.kind ?? 'area',
                   created_at: existing?.created_at ?? new Date().toISOString(),
                 }
                 return existing ? prev.map((t) => (t.id === row.id ? row : t)) : [...prev, row]
@@ -465,6 +569,73 @@ export default function FieldClient({
           }}
         />
       )}
+
+      {/* ── Field-productivity panels ─────────────────────────────────────── */}
+      {panel === 'nearby' && (
+        <NearbyPanel places={places} userLoc={userLoc} onClose={() => setPanel(null)}
+          onOpen={openFromPanel} onNavigate={navigateTo} onQuick={openQuick} />
+      )}
+      {panel === 'followups' && (
+        <FollowupsCenter places={places} userLoc={userLoc} onClose={() => setPanel(null)}
+          onOpen={openFromPanel} onNavigate={navigateTo} onQuick={openQuick} onReschedule={rescheduleFollowup} />
+      )}
+      {panel === 'coverage' && (
+        <CoveragePanel places={places} territories={territories} onClose={() => setPanel(null)}
+          onPickLocality={(locId) => { setRegion(''); setArea(''); setLocality(locId); setPanel(null); setFitSignal((n) => n + 1) }} />
+      )}
+      {panel === 'quickpick' && (
+        <QuickVisitPicker places={places} userLoc={userLoc} onClose={() => setPanel(null)}
+          onPick={(p) => { setPanel(null); setQuickPlace(p) }} />
+      )}
+      {panel === 'nextbest' && (
+        <NextBestCard places={places} userLoc={userLoc} onClose={() => setPanel(null)}
+          onOpen={openFromPanel} onNavigate={navigateTo} onQuick={openQuick} />
+      )}
+      {panel === 'plan' && (
+        <PlanDaySheet places={places} userLoc={userLoc} localities={localities} onClose={() => setPanel(null)}
+          onStartRoute={(ids) => startRoute(ids, null)} />
+      )}
+      {panel === 'ontheway' && (
+        <OnTheWaySheet places={places} userLoc={userLoc} onClose={() => setPanel(null)}
+          onStartRoute={(ids, destination) => startRoute(ids, destination)}
+          toast={{ error: (t, b) => toast.error(t, b), success: (t, b) => toast.success(t, b) }} />
+      )}
+      {panel === 'report' && (
+        <DailyReportPanel places={places} territories={territories} onClose={() => setPanel(null)} />
+      )}
+      {quickPlace && (
+        <QuickVisitSheet place={quickPlace} userLoc={userLoc} onClose={() => setQuickPlace(null)}
+          onSaved={(placeId, data) => {
+            patch(placeId, {
+              last_visit_at: data.last_visit_at,
+              ...(data.status ? { status: data.status } : {}),
+              ...(data.likelihood ? { likelihood: data.likelihood } : {}),
+              next_followup_at: data.next_followup_at,
+            })
+            // If this is the current route stop, advance the session.
+            if (route && route.stops[route.index] === placeId) setRoute((r) => (r ? { ...r, index: r.index + 1 } : r))
+            setQuickPlace(null)
+            toast.success('Visit saved')
+          }} />
+      )}
+
+      {/* Active route session (§13) */}
+      {route && routeStops.length > 0 && (
+        <RouteSessionBar
+          stops={routeStops} index={route.index} destination={route.destination}
+          onOpen={(p) => setSelectedId(p.id)} onNavigate={navigateTo} onQuick={openQuick}
+          onSkip={() => setRoute((r) => (r ? { ...r, index: r.index + 1 } : r))}
+          onExit={() => setRoute(null)} />
+      )}
+
+      {/* Mobile bottom action bar (§19) */}
+      <FieldBottomBar
+        onNearby={() => setPanel('nearby')}
+        onNextBest={() => setPanel('nextbest')}
+        onPlan={() => setPanel('plan')}
+        onOnTheWay={() => setPanel('ontheway')}
+        onQuick={() => setPanel('quickpick')}
+      />
 
       <ToastContainer toasts={toast.toasts} onDismiss={toast.dismiss} />
     </>
@@ -526,7 +697,7 @@ function PlaceRow({ place, dist, selected, territory, due, onOpen }: {
 
 function PlaceDrawer({
   place, employees, empMap, userLoc, canManage,
-  onClose, onStatus, onLikelihood, onAssign, onNavigate, onPatch, onDelete, toast,
+  onClose, onStatus, onLikelihood, onPriority, onAssign, onNavigate, onQuickVisit, onPatch, onDelete, toast,
 }: {
   place: FieldPlace
   employees: EmployeeRow[]
@@ -536,8 +707,10 @@ function PlaceDrawer({
   onClose: () => void
   onStatus: (s: FieldStatus) => void
   onLikelihood: (l: FieldLikelihood | null) => void
+  onPriority: (p: 'A' | 'B' | 'C' | null) => void
   onAssign: (id: string | null) => void
   onNavigate: () => void
+  onQuickVisit: () => void
   onPatch: (p: Partial<FieldPlace>) => void
   onDelete: () => void
   toast: ReturnType<typeof useToast>
@@ -635,8 +808,8 @@ function PlaceDrawer({
             </div>
           )}
 
-          {/* Status + likelihood */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Status + likelihood + priority */}
+          <div className="grid grid-cols-3 gap-2">
             <div>
               <label className={labelCls}>Status</label>
               {canManage ? (
@@ -646,13 +819,24 @@ function PlaceDrawer({
               ) : <span className={`inline-flex px-2 py-1 rounded-md text-xs font-medium ${STATUS_CHIP[place.status]}`}>{STATUS_LABEL[place.status]}</span>}
             </div>
             <div>
-              <label className={labelCls}>Chance of converting</label>
+              <label className={labelCls}>Chance</label>
               {canManage ? (
                 <AppSelect value={place.likelihood ?? ''} onChange={(e) => onLikelihood((e.target.value || null) as FieldLikelihood | null)}>
                   <option value="">Unset</option>
                   {FIELD_LIKELIHOODS.map((l) => <option key={l} value={l}>{LIKELIHOOD_LABEL[l]}</option>)}
                 </AppSelect>
               ) : place.likelihood ? <span className={`inline-flex px-2 py-1 rounded-md text-xs font-medium ${LIKELIHOOD_CHIP[place.likelihood]}`}>{LIKELIHOOD_LABEL[place.likelihood]}</span> : <span className="text-xs text-muted-foreground">—</span>}
+            </div>
+            <div>
+              <label className={labelCls}>Priority</label>
+              {canManage ? (
+                <AppSelect value={place.priority ?? ''} onChange={(e) => onPriority((e.target.value || null) as 'A' | 'B' | 'C' | null)}>
+                  <option value="">Unset</option>
+                  <option value="A">High</option>
+                  <option value="B">Medium</option>
+                  <option value="C">Low</option>
+                </AppSelect>
+              ) : place.priority ? <span className={`inline-flex px-2 py-1 rounded-md text-xs font-medium ${PRIORITY_CHIP[place.priority]}`}>{PRIORITY_LABEL[place.priority]}</span> : <span className="text-xs text-muted-foreground">—</span>}
             </div>
           </div>
 
@@ -742,12 +926,15 @@ function PlaceDrawer({
 
         {/* Footer actions */}
         {canManage && (
-          <div className="border-t border-border p-3 flex items-center gap-2">
-            <Button size="sm" variant="secondary" className="flex-1" onClick={() => setShowVisit(true)}><ClipboardList className="w-4 h-4 mr-1.5" />Log visit</Button>
-            {!place.converted_client_id && (
-              <Button size="sm" variant="secondary" className="flex-1" onClick={convert} loading={converting}><Building2 className="w-4 h-4 mr-1.5" />Convert</Button>
-            )}
-            <button onClick={onDelete} className="text-muted-foreground hover:text-red-400 p-2"><Trash2 className="w-4 h-4" /></button>
+          <div className="border-t border-border p-3 space-y-2">
+            <Button size="sm" className="w-full h-10" onClick={onQuickVisit}><Zap className="w-4 h-4 mr-1.5" />Quick Visit</Button>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="secondary" className="flex-1" onClick={() => setShowVisit(true)}><ClipboardList className="w-4 h-4 mr-1.5" />Log visit</Button>
+              {!place.converted_client_id && (
+                <Button size="sm" variant="secondary" className="flex-1" onClick={convert} loading={converting}><Building2 className="w-4 h-4 mr-1.5" />Convert</Button>
+              )}
+              <button onClick={onDelete} className="text-muted-foreground hover:text-red-400 p-2"><Trash2 className="w-4 h-4" /></button>
+            </div>
           </div>
         )}
       </div>
