@@ -40,6 +40,7 @@ function plan(over: {
   tasks?: PackageTaskLike[]
   month?: string
   billed?: Set<string>
+  feeMonths?: Map<string, Set<string>>
 } = {}) {
   const packages = over.packages ?? [pkg()]
   return planPackageInvoice({
@@ -48,6 +49,7 @@ function plan(over: {
     tasksByPackage: new Map(packages.map(p => [p.id, over.tasks ?? []])),
     month: over.month ?? '2026-08',
     oneTimeAlreadyBilled: over.billed ?? new Set(),
+    feeLineMonths: over.feeMonths,
   })
 }
 
@@ -99,14 +101,32 @@ describe('an extended opening cycle (Elara: signed 20 Jul, first cycle to 31 Aug
   // opening period.
   const first = [pkg({ first_cycle_end: '2026-08-31' })]
 
-  it('bills ONCE, on the month the package started', () => {
+  it('bills on the start month when that month is invoiced', () => {
     expect(plan({ packages: first, month: '2026-07' }).feeLines).toHaveLength(1)
-    expect(plan({ packages: first, month: '2026-08' }).feeLines).toEqual([])
   })
 
-  it('names the line so the client can see why it covers two months', () => {
+  it('bills on a later month of the span when the start month was never invoiced', () => {
+    // Elara: signed 20 July, but the first invoice raised was August's. The fee
+    // still has to land somewhere, or the opening cycle is never billed at all.
+    expect(plan({ packages: first, month: '2026-08' }).feeLines).toHaveLength(1)
+  })
+
+  it('does NOT bill again when another invoice in the span already carries it', () => {
+    // July's invoice already has the line; August must not add a second.
+    const feeMonths = new Map([['p1', new Set(['2026-07'])]])
+    expect(plan({ packages: first, month: '2026-08', feeMonths }).feeLines).toEqual([])
+  })
+
+  it('ignores a fee billed OUTSIDE the span when deciding', () => {
+    // September is a normal monthly cycle, not part of the opening span, so its
+    // line says nothing about whether the opening cycle was paid.
+    const feeMonths = new Map([['p1', new Set(['2026-09'])]])
+    expect(plan({ packages: first, month: '2026-08', feeMonths }).feeLines).toHaveLength(1)
+  })
+
+  it('names the line with its span so the client can see why it covers two months', () => {
     expect(plan({ packages: first, month: '2026-07' }).feeLines[0].description)
-      .toBe('Social Media Management — first cycle')
+      .toBe('Social Media Management — first cycle (20 Jul – 31 Aug 2026)')
   })
 
   it('resumes normal monthly billing after the opening cycle', () => {
@@ -141,7 +161,8 @@ describe('an extended opening cycle (Elara: signed 20 Jul, first cycle to 31 Aug
   it('still covers August work even though August carries no fee', () => {
     // The risk this guards: no fee line on August could be read as "the package
     // does not apply in August", which would bill every August task on its own.
-    const r = plan({ packages: first, tasks: tasks(3, POSTER, '2026-08'), month: '2026-08' })
+    const feeMonths = new Map([['p1', new Set(['2026-07'])]])
+    const r = plan({ packages: first, tasks: tasks(3, POSTER, '2026-08'), month: '2026-08', feeMonths })
     expect(r.feeLines).toEqual([])
     expect(r.coveredTaskIds.size).toBe(3)
   })

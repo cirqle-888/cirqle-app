@@ -14,7 +14,7 @@
  * the same verdict from the same inputs.
  */
 
-import { resolveCoverage, isPackageInForceForMonth, cycleForMonth, tasksInCycle } from './progress'
+import { resolveCoverage, isPackageInForceForMonth, cycleForMonth, tasksInCycle, taskMonth } from './progress'
 import type { BillingCycle } from './progress'
 import type { PackageRow, PackageItemRow, PackageTaskLike } from './types'
 
@@ -69,6 +69,16 @@ export interface PackageInvoiceInput {
    * one-off fee again.
    */
   oneTimeAlreadyBilled: Set<string>
+  /**
+   * package_id → billing months (`YYYY-MM`) of OTHER invoices that already
+   * carry a fee line for it.
+   *
+   * Only the opening cycle reads this. That cycle spans several months and
+   * bills once for the whole span, so "has it been billed?" cannot be answered
+   * by the month alone — it has to look across the span. Regular monthly fees
+   * don't need it: one line per (invoice, package) is already enforced.
+   */
+  feeLineMonths?: Map<string, Set<string>>
 }
 
 /**
@@ -115,13 +125,34 @@ export function planPackageInvoice(input: PackageInvoiceInput): PackageInvoicePl
     if (pkg.billing_type === 'one_time' && input.oneTimeAlreadyBilled.has(pkg.id)) continue
 
     // An extended opening cycle is ONE cycle spanning several months, so it
-    // carries one fee — charged on the month it started. The later months of
-    // that span still cover their tasks (above); they just don't bill again.
-    if (cycle.billingMonth !== input.month) continue
+    // carries one fee for the whole span. It is charged on the first invoice
+    // that COVERS the span, not strictly on the month the package started —
+    // that month may never have been invoiced at all (a package signed on 20
+    // July whose first invoice is August's). Anchoring on the start month
+    // instead would leave the opening fee permanently unbillable.
+    //
+    // "Once" is enforced by looking across the span: if another invoice inside
+    // the cycle already carries the fee, this one must not add a second.
+    if (cycle.isFirstCycle) {
+      const endMonth = taskMonth(cycle.end)
+      const billed = input.feeLineMonths?.get(pkg.id)
+      const billedInThisCycle = billed
+        && [...billed].some(m => m >= cycle.billingMonth && m <= endMonth)
+      if (billedInThisCycle) continue
+    } else if (cycle.billingMonth !== input.month) {
+      // The later months of an ordinary span still cover their tasks (above);
+      // they just don't bill again.
+      continue
+    }
 
     feeLines.push({
       packageId: pkg.id,
-      description: cycle.isFirstCycle ? `${pkg.name} — first cycle` : pkg.name,
+      // The opening cycle's line names its span. Without it the client sees one
+      // month's invoice carrying a fee that silently covers two, which reads as
+      // an overcharge.
+      description: cycle.isFirstCycle
+        ? `${pkg.name} — first cycle (${formatSpan(cycle.start, cycle.end)})`
+        : pkg.name,
       amount: Number(pkg.price) || 0,
       currency: pkg.currency,
       // A one-time fee (and an opening cycle's fee) is dated to the day the
@@ -136,6 +167,23 @@ export function planPackageInvoice(input: PackageInvoiceInput): PackageInvoicePl
   }
 
   return { feeLines, coveredTaskIds, extras, unmatchedTaskIds }
+}
+
+/**
+ * "20 Jul – 31 Aug 2026" — the year stated once when both ends share it.
+ *
+ * Deliberately plain-English rather than ISO: this string goes on the invoice
+ * the client reads, not into a machine.
+ */
+function formatSpan(start: string, end: string): string {
+  const fmt = (iso: string, withYear: boolean) => {
+    const d = new Date(iso + 'T00:00:00')
+    const day = d.getDate()
+    const mon = d.toLocaleDateString('en-GB', { month: 'short' })
+    return `${day} ${mon}${withYear ? ` ${d.getFullYear()}` : ''}`
+  }
+  const sameYear = start.slice(0, 4) === end.slice(0, 4)
+  return `${fmt(start, !sameYear)} – ${fmt(end, true)}`
 }
 
 /** Earliest linked task date inside the cycle, or null when none was done. */

@@ -1,5 +1,6 @@
 'use client'
 
+import { resolveBrandingUrl } from '@/lib/utils/branding'
 import QRCode from 'qrcode'
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
@@ -26,6 +27,7 @@ import {
 import { publicInvoiceUrl, buildInvoiceShareText, whatsappShareUrl } from '@/lib/invoices/share'
 import { TEMPLATE_KEYS } from '@/lib/messaging/templates'
 import { renderInvoiceHtml } from '@/lib/invoices/render-html'
+import type { AgreementBreakdown } from '@/lib/packages/invoice-breakdown'
 import { formatCurrency, getCurrencySymbol, round2 } from '@/lib/calculations/currency'
 import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
 import {
@@ -75,7 +77,7 @@ const ReceiptModal = dynamic(
   { ssr: false },
 )
 import type { ReceiptInput } from '@/components/cashbook/receipt-modal'
-import { lastDayOfMonthISO, monthStartISO, todayISO } from '@/lib/utils/local-date'
+import { addDaysISO, lastDayOfMonthISO, monthStartISO, todayISO } from '@/lib/utils/local-date'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface StatementLedgerRow {
@@ -172,6 +174,8 @@ interface Props {
   services: { id: string; name: string }[]
   companySettings: Record<string, string>
   exchangeRates: { currency: string; rate_to_inr: number; rate_date?: string }[]
+  /** invoice_id → the agreements in force that month, with the work each covered. */
+  agreementBreakdowns?: Record<string, AgreementBreakdown[]>
   /**
    * Per-field financial visibility resolved server-side from the user's
    * permission set. When `amounts` is false, total_amount/paid_amount and
@@ -247,7 +251,7 @@ function findLinkedCashbookEntry(inv: Invoice, p: Payment) {
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export default function InvoicesClient({ initialInvoices, clients, bankAccounts, cashbookCategories, services, companySettings, exchangeRates, visibility }: Props) {
+export default function InvoicesClient({ initialInvoices, clients, bankAccounts, cashbookCategories, services, companySettings, exchangeRates, visibility, agreementBreakdowns }: Props) {
   const showAmounts     = visibility.amounts
   const showLinePricing = visibility.linePricing
   const supabase = createClient()
@@ -380,6 +384,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
   // Bulk actions
   const [selectedForBulk, setSelectedForBulk] = useState<Set<string>>(new Set())
+  // Agreement breakdowns the user has expanded, keyed `${invoiceId}:${packageId}`.
+  // Collapsed by default: the covered work is context, not the bill.
+  const [expandedAgreements, setExpandedAgreements] = useState<Set<string>>(new Set())
   const [isUpdatingBulk, setIsUpdatingBulk] = useState(false)
 
   // Confirmation modal
@@ -773,9 +780,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       // overdue — due date instead of always landing 30 days in the future.
       if (newStatus === 'sent' && !invoices.find(i => i.id === invoiceId)?.due_date) {
         const inv = invoices.find(i => i.id === invoiceId)
-        const base = inv?.issue_date ? new Date(inv.issue_date) : new Date()
-        base.setDate(base.getDate() + 30)
-        updates.due_date = base.toISOString().split('T')[0]
+        updates.due_date = addDaysISO(inv?.issue_date || todayISO(), 30)
       }
       const { error } = await supabase.from('invoices').update(updates).eq('id', invoiceId)
       if (error) { toastError(error.message); return }
@@ -1276,6 +1281,54 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     }
   }
 
+  // Bulk resync: only draft invoices can be resynced (server action enforces it
+  // too), so silently skip non-drafts rather than failing the whole batch.
+  // Runs sequentially — each resync rewrites line items and package fee lines,
+  // and firing them in parallel races the per-invoice package-line upserts.
+  async function handleBulkResync() {
+    if (selectedForBulk.size === 0) return
+    const targets = invoices.filter(i => selectedForBulk.has(i.id) && i.status === 'draft')
+    const skipped = selectedForBulk.size - targets.length
+    if (!targets.length) {
+      toastError('No draft invoices selected. Only drafts can be resynced.')
+      return
+    }
+    setSaving(true)
+    setIsUpdatingBulk(true)
+    let okCount = 0, taskCount = 0, feeCount = 0
+    const failures: string[] = []
+    try {
+      for (const inv of targets) {
+        setResyncingId(inv.id)
+        try {
+          const result = await serverResyncInvoiceTasks(inv.id)
+          if (!result.ok) throw new Error(result.error)
+          okCount++
+          taskCount += result.data?.syncedTasks || 0
+          feeCount += result.data?.feeLines || 0
+        } catch (e: any) {
+          failures.push(`${inv.invoice_number || inv.id}: ${e.message || 'failed'}`)
+        }
+      }
+      if (okCount > 0) {
+        success(
+          `Processed ${taskCount} task${taskCount === 1 ? '' : 's'}`
+            + (feeCount > 0 ? ` and ${feeCount} package line${feeCount === 1 ? '' : 's'}` : '')
+            + (skipped > 0 ? ` · ${skipped} non-draft skipped` : ''),
+          `${okCount} invoice${okCount === 1 ? '' : 's'} resynced`,
+        )
+      }
+      if (failures.length) {
+        toastError(`${failures.length} invoice${failures.length === 1 ? '' : 's'} failed: ${failures.slice(0, 3).join('; ')}`)
+      }
+      router.refresh()
+    } finally {
+      setResyncingId(null)
+      setSaving(false)
+      setIsUpdatingBulk(false)
+    }
+  }
+
   function confirmDelete(invoiceId: string) {
     const inv = invoices.find(i => i.id === invoiceId)
     if (inv && ((inv.paid_amount && inv.paid_amount > 0) || (inv.payments && inv.payments.length > 0) || (inv.status === 'paid' || inv.status === 'partial'))) {
@@ -1353,9 +1406,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       const missing = invoices.filter(i => idsToUpdate.includes(i.id) && !i.due_date)
       missingDueIds = missing.map(i => i.id)
       for (const inv of missing) {
-        const base = inv.issue_date ? new Date(inv.issue_date) : new Date()
-        base.setDate(base.getDate() + 30)
-        dueById.set(inv.id, base.toISOString().split('T')[0])
+        dueById.set(inv.id, addDaysISO(inv.issue_date || todayISO(), 30))
       }
     }
 
@@ -1497,7 +1548,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       const { data: inv, error } = await supabase.from('invoices').insert({
         invoice_number: invNum, client_id: newForm.client_id, status: 'draft',
         issue_date: newForm.issue_date,
-        due_date: newForm.due_date || (() => { const d = new Date(newForm.issue_date); d.setDate(d.getDate() + 30); return d.toISOString().split('T')[0] })(),
+        due_date: newForm.due_date || addDaysISO(newForm.issue_date || todayISO(), 30),
         currency: newForm.currency, total_amount: subtotal, paid_amount: 0,
         notes: newForm.notes || null,
       }).select('*, client:clients(id,name,code,phone,email)').single()
@@ -2045,7 +2096,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const FONT    = companySettings.invoice_font          || 'Arial, Helvetica, sans-serif'
     const coName  = companySettings.company_name          || 'cirqle'
     const coTag   = companySettings.company_tagline       || 'Creative & Marketing Solutions'
-    const logoUrl = companySettings.logo_url_light || companySettings.logo_url || ''
+    const logoUrl = resolveBrandingUrl(companySettings.logo_url_light || companySettings.logo_url) || ''
     const showTag = companySettings.invoice_show_tagline  !== 'false'
 
     const stmtLogoBlock = logoUrl
@@ -2219,7 +2270,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const NAVY = companySettings.invoice_primary_color || '#1a2744'
     const FONT = companySettings.invoice_font || 'Arial, Helvetica, sans-serif'
     const coName = companySettings.company_name || 'cirqle'
-    const logoUrl = companySettings.logo_url || ''
+    const logoUrl = resolveBrandingUrl(companySettings.logo_url) || ''
     const showTag = companySettings.invoice_show_tagline !== 'false'
     const coTag = companySettings.company_tagline || ''
 
@@ -2685,7 +2736,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   // ── Invoice print-design helpers ──────────────────────────────────────────
   function buildInvoiceHtml(inv: Invoice, opts?: { autoprint?: boolean; forRaster?: boolean }): string {
     const otherOutstanding = includeOutstanding.has(inv.id) ? (otherOutstandingByInvoice[inv.id] || 0) : undefined
-    return renderInvoiceHtml(inv as any, companySettings, { ...opts, otherOutstanding })
+    const agreements = agreementBreakdowns?.[inv.id]
+    return renderInvoiceHtml(inv as any, companySettings, { ...opts, otherOutstanding, agreements })
   }
 
   // "Include other outstanding invoices" toggle — computes the client's live
@@ -2878,6 +2930,15 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                   className="text-[10px] font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 px-2 py-1 rounded transition-colors disabled:opacity-50"
                 >
                   Cancel
+                </button>
+                <button
+                  onClick={handleBulkResync}
+                  disabled={isUpdatingBulk}
+                  title="Rebuild line items from linked tasks for every selected draft invoice"
+                  className="text-[10px] font-medium bg-background border border-border hover:bg-secondary px-2 py-1 rounded transition-colors disabled:opacity-50 inline-flex items-center gap-1"
+                >
+                  <ListRestart className={cn("w-3 h-3", isUpdatingBulk && resyncingId && "animate-spin")} />
+                  Resync
                 </button>
                 <button
                   onClick={exportSelectedCSV}
@@ -3428,6 +3489,68 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 </div>
               ))}
               
+              {/* Agreement breakdown — what each package fee actually covered.
+                  These tasks have NO invoice line of their own (the fee replaced
+                  them), so without this the reader cannot tell what the
+                  agreement bought. Shown unpriced, matching the PDF. */}
+              {(agreementBreakdowns?.[inv.id] || []).map(ag => {
+                const key = `${inv.id}:${ag.packageId}`
+                const open = expandedAgreements.has(key)
+                return (
+                  <div key={`ag-${ag.packageId}`} className="relative bg-emerald-500/[0.04]">
+                    <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-emerald-400/70" />
+                    <button
+                      onClick={() => setExpandedAgreements(prev => {
+                        const next = new Set(prev)
+                        if (next.has(key)) next.delete(key); else next.add(key)
+                        return next
+                      })}
+                      className="w-full flex items-start gap-3 px-4 py-3 hover:bg-emerald-500/[0.08] transition-colors text-left"
+                    >
+                      <Gift className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-foreground truncate">{ag.packageName}</span>
+                          <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded-full shrink-0">
+                            {ag.covered.length} included
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-muted-foreground mt-0.5">
+                          {ag.allowance.map(a => (
+                            `${a.serviceName}: ${a.delivered}/${a.included}${a.extra > 0 ? ` (+${a.extra} extra)` : ''}`
+                          )).join(' · ')}
+                          {!ag.feeOnThisInvoice && ' · fee charged earlier'}
+                        </div>
+                      </div>
+                      {open
+                        ? <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
+                        : <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />}
+                    </button>
+                    {open && (
+                      <div className="pb-2">
+                        {ag.covered.length === 0 && (
+                          <div className="px-4 pb-2 pl-11 text-[11px] text-muted-foreground italic">
+                            No delivered work covered this period.
+                          </div>
+                        )}
+                        {ag.covered.map((t, i) => (
+                          <div key={t.id} className="flex items-center gap-2 px-4 py-1.5 pl-11 text-xs hover:bg-emerald-500/[0.06]">
+                            <span className="text-muted-foreground/60 tabular-nums w-5 shrink-0">{i + 1}</span>
+                            <span className="text-muted-foreground tabular-nums w-20 shrink-0">
+                              {t.taskDate ? fmtDate(t.taskDate) : '—'}
+                            </span>
+                            <span className="text-foreground truncate flex-1">{t.title}</span>
+                            <span className="text-emerald-600 dark:text-emerald-400 font-medium shrink-0 flex items-center gap-1">
+                              <Check className="w-3 h-3" /> Included
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+
               {/* Expense items inline in line items */}
               {(inv.expense_items || []).map(exp => (
                 <div key={`exp-${exp.id}`} className="relative flex items-start gap-3 px-4 py-3 bg-amber-500/[0.04] hover:bg-amber-500/[0.08] transition-colors group">
@@ -6344,7 +6467,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 number: inv?.invoice_number || '—',
                 outstanding: inv ? Number(inv.total_amount) - Number(inv.paid_amount || 0) : 0,
               }],
-              companyLogoUrl: companySettings.logo_url_dark || companySettings.logo_url,
+              companyLogoUrl: resolveBrandingUrl(companySettings.logo_url_dark || companySettings.logo_url),
               companyName:    companySettings.company_name,
               companyPhone:   companySettings.company_phone,
               companyWebsite: companySettings.company_website,

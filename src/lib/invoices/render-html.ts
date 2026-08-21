@@ -15,6 +15,8 @@
 import QRCode from 'qrcode'
 import { getCurrencySymbol } from '@/lib/calculations/currency'
 import { formatBillingPeriod, compareInvoiceItems } from '@/lib/utils/invoice'
+import { resolveBrandingUrl } from '@/lib/utils/branding'
+import type { AgreementBreakdown } from '@/lib/packages/invoice-breakdown'
 import type { Currency } from '@/types'
 
 function escapeHtml(unsafe: string | null | undefined, keepNewlines = false): string {
@@ -138,11 +140,17 @@ export function buildPageDecor(companySettings: Record<string, string>): PageDec
          </g>
        </svg>`
 
-  const customTopImg = (pos: DecorLayerPos) => companySettings.invoice_bg_image_top_url
-    ? `<img src="${companySettings.invoice_bg_image_top_url}" style="position:${pos === 'fixed' ? 'absolute' : pos};top:0;left:0;width:100%;height:auto;pointer-events:none;z-index:0;display:block;" />`
+  // Branding assets are stored as `storage:bucket/path` refs, which no browser
+  // can load — they must be expanded to a public URL first. The bucket is
+  // public and returns `access-control-allow-origin: *`, so a plain remote URL
+  // is safe for the html2canvas rasterisation too.
+  const bgTopUrl = resolveBrandingUrl(companySettings.invoice_bg_image_top_url)
+  const bgBottomUrl = resolveBrandingUrl(companySettings.invoice_bg_image_bottom_url)
+  const customTopImg = (pos: DecorLayerPos) => bgTopUrl
+    ? `<img src="${bgTopUrl}" style="position:${pos === 'fixed' ? 'absolute' : pos};top:0;left:0;width:100%;height:auto;pointer-events:none;z-index:0;display:block;" />`
     : ''
-  const customBottomImg = (pos: DecorLayerPos) => companySettings.invoice_bg_image_bottom_url
-    ? `<img src="${companySettings.invoice_bg_image_bottom_url}" style="position:${pos === 'fixed' ? 'absolute' : pos};bottom:0;left:0;width:100%;height:auto;pointer-events:none;z-index:0;display:block;" />`
+  const customBottomImg = (pos: DecorLayerPos) => bgBottomUrl
+    ? `<img src="${bgBottomUrl}" style="position:${pos === 'fixed' ? 'absolute' : pos};bottom:0;left:0;width:100%;height:auto;pointer-events:none;z-index:0;display:block;" />`
     : ''
 
   const bgTop = (pos: DecorLayerPos) =>
@@ -202,6 +210,12 @@ export interface InvoiceRenderOpts {
   // renders as text, not solid boxes. Preview / Print (real browser rendering)
   // leave it off and keep the gradient.
   forRaster?: boolean
+  // agreements: what each package fee actually covered, for an "Included in your
+  // agreement" block. Display only — these tasks are deliberately UNPRICED here.
+  // They carry internal work values (often in a different currency to the
+  // invoice), and printing those as amounts would both misstate the currency and
+  // bill the client twice over for work the fee already paid for.
+  agreements?: AgreementBreakdown[]
 }
 
 /** Decorative layers can be viewport-fixed (print) or page-div-absolute (PDF pages). */
@@ -209,8 +223,12 @@ type LayerPos = 'fixed' | 'absolute'
 
 /**
  * Route a remote logo through our own origin (see src/app/api/invoice-logo).
- * data: URIs are already inline — every other invoice asset (background art,
- * QR, favicon) is stored that way — and are returned untouched.
+ * The logo is the one asset that needs this: it lives on cirqle.work, which
+ * sends no CORS header, so a crossorigin="anonymous" request there fails and
+ * the canvas rasterisation loses it. Other branding assets sit in the public
+ * `company-branding` bucket (allow-origin: *) and load directly once
+ * resolveBrandingUrl has expanded their `storage:` ref. data: URIs are already
+ * inline and are returned untouched.
  */
 function resolveLogoUrl(url: string): string {
   if (!url) return ''
@@ -243,6 +261,8 @@ export interface InvoiceRenderParts {
   itemRows: string[]
   emptyRow: string
   expensesBlock: string
+  /** "Included in your agreement" — covered work, listed without prices. */
+  agreementBlock: string
   totalsBlock: string
   notesBlock: string
   /** payment info | QR | thank-you footer (margin-top:auto, pinned to page bottom) */
@@ -406,6 +426,54 @@ export function buildInvoiceParts(
   </div>`
   })() : ''
 
+  // ── "Included in your agreement" ───────────────────────────────────────────
+  //
+  // A package fee replaces the task lines it covers, so without this the client
+  // reads "Social Media Management — AED 400" against a blank space and cannot
+  // tell what they got for it. Rows are deliberately UNPRICED: the covered tasks
+  // carry internal work values, often in another currency, and showing those as
+  // money would both misstate the amount and imply a second charge.
+  const agreements = opts?.agreements || []
+  const agreementBlock = agreements.length > 0 ? (() => {
+    const A_H = 30
+    const tdA = `height:${A_H}px;padding:0 10px 7px 10px;line-height:${A_H - 7}px;border-bottom:1px solid ${CELL_BORD};font-size:12.5px;`
+    const sections = agreements.map(ag => {
+      const rows = ag.covered.map((t, i) => `
+        <tr style="background:${i % 2 === 1 ? ALT_ROW : '#ffffff'};height:${A_H}px">
+          <td style="${tdA}border-left:none;text-align:center;color:#555;width:36px">${i + 1}</td>
+          <td style="${tdA}border-left:1px solid ${CELL_BORD};text-align:center;color:#222;white-space:nowrap;width:110px">${t.taskDate ? ddMon(t.taskDate) : ''}</td>
+          <td style="${tdA}border-left:1px solid ${CELL_BORD};text-align:left;color:#222">${escapeHtml(t.title)}</td>
+          <td style="${tdA}border-left:1px solid ${CELL_BORD};text-align:right;color:#1d9a52;font-weight:700;white-space:nowrap;width:110px">Included</td>
+        </tr>`).join('')
+
+      // "5 of 15 Social Media Poster used" — tells the client what remains of
+      // what they bought, which the covered list alone doesn't convey.
+      const allowance = ag.allowance
+        .map(a => `${escapeHtml(a.serviceName)}: ${a.delivered} of ${a.included} used${a.extra > 0 ? ` (+${a.extra} extra, billed above)` : ''}`)
+        .join(' &nbsp;·&nbsp; ')
+
+      const feeNote = ag.feeOnThisInvoice
+        ? 'Charged on this invoice'
+        : 'Already charged — no further fee this period'
+
+      return `
+      <div style="margin-top:10px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:4px">
+          <span style="font-weight:700;font-size:12.5px;color:#111">${escapeHtml(ag.packageName)}</span>
+          <span style="font-size:11px;color:#666;white-space:nowrap">${feeNote}</span>
+        </div>
+        ${allowance ? `<div style="font-size:11px;color:#666;margin-bottom:5px">${allowance}</div>` : ''}
+        ${rows ? `<table style="width:100%;border-collapse:collapse;border:1px solid ${CELL_BORD}"><tbody>${rows}</tbody></table>` : ''}
+      </div>`
+    }).join('')
+
+    return `
+  <div style="margin-top:18px">
+    <div style="font-weight:700;font-size:13px;color:${NAVY};margin-bottom:2px;padding-bottom:5px;text-transform:uppercase;letter-spacing:0.05em">Included in your agreement</div>
+    ${sections}
+  </div>`
+  })() : ''
+
   const upiString = co.upi ? `upi://pay?pa=${co.upi}&pn=${encodeURIComponent(co.holder)}&cu=INR` : ''
 
   // Logo: use uploaded image if available, else SVG icon
@@ -439,7 +507,7 @@ export function buildInvoiceParts(
     </div>` : ''
 
   // QR (encodes the UPI pay link or uses a custom uploaded QR image)
-  const customQr = companySettings.invoice_qr_image_url
+  const customQr = resolveBrandingUrl(companySettings.invoice_qr_image_url)
   const qrBlock = showQr
     ? (customQr ? `<img src="${customQr}" alt="QR Code" crossorigin="anonymous" style="width:104px;height:104px;object-fit:contain;display:block;margin:0 auto"/>` : (upiString ? qrSvgBlock(upiString, NAVY_LIGHT) : ''))
     : ''
@@ -741,7 +809,7 @@ export function buildInvoiceParts(
   return {
     inv, co, NAVY, NAVY_LIGHT, CELL_BORD, FONT, bgStyle, bgCss, fullBleed, pageMargin, bodyPad,
     fontLinks, headerBlock, contHeader, contFooter, itemsTable, itemRows, emptyRow,
-    expensesBlock, totalsBlock, notesBlock, footerBlock, brandStrip,
+    expensesBlock, agreementBlock, totalsBlock, notesBlock, footerBlock, brandStrip,
     cornerSvg, bgTop, bgBottom, autoprintScript,
   }
 }
@@ -777,6 +845,8 @@ export function renderInvoiceHtml(
   ${p.itemsTable(p.itemRows.join('') || p.emptyRow)}
 
   ${p.expensesBlock}
+
+  ${p.agreementBlock}
 
   ${p.totalsBlock}
 
@@ -832,6 +902,7 @@ export function renderMeasureHtml(p: InvoiceRenderParts): string {
     ${wrap('contHeader', p.contHeader(2, 9))}
     ${wrap('table', p.itemsTable(p.itemRows.join('') || p.emptyRow))}
     ${wrap('expenses', p.expensesBlock)}
+    ${wrap('agreement', p.agreementBlock)}
     ${wrap('totals', p.totalsBlock)}
     ${wrap('notes', p.notesBlock)}
     ${wrap('footer', p.footerBlock)}
@@ -863,7 +934,7 @@ export function renderPaginatedInvoiceHtml(p: InvoiceRenderParts, pageRows: numb
       ${isFirst ? p.headerBlock : p.contHeader(i + 1, N)}
       ${tableHtml}
       ${isLast
-        ? `${p.expensesBlock}${p.totalsBlock}${p.notesBlock}${p.footerBlock}${p.brandStrip(N > 1 ? `Page ${N} of ${N}` : '')}`
+        ? `${p.expensesBlock}${p.agreementBlock}${p.totalsBlock}${p.notesBlock}${p.footerBlock}${p.brandStrip(N > 1 ? `Page ${N} of ${N}` : '')}`
         : p.contFooter(i + 1, N)}
     </div>
   </div>`

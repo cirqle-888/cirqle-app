@@ -14,6 +14,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { planPackageInvoice, extraTaskUnitPrice } from './invoice-lines'
 import type { PackageRow, PackageItemRow, PackageTaskLike } from './types'
+// Canonical money rounding — a local Math.round(n * 100) / 100 disagrees at the
+// .xx5 midpoints (1.005 -> 1.00 instead of 1.01), which on an invoice total is
+// a paisa the line items do not add up to. See currency.ts round2.
+import { round2 as r2 } from '@/lib/calculations/currency'
 
 export interface PackageSyncResult {
   feeLines: number
@@ -75,9 +79,11 @@ export async function syncInvoicePackageLines(
       .in('package_id', ids).is('deleted_at', null),
     // One-time fees bill once EVER, so this looks across every invoice, not
     // just this one — and ignores lines on this invoice, which we are about to
-    // rewrite anyway.
+    // rewrite anyway. The joined invoice month is what lets an extended opening
+    // cycle ask "was this span already billed?", which the package_id alone
+    // cannot answer.
     admin.from('invoice_items')
-      .select('package_id, invoice_id')
+      .select('package_id, invoice_id, invoice:invoices(billing_period_start)')
       .in('package_id', ids).neq('invoice_id', invoiceId),
   ])
 
@@ -95,14 +101,32 @@ export async function syncInvoicePackageLines(
     else tasksByPackage.set(t.package_id, [t])
   }
 
+  type BilledRow = {
+    package_id: string | null
+    invoice: { billing_period_start: string | null } | { billing_period_start: string | null }[] | null
+  }
+  const billedRows = (billedRes.data ?? []) as BilledRow[]
+
   const oneTimeAlreadyBilled = new Set(
-    ((billedRes.data ?? []) as { package_id: string | null }[])
-      .map(r => r.package_id).filter(Boolean) as string[],
+    billedRows.map(r => r.package_id).filter(Boolean) as string[],
   )
+
+  // package_id → months of the OTHER invoices already carrying its fee.
+  const feeLineMonths = new Map<string, Set<string>>()
+  for (const r of billedRows) {
+    if (!r.package_id) continue
+    // PostgREST returns an embedded to-one as an object, but types it as either.
+    const embedded = Array.isArray(r.invoice) ? r.invoice[0] : r.invoice
+    const start = embedded?.billing_period_start
+    if (!start) continue
+    const set = feeLineMonths.get(r.package_id)
+    if (set) set.add(String(start).slice(0, 7))
+    else feeLineMonths.set(r.package_id, new Set([String(start).slice(0, 7)]))
+  }
 
   // ── Decide ─────────────────────────────────────────────────────────────────
   const plan = planPackageInvoice({
-    packages, itemsByPackage, tasksByPackage, month, oneTimeAlreadyBilled,
+    packages, itemsByPackage, tasksByPackage, month, oneTimeAlreadyBilled, feeLineMonths,
   })
 
   // ── Write the difference ───────────────────────────────────────────────────
@@ -178,7 +202,7 @@ export async function syncInvoicePackageLines(
     const qty = r.quantity ?? 1
     if (r.unit_price === unit) continue
     await admin.from('invoice_items')
-      .update({ unit_price: unit, total: Math.round(unit * qty * 100) / 100 })
+      .update({ unit_price: unit, total: r2(unit * qty) })
       .eq('id', r.id)
     extrasRepriced++
   }
@@ -209,7 +233,6 @@ async function recalcInvoiceTotal(admin: SupabaseClient, invoiceId: string): Pro
       .select('discount_amount, tax_amount, previous_balance').eq('id', invoiceId).maybeSingle(),
   ])
 
-  const r2 = (n: number) => Math.round(n * 100) / 100
   const itemTotal = ((itemsRes.data ?? []) as { total: number | null }[])
     .reduce((s, i) => s + (i.total || 0), 0)
   const expTotal = ((expRes.data ?? []) as { amount: number | null }[])

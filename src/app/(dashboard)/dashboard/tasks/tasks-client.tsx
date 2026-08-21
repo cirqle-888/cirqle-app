@@ -19,6 +19,7 @@ import { formatCurrency } from '@/lib/calculations/currency'
 import Link from 'next/link'
 import Combobox from '@/components/ui/combobox'
 import { TitleAutocomplete } from '@/components/tasks/title-autocomplete'
+import { normalizeTaskTitle } from '@/lib/utils/title-case'
 
 const QuickCreateClientModal = dynamic(() => import('@/components/tasks/quick-create-modals').then(mod => mod.QuickCreateClientModal), { ssr: false })
 const QuickCreateServiceModal = dynamic(() => import('@/components/tasks/quick-create-modals').then(mod => mod.QuickCreateServiceModal), { ssr: false })
@@ -1358,7 +1359,11 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
 
     const insertPayload: Record<string, unknown> = {
       task_number: tn,
-      title: form.title,
+      // Title case is applied on the way in, not offered as a suggestion — the
+      // field can still be edited freely, but what lands in the table is
+      // normalised. See lib/utils/title-case for what it deliberately leaves
+      // alone (Malayalam, acronyms, brand capitals).
+      title: normalizeTaskTitle(form.title),
       description: form.description || null,
       // Empty or the Internal sentinel → NULL: internal Cirqle work with no
       // client. The task→invoice trigger ignores NULL-client tasks entirely.

@@ -4,6 +4,7 @@ import { financialVisibility, stripInvoiceList } from '@/lib/permissions/strip'
 import { getPendingPricing } from '@/lib/pricing/pending'
 import { PricingPendingBanner } from '@/components/pricing/pricing-pending-banner'
 import { getCompanySettings } from '@/lib/settings/company-settings'
+import { loadAgreementBreakdowns } from '@/lib/packages/invoice-breakdown'
 import InvoicesClient from './invoices-client'
 
 export const dynamic = 'force-dynamic'
@@ -76,6 +77,19 @@ export default async function InvoicesPage() {
     { amounts: vis.billingAmounts, linePricing: vis.billingLinePricing },
   )
 
+  // Agreement breakdowns: a package fee replaces the task lines it covers, so
+  // the covered work has no rows left to render. Rebuilt here (display only) so
+  // both the invoice panel and the PDF can show what an agreement included.
+  // Three small queries for the whole page — see loadAgreementBreakdowns.
+  const serviceNames = new Map(
+    (servicesRes.data || []).map((s: { id: string; name: string }) => [s.id, s.name]),
+  )
+  const agreementBreakdowns = await loadAgreementBreakdowns(
+    supabase,
+    initialInvoices as any[],
+    serviceNames,
+  )
+
   // Pending-to-price banner — only for users who can see invoice amounts/pricing.
   const canSeePricing = (me?.isAdmin ?? false) || vis.billingAmounts || vis.billingLinePricing
   const pendingPricing = canSeePricing ? await getPendingPricing(supabase) : { clients: [], services: [], total: 0 }
@@ -91,6 +105,7 @@ export default async function InvoicesPage() {
       services={servicesRes.data || []}
       companySettings={settings}
       exchangeRates={ratesRes.data || []}
+      agreementBreakdowns={agreementBreakdowns}
       visibility={{
         amounts:     vis.billingAmounts,
         linePricing: vis.billingLinePricing,

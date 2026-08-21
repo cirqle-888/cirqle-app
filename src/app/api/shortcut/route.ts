@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { normalizeTaskTitle } from '@/lib/utils/title-case'
 import { createAdminClient } from '@/lib/supabase/server'
 import { aiParse, findClient, findService, normalizeDate } from '@/lib/ai/request-capture'
 import { todayISO } from '@/lib/utils/local-date'
@@ -115,7 +116,7 @@ async function createTask(admin: Admin, p: { title?: string; client?: string; se
   const tn = await nextTaskNumber(admin)
   const { data, error } = await admin.from('tasks').insert({
     task_number: tn,
-    title,
+    title: normalizeTaskTitle(title),
     client_id: client?.id || null,
     service_id: service?.id || null,
     status: 'pending',

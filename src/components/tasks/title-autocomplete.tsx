@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { cleanTitle, normalizeTaskTitle } from '@/lib/utils/title-case'
 import { Clock, Sparkles, Check, Wand2 } from 'lucide-react'
 import { getTitleSuggestions, getRecentTitlePool } from '@/app/(dashboard)/dashboard/tasks/quick-create-actions'
 
@@ -40,29 +41,6 @@ function norm(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, '')
 }
 
-/** Tidy a title: trim, collapse inner whitespace, fix spacing around dashes. */
-function cleanTitle(s: string): string {
-  return s
-    .replace(/\s+/g, ' ')
-    .replace(/\s*([—–-])\s*/g, ' $1 ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-/** Title-case words but keep ALLCAPS tokens and small joiners lowercase. */
-function toTitleCase(s: string): string {
-  const small = new Set(['a', 'an', 'and', 'the', 'of', 'for', 'to', 'in', 'on', 'by', 'with'])
-  const words = s.split(' ')
-  return words
-    .map((w, i) => {
-      if (!w) return w
-      if (w.length > 1 && w === w.toUpperCase()) return w // keep acronyms (B.N., CQID)
-      const lower = w.toLowerCase()
-      if (i !== 0 && small.has(lower)) return lower
-      return lower.charAt(0).toUpperCase() + lower.slice(1)
-    })
-    .join(' ')
-}
 
 export function TitleAutocomplete({ value, onChange, className, placeholder, required, localTitles = [] }: Props) {
   const [open, setOpen] = useState(false)
@@ -110,10 +88,13 @@ export function TitleAutocomplete({ value, onChange, className, placeholder, req
   })()
 
   // Corrections.
+  //
+  // Title case is no longer offered here — it is applied unconditionally on
+  // blur and again on insert, so a button for it would only ever be a no-op.
+  // The remaining suggestions are the ones the user must actually choose:
+  // a spacing tidy they can see, and a fuzzy match against past titles.
   const cleaned = cleanTitle(value)
-  const titleCased = toTitleCase(cleaned)
   const showCleanup = cleaned !== value && cleaned.length > 0
-  const showCase = !showCleanup && titleCased !== value && titleCased.length > 0
 
   // "Did you mean" — closest past title by normalized edit distance (spacing and
   // punctuation ignored), matched against the full history pool. Catches typos
@@ -151,7 +132,7 @@ export function TitleAutocomplete({ value, onChange, className, placeholder, req
     return () => document.removeEventListener('mousedown', onDoc)
   }, [])
 
-  const hasPanel = open && focused && (merged.length > 0 || showCleanup || showCase || !!didYouMean)
+  const hasPanel = open && focused && (merged.length > 0 || showCleanup || !!didYouMean)
 
   return (
     <div ref={boxRef} className="relative">
@@ -160,8 +141,10 @@ export function TitleAutocomplete({ value, onChange, className, placeholder, req
         onChange={e => { onChange(e.target.value); setOpen(true) }}
         onFocus={() => { setFocused(true); setOpen(true); ensurePool() }}
         onBlur={() => {
-          // Auto-tidy whitespace on blur (non-destructive: only spacing).
-          const c = cleanTitle(value)
+          // Normalise on blur so the field shows exactly what will be saved.
+          // Task creation applies the same function again on insert — this is
+          // the preview of that, not the enforcement of it.
+          const c = normalizeTaskTitle(value)
           if (c !== value) onChange(c)
         }}
         required={required}
@@ -173,7 +156,7 @@ export function TitleAutocomplete({ value, onChange, className, placeholder, req
       {hasPanel && (
         <div className="absolute z-50 left-0 right-0 mt-1 bg-secondary border border-foreground/15 rounded-xl shadow-2xl shadow-black/50 overflow-hidden">
           {/* Corrections */}
-          {(showCleanup || showCase || didYouMean) && (
+          {(showCleanup || didYouMean) && (
             <div className="p-1.5 border-b border-foreground/[0.06] space-y-1">
               {didYouMean && (
                 <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => { onChange(didYouMean); setOpen(false) }}
@@ -190,14 +173,6 @@ export function TitleAutocomplete({ value, onChange, className, placeholder, req
                   <Sparkles className="w-3.5 h-3.5 text-violet-400 shrink-0" />
                   <span className="text-xs text-muted-foreground">Clean up spacing →</span>
                   <span className="text-xs font-medium text-foreground truncate">{cleaned}</span>
-                </button>
-              )}
-              {showCase && (
-                <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => { onChange(titleCased); setOpen(false) }}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left hover:bg-foreground/[0.06] transition-colors">
-                  <Sparkles className="w-3.5 h-3.5 text-violet-400 shrink-0" />
-                  <span className="text-xs text-muted-foreground">Title case →</span>
-                  <span className="text-xs font-medium text-foreground truncate">{titleCased}</span>
                 </button>
               )}
             </div>

@@ -31,6 +31,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import AppSelect from '@/components/ui/app-select'
 import Combobox from '@/components/ui/combobox'
 import { TitleAutocomplete } from '@/components/tasks/title-autocomplete'
+import { normalizeTaskTitle } from '@/lib/utils/title-case'
 
 const QuickCreateClientModal = dynamic(() => import('@/components/tasks/quick-create-modals').then(mod => mod.QuickCreateClientModal), { ssr: false })
 const QuickCreateServiceModal = dynamic(() => import('@/components/tasks/quick-create-modals').then(mod => mod.QuickCreateServiceModal), { ssr: false })
@@ -1305,7 +1306,7 @@ export default function ContributionsClient({
     if (!addTaskForm.title.trim()) { setAddTaskError('Task title is required'); return }
     setAddingTask(true); setAddTaskError('')
     const payload: any = {
-      title: addTaskForm.title.trim(),
+      title: normalizeTaskTitle(addTaskForm.title),
       status: addTaskForm.status,
       task_date: addTaskForm.task_date || todayISO(),
     }

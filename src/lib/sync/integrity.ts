@@ -8,6 +8,7 @@ import { fetchAll } from '@/lib/supabase/server'
 // Canonical money rounding — a local Math.round(n * 100) / 100 disagrees at
 // the .xx5 midpoints (1.005 -> 1.00 instead of 1.01). See currency.ts round2.
 import { round2 as r2 } from '@/lib/calculations/currency'
+import { syncInvoicePackageLines } from '@/lib/packages/sync-invoice'
 import { resolveEarning, CommissionAgreement } from '@/lib/agreements/resolve-earning'
 
 /**
@@ -419,7 +420,24 @@ export async function syncDraftInvoices(taskId: string) {
     }
   }
 
-  // 3. Recalculate totals for all affected draft invoices
+  // 3. Reconcile package lines on every invoice this task touched.
+  //
+  // Runs BEFORE the recalculation below, and AFTER the per-task sync above —
+  // that order is the whole point. The task sync re-adds a line for every done
+  // task, including ones a package fee already covers; this collapses those
+  // back into the fee line, and adds the fee itself when the month is due one.
+  // Doing it here rather than only in the manual Resync is what makes a monthly
+  // retainer appear on its own.
+  //
+  // Best-effort: a package problem must never fail a task save. Each invoice is
+  // guarded separately so one bad package can't stop the others.
+  for (const invId of invoiceIdsToRecalculate) {
+    try {
+      await syncInvoicePackageLines(supabase as any, invId)
+    } catch { /* leave this invoice's package lines to the manual Resync */ }
+  }
+
+  // 4. Recalculate totals for all affected draft invoices
   for (const invId of invoiceIdsToRecalculate) {
     const { data: allItems } = await supabase.from('invoice_items').select('total').eq('invoice_id', invId)
     const { data: allExps } = await supabase.from('invoice_expense_items').select('amount').eq('invoice_id', invId)
