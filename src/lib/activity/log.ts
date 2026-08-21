@@ -43,6 +43,8 @@ export type EntityType =
   | 'job_position'
   | 'interview'
   | 'offer'
+  // Field Marketing — physical prospect on the territory map
+  | 'field_place'
 
 /** Timeline filter groups — mirrors migration 014 backfill mapping. */
 export type ActivityCategory =
@@ -62,6 +64,7 @@ export const DEFAULT_CATEGORY: Record<EntityType, ActivityCategory> = {
   message: 'chat', approval: 'crm',
   job_application: 'recruitment', job_position: 'recruitment',
   interview: 'recruitment', offer: 'recruitment',
+  field_place: 'crm',
 }
 
 export type ActivityAction =

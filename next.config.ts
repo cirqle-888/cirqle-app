@@ -46,8 +46,11 @@ const nextConfig: NextConfig = {
           { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
           // Don't leak full URLs (which contain portal/intake tokens) to third parties.
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-          // Lock down powerful browser features the app doesn't use.
-          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+          // Lock down powerful browser features the app doesn't use. Geolocation
+          // is allowed for the app's OWN origin only (self) — Field Marketing
+          // needs the "you are here"/distance GPS; the browser still prompts,
+          // and no iframe/third party is granted (the app is never iframed).
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(self)' },
         ],
       },
     ]

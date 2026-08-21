@@ -35,6 +35,9 @@ export type NotificationType =
   | 'social_post_failed'
   | 'social_sync_failed'
   | 'meta_reauth_required'
+  // Field Marketing
+  | 'field_place_assigned'
+  | 'field_followup_due'
 
 interface NotificationContent {
   type: NotificationType | (string & {})

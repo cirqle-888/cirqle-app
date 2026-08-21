@@ -130,6 +130,12 @@ export const PERMS = {
   /** Create/edit/assign leads, change status, configure automation rules. */
   LEADS_MANAGE: 'leads.manage',
 
+  // Field Marketing — door-to-door territory map + visits (migration 20260821120000)
+  /** Open the Field Marketing module: territory map, place list, visit history. */
+  FIELD_VIEW:   'field.view',
+  /** Add/edit places, log visits, change status, assign reps, manage territories, convert. */
+  FIELD_MANAGE: 'field.manage',
+
   // Packages — a committed bundle of work: one agreed price, a list of what's
   // included, and a bulk invoice line. Replaces the retired Client Agreements
   // module (migration 20260814110000).

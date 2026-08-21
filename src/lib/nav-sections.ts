@@ -13,7 +13,7 @@ import {
   SlidersHorizontal, MessageSquare, ClipboardCheck, NotebookPen, LayoutGrid,
   Briefcase, ClipboardList, CalendarClock, CalendarDays, BadgeCheck, PieChart, Building2, Tags, History, Sparkles,
   BadgePercent, CalendarRange, HardHat, Repeat, Package as PackageIcon,
-  Share2, UserPlus, Gauge, ShieldCheck, Grid3x3,
+  Share2, UserPlus, Gauge, ShieldCheck, Grid3x3, MapPin,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -118,6 +118,9 @@ export const navSections: NavSection[] = [
       { label: 'Feed Planner',     href: '/dashboard/social/feed',     icon: Grid3x3, requiredPerm: 'social.plan_feed', keywords: ['instagram grid', 'feed preview', 'mockup', 'creatives', 'profile', 'aesthetic', 'layout'] },
       { label: 'Social Calendar',  href: '/dashboard/social-calendar', icon: CalendarDays, requiredPerm: 'social.view', keywords: ['content', 'planner', 'posts', 'instagram', 'social media'] },
       { label: 'Leads',            href: '/dashboard/leads',           icon: UserPlus, requiredPerm: 'leads.view', keywords: ['crm', 'meta leads', 'lead ads', 'prospects', 'enquiries'] },
+      // Door-to-door / direct marketing: physical prospects on a map, visit
+      // tracking, follow-ups — distinct from the Meta-ads Leads CRM above.
+      { label: 'Field Marketing',  href: '/dashboard/field-marketing', icon: MapPin, requiredPerm: 'field.view', keywords: ['map', 'territory', 'door to door', 'direct marketing', 'supermarkets', 'shops', 'visits', 'gps', 'route', 'coverage', 'field sales'] },
       { label: 'Advertising',      href: '/dashboard/advertising',     icon: Megaphone, requiredPerm: 'advertising.view', keywords: ['campaigns', 'ads', 'marketing'] },
       { label: 'Agency',           href: '/dashboard/agency',          icon: LayoutGrid, requiredPerm: 'reports.view', keywords: ['agency dashboard', 'all clients', 'overview', 'spend', 'leads', 'cpl', 'alerts'] },
     ],
