@@ -48,47 +48,55 @@ export default async function FeedPlannerPage({
   let published: Record<string, unknown>[] = []
   let shareLinks: Record<string, unknown>[] = []
 
-  if (selected) {
-    // grid_order arrives with 20260814160000; without it the planner still
-    // renders (every tile simply reads as an unplaced draft) rather than 500ing.
-    const plannedRes = await admin
-      .from('social_posts')
-      .select('id, status, media, caption, hashtags, scheduled_at, grid_order, review_note')
-      .eq('account_id', selected.id)
-      .then(r => r.error
-        ? admin.from('social_posts')
-            .select('id, status, media, caption, hashtags, scheduled_at')
-            .eq('account_id', selected.id)
-        : r)
-    planned = (plannedRes.data ?? []) as Record<string, unknown>[]
-
-    const { data: media } = await admin
-      .from('social_media_items')
-      .select('id, thumbnail_url, media_url, permalink, caption, posted_at, media_type, media_product_type, likes, comments')
-      .eq('account_id', selected.id)
-      .order('posted_at', { ascending: false })
-      .limit(60)
-    published = (media ?? []) as Record<string, unknown>[]
-
+  // Instagram has changed its grid crop before and will again — so the ratio
+  // is a setting, not a constant. One dropdown, no deploy. Started here rather
+  // than after the feed queries because it depends on none of them.
+  const aspectP = (async (): Promise<string | null> => {
     try {
-      const { data: links } = await admin
-        .from('feed_share_links')
-        .select('id, token, label, expires_at, revoked_at, created_at, last_used_at')
+      const { data } = await admin
+        .from('company_settings').select('value').eq('key', FEED_ASPECT_KEY).maybeSingle()
+      return data?.value ?? null
+    } catch { return null /* unset — the parser falls back to the default */ }
+  })()
+
+  if (selected) {
+    // All three read the SAME account and none feeds the next, so they go out
+    // together — the panel was three round trips deep for no reason.
+    const [plannedRes, mediaRes, linksRes] = await Promise.all([
+      // grid_order arrives with 20260814160000; without it the planner still
+      // renders (every tile reads as an unplaced draft) rather than 500ing.
+      admin
+        .from('social_posts')
+        .select('id, status, media, caption, hashtags, scheduled_at, grid_order, review_note')
         .eq('account_id', selected.id)
-        .is('revoked_at', null)
-        .order('created_at', { ascending: false })
-      shareLinks = (links ?? []) as Record<string, unknown>[]
-    } catch { /* table arrives with the same migration */ }
+        .then(r => r.error
+          ? admin.from('social_posts')
+              .select('id, status, media, caption, hashtags, scheduled_at')
+              .eq('account_id', selected.id)
+          : r),
+      admin
+        .from('social_media_items')
+        .select('id, thumbnail_url, media_url, permalink, caption, posted_at, media_type, media_product_type, likes, comments')
+        .eq('account_id', selected.id)
+        .order('posted_at', { ascending: false })
+        .limit(60),
+      (async () => {
+        try {
+          return await admin
+            .from('feed_share_links')
+            .select('id, token, label, expires_at, revoked_at, created_at, last_used_at')
+            .eq('account_id', selected.id)
+            .is('revoked_at', null)
+            .order('created_at', { ascending: false })
+        } catch { return { data: [] } /* table arrives with the same migration */ }
+      })(),
+    ])
+    planned = (plannedRes.data ?? []) as Record<string, unknown>[]
+    published = (mediaRes.data ?? []) as Record<string, unknown>[]
+    shareLinks = (linksRes.data ?? []) as Record<string, unknown>[]
   }
 
-  // Instagram has changed its grid crop before and will again — so the ratio
-  // is a setting, not a constant. One dropdown, no deploy.
-  let aspectRaw: string | null = null
-  try {
-    const { data } = await admin
-      .from('company_settings').select('value').eq('key', FEED_ASPECT_KEY).maybeSingle()
-    aspectRaw = data?.value ?? null
-  } catch { /* unset — the parser falls back to the default */ }
+  const aspectRaw = await aspectP
 
   const grid = buildFeedGrid({
     planned: planned as never,

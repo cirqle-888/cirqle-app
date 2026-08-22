@@ -19,22 +19,22 @@ export default async function InvoicesPage() {
   const supabase = createAdminClient()
 
   const [invoicesRes, clientsRes, bankRes, servicesRes, settingsRes, ratesRes, categoriesRes] = await Promise.all([
-    // Note: this is the biggest single query on the page (HAR shows 7.5s cold).
-    // The nested task+service joins inside `items` are needed by the editor,
-    // PDF generator, and invoice rows — can't safely drop them without a
-    // client refactor. Caps at 500 most-recent invoices to bound the payload.
+    // The list query. `items` and `cashbook_invoice_allocations` are
+    // deliberately NOT joined here: measured across 270 invoices they were
+    // 988 KB and 154 KB of a 1375 KB payload, and nothing on the LIST needs
+    // either — only the selected invoice's detail panel, the PDF, a statement
+    // or a bulk task-status update does. Those pull them through
+    // getInvoiceDetails() instead, which keeps the line-pricing permission
+    // strip on a path that can enforce it. Dropping them takes the payload to
+    // ~264 KB. `items(count)` keeps the "N tasks" badge on each row.
+    // Caps at 500 most-recent invoices to bound the payload.
     supabase
       .from('invoices')
       .select(`
         *,
         client:clients(id, name, code, phone, email, address),
-        items:invoice_items(
-          *,
-          task:tasks(id, title, task_date, status, billing_amount_inr, currency),
-          service:services(id, name)
-        ),
+        item_count:invoice_items(count),
         payments(id, amount, currency, exchange_rate, amount_inr, payment_date, payment_method, reference, notes),
-        cashbook_invoice_allocations(id, deleted_at, allocated_amount, cashbook_entry:cashbook_entries(id, reference, entry_date, description, receipt_number, bank_account:bank_accounts(name))),
         expense_items:invoice_expense_items(id, cashbook_entry_id, description, amount, amount_inr, currency, original_amount, original_amount_inr, markup_type, markup_value, markup_amount, notes)
       `)
       .order('created_at', { ascending: false })

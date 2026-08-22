@@ -156,7 +156,6 @@ export interface InvoiceForBreakdown {
   id: string
   client_id: string | null
   billing_period_start: string | null
-  items?: { package_id?: string | null }[] | null
 }
 
 /**
@@ -188,12 +187,27 @@ export async function loadAgreementBreakdowns(
     const packages = pkgData as PackageRow[]
     const ids = packages.map(p => p.id)
 
-    const [itemsRes, tasksRes] = await Promise.all([
+    const [itemsRes, tasksRes, feeRes] = await Promise.all([
       admin.from('client_package_items').select('*').in('package_id', ids),
       admin.from('tasks')
         .select('id, title, package_id, service_id, task_date, task_number, status')
         .in('package_id', ids).is('deleted_at', null),
+      // Which invoice carries which package's FEE line. Asked directly rather
+      // than read off the passed-in invoices: the invoices page no longer ships
+      // `items` (it was 72% of the payload), and inferring "no fee here" from a
+      // missing join would silently print "already charged" on every invoice.
+      admin.from('invoice_items')
+        .select('invoice_id, package_id')
+        .in('invoice_id', invoices.map(i => i.id))
+        .not('package_id', 'is', null),
     ])
+
+    const feeIdsByInvoice = new Map<string, Set<string>>()
+    for (const r of (feeRes.data ?? []) as { invoice_id: string; package_id: string }[]) {
+      const set = feeIdsByInvoice.get(r.invoice_id)
+      if (set) set.add(r.package_id)
+      else feeIdsByInvoice.set(r.invoice_id, new Set([r.package_id]))
+    }
 
     const itemsByPackage = new Map<string, PackageItemRow[]>()
     for (const it of (itemsRes.data ?? []) as PackageItemRow[]) {
@@ -220,9 +234,7 @@ export async function loadAgreementBreakdowns(
       const mine = packagesByClient.get(inv.client_id)
       if (!mine?.length) continue
 
-      const feePackageIds = new Set(
-        (inv.items ?? []).map(i => i?.package_id).filter(Boolean) as string[],
-      )
+      const feePackageIds = feeIdsByInvoice.get(inv.id) ?? new Set<string>()
       const rows = buildAgreementBreakdowns({
         packages: mine, itemsByPackage, tasksByPackage, serviceNames, month, feePackageIds,
       })

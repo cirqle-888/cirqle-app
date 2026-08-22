@@ -21,8 +21,10 @@ export default async function ReportsPage() {
 
   const admin = createAdminClient()
 
-  // Fetch recent reports (last 50) across all projects
-  const { data: reports } = await admin
+  // Three independent lists — fetched together rather than in series.
+  const [{ data: reports }, { data: schedules }, { data: projects }] = await Promise.all([
+    // Recent reports (last 50) across all projects
+    admin
     .from('ad_reports')
     .select(
       'id, project_id, client_id, report_type, template, date_from, date_to, ' +
@@ -31,10 +33,9 @@ export default async function ReportsPage() {
       'project:ad_projects(id, campaign_name, platform, client:clients(id, name, code))'
     )
     .order('created_at', { ascending: false })
-    .limit(50)
-
-  // Fetch active schedules
-  const { data: schedules } = await admin
+    .limit(50),
+    // Active schedules
+    admin
     .from('ad_report_schedules')
     .select(
       'id, project_id, client_id, frequency, report_type, template, formats, ' +
@@ -43,16 +44,16 @@ export default async function ReportsPage() {
     )
     .eq('is_active', true)
     .order('next_run_at', { ascending: true })
-    .limit(20)
-
-  // Fetch projects for "Generate Report" dropdown
-  const { data: projects } = await admin
+    .limit(20),
+    // Projects for the "Generate Report" dropdown
+    admin
     .from('ad_projects')
     .select('id, campaign_name, platform, client_id, client:clients(id, name, code)')
     .is('deleted_at', null)
     .in('status', ['active', 'paused', 'completed'])
     .order('created_at', { ascending: false })
-    .limit(100)
+    .limit(100),
+  ])
 
   const canEdit = isAdmin || hasPermission(me, PERMS.ADVERTISING_EDIT)
 

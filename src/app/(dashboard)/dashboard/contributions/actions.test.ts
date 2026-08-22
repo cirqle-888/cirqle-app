@@ -10,6 +10,7 @@ const deleted: string[] = []
 const updatedTables: string[] = []
 const loggedActivity: any[] = []
 const recordAdjustmentsCalls: { month: number; year: number }[] = []
+const recalcCalls: { taskId: string; userId?: string }[] = []
 let recordedAdjustments = 0
 
 vi.mock('next/cache', () => ({
@@ -32,6 +33,19 @@ vi.mock('@/lib/payroll/adjustments', () => ({
   recordAdjustments: (_admin: any, month: number, year: number) => {
     recordAdjustmentsCalls.push({ month, year })
     return Promise.resolve({ recorded: recordedAdjustments })
+  },
+}))
+// saveTaskContributions calls recalcTaskCommissions (added in 01d3377) purely as
+// a downstream side effect. That module builds its OWN client via
+// createTypedAdminClient in @/lib/supabase/server — a different seam from the
+// @/lib/supabase/admin mock below — so without this the real supabase-js
+// constructor ran and every case here died on "supabaseUrl is required".
+// The recalc has its own coverage; this suite is about the closed-month
+// correction path, so it is stubbed and its calls recorded.
+vi.mock('@/lib/sync/integrity', () => ({
+  recalcTaskCommissions: (taskId: string, userId?: string) => {
+    recalcCalls.push({ taskId, userId })
+    return Promise.resolve({ ok: true })
   },
 }))
 vi.mock('@/lib/supabase/admin', () => ({

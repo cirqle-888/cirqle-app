@@ -39,58 +39,55 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     // outstanding lives in the Clients module, which computes it itself.
   ])
 
-  // Load designations (graceful — may not exist yet if migration not run)
-  let designations: any[] = []
-  try {
-    const { data } = await supabase
+  // Five INDEPENDENT lookups. Awaited one at a time they cost 1.65s against
+  // live data; together, 0.33s. Each keeps its own catch so a table that a
+  // migration hasn't created yet still degrades to [] on its own rather than
+  // taking the other four (and the page) down with it — which is what the
+  // separate try/catch blocks were protecting before.
+  // PostgrestFilterBuilder is a thenable, not a real Promise, so the parameter
+  // is typed PromiseLike — awaiting it is what turns it into a request.
+  const settle = async <T,>(run: () => PromiseLike<{ data: T[] | null }>): Promise<T[]> => {
+    try { return (await run()).data || [] } catch { return [] }
+  }
+
+  const [
+    designations,
+    designationPerms,
+    employeeServices,
+    serviceCategories,
+    employeeServiceCategories,
+  ] = await Promise.all([
+    settle<any>(() => supabase
       .from('designations')
       .select('id, name, is_admin, is_system, display_order')
-      .order('display_order')
-    designations = data || []
-  } catch {}
-
-  // Which designations carry CRITICAL permissions (pricing, earnings,
-  // salaries, personal data — CRITICAL_PERMS). Powers the red warning on the
-  // employee form's designation picker, so "Reviewer" can't be handed to a
-  // new hire without the assigner seeing it includes client pricing.
-  let criticalDesignationIds: string[] = []
-  try {
-    const { data } = await supabase
+      .order('display_order')),
+    // Which designations carry CRITICAL permissions (pricing, earnings,
+    // salaries, personal data — CRITICAL_PERMS). Powers the red warning on the
+    // employee form's designation picker, so "Reviewer" can't be handed to a
+    // new hire without the assigner seeing it includes client pricing.
+    settle<{ designation_id: string; permission: { key: string } | null }>(() => supabase
       .from('designation_permissions')
       .select('designation_id, allowed, permission:permissions(key)')
-      .eq('allowed', true)
-    const ids = new Set<string>()
-    type Row = { designation_id: string; permission: { key: string } | null }
-    for (const row of (data || []) as unknown as Row[]) {
-      if (row.permission?.key && CRITICAL_PERMS.has(row.permission.key)) ids.add(row.designation_id)
-    }
-    criticalDesignationIds = [...ids]
-  } catch { /* pre-migration — picker simply shows no warnings */ }
-
-  // Employee ↔ service assignments (graceful — table lands in migration 20260714150000)
-  let employeeServices: { employee_id: string; service_id: string }[] = []
-  {
-    const { data } = await supabase.from('employee_services').select('employee_id, service_id')
-    employeeServices = data || []
-  }
-
-  // Service taxonomy + category-level assignments (graceful — 20260722090000).
-  // NOTE: `serviceCategories`, not `categories` — that prop is already taken by
-  // Cash Book categories, an unrelated concept.
-  let serviceCategories: any[] = []
-  let employeeServiceCategories: { employee_id: string; category_id: string }[] = []
-  {
-    const { data } = await supabase
+      .eq('allowed', true) as any),
+    // Employee ↔ service assignments (graceful — table lands in 20260714150000)
+    settle<{ employee_id: string; service_id: string }>(() => supabase
+      .from('employee_services').select('employee_id, service_id')),
+    // Service taxonomy + category-level assignments (graceful — 20260722090000).
+    // NOTE: `serviceCategories`, not `categories` — that prop is already taken
+    // by Cash Book categories, an unrelated concept.
+    settle<any>(() => supabase
       .from('service_categories')
       .select('id, name, slug, description, color, display_order, is_active')
-      .order('display_order')
-    serviceCategories = data || []
-  }
-  {
-    const { data } = await supabase
-      .from('employee_service_categories').select('employee_id, category_id')
-    employeeServiceCategories = data || []
-  }
+      .order('display_order')),
+    settle<{ employee_id: string; category_id: string }>(() => supabase
+      .from('employee_service_categories').select('employee_id, category_id')),
+  ])
+
+  const criticalDesignationIds = [...new Set(
+    designationPerms
+      .filter(r => r.permission?.key && CRITICAL_PERMS.has(r.permission.key))
+      .map(r => r.designation_id),
+  )]
 
   return (
     <SettingsClient

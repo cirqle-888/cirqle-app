@@ -14,6 +14,7 @@ import {
   Briefcase, ClipboardList, CalendarClock, CalendarDays, BadgeCheck, PieChart, Building2, Tags, History, Sparkles,
   BadgePercent, CalendarRange, HardHat, Repeat, Package as PackageIcon,
   Share2, UserPlus, Gauge, ShieldCheck, Grid3x3, MapPin,
+  Scale,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -93,6 +94,13 @@ export const navSections: NavSection[] = [
       { label: 'Packages',          href: '/dashboard/packages',   icon: PackageIcon, requiredPerm: 'packages.view', keywords: ['agreement', 'retainer', 'commitment', 'bundle', 'committed', 'promised'] },
       { label: 'Invoices',          href: '/dashboard/invoices',   icon: FileText, requiredPerm: 'billing.view_invoices' },
       { label: 'Follow-ups',        href: '/dashboard/invoices/follow-ups', icon: PhoneCall, requiredPerm: 'billing.view_invoices' },
+      // Sits with collections, not in Tools: a partner is a commission-earning
+      // intermediary who OWNS clients (partner_code, commission_type/value, and
+      // per-partner outstanding/margin rollups), and Follow-ups already offers a
+      // "By Business Partner" view. Keywords used to read 'vendors, suppliers' —
+      // this app has no vendor concept at all, so search pointed at the wrong
+      // kind of entity entirely.
+      { label: 'Business Partners', href: '/dashboard/partners',   icon: Handshake, requiredPerm: 'finance.partner.view', keywords: ['commission', 'referral', 'reseller', 'agent', 'partner code', 'BP'] },
       { label: 'Cash Book',         href: '/dashboard/cashbook',   icon: Wallet,   requiredPerm: 'cashbook.view', keywords: ['expenses', 'bank', 'transactions'] },
       { label: 'Recurring',         href: '/dashboard/cashbook/recurring', icon: Repeat, requiredPerm: 'cashbook.view', keywords: ['rent', 'subscription', 'monthly bill', 'repeat', 'standing'] },
       // The monthly control centre: profit composition, payroll status,
@@ -165,6 +173,12 @@ export const navSections: NavSection[] = [
       { label: 'What-If Planner', href: '/dashboard/reports/what-if', icon: SlidersHorizontal, requiredPerm: 'reports.view', keywords: ['simulation', 'forecast', 'commission'] },
       // Business Health Center: cash/collections, overdue aging, client risk, cron status.
       { label: 'Business Health', href: '/dashboard/health', icon: Activity, requiredPerm: 'reports.view', keywords: ['cash flow', 'overdue', 'risk', 'cron'] },
+      // Was reachable only by typing the URL — no nav entry and no inbound link
+      // anywhere in the app, despite being live and maintained. It surfaces
+      // done-but-uninvoiced tasks and invoice/task drift; on the day it was
+      // added here it was holding ₹6,400 of uninvoiced work and ₹2,375 of
+      // unbilled client expenses that nobody could see.
+      { label: 'Billing Reconciliation', href: '/dashboard/reports/reconcile', icon: Scale, requiredPerm: 'reports.view', keywords: ['unbilled', 'uninvoiced', 'drift', 'missing invoice', 'reconcile'] },
       // ── Specialist reports — every report lives HERE, not scattered ──
       { label: 'Company Operations',   href: '/dashboard/reports/company-ops', icon: Building2, requiredPerm: 'reports.view', keywords: ['P&L', 'burn rate', 'runway'] },
       { label: 'Client Profitability', href: '/dashboard/reports/client-profitability', icon: TrendingUp, requiredPerm: 'reports.view', keywords: ['margin', 'finance engine'] },
@@ -181,7 +195,6 @@ export const navSections: NavSection[] = [
       { label: 'My Planner',        href: '/dashboard/workspace',  icon: NotebookPen, keywords: ['workspace', 'todo', 'notes', 'reminders', 'personal'] },
       { label: 'Approvals',         href: '/dashboard/approvals',  icon: ClipboardCheck },
       { label: 'Quotations',        href: '/dashboard/quotations', icon: BookOpen, requiredPerm: 'billing.view_quotations' },
-      { label: 'Business Partners', href: '/dashboard/partners',   icon: Handshake, requiredPerm: 'finance.partner.view', keywords: ['vendors', 'suppliers'] },
       { label: 'Apps Directory',    href: '/dashboard/apps',       icon: Blocks, keywords: ['integrations', 'marketplace', 'standard request', 'intake links'] },
       // Offer Flyer editor: FROZEN since the Cirqle Studio Figma plugin became
       // the primary design workflow — adminOnly keeps it off staff nav; the
@@ -192,13 +205,14 @@ export const navSections: NavSection[] = [
       // contributions, and cashbook entries, so it shouldn't surface to
       // non-admin team members who might happen to hold `tasks.create`.
       { label: 'Bulk Import',       href: '/dashboard/import',     icon: Upload,   adminOnly: true, keywords: ['csv', 'mass import'] },
-      { label: 'Workspaces',        href: '/dashboard/settings/workspaces', icon: LayoutGrid, requiredPerm: 'workspaces.manage', keywords: ['teams'] },
     ],
   },
   {
     label: 'System',
     defaultOpen: false,
     items: [
+      // A /dashboard/settings/* route — belongs with Settings, not in Tools.
+      { label: 'Workspaces',  href: '/dashboard/settings/workspaces', icon: LayoutGrid, requiredPerm: 'workspaces.manage', keywords: ['teams'] },
       { label: 'Settings',    href: '/dashboard/settings', icon: Settings, requiredPerm: 'settings.access' },
     ],
   },

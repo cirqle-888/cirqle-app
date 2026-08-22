@@ -32,18 +32,73 @@ export default async function AdvertisingPage() {
 
   const admin = createAdminClient()
 
-  let projects: any[] = []
-  let migrated = true
-  try {
-    const { data, error } = await admin
-      .from('ad_projects')
-      .select('*, client:clients(id, name, code)')
-      .is('deleted_at', null)
-      .order('created_at', { ascending: false })
-      .limit(500)
-    if (error) migrated = false
-    projects = data || []
-  } catch { migrated = false }
+  // These four are INDEPENDENT, so they go out together rather than one after
+  // another. Only `metrics` (needs project ids) and `fundCandidates` (needs to
+  // know the wallet exists) genuinely have to wait, and they still do below.
+  const projectsP = (async () => {
+    try {
+      const { data, error } = await admin
+        .from('ad_projects')
+        .select('*, client:clients(id, name, code)')
+        .is('deleted_at', null)
+        .order('created_at', { ascending: false })
+        .limit(500)
+      return { rows: data || [], migrated: !error }
+    } catch { return { rows: [] as any[], migrated: false } }
+  })()
+
+  const clientsP = (async () => {
+    try { return (await admin.from('clients').select('id, name, code').order('name')).data || [] }
+    catch { return [] as any[] }
+  })()
+
+  // ── Client wallet ledger (best-effort — migration 20260703140000) ──────────
+  // One fetch powers balances, per-campaign allocations, and the history panel.
+  // FINANCIALS-GATED at the QUERY: without view_financials only DEBIT rows
+  // (campaign allocations = working budgets, visible to every viewer) are
+  // fetched — credits/top-ups, and therefore wallet balances, never reach the
+  // browser at all.
+  const ledgerP = (async () => {
+    try {
+      let q = admin
+        .from('ad_wallet_ledger')
+        .select(`
+          id, client_id, direction, kind, ad_project_id, cashbook_entry_id,
+          amount, amount_inr, notes, created_at,
+          creator:employees(id, name, cqid),
+          entry:cashbook_entries(id, entry_date, description, reference),
+          project:ad_projects(id, campaign_name)
+        `)
+        .is('deleted_at', null)
+      if (!viewFinancials) q = q.eq('direction', 'debit')
+      const { data, error } = await q.order('created_at', { ascending: false }).limit(1000)
+      return { rows: data || [], supported: !error }
+    } catch { return { rows: [] as any[], supported: false } }
+  })()
+
+  // Advertising requests waiting to be started (they also show in the Requests
+  // inbox). Defensive: the ad_meta column ships in a later migration.
+  const pendingRequestsP = (async () => {
+    try {
+      const { data } = await admin
+        .from('task_requests')
+        .select('id, ref_no, title, created_at, ad_meta, client:clients(id, name)')
+        .not('ad_meta', 'is', null)
+        .is('promoted_task_id', null)
+        .not('status', 'in', '("rejected","archived")')
+        .order('created_at', { ascending: false })
+        .limit(50)
+      return data || []
+    } catch { return [] as any[] }
+  })()
+
+  const [projectsRes, clients, ledgerRes, pendingRequests] =
+    await Promise.all([projectsP, clientsP, ledgerP, pendingRequestsP])
+
+  const projects: any[] = projectsRes.rows
+  const migrated = projectsRes.migrated
+  const ledger: any[] = ledgerRes.rows
+  const walletSupported = ledgerRes.supported
 
   // Aggregate-able daily rows per project (defensive — table may be empty/missing).
   const metricsByProject: Record<string, any[]> = {}
@@ -58,34 +113,6 @@ export default async function AdvertisingPage() {
     } catch { /* metrics table not migrated */ }
   }
 
-  const clients = (await admin.from('clients').select('id, name, code').order('name')).data || []
-
-  // ── Client wallet ledger (best-effort — migration 20260703140000) ──────────
-  // One fetch powers balances, per-campaign allocations, and the history panel.
-  // FINANCIALS-GATED at the QUERY: without view_financials only DEBIT rows
-  // (campaign allocations = working budgets, visible to every viewer) are
-  // fetched — credits/top-ups, and therefore wallet balances, never reach the
-  // browser at all.
-  let walletSupported = true
-  let ledger: any[] = []
-  try {
-    let q = admin
-      .from('ad_wallet_ledger')
-      .select(`
-        id, client_id, direction, kind, ad_project_id, cashbook_entry_id,
-        amount, amount_inr, notes, created_at,
-        creator:employees(id, name, cqid),
-        entry:cashbook_entries(id, entry_date, description, reference),
-        project:ad_projects(id, campaign_name)
-      `)
-      .is('deleted_at', null)
-    if (!viewFinancials) q = q.eq('direction', 'debit')
-    const { data, error } = await q
-      .order('created_at', { ascending: false })
-      .limit(1000)
-    if (error) walletSupported = false
-    ledger = data || []
-  } catch { walletSupported = false }
 
   // Candidate funding entries for "Add funds": recent outflows + how much of
   // each is still uncredited to any wallet. Wallet-layer data → gated.
@@ -118,18 +145,6 @@ export default async function AdvertisingPage() {
 
   // Advertising requests waiting to be started (they also show in the Requests
   // inbox). Defensive: the ad_meta column ships in a later migration.
-  let pendingRequests: any[] = []
-  try {
-    const { data } = await admin
-      .from('task_requests')
-      .select('id, ref_no, title, created_at, ad_meta, client:clients(id, name)')
-      .not('ad_meta', 'is', null)
-      .is('promoted_task_id', null)
-      .not('status', 'in', '("rejected","archived")')
-      .order('created_at', { ascending: false })
-      .limit(50)
-    pendingRequests = data || []
-  } catch { /* ad_meta not migrated */ }
 
   const perms = {
     create:         isAdmin || hasPermission(me, PERMS.ADVERTISING_CREATE),

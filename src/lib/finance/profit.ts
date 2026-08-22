@@ -32,8 +32,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchJournalLines } from './journal'
 import type { JournalLine, StatementSection } from './types'
-
-const r2 = (n: number) => Math.round(n * 100) / 100
+// The one money-rounding helper. A local `Math.round(n * 100) / 100` looks
+// identical but disagrees at the .xx5 midpoints (1.005 rounds DOWN to 1.00
+// without the epsilon guard), so "the profit engine" and pnl.ts could return
+// figures a paisa apart for the same input. See currency.ts round2.
+import { round2 as r2 } from '@/lib/calculations/currency'
 
 // ── Policy ───────────────────────────────────────────────────────────────────
 
@@ -265,8 +268,12 @@ export async function getPeriodProfit(
 ): Promise<ProfitResult> {
   const acc: ProfitComponents = { revenueInr: 0, contributionInr: 0, baseSalariesInr: 0, expensesInr: 0 }
   let allFrozen = months.length > 0
-  for (const m of months) {
-    const r = await getMonthlyProfit(admin, m.month, m.year)
+  // Each month is an independent read, so they go out together — a quarter is
+  // 3 round trips deep instead of 3 in series, a year 12. Promise.all keeps
+  // input order, which matters: the accumulation below must stay deterministic
+  // or float addition can land on a different paisa run to run.
+  const results = await Promise.all(months.map(m => getMonthlyProfit(admin, m.month, m.year)))
+  for (const r of results) {
     acc.revenueInr += r.revenueInr
     acc.contributionInr += r.contributionInr
     acc.baseSalariesInr += r.baseSalariesInr

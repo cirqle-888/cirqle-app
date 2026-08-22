@@ -1,3 +1,5 @@
+import { round2 } from '@/lib/calculations/currency'
+
 export interface CommissionAgreement {
   id: string
   employee_id: string
@@ -32,9 +34,13 @@ export interface ResolvedEarning {
   agreement_id: string | null
 }
 
-function r2(val: number) {
-  return Math.round(val * 100) / 100
-}
+// Agreement earnings are money, so they round exactly like every other money
+// path. The local implementation this replaced omitted the Number.EPSILON
+// nudge, so values sitting just under a half-paisa boundary (1.005, 1.015 …)
+// rounded DOWN here and UP everywhere else — a one-paisa drift between an
+// employee's agreement earning and the same figure recomputed elsewhere.
+// round2.test.ts guards against re-introducing a local copy.
+const r2 = round2
 
 export function resolveEarning(params: ResolveEarningParams): ResolvedEarning {
   const {

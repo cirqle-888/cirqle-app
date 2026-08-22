@@ -8,7 +8,8 @@
  */
 
 import { revalidatePath } from 'next/cache'
-import { requirePermission } from '@/lib/permissions/check'
+import { requirePermission, loadCurrentUser } from '@/lib/permissions/check'
+import { financialVisibility, stripInvoiceList } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
 import { recordPayment } from '@/lib/finance/record-payment'
 import type { RecordInvoicePaymentInput } from '@/lib/finance/record-payment'
@@ -135,4 +136,49 @@ export async function serverResyncInvoiceTasks(
 
   revalidatePath('/dashboard/invoices')
   return { ok: true, data: { syncedTasks: allIds.length + allExpIds.length, feeLines } }
+}
+
+/**
+ * Line items and cashbook allocations for specific invoices, on demand.
+ *
+ * These two joins are ~80% of the invoices page payload (988 KB of 1375 KB for
+ * 270 invoices, measured) and are only ever read for one invoice at a time —
+ * the detail panel, the PDF, a statement, or a bulk action that has to walk the
+ * covered tasks. The page therefore ships neither, and every reader pulls what
+ * it needs through here.
+ *
+ * Deliberately a SERVER action rather than a browser query. `invoice_items`
+ * carries `unit_price`, which `stripInvoiceAmounts` removes for a user without
+ * `billing.view_line_pricing`; RLS is `authenticated USING(true)`, so a
+ * client-side fetch of the same rows would hand that user the pricing the page
+ * took care to withhold. Loading it here keeps the strip on the only path that
+ * can enforce it.
+ */
+export async function getInvoiceDetails(
+  invoiceIds: string[],
+): Promise<ActionResult<Record<string, unknown>[]>> {
+  const guard = await requirePermission(PERMS.BILLING_VIEW_INVOICES)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!invoiceIds.length) return { ok: true, data: [] }
+
+  const me = await loadCurrentUser().catch(() => null)
+  const vis = financialVisibility(me)
+
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from('invoices')
+    .select(`id,
+      items:invoice_items(*, task:tasks(id, title, task_date, status, billing_amount_inr, currency), service:services(id, name)),
+      cashbook_invoice_allocations(id, deleted_at, allocated_amount, cashbook_entry:cashbook_entries(id, reference, entry_date, description, receipt_number, bank_account:bank_accounts(name)))
+    `)
+    .in('id', invoiceIds)
+
+  if (error) return { ok: false, error: error.message }
+
+  // Same strip the page applies to its own payload — see stripInvoiceList.
+  const stripped = stripInvoiceList(
+    (data || []) as Record<string, unknown>[],
+    { amounts: vis.billingAmounts, linePricing: vis.billingLinePricing },
+  )
+  return { ok: true, data: stripped }
 }

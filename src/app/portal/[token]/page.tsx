@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { fetchAll, stablePaginationQuery } from '@/lib/supabase/server'
+import { fetchAll, fetchAllIn, stablePaginationQuery } from '@/lib/supabase/server'
 import { defaultWindow } from '@/lib/reports/date-bounds'
 import PortalClient from './portal-client'
 
@@ -35,28 +35,28 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
     return notFound()
   }
 
-  // 2. Fetch all data in parallel
-  // TODO [SCALABILITY SAFEGUARD]: Future optional date-window filtering
-  // TODO [SCALABILITY SAFEGUARD]: Lazy loading support
-  // TODO [SCALABILITY SAFEGUARD]: Cursor pagination preparation
-  // Egress guard: the portal shows an employee's recent work, and it used to
-  // fetch EVERY task in the company (all clients, all history) on every view
-  // of a public token page. Bounded to the last 12 months — the "later"
-  // optimisation the TODO above promised, made real once egress became the
-  // binding Supabase quota.
+  // 2. Fetch in two waves.
+  //
+  // Wave 1 is everything that identifies THIS employee's work, plus the static
+  // lookups. Wave 2 then asks only for the tasks those ids name.
+  //
+  // This replaces a fetch-everything-then-filter shape that was both wrong and
+  // expensive on a PUBLIC page: it pulled every task in the company for the
+  // window (all clients, all employees) and then narrowed to the viewer's own
+  // by set membership. Two problems with that. The narrowing key was
+  // `task_assignments`, a table that is EMPTY in this database — so the filter
+  // matched nothing and every portal rendered zero tasks. And the rows it
+  // discarded were other clients' work, egressed on an unauthenticated route.
+  //
+  // Membership now also accepts contributions and contribution_scores, which
+  // are how work is actually attributed here (task_assignments is kept in the
+  // union so it starts working by itself if it is ever populated).
   const portalWindow = defaultWindow()
   const [
-    assignmentsRes, tasksRes, contribsRes, scoresRes,
+    assignmentsRes, contribsRes, scoresRes,
     paramsRes, groupsRes, paramServicesRes, groupServicesRes,
   ] = await Promise.all([
     fetchAll(stablePaginationQuery(supabase.from('task_assignments').select('task_id').eq('employee_id', employee.id))),
-    fetchAll(stablePaginationQuery(
-      supabase.from('tasks')
-        .select('id, title, service_id, billing_amount_inr, status, task_date, client:clients(id, name), service:services(id, name)')
-        .in('status', ['pending', 'in_progress', 'done', 'delivered', 'invoiced', 'paid'])
-        .gte('task_date', portalWindow.from!)
-        .order('task_date', { ascending: false })
-    )),
     fetchAll(stablePaginationQuery(
       supabase.from('contributions')
         .select('task_id, parameter_id, value')
@@ -74,9 +74,26 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
     supabase.from('group_services').select('group_id, service_id'),
   ])
 
-  const assignedTaskIds = new Set((assignmentsRes.data || []).map((a: any) => a.task_id))
-  const allTasks = tasksRes.data || []
-  const myTasks = allTasks.filter((t: any) => assignedTaskIds.has(t.id))
+  const myTaskIds = Array.from(new Set([
+    ...(assignmentsRes.data || []).map((a: any) => a.task_id),
+    ...(contribsRes.data    || []).map((c: any) => c.task_id),
+    ...(scoresRes.data      || []).map((s: any) => s.task_id),
+  ].filter(Boolean) as string[]))
+
+  // Still date-bounded: the portal shows recent work, not an entire career.
+  const tasksRes = await fetchAllIn(
+    (idChunk) => stablePaginationQuery(
+      supabase.from('tasks')
+        .select('id, title, service_id, billing_amount_inr, status, task_date, client:clients(id, name), service:services(id, name)')
+        .in('id', idChunk)
+        .in('status', ['pending', 'in_progress', 'done', 'delivered', 'invoiced', 'paid'])
+        .gte('task_date', portalWindow.from!)
+    ),
+    myTaskIds,
+  )
+
+  const myTasks = (tasksRes.data || [])
+    .sort((a: any, b: any) => String(b.task_date).localeCompare(String(a.task_date)))
 
   return (
     <PortalClient

@@ -39,7 +39,7 @@ import {
   Wallet, Link2, ShoppingBag, Share2, Layers, ListTree, ScrollText, Check, AlertCircle,
 } from 'lucide-react'
 import { logFollowup } from "./follow-ups/actions"
-import { recordInvoicePayment, serverResyncInvoiceTasks } from "./actions"
+import { recordInvoicePayment, serverResyncInvoiceTasks, getInvoiceDetails } from "./actions"
 
 import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
@@ -154,6 +154,11 @@ interface Invoice {
   // Active cashbook→invoice allocations. If any exist, this invoice is paid via
   // the allocation path and must NOT also take a direct "Record Payment".
   // allocated_amount + cashbook_entry are loaded for the relationship display.
+  /**
+   * Row count from `invoice_items(count)`. Present on every invoice from the
+   * list query; `items` is NOT — see ensureDetails.
+   */
+  item_count?: { count: number }[]
   cashbook_invoice_allocations?: {
     id: string
     deleted_at?: string | null
@@ -229,6 +234,17 @@ function balanceDueDisplay(inv: Invoice): number | undefined {
 // INR-base helpers for COMPANY-WIDE rollups (KPI cards) — never mix currencies.
 // Per-invoice display stays in the invoice currency via fmt(n, inv.currency).
 // Falls back to the raw amount for INR invoices / pre-migration rows.
+/**
+ * Line-item count for a list row.
+ *
+ * Prefers the loaded `items` (fresher — an edit updates it immediately) and
+ * falls back to the `invoice_items(count)` aggregate the list query ships for
+ * invoices whose detail has not been pulled in yet.
+ */
+function taskCountOf(inv: Invoice): number {
+  if (Array.isArray(inv.items)) return inv.items.length
+  return inv.item_count?.[0]?.count ?? 0
+}
 function invTotalInr(inv: Invoice): number { return inv.total_amount_inr ?? inv.total_amount ?? 0 }
 function invPaidInr(inv: Invoice): number { return inv.paid_amount_inr ?? inv.paid_amount ?? 0 }
 function balanceDueInr(inv: Invoice): number { return Math.max(0, invTotalInr(inv) - invPaidInr(inv)) }
@@ -387,6 +403,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   // Agreement breakdowns the user has expanded, keyed `${invoiceId}:${packageId}`.
   // Collapsed by default: the covered work is context, not the bill.
   const [expandedAgreements, setExpandedAgreements] = useState<Set<string>>(new Set())
+  // Invoices whose line items / allocations have been pulled in. See ensureDetails.
+  const [detailLoaded, setDetailLoaded] = useState<Set<string>>(new Set())
   const [isUpdatingBulk, setIsUpdatingBulk] = useState(false)
 
   // Confirmation modal
@@ -607,6 +625,18 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [panelMode])
+
+  // Pull line items for whichever invoice is on screen. The detail panel, the
+  // preview and the PDF all read `inv.items`, and the list query no longer
+  // ships it — so this is what makes the detail view whole. Runs once per
+  // invoice; ensureDetails no-ops for anything already loaded.
+  useEffect(() => {
+    const id = previewInv?.id || selectedId
+    if (id && !detailLoaded.has(id)) void ensureDetails([id])
+    // ensureDetails closes over `invoices`; re-running it on every list change
+    // would refetch endlessly. `detailLoaded` is the real guard.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, previewInv?.id, detailLoaded])
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const selectedInv = useMemo(() => invoices.find(i => i.id === selectedId) || null, [invoices, selectedId])
@@ -1348,7 +1378,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     setConfirmModal(null)
     setDeleting(true)
     try {
-      const inv = invoices.find(i => i.id === invoiceId)
+      // Detail must be loaded first: without it `items` is undefined and the
+      // linked tasks stay 'invoiced' against an invoice that no longer exists.
+      const [inv] = await ensureDetails([invoiceId])
       const taskIds = (inv?.items || []).map(it => it.task_id).filter(Boolean) as string[]
       if (taskIds.length) await supabase.from('tasks').update({ status: 'done' }).in('id', taskIds)
       await supabase.from('cashbook_invoice_allocations').delete().eq('invoice_id', invoiceId)
@@ -1429,8 +1461,10 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       // When bulk-marking sent → tasks become 'invoiced'; draft/cancelled → revert to 'done'.
       const bulkTaskStatus = newStatus === 'sent' ? 'invoiced' : (newStatus === 'draft' || newStatus === 'cancelled') ? 'done' : null
       if (bulkTaskStatus) {
-        const taskIds = invoices
-          .filter(i => idsToUpdate.includes(i.id))
+        // Same reason as deleteInvoice — read the rows ensureDetails returns,
+        // not `invoices`, which React has not re-rendered yet.
+        const withItems = await ensureDetails(idsToUpdate)
+        const taskIds = withItems
           .flatMap(i => (i.items || []).map((it: any) => it.task_id).filter(Boolean)) as string[]
         if (taskIds.length) {
           await supabase.from('tasks').update({ status: bulkTaskStatus }).in('id', taskIds)
@@ -2237,7 +2271,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     if (w) { w.document.write(html); w.document.close(); setTimeout(() => w.print(), 400) }
   }
 
-  function printDetailedStatement() {
+  async function printDetailedStatement() {
     // Determine date range (same logic as printStatement)
     let from = '', to = '', periodLabel = ''
     if (stmtForm.mode === 'month') {
@@ -2291,11 +2325,16 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     let runningBalance = 0
     let allRows = ''
 
+    // Statement lines come from invoice_items, which the list query no longer
+    // ships — pull them for exactly the invoices this statement covers.
+    const stmtDetailed = new Map(
+      (await ensureDetails(stmtInvoices.map(i => i.id))).map(i => [i.id, i]),
+    )
     for (const inv of stmtInvoices) {
       const invTotal = inv.total_amount || 0
       const discount = inv.discount_amount || 0
       const prevBal = inv.previous_balance || 0
-      const sortedItems = [...(inv.items || [])].sort(compareInvoiceItems)
+      const sortedItems = [...(stmtDetailed.get(inv.id)?.items || [])].sort(compareInvoiceItems)
 
       // Invoice header row
       allRows += `
@@ -2466,7 +2505,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     if (w) { w.document.write(html); w.document.close(); setTimeout(() => w.print(), 400) }
   }
 
-  function exportDetailedStatementCSV() {
+  async function exportDetailedStatementCSV() {
     // Determine date range (same logic as printDetailedStatement)
     let from = '', to = '', periodLabel = ''
     if (stmtForm.mode === 'month') {
@@ -2500,11 +2539,16 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     const ledgerRows: StatementLedgerRow[] = []
     let runningBalance = 0
 
+    // Statement lines come from invoice_items, which the list query no longer
+    // ships — pull them for exactly the invoices this statement covers.
+    const stmtDetailed = new Map(
+      (await ensureDetails(stmtInvoices.map(i => i.id))).map(i => [i.id, i]),
+    )
     for (const inv of stmtInvoices) {
       const invTotal = inv.total_amount || 0
       const discount = inv.discount_amount || 0
       const prevBal = inv.previous_balance || 0
-      const sortedItems = [...(inv.items || [])].sort(compareInvoiceItems)
+      const sortedItems = [...(stmtDetailed.get(inv.id)?.items || [])].sort(compareInvoiceItems)
       const clientName = inv.client?.name || ''
 
       // Invoice Header Info Row
@@ -2726,11 +2770,52 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     setExpenseReportLoaded(true)
   }
 
+  /**
+   * Pull `items` + `cashbook_invoice_allocations` for invoices that don't have
+   * them yet, and merge into state.
+   *
+   * The list query ships neither (they were 80% of its payload), so EVERY read
+   * of `inv.items` must await this first — otherwise the caller sees an empty
+   * array and silently does nothing, which on this screen means an invoice
+   * deleted without reverting its tasks, or a statement printed with no lines.
+   *
+   * Returns the up-to-date rows so callers use the result rather than the
+   * `invoices` state they closed over, which React has not updated yet.
+   */
+  async function ensureDetails(ids: string[]): Promise<Invoice[]> {
+    const wanted = [...new Set(ids.filter(Boolean))]
+    const missing = wanted.filter(id => !detailLoaded.has(id))
+
+    let merged = invoices
+    if (missing.length) {
+      const res = await getInvoiceDetails(missing)
+      if (!res.ok) {
+        toastError(res.error || 'Could not load invoice line items')
+        return invoices.filter(i => wanted.includes(i.id))
+      }
+      const byId = new Map((res.data || []).map((d: any) => [d.id, d]))
+      merged = invoices.map(i => {
+        const d = byId.get(i.id)
+        return d ? { ...i, items: d.items || [], cashbook_invoice_allocations: d.cashbook_invoice_allocations || [] } : i
+      })
+      setInvoices(merged)
+      setDetailLoaded(prev => {
+        const next = new Set(prev)
+        missing.forEach(id => next.add(id))
+        return next
+      })
+    }
+    return merged.filter(i => wanted.includes(i.id))
+  }
+
   async function refreshInvoice(invoiceId: string) {
     const { data } = await supabase.from('invoices')
       .select('*, client:clients(id,name,code,phone,email), items:invoice_items(*, task:tasks(id,title,task_date,status,billing_amount_inr,currency), service:services(id,name)), payments(*), cashbook_invoice_allocations(id, deleted_at, allocated_amount, cashbook_entry:cashbook_entries(id, reference, entry_date, description, receipt_number, bank_account:bank_accounts(name)))')
       .eq('id', invoiceId).single()
-    if (data) setInvoices(prev => prev.map(i => i.id === invoiceId ? data as any : i))
+    if (data) {
+      setInvoices(prev => prev.map(i => i.id === invoiceId ? data as any : i))
+      setDetailLoaded(prev => new Set(prev).add(invoiceId))
+    }
   }
 
   // ── Invoice print-design helpers ──────────────────────────────────────────
@@ -3060,10 +3145,10 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground mt-0.5">
               <div className="truncate flex items-center gap-1.5">
                 {inv.billing_period_start ? formatBillingPeriod(inv.billing_period_start) : `Issued ${fmtDate(inv.issue_date)}`}
-                {(inv.items?.length || 0) > 0 && (
+                {taskCountOf(inv) > 0 && (
                   <>
                     <span className="opacity-30">·</span>
-                    <span>{inv.items!.length} task{inv.items!.length !== 1 ? 's' : ''}</span>
+                    <span>{taskCountOf(inv)} task{taskCountOf(inv) !== 1 ? 's' : ''}</span>
                   </>
                 )}
               </div>

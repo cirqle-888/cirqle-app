@@ -5,6 +5,7 @@ import {
   buildAnalysisRows,
   type RawTask, type RawScore, type RawPricing, type EmployeeColumn,
 } from '@/lib/reports/contribution-analysis'
+import type { CommissionAgreement } from '@/lib/agreements/resolve-earning'
 import { resolveFetchWindow, scoreWindowFor } from '@/lib/reports/date-bounds'
 import ContributionAnalysisClient from './contribution-analysis-client'
 
@@ -32,7 +33,7 @@ export default async function ContributionAnalysisPage({
 
   const supabase = createAdminClient()
 
-  const [employeesRes, clientsRes, servicesRes, pricingRes, tasksRes, scoresRes, invoiceItemsRes, invoicesRes, ratingsRes, taskToolsRes, toolsRes] = await Promise.all([
+  const [employeesRes, clientsRes, servicesRes, pricingRes, tasksRes, scoresRes, invoiceItemsRes, invoicesRes, ratingsRes, taskToolsRes, toolsRes, agreementsRes, ratesRes] = await Promise.all([
     // Active employees define the dynamic columns (ordered by CQID for stability).
     supabase.from('employees').select('id, cqid, name').eq('is_active', true).order('cqid'),
     supabase.from('clients').select('id, name').order('name'),
@@ -70,6 +71,12 @@ export default async function ContributionAnalysisPage({
     // Tool usage per task + tool deduction % (flat % off the pool, like the engine).
     fetchAll(supabase.from('task_tools').select('task_id, tool_id').order('id', { ascending: true })),
     supabase.from('tools').select('id, fixed_percentage, is_active'),
+    // Commission agreements + book FX, both consumed by buildAnalysisRows below.
+    // Same pairing the recalc endpoint uses (api/recalc-commissions/route.ts):
+    // active agreements only — resolveEarning applies the effective_from/to
+    // window itself — and every rate, keyed currency → rate_to_inr.
+    supabase.from('employee_commission_agreements').select('*').eq('is_active', true),
+    supabase.from('exchange_rates').select('currency, rate_to_inr'),
   ])
 
   const employees: EmployeeColumn[] = (employeesRes.data || []) as EmployeeColumn[]
@@ -136,6 +143,9 @@ export default async function ContributionAnalysisPage({
     if (pct) toolPctByTask.set(tt.task_id, (toolPctByTask.get(tt.task_id) || 0) + pct)
   }
 
+  const agreements = (agreementsRes?.data || []) as CommissionAgreement[]
+  const rates = (ratesRes?.data || []).reduce((acc: any, r: any) => ({ ...acc, [r.currency]: Number(r.rate_to_inr) || 1 }), { INR: 1 })
+
   const rows = buildAnalysisRows(
     (tasksRes.data || []) as RawTask[],
     (scoresRes.data || []) as RawScore[],
@@ -147,6 +157,8 @@ export default async function ContributionAnalysisPage({
     empRating,
     toolPctByTask,
     100,           // defaultPerformanceRating
+    agreements,
+    rates
   )
 
   // ── Saved layouts (personal + system default) ──────────────────────────────
