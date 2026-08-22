@@ -307,7 +307,33 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   })
   
   useEffect(() => {
-    setInvoices(initialInvoices)
+    // `initialInvoices` no longer carries `items` or cashbook allocations —
+    // those are fetched per invoice by ensureDetails. So this sync can NOT be a
+    // plain reset any more: it would throw away everything already loaded while
+    // `detailLoaded` still counted it as loaded, and the detail panel would sit
+    // on "0 items" for an invoice that has items until a full page reload.
+    // That is exactly what happened — every router.refresh() (realtime events,
+    // and the ?id= URL sync on each selection) silently emptied the panel.
+    //
+    // Carry the loaded detail across the refresh so nothing disappears...
+    setInvoices(prev => {
+      const carried = new Map(
+        prev.filter(i => i.items !== undefined).map(i => [i.id, i]),
+      )
+      return initialInvoices.map(i => {
+        const old = carried.get(i.id)
+        return old
+          ? { ...i, items: old.items, cashbook_invoice_allocations: old.cashbook_invoice_allocations }
+          : i
+      })
+    })
+
+    // ...but the refresh exists precisely BECAUSE the lines may have changed (a
+    // task hitting 'done' adds one), so the carried copy is now suspect. Marking
+    // every invoice's detail stale makes the effect below refetch the one on
+    // screen; until it lands the panel keeps showing the previous lines rather
+    // than flashing an empty state.
+    setDetailLoaded(new Set())
   }, [initialInvoices])
 
   // ── Supabase Realtime: keep the invoice list live ─────────────────────────
@@ -2794,16 +2820,33 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         return invoices.filter(i => wanted.includes(i.id))
       }
       const byId = new Map((res.data || []).map((d: any) => [d.id, d]))
-      merged = invoices.map(i => {
+      const applyTo = (list: Invoice[]) => list.map(i => {
         const d = byId.get(i.id)
         return d ? { ...i, items: d.items || [], cashbook_invoice_allocations: d.cashbook_invoice_allocations || [] } : i
       })
-      setInvoices(merged)
+
+      // FUNCTIONAL updater, not setInvoices(<snapshot>.map(...)).
+      //
+      // `invoices` here is the snapshot from the render that started this call.
+      // Clicking through invoices fires overlapping ensureDetails calls, and a
+      // slower one finishing second used to write ITS stale snapshot over the
+      // faster one's result — silently dropping line items that had already
+      // loaded, on an invoice that detailLoaded still counted as loaded. The
+      // detail panel then showed "0 items" for an invoice that has items, with
+      // no way to recover short of a reload. Merging onto `prev` composes
+      // instead of clobbering, so completion order stops mattering.
+      setInvoices(prev => applyTo(prev))
+
+      // Only ids the server actually returned. Marking an id loaded when it
+      // came back empty is what made that bad state permanent: the guard above
+      // then skipped every retry.
       setDetailLoaded(prev => {
         const next = new Set(prev)
-        missing.forEach(id => next.add(id))
+        missing.filter(id => byId.has(id)).forEach(id => next.add(id))
         return next
       })
+
+      merged = applyTo(invoices)
     }
     return merged.filter(i => wanted.includes(i.id))
   }
@@ -3166,6 +3209,14 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   // RIGHT PANEL — Invoice Detail
   // ─────────────────────────────────────────────────────────────────────────
   function renderDetail(inv: Invoice) {
+    // Line items arrive AFTER first paint now (ensureDetails), so an invoice
+    // whose detail hasn't landed yet has `items === undefined` — which is NOT
+    // the same as an invoice with zero items. Telling them apart matters on a
+    // billing screen: rendering the empty state during the ~1.5s fetch read as
+    // "auto-collection produced nothing", inviting someone to re-add lines
+    // that already existed.
+    const detailPending = !detailLoaded.has(inv.id)
+    const knownItemCount = detailPending ? taskCountOf(inv) : (inv.items?.length || 0)
     const forceEdit = forceEditId === inv.id
     const editable = isEditable(inv.status) || forceEdit
     const balance = balanceDue(inv)
@@ -3479,7 +3530,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 </span>
                 Line Items
                 <span className="text-[10px] font-semibold text-violet-600 dark:text-violet-300 bg-violet-500/10 border border-violet-500/20 px-1.5 py-0.5 rounded-full tabular-nums">
-                  {(inv.items?.length || 0) + (inv.expense_items?.length || 0)}
+                  {knownItemCount + (inv.expense_items?.length || 0)}
                 </span>
               </h4>
               <div className="flex items-center gap-2">
@@ -3502,7 +3553,13 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               <span className="text-right">Amount</span>
             </div>
             <div className="divide-y divide-border/40">
-              {(inv.items || []).length === 0 && (
+              {detailPending && (
+                <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground py-8">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  Loading line items…
+                </div>
+              )}
+              {!detailPending && (inv.items || []).length === 0 && (
                 <div className="text-xs text-muted-foreground text-center py-8">
                   No items yet — tasks marked "done" auto-appear here
                 </div>
@@ -3710,7 +3767,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             {/* In-card tally — bridges into the Amounts card below */}
             <div className="flex items-center justify-between px-4 py-2.5 bg-secondary/30 border-t border-border/50">
               <span className="text-[11px] text-muted-foreground font-medium">
-                {(inv.items?.length || 0) + (inv.expense_items?.length || 0)} item{((inv.items?.length || 0) + (inv.expense_items?.length || 0)) !== 1 ? 's' : ''}
+                {knownItemCount + (inv.expense_items?.length || 0)} item{(knownItemCount + (inv.expense_items?.length || 0)) !== 1 ? 's' : ''}
               </span>
               <span className="text-sm font-bold tabular-nums">{fmt(inv.subtotal || inv.total_amount, inv.currency)}</span>
             </div>
