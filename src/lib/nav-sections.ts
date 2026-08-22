@@ -14,7 +14,7 @@ import {
   Briefcase, ClipboardList, CalendarClock, CalendarDays, BadgeCheck, PieChart, Building2, Tags, History, Sparkles,
   BadgePercent, CalendarRange, HardHat, Repeat, Package as PackageIcon,
   Share2, UserPlus, Gauge, ShieldCheck, Grid3x3, MapPin,
-  Scale,
+  Scale, Receipt,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -94,6 +94,7 @@ export const navSections: NavSection[] = [
       { label: 'Packages',          href: '/dashboard/packages',   icon: PackageIcon, requiredPerm: 'packages.view', keywords: ['agreement', 'retainer', 'commitment', 'bundle', 'committed', 'promised'] },
       { label: 'Invoices',          href: '/dashboard/invoices',   icon: FileText, requiredPerm: 'billing.view_invoices' },
       { label: 'Follow-ups',        href: '/dashboard/invoices/follow-ups', icon: PhoneCall, requiredPerm: 'billing.view_invoices' },
+      { label: 'Statements',        href: '/dashboard/statements', icon: Receipt, requiredPerm: 'billing.view_invoices', keywords: ['statement of account', 'ledger', 'ageing', 'aging', 'balance due', 'outstanding'] },
       // Sits with collections, not in Tools: a partner is a commission-earning
       // intermediary who OWNS clients (partner_code, commission_type/value, and
       // per-partner outstanding/margin rollups), and Follow-ups already offers a
