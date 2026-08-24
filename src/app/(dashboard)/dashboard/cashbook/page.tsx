@@ -84,24 +84,38 @@ export default async function CashBookPage() {
     supabase.from('cashbook_categories').select('*').order('type').order('name'),
     supabase.from('bank_accounts').select('id, name, type, is_active, is_default').order('name'),
     supabase.from('exchange_rates').select('*'),
-    supabase
-      .from('invoices')
-      .select('id, invoice_number, status, issue_date, due_date, total_amount, paid_amount, total_amount_inr, paid_amount_inr, exchange_rate, currency, client_id, client:clients(id, name, code), payments(id)')
-      .in('status', ['draft', 'reviewed', 'sent', 'partial', 'overdue'])
-      .order('due_date', { ascending: true }),
+    // GATED AT THE QUERY. These three lists feed the entry form's allocation
+    // pickers and every one of them carries money that this page's own
+    // permission does not cover: open-invoice totals, employee credit amounts,
+    // and pending payslip net salaries. They used to be fetched and shipped
+    // unconditionally, so anyone holding `cashbook.view` received them in the
+    // payload — including a data-entry user explicitly denied billing and
+    // payroll visibility. Withheld at the source rather than hidden in the UI,
+    // because hiding still ships them.
+    vis.billingAmounts
+      ? supabase
+          .from('invoices')
+          .select('id, invoice_number, status, issue_date, due_date, total_amount, paid_amount, total_amount_inr, paid_amount_inr, exchange_rate, currency, client_id, client:clients(id, name, code), payments(id)')
+          .in('status', ['draft', 'reviewed', 'sent', 'partial', 'overdue'])
+          .order('due_date', { ascending: true })
+      : Promise.resolve({ data: [] as unknown[] }),
     supabase.from('employees').select('id, cqid, name, role').eq('is_active', true).order('cqid'),
     supabase.from('clients').select('id, name, code').eq('is_active', true).order('name'),
-    supabase.from('credit_ledger').select('*, employee:employees(cqid)').eq('credit_type', 'given').order('credit_date', { ascending: false }),
+    vis.payrollAmounts
+      ? supabase.from('credit_ledger').select('*, employee:employees(cqid)').eq('credit_type', 'given').order('credit_date', { ascending: false })
+      : Promise.resolve({ data: [] as unknown[] }),
     // Pending payslips power the salary-expense picker in the entry form.
     // Filtered to status='pending' so paid payslips don't pollute the list,
     // sorted newest-first (year desc, month desc) so the auto-default lands
     // on the most recent unpaid month for the selected employee.
-    supabase
-      .from('payroll')
-      .select('id, employee_id, month, year, payslip_number, net_salary, status, employee:employees(cqid, name)')
-      .eq('status', 'pending')
-      .order('year', { ascending: false })
-      .order('month', { ascending: false }),
+    vis.payrollAmounts
+      ? supabase
+          .from('payroll')
+          .select('id, employee_id, month, year, payslip_number, net_salary, status, employee:employees(cqid, name)')
+          .eq('status', 'pending')
+          .order('year', { ascending: false })
+          .order('month', { ascending: false })
+      : Promise.resolve({ data: [] as unknown[] }),
     // Pull the small set of company branding keys we need on receipts so the
     // workspace's own logo/name/phone replaces the hardcoded Cirqle defaults.
     // Same pattern as invoices/page.tsx — key/value rows materialised into a
@@ -127,7 +141,7 @@ export default async function CashBookPage() {
   // Strip amount + amount_inr from cashbook entries (plus nested allocation
   // totals + invoice/payroll totals on the join) when the viewer lacks
   // `cashbook.view_amounts`. The data never reaches the client's JS state.
-  const initialEntries = stripCashbookList((entriesRes.data || []) as any[], vis.cashbookAmounts)
+  const initialEntries = stripCashbookList((entriesRes.data || []) as any[], vis.cashbookAmounts, vis.payrollAmounts)
 
   return (
     <CashBookClient

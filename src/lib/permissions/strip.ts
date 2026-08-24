@@ -175,28 +175,52 @@ export function stripInvoiceList<T extends Record<string, any>>(
  * Cashbook entries: amount + amount_inr + nested invoice/payroll allocation
  * totals.
  */
-export function stripCashbookAmounts<T extends Record<string, any>>(entry: T, canView: boolean): T {
-  if (canView || entry == null) return entry
+export function stripCashbookAmounts<T extends Record<string, any>>(
+  entry: T,
+  canView: boolean,
+  /**
+   * Salary is a SEPARATE axis from cashbook amounts. An entry that pays a
+   * payslip carries that payslip's net_salary on its join, and it used to ride
+   * on `canView` alone — so anyone holding cashbook.view_amounts read every
+   * allocated salary even where payroll.view_amounts was deliberately withheld.
+   * Defaults to `canView`, so existing two-argument callers are unchanged.
+   */
+  canViewSalary: boolean = canView,
+): T {
+  if ((canView && canViewSalary) || entry == null) return entry
   const out: any = { ...entry }
-  delete out.amount
-  delete out.amount_inr
-  if (Array.isArray(out.allocations)) {
-    out.allocations = out.allocations.map((a: any) => {
-      const { allocated_amount, ...rest } = a
-      void allocated_amount
-      if (rest.invoice) {
-        const { total_amount, paid_amount, ...irest } = rest.invoice
-        void total_amount; void paid_amount
-        rest.invoice = irest
-      }
-      return rest
-    })
+
+  if (!canView) {
+    delete out.amount
+    delete out.amount_inr
+    if (Array.isArray(out.allocations)) {
+      out.allocations = out.allocations.map((a: any) => {
+        const { allocated_amount, ...rest } = a
+        void allocated_amount
+        if (rest.invoice) {
+          const { total_amount, paid_amount, ...irest } = rest.invoice
+          void total_amount; void paid_amount
+          rest.invoice = irest
+        }
+        return rest
+      })
+    }
+    if (Array.isArray(out.employee_splits)) {
+      out.employee_splits = out.employee_splits.map((s: any) => {
+        const { amount, amount_inr, ...rest } = s
+        void amount; void amount_inr
+        return rest
+      })
+    }
   }
-  if (Array.isArray(out.payroll_allocations)) {
+
+  // Payroll allocations: the allocated figure follows cashbook visibility, the
+  // salary behind it follows payroll visibility.
+  if ((!canView || !canViewSalary) && Array.isArray(out.payroll_allocations)) {
     out.payroll_allocations = out.payroll_allocations.map((a: any) => {
       const { allocated_amount, ...rest } = a
-      void allocated_amount
-      if (rest.payroll) {
+      if (canView) rest.allocated_amount = allocated_amount
+      if (!canViewSalary && rest.payroll) {
         const { net_salary, ...prest } = rest.payroll
         void net_salary
         rest.payroll = prest
@@ -204,18 +228,16 @@ export function stripCashbookAmounts<T extends Record<string, any>>(entry: T, ca
       return rest
     })
   }
-  if (Array.isArray(out.employee_splits)) {
-    out.employee_splits = out.employee_splits.map((s: any) => {
-      const { amount, amount_inr, ...rest } = s
-      void amount; void amount_inr
-      return rest
-    })
-  }
+
   return out as T
 }
-export function stripCashbookList<T extends Record<string, any>>(entries: T[], canView: boolean): T[] {
-  if (canView) return entries
-  return entries.map(e => stripCashbookAmounts(e, false))
+export function stripCashbookList<T extends Record<string, any>>(
+  entries: T[],
+  canView: boolean,
+  canViewSalary: boolean = canView,
+): T[] {
+  if (canView && canViewSalary) return entries
+  return entries.map(e => stripCashbookAmounts(e, canView, canViewSalary))
 }
 
 /** Client-service pricing rows. Always admin-or-permitted to see. */
