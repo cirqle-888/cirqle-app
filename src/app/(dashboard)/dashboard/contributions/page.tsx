@@ -85,7 +85,7 @@ export default async function ContributionsPage() {
     contributorRecordsRes, taskToolRecordsRes, pricingRes,
     visibilityBillingRes, visibilityContribRes, visibilityNamesRes,
     taskGroupAssignmentsRes, taskParamAssignmentsRes, performanceHistoryRes,
-    employeeServicesRes, unitScope,
+    employeeServicesRes, employeeServiceCategoriesRes, serviceCategoryMapRes, unitScope,
   ] = await Promise.all([
     // Tasks — same shape for both roles, employee select drops billing_amount_inr.
     timed('tasks',                  fetchAll(tasksQuery)),
@@ -134,6 +134,14 @@ export default async function ContributionsPage() {
     // Employee ↔ service assignments — drives "only employees of this task's
     // service" in the scoring UI. Missing table (pre-migration) → empty list.
     timed('employee_services',      supabase.from('employee_services').select('employee_id, service_id')),
+    // ...and the CATEGORY half of the same assignment. Ticking a category in
+    // the employee form is meant to grant the whole discipline — the form even
+    // says "services added to it later are included automatically" — but this
+    // page only ever read the direct rows, so a category-scoped employee never
+    // appeared in scoring and every service had to be ticked by hand. Expanded
+    // into service ids below, exactly as lib/scope/service-scope.ts does.
+    timed('employee_service_categories', supabase.from('employee_service_categories').select('employee_id, category_id')),
+    timed('service_categories_map', supabase.from('services').select('id, category_id')),
     // Org-unit scope (contributions.view_unit). Short-circuits to an empty
     // scope without a query for every viewer who isn't unit-scoped.
     timed('unit_scope',             loadUnitScope(supabase, me, 'contributions')),
@@ -186,15 +194,39 @@ export default async function ContributionsPage() {
   const outContributorRecords = mine(contributorRecordsRes.data || [])
   const outAssignments        = mine(mergedAssignments)
 
+  // ── Employee ↔ service assignments, direct + via category ─────────────────
+  // A category assignment means "every service in this discipline, including
+  // ones added later", so it is expanded at READ time rather than materialised
+  // into employee_services — same contract as lib/scope/service-scope.ts.
+  const servicesByCategory = new Map<string, string[]>()
+  for (const r of (serviceCategoryMapRes.data || []) as { id: string; category_id: string | null }[]) {
+    if (!r.category_id) continue
+    const list = servicesByCategory.get(r.category_id)
+    if (list) list.push(r.id)
+    else servicesByCategory.set(r.category_id, [r.id])
+  }
+  const employeeServicesWithCategories: { employee_id: string; service_id: string }[] = [
+    ...((employeeServicesRes.data || []) as { employee_id: string; service_id: string }[]),
+  ]
+  const seenPair = new Set(employeeServicesWithCategories.map(p => `${p.employee_id}|${p.service_id}`))
+  for (const r of (employeeServiceCategoriesRes.data || []) as { employee_id: string; category_id: string }[]) {
+    for (const serviceId of servicesByCategory.get(r.category_id) || []) {
+      const key = `${r.employee_id}|${serviceId}`
+      if (seenPair.has(key)) continue
+      seenPair.add(key)
+      employeeServicesWithCategories.push({ employee_id: r.employee_id, service_id: serviceId })
+    }
+  }
+
   // ── Service-scoped task visibility (tasks.view_by_service) ────────────────
   // Opt-in restriction: viewers with the perm (and without tasks.view_all) see
   // only tasks of their assigned services, plus tasks they personally worked on.
   const visibilityMode = resolveTaskVisibilityMode(me)
   let outTasks = tasksRes.data || []
   if (visibilityMode === 'services' && myEmployeeId) {
-    const myServiceIds = (employeeServicesRes.data || [])
-      .filter((es: any) => es.employee_id === myEmployeeId)
-      .map((es: any) => es.service_id)
+    const myServiceIds = employeeServicesWithCategories
+      .filter(es => es.employee_id === myEmployeeId)
+      .map(es => es.service_id)
     const ownTaskIds = new Set<string>([
       ...mergedAssignments.filter(a => a.employee_id === myEmployeeId).map(a => a.task_id),
       ...(scoresRes.data || []).filter((s: any) => s.employee_id === myEmployeeId).map((s: any) => s.task_id),
@@ -230,7 +262,7 @@ export default async function ContributionsPage() {
       parameterServices={paramServicesRes.data || []}
       toolServices={toolServicesRes.data || []}
       groupServices={groupServicesRes.data || []}
-      employeeServices={employeeServicesRes.data || []}
+      employeeServices={employeeServicesWithCategories}
       scores={outScores}
       clients={clientsRes.data || []}
       services={servicesRes.data || []}
