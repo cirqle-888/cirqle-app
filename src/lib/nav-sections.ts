@@ -23,6 +23,13 @@ export type NavItem = {
   href: string
   icon: LucideIcon
   requiredPerm?: string
+  /**
+   * Visible when the viewer holds ANY of these. Used where one page is reachable
+   * under several keys — the financial reports accept their own narrow key OR
+   * the older blanket `reports.view`, so splitting that key did not blank the
+   * Insights section for anyone who already had it.
+   */
+  requiredAnyPerm?: string[]
   adminOnly?: boolean
   /** Extra search terms for the App Launcher (src/components/layout/app-launcher.tsx) — never rendered, only matched against. */
   keywords?: string[]
@@ -36,7 +43,8 @@ export type NavSection = {
 
 /** Permission/admin gate shared by every navSections consumer (Sidebar, App Launcher, Command Palette). */
 export function isNavItemVisible(item: NavItem, can: (key: string) => boolean, isAdmin: boolean): boolean {
-  return (!item.requiredPerm || can(item.requiredPerm)) && (!item.adminOnly || isAdmin)
+  const anyOk = !item.requiredAnyPerm?.length || item.requiredAnyPerm.some(can)
+  return (!item.requiredPerm || can(item.requiredPerm)) && anyOk && (!item.adminOnly || isAdmin)
 }
 
 /**
@@ -163,28 +171,28 @@ export const navSections: NavSection[] = [
     items: [
       // Reports is gated by reports.view — admins always have it; non-admins
       // see the tab only when their designation grants it in Settings → Designations.
-      { label: 'Reports', href: '/dashboard/reports', icon: BarChart3, requiredPerm: 'reports.view' },
+      { label: 'Reports', href: '/dashboard/reports', icon: BarChart3, requiredAnyPerm: ['reports.view', 'reports.view_company_financials', 'reports.view_client_financials', 'reports.view_people_earnings'] },
       // Contribution Analysis: spreadsheet-style per-task profitability / earnings BI report.
-      { label: 'Contribution Analysis', href: '/dashboard/reports/contribution-analysis', icon: Sheet, requiredPerm: 'reports.view', keywords: ['spreadsheet', 'earnings', 'BI'] },
+      { label: 'Contribution Analysis', href: '/dashboard/reports/contribution-analysis', icon: Sheet, requiredAnyPerm: ['reports.view_people_earnings', 'reports.view'], keywords: ['spreadsheet', 'earnings', 'BI'] },
       // Earnings by Role: what each ownership "hat" earned (Accounts, HR, CEO
       // Direct) — the split payroll's single ownership_earned figure hides.
       // Rows strip to the viewer's own awards without payroll.view_amounts.
-      { label: 'Earnings by Role', href: '/dashboard/reports/role-earnings', icon: HardHat, requiredPerm: 'reports.view', keywords: ['hat', 'ownership', 'revenue share', 'accounts', 'HR', 'role label', 'incentive'] },
+      { label: 'Earnings by Role', href: '/dashboard/reports/role-earnings', icon: HardHat, requiredAnyPerm: ['reports.view_people_earnings', 'reports.view'], keywords: ['hat', 'ownership', 'revenue share', 'accounts', 'HR', 'role label', 'incentive'] },
       // What-If Planner: simulate increments / commission / pricing / roles over a period.
-      { label: 'What-If Planner', href: '/dashboard/reports/what-if', icon: SlidersHorizontal, requiredPerm: 'reports.view', keywords: ['simulation', 'forecast', 'commission'] },
+      { label: 'What-If Planner', href: '/dashboard/reports/what-if', icon: SlidersHorizontal, requiredAnyPerm: ['reports.view_people_earnings', 'reports.view'], keywords: ['simulation', 'forecast', 'commission'] },
       // Business Health Center: cash/collections, overdue aging, client risk, cron status.
-      { label: 'Business Health', href: '/dashboard/health', icon: Activity, requiredPerm: 'reports.view', keywords: ['cash flow', 'overdue', 'risk', 'cron'] },
+      { label: 'Business Health', href: '/dashboard/health', icon: Activity, requiredAnyPerm: ['reports.view_company_financials', 'reports.view'], keywords: ['cash flow', 'overdue', 'risk', 'cron'] },
       // Was reachable only by typing the URL — no nav entry and no inbound link
       // anywhere in the app, despite being live and maintained. It surfaces
       // done-but-uninvoiced tasks and invoice/task drift; on the day it was
       // added here it was holding ₹6,400 of uninvoiced work and ₹2,375 of
       // unbilled client expenses that nobody could see.
-      { label: 'Billing Reconciliation', href: '/dashboard/reports/reconcile', icon: Scale, requiredPerm: 'reports.view', keywords: ['unbilled', 'uninvoiced', 'drift', 'missing invoice', 'reconcile'] },
+      { label: 'Billing Reconciliation', href: '/dashboard/reports/reconcile', icon: Scale, requiredAnyPerm: ['reports.view_client_financials', 'reports.view'], keywords: ['unbilled', 'uninvoiced', 'drift', 'missing invoice', 'reconcile'] },
       // ── Specialist reports — every report lives HERE, not scattered ──
-      { label: 'Company Operations',   href: '/dashboard/reports/company-ops', icon: Building2, requiredPerm: 'reports.view', keywords: ['P&L', 'burn rate', 'runway'] },
-      { label: 'Client Profitability', href: '/dashboard/reports/client-profitability', icon: TrendingUp, requiredPerm: 'reports.view', keywords: ['margin', 'finance engine'] },
-      { label: 'Cost & Tags',          href: '/dashboard/reports/cost-attribution', icon: Tags, requiredPerm: 'reports.view', keywords: ['spend', 'attribution'] },
-      { label: 'Client Ranking',       href: '/dashboard/clients/ranking', icon: Award, requiredPerm: 'reports.view', keywords: ['reliability', 'scoring'] },
+      { label: 'Company Operations',   href: '/dashboard/reports/company-ops', icon: Building2, requiredAnyPerm: ['reports.view_company_financials', 'reports.view'], keywords: ['P&L', 'burn rate', 'runway'] },
+      { label: 'Client Profitability', href: '/dashboard/reports/client-profitability', icon: TrendingUp, requiredAnyPerm: ['reports.view_client_financials', 'reports.view'], keywords: ['margin', 'finance engine'] },
+      { label: 'Cost & Tags',          href: '/dashboard/reports/cost-attribution', icon: Tags, requiredAnyPerm: ['reports.view_company_financials', 'reports.view'], keywords: ['spend', 'attribution'] },
+      { label: 'Client Ranking',       href: '/dashboard/clients/ranking', icon: Award, requiredAnyPerm: ['reports.view_client_financials', 'reports.view'], keywords: ['reliability', 'scoring'] },
     ],
   },
   {

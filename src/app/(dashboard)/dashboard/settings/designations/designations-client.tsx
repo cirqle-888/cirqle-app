@@ -803,10 +803,16 @@ function NewDesignationModal({
             <p className="text-[11px] text-muted-foreground mt-1.5">
               Tip — pre-built role presets are available to copy from:
               <br />• <b>Operations</b> — tasks + contributions, no ₹
-              <br />• <b>Accounts</b> — full finance access incl. amounts
               <br />• <b>HR</b> — payroll workflow without salary figures
               <br />• <b>Reviewer</b> — read-only across all modules
               <br />• <b>Management</b> — sees everything, no settings access
+              <br /><br />Finance ladder — each narrower than the one above:
+              <br />• <b>Finance Controller</b> — full finance incl. edit and company P&amp;L. <i>No salaries</i> — add payroll separately
+              <br />• <b>Accountant</b> — invoices, cashbook, statements, client financials. No company P&amp;L
+              <br />• <b>Accountant Assistant</b> — entry only. No company P&amp;L, no earnings, no salaries
+              <br />• <b>Finance Executive</b> — read-only client financials
+              <br />• <b>Auditor</b> — read-only across all finance <i>including</i> salaries
+              <br />• <b>Accounts</b> — the older combined finance role
             </p>
           </div>
 

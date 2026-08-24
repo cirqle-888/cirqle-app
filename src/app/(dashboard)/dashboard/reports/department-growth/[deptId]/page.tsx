@@ -36,7 +36,12 @@ export default async function DepartmentDetailPage({
 }) {
   const me = await loadCurrentUser().catch(() => null)
   const isAdmin = me?.isAdmin ?? false
-  const canView = isAdmin || me?.permissions.has('reports.view')
+  // client financials — narrower than the old blanket reports.view, which
+  // also carried burn rate, runway and every employee's earnings.
+  // `reports.view` still admits holders granted before the split.
+  const canView = isAdmin
+    || me?.permissions.has('reports.view_client_financials')
+    || me?.permissions.has('reports.view')
   if (!canView) redirect('/dashboard')
 
   const { deptId } = await params

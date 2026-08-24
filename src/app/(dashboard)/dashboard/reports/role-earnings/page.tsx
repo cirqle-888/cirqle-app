@@ -48,7 +48,12 @@ export default async function RoleEarningsPage({
 }) {
   const me = await loadCurrentUser().catch(() => null)
   const isAdmin = me?.isAdmin ?? false
-  const canView = isAdmin || me?.permissions.has('reports.view')
+  // people's earnings — narrower than the old blanket reports.view, which
+  // also carried burn rate, runway and every employee's earnings.
+  // `reports.view` still admits holders granted before the split.
+  const canView = isAdmin
+    || me?.permissions.has('reports.view_people_earnings')
+    || me?.permissions.has('reports.view')
   if (!canView) redirect('/dashboard')
 
   const seeEveryone = isAdmin || financialVisibility(me).payrollAmounts

@@ -9,7 +9,20 @@ export const PERMS = {
   DASHBOARD_VIEW_ANALYTICS: 'dashboard.view_analytics',
 
   // Reports
+  /**
+   * Base key: the Reports index and any report that carries no money.
+   * NOT sufficient on its own for the financial reports below — those all sat
+   * behind this single key, which meant granting a bookkeeper the client
+   * profitability report also handed them Cirqle's burn rate, runway and every
+   * employee's earnings. Split three ways so a finance role can be shaped.
+   */
   REPORTS_VIEW: 'reports.view',
+  /** Cirqle's OWN money: company P&L, burn rate, runway, department P&L, cost attribution. */
+  REPORTS_VIEW_COMPANY_FINANCIALS: 'reports.view_company_financials',
+  /** CLIENT money: profitability, department growth, billing reconciliation. */
+  REPORTS_VIEW_CLIENT_FINANCIALS: 'reports.view_client_financials',
+  /** PEOPLE money: earnings by role, contribution analysis, the commission what-if planner. */
+  REPORTS_VIEW_PEOPLE_EARNINGS: 'reports.view_people_earnings',
 
   // Tasks
   TASKS_VIEW_OWN:     'tasks.view_own',
@@ -290,6 +303,10 @@ export const CRITICAL_PERMS: ReadonlySet<string> = new Set<string>([
   // split here — seeing the page means seeing what the client pays.
   PERMS.PACKAGES_VIEW,
   PERMS.CASHBOOK_VIEW_AMOUNTS,
+  // Report money layers — the company's own P&L and everyone's earnings are at
+  // least as sensitive as the figures they aggregate.
+  PERMS.REPORTS_VIEW_COMPANY_FINANCIALS,
+  PERMS.REPORTS_VIEW_PEOPLE_EARNINGS,
   // Advertising money layers (migration 027)
   PERMS.ADVERTISING_VIEW_FINANCIALS,
   PERMS.ADVERTISING_VIEW_BILLING,

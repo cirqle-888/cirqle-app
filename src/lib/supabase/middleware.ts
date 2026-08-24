@@ -9,6 +9,7 @@ import { Database } from '../../types/supabase'
 const ROUTE_PERMS: Array<[RegExp, string]> = [
   [/^\/dashboard\/activity/,                'timeline.view_all'],
   [/^\/dashboard\/leads/,                   'leads.view'],
+  [/^\/dashboard\/field-marketing/,         'field.view'],
   [/^\/dashboard\/agency/,                  'reports.view'],
   // More specific first: the planner has its own permission.
   [/^\/dashboard\/social\/feed/,           'social.plan_feed'],
@@ -26,6 +27,9 @@ const ROUTE_PERMS: Array<[RegExp, string]> = [
   [/^\/dashboard\/performance/,             'performance.manage'],
   [/^\/dashboard\/packages/,                'packages.view'],
   [/^\/dashboard\/invoices/,                'billing.view_invoices'],
+  // Statement of Account reads the same invoices; gated here too so it matches
+  // every other finance route rather than relying on its page check alone.
+  [/^\/dashboard\/statements/,              'billing.view_invoices'],
   [/^\/dashboard\/quotations/,              'billing.view_quotations'],
   [/^\/dashboard\/settings\/designations/,  'settings.manage_designations'],
   [/^\/dashboard\/settings\/change-requests/, 'employees.review_change_requests'],
@@ -222,7 +226,10 @@ export async function updateSession(request: NextRequest) {
                                                          // X-Hub-Signature-256 HMAC (app secret) inside the route itself.
                                                          // Meta's servers carry no session cookie; without this exemption
                                                          // every delivery would be 307-redirected to /login and dropped.
-                  || pathname.startsWith('/api/figma/') // Cirqle Studio Figma plugin — its own offer_sheet_secret bearer auth
+                  || pathname.startsWith('/api/figma/')
+                  || pathname.startsWith('/api/logo')
+                  || pathname.startsWith('/api/favicon')
+                  || pathname.startsWith('/api/invoice-logo') // Cirqle Studio Figma plugin — its own offer_sheet_secret bearer auth
                                                          // (fail-closed in the routes). Same bug class as /api/cron/ above: the
                                                          // plugin's iframe carries no session cookies, so without this exemption
                                                          // its CORS preflight was 307-redirected to /login — and browsers reject

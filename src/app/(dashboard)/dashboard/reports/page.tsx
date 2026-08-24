@@ -16,7 +16,14 @@ export default async function ReportsPage() {
   const isAdmin = me?.isAdmin ?? false   // pre-migration fail-open
   // Allow access when: admin, OR has explicit reports.view permission, OR no user
   // record yet (fail-open so the app keeps working pre-migration).
-  const canViewReports = isAdmin || me?.permissions.has('reports.view')
+  // Any report key opens the index. A finance role granted only client
+  // financials would otherwise hold the reports it needs with no way to reach
+  // them, since this page is the only nav entry point.
+  const canViewReports = isAdmin
+    || me?.permissions.has('reports.view')
+    || me?.permissions.has('reports.view_company_financials')
+    || me?.permissions.has('reports.view_client_financials')
+    || me?.permissions.has('reports.view_people_earnings')
   if (!canViewReports) redirect('/dashboard')
 
   const supabase = createAdminClient()
