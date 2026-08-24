@@ -130,7 +130,7 @@ export default async function DepartmentDetailPage({
             <ArrowLeft className="h-3.5 w-3.5" /> All departments
           </Link>
           <span className="text-muted-foreground ml-1">Window:</span>
-          {RANGE_PRESETS.filter(m => m >= 3).map(m => (
+          {RANGE_PRESETS.map(m => (
             <Link
               key={m}
               href={`${INDEX}/${encodeURIComponent(deptId)}?months=${m}`}
@@ -138,7 +138,7 @@ export default async function DepartmentDetailPage({
                 ? 'border-primary/40 bg-primary/10 text-primary font-medium'
                 : 'border-border text-muted-foreground hover:text-foreground'}`}
             >
-              {m} months
+              {m === 1 ? 'This month' : `${m} months`}
             </Link>
           ))}
           <span className="font-medium ml-1">

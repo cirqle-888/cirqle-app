@@ -91,7 +91,7 @@ export default async function DepartmentCardsPage({
       <div className="rounded-xl border border-border bg-card px-4 py-3 space-y-3">
         <div className="flex items-center gap-1.5 text-xs flex-wrap">
           <span className="text-muted-foreground mr-0.5">Window:</span>
-          {RANGE_PRESETS.filter(m => m >= 3).map(m => (
+          {RANGE_PRESETS.map(m => (
             <Link
               key={m}
               href={`${ROUTE}?months=${m}`}
@@ -99,7 +99,7 @@ export default async function DepartmentCardsPage({
                 ? 'border-primary/40 bg-primary/10 text-primary font-medium'
                 : 'border-border text-muted-foreground hover:text-foreground'}`}
             >
-              {m} months
+              {m === 1 ? 'This month' : `${m} months`}
             </Link>
           ))}
           <span className="font-medium ml-1">

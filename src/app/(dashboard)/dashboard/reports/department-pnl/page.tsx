@@ -157,19 +157,31 @@ export default async function DepartmentPnlPage({
     engineProfitInr = p.profitInr
     engineTerms = { revenueInr: p.revenueInr, contributionInr: p.contributionInr, frozen: p.frozen }
   } else {
-    const policy = await loadOverheadPolicy(admin, range.to)
-    const lines = await fetchJournalLines(admin, { from: range.from, to: range.to, scope: 'company' })
+    const [policy, lines] = await Promise.all([
+      loadOverheadPolicy(admin, range.to),
+      fetchJournalLines(admin, { from: range.from, to: range.to, scope: 'company' }),
+    ])
     allocatableOpexInr = expensesFromLines(lines, policy)
 
     // Pro-rate each overlapping month's recorded base salaries by days covered.
-    for (const m of monthRange(range.from.slice(0, 7), range.to.slice(0, 7))) {
+    //
+    // ONE query for the whole range, grouped in memory. This used to issue a
+    // query per month inside the loop — 24 sequential round trips for a
+    // two-year custom range, purely to sum a handful of rows each time.
+    const spannedMonths = monthRange(range.from.slice(0, 7), range.to.slice(0, 7))
+    const spannedYears = [...new Set(spannedMonths.map(m => Number(m.slice(0, 4))))]
+    const { data: payrollRows } = await fetchAll(
+      admin.from('payroll').select('month, year, base_salary').in('year', spannedYears),
+    )
+    const salaryByMonth = new Map<string, number>()
+    for (const r of (payrollRows || []) as { month: number; year: number; base_salary: number | null }[]) {
+      const key = `${r.year}-${String(r.month).padStart(2, '0')}`
+      salaryByMonth.set(key, (salaryByMonth.get(key) || 0) + Number(r.base_salary || 0))
+    }
+    for (const m of spannedMonths) {
       const [year, month] = m.split('-').map(Number)
-      const { data: pr } = await fetchAll(
-        admin.from('payroll').select('base_salary').eq('month', month).eq('year', year),
-      )
-      const monthTotal = (pr || []).reduce(
-        (s: number, r: { base_salary: number | null }) => s + Number(r.base_salary || 0), 0)
-      baseSalariesInr += monthTotal * monthOverlapFraction(month, year, range.from, range.to)
+      baseSalariesInr += (salaryByMonth.get(m) || 0)
+        * monthOverlapFraction(month, year, range.from, range.to)
     }
     baseSalariesInr = Math.round(baseSalariesInr * 100) / 100
   }

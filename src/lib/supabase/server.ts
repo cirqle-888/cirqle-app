@@ -169,15 +169,49 @@ export async function fetchAllIn(
   const unique = Array.from(new Set(ids ?? []))
   if (unique.length === 0) return { data: [] }
 
-  const allData: any[] = []
+  const chunks: string[][] = []
   for (let i = 0; i < unique.length; i += chunkSize) {
-    const { data, error } = await fetchAll(makeQuery(unique.slice(i, i + chunkSize)))
-    // Stop at the first failed chunk. Continuing would return a result that
-    // looks complete but is missing whole id ranges.
-    if (error) return { data: allData, error }
-    if (data) allData.push(...data)
+    chunks.push(unique.slice(i, i + chunkSize))
   }
-  return { data: allData }
+
+  // Chunks run CONCURRENTLY, a few at a time.
+  //
+  // Serially they were the slowest thing in the reports: department-growth over
+  // a 24-month window matches ~1,900 task ids, so contribution_scores alone was
+  // 19 round trips one after another — 9.7s for the page against live data.
+  //
+  // Safe here in a way it is NOT for fetchAll: this takes a FACTORY, so every
+  // chunk builds its own query object. fetchAll receives one already-built
+  // PostgrestFilterBuilder, which is mutable — calling .range() on it twice
+  // before awaiting makes both requests fetch the same page, which silently
+  // dropped rows when that was tried. See the comment there.
+  const LANES = 4
+  const results: { data: any[]; error?: any }[] = new Array(chunks.length)
+  let next = 0
+  let failure: any
+
+  const lane = async (): Promise<void> => {
+    for (;;) {
+      const i = next++
+      if (i >= chunks.length || failure) return
+      const res = await fetchAll(makeQuery(chunks[i]))
+      results[i] = res
+      // Stop at the first failed chunk. Continuing would return a result that
+      // looks complete but is missing whole id ranges.
+      if (res.error && !failure) failure = res.error
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(LANES, chunks.length) }, lane))
+
+  // Re-assembled in chunk order, not completion order, so a caller that relies
+  // on the id ordering it passed in still gets it.
+  const allData: any[] = []
+  for (const r of results) {
+    if (!r) continue
+    if (r.error) break
+    allData.push(...(r.data || []))
+  }
+  return failure ? { data: allData, error: failure } : { data: allData }
 }
 
 // Dev-only: log each missing-table once per process so the user knows what's
