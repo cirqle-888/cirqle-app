@@ -497,6 +497,28 @@ export interface LinkedRequestView {
 }
 
 /**
+ * A task linked STRAIGHT to the item, with no request in between (the
+ * "skip the inbox" exit). Same shape the request's promoted_task carries, so
+ * both routes collapse onto one status read below.
+ */
+export interface LinkedTaskView {
+  status: string                                   // tasks.status
+  deleted_at?: string | null
+}
+
+/**
+ * Map a task status onto the planner's display state. Shared by both exits —
+ * a task reached through a request and one linked directly are the same work,
+ * so they must never report different progress.
+ */
+function progressFromTaskStatus(status: string): ItemProgress {
+  if (status === 'done' || status === 'invoiced' || status === 'paid') return 'done'
+  if (status === 'delivered') return 'delivered'
+  if (status === 'cancelled') return 'cancelled'
+  return 'in_progress'
+}
+
+/**
  * Request statuses the planner must never write to: already closed, or
  * already finished-and-client-notified. Editing or cancelling one of these
  * from the calendar would rewrite a record the client has already seen.
@@ -520,8 +542,15 @@ export function isClosedRequestStatus(status: string | null | undefined): boolea
 export function resolveItemProgress(
   itemStatus: string,
   request: LinkedRequestView | null | undefined,
+  task?: LinkedTaskView | null,
 ): ItemProgress {
   if (itemStatus === 'cancelled') return 'cancelled'
+  // Direct exit first: a task linked straight to the item owns its progress
+  // outright, with no request status to reconcile against. A soft-deleted task
+  // is treated as no task at all — the item falls back to whatever the request
+  // route says, or to 'planned', so trashing a task never strands the item in
+  // a state the planner cannot act on.
+  if (task && !task.deleted_at) return progressFromTaskStatus(task.status)
   if (!request) return 'planned'
   const rs = request.status
   // 'archived' is terminal in the inbox too — without this it would fall
@@ -529,15 +558,69 @@ export function resolveItemProgress(
   if (rs === 'rejected' || rs === 'cancelled' || rs === 'archived') return 'cancelled'
   if (rs === 'completed') return 'done'
   if (rs === 'delivered') return 'delivered'
-  if (request.promoted_task) {
-    const ts = request.promoted_task.status
-    if (ts === 'done' || ts === 'invoiced' || ts === 'paid') return 'done'
-    if (ts === 'delivered') return 'delivered'
-    if (ts === 'cancelled') return 'cancelled'
-    return 'in_progress'
-  }
+  if (request.promoted_task) return progressFromTaskStatus(request.promoted_task.status)
   if (rs === 'started' || rs === 'in_progress' || rs === 'waiting_for_content' || rs === 'revision_requested') {
     return 'in_progress'
   }
   return 'requested'   // submitted / under_review / approved — sitting in the inbox
+}
+
+// ── Routing (which exits an item may still take) ─────────────────────────────
+
+/**
+ * The item shape the routing helpers below read. Deliberately structural: the
+ * calendar page, the push actions and the Tasks-page picker all hold slightly
+ * different projections of the same row.
+ */
+export interface RoutableItem {
+  status: string
+  request_id?: string | null
+  task_id?: string | null
+  request?: LinkedRequestView | null
+  task?: LinkedTaskView | null
+}
+
+/**
+ * Is this item still unrouted — no live request, no live task — and therefore
+ * available to send down either pipe?
+ *
+ * Reads the JOINED rows, not just the id columns, because a task can be
+ * soft-deleted (deleted_at) and a request can be cancelled while the id stays
+ * behind. Those items are genuinely back to square one and must be pushable
+ * again; keying off `request_id != null` alone would strand them forever.
+ *
+ * Note the `task_id` fallback: before the direct-task migration is applied the
+ * joined `task` is always undefined, so a bare id still counts as routed.
+ */
+export function isUnrouted(item: RoutableItem): boolean {
+  if (item.status === 'cancelled') return false
+  if (item.task_id && (!item.task || !item.task.deleted_at)) return false
+  if (item.request_id && !isClosedRequestStatus(item.request?.status)) {
+    // An id with no joined row (pre-migration read, or a request the viewer
+    // cannot see) is treated as live — better to under-offer the button than
+    // to double-push work that already exists.
+    return false
+  }
+  return true
+}
+
+/**
+ * Can the item be pulled back to 'planned' from the calendar alone?
+ *
+ * False once real downstream work exists: a promoted task owns the schedule,
+ * and a completed/delivered request has already been shown to the client.
+ * Both cases must be resolved where they live, not tidied away from the
+ * planner.
+ */
+export function canPullBack(item: RoutableItem): boolean {
+  if (item.status === 'cancelled') return false
+  if (item.task_id && item.task && !item.task.deleted_at) {
+    // Direct-task exit: only reversible while the task has not been delivered
+    // or finished. An unstarted task is a planning mistake; a delivered one is
+    // a record.
+    return !['delivered', 'done', 'invoiced', 'paid'].includes(item.task.status)
+  }
+  if (!item.request_id) return false
+  if (item.request?.promoted_task) return false
+  return !['completed', 'delivered'].includes(item.request?.status ?? '')
 }

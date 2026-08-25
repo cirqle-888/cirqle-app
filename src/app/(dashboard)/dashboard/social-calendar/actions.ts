@@ -493,25 +493,111 @@ export async function updateCalendarItem(
  * Without this the item is a dead end: push() skips anything already linked,
  * so a shelved-then-revived post could only be recreated from scratch.
  */
+/**
+ * Pull an item back to 'planned' so it can be edited and sent again.
+ *
+ * Handles BOTH exits, and both the already-closed and still-open cases:
+ *
+ *   request, closed .... unlink only; the cancelled request stays as history
+ *   request, open ...... cancel it first (house setRequestStatus, so
+ *                        client_status, the portal timeline and visibility all
+ *                        behave exactly like an inbox cancel), then unlink
+ *   direct task ........ unlink only; the task is left alone for the Tasks
+ *                        page to cancel or delete on its own terms
+ *
+ * Refuses once real downstream work exists — a promoted task owns the
+ * schedule, and a completed/delivered request has already been shown to the
+ * client. Those are resolved where they live, not tidied away from here.
+ */
 export async function revertItemToPlanned(itemId: string): Promise<ActionResult> {
   const guard = await requirePermission(PERMS.SOCIAL_MANAGE)
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const admin = createAdminClient()
+
+  // task_id needs the direct-task migration — read it separately so a pending
+  // migration leaves the (unchanged) request path working.
+  let taskId: string | null = null
+  let task: { id: string; status: string; deleted_at: string | null } | null = null
+  try {
+    const { data: withTask } = await admin.from('social_calendar_items')
+      .select('task_id, task:tasks(id, status, deleted_at)')
+      .eq('id', itemId).maybeSingle()
+    taskId = (withTask as any)?.task_id ?? null
+    task = (withTask as any)?.task ?? null
+  } catch { /* pre-migration — no direct-task exit exists yet */ }
+
   const { data: item, error: itemErr } = await admin.from('social_calendar_items')
-    .select('id, request_id, request:task_requests(id, status, promoted_task_id)')
+    .select('id, status, request_id, request:task_requests(id, ref_no, status, promoted_task_id)')
     .eq('id', itemId).maybeSingle()
   if (itemErr || !item) return { ok: false, error: 'Item not found.' }
 
   const req = (item as any).request
-  if (!req) return { ok: false, error: 'This item has no linked request.' }
-  if (req.promoted_task_id) return { ok: false, error: 'This item is already a task — manage it from the Tasks page.' }
-  if (!isClosedRequestStatus(req.status)) {
-    return { ok: false, error: 'Its request is still open in the inbox — cancel it there first.' }
+
+  // ── Direct-task exit ───────────────────────────────────────────────────────
+  if (taskId && task && !task.deleted_at) {
+    if (['delivered', 'done', 'invoiced', 'paid'].includes(task.status)) {
+      return {
+        ok: false,
+        error: `Its task is already ${task.status} — pulling it back would rewrite finished work. Cancel the task from the Tasks page if that is really what you want.`,
+      }
+    }
+    // Unlink only. Deleting or cancelling the task from here would be a
+    // surprise: the planner asked to free the calendar slot, not to destroy
+    // whatever the designer has already done on the Tasks page.
+    const { data: reverted, error } = await admin.from('social_calendar_items')
+      .update({ task_id: null, status: 'planned', updated_at: new Date().toISOString() })
+      .eq('id', itemId).eq('task_id', taskId)
+      .select('id')
+    if (error) return { ok: false, error: error.message }
+    if (!reverted?.length) return { ok: false, error: 'The item changed while you were working — reload and retry.' }
+    // Scoped to the TASK, not the item: entityType 'project' would write the
+    // item id into activity_logs.project_id, which is FK-constrained to
+    // projects — the insert fails and the entry is lost.
+    void logActivity({
+      actorId: guard.employeeId, entityType: 'task', entityId: taskId,
+      action: 'updated', category: 'crm',
+      detail: { label: 'Social calendar — unlinked from plan item', itemId },
+    })
+    revalidatePath(REVALIDATE); revalidatePath('/dashboard/tasks')
+    return { ok: true }
   }
 
-  // Unlink only (the cancelled request stays as history). Conditional on the
-  // request_id we read, so a concurrent push can't have its link clobbered.
+  // ── Request exit ───────────────────────────────────────────────────────────
+  if (!req) {
+    // status says routed but nothing is linked (the task was hard-deleted, or
+    // a stale row) — just settle the status rather than reporting an error the
+    // user cannot act on.
+    if ((item as any).status !== 'planned') {
+      await admin.from('social_calendar_items')
+        .update({ status: 'planned', updated_at: new Date().toISOString() })
+        .eq('id', itemId)
+      revalidatePath(REVALIDATE)
+      return { ok: true }
+    }
+    return { ok: false, error: 'This item has no linked request or task.' }
+  }
+  if (req.promoted_task_id) return { ok: false, error: 'This item is already a task — manage it from the Tasks page.' }
+  if (req.status === 'completed' || req.status === 'delivered') {
+    return {
+      ok: false,
+      error: `Its request (${req.ref_no ? `REQ-${String(req.ref_no).padStart(4, '0')}` : 'linked'}) is already ${req.status} — the client has been notified. Handle it in the Requests inbox.`,
+    }
+  }
+
+  // Still open in the inbox → cancel it here, so pulling work back is one
+  // click from the calendar instead of a round-trip through Requests.
+  if (!isClosedRequestStatus(req.status)) {
+    const cancelled = await setRequestStatus(admin, req.id, 'cancelled', {
+      type: 'admin', id: guard.employeeId, label: 'social calendar (pulled back)',
+    })
+    if (!cancelled) {
+      return { ok: false, error: 'Could not cancel the linked request — the item was left linked so it stays traceable. Try again.' }
+    }
+  }
+
+  // Unlink. Conditional on the request_id we read, so a concurrent push can't
+  // have its link clobbered.
   const { data: reverted, error } = await admin.from('social_calendar_items')
     .update({ request_id: null, status: 'planned', updated_at: new Date().toISOString() })
     .eq('id', itemId).eq('request_id', req.id)
@@ -519,7 +605,58 @@ export async function revertItemToPlanned(itemId: string): Promise<ActionResult>
   if (error) return { ok: false, error: error.message }
   if (!reverted?.length) return { ok: false, error: 'The item changed while you were working — reload and retry.' }
 
-  revalidatePath(REVALIDATE)
+  // No logActivity here on purpose: setRequestStatus above already wrote a
+  // status_changed entry on the request's own timeline (and the client's
+  // portal). A second row scoped to the calendar item would add nothing and,
+  // as 'project', could not be written at all.
+  revalidatePath(REVALIDATE); revalidatePath('/dashboard/requests')
+  return { ok: true }
+}
+
+/**
+ * Claim a task as the direct output of a calendar item — the counterpart to
+ * markRequestPromoted, for the exit that skips the inbox entirely.
+ *
+ * Called after the Tasks page has actually created the task, so a failure here
+ * leaves a perfectly good task that simply isn't attributed back to the plan.
+ * That is the right way round: the work matters more than the link.
+ */
+export async function markSocialItemTasked(
+  itemId: string, taskId: string,
+): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.SOCIAL_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+  const { data: item, error: itemErr } = await admin.from('social_calendar_items')
+    .select('id, status, request_id')
+    .eq('id', itemId).maybeSingle()
+  if (itemErr || !item) return { ok: false, error: 'Calendar item not found.' }
+  if ((item as any).request_id) {
+    return { ok: false, error: 'This item already went to Requests — promote it from the inbox instead.' }
+  }
+
+  // Atomic claim, same discipline as the push-to-Requests path: only a row
+  // still unlinked and still 'planned' can be claimed, so two concurrent
+  // creates cannot both attach to one item.
+  const { data: claimed, error } = await admin.from('social_calendar_items')
+    .update({ task_id: taskId, status: 'tasked', updated_at: new Date().toISOString() })
+    .eq('id', itemId).is('task_id', null).eq('status', 'planned')
+    .select('id')
+  if (error) {
+    if (missingPatchColumn(error, ['task_id'])) {
+      return { ok: false, error: 'The direct-to-task migration is not applied yet — apply supabase/migrations/20260825120000_social_calendar_direct_task.sql.' }
+    }
+    return { ok: false, error: error.message }
+  }
+  if (!claimed?.length) return { ok: false, error: 'The item was already routed while you were working — reload the calendar.' }
+
+  void logActivity({
+    actorId: guard.employeeId, entityType: 'task', entityId: taskId,
+    action: 'updated', category: 'crm',
+    detail: { label: 'Social calendar → Task (direct, no request)', itemId },
+  })
+  revalidatePath(REVALIDATE); revalidatePath('/dashboard/tasks')
   return { ok: true }
 }
 

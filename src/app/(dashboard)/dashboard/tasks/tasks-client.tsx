@@ -24,6 +24,7 @@ import { normalizeTaskTitle } from '@/lib/utils/title-case'
 const QuickCreateClientModal = dynamic(() => import('@/components/tasks/quick-create-modals').then(mod => mod.QuickCreateClientModal), { ssr: false })
 const QuickCreateServiceModal = dynamic(() => import('@/components/tasks/quick-create-modals').then(mod => mod.QuickCreateServiceModal), { ssr: false })
 import { markRequestPromoted, getRequestBriefForTask } from '@/app/(dashboard)/dashboard/requests/actions'
+import { markSocialItemTasked } from '@/app/(dashboard)/dashboard/social-calendar/actions'
 import { createContributionSlots } from '@/app/(dashboard)/dashboard/contributions/actions'
 import { DiscussButton } from '@/components/chat/discuss-button'
 import AppSelect from '@/components/ui/app-select'
@@ -54,6 +55,8 @@ import {
   logTaskAssignment,
   serverInlineTaskUpdate,
   checkPossibleDuplicateTask,
+  fetchPendingSourcesForClient,
+  type PendingSource,
 } from './actions'
 import { TaskBillingSection } from '@/components/ui/task-billing-section'
 import { computeTaskAmount, resolveTaskQuantity, resolvePricingType } from '@/lib/tasks/pricing'
@@ -159,6 +162,15 @@ interface Props {
   promotionRequest?: {
     id: string; ref_no: number; title: string; description: string
     client_id: string | null; service_id: string | null; due_date: string | null
+  } | null
+  /** Set when arriving via /dashboard/tasks?fromSocialItem=<id> — the Social
+   *  Calendar's direct exit, which skips the Requests inbox entirely. Same
+   *  prefill shape; on create we link the item to the task instead of a
+   *  request. */
+  promotionSocialItem?: {
+    id: string; title: string; description: string
+    client_id: string | null; service_id: string | null; due_date: string | null
+    assigned_employee_id?: string | null
   } | null
   /** taskId → linked external request (REQ chip + brief modal on task rows). */
   requestRefByTaskId?: Record<string, { id: string; ref_no: number }>
@@ -340,7 +352,7 @@ function SortablePanelRow({ id, label, onUp, onDown, isFirst, isLast }: {
   )
 }
 
-export default function TasksClient({ promotionRequest, requestRefByTaskId = {}, pendingRequestCount = 0, initialSearch = '', initialClient = '', initialService = '', initialDateRange = null, dbTaskTotal, fullHistory = false, initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, myTaskIds, visibilitySettings, permissionFlags }: Props) {
+export default function TasksClient({ promotionRequest, promotionSocialItem, requestRefByTaskId = {}, pendingRequestCount = 0, initialSearch = '', initialClient = '', initialService = '', initialDateRange = null, dbTaskTotal, fullHistory = false, initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, myTaskIds, visibilitySettings, permissionFlags }: Props) {
   const { role, employee: currentEmployee } = useRole()
   // Browser DB search runs through the anon/RLS client, which cannot reproduce
   // the server's service- and unit-scoped visibility model — so it is, and must
@@ -611,6 +623,25 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
     setPromotingRequestId(promotionRequest.id)
     setShowForm(true)
     // Strip the query param so a refresh doesn't re-trigger the prefill.
+    window.history.replaceState(null, '', '/dashboard/tasks')
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Direct calendar promotion (?fromSocialItem=…) ─────────────────────────
+  // The Social Calendar's no-request exit. Identical prefill; the difference is
+  // only which record gets linked on success (markSocialItemTasked).
+  const [promotingSocialItemId, setPromotingSocialItemId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!promotionSocialItem) return
+    setForm({
+      ...EMPTY_FORM,
+      title: promotionSocialItem.title,
+      description: promotionSocialItem.description,
+      client_id: promotionSocialItem.client_id || '',
+      service_id: promotionSocialItem.service_id || '',
+      task_date: promotionSocialItem.due_date || todayISO(),
+    })
+    setPromotingSocialItemId(promotionSocialItem.id)
+    setShowForm(true)
     window.history.replaceState(null, '', '/dashboard/tasks')
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1037,10 +1068,78 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
     return unitPrice
   }, [parentTask, form.billing_override, form.is_billable, pricingType, computedAmount, form.quantity, form.hours, form.spend, unitPrice])
 
+  // ── Optional "pick from Requests / Calendar" panel ─────────────────────────
+  // Everything already queued for this client that could become this task.
+  // Opt-out, remembered per browser: people who never work from the inbox
+  // shouldn't have a panel they must scroll past on every single task.
+  const [sourcesOpen, setSourcesOpen] = useState(true)
+  const [sources, setSources] = useState<PendingSource[]>([])
+  const [sourcesLoading, setSourcesLoading] = useState(false)
+  const [pickedSource, setPickedSource] = useState<PendingSource | null>(null)
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem('tasks.sourcePicker')
+      if (v != null) setSourcesOpen(v === '1')
+    } catch { /* private mode — default to open */ }
+  }, [])
+  function toggleSources() {
+    setSourcesOpen(v => {
+      const next = !v
+      try { localStorage.setItem('tasks.sourcePicker', next ? '1' : '0') } catch { /* ignore */ }
+      return next
+    })
+  }
+  // Reload whenever the chosen client changes while the form is open. Skipped
+  // entirely for internal work — it has no client and therefore no inbox.
+  useEffect(() => {
+    if (!showForm || !sourcesOpen) return
+    const clientId = form.client_id
+    if (!clientId || clientId === INTERNAL_CLIENT) { setSources([]); return }
+    // Already arrived from a specific request/item — the form is prefilled and
+    // offering to overwrite it with a different one would be a trap.
+    if (promotingRequestId || promotingSocialItemId) { setSources([]); return }
+    let cancelled = false
+    setSourcesLoading(true)
+    fetchPendingSourcesForClient(clientId)
+      .then(res => { if (!cancelled) setSources(res.ok && res.data ? res.data : []) })
+      .catch(() => { if (!cancelled) setSources([]) })
+      .finally(() => { if (!cancelled) setSourcesLoading(false) })
+    return () => { cancelled = true }
+  }, [showForm, sourcesOpen, form.client_id, promotingRequestId, promotingSocialItemId])
+
+  /**
+   * Adopt a queued item into the form. Fills only what is empty or clearly
+   * still default — a title the user has already typed is never clobbered.
+   * Picking also arms the link-back, so saving attributes the task to its
+   * source exactly as if they had arrived via ?fromRequest / ?fromSocialItem.
+   */
+  function pickSource(s: PendingSource) {
+    setPickedSource(s)
+    setForm(p => ({
+      ...p,
+      title: p.title.trim() ? p.title : s.title,
+      description: p.description.trim() ? p.description : s.description,
+      service_id: p.service_id || s.serviceId || '',
+      task_date: s.dueDate || p.task_date,
+    }))
+    if (s.kind === 'request') { setPromotingRequestId(s.id); setPromotingSocialItemId(null) }
+    else { setPromotingSocialItemId(s.id); setPromotingRequestId(null) }
+  }
+
+  function clearPickedSource() {
+    setPickedSource(null)
+    setPromotingRequestId(null)
+    setPromotingSocialItemId(null)
+  }
+
   // When client or service changes, update currency
   function handleClientChange(clientId: string) {
     const cp = clientPricings.find(p => p.client_id === clientId && p.service_id === form.service_id)
     setForm(p => ({ ...p, client_id: clientId, currency: (cp?.currency as Currency) || p.currency }))
+    // A pick belongs to the client it came from — switching clients invalidates
+    // it, and silently keeping the link would attribute this task to another
+    // client's request.
+    if (pickedSource) clearPickedSource()
   }
 
   function handleServiceChange(serviceId: string) {
@@ -1445,6 +1544,19 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
         setPromotingRequestId(null)
       }
 
+      // Direct calendar flow: claim the task for the plan item. No request is
+      // involved, so nothing is emailed and the client portal shows nothing —
+      // this link exists purely so the calendar can read live task progress.
+      if (promotingSocialItemId) {
+        void markSocialItemTasked(promotingSocialItemId, data.id)
+          .then(res => {
+            if (res.ok) success('Sent to Tasks', `Task #${data.task_number ?? ''} linked to the calendar item`)
+            else toastError('Task created, but linking the calendar item failed', res.error)
+          })
+          .catch(() => {})
+        setPromotingSocialItemId(null)
+      }
+
       // If the user can't see pricing, billing_amount was inserted as 0.
       // Backfill the correct price server-side (admin client reads pricing tables).
       // Fire-and-forget — the employee's UI intentionally never sees the price.
@@ -1500,6 +1612,9 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
 
       setShowForm(false)
       setForm({ ...EMPTY_FORM, task_date: todayISO() })
+      // The pick has been consumed by the link-back above; leaving it set
+      // would show a stale "will be linked" banner on the NEXT task.
+      setPickedSource(null)
       success(`Task #${tn} added`)
     } else if (error) {
       // Surface the DB error to the user (e.g. missing variant columns if migration 002 wasn't run yet).
@@ -4524,6 +4639,71 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                 </div>
               </div>
 
+              {/* ── Optional: adopt something already queued for this client ──
+                  Renders only when there IS something to pick, so a client
+                  with an empty inbox costs the form nothing. Collapsed state
+                  is remembered per browser. */}
+              {form.client_id && form.client_id !== INTERNAL_CLIENT
+                && !promotionRequest && !promotionSocialItem
+                && (sourcesLoading || sources.length > 0 || !sourcesOpen) && (
+                <div className="rounded-lg border border-border bg-secondary/40 overflow-hidden">
+                  <button
+                    type="button" onClick={toggleSources}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+                  >
+                    <Inbox className="w-3.5 h-3.5" />
+                    <span>Pick from Requests or Calendar</span>
+                    {sources.length > 0 && (
+                      <span className="px-1.5 py-0.5 rounded-full bg-primary/15 text-primary text-[10px]">{sources.length}</span>
+                    )}
+                    <span className="flex-1" />
+                    <ChevronDown className={`w-3.5 h-3.5 transition-transform ${sourcesOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {sourcesOpen && (
+                    <div className="border-t border-border">
+                      {sourcesLoading ? (
+                        <p className="px-3 py-2.5 text-xs text-muted-foreground">Loading…</p>
+                      ) : pickedSource ? (
+                        <div className="flex items-start gap-2 px-3 py-2.5">
+                          <CheckCircle className="w-4 h-4 text-green-500 shrink-0 mt-0.5" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-medium truncate">{pickedSource.title}</p>
+                            <p className="text-[11px] text-muted-foreground">
+                              {pickedSource.label} · will be linked to this task on save
+                            </p>
+                          </div>
+                          <button type="button" onClick={clearPickedSource}
+                            className="text-[11px] text-muted-foreground hover:text-foreground underline shrink-0">
+                            unlink
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="max-h-44 overflow-y-auto divide-y divide-border/60">
+                          {sources.map(s => (
+                            <button
+                              key={`${s.kind}:${s.id}`} type="button" onClick={() => pickSource(s)}
+                              className="w-full text-left px-3 py-2 hover:bg-background/60 flex items-start gap-2"
+                            >
+                              <span className={`mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono shrink-0 ${
+                                s.kind === 'request'
+                                  ? 'bg-blue-500/15 text-blue-500'
+                                  : 'bg-emerald-500/15 text-emerald-500'
+                              }`}>{s.label}</span>
+                              <span className="min-w-0 flex-1">
+                                <span className="block text-xs font-medium truncate">{s.title}</span>
+                                <span className="block text-[11px] text-muted-foreground truncate">
+                                  {s.meta}{s.dueDate ? ` · due ${s.dueDate}` : ''}
+                                </span>
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {dupWarning && (
                 <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-500">
                   <span className="mt-0.5">⚠</span>
@@ -5221,7 +5401,7 @@ export default function TasksClient({ promotionRequest, requestRefByTaskId = {},
                   launcher (fixed bottom-right, ~4.25rem corner); safe-area inset
                   lifts the buttons above the home indicator on notched phones. */}
               <div className="sticky bottom-0 -mx-5 sm:-mx-6 pl-5 pr-20 sm:px-6 -mb-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/85 border-t border-border flex gap-3">
-                <Button type="button" variant="outline" onClick={() => { setShowForm(false); setAddError(null) }} className="flex-1" size="lg">Cancel</Button>
+                <Button type="button" variant="outline" onClick={() => { setShowForm(false); setAddError(null); clearPickedSource() }} className="flex-1" size="lg">Cancel</Button>
                 <Button type="submit" disabled={!selectedService} loading={saving} className="flex-1 bg-gradient-to-r from-primary to-violet-600 hover:from-primary/90 hover:to-violet-600/90 text-primary-foreground" size="lg">
                   Add Task {previewTaskNumber != null && <span className="opacity-70 ml-1">#{previewTaskNumber}</span>}
                 </Button>

@@ -66,11 +66,20 @@ export default async function SocialCalendarPage({
           promoted_task:tasks!task_requests_promoted_task_id_fkey(id, task_number, status)
         )
       `
+    // The OTHER exit: a task linked straight to the item, no request in
+    // between. Needs 20260825120000 — the embed is dropped together with
+    // task_id below, since without the column the FK it names does not exist.
+    const TASK_COLS = `
+        task:tasks!social_calendar_items_task_id_fkey(id, task_number, status, deleted_at)
+      `
     // Drop ONLY the column each retry trips on — a pending patch migration
     // must not also hide columns that already exist.
-    let extraCols = ['service_id', 'variants', 'reference_url', 'reference_urls', 'scheduled_end_date', 'caption_canvas', 'assigned_employee_id']
-    for (let attempt = 0; attempt <= 7; attempt++) {
-      const sel = [...extraCols, ITEM_COLS].join(', ')
+    let extraCols = ['service_id', 'variants', 'reference_url', 'reference_urls', 'scheduled_end_date', 'caption_canvas', 'assigned_employee_id', 'task_id']
+    for (let attempt = 0; attempt <= extraCols.length; attempt++) {
+      const sel = [
+        ...extraCols, ITEM_COLS,
+        ...(extraCols.includes('task_id') ? [TASK_COLS] : []),
+      ].join(', ')
       const itemsRes = await admin
         .from('social_calendar_items')
         .select(sel)
@@ -84,8 +93,17 @@ export default async function SocialCalendarPage({
       // column that exists, hiding every legacy reference image.
       const msg = itemsRes.error.message || ''
       const quoted = [...msg.matchAll(/'([a-z_]+)'/gi)].map(m => m[1])
-      const col = extraCols.find(c => quoted.includes(c))
-        ?? [...extraCols].sort((a, b) => b.length - a.length).find(c => msg.includes(c))
+      // A missing EMBED reports the relationship, not the column: "Could not
+      // find a relationship between 'social_calendar_items' and 'tasks'".
+      // That names neither `task_id` nor the FK, so the generic matchers below
+      // find nothing and would break out of the loop — leaving the calendar
+      // with zero items instead of falling back. Catch it first.
+      const embedMissing = extraCols.includes('task_id')
+        && (/relationship/i.test(msg) || msg.includes('social_calendar_items_task_id_fkey'))
+      const col = embedMissing
+        ? 'task_id'
+        : (extraCols.find(c => quoted.includes(c))
+            ?? [...extraCols].sort((a, b) => b.length - a.length).find(c => msg.includes(c)))
       if (!col) break
       extraCols = extraCols.filter(c => c !== col)
     }

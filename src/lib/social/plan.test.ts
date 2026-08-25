@@ -3,7 +3,7 @@ import {
   composeRequestDescription, buildSocialMeta, resolveItemProgress, platformLabels,
   isTerminalRequestStatus, isClosedRequestStatus, contentTypeWithVariants,
   sanitizeCaptionHtml, captionHtmlToText, formatShortDateRange,
-  sanitizeCaptionCanvas, canvasToText,
+  sanitizeCaptionCanvas, canvasToText, isUnrouted, canPullBack,
 } from './plan'
 
 describe('sanitizeCaptionHtml', () => {
@@ -397,5 +397,96 @@ describe('isTerminalRequestStatus / isClosedRequestStatus', () => {
     expect(isClosedRequestStatus('archived')).toBe(true)
     expect(isClosedRequestStatus('completed')).toBe(false)   // finished, not re-plannable
     expect(isClosedRequestStatus('submitted')).toBe(false)
+  })
+})
+
+describe('resolveItemProgress — direct task exit', () => {
+  it('a directly-linked task owns the progress, with no request involved', () => {
+    expect(resolveItemProgress('tasked', null, { status: 'pending' })).toBe('in_progress')
+    expect(resolveItemProgress('tasked', null, { status: 'delivered' })).toBe('delivered')
+    expect(resolveItemProgress('tasked', null, { status: 'paid' })).toBe('done')
+    expect(resolveItemProgress('tasked', null, { status: 'cancelled' })).toBe('cancelled')
+  })
+
+  it('both routes report the same state for the same task status', () => {
+    for (const s of ['pending', 'in_progress', 'delivered', 'done', 'invoiced', 'paid', 'cancelled']) {
+      const direct = resolveItemProgress('tasked', null, { status: s })
+      const viaRequest = resolveItemProgress('requested', { status: 'started', promoted_task: { status: s } })
+      expect(direct).toBe(viaRequest)
+    }
+  })
+
+  it('a soft-deleted task falls back instead of stranding the item', () => {
+    // Trashing the task must not leave the calendar showing phantom progress.
+    expect(resolveItemProgress('tasked', null, { status: 'pending', deleted_at: '2026-08-25' })).toBe('planned')
+    // …and if a request also exists, that route still answers.
+    expect(
+      resolveItemProgress('requested', { status: 'submitted' }, { status: 'pending', deleted_at: '2026-08-25' }),
+    ).toBe('requested')
+  })
+
+  it('an explicitly cancelled item beats any live task', () => {
+    expect(resolveItemProgress('cancelled', null, { status: 'in_progress' })).toBe('cancelled')
+  })
+})
+
+describe('isUnrouted', () => {
+  it('a plain planned item can be sent down either pipe', () => {
+    expect(isUnrouted({ status: 'planned' })).toBe(true)
+  })
+
+  it('anything already carrying live work is not offered again', () => {
+    expect(isUnrouted({ status: 'requested', request_id: 'r1', request: { status: 'submitted' } })).toBe(false)
+    expect(isUnrouted({ status: 'tasked', task_id: 't1', task: { status: 'pending' } })).toBe(false)
+    expect(isUnrouted({ status: 'cancelled' })).toBe(false)
+  })
+
+  it('a closed request frees the item to be sent again', () => {
+    expect(isUnrouted({ status: 'planned', request_id: 'r1', request: { status: 'cancelled' } })).toBe(true)
+    expect(isUnrouted({ status: 'planned', request_id: 'r1', request: { status: 'rejected' } })).toBe(true)
+  })
+
+  it('a trashed direct task frees the item too', () => {
+    expect(isUnrouted({ status: 'planned', task_id: 't1', task: { status: 'pending', deleted_at: '2026-08-25' } })).toBe(true)
+  })
+
+  it('a bare request id with no joined row counts as live', () => {
+    // Pre-migration reads and permission-filtered joins both land here. Better
+    // to under-offer the button than to double-push work that already exists.
+    expect(isUnrouted({ status: 'requested', request_id: 'r1' })).toBe(false)
+  })
+})
+
+describe('canPullBack', () => {
+  it('an open, unpromoted request can be pulled back in one click', () => {
+    expect(canPullBack({ status: 'requested', request_id: 'r1', request: { status: 'submitted' } })).toBe(true)
+    expect(canPullBack({ status: 'requested', request_id: 'r1', request: { status: 'under_review' } })).toBe(true)
+  })
+
+  it('a closed request is still pullable — that is the re-plan escape hatch', () => {
+    expect(canPullBack({ status: 'planned', request_id: 'r1', request: { status: 'cancelled' } })).toBe(true)
+  })
+
+  it('refuses once the request became a task — the task owns the schedule', () => {
+    expect(canPullBack({
+      status: 'requested', request_id: 'r1',
+      request: { status: 'started', promoted_task: { status: 'pending' } },
+    })).toBe(false)
+  })
+
+  it('refuses to rewrite work the client has already seen', () => {
+    expect(canPullBack({ status: 'requested', request_id: 'r1', request: { status: 'completed' } })).toBe(false)
+    expect(canPullBack({ status: 'requested', request_id: 'r1', request: { status: 'delivered' } })).toBe(false)
+  })
+
+  it('a direct task is pullable while unstarted, not once delivered', () => {
+    expect(canPullBack({ status: 'tasked', task_id: 't1', task: { status: 'pending' } })).toBe(true)
+    expect(canPullBack({ status: 'tasked', task_id: 't1', task: { status: 'in_progress' } })).toBe(true)
+    expect(canPullBack({ status: 'tasked', task_id: 't1', task: { status: 'delivered' } })).toBe(false)
+    expect(canPullBack({ status: 'tasked', task_id: 't1', task: { status: 'paid' } })).toBe(false)
+  })
+
+  it('there is nothing to pull back from an unrouted item', () => {
+    expect(canPullBack({ status: 'planned' })).toBe(false)
   })
 })

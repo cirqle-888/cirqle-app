@@ -21,6 +21,7 @@ import {
   CONTENT_TYPES, CONTENT_TYPE_LABEL, CONTENT_TYPE_CHIP, VARIANT_TYPES,
   PLATFORMS, PLATFORM_LABEL, platformLabels, contentTypeWithVariants,
   PROGRESS_LABEL, PROGRESS_CHIP, resolveItemProgress, isClosedRequestStatus,
+  isUnrouted, canPullBack,
   formatShortDateRange, suggestServiceId, type CaptionCanvas,
   type ItemProgress,
 } from '@/lib/social/plan'
@@ -32,7 +33,7 @@ import {
   type ItemInput,
 } from './actions'
 import {
-  CalendarDays, Loader2, Plus, Send, Trash2, Archive, ExternalLink, RotateCcw, X,
+  CalendarDays, Loader2, Plus, Send, Trash2, Archive, ExternalLink, RotateCcw, X, ListChecks,
   Package as PackageIcon, CheckCircle2, AlertTriangle,
   Settings2, FileDown, FileSpreadsheet, FileText, Lightbulb, Upload, LayoutGrid,
   Link2, Clipboard, PanelRightClose, PanelRightOpen,
@@ -81,6 +82,10 @@ interface ItemRow {
     promoted_task_id: string | null
     promoted_task?: { id: string; task_number: number | null; status: string } | null
   } | null
+  /** Direct exit — a task created straight from the item, no request between.
+   *  Both undefined pre-migration (20260825120000). */
+  task_id?: string | null
+  task?: { id: string; task_number: number | null; status: string; deleted_at: string | null } | null
 }
 
 interface Props {
@@ -614,7 +619,7 @@ export default function SocialCalendarClient({
         contentType: contentTypeWithVariants(it.content_type, it.variants),
         platforms: platformLabels(it.platforms, true),
         service: serviceName(it.service_id),
-        status: PROGRESS_LABEL[resolveItemProgress(it.status, it.request)],
+        status: PROGRESS_LABEL[resolveItemProgress(it.status, it.request, it.task)],
         caption: it.caption,
         imageUrls: itemRefs(it),
         canvas: it.caption_canvas ?? null,
@@ -630,7 +635,7 @@ export default function SocialCalendarClient({
   // The monthly report shows only DELIVERED / COMPLETED work — what the client
   // actually received this month.
   const isDeliveredWork = (it: ItemRow) => {
-    const p = resolveItemProgress(it.status, it.request)
+    const p = resolveItemProgress(it.status, it.request, it.task)
     return p === 'delivered' || p === 'done'
   }
   const deliveredCount = useMemo(() => items.filter(it => it.scheduled_date && isDeliveredWork(it)).length, [items])
@@ -791,10 +796,18 @@ export default function SocialCalendarClient({
     ? items.find(i => i.id === itemModal.itemId) ?? null
     : null
   const editingProgress: ItemProgress | null = editingItem
-    ? resolveItemProgress(editingItem.status, editingItem.request)
+    ? resolveItemProgress(editingItem.status, editingItem.request, editingItem.task)
     : null
+  // Frozen = a task owns the schedule. Both exits qualify: promoted through
+  // the inbox, or linked directly. A soft-deleted direct task does not freeze
+  // anything — the item is editable again.
   const editingFrozen = !!editingItem?.request?.promoted_task_id
+    || !!(editingItem?.task && !editingItem.task.deleted_at)
   const requestIsClosed = isClosedRequestStatus(editingItem?.request?.status)
+  // Can the item still be sent anywhere? (nothing live attached to it)
+  const editingUnrouted = !!editingItem && isUnrouted(editingItem)
+  // Can it be pulled back to 'planned' in one click from here?
+  const editingPullable = !!editingItem && canPullBack(editingItem)
 
   // ── Derived: month grid + per-day items + progress counts ──────────────────
   const grid = useMemo(() => {
@@ -903,11 +916,12 @@ export default function SocialCalendarClient({
     const counts: Record<ItemProgress, number> = {
       planned: 0, requested: 0, in_progress: 0, delivered: 0, done: 0, cancelled: 0,
     }
-    for (const it of items) counts[resolveItemProgress(it.status, it.request)]++
+    for (const it of items) counts[resolveItemProgress(it.status, it.request, it.task)]++
     return counts
   }, [items])
 
-  const unpushed = items.filter(i => i.status === 'planned' && !i.request_id)
+  // Items that have taken neither exit — the bulk "Send" buttons act on these.
+  const unpushed = items.filter(isUnrouted)
 
   // ── Actions ────────────────────────────────────────────────────────────────
 
@@ -965,13 +979,34 @@ export default function SocialCalendarClient({
     router.refresh()
   }
 
+  /**
+   * The direct exit. Nothing is created here — this hands off to the Tasks
+   * page's Add Task form (prefilled), which is where task creation actually
+   * lives: pricing, quantity, package and derived-billing logic all run there
+   * and must not be duplicated. The item is claimed only once that form saves.
+   */
+  function sendToTask(itemId: string) {
+    router.push(`/dashboard/tasks?fromSocialItem=${itemId}`)
+  }
+
   async function replanItem(itemId: string) {
+    const item = items.find(i => i.id === itemId)
+    // Cancelling a live request is visible to the client (the portal timeline
+    // gets a Cancelled entry), so it is worth one confirmation. Unlinking a
+    // task or a request that is already closed is invisible — no prompt.
+    const willCancelRequest = !!item?.request_id
+      && !isClosedRequestStatus(item.request?.status)
+      && !item.request?.promoted_task_id
+    if (willCancelRequest) {
+      const ref = item?.request?.ref_no ? `REQ-${String(item.request.ref_no).padStart(4, '0')}` : 'its request'
+      if (!confirm(`Pull "${item?.title ?? 'this item'}" back to planned?\n\n${ref} will be cancelled in the inbox and the client will see it as Cancelled on their portal. The item returns to the calendar so you can edit and send it again.`)) return
+    }
     setBusy(`replan:${itemId}`)
     const res = await revertItemToPlanned(itemId)
     setBusy(null)
-    if (!res.ok) { toast.toastError('Could not re-plan the item', res.error); return }
+    if (!res.ok) { toast.toastError('Could not pull the item back', res.error); return }
     setItemModal(null)
-    toast.success('Item back to planned', 'You can edit it and send it to Requests again.')
+    toast.success('Item back to planned', 'You can edit it and send it again.')
     router.refresh()
   }
 
@@ -1460,7 +1495,7 @@ export default function SocialCalendarClient({
                         </div>
                         <div className="mt-1 space-y-1">
                           {dayItems.map(it => {
-                            const progress = resolveItemProgress(it.status, it.request)
+                            const progress = resolveItemProgress(it.status, it.request, it.task)
                             const refs = itemRefs(it)
                             const isRange = !!it.scheduled_end_date && it.scheduled_end_date > (it.scheduled_date ?? '')
                             return (
@@ -1561,11 +1596,11 @@ export default function SocialCalendarClient({
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 items-start">
             {([
               ['idea', 'Ideas', ideaBacklog],
-              ['planned', PROGRESS_LABEL.planned, items.filter(i => i.scheduled_date && resolveItemProgress(i.status, i.request) === 'planned')],
-              ['requested', PROGRESS_LABEL.requested, items.filter(i => resolveItemProgress(i.status, i.request) === 'requested')],
-              ['in_progress', PROGRESS_LABEL.in_progress, items.filter(i => resolveItemProgress(i.status, i.request) === 'in_progress')],
-              ['delivered', PROGRESS_LABEL.delivered, items.filter(i => resolveItemProgress(i.status, i.request) === 'delivered')],
-              ['done', PROGRESS_LABEL.done, items.filter(i => resolveItemProgress(i.status, i.request) === 'done')],
+              ['planned', PROGRESS_LABEL.planned, items.filter(i => i.scheduled_date && resolveItemProgress(i.status, i.request, i.task) === 'planned')],
+              ['requested', PROGRESS_LABEL.requested, items.filter(i => resolveItemProgress(i.status, i.request, i.task) === 'requested')],
+              ['in_progress', PROGRESS_LABEL.in_progress, items.filter(i => resolveItemProgress(i.status, i.request, i.task) === 'in_progress')],
+              ['delivered', PROGRESS_LABEL.delivered, items.filter(i => resolveItemProgress(i.status, i.request, i.task) === 'delivered')],
+              ['done', PROGRESS_LABEL.done, items.filter(i => resolveItemProgress(i.status, i.request, i.task) === 'done')],
             ] as const).map(([key, label, colItems]) => (
               <div key={key} className="bg-card border border-border rounded-xl">
                 <div className="px-3 py-2 border-b border-border flex items-center gap-2">
@@ -1738,6 +1773,22 @@ export default function SocialCalendarClient({
                     </Link>
                   </p>
                 )}
+                {/* Direct exit — no REQ to show, so the task itself is the
+                    only reference the planner has. */}
+                {editingItem?.task && !editingItem.task.deleted_at && (
+                  <p className="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-1.5 flex-wrap">
+                    <span className="font-mono text-emerald-500">Task #{editingItem.task.task_number ?? '—'}</span>
+                    {editingProgress && (
+                      <span className={`px-1.5 py-0.5 rounded-full border text-[10px] ${PROGRESS_CHIP[editingProgress]}`}>
+                        {PROGRESS_LABEL[editingProgress]}
+                      </span>
+                    )}
+                    <span className="text-muted-foreground/70">sent directly — no request</span>
+                    <Link href={`/dashboard/tasks?q=%23${editingItem.task.task_number ?? ''}`} className="text-primary hover:underline inline-flex items-center gap-0.5">
+                      open in Tasks <ExternalLink className="w-3 h-3" />
+                    </Link>
+                  </p>
+                )}
               </div>
               <button onClick={() => setItemModal(null)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
             </div>
@@ -1746,6 +1797,7 @@ export default function SocialCalendarClient({
               {editingFrozen && (
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
                   This item is already a task — the plan entry is frozen. Manage it from the Tasks page.
+                  {editingPullable && ' Use Re-plan below to unlink it and edit the plan again; the task itself is left untouched.'}
                 </div>
               )}
               <div>
@@ -2145,28 +2197,50 @@ export default function SocialCalendarClient({
                   Remove
                 </button>
               )}
-              {itemModal.mode === 'edit' && editingItem && !editingItem.request_id && editingItem.status === 'planned' && (
+              {/* The two exits. Requests keeps the REQ trail and the client's
+                  portal timeline; Tasks skips both and is for internal work
+                  nobody outside the office follows. */}
+              {itemModal.mode === 'edit' && editingUnrouted && (
                 <button
                   onClick={() => push([itemModal.itemId!])}
                   disabled={busy === `push:${itemModal.itemId}`}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/40 bg-blue-500/10 text-blue-500 px-3 py-2 text-sm font-medium hover:bg-blue-500/20 disabled:opacity-50"
+                  title="Create a request in the inbox — the client sees it on their portal"
                 >
                   {busy === `push:${itemModal.itemId}` ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                   Send to Requests
                 </button>
               )}
-              {/* Escape hatch: the inbox closed this item's request, so without
-                  a way back to 'planned' the item is a dead end (push skips
-                  anything already linked). */}
-              {itemModal.mode === 'edit' && editingItem && !editingFrozen && requestIsClosed && (
+              {itemModal.mode === 'edit' && editingUnrouted && (
+                <button
+                  onClick={() => sendToTask(itemModal.itemId!)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-500 px-3 py-2 text-sm font-medium hover:bg-emerald-500/20 disabled:opacity-50"
+                  title="Skip the inbox — opens Add Task prefilled. No REQ number, and nothing appears on the client portal."
+                >
+                  <ListChecks className="w-4 h-4" />
+                  Send to Tasks
+                </button>
+              )}
+              {/* Escape hatch, both directions: pull the item back to 'planned'
+                  so it can be edited and sent again. Cancels a still-open
+                  request on the way (one click instead of a round-trip through
+                  the inbox); for a direct task it unlinks only and leaves the
+                  task for the Tasks page to deal with. */}
+              {itemModal.mode === 'edit' && editingPullable && (
                 <button
                   onClick={() => replanItem(itemModal.itemId!)}
                   disabled={busy === `replan:${itemModal.itemId}`}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50"
-                  title="Its request was closed in the inbox — unlink and plan it again"
+                  title={
+                    editingItem?.task && !editingItem.task.deleted_at
+                      ? 'Unlink the task and plan this again — the task itself is left untouched'
+                      : requestIsClosed
+                        ? 'Its request was closed in the inbox — unlink and plan it again'
+                        : 'Cancel its request and bring the item back to planned'
+                  }
                 >
                   {busy === `replan:${itemModal.itemId}` ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
-                  Re-plan
+                  {requestIsClosed || (editingItem?.task && !editingItem.task.deleted_at) ? 'Re-plan' : 'Pull back'}
                 </button>
               )}
               <div className="flex-1" />

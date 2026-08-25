@@ -6,6 +6,7 @@ import { resolveTaskVisibilityMode, fetchEmployeeServiceIds, filterTasksByVisibi
 import { loadUnitScope, scopeTasksByUnit, unitTaskIdsFrom } from '@/lib/scope/unit-scope'
 import { getPendingPricing } from '@/lib/pricing/pending'
 import { PricingPendingBanner } from '@/components/pricing/pricing-pending-banner'
+import { composeRequestDescription, sanitizeCaptionCanvas } from '@/lib/social/plan'
 import TasksClient from './tasks-client'
 
 export const dynamic = 'force-dynamic'
@@ -184,6 +185,58 @@ export default async function TasksPage({
         }
       }
     } catch { /* portal not migrated — ignore */ }
+  }
+
+  // ── Direct calendar promotion (?fromSocialItem=<id>) ──────────────────────
+  // The Social Calendar's second exit: straight to a task, no request in
+  // between. Same shape as promotionRequest above so the client component
+  // prefills identically; only the link-back target differs.
+  let promotionSocialItem: any = null
+  const fromSocialItem = typeof sp?.fromSocialItem === 'string' ? sp.fromSocialItem : null
+  if (fromSocialItem) {
+    try {
+      // task_id needs 20260825120000. Retry without it rather than failing the
+      // prefill outright — otherwise, before the migration lands, "Send to
+      // Tasks" would drop the user on an empty Tasks page with no explanation.
+      let raw: any = null
+      for (const withTaskId of [true, false]) {
+        const res = await supabase
+          .from('social_calendar_items')
+          .select('id, title, content_type, platforms, caption, notes, scheduled_date, scheduled_end_date, ' +
+            'variants, reference_url, reference_urls, caption_canvas, service_id, assigned_employee_id, ' +
+            'status, request_id' + (withTaskId ? ', task_id' : '') +
+            ', calendar:social_calendars(id, title, client_id)')
+          .eq('id', fromSocialItem)
+          .maybeSingle()
+        if (!res.error) { raw = res.data; break }
+        if (!withTaskId) break
+      }
+      const it = raw as any
+      // Only an unrouted item may be tasked — one that already went to
+      // Requests, or already has a task, must not spawn a second one.
+      // (`task_id` is undefined pre-migration, which correctly reads as unset.)
+      if (it && !it.request_id && !it.task_id && it.status === 'planned') {
+        const cal: any = Array.isArray(it.calendar) ? it.calendar[0] : it.calendar
+        promotionSocialItem = {
+          id: it.id,
+          title: it.title,
+          // Reuse the exact brief the Requests route composes, so the designer
+          // reads the same thing either way.
+          description: composeRequestDescription({
+            title: it.title, contentType: it.content_type, platforms: it.platforms || [],
+            scheduledDate: it.scheduled_date, scheduledEndDate: it.scheduled_end_date,
+            caption: it.caption, notes: it.notes,
+            calendarTitle: cal?.title, variants: it.variants,
+            referenceUrls: it.reference_urls?.length ? it.reference_urls : (it.reference_url ? [it.reference_url] : []),
+            captionCanvas: sanitizeCaptionCanvas(it.caption_canvas),
+          }),
+          client_id: cal?.client_id ?? '',
+          service_id: it.service_id || '',
+          due_date: it.scheduled_date,
+          assigned_employee_id: it.assigned_employee_id || null,
+        }
+      }
+    } catch { /* calendar or direct-task migration not applied — ignore */ }
   }
 
   // Best-effort load user role to apply optimizations
@@ -385,6 +438,7 @@ export default async function TasksPage({
     {vis.tasksPricing && <PricingPendingBanner clients={pendingPricing.clients} services={pendingPricing.services} />}
     <TasksClient
       promotionRequest={promotionRequest}
+      promotionSocialItem={promotionSocialItem}
       requestRefByTaskId={requestRefByTaskId}
       pendingRequestCount={pendingRequestCount}
       initialSearch={initialSearch}

@@ -28,6 +28,7 @@ import {
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { recalculatePayrollForMonth } from '@/app/(dashboard)/dashboard/payroll/actions'
 import { syncRequestStatusFromTask, syncRequestStatusFromTasks } from '@/lib/requests/task-sync'
+import { composeRequestDescription, sanitizeCaptionCanvas, contentTypeWithVariants } from '@/lib/social/plan'
 import { retryWithoutScope, withoutScope } from '@/lib/finance/classify'
 import { activePackagesForClient, type PackageOption } from '@/lib/packages/queries'
 
@@ -461,6 +462,115 @@ export async function fetchClientPackages(
 ): Promise<PackageOption[]> {
   const admin = createAdminClient()
   return activePackagesForClient(admin, clientId, taskDate)
+}
+
+/** One pickable upstream item — a queued request or a planned calendar piece. */
+export interface PendingSource {
+  kind: 'request' | 'calendar'
+  id: string
+  label: string            // "REQ-0042" or the plan month, for the row's badge
+  title: string
+  description: string
+  serviceId: string | null
+  dueDate: string | null
+  /** Extra context for the row: request status, or the item's content type. */
+  meta: string
+}
+
+/**
+ * Everything for this client that is waiting to become a task — the Requests
+ * inbox and the Social Calendar, in one list, for the optional picker in the
+ * Add Task form.
+ *
+ * Permission-aware: each source is included only if the caller can already see
+ * that module, so the picker can never become a side channel into work the
+ * viewer is not allowed to open directly. Returns [] rather than an error when
+ * the caller can see neither — the picker simply does not render.
+ */
+export async function fetchPendingSourcesForClient(
+  clientId: string,
+): Promise<ActionResult<PendingSource[]>> {
+  const me = await loadCurrentUser()
+  if (!me) return { ok: false, error: 'Not signed in.' }
+  if (!clientId) return { ok: true, data: [] }
+
+  const canSeeRequests = hasPermission(me, [PERMS.REQUESTS_VIEW, PERMS.REQUESTS_MANAGE, PERMS.REQUESTS_START])
+  const canSeeCalendar = hasPermission(me, [PERMS.SOCIAL_VIEW, PERMS.SOCIAL_MANAGE])
+  if (!canSeeRequests && !canSeeCalendar) return { ok: true, data: [] }
+
+  const admin = createAdminClient()
+  const out: PendingSource[] = []
+
+  if (canSeeRequests) {
+    try {
+      const { data } = await admin.from('task_requests')
+        .select('id, ref_no, title, description, design_plan, remarks, status, priority, due_date, service_id')
+        .eq('client_id', clientId)
+        .is('promoted_task_id', null)
+        .in('status', ['submitted', 'under_review', 'approved'])
+        .order('priority_rank', { ascending: true, nullsFirst: false })
+        .order('created_at', { ascending: true })
+        .limit(50)
+      for (const r of data || []) {
+        const parts = [r.description, r.design_plan && `Design plan:\n${r.design_plan}`, r.remarks && `Remarks:\n${r.remarks}`]
+        out.push({
+          kind: 'request',
+          id: r.id,
+          label: `REQ-${String(r.ref_no ?? 0).padStart(4, '0')}`,
+          title: r.title,
+          description: parts.filter(Boolean).join('\n\n'),
+          serviceId: r.service_id || null,
+          dueDate: r.due_date || null,
+          meta: r.status === 'submitted' ? 'New' : r.status.replace(/_/g, ' '),
+        })
+      }
+    } catch { /* portal not migrated */ }
+  }
+
+  if (canSeeCalendar) {
+    // task_id needs 20260825120000 — retry without it so a pending migration
+    // still lists planned items (they just can't be filtered on direct-tasked
+    // yet, and `status = 'planned'` already excludes those).
+    for (const withTaskId of [true, false]) {
+      const cols = 'id, title, content_type, platforms, caption, notes, scheduled_date, scheduled_end_date, ' +
+        'variants, reference_url, reference_urls, caption_canvas, service_id, status, request_id' +
+        (withTaskId ? ', task_id' : '') +
+        ', calendar:social_calendars!inner(id, title, month, client_id, status)'
+      const { data, error } = await admin.from('social_calendar_items')
+        .select(cols)
+        .eq('calendar.client_id', clientId)
+        .neq('calendar.status', 'archived')
+        .eq('status', 'planned')
+        .is('request_id', null)
+        .order('scheduled_date', { ascending: true, nullsFirst: false })
+        .limit(50)
+      if (error) { if (withTaskId) continue; break }
+      for (const it of (data || []) as any[]) {
+        if (withTaskId && it.task_id) continue
+        const cal = Array.isArray(it.calendar) ? it.calendar[0] : it.calendar
+        out.push({
+          kind: 'calendar',
+          id: it.id,
+          label: cal?.month ? new Date(`${String(cal.month).slice(0, 7)}-01T00:00:00`).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'Plan',
+          title: it.title,
+          description: composeRequestDescription({
+            title: it.title, contentType: it.content_type, platforms: it.platforms || [],
+            scheduledDate: it.scheduled_date, scheduledEndDate: it.scheduled_end_date,
+            caption: it.caption, notes: it.notes,
+            calendarTitle: cal?.title, variants: it.variants,
+            referenceUrls: it.reference_urls?.length ? it.reference_urls : (it.reference_url ? [it.reference_url] : []),
+            captionCanvas: sanitizeCaptionCanvas(it.caption_canvas),
+          }),
+          serviceId: it.service_id || null,
+          dueDate: it.scheduled_date || null,
+          meta: contentTypeWithVariants(it.content_type, it.variants),
+        })
+      }
+      break
+    }
+  }
+
+  return { ok: true, data: out }
 }
 
 export async function serverFillTaskBilling(
