@@ -12,10 +12,21 @@ import {
 import Header from '@/components/layout/header'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import {
-  WORK_STAGES, STAGE_LABEL, STAGE_HINT, STAGE_CHIP, stageOf, canMove,
+  WORK_STAGES, STAGE_LABEL, STAGE_HINT, STAGE_CHIP, stageOf, stageOfPlan, canMove,
   isPending, moveRefusalReason, type WorkStage,
 } from '@/lib/requests/my-work'
 import { moveMyWork, type MyWorkRow } from './actions'
+
+/**
+ * One stage for a row from either queue. A request carries its own status; a
+ * plan item has none and is read through whatever task it has grown (or has
+ * not grown yet). Everything downstream — columns, counts, the next-step
+ * button — goes through this, so the two sources stay indistinguishable on the
+ * board, which is the point of merging them.
+ */
+function rowStage(r: MyWorkRow): WorkStage {
+  return r.source === 'plan' ? stageOfPlan(r.status || null) : stageOf(r.status)
+}
 
 interface Props {
   initialRows: MyWorkRow[]
@@ -42,6 +53,16 @@ function Card({ row, dragging }: { row: MyWorkRow; dragging?: boolean }) {
     <div className={`rounded-xl border border-border bg-card p-3 space-y-2 ${dragging ? 'shadow-xl' : 'shadow-sm'}`}>
       <p className="text-sm font-medium leading-snug break-words">{row.title}</p>
       <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+        {/* Where it came from. Not needed to DO the work — the board treats
+            both identically — but a designer glancing at a card should be able
+            to tell a client request from something planned on the calendar. */}
+        <span className={`px-1.5 py-0.5 rounded font-medium ${
+          row.source === 'plan'
+            ? 'bg-violet-500/15 text-violet-400'
+            : 'bg-blue-500/15 text-blue-400'
+        }`}>
+          {row.source === 'plan' ? 'Plan' : row.ref_no ? `REQ-${String(row.ref_no).padStart(4, '0')}` : 'Request'}
+        </span>
         {row.client_name && (
           <span className="px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">{row.client_name}</span>
         )}
@@ -147,7 +168,7 @@ export default function MyWorkClient({ initialRows, firstName }: Props) {
 
   const byStage = useMemo(() => {
     const out: Record<WorkStage, MyWorkRow[]> = { todo: [], working: [], delivered: [], done: [] }
-    for (const r of visibleRows) out[stageOf(r.status)].push(r)
+    for (const r of visibleRows) out[rowStage(r)].push(r)
     // Newest-finished first, so the cards a designer might still want to look
     // at sit at the top rather than being buried under months of history.
     out.done.sort((a, b) => (b.due_date ?? b.created_at).localeCompare(a.due_date ?? a.created_at))
@@ -161,23 +182,23 @@ export default function MyWorkClient({ initialRows, firstName }: Props) {
   // Counts always reflect the FULL queue, never the client filter — "how much
   // is on me" must not change because you narrowed the board to one client.
   const pendingCount = useMemo(
-    () => rows.filter(r => isPending(stageOf(r.status))).length,
+    () => rows.filter(r => isPending(rowStage(r))).length,
     [rows],
   )
   const overdueCount = useMemo(
-    () => rows.filter(r => isPending(stageOf(r.status)) && r.due_date && r.due_date < todayISO()).length,
+    () => rows.filter(r => isPending(rowStage(r)) && r.due_date && r.due_date < todayISO()).length,
     [rows],
   )
 
   async function apply(id: string, to: WorkStage) {
     const row = rows.find(r => r.id === id)
     if (!row) return
-    const from = stageOf(row.status)
+    const from = rowStage(row)
     if (from === to) return
     if (!canMove(from, to)) { toast.toastError('Cannot move that way', moveRefusalReason(from, to)); return }
 
     setBusyId(id)
-    const res = await moveMyWork(id, to)
+    const res = await moveMyWork(id, to, row.source)
     setBusyId(null)
     if (!res.ok || !res.data) { toast.toastError('Could not update', res.error); return }
     // Trust the status the server actually wrote rather than assuming the
@@ -363,7 +384,7 @@ function CalendarView({ rows }: { rows: MyWorkRow[] }) {
             <span className="text-[10px] text-muted-foreground">{c.day}</span>
             <div className="space-y-1 mt-1">
               {(byDate[c.iso] || []).map(r => (
-                <div key={r.id} className={`text-[10px] px-1.5 py-1 rounded border truncate ${STAGE_CHIP[stageOf(r.status)]}`} title={r.title}>
+                <div key={r.id} className={`text-[10px] px-1.5 py-1 rounded border truncate ${STAGE_CHIP[rowStage(r)]}`} title={r.title}>
                   {r.title}
                 </div>
               ))}
@@ -376,7 +397,7 @@ function CalendarView({ rows }: { rows: MyWorkRow[] }) {
           <p className="text-xs font-medium mb-2">No date set ({undated.length})</p>
           <div className="flex flex-wrap gap-1.5">
             {undated.map(r => (
-              <span key={r.id} className={`text-[11px] px-2 py-1 rounded border ${STAGE_CHIP[stageOf(r.status)]}`}>{r.title}</span>
+              <span key={r.id} className={`text-[11px] px-2 py-1 rounded border ${STAGE_CHIP[rowStage(r)]}`}>{r.title}</span>
             ))}
           </div>
         </div>
@@ -404,7 +425,7 @@ function ListView({ rows, onMove, busyId }: {
   return (
     <div className="space-y-2">
       {ordered.map(r => {
-        const stage = stageOf(r.status)
+        const stage = rowStage(r)
         const next = WORK_STAGES[WORK_STAGES.indexOf(stage) + 1]
         const due = dueLabel(r.due_date)
         return (

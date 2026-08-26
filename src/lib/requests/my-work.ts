@@ -62,6 +62,24 @@ export function stageOf(status: string): WorkStage {
 }
 
 /**
+ * Which stage a CALENDAR PLAN ITEM sits in.
+ *
+ * A plan item has no request status of its own — it is either still just a
+ * plan, or it has become a task. So the linked task's status is the answer
+ * whenever there is one, and everything else is To Do. Mapping through the
+ * same task vocabulary as stageOf keeps one plan and one request at the same
+ * stage looking identical on the board, which is the point of showing them
+ * together at all.
+ */
+export function stageOfPlan(taskStatus: string | null | undefined): WorkStage {
+  if (!taskStatus) return 'todo'
+  if (['done', 'invoiced', 'paid'].includes(taskStatus)) return 'done'
+  if (taskStatus === 'delivered') return 'delivered'
+  if (taskStatus === 'cancelled') return 'todo'   // trashed task → back to just a plan
+  return 'working'
+}
+
+/**
  * Statuses a designer's board never shows. Cancelled and rejected work is not
  * theirs to resurrect, and archived work is gone — surfacing any of it would
  * put cards on the board that cannot be moved.

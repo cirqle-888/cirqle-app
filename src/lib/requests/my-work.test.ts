@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  stageOf, canMove, isPending, isHidden, STAGE_TARGET_STATUS, WORK_STAGES,
+  stageOf, stageOfPlan, canMove, isPending, isHidden, STAGE_TARGET_STATUS, WORK_STAGES,
   moveRefusalReason,
 } from './my-work'
 
@@ -61,6 +61,41 @@ describe('canMove', () => {
       for (const to of WORK_STAGES) {
         if (canMove(from, to)) expect(STAGE_TARGET_STATUS[to]).toBeTruthy()
       }
+    }
+  })
+})
+
+describe('stageOfPlan', () => {
+  it('a plan with no task yet is simply To Do', () => {
+    expect(stageOfPlan(null)).toBe('todo')
+    expect(stageOfPlan(undefined)).toBe('todo')
+    expect(stageOfPlan('')).toBe('todo')
+  })
+
+  it('reads the linked task once one exists', () => {
+    expect(stageOfPlan('pending')).toBe('working')
+    expect(stageOfPlan('in_progress')).toBe('working')
+    expect(stageOfPlan('delivered')).toBe('delivered')
+    expect(stageOfPlan('done')).toBe('done')
+    expect(stageOfPlan('invoiced')).toBe('done')
+    expect(stageOfPlan('paid')).toBe('done')
+  })
+
+  it('a cancelled task returns the item to being just a plan', () => {
+    // Not 'cancelled' — the PLAN is still perfectly valid, it is the task that
+    // was thrown away, so the item must be startable again rather than stuck.
+    expect(stageOfPlan('cancelled')).toBe('todo')
+  })
+
+  it('agrees with the request path for the same underlying task status', () => {
+    // A plan and a request at the same real stage must look identical on the
+    // board, or merging the two queues would be misleading.
+    for (const [taskStatus, viaRequest] of [
+      ['in_progress', 'in_progress'],
+      ['delivered', 'delivered'],
+      ['done', 'completed'],
+    ] as const) {
+      expect(stageOfPlan(taskStatus)).toBe(stageOf(viaRequest))
     }
   })
 })

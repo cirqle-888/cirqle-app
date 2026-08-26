@@ -23,8 +23,9 @@ import { syncRequestStatusFromTask } from '@/lib/requests/task-sync'
 import { serverFillTaskBilling } from '@/app/(dashboard)/dashboard/tasks/actions'
 import { nextTaskNumber } from '@/lib/utils/task-code'
 import { todayISO } from '@/lib/utils/local-date'
+import { loadMyWork } from '@/lib/requests/my-work-load'
 import {
-  stageOf, canMove, isHidden, STAGE_TARGET_STATUS, STAGE_LABEL,
+  stageOf, stageOfPlan, canMove, STAGE_TARGET_STATUS, STAGE_LABEL,
   moveRefusalReason, type WorkStage,
 } from '@/lib/requests/my-work'
 
@@ -38,9 +39,14 @@ interface ActionResult<T = void> {
 
 export interface MyWorkRow {
   id: string
+  /** Which queue this came from. A designer should not have to care, but the
+   *  move path differs: a request drives a promoted task, a plan item becomes
+   *  one directly (no request, no REQ number). */
+  source: 'request' | 'plan'
   ref_no: number | null
   title: string
   description: string | null
+  /** Request status for 'request'; the linked task's status (or null) for 'plan'. */
   status: string
   due_date: string | null
   priority: string | null
@@ -57,33 +63,7 @@ export interface MyWorkRow {
 export async function fetchMyWork(): Promise<ActionResult<MyWorkRow[]>> {
   const guard = await requirePermission(PERMS.REQUESTS_WORK_OWN)
   if (!guard.ok) return { ok: false, error: guard.error }
-
-  const admin = createAdminClient()
-  const { data, error } = await admin
-    .from('task_requests')
-    .select('id, ref_no, title, description, status, due_date, priority, created_at, ' +
-      'client:clients(name), service:services(name), ' +
-      'promoted_task:tasks!task_requests_promoted_task_id_fkey(task_number)')
-    .eq('assigned_employee_id', guard.employeeId)
-    .order('due_date', { ascending: true, nullsFirst: false })
-    .order('created_at', { ascending: true })
-  if (error) return { ok: false, error: error.message }
-
-  const rows: MyWorkRow[] = (data || [])
-    .filter((r: any) => !isHidden(r.status))
-    .map((r: any) => {
-      const c = Array.isArray(r.client) ? r.client[0] : r.client
-      const s = Array.isArray(r.service) ? r.service[0] : r.service
-      const t = Array.isArray(r.promoted_task) ? r.promoted_task[0] : r.promoted_task
-      return {
-        id: r.id, ref_no: r.ref_no, title: r.title, description: r.description,
-        status: r.status, due_date: r.due_date, priority: r.priority,
-        created_at: r.created_at,
-        client_name: c?.name ?? null,
-        service_name: s?.name ?? null,
-        task_number: t?.task_number ?? null,
-      }
-    })
+  const rows = await loadMyWork(createAdminClient(), guard.employeeId)
   return { ok: true, data: rows }
 }
 
@@ -180,10 +160,11 @@ async function ensureTaskForRequest(
  * task, rather than a manager having to promote it from the inbox first.
  */
 export async function moveMyWork(
-  requestId: string, toStage: WorkStage,
+  requestId: string, toStage: WorkStage, source: 'request' | 'plan' = 'request',
 ): Promise<ActionResult<{ status: string; taskCreated?: boolean; warning?: string }>> {
   const guard = await requirePermission(PERMS.REQUESTS_WORK_OWN)
   if (!guard.ok) return { ok: false, error: guard.error }
+  if (source === 'plan') return movePlanItem(requestId, toStage, guard.employeeId)
 
   const admin = createAdminClient()
   const { data: req, error } = await admin
@@ -239,4 +220,105 @@ export async function moveMyWork(
 
   revalidatePath(REVALIDATE); revalidatePath('/dashboard/requests'); revalidatePath('/dashboard/tasks')
   return { ok: true, data: { status: target, taskCreated: created, warning } }
+}
+
+/**
+ * Move a CALENDAR PLAN ITEM. Same board, different plumbing.
+ *
+ * A plan item has no request behind it, so there is nothing to promote and no
+ * REQ number to mint — it goes straight to a task, which is the second exit
+ * added in e7d9b7b. That is deliberate and is the whole "stop doing the same
+ * work twice" point: the planner already described the job on the calendar, so
+ * starting it should not require re-typing it into Requests first.
+ *
+ * The task carries the item's own service and date, and is priced from the
+ * matrix exactly like the request path.
+ */
+async function movePlanItem(
+  itemId: string, toStage: WorkStage, employeeId: string,
+): Promise<ActionResult<{ status: string; taskCreated?: boolean; warning?: string }>> {
+  const admin = createAdminClient()
+
+  const { data: item, error } = await admin
+    .from('social_calendar_items')
+    .select('id, title, caption, notes, scheduled_date, status, service_id, assigned_employee_id, request_id, task_id, ' +
+      'task:tasks!social_calendar_items_task_id_fkey(id, status, deleted_at), ' +
+      'calendar:social_calendars(client_id)')
+    .eq('id', itemId).maybeSingle()
+  if (error || !item) return { ok: false, error: 'That plan item could not be found.' }
+
+  const it: any = item
+  if (it.assigned_employee_id !== employeeId) {
+    return { ok: false, error: 'This work is assigned to someone else.' }
+  }
+  if (it.request_id) {
+    return { ok: false, error: 'This item went to Requests — move it from the request card instead.' }
+  }
+
+  const live = it.task && !it.task.deleted_at ? it.task : null
+  const from = stageOfPlan(live?.status)
+  if (from === toStage) return { ok: true, data: { status: live?.status ?? '' } }
+  if (!canMove(from, toStage)) return { ok: false, error: moveRefusalReason(from, toStage) }
+
+  const taskStatus = STAGE_TASK_STATUS[toStage]
+  if (!taskStatus) return { ok: false, error: moveRefusalReason(from, toStage) }
+
+  let taskId: string = live?.id
+  let created = false
+  let warning: string | undefined
+
+  if (!taskId) {
+    const cal = Array.isArray(it.calendar) ? it.calendar[0] : it.calendar
+    const clientId = cal?.client_id ?? null
+    const maxRow = await admin.from('tasks')
+      .select('task_number').order('task_number', { ascending: false, nullsFirst: false })
+      .limit(1).maybeSingle()
+    const { data: task, error: tErr } = await admin.from('tasks').insert({
+      task_number: nextTaskNumber(maxRow.data?.task_number),
+      title: it.title,
+      description: it.caption || it.notes || null,
+      client_id: clientId,
+      service_id: it.service_id ?? null,
+      task_date: it.scheduled_date || todayISO(),
+      status: taskStatus,
+      quantity: 1, billing_amount: 0, billing_amount_inr: 0,
+    }).select('id').single()
+    if (tErr || !task) return { ok: false, error: tErr?.message || 'Could not create the task.' }
+    taskId = task.id
+    created = true
+
+    // Claim the item for the task. Conditional, so two concurrent moves cannot
+    // both attach — the loser cleans up the task it just made rather than
+    // leaving a duplicate behind.
+    const { data: claimed } = await admin.from('social_calendar_items')
+      .update({ task_id: taskId, status: 'tasked', updated_at: new Date().toISOString() })
+      .eq('id', itemId).is('task_id', null)
+      .select('id')
+    if (!claimed?.length) {
+      await admin.from('tasks').delete().eq('id', taskId)
+      return { ok: false, error: 'Someone else started this item — reload the board.' }
+    }
+
+    try {
+      await serverFillTaskBilling(taskId, clientId, it.service_id ?? null, 1)
+    } catch {
+      warning = 'The task was created but could not be priced automatically — a manager should set its amount.'
+    }
+  } else {
+    const { error: uErr } = await admin.from('tasks')
+      .update({ status: taskStatus, updated_at: new Date().toISOString() })
+      .eq('id', taskId)
+    if (uErr) return { ok: false, error: 'Could not update the task status. Try again.' }
+  }
+
+  void logActivity({
+    actorId: employeeId, entityType: 'task', entityId: taskId,
+    action: created ? 'created' : 'updated', category: 'crm',
+    note: `My Work: plan item → ${STAGE_LABEL[toStage]}`,
+    detail: { itemId, from, to: toStage, taskStatus, taskCreated: created },
+  })
+
+  revalidatePath(REVALIDATE)
+  revalidatePath('/dashboard/social-calendar'); revalidatePath('/dashboard/tasks')
+  return { ok: true, data: { status: taskStatus, taskCreated: created, warning } }
 }
