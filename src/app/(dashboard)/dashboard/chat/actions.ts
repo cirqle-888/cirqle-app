@@ -360,30 +360,45 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
   const admin = createAdminClient()
   const canModerate = me.isAdmin || hasPermission(me, 'chat.moderate')
 
-  // Memberships (with per-conversation last_read_at). hidden_at is selected
-  // separately so a pre-026 database still returns the rest of the columns.
-  const { data: memberships, error: memErr } = await admin
-    .from('conversation_members')
-    .select('conversation_id, last_read_at, role')
-    .eq('employee_id', me.employeeId)
-  if (memErr) {
-    // Table missing → migration 015 not applied
-    return { ok: false, error: 'Chat is not set up yet — apply migration 015_chat_module.sql.' }
+  // Memberships: per-conversation last_read_at, role, and the DM hide marker.
+  //
+  // EGRESS: hidden_at used to be fetched in a SECOND request, so that a pre-026
+  // database — where the column doesn't exist — still returned the other
+  // columns rather than failing the whole select. That guard cost an extra
+  // round-trip on every sidebar refresh, forever, on a schema that has had the
+  // column since migration 026. Ask for all four columns up front and only pay
+  // for the second request if the column really is missing.
+  type MembershipRow = {
+    conversation_id: string; last_read_at: string; role: string; hidden_at?: string | null
   }
-  const lastReadByConv = new Map((memberships ?? []).map(m => [m.conversation_id, m.last_read_at]))
-  const myRoleByConv = new Map((memberships ?? []).map(m => [m.conversation_id, m.role as ChatMember['role']]))
-  const memberIds = [...lastReadByConv.keys()]
-
+  let memberships: MembershipRow[] = []
   // Per-member hide (DM "delete"). Missing column pre-026 → nothing hidden.
   const hiddenByConv = new Map<string, string>()
   {
-    const { data: hidden } = await admin
+    const withHidden = await admin
       .from('conversation_members')
-      .select('conversation_id, hidden_at')
+      .select('conversation_id, last_read_at, role, hidden_at')
       .eq('employee_id', me.employeeId)
-      .not('hidden_at', 'is', null)
-    for (const h of hidden ?? []) hiddenByConv.set(h.conversation_id, h.hidden_at as string)
+    if (!withHidden.error) {
+      memberships = (withHidden.data ?? []) as MembershipRow[]
+      for (const m of memberships) {
+        if (m.hidden_at) hiddenByConv.set(m.conversation_id, m.hidden_at)
+      }
+    } else {
+      const base = await admin
+        .from('conversation_members')
+        .select('conversation_id, last_read_at, role')
+        .eq('employee_id', me.employeeId)
+      if (base.error) {
+        // Table missing → migration 015 not applied
+        return { ok: false, error: 'Chat is not set up yet — apply migration 015_chat_module.sql.' }
+      }
+      memberships = (base.data ?? []) as MembershipRow[]
+    }
   }
+  const lastReadByConv = new Map(memberships.map(m => [m.conversation_id, m.last_read_at]))
+  const myRoleByConv = new Map(memberships.map(m => [m.conversation_id, m.role as ChatMember['role']]))
+  const memberIds = [...lastReadByConv.keys()]
 
   // My conversations + public channels I could join
   const orFilter = memberIds.length
@@ -471,27 +486,92 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
     }
   }
 
-  const results = await Promise.all((convs ?? []).map(async (c) => {
+  // Last message + unread count for every conversation, in ONE round-trip.
+  //
+  // EGRESS: this used to be two PostgREST requests per conversation — a GET for
+  // the last message and a HEAD for the unread count. At ~30 rooms that is ~60
+  // requests every time the sidebar refreshes, and it refreshes on a 90s timer
+  // on the chat page, a 5-minute timer app-wide (FloatingCommsWidget is mounted
+  // in the dashboard layout, so it runs on every page), and on realtime events.
+  // It was the project's single largest source of Supabase traffic — 16,203
+  // requests to /rest/v1/messages in one day against six users — and it pushed
+  // the org past the Free plan's 5 GB monthly egress. See migration
+  // 20260826120000_chat_sidebar_summary_rpc.sql.
+  type ConvSummary = {
+    body: string | null; kind: string | null; deletedAt: string | null; createdAt: string | null
+    senderName: string | null; senderCqid: string | null; unread: number
+  }
+  const summaries = new Map<string, ConvSummary>()
+  {
+    const convIds = (convs ?? []).map((c: { id: string }) => c.id)
+    if (convIds.length) {
+      const { data: rows, error: rpcErr } = await admin.rpc('chat_sidebar_summary', {
+        p_employee_id: me.employeeId,
+        p_conversation_ids: convIds,
+      })
+      if (!rpcErr) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        for (const r of (rows ?? []) as any[]) {
+          summaries.set(r.conversation_id as string, {
+            body: r.last_body ?? null,
+            kind: r.last_kind ?? null,
+            deletedAt: r.last_deleted_at ?? null,
+            createdAt: r.last_created_at ?? null,
+            senderName: r.last_sender_name ?? null,
+            senderCqid: r.last_sender_cqid ?? null,
+            unread: (r.unread_count as number | null) ?? 0,
+          })
+        }
+      } else {
+        // RPC absent → this database hasn't run the migration yet. Fall back to
+        // the old per-conversation queries so chat keeps working (just as
+        // expensively as before) rather than rendering an empty sidebar.
+        await Promise.all(convIds.map(async (id: string) => {
+          const isMember = lastReadByConv.has(id)
+          const [lastRes, unreadRes] = await Promise.all([
+            admin.from('messages')
+              // cqid is REQUIRED here, not just name — the client's displayEmployee()
+              // falls back to showing the raw name whenever cqid is empty, so
+              // dropping cqid from this select silently leaked real names into every
+              // DM's last-message preview regardless of the reveal-names toggle.
+              .select('body, kind, deleted_at, created_at, sender:sender_id(name, cqid)')
+              .eq('conversation_id', id)
+              .order('created_at', { ascending: false })
+              .limit(1).maybeSingle(),
+            isMember
+              ? admin.from('messages')
+                  .select('id', { count: 'exact', head: true })
+                  .eq('conversation_id', id)
+                  .gt('created_at', lastReadByConv.get(id) as string)
+                  .neq('sender_id', me.employeeId)
+                  .is('deleted_at', null)
+              : Promise.resolve({ count: 0 }),
+          ])
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const l: any = (lastRes as any)?.data ?? null
+          const ls = l ? (Array.isArray(l.sender) ? l.sender[0] : l.sender) : null
+          summaries.set(id, {
+            body: l?.body ?? null,
+            kind: l?.kind ?? null,
+            deletedAt: l?.deleted_at ?? null,
+            createdAt: l?.created_at ?? null,
+            senderName: ls?.name ?? null,
+            senderCqid: ls?.cqid ?? null,
+            unread: ('count' in unreadRes ? unreadRes.count : 0) ?? 0,
+          })
+        }))
+      }
+    }
+  }
+
+  const results = (convs ?? []).map((c) => {
     const isMember = lastReadByConv.has(c.id)
-    const [lastRes, unreadRes] = await Promise.all([
-      admin.from('messages')
-        // cqid is REQUIRED here, not just name — the client's displayEmployee()
-        // falls back to showing the raw name whenever cqid is empty, so
-        // dropping cqid from this select silently leaked real names into every
-        // DM's last-message preview regardless of the reveal-names toggle.
-        .select('body, kind, deleted_at, created_at, sender:sender_id(name, cqid)')
-        .eq('conversation_id', c.id)
-        .order('created_at', { ascending: false })
-        .limit(1).maybeSingle(),
-      isMember
-        ? admin.from('messages')
-            .select('id', { count: 'exact', head: true })
-            .eq('conversation_id', c.id)
-            .gt('created_at', lastReadByConv.get(c.id) as string)
-            .neq('sender_id', me.employeeId)
-            .is('deleted_at', null)
-        : Promise.resolve({ count: 0 }),
-    ])
+    const summary = summaries.get(c.id) ?? null
+    // A conversation with no messages still comes back from the RPC, as an
+    // all-null row — treat that as "no last message", same as maybeSingle() did.
+    const last = summary && summary.createdAt
+      ? { ...summary, createdAt: summary.createdAt }
+      : null
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const members: ChatMember[] = ((c as any).members ?? []).map((m: any) => {
@@ -505,10 +585,6 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
       const other = members.find(m => m.employeeId !== me.employeeId)
       name = other ? `${other.cqid}||${other.name}` : 'Direct message' // client splits + masks
     }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const last: any = (lastRes as any)?.data ?? null
-    const lastSender = last ? (Array.isArray(last.sender) ? last.sender[0] : last.sender) : null
 
     // Entity rooms group under "Discussions" in the sidebar. 'plan' must be
     // listed here too — without it a plan room matches no sidebar group at all
@@ -532,20 +608,20 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
       topic: c.topic ?? null,
       isPrivate: c.is_private,
       isMember,
-      unread: ('count' in unreadRes ? unreadRes.count : 0) ?? 0,
+      unread: isMember ? (summary?.unread ?? 0) : 0,
       category,
       clientId: (c.client_id as string | null) ?? clientIdByConv.get(c.id) ?? null,
       clientName: clientNames.get(((c.client_id as string | null) ?? clientIdByConv.get(c.id)) ?? '') ?? null,
       lastMessage: last ? {
-        body: last.deleted_at ? 'Message deleted' : (last.kind === 'text' ? last.body : `[${last.kind}]`),
-        senderName: lastSender?.name ?? null,
-        senderCqid: lastSender?.cqid ?? null,
-        createdAt: last.created_at,
+        body: last.deletedAt ? 'Message deleted' : (last.kind === 'text' ? (last.body ?? '') : `[${last.kind}]`),
+        senderName: last.senderName,
+        senderCqid: last.senderCqid,
+        createdAt: last.createdAt,
       } : null,
       members,
       canDelete,
     } satisfies ChatConversation
-  }))
+  })
 
   // Drop conversations this member hid, unless something was said since —
   // a new message brings a hidden DM back, exactly like every messenger.

@@ -31,9 +31,10 @@ import {
   type ChatConversation, type ChatMessage,
 } from '@/app/(dashboard)/dashboard/chat/actions'
 import {
-  getMyNotifications, markNotificationRead, markAllNotificationsRead,
+  markNotificationRead, markAllNotificationsRead,
   type NotificationRow,
 } from '@/app/api/notifications/actions'
+import { fetchSharedNotifications, unreadIn } from '@/lib/notifications/shared-fetch'
 
 type Tab = 'chat' | 'alerts'
 
@@ -207,8 +208,15 @@ export function FloatingCommsWidget() {
       (a, b) => (b.lastMessage?.createdAt ?? '').localeCompare(a.lastMessage?.createdAt ?? '')))
   }, [])
   const refreshNotifs = useCallback(async () => {
-    const res = await getMyNotifications(20)
-    if (res.ok && res.data) { setNotifs(res.data.rows); setNotifUnread(res.data.unreadCount) }
+    // Shared with NotificationBell — see lib/notifications/shared-fetch. The
+    // shared call fetches 30; slice back to the 20 this widget has always shown
+    // so both the list and the badge are unchanged.
+    const res = await fetchSharedNotifications()
+    if (res.ok && res.data) {
+      const rows = res.data.rows.slice(0, 20)
+      setNotifs(rows)
+      setNotifUnread(unreadIn(rows, 20))
+    }
   }, [])
 
   const openConversation = useCallback(async (convId: string) => {

@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { Bell, Check, ExternalLink } from 'lucide-react'
-import { getMyNotifications, markNotificationRead, markAllNotificationsRead, type NotificationRow } from '@/app/api/notifications/actions'
+import { markNotificationRead, markAllNotificationsRead, type NotificationRow } from '@/app/api/notifications/actions'
+import { fetchSharedNotifications, unreadIn } from '@/lib/notifications/shared-fetch'
 import { PushToggle } from '@/components/notifications/push-toggle'
 import { SoundToggle } from '@/components/notifications/sound-toggle'
 import { useVisibleInterval } from '@/lib/hooks/use-visible-interval'
@@ -34,10 +35,12 @@ export function NotificationBell({ isCollapsed = false }: { isCollapsed?: boolea
   const panelRef = useRef<HTMLDivElement>(null)
 
   const refresh = useCallback(async () => {
-    const res = await getMyNotifications()
+    // Shared with FloatingCommsWidget — see lib/notifications/shared-fetch.
+    // Same 30 rows and the same unread count as the old getMyNotifications().
+    const res = await fetchSharedNotifications()
     if (res.ok && res.data) {
       setRows(res.data.rows)
-      setUnreadCount(res.data.unreadCount)
+      setUnreadCount(unreadIn(res.data.rows, 30))
     }
     setLoaded(true)
   }, [])

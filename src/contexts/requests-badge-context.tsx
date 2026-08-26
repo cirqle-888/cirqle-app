@@ -16,7 +16,12 @@ import { usePermissions } from '@/contexts/permission-context'
 const Ctx = createContext<number | null>(null)
 
 /** How often to re-check while the tab is actually being looked at. */
-const REFRESH_MS = 120_000
+// EGRESS: was 120s, while every other background poll in the app (the comms
+// widget, the notification bell) had already been moved to 300s. This is a
+// badge count that also refreshes on tab focus and on every visit to the
+// Requests page, so the extra freshness bought nothing and cost ~290
+// requests/day on its own.
+const REFRESH_MS = 300_000
 
 export function RequestsBadgeProvider({ children }: { children: ReactNode }) {
   const { can } = usePermissions()
