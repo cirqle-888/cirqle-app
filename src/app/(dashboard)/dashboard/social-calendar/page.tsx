@@ -226,6 +226,56 @@ export default async function SocialCalendarPage({
     } catch { /* packages not migrated — the calendar simply shows no commitment */ }
   }
 
+  // ── Delivered work for the month (the monthly-report overlay) ──────────────
+  // The plan answers "what did we say we would do". A monthly report also has
+  // to answer "what did we actually deliver" — and those differ, because work
+  // arrives by request and by ad-hoc task, not only off the calendar.
+  //
+  // Tasks already represented ON the calendar are excluded: a planned item that
+  // became a task already shows its own Completed chip, so listing the task as
+  // well would double-count it in the very report this exists to support. What
+  // is left is delivered work that never appeared on the plan — precisely the
+  // gap worth seeing.
+  let deliveredTasks: any[] = []
+  if (selectedCalendar?.client_id && selectedCalendar?.month) {
+    try {
+      const monthStart = String(selectedCalendar.month).slice(0, 10)
+      const d = new Date(`${monthStart}T00:00:00`)
+      const nextMonth = new Date(d.getFullYear(), d.getMonth() + 1, 1)
+        .toLocaleDateString('en-CA')
+
+      const { data: done } = await admin
+        .from('tasks')
+        .select('id, task_number, title, task_date, status, service:services(name)')
+        .eq('client_id', selectedCalendar.client_id)
+        .is('deleted_at', null)
+        .in('status', ['delivered', 'done', 'invoiced', 'paid'])
+        .gte('task_date', monthStart)
+        .lt('task_date', nextMonth)
+        .order('task_date', { ascending: true })
+
+      // Ids already on the plan, via either exit: item → task directly, or
+      // item → request → promoted task.
+      const onPlan = new Set<string>()
+      for (const it of items as any[]) {
+        if (it.task_id) onPlan.add(it.task_id)
+        const pt = it.request?.promoted_task
+        if (pt?.id) onPlan.add(pt.id)
+        if (it.request?.promoted_task_id) onPlan.add(it.request.promoted_task_id)
+      }
+
+      deliveredTasks = (done ?? [])
+        .filter((t: any) => !onPlan.has(t.id))
+        .map((t: any) => {
+          const s = Array.isArray(t.service) ? t.service[0] : t.service
+          return {
+            id: t.id, task_number: t.task_number, title: t.title,
+            task_date: t.task_date, status: t.status, service_name: s?.name ?? null,
+          }
+        })
+    } catch { /* tasks unreadable — the calendar is still useful without the overlay */ }
+  }
+
   // Services power the item modal's Service picker — the same catalogue the
   // Requests form uses, so calendar items align with request types.
   const services = (await admin
@@ -254,6 +304,7 @@ export default async function SocialCalendarPage({
       initialItems={items}
       packages={packages}
       packageTasks={packageTasks}
+      deliveredTasks={deliveredTasks}
       clients={clients as any[]}
       services={services as any[]}
       knownVariants={knownVariants}

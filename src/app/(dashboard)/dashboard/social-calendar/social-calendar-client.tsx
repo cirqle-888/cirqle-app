@@ -97,6 +97,12 @@ interface Props {
   packages?: (PackageRow & { items: PackageItemRow[] })[]
   /** Tasks already linked to those packages — what has actually been delivered. */
   packageTasks?: (PackageTaskLike & { package_id: string })[]
+  /** Delivered work for this client THIS MONTH that is not already on the
+   *  plan — the monthly-report overlay. Off by default. */
+  deliveredTasks?: {
+    id: string; task_number: number | null; title: string
+    task_date: string; status: string; service_name: string | null
+  }[]
   clients: { id: string; name: string; code: string }[]
   services?: { id: string; name: string }[]
   /** Variant tags used across every plan — autocomplete for the "Also as" field. */
@@ -512,7 +518,7 @@ function DroppableZone({ id, className, activeClassName, disabled, children }: {
 
 export default function SocialCalendarClient({
   migrated, calendars, selectedId, initialItems, clients, services = [], serviceMap = {}, companySettings = {}, canManage,
-  knownVariants = [], employees = [], packages = [], packageTasks = [],
+  knownVariants = [], employees = [], packages = [], packageTasks = [], deliveredTasks = [],
   employeeDepartments = {}, employeeServices = {}, departments = [],
 }: Props) {
   const router = useRouter()
@@ -684,6 +690,32 @@ export default function SocialCalendarClient({
 
   // ── Canvas state: view toggle, quick-add, drag & drop ──────────────────────
   const [viewMode, setViewMode] = useState<'calendar' | 'board'>('calendar')
+
+  // ── Delivered overlay ──────────────────────────────────────────────────────
+  // OFF by default: the calendar's job is planning, and every month's finished
+  // work permanently layered over it would bury what still has to be done.
+  // Turned on when the question changes to "what did this client get this
+  // month" — which is a reporting question, not a planning one.
+  const [showDelivered, setShowDelivered] = useState(false)
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem('social.showDelivered')
+      if (v != null) setShowDelivered(v === '1')
+    } catch { /* private mode — stays off */ }
+  }, [])
+  function toggleDelivered() {
+    setShowDelivered(v => {
+      const next = !v
+      try { localStorage.setItem('social.showDelivered', next ? '1' : '0') } catch { /* ignore */ }
+      return next
+    })
+  }
+  const deliveredByDate = useMemo(() => {
+    const out: Record<string, typeof deliveredTasks> = {}
+    if (!showDelivered) return out
+    for (const t of deliveredTasks) (out[t.task_date] ||= []).push(t)
+    return out
+  }, [deliveredTasks, showDelivered])
   const [quickTitle, setQuickTitle] = useState('')
   const [quickType, setQuickType] = useState<string>('post')
   const [quickBusy, setQuickBusy] = useState(false)
@@ -1489,6 +1521,20 @@ export default function SocialCalendarClient({
                 <Icon className="w-3.5 h-3.5" /> {label}
               </button>
             ))}
+            {/* Only offered when there IS off-plan delivered work — a toggle
+                that can only ever reveal nothing is just another control. */}
+            {deliveredTasks.length > 0 && (
+              <button
+                onClick={toggleDelivered}
+                title="Show work delivered for this client this month that was not on the plan"
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ml-1 ${
+                  showDelivered
+                    ? 'bg-green-500/10 text-green-500 border-green-500/30'
+                    : 'bg-secondary text-muted-foreground border-transparent hover:text-foreground'}`}>
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                {showDelivered ? 'Hide delivered' : `Show delivered (${deliveredTasks.length})`}
+              </button>
+            )}
           </div>
 
           {viewMode === 'calendar' ? (
@@ -1568,6 +1614,19 @@ export default function SocialCalendarClient({
                               <span className="opacity-70">⟶</span>
                               <span className="truncate">{it.title}{it.scheduled_end_date === cell.key ? ' (ends)' : ''}</span>
                             </button>
+                          ))}
+                          {/* Delivered-but-unplanned work. Visually distinct
+                              from plan cards on purpose — it is a record of
+                              what happened, not something to drag or edit. */}
+                          {(deliveredByDate[cell.key] ?? []).map(t => (
+                            <div
+                              key={`done-${t.id}`}
+                              title={`#${t.task_number ?? '?'} ${t.title}${t.service_name ? ` · ${t.service_name}` : ''} — ${t.status}`}
+                              className="w-full flex items-center gap-1 rounded-sm border border-dashed border-green-500/40 bg-green-500/5 px-1 py-0.5 text-[9px] text-green-600 dark:text-green-400 truncate"
+                            >
+                              <CheckCircle2 className="w-2.5 h-2.5 shrink-0" />
+                              <span className="truncate">{t.title}</span>
+                            </div>
                           ))}
                         </div>
 
