@@ -67,6 +67,10 @@ export async function fetchMyWork(): Promise<ActionResult<MyWorkRow[]>> {
   return { ok: true, data: rows }
 }
 
+/** A PostgREST row whose shape we know but whose generated types cannot
+ *  express a string-built select. One narrow alias beats scattering `any`. */
+type Row = Record<string, unknown> & { [k: string]: any }   // eslint-disable-line @typescript-eslint/no-explicit-any
+
 /** Task status that backs each stage. Round-trips through
  *  requestStatusFromTask() to exactly the stage it came from:
  *    in_progress → request in_progress → 'working'
@@ -91,7 +95,7 @@ const STAGE_TASK_STATUS: Partial<Record<WorkStage, string>> = {
  */
 async function ensureTaskForRequest(
   admin: ReturnType<typeof createAdminClient>,
-  req: any,
+  req: Row,
   employeeId: string,
 ): Promise<{ taskId: string; created: boolean; warning?: string }> {
   if (req.promoted_task_id) return { taskId: req.promoted_task_id, created: false }
@@ -176,12 +180,12 @@ export async function moveMyWork(
   // The check the permission cannot make. Admins are NOT exempt here: an admin
   // moving someone else's card should do it from the inbox, where the action is
   // logged as an inbox change rather than as the assignee's own progress.
-  if ((req as any).assigned_employee_id !== guard.employeeId) {
+  if ((req as Row).assigned_employee_id !== guard.employeeId) {
     return { ok: false, error: 'This work is assigned to someone else.' }
   }
 
-  const from = stageOf((req as any).status)
-  if (from === toStage) return { ok: true, data: { status: (req as any).status } }
+  const from = stageOf((req as Row).status)
+  if (from === toStage) return { ok: true, data: { status: (req as Row).status } }
   if (!canMove(from, toStage)) {
     return { ok: false, error: moveRefusalReason(from, toStage) }
   }
@@ -213,8 +217,8 @@ export async function moveMyWork(
 
   void logActivity({
     actorId: guard.employeeId, entityType: 'task', entityId: taskId,
-    action: 'updated', category: 'crm', clientId: (req as any).client_id ?? null,
-    note: `My Work: ${(req as any).ref_no ? `REQ-${String((req as any).ref_no).padStart(4, '0')}` : 'request'} → ${STAGE_LABEL[toStage]}`,
+    action: 'updated', category: 'crm', clientId: (req as Row).client_id ?? null,
+    note: `My Work: ${(req as Row).ref_no ? `REQ-${String((req as Row).ref_no).padStart(4, '0')}` : 'request'} → ${STAGE_LABEL[toStage]}`,
     detail: { requestId, from, to: toStage, taskStatus, taskCreated: created },
   })
 
@@ -247,7 +251,7 @@ async function movePlanItem(
     .eq('id', itemId).maybeSingle()
   if (error || !item) return { ok: false, error: 'That plan item could not be found.' }
 
-  const it: any = item
+  const it = item as unknown as Row
   if (it.assigned_employee_id !== employeeId) {
     return { ok: false, error: 'This work is assigned to someone else.' }
   }

@@ -16,6 +16,11 @@ import { captionHtmlToText } from '@/lib/social/plan'
  * once an item is pushed to Requests it becomes a task_request and is already
  * covered by the first query, so including it again would show one job twice.
  */
+/** A PostgREST row from a string-built select — shape known, generated types
+ *  cannot express it. Narrow index signature instead of `any`, so the fields
+ *  are still readable without switching off type-checking entirely. */
+type Row = Record<string, unknown> & { [k: string]: any }   // eslint-disable-line @typescript-eslint/no-explicit-any
+
 export interface RawMyWorkRow {
   id: string
   source: 'request' | 'plan'
@@ -46,7 +51,7 @@ export async function loadMyWork(
         'promoted_task:tasks!task_requests_promoted_task_id_fkey(task_number)')
       .eq('assigned_employee_id', employeeId)
       .order('due_date', { ascending: true, nullsFirst: false })
-    for (const r of (data ?? []) as any[]) {
+    for (const r of (data ?? []) as unknown as Row[]) {
       if (isHidden(r.status)) continue
       const c = Array.isArray(r.client) ? r.client[0] : r.client
       const s = Array.isArray(r.service) ? r.service[0] : r.service
@@ -78,7 +83,7 @@ export async function loadMyWork(
         .neq('calendar.status', 'archived')
         .order('scheduled_date', { ascending: true, nullsFirst: false })
       if (error) { if (withTask) continue; break }
-      for (const it of (data ?? []) as any[]) {
+      for (const it of (data ?? []) as unknown as Row[]) {
         const cal = Array.isArray(it.calendar) ? it.calendar[0] : it.calendar
         const cl = cal ? (Array.isArray(cal.client) ? cal.client[0] : cal.client) : null
         const s = Array.isArray(it.service) ? it.service[0] : it.service

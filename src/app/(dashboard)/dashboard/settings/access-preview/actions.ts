@@ -18,6 +18,10 @@ interface ActionResult<T = void> {
   data?: T
 }
 
+/** A PostgREST row from a joined select — shape known, generated types cannot
+ *  express the embed. One narrow alias beats scattering `any`. */
+type Row = Record<string, unknown> & { [k: string]: any }   // eslint-disable-line @typescript-eslint/no-explicit-any
+
 export interface AccessPreview {
   cqid: string
   designationName: string | null
@@ -46,7 +50,8 @@ export async function previewEmployeeAccess(
     .eq('id', employeeId).maybeSingle()
   if (error || !emp) return { ok: false, error: 'Employee not found.' }
 
-  const d: any = Array.isArray((emp as any).designation) ? (emp as any).designation[0] : (emp as any).designation
+  const e = emp as unknown as Row
+  const d: Row | undefined = Array.isArray(e.designation) ? e.designation[0] : e.designation
   const isAdmin = d?.is_admin === true
 
   const { count: catalogSize } = await admin
@@ -59,24 +64,24 @@ export async function previewEmployeeAccess(
   let permissionKeys: string[] = []
   if (isAdmin) {
     const { data: all } = await admin.from('permissions').select('key')
-    permissionKeys = (all ?? []).map((p: any) => p.key)
+    permissionKeys = (all ?? []).map((p: Row) => p.key as string)
   } else if (d?.id) {
     const { data: dp } = await admin
       .from('designation_permissions')
       .select('allowed, permission:permission_id(key)')
       .eq('designation_id', d.id).eq('allowed', true)
     permissionKeys = (dp ?? [])
-      .map((r: any) => (Array.isArray(r.permission) ? r.permission[0] : r.permission)?.key)
+      .map((r: Row) => (Array.isArray(r.permission) ? r.permission[0] : r.permission)?.key as string)
       .filter(Boolean)
   }
 
   return {
     ok: true,
     data: {
-      cqid: (emp as any).cqid ?? '',
+      cqid: e.cqid ?? '',
       designationName: d?.name ?? null,
       isAdmin,
-      isArchived: (emp as any).is_archived === true,
+      isArchived: e.is_archived === true,
       permissionKeys: permissionKeys.sort(),
       catalogSize: catalogSize ?? 0,
     },
