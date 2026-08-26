@@ -1640,13 +1640,13 @@ export default function SocialCalendarClient({
 
       {/* ── New Plan modal ── */}
       {showNewPlan && (
-        <ModalOverlay onClose={() => setShowNewPlan(false)}>
-          <div className="bg-card border border-border rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+        <ModalOverlay onClose={() => setShowNewPlan(false)} sheetOnMobile>
+          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col min-h-0">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
               <h2 className="font-semibold">New Content Plan</h2>
               <button onClick={() => setShowNewPlan(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
             </div>
-            <div className="px-5 py-4 space-y-3">
+            <div className="px-5 py-4 space-y-3 overflow-y-auto flex-1 min-h-0">
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1.5">Client *</label>
                 <Combobox
@@ -1685,7 +1685,7 @@ export default function SocialCalendarClient({
                 />
               </div>
             </div>
-            <div className="flex gap-2 px-5 py-4 border-t border-border">
+            <div className="flex gap-2 px-5 py-4 border-t border-border shrink-0">
               <button onClick={() => setShowNewPlan(false)} className="flex-1 bg-secondary text-sm font-medium py-2 rounded-lg hover:bg-secondary/80">Cancel</button>
               <button
                 onClick={submitNewPlan}
@@ -1701,9 +1701,9 @@ export default function SocialCalendarClient({
 
       {/* ── Service defaults modal (content type → service mapping) ── */}
       {showServiceDefaults && (
-        <ModalOverlay onClose={() => setShowServiceDefaults(false)}>
-          <div className="bg-card border border-border rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+        <ModalOverlay onClose={() => setShowServiceDefaults(false)} sheetOnMobile>
+          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col min-h-0">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
               <div>
                 <h2 className="font-semibold">Service defaults</h2>
                 <p className="text-[11px] text-muted-foreground mt-0.5">
@@ -1713,7 +1713,7 @@ export default function SocialCalendarClient({
               </div>
               <button onClick={() => setShowServiceDefaults(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
             </div>
-            <div className="px-5 py-4 space-y-2.5 max-h-[60dvh] overflow-y-auto">
+            <div className="px-5 py-4 space-y-2.5 overflow-y-auto flex-1 min-h-0">
               {CONTENT_TYPES.map(t => (
                 <div key={t} className="grid grid-cols-[7rem_1fr] items-center gap-3">
                   <span className="text-sm text-muted-foreground">{CONTENT_TYPE_LABEL[t]}</span>
@@ -1732,7 +1732,7 @@ export default function SocialCalendarClient({
                 </div>
               ))}
             </div>
-            <div className="flex justify-end gap-2 px-5 py-4 border-t border-border">
+            <div className="flex justify-end gap-2 px-5 py-4 border-t border-border shrink-0">
               <button onClick={() => setShowServiceDefaults(false)} className="bg-secondary text-sm font-medium px-4 py-2 rounded-lg hover:bg-secondary/80">Cancel</button>
               <button
                 onClick={submitServiceMap}
@@ -1749,12 +1749,19 @@ export default function SocialCalendarClient({
 
       {/* ── Item modal (add / edit) ── */}
       {itemModal && selected && (
-        <ModalOverlay onClose={() => setItemModal(null)}>
+        <ModalOverlay onClose={() => setItemModal(null)} sheetOnMobile>
           {/* max-w-2xl (not lg): the caption editor is the working surface of
               this form — the extra width keeps its toolbar to one row and
-              gives the copy room to breathe. */}
-          <div className="bg-card border border-border rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              gives the copy room to breathe.
+
+              flex-col + min-h-0 is load-bearing, not decoration. ModalOverlay
+              caps its child at max-h-[90dvh]; without the column this card
+              still laid out at its NATURAL height (header + body + footer) and
+              overflow-hidden simply clipped whatever spilled past the cap —
+              which on a phone was the entire footer row, Save Changes
+              included. The column makes the body the only thing that gives. */}
+          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col min-h-0">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
               <div>
                 <h2 className="font-semibold">{itemModal.mode === 'add' ? 'Plan an item' : 'Edit item'}</h2>
                 {editingItem?.request && (
@@ -1793,7 +1800,10 @@ export default function SocialCalendarClient({
               <button onClick={() => setItemModal(null)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
             </div>
 
-            <div className="px-5 py-4 space-y-3 max-h-[72dvh] overflow-y-auto">
+            {/* flex-1 min-h-0, not a fixed max-h: the body has to absorb
+                whatever the header and (wrapping) footer leave over, which on
+                a narrow phone is far less than 72dvh. */}
+            <div className="px-5 py-4 space-y-3 overflow-y-auto flex-1 min-h-0">
               {editingFrozen && (
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
                   This item is already a task — the plan entry is frozen. Manage it from the Tasks page.
@@ -2175,7 +2185,11 @@ export default function SocialCalendarClient({
               </OptionalSection>
             </div>
 
-            <div className="flex flex-wrap gap-2 px-5 py-4 border-t border-border">
+            {/* Up to seven buttons live here (Discuss / Remove / both Send
+                exits / Pull back / Close / Save). They wrap on a phone, so the
+                row is given its own scroll ceiling rather than being allowed
+                to grow until it squeezes the form out of view. */}
+            <div className="flex flex-wrap gap-2 px-5 py-4 border-t border-border shrink-0 max-h-[40dvh] overflow-y-auto">
               {/* Per-item discussion — its own room, separate from the month
                   plan's. Edit mode only: an unsaved item has no id to hang a
                   conversation off. */}

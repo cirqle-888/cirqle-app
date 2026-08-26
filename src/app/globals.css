@@ -267,6 +267,23 @@
   }
 }
 
+/* The floating chat launcher sits at `fixed bottom-5 right-5 z-50` — the SAME
+   stacking level as a modal overlay, and later in the DOM, so it paints on top
+   of one. On a desktop dialog it lands harmlessly beside the card, but a mobile
+   sheet spans the full width and runs to the bottom edge, putting the launcher
+   squarely on the footer's last row of buttons (Close / Save Changes on the
+   calendar's Edit item sheet). Hide it while any modal is open: it opens a
+   panel that would be trapped behind the dialog anyway, so nothing is lost.
+
+   OUTSIDE the `min-width: 768px` block above — this is a phone problem, and
+   inside it the rule silently did nothing at mobile widths.
+
+   DELIBERATELY UNLAYERED, for the same reason spelled out above: `display` here
+   competes with Tailwind's `flex` utility, and layer order beats specificity. */
+body:has([data-modal-overlay]) [data-chat-launcher] {
+  display: none;
+}
+
 @layer utilities {
   .gradient-text {
     background: linear-gradient(135deg, #a78bfa, #60a5fa);

@@ -458,6 +458,10 @@ export function FloatingCommsWidget() {
       <button
         onClick={() => setOpen(o => !o)}
         aria-label="Chat & alerts"
+        // data-chat-launcher: globals.css hides this while a modal is open —
+        // it shares z-50 with the modal overlay and would otherwise cover the
+        // bottom-right of any mobile sheet, i.e. its footer buttons.
+        data-chat-launcher
         className="fixed bottom-5 right-5 z-50 flex h-12 w-12 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-transform hover:scale-105"
       >
         {open ? <X className="h-5 w-5" /> : <MessageCircle className="h-5 w-5" />}

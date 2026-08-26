@@ -3080,13 +3080,25 @@ export default function ContributionsClient({
       {/* pr-20 reserves the bottom-right corner so the floating chat launcher
           (fixed bottom-right, ~4.25rem) never overlaps the last action button. */}
       <div className="fixed bottom-0 left-0 md:left-60 right-0 z-20 bg-card/95 backdrop-blur-md border-t border-border pl-4 sm:pl-6 pr-20 py-3 sm:py-3.5 flex items-center gap-2 sm:gap-3 flex-wrap pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        {/* whitespace-nowrap + a shorter mobile label: with the sibling buttons
+            and pr-20 taking their share of a 375px bar, the flex-1 basis left
+            here is ~100px — enough to wrap "Save & Mark Done" onto three lines
+            rather than shrink it. min-w-0 keeps it from pushing the row wider
+            than the viewport instead. */}
         <button onClick={handleSave} disabled={saving}
-          className="flex-1 sm:flex-initial flex items-center justify-center gap-2 gradient-bg text-white text-sm font-semibold px-4 sm:px-6 py-3 sm:py-2.5 rounded-xl hover:opacity-90 disabled:opacity-40 transition-opacity shadow-md shadow-primary/20">
+          className="flex-1 sm:flex-initial min-w-0 flex items-center justify-center gap-2 gradient-bg text-white text-sm font-semibold px-4 sm:px-6 py-3 sm:py-2.5 rounded-xl hover:opacity-90 disabled:opacity-40 transition-opacity shadow-md shadow-primary/20 whitespace-nowrap">
           {saving
             ? <><span className="w-4 h-4 border-2 border-foreground/30 border-t-white rounded-full animate-spin" /> Saving…</>
             : calculatedResult
-              ? <><Check className="w-4 h-4" /> Save &amp; Mark Done</>
-              : 'Save Contributions'
+              ? <>
+                  <Check className="w-4 h-4 shrink-0" />
+                  <span className="sm:hidden">Save &amp; Done</span>
+                  <span className="hidden sm:inline">Save &amp; Mark Done</span>
+                </>
+              : <>
+                  <span className="sm:hidden">Save</span>
+                  <span className="hidden sm:inline">Save Contributions</span>
+                </>
           }
         </button>
         <button onClick={() => setView('list')}
@@ -3105,8 +3117,10 @@ export default function ContributionsClient({
               setExpandedEmployees(new Set()); setActiveGroups(new Set()); setActiveSubParams(new Set())
               toast.info('Draft discarded')
             }}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-red-400 px-3 py-2 rounded-lg hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition-all">
-            <Trash2 className="w-3.5 h-3.5" /> Discard draft
+            title="Discard draft"
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-red-400 px-3 py-2 rounded-lg hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition-all shrink-0">
+            <Trash2 className="w-3.5 h-3.5 shrink-0" />
+            <span className="hidden sm:inline">Discard draft</span>
           </button>
         )}
         {calculatedResult && showFinancials && (
