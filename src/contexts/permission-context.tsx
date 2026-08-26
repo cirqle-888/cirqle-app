@@ -16,6 +16,8 @@ export interface PermissionUser {
   isAdmin: boolean
   permissions: string[]
   dateOfBirth: string | null
+  /** True while an admin is browsing as this employee (read-only preview). */
+  isViewAs?: boolean
 }
 
 interface PermissionContextValue {
@@ -54,7 +56,15 @@ export function PermissionProvider(
     // TEMPORARY dev bypass (dead code in production builds) — see
     // src/lib/permissions/dev-bypass.ts. Keeps the client's `can()` in step
     // with the server guards so the UI doesn't hide what the server allows.
-    can: (key) => (user.isAdmin || isDevPermissionBypassActive() ? true : perms.has(key)),
+    //
+    // Skipped while previewing another account, mirroring hasPermission on the
+    // server. Without this the sidebar showed every page during a preview in
+    // development — including Requests, which the previewed designer cannot
+    // open — making the preview confidently wrong about the one thing it is for.
+    can: (key) =>
+      user.isAdmin || (!user.isViewAs && isDevPermissionBypassActive())
+        ? true
+        : perms.has(key),
     revealNames: user.isAdmin && revealNames,
     setRevealNames,
     logoUrl,

@@ -13,11 +13,13 @@ import { FloatingCommsWidget } from '@/components/comms/floating-comms-widget'
 import { BirthdayCelebration } from '@/components/ui/birthday-celebration'
 import { FxRatesAutoSync } from './fx-rates-auto-sync'
 import { loadCurrentUser } from '@/lib/permissions/check'
+import { ViewAsBanner } from '@/components/layout/view-as-banner'
 import { isBirthdayToday } from '@/lib/utils/birthday'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { listFavoritesForEmployee } from '@/lib/favorites/queries'
 import { getMyWorkspaceState } from '@/lib/workspaces/actions'
 import { unstable_cache } from 'next/cache'
+import { resolveBrandingUrl } from '@/lib/utils/branding'
 import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { navSections, isNavItemVisible, resolveActiveHref } from '@/lib/nav-sections'
@@ -42,9 +44,9 @@ const getLogoUrls = unstable_cache(
       .in('key', ['logo_url', 'logo_url_dark', 'favicon_url'])
     const map = Object.fromEntries((data || []).map((r: any) => [r.key, (r.value || '').trim()]))
     return {
-      logoUrl:     map['logo_url']      || null,
-      logoUrlDark: map['logo_url_dark'] || null,
-      faviconUrl:  map['favicon_url']   || null,
+      logoUrl:     resolveBrandingUrl(map['logo_url'])      || null,
+      logoUrlDark: resolveBrandingUrl(map['logo_url_dark']) || null,
+      faviconUrl:  resolveBrandingUrl(map['favicon_url'])   || null,
     }
   },
   ['company-logo-urls'],
@@ -121,9 +123,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
         email: me.email,
         designationId: me.designationId,
         designationName: me.designationName,
-        isAdmin: me.isAdmin || me.designationId === null, // pre-migration: treat as admin
+        // The pre-migration "no designation → treat as admin" fallback must NOT
+        // apply while previewing: an employee with no designation is exactly
+        // the case the preview needs to show honestly, not paper over.
+        isAdmin: me.isViewAs ? me.isAdmin : (me.isAdmin || me.designationId === null),
         permissions: Array.from(me.permissions),
         dateOfBirth: me.dateOfBirth,
+        isViewAs: me.isViewAs,
       }
     : fallbackUser
 
@@ -163,7 +169,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
               globals.css shrinks this container by the panel's width so the
               page reflows beside it instead of hiding underneath — tables keep
               every column reachable through their own scroller. */}
-          <div data-app-shell className="flex h-dvh overflow-hidden">
+          {/* Outside data-app-shell so the side-panel width rule cannot shift
+              it — the one thing that must stay put is the reminder that you
+              are not looking at your own account. */}
+          {meResult.user?.isViewAs && (
+            <ViewAsBanner
+              cqid={meResult.user.cqid}
+              designation={meResult.user.designationName}
+            />
+          )}
+          <div data-app-shell className={`flex h-dvh overflow-hidden ${meResult.user?.isViewAs ? 'pt-7' : ''}`}>
             {/* First tab stop on every dashboard page: lets keyboard users jump
                 past the full sidebar nav. Visually hidden until focused. */}
             <a

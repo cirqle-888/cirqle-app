@@ -46,7 +46,10 @@ describe('the bypass widens rights but never invents a user', () => {
     (fn) => {
       const at = check.indexOf(`export async function ${fn}`)
       expect(at).toBeGreaterThan(-1)
-      const body = check.slice(at, at + 1200)
+      // Generous window: these bodies carry long explanatory comments, and a
+      // slice that ends mid-function would fail for length rather than for
+      // the ordering this test is actually about.
+      const body = check.slice(at, at + 2600)
       const notSignedIn = body.indexOf("'Not signed in.'")
       const archived = body.indexOf('isArchived')
       const bypass = body.indexOf('devPermissionBypass()')
@@ -60,12 +63,39 @@ describe('the bypass widens rights but never invents a user', () => {
 
   it('hasPermission still refuses a null or archived user', () => {
     const at = check.indexOf('export function hasPermission')
-    const body = check.slice(at, at + 500)
+    const body = check.slice(at, at + 1200)
     const nullCheck = body.indexOf('!user || user.isArchived')
     const bypass = body.indexOf('devPermissionBypass()')
     expect(nullCheck).toBeGreaterThan(-1)
+    expect(bypass).toBeGreaterThan(-1)
     expect(nullCheck).toBeLessThan(bypass)
   })
+
+  // ── View-as must survive the bypass ────────────────────────────────────────
+  // The preview exists to answer "what can THIS employee reach?". If the dev
+  // bypass outranked it, that answer would be "everything" in development —
+  // which is precisely where the preview gets used.
+  it('hasPermission ignores the bypass while previewing another account', () => {
+    const at = check.indexOf('export function hasPermission')
+    const body = check.slice(at, at + 1200)
+    expect(body).toMatch(/!user\.isViewAs\s*&&\s*devPermissionBypass\(\)/)
+  })
+
+  it.each(['requirePermission', 'requireAnyPermission'])(
+    '%s refuses every mutation while previewing, ahead of the admin short-circuit',
+    (fn) => {
+      const at = check.indexOf(`export async function ${fn}`)
+      const body = check.slice(at, at + 2600)
+      const viewAs = body.indexOf('user.isViewAs')
+      const adminShortCircuit = body.indexOf('if (user.isAdmin)')
+      const bypass = body.indexOf('devPermissionBypass()')
+      expect(viewAs).toBeGreaterThan(-1)
+      // Previewing an ADMIN must not hand the writes back, and the dev bypass
+      // must not either — so the read-only check has to come before both.
+      expect(viewAs).toBeLessThan(adminShortCircuit)
+      expect(viewAs).toBeLessThan(bypass)
+    },
+  )
 })
 
 describe('removal is a documented, greppable operation', () => {

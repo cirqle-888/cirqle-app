@@ -1,11 +1,13 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Eye, Check, X as XIcon, Loader2, ShieldCheck } from 'lucide-react'
 import Header from '@/components/layout/header'
 import Combobox from '@/components/ui/combobox'
 import { navSections, isNavItemVisible } from '@/lib/nav-sections'
 import { previewEmployeeAccess, type AccessPreview } from './actions'
+import { startViewAs } from '@/lib/permissions/view-as-actions'
 
 interface EmployeeOption {
   id: string
@@ -19,6 +21,20 @@ export default function AccessPreviewClient({ employees }: { employees: Employee
   const [loading, setLoading] = useState(false)
   const [preview, setPreview] = useState<AccessPreview | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [entering, setEntering] = useState(false)
+  const router = useRouter()
+
+  async function enterViewAs() {
+    if (!selected) return
+    setEntering(true)
+    const res = await startViewAs(selected)
+    if (!res.ok) { setEntering(false); setError(res.error ?? 'Could not start preview.'); return }
+    // Land on the dashboard — their home, and the honest first thing to see
+    // through their eyes. router.refresh() first so the layout re-reads the
+    // cookie and paints the banner.
+    router.refresh()
+    router.push('/dashboard')
+  }
 
   async function pick(id: string) {
     setSelected(id)
@@ -97,6 +113,24 @@ export default function AccessPreviewClient({ employees }: { employees: Employee
           Read-only. This resolves their designation and permissions the same way sign-in does;
           your own session is untouched and nothing can be done as them.
         </p>
+
+        {preview && (
+          <div className="pt-1 border-t border-border/60">
+            <button
+              onClick={enterViewAs}
+              disabled={entering}
+              className="inline-flex items-center gap-1.5 rounded-lg gradient-bg text-white px-3 py-2 text-sm font-medium disabled:opacity-50"
+            >
+              {entering ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
+              Browse the app as {preview.cqid}
+            </button>
+            <p className="text-[11px] text-muted-foreground mt-1.5">
+              Opens the real app through their permissions so you can see their actual screens and data.
+              Still read-only — every save, edit and delete is refused while previewing, and a banner
+              stays on screen until you exit.
+            </p>
+          </div>
+        )}
       </div>
 
       {loading && (

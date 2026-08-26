@@ -16,6 +16,90 @@ export interface CurrentUser {
   isArchived: boolean
   permissions: Set<string>
   dateOfBirth: string | null
+  /** True while an admin is browsing as this employee. Every mutation is
+   *  refused in this state — see requirePermission. */
+  isViewAs?: boolean
+  /** CQID of the admin doing the previewing, for the banner. */
+  viewAsBy?: string
+}
+
+/** Cookie naming the employee an admin is currently previewing. */
+export const VIEW_AS_COOKIE = 'cirqle_view_as'
+
+async function readViewAsCookie(): Promise<string | null> {
+  try {
+    const { cookies } = await import('next/headers')
+    const jar = await cookies()
+    return jar.get(VIEW_AS_COOKIE)?.value || null
+  } catch { return null }   // not in a request scope
+}
+
+/**
+ * Resolve the previewed identity — but ONLY if the real signed-in user is an
+ * admin. This is the security boundary for the whole feature: the cookie is
+ * just a name, and this function is the one place that decides whether it
+ * means anything. Returns null (→ caller falls back to the real user) for a
+ * non-admin, an unknown target, or any error.
+ */
+async function resolveViewAs(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  authId: string,
+  targetEmployeeId: string,
+): Promise<CurrentUser | null> {
+  try {
+    const { data: realEmp } = await supabase
+      .from('employees')
+      .select('cqid, is_archived, designation:designation_id ( is_admin )')
+      .eq('auth_id', authId)
+      .maybeSingle()
+    const realDesig: any = Array.isArray((realEmp as any)?.designation)
+      ? (realEmp as any).designation[0] : (realEmp as any)?.designation
+    // Re-checked per request, never trusted from the cookie or a cache.
+    if (realDesig?.is_admin !== true || (realEmp as any)?.is_archived === true) return null
+
+    const { data: target } = await supabase
+      .from('employees')
+      .select('id, cqid, name, email, is_archived, date_of_birth, designation:designation_id ( id, name, is_admin )')
+      .eq('id', targetEmployeeId)
+      .maybeSingle()
+    if (!target) return null
+
+    const d: any = Array.isArray((target as any).designation)
+      ? (target as any).designation[0] : (target as any).designation
+    const targetIsAdmin = d?.is_admin === true
+
+    let permissions = new Set<string>()
+    if (targetIsAdmin) {
+      const { data: all } = await supabase.from('permissions').select('key')
+      permissions = new Set((all ?? []).map((p: any) => p.key))
+    } else if (d?.id) {
+      const { data: dp } = await supabase
+        .from('designation_permissions')
+        .select('allowed, permission:permission_id(key)')
+        .eq('designation_id', d.id).eq('allowed', true)
+      permissions = new Set(
+        (dp ?? [])
+          .map((r: any) => (Array.isArray(r.permission) ? r.permission[0] : r.permission)?.key)
+          .filter(Boolean),
+      )
+    }
+
+    return {
+      authId,
+      employeeId: (target as any).id,
+      cqid: (target as any).cqid ?? '',
+      name: (target as any).name ?? '',
+      email: (target as any).email ?? '',
+      designationId: d?.id ?? null,
+      designationName: d?.name ?? null,
+      isAdmin: targetIsAdmin,
+      isArchived: (target as any).is_archived === true,
+      permissions,
+      dateOfBirth: (target as any).date_of_birth ?? null,
+      isViewAs: true,
+      viewAsBy: (realEmp as any)?.cqid ?? '',
+    }
+  } catch { return null }
 }
 
 // ── Process-level cache ──────────────────────────────────────────────────────
@@ -78,16 +162,39 @@ export const loadCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
-  // Process-level cache hit — skips the two follow-up DB round-trips.
-  const cached = USER_CACHE.get(user.id)
+  // ── View-as ────────────────────────────────────────────────────────────────
+  // An admin can browse the app through another employee's permissions. The
+  // cookie only names a target; it grants nothing on its own. Authority is
+  // re-derived from the REAL signed-in user on every single request below, so
+  // a forged or stale cookie on a non-admin session is inert.
+  //
+  // It can only ever REDUCE access: the returned identity is the target's, and
+  // requirePermission refuses every mutation while it is set (see there). An
+  // admin cannot use this to gain anything they did not already have.
+  const viewAsId = await readViewAsCookie()
+
+  // Cache key includes the target — the same auth session resolves to a
+  // different CurrentUser while previewing, and keying on auth id alone would
+  // serve the admin their own permissions inside the preview (or worse, leak
+  // the preview's reduced set back out after exiting).
+  const cacheKey = viewAsId ? `${user.id}::${viewAsId}` : user.id
+  const cached = USER_CACHE.get(cacheKey)
   if (cached && cached.expiresAt > Date.now()) return cached.user
 
   // Helper: store the result before returning so the next page nav in this
   // ~30s window only pays for auth.getUser() (~50ms) instead of full lookup.
   const cacheAndReturn = (result: CurrentUser | null): CurrentUser | null => {
     pruneCache()
-    USER_CACHE.set(user.id, { user: result, expiresAt: Date.now() + USER_CACHE_TTL_MS })
+    USER_CACHE.set(cacheKey, { user: result, expiresAt: Date.now() + USER_CACHE_TTL_MS })
     return result
+  }
+
+  if (viewAsId) {
+    const previewed = await resolveViewAs(supabase, user.id, viewAsId)
+    if (previewed) return cacheAndReturn(previewed)
+    // Target missing, or the real user is not an admin → fall through and
+    // resolve them normally. Failing closed to their OWN identity is right:
+    // a bad cookie must never leave someone with no identity at all.
   }
 
   // Try the new shape first (with designation_id + new columns)
@@ -175,8 +282,12 @@ export const loadCurrentUser = cache(async (): Promise<CurrentUser | null> => {
 export function hasPermission(user: CurrentUser | null, key: string | string[]): boolean {
   if (!user || user.isArchived) return false
   if (user.isAdmin) return true
+  // The dev bypass is skipped while previewing. Honouring it here would make
+  // view-as show every page in development — the exact opposite of the
+  // question being asked ("what can THIS employee actually reach?"), and
+  // development is where the preview gets used most.
   // TEMPORARY (dev only, dead code in production builds) — src/lib/permissions/dev-bypass.ts
-  if (devPermissionBypass()) return true
+  if (!user.isViewAs && devPermissionBypass()) return true
   if (Array.isArray(key)) return key.some(k => user.permissions.has(k))
   return user.permissions.has(key)
 }
@@ -195,6 +306,19 @@ export async function requirePermission(key: PermKey | string): Promise<GuardRes
   const user = await loadCurrentUser()
   if (!user)              return { ok: false, error: 'Not signed in.' }
   if (user.isArchived)    return { ok: false, error: 'Your account is archived.' }
+  // View-as is READ-ONLY, and this is where that is enforced. Every mutation in
+  // the app passes through here, so refusing at this one point blocks them all
+  // — including any action added later, which is the property that makes the
+  // guarantee hold over time rather than depending on remembering.
+  //
+  // It fails CLOSED: a handful of read-only actions are refused too, and that
+  // is the right trade. Pages render server-side from loadCurrentUser, so the
+  // preview still shows what the employee sees; what it will not do is let an
+  // admin change something while wearing someone else's face.
+  //
+  // Checked BEFORE the isAdmin short-circuit on purpose — previewing an admin
+  // must not hand the writes back.
+  if (user.isViewAs)      return { ok: false, error: 'Preview is read-only. Exit preview to make changes.' }
   if (user.isAdmin)       return { ok: true, employeeId: user.employeeId, isAdmin: true }
   // TEMPORARY (dev only, dead code in production builds) — src/lib/permissions/dev-bypass.ts
   if (devPermissionBypass()) return { ok: true, employeeId: user.employeeId, isAdmin: false }
@@ -208,6 +332,9 @@ export async function requireAnyPermission(keys: (PermKey | string)[]): Promise<
   const user = await loadCurrentUser()
   if (!user)              return { ok: false, error: 'Not signed in.' }
   if (user.isArchived)    return { ok: false, error: 'Your account is archived.' }
+  // Same read-only block as requirePermission — this is the OTHER door every
+  // mutation can come through, so leaving it open would defeat the guarantee.
+  if (user.isViewAs)      return { ok: false, error: 'Preview is read-only. Exit preview to make changes.' }
   if (user.isAdmin)       return { ok: true, employeeId: user.employeeId, isAdmin: true }
   // TEMPORARY (dev only, dead code in production builds) — src/lib/permissions/dev-bypass.ts
   if (devPermissionBypass()) return { ok: true, employeeId: user.employeeId, isAdmin: false }
