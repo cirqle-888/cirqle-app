@@ -10,9 +10,13 @@ export interface ComboOption {
   label: string
   sub?: string
   /** Optional section header — consecutive options sharing a group render
-   *  under one divider. When any option carries a group, the caller owns the
-   *  order: smart-sort reordering and its badges are skipped (search still
-   *  filters flat). */
+   *  under one divider, pinned to the TOP in the caller's order.
+   *
+   *  Grouping is per-option, not all-or-nothing: options WITHOUT a group fall
+   *  through to the normal smart-sort below the pinned sections, keeping their
+   *  Recently/Frequently Used dividers and badges. That is what lets a caller
+   *  pin, say, a client's committed services first without giving up usage
+   *  ordering for everything else. (Search still filters flat.) */
   group?: string
 }
 
@@ -133,14 +137,22 @@ export default function Combobox({
       const q = query.toLowerCase()
       return options
         .filter(o => o.label.toLowerCase().includes(q) || o.sub?.toLowerCase().includes(q))
-        .map(o => ({ ...o, _badge: undefined as SortBadge }))
+        .map(o => ({ ...o, _badge: undefined as SortBadge, _restStart: false }))
     }
-    if (sortKey && !grouped) return smartSort(options, sortData)
-    return options.map(o => ({ ...o, _badge: undefined as SortBadge }))
+    if (!sortKey) return options.map(o => ({ ...o, _badge: undefined as SortBadge, _restStart: false }))
+    if (!grouped) return smartSort(options, sortData).map(o => ({ ...o, _restStart: false }))
+    // Mixed list: pinned groups keep the caller's order at the top, everything
+    // ungrouped falls through to smart-sort below them. A fully-grouped list
+    // leaves `rest` empty, so callers that group every option are unaffected.
+    const pinned = options.filter(o => o.group)
+      .map(o => ({ ...o, _badge: undefined as SortBadge, _restStart: false }))
+    const rest = smartSort(options.filter(o => !o.group), sortData)
+      .map((o, i) => ({ ...o, _restStart: i === 0 && pinned.length > 0 }))
+    return [...pinned, ...rest]
   })()
 
   // Section dividers (only when showing sorted, no active search)
-  const showDividers = !!sortKey && !query && !grouped
+  const showDividers = !!sortKey && !query
   const showGroups = grouped && !query
 
   function select(id: string) {
@@ -167,7 +179,13 @@ export default function Combobox({
         rows.push(<Divider key={`g-${o.group}-${i}`} label={o.group} />)
         lastGroup = o.group
       }
-      if (showDividers && o._badge !== lastBadge) {
+      // First unpinned row when it carries no badge: the badge-transition
+      // below can't see this boundary (undefined → undefined), so the rest of
+      // the list would run straight on from the pinned section with no header.
+      if (showDividers && o._restStart && !o._badge) {
+        rows.push(<Divider key={`d-rest-${i}`} label="All" />)
+        lastBadge = o._badge
+      } else if (showDividers && o._badge !== lastBadge) {
         if (o._badge === 'recent')   rows.push(<Divider key={`d-recent-${i}`}   label="Recently Used" />)
         if (o._badge === 'frequent') rows.push(<Divider key={`d-frequent-${i}`} label="Frequently Used" />)
         if (!o._badge && (lastBadge === 'recent' || lastBadge === 'frequent'))

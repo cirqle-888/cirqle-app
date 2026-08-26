@@ -18,6 +18,7 @@ import { Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, Refre
 import { formatCurrency } from '@/lib/calculations/currency'
 import Link from 'next/link'
 import Combobox from '@/components/ui/combobox'
+import { buildServiceOptions } from '@/lib/tasks/service-options'
 import { TitleAutocomplete } from '@/components/tasks/title-autocomplete'
 import { normalizeTaskTitle } from '@/lib/utils/title-case'
 
@@ -55,6 +56,7 @@ import {
   logTaskAssignment,
   serverInlineTaskUpdate,
   checkPossibleDuplicateTask,
+  fetchClientPackages,
   fetchPendingSourcesForClient,
   type PendingSource,
 } from './actions'
@@ -857,6 +859,43 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
       return a.name.localeCompare(b.name)
     })
   }, [services, initialTasks])
+
+  // ── Committed services for the chosen client ───────────────────────────────
+  // Two kinds of commitment, strongest first:
+  //   package  — the service is a line in an ACTIVE client package, i.e. work
+  //              already contracted and owed
+  //   agreed   — the client has a negotiated rate for it (client_pricings)
+  // Both are far likelier picks than an arbitrary service, so they get pinned
+  // above the usage-sorted list rather than buried in it.
+  const [packageServiceIds, setPackageServiceIds] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    const clientId = form.client_id
+    if (!clientId || clientId === INTERNAL_CLIENT) { setPackageServiceIds(new Set()); return }
+    let cancelled = false
+    fetchClientPackages(clientId, form.task_date || null)
+      .then(pkgs => {
+        if (cancelled) return
+        setPackageServiceIds(new Set(pkgs.flatMap(p => p.serviceIds ?? [])))
+      })
+      .catch(() => { if (!cancelled) setPackageServiceIds(new Set()) })
+    return () => { cancelled = true }
+  }, [form.client_id, form.task_date])
+
+  const agreedServiceIds = useMemo(() => {
+    if (!form.client_id || form.client_id === INTERNAL_CLIENT) return new Set<string>()
+    return new Set(
+      clientPricings.filter(p => p.client_id === form.client_id).map(p => p.service_id),
+    )
+  }, [clientPricings, form.client_id])
+
+  // Committed services pinned on top; everything else keeps the existing
+  // recently/frequently-used ordering and badges untouched.
+  const serviceOptions = useMemo(
+    () => buildServiceOptions(sortedServices, {
+      packageServiceIds, agreedServiceIds,
+    }),
+    [sortedServices, packageServiceIds, agreedServiceIds],
+  )
 
   // Derived: selected service object
   const selectedService = services.find(s => s.id === form.service_id)
@@ -4624,11 +4663,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1.5">Service *</label>
                   <Combobox
-                    options={sortedServices.map(s => ({
-                      id: s.id,
-                      label: s.name,
-                      sub: initialTasks.some(t => t.service?.id === s.id) ? 'recent' : undefined
-                    }))}
+                    options={serviceOptions}
                     value={form.service_id}
                     onChange={handleServiceChange}
                     placeholder="Search service…"

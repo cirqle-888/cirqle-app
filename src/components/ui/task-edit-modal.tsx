@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import dynamic from 'next/dynamic'
 import { X, Trash2, BarChart2, Clock } from 'lucide-react'
-import { serverSaveTask, serverDeleteTask } from '@/app/(dashboard)/dashboard/tasks/actions'
+import { serverSaveTask, serverDeleteTask, fetchClientPackages } from '@/app/(dashboard)/dashboard/tasks/actions'
+import { buildServiceOptions } from '@/lib/tasks/service-options'
 import { ModalOverlay } from './modal-overlay'
 import AppSelect from './app-select'
 import Combobox from './combobox'
@@ -85,6 +86,28 @@ export function TaskEditModal({
     status: task.status ?? 'pending',
     package_id: (task.package_id as string | null) ?? null,
   })
+
+  // ── Committed services pinned in the picker ────────────────────────────────
+  // Same treatment as the Add Task form: what the client has actually
+  // contracted (active package) or negotiated a rate for leads the list, with
+  // the usual recently/frequently-used ordering below it.
+  const [packageServiceIds, setPackageServiceIds] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    const clientId = form.client_id
+    if (!clientId) { setPackageServiceIds(new Set()); return }
+    let cancelled = false
+    fetchClientPackages(clientId, form.task_date || null)
+      .then(pkgs => { if (!cancelled) setPackageServiceIds(new Set(pkgs.flatMap(p => p.serviceIds ?? []))) })
+      .catch(() => { if (!cancelled) setPackageServiceIds(new Set()) })
+    return () => { cancelled = true }
+  }, [form.client_id, form.task_date])
+
+  const serviceOptions = useMemo(() => buildServiceOptions(services, {
+    packageServiceIds,
+    agreedServiceIds: new Set(
+      clientPricings.filter(p => p.client_id === form.client_id).map(p => p.service_id),
+    ),
+  }), [services, clientPricings, form.client_id, packageServiceIds])
 
   // Derived billing ("Handling = 30% of posters"): the rule is edited here and
   // sent on save; the AMOUNT is always computed server-side from it.
@@ -277,7 +300,7 @@ export function TaskEditModal({
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1.5">Service</label>
                   <Combobox
-                    options={services.map(s => ({ id: s.id, label: s.name }))}
+                    options={serviceOptions}
                     value={form.service_id}
                     onChange={id => setForm(p => ({ ...p, service_id: id }))}
                     placeholder="Search service…"
