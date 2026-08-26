@@ -164,6 +164,17 @@ export const PERMS = {
   // module (migration 20260814110000).
   /** Open the Packages module: what's committed, delivered and still owed. */
   PACKAGES_VIEW:   'packages.view',
+  /**
+   * See the MONEY on a package: its agreed price, the overage rate, and the
+   * billing amounts on its linked tasks.
+   *
+   * Split out so "what did the client commit to, and how much is delivered"
+   * can be answered without exposing what they pay — a coordinator chasing
+   * coverage needs the counts, not the fee. Without this key the page still
+   * renders in full; the figures are stripped SERVER-SIDE and never reach the
+   * browser.
+   */
+  PACKAGES_VIEW_PRICING: 'packages.view_pricing',
   /** Create/edit/close packages and set their price and extra-work rate. */
   PACKAGES_MANAGE: 'packages.manage',
 

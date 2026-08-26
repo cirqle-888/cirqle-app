@@ -144,6 +144,7 @@ function tasksHref(
 
 export default function PackagesClient({
   initialPackages, loadError, clients, services, linkedTasks, billing, canManage,
+  canSeePricing,
 }: {
   initialPackages: PackageWithItems[]
   loadError: string | null
@@ -152,6 +153,9 @@ export default function PackagesClient({
   linkedTasks: LinkedTask[]
   billing: PackageBilling[]
   canManage: boolean
+  /** False → price and extra_task_price arrived as null (stripped server-side),
+   *  so every money line is omitted rather than rendering a misleading zero. */
+  canSeePricing: boolean
 }) {
   const router = useRouter()
   const { toasts, dismiss, success, error: toastError } = useToast()
@@ -390,7 +394,7 @@ export default function PackagesClient({
                     </div>
 
                     <div className="text-right shrink-0">
-                      <p className="text-sm font-bold">{money(p.currency, p.price)}</p>
+                      {canSeePricing && <p className="text-sm font-bold">{money(p.currency, p.price)}</p>}
                       <p className="text-[10px] text-muted-foreground">
                         {p.billing_type === 'monthly' ? 'per month' : 'one-time'}
                       </p>
@@ -465,9 +469,11 @@ export default function PackagesClient({
                           <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
                           <span>
                             {extras} task{extras === 1 ? '' : 's'} beyond what&rsquo;s included — billed separately
-                            {p.extra_task_price != null
-                              ? ` at ${money(p.currency, p.extra_task_price)} each`
-                              : ' at the normal price'}.
+                            {!canSeePricing
+                              ? '.'
+                              : p.extra_task_price != null
+                                ? ` at ${money(p.currency, p.extra_task_price)} each.`
+                                : ' at the normal price.'}
                           </span>
                         </p>
                       )}
@@ -602,7 +608,7 @@ export default function PackagesClient({
                           {tasks.length > 0 && <> · {tasks.length} task{tasks.length === 1 ? '' : 's'}</>}
                         </p>
                       </div>
-                      <p className="text-xs text-muted-foreground shrink-0">{money(p.currency, p.price)}</p>
+                      {canSeePricing && <p className="text-xs text-muted-foreground shrink-0">{money(p.currency, p.price)}</p>}
                       {canManage && (
                         <OverflowMenu
                           items={[

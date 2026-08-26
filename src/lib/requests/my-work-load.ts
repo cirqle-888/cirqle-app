@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isHidden } from '@/lib/requests/my-work'
+import { captionHtmlToText } from '@/lib/social/plan'
 
 /**
  * The one query pair behind My Work, shared by the page (server component) and
@@ -83,9 +84,15 @@ export async function loadMyWork(
         const s = Array.isArray(it.service) ? it.service[0] : it.service
         const task = Array.isArray(it.task) ? it.task[0] : it.task
         const live = task && !task.deleted_at ? task : null
+        // The calendar caption is RICH TEXT — it comes out as
+        // "Fragrance,<br><b>Golden Glow</b>". My Work renders the brief as
+        // plain text (deliberately: a designer's card is not a place to
+        // execute stored markup), so it is flattened here rather than shown
+        // with its tags visible.
+        const caption = captionHtmlToText(it.caption).trim()
         rows.push({
           id: it.id, source: 'plan', ref_no: null, title: it.title,
-          description: it.caption || it.notes || null,
+          description: caption || it.notes || null,
           // No status of its own — the linked task's, or none at all.
           status: live?.status ?? '',
           due_date: it.scheduled_date, priority: null, created_at: it.created_at,

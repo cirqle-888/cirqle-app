@@ -93,15 +93,34 @@ export default async function PackagesPage() {
     billing = [...byPackage.values()]
   } catch { /* invoice_items.package_id not migrated yet */ }
 
+  // ── Price stripping ────────────────────────────────────────────────────────
+  // Done HERE, on the server, not by hiding fields in the UI: a figure removed
+  // with CSS is still in the page payload and readable by anyone who opens
+  // devtools. Without packages.view_pricing the numbers never leave the server.
+  //
+  // Managing implies pricing — you cannot meaningfully edit a package you are
+  // not allowed to see the price of, and the edit form would post back a zero.
+  const canSeePricing = isAdmin || canManage || userCanSee(me, PERMS.PACKAGES_VIEW_PRICING)
+
+  const rawPackages = packagesRes.ok ? (packagesRes.data ?? []) : []
+  const packages = canSeePricing
+    ? rawPackages
+    : rawPackages.map(p => ({ ...p, price: null, extra_task_price: null }))
+
+  const tasksForClient = canSeePricing
+    ? (linkedTasks ?? [])
+    : (linkedTasks ?? []).map((t: any) => ({ ...t, billing_amount: null }))
+
   return (
     <PackagesClient
       billing={billing}
-      initialPackages={packagesRes.ok ? (packagesRes.data ?? []) : []}
+      initialPackages={packages as never[]}
       loadError={packagesRes.ok ? null : (packagesRes.error ?? null)}
       clients={(clientsRes.data ?? []) as { id: string; name: string; code: string | null; is_active: boolean | null }[]}
       services={(servicesRes.data ?? []) as { id: string; name: string; is_active: boolean | null }[]}
-      linkedTasks={(linkedTasks ?? []) as never[]}
+      linkedTasks={tasksForClient as never[]}
       canManage={canManage}
+      canSeePricing={canSeePricing}
     />
   )
 }

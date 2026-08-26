@@ -940,8 +940,21 @@ export default function SocialCalendarClient({
     router.refresh()
   }
 
+  /**
+   * Is this saved item COMMITTED work rather than a rough idea?
+   *
+   * A date and a named designer together mean someone has decided this is
+   * happening and who is doing it — which is exactly when it should stop
+   * living only on the calendar. An undated Idea Board scribble has neither,
+   * so brainstorming never leaks into the client-facing Requests inbox.
+   */
+  function isCommitted(form: ItemInput): boolean {
+    return !!form.scheduledDate && !!form.assignedEmployeeId && !!form.title?.trim()
+  }
+
   async function submitItem() {
     if (!selected || !itemModal) return
+    const wasUnrouted = itemModal.mode === 'add' || (editingItem ? isUnrouted(editingItem) : false)
     setSavingItem(true)
     const res = itemModal.mode === 'add'
       ? await addCalendarItem(selected.id, itemForm)
@@ -953,6 +966,30 @@ export default function SocialCalendarClient({
     // showing a plain success while the planner's board went nowhere.
     if (res.warning) toast.toastError('Saved with missing data', res.warning)
     else toast.success(itemModal.mode === 'add' ? 'Item planned' : 'Item updated')
+
+    // ── Auto-push ────────────────────────────────────────────────────────────
+    // Committed work goes to Requests without anyone pressing a second button,
+    // so the same job is never described twice. Only for items that were not
+    // already routed — re-pushing an item that has a request would create a
+    // duplicate of the very thing this is meant to prevent.
+    //
+    // BEST EFFORT ON PURPOSE. The push needs requests.manage (createManualRequest
+    // guards it independently), which some planner roles do not hold — the
+    // Task Manager designation is one. A failure there must not look like the
+    // save failed, because it did not: the item is safely planned either way,
+    // and "Send to Requests" is still there to press by hand.
+    const newId = itemModal.mode === 'add' ? (res as any)?.data?.id : itemModal.itemId
+    if (wasUnrouted && newId && isCommitted(itemForm)) {
+      const pushRes = await pushItemsToRequests(selected.id, [newId])
+      if (pushRes.ok && pushRes.data?.pushed) {
+        toast.success('Sent to Requests', 'It has a date and a designer, so it went to the inbox automatically.')
+      } else if (!pushRes.ok) {
+        toast.info(
+          'Left as planned',
+          'It could not be sent to Requests automatically — open it and use Send to Requests.',
+        )
+      }
+    }
     router.refresh()
   }
 

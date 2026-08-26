@@ -7,15 +7,22 @@ import {
   useDraggable, useDroppable, closestCorners, type DragEndEvent,
 } from '@dnd-kit/core'
 import {
-  LayoutGrid, CalendarDays, List, Loader2, Check, ChevronRight, CircleAlert,
+  LayoutGrid, CalendarDays, List, Loader2, Check, ChevronRight, CircleAlert, X as XIcon,
 } from 'lucide-react'
+import dynamicImport from 'next/dynamic'
 import Header from '@/components/layout/header'
+import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import {
   WORK_STAGES, STAGE_LABEL, STAGE_HINT, STAGE_CHIP, stageOf, stageOfPlan, canMove,
   isPending, moveRefusalReason, type WorkStage,
 } from '@/lib/requests/my-work'
 import { moveMyWork, type MyWorkRow } from './actions'
+
+const DiscussButton = dynamicImport(
+  () => import('@/components/chat/discuss-button').then(m => m.DiscussButton),
+  { ssr: false },
+)
 
 /**
  * One stage for a row from either queue. A request carries its own status; a
@@ -75,11 +82,111 @@ function Card({ row, dragging }: { row: MyWorkRow; dragging?: boolean }) {
   )
 }
 
-function DraggableCard({ row, disabled }: { row: MyWorkRow; disabled?: boolean }) {
+/**
+ * What a designer actually needs from a card: the brief, and the references.
+ *
+ * Deliberately read-only and deliberately small. Everything a manager would
+ * want here — reassigning, re-pricing, changing dates, editing the brief — is
+ * absent, because a designer opening their own work should be reading it, not
+ * navigating around edit controls that would refuse them anyway. The one thing
+ * they CAN do is say something, via Discuss.
+ */
+function CardDetail({ row, onClose }: { row: MyWorkRow; onClose: () => void }) {
+  const due = dueLabel(row.due_date)
+  // Any http(s) URL in the brief is a reference worth showing as a link rather
+  // than as raw text buried in a paragraph.
+  const links = useMemo(() => {
+    const out = (row.description || '').match(/https?:\/\/[^\s<>"')]+/g) ?? []
+    return [...new Set(out)]
+  }, [row.description])
+  const images = useMemo(
+    () => links.filter(u => /\.(png|jpe?g|gif|webp|avif)(\?|$)/i.test(u)),
+    [links],
+  )
+
+  return (
+    <ModalOverlay onClose={onClose} sheetOnMobile>
+      <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col min-h-0">
+        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-border shrink-0">
+          <div className="min-w-0">
+            <h2 className="font-semibold leading-snug break-words">{row.title}</h2>
+            <div className="flex flex-wrap items-center gap-1.5 text-[11px] mt-1.5">
+              <span className={`px-1.5 py-0.5 rounded-full border ${STAGE_CHIP[rowStage(row)]}`}>
+                {STAGE_LABEL[rowStage(row)]}
+              </span>
+              {row.client_name && <span className="text-muted-foreground">{row.client_name}</span>}
+              {row.service_name && <span className="text-primary">{row.service_name}</span>}
+              {due && <span className={`px-1.5 py-0.5 rounded-full border ${due.tone}`}>{due.text}</span>}
+            </div>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground shrink-0">
+            <XIcon className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="px-5 py-4 space-y-4 overflow-y-auto flex-1 min-h-0">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1.5">What to make</p>
+            {row.description?.trim()
+              ? <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">{row.description}</p>
+              : <p className="text-sm text-muted-foreground">No brief was written for this one.</p>}
+          </div>
+
+          {images.length > 0 && (
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1.5">References</p>
+              <div className="grid grid-cols-2 gap-2">
+                {images.map(u => (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <a key={u} href={u} target="_blank" rel="noopener noreferrer" className="block rounded-lg overflow-hidden border border-border">
+                    <img src={u} alt="Reference" className="w-full h-28 object-cover" loading="lazy" />
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {links.length > images.length && (
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1.5">Links</p>
+              <div className="space-y-1">
+                {links.filter(u => !images.includes(u)).map(u => (
+                  <a key={u} href={u} target="_blank" rel="noopener noreferrer"
+                     className="block text-xs text-primary hover:underline truncate">{u}</a>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 px-5 py-4 border-t border-border shrink-0">
+          {/* The only write a designer gets here — and it is a conversation,
+              not an edit. Suggestions belong beside the work, not in a form. */}
+          {row.source === 'request' && (
+            <DiscussButton entityType="request" entityId={row.id} label="Ask / suggest" panelTitle={row.title} />
+          )}
+          {row.source === 'plan' && (
+            <DiscussButton entityType="plan_item" entityId={row.id} label="Ask / suggest" panelTitle={row.title} />
+          )}
+          <span className="flex-1" />
+          <button onClick={onClose} className="bg-secondary text-sm font-medium px-4 py-2 rounded-lg hover:bg-secondary/80">Close</button>
+        </div>
+      </div>
+    </ModalOverlay>
+  )
+}
+
+function DraggableCard({ row, disabled, onOpen }: {
+  row: MyWorkRow; disabled?: boolean; onOpen: (r: MyWorkRow) => void
+}) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: row.id, disabled })
   return (
     <div
       ref={setNodeRef} {...attributes} {...listeners}
+      // onClick, not onPointerUp: dnd-kit's PointerSensor has a 6px activation
+      // distance, so a real drag never fires a click and this cannot open the
+      // brief every time a card is moved.
+      onClick={() => { if (!isDragging) onOpen(row) }}
       style={transform ? { transform: `translate(${transform.x}px, ${transform.y}px)`, zIndex: 60, position: 'relative' } : undefined}
       className={`${isDragging ? 'opacity-90 cursor-grabbing' : disabled ? '' : 'cursor-grab'} touch-none`}
     >
@@ -88,10 +195,11 @@ function DraggableCard({ row, disabled }: { row: MyWorkRow; disabled?: boolean }
   )
 }
 
-function Column({ stage, rows, busyId, totalCount, footer }: {
+function Column({ stage, rows, busyId, totalCount, footer, onOpen }: {
   stage: WorkStage
   rows: MyWorkRow[]
   busyId: string | null
+  onOpen: (r: MyWorkRow) => void
   /** Set when `rows` is a capped preview — the badge must show the real total. */
   totalCount?: number
   footer?: React.ReactNode
@@ -111,7 +219,7 @@ function Column({ stage, rows, busyId, totalCount, footer }: {
       <div className="space-y-2 flex-1">
         {rows.map(r => (
           <div key={r.id} className="relative">
-            <DraggableCard row={r} disabled={busyId === r.id} />
+            <DraggableCard row={r} disabled={busyId === r.id} onOpen={onOpen} />
             {busyId === r.id && (
               <div className="absolute inset-0 grid place-items-center rounded-xl bg-card/70">
                 <Loader2 className="w-4 h-4 animate-spin text-primary" />
@@ -134,6 +242,7 @@ export default function MyWorkClient({ initialRows, firstName }: Props) {
   const [rows, setRows] = useState(initialRows)
   const [view, setView] = useState<'board' | 'calendar' | 'list'>('board')
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [openRow, setOpenRow] = useState<MyWorkRow | null>(null)
 
   // A touch sensor with a hold delay, not a raw pointer sensor: on a phone the
   // board scrolls, and without the delay every attempt to scroll a column
@@ -308,6 +417,7 @@ export default function MyWorkClient({ initialRows, firstName }: Props) {
               {WORK_STAGES.map(s => (
                 <Column
                   key={s} stage={s}
+                  onOpen={setOpenRow}
                   rows={s === 'done' ? doneShown : byStage[s]}
                   totalCount={s === 'done' ? byStage.done.length : undefined}
                   busyId={busyId}
@@ -330,8 +440,10 @@ export default function MyWorkClient({ initialRows, firstName }: Props) {
       ) : view === 'calendar' ? (
         <CalendarView rows={visibleRows} />
       ) : (
-        <ListView rows={visibleRows} onMove={apply} busyId={busyId} />
+        <ListView rows={visibleRows} onMove={apply} busyId={busyId} onOpen={setOpenRow} />
       )}
+
+      {openRow && <CardDetail row={openRow} onClose={() => setOpenRow(null)} />}
 
       <ToastContainer toasts={toast.toasts} onDismiss={toast.dismiss} />
     </div>
@@ -407,10 +519,11 @@ function CalendarView({ rows }: { rows: MyWorkRow[] }) {
 }
 
 /** Flat list with an explicit next-step button — the no-dragging path. */
-function ListView({ rows, onMove, busyId }: {
+function ListView({ rows, onMove, busyId, onOpen }: {
   rows: MyWorkRow[]
   onMove: (id: string, to: WorkStage) => void
   busyId: string | null
+  onOpen: (r: MyWorkRow) => void
 }) {
   // Stage first, due date second. The incoming order is purely by date, which
   // interleaves finished work through the list — so the thing you have to do
@@ -430,7 +543,7 @@ function ListView({ rows, onMove, busyId }: {
         const due = dueLabel(r.due_date)
         return (
           <div key={r.id} className="rounded-xl border border-border bg-card p-3 flex items-center gap-3 flex-wrap">
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0 flex-1 cursor-pointer" onClick={() => onOpen(r)}>
               <p className="text-sm font-medium break-words">{r.title}</p>
               <div className="flex flex-wrap items-center gap-1.5 text-[11px] mt-1">
                 <span className={`px-1.5 py-0.5 rounded-full border ${STAGE_CHIP[stage]}`}>{STAGE_LABEL[stage]}</span>
