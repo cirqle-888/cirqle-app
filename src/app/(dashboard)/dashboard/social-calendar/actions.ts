@@ -15,7 +15,7 @@
  */
 
 import { revalidatePath, revalidateTag } from 'next/cache'
-import { COMPANY_SETTINGS_TAG } from '@/lib/settings/company-settings'
+import { COMPANY_SETTINGS_TAG, getCompanySettings } from '@/lib/settings/company-settings'
 import { resolveImageExt, IMAGE_UPLOAD_ERROR, IMAGE_EXT_BY_TYPE, MAX_IMAGE_BYTES } from '@/lib/uploads'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission } from '@/lib/permissions/check'
@@ -26,7 +26,7 @@ import { setRequestStatus } from '@/lib/requests/core'
 import {
   CONTENT_TYPES, PLATFORMS, composeRequestDescription, buildSocialMeta,
   isTerminalRequestStatus, isClosedRequestStatus, suggestServiceId,
-  sanitizeCaptionHtml, captionHtmlToText, sanitizeCaptionCanvas,
+  sanitizeCaptionHtml, captionHtmlToText, sanitizeCaptionCanvas, dueDateForPublish,
 } from '@/lib/social/plan'
 import { todayISO } from '@/lib/utils/local-date'
 
@@ -143,6 +143,35 @@ export async function deleteSocialCalendar(id: string): Promise<ActionResult> {
 // the client falls back to a service-name keyword guess for unmapped types.
 
 const SERVICE_MAP_KEY = 'social_content_type_services'
+
+/**
+ * Working days between "design is due" and "the post goes live".
+ *
+ * A post dated 15 August is a PUBLISH date, but the design has to be finished
+ * before that — an Independence Day creative due on Independence Day is
+ * already late. Without this the pushed request inherited the publish date as
+ * its due date, so every seasonal piece looked on time right up to the moment
+ * it wasn't.
+ *
+ * 0 keeps the old behaviour exactly, which is why it is the default.
+ */
+const LEAD_DAYS_KEY = 'social_lead_days'
+
+export async function saveSocialLeadDays(days: number): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.SOCIAL_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  // Clamped, not validated-and-rejected: the field is a planning convenience,
+  // and a silly number should be tamed rather than turned into an error.
+  const clean = Math.max(0, Math.min(60, Math.round(Number(days) || 0)))
+  const admin = createAdminClient()
+  const { error } = await admin.from('company_settings')
+    .upsert({ key: LEAD_DAYS_KEY, value: String(clean) }, { onConflict: 'key' })
+  if (error) return { ok: false, error: error.message }
+  revalidateTag(COMPANY_SETTINGS_TAG, 'max')
+  revalidatePath(REVALIDATE)
+  return { ok: true }
+}
+
 
 export async function saveContentTypeServiceMap(
   map: Record<string, string | null>,
@@ -890,6 +919,14 @@ export async function pushItemsToRequests(
   let pushed = 0, skipped = 0, failed = 0
   let firstError: string | undefined
 
+  // Read once for the whole batch — a shared, cached settings lookup, not one
+  // round-trip per item.
+  let leadDays = 0
+  try {
+    const settings = await getCompanySettings()
+    leadDays = Math.max(0, Math.min(60, parseInt(settings[LEAD_DAYS_KEY] ?? '0', 10) || 0))
+  } catch { /* unset — no lead time, the old behaviour */ }
+
   for (const item of (items || []) as any[]) {
     if (item.request_id || item.status !== 'planned') { skipped++; continue }
 
@@ -905,7 +942,9 @@ export async function pushItemsToRequests(
         captionCanvas: sanitizeCaptionCanvas(item.caption_canvas),
       }),
       isPlanned: true,
-      dueDate: item.scheduled_date,
+      // The DESIGNER's deadline, not the publish date. With a lead time set,
+      // a 15 August post is due on the 13th so there is room to review it.
+      dueDate: dueDateForPublish(item.scheduled_date, leadDays),
       // The item's chosen service rides into the request so calendar work gets
       // the same service-based pricing/routing as directly-created requests.
       serviceId: item.service_id || null,

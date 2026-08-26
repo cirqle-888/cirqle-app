@@ -3,7 +3,7 @@ import {
   composeRequestDescription, buildSocialMeta, resolveItemProgress, platformLabels,
   isTerminalRequestStatus, isClosedRequestStatus, contentTypeWithVariants,
   sanitizeCaptionHtml, captionHtmlToText, formatShortDateRange,
-  sanitizeCaptionCanvas, canvasToText, isUnrouted, canPullBack,
+  sanitizeCaptionCanvas, canvasToText, isUnrouted, canPullBack, dueDateForPublish,
 } from './plan'
 
 describe('sanitizeCaptionHtml', () => {
@@ -488,5 +488,34 @@ describe('canPullBack', () => {
 
   it('there is nothing to pull back from an unrouted item', () => {
     expect(canPullBack({ status: 'planned' })).toBe(false)
+  })
+})
+
+describe('dueDateForPublish', () => {
+  it('a post goes live on the 15th but is DUE earlier', () => {
+    // The case that motivated it: an Independence Day creative due on
+    // Independence Day leaves no room to review, fix or schedule it.
+    expect(dueDateForPublish('2026-08-15', 2)).toBe('2026-08-13')
+  })
+
+  it('no lead time leaves the date exactly as it was', () => {
+    expect(dueDateForPublish('2026-08-15', 0)).toBe('2026-08-15')
+    expect(dueDateForPublish('2026-08-15', -3)).toBe('2026-08-15')
+  })
+
+  it('crosses month and year boundaries correctly', () => {
+    expect(dueDateForPublish('2026-09-01', 3)).toBe('2026-08-29')
+    expect(dueDateForPublish('2026-01-02', 5)).toBe('2025-12-28')
+    expect(dueDateForPublish('2026-03-01', 1)).toBe('2026-02-28')
+  })
+
+  it('an undated idea stays undated — lead time cannot invent a deadline', () => {
+    expect(dueDateForPublish(null, 5)).toBeNull()
+    expect(dueDateForPublish(undefined, 5)).toBeNull()
+  })
+
+  it('a malformed date is returned untouched rather than silently moved', () => {
+    expect(dueDateForPublish('not-a-date', 3)).toBe('not-a-date')
+    expect(dueDateForPublish('2026-08-15', NaN)).toBe('2026-08-15')
   })
 })

@@ -28,7 +28,7 @@ import {
 import {
   createSocialCalendar, updateSocialCalendar, deleteSocialCalendar,
   addCalendarItem, updateCalendarItem, deleteCalendarItem, pushItemsToRequests,
-  revertItemToPlanned, saveContentTypeServiceMap,
+  revertItemToPlanned, saveContentTypeServiceMap, saveSocialLeadDays,
   quickAddIdea, moveCalendarItem, getRefUploadUrl,
   type ItemInput,
 } from './actions'
@@ -677,13 +677,28 @@ export default function SocialCalendarClient({
     }
   }
 
+  // Lead time: how many days BEFORE the publish date the design is due.
+  const savedLeadDays = Math.max(0, parseInt(companySettings.social_lead_days ?? '0', 10) || 0)
+  const [leadDaysDraft, setLeadDaysDraft] = useState(String(savedLeadDays))
+
   async function submitServiceMap() {
     setSavingServiceMap(true)
     const res = await saveContentTypeServiceMap(serviceMapDraft)
+    // Saved together because they are set together, but reported apart — the
+    // mapping landing while the lead time silently did not would be worse than
+    // either failing outright.
+    const lead = await saveSocialLeadDays(Number(leadDaysDraft) || 0)
     setSavingServiceMap(false)
     if (!res.ok) { toast.toastError('Could not save the defaults', res.error); return }
+    if (!lead.ok) { toast.toastError('Defaults saved, but not the lead time', lead.error); return }
     setShowServiceDefaults(false)
-    toast.success('Service defaults saved', 'New items now preselect these services per content type.')
+    const n = Number(leadDaysDraft) || 0
+    toast.success(
+      'Service defaults saved',
+      n > 0
+        ? `New items preselect these services, and designs are due ${n} day${n === 1 ? '' : 's'} before the post date.`
+        : 'New items now preselect these services per content type.',
+    )
     router.refresh()
   }
   const [busy, setBusy] = useState<string | null>(null)   // 'push-all' | 'push:<id>' | 'delete:<id>' | 'archive'
@@ -1585,7 +1600,17 @@ export default function SocialCalendarClient({
                               <DraggableItem key={it.id} id={it.id} disabled={!canManage || !!it.request?.promoted_task_id}>
                                 <button
                                   onClick={e => { e.stopPropagation(); openEdit(it) }}
-                                  className={`w-full text-left rounded-md border px-1.5 py-1 text-[10px] leading-tight hover:opacity-80 ${isRange ? 'border-l-[3px]' : ''} ${CONTENT_TYPE_CHIP[it.content_type as keyof typeof CONTENT_TYPE_CHIP] ?? CONTENT_TYPE_CHIP.other}`}
+                                  // Content type answers "what is this" — useful while
+                                  // it is still work. Once the piece is FINISHED that
+                                  // question stops mattering and "is it done?" takes
+                                  // over, so a completed card reads green like the
+                                  // delivered chips instead of staying the same purple
+                                  // as something nobody has started.
+                                  className={`w-full text-left rounded-md border px-1.5 py-1 text-[10px] leading-tight hover:opacity-80 ${isRange ? 'border-l-[3px]' : ''} ${
+                                    progress === 'done' || progress === 'cancelled'
+                                      ? PROGRESS_CHIP[progress]
+                                      : CONTENT_TYPE_CHIP[it.content_type as keyof typeof CONTENT_TYPE_CHIP] ?? CONTENT_TYPE_CHIP.other
+                                  }`}
                                   title={`${it.title} — ${PROGRESS_LABEL[progress]}${isRange ? ` · ${formatShortDateRange(it.scheduled_date, it.scheduled_end_date)}` : ''}`}
                                 >
                                   <span className="flex items-center gap-1">
@@ -1810,6 +1835,32 @@ export default function SocialCalendarClient({
               <button onClick={() => setShowServiceDefaults(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
             </div>
             <div className="px-5 py-4 space-y-2.5 overflow-y-auto flex-1 min-h-0">
+              {/* Lead time — first, because it changes every future deadline
+                  while the mapping below only changes which service is picked. */}
+              <div className="rounded-lg border border-border bg-secondary/40 p-3 mb-3">
+                <label className="block text-sm font-medium mb-1">Design lead time</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number" min={0} max={60}
+                    value={leadDaysDraft}
+                    onChange={e => setLeadDaysDraft(e.target.value)}
+                    className="w-20 bg-card border border-border rounded-lg px-2.5 py-1.5 text-sm focus:outline-none"
+                  />
+                  <span className="text-sm text-muted-foreground">days before the post date</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-2">
+                  A calendar date is when the post goes LIVE. This is how long before that the
+                  design must be finished, and it sets the due date on every request sent from
+                  here.{' '}
+                  {(Number(leadDaysDraft) || 0) > 0
+                    ? <>A 15 August post would be due{' '}
+                        <strong className="text-foreground">
+                          {new Date(`2026-08-15T00:00:00`).toLocaleDateString('en-CA') &&
+                            (() => { const d = new Date('2026-08-15T00:00:00'); d.setDate(d.getDate() - (Number(leadDaysDraft) || 0)); return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' }) })()}
+                        </strong>.</>
+                    : <>Leave at 0 and the due date stays the post date itself.</>}
+                </p>
+              </div>
               {CONTENT_TYPES.map(t => (
                 <div key={t} className="grid grid-cols-[7rem_1fr] items-center gap-3">
                   <span className="text-sm text-muted-foreground">{CONTENT_TYPE_LABEL[t]}</span>

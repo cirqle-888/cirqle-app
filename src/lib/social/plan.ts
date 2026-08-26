@@ -624,3 +624,26 @@ export function canPullBack(item: RoutableItem): boolean {
   if (item.request?.promoted_task) return false
   return !['completed', 'delivered'].includes(item.request?.status ?? '')
 }
+
+// ── Lead time ────────────────────────────────────────────────────────────────
+
+/**
+ * Publish date minus the lead time — the date the DESIGNER works to.
+ *
+ * A calendar date is when the post GOES LIVE. The creative has to be finished
+ * before then: an Independence Day piece due on Independence Day is already
+ * late, because there is no room left to review it, fix it, or schedule it.
+ *
+ * Pure and day-based (no timezone maths beyond the local calendar day) so the
+ * planner, the pushed request and any test all land on the same date. Returns
+ * the publish date unchanged when there is no lead time or the input is not a
+ * real date — a bad value must never silently move a deadline.
+ */
+export function dueDateForPublish(publish: string | null | undefined, leadDays: number): string | null {
+  if (!publish) return null
+  if (!Number.isFinite(leadDays) || leadDays <= 0) return publish
+  const d = new Date(`${publish}T00:00:00`)
+  if (isNaN(d.getTime())) return publish
+  d.setDate(d.getDate() - Math.round(leadDays))
+  return d.toLocaleDateString('en-CA')
+}
