@@ -117,6 +117,16 @@ export const PERMS = {
   REQUESTS_REVIEW:        'requests.review',
   REQUESTS_START:         'requests.start',
   REQUESTS_MANAGE:        'requests.manage',
+  /**
+   * A designer's own queue (the My Work board) — see requests ASSIGNED TO YOU
+   * and advance them through To Do → Working → Delivered → Done.
+   *
+   * Deliberately not a weaker REQUESTS_MANAGE: it grants no sight of anyone
+   * else's requests, and the action behind it re-checks assignment per row and
+   * refuses cancel / reject / archive / reassign. Holding this does NOT imply
+   * requests.view — the inbox stays closed.
+   */
+  REQUESTS_WORK_OWN:      'requests.work_own',
   REQUESTS_ACTIVITY_VIEW: 'requests.activity.view',
   INTAKE_LINKS_MANAGE:    'intake_links.manage',
   AGENCY_LINKS_MANAGE:    'agency_links.manage',
