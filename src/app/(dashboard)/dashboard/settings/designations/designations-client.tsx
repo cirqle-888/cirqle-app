@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Trash2, Save, Check, X, ChevronDown, ChevronLeft, ShieldAlert } from 'lucide-react'
+import { Plus, Trash2, Save, Check, X, ChevronDown, ChevronLeft, ShieldAlert, Search } from 'lucide-react'
 import { usePermissions } from '@/contexts/permission-context'
 import { CRITICAL_PERMS } from '@/lib/permissions/keys'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
@@ -113,8 +113,16 @@ export default function DesignationsClient(props: Props) {
   // into ~50% of an already-narrow screen. Defaults to 'list' so users see
   // the directory first, not the auto-selected detail.
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list')
+  const [designationQuery, setDesignationQuery] = useState('')
 
   const selected = designations.find(d => d.id === selectedId) ?? null
+
+  const visibleDesignations = useMemo(() => {
+    const q = designationQuery.trim().toLowerCase()
+    if (!q) return designations
+    return designations.filter(d =>
+      d.name.toLowerCase().includes(q) || (d.description ?? '').toLowerCase().includes(q))
+  }, [designations, designationQuery])
 
   // Group permissions by module, in the canonical order.
   const groupedPermissions = useMemo(() => {
@@ -284,11 +292,38 @@ export default function DesignationsClient(props: Props) {
           )}
         </div>
 
+        {/* Search — name AND description, because half these roles are found
+            by what they do ("cash book", "read-only") rather than by title. */}
+        <div className="px-3 pt-3">
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-muted-foreground/60 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <input
+              value={designationQuery}
+              onChange={e => setDesignationQuery(e.target.value)}
+              placeholder="Search designations…"
+              className="w-full bg-secondary border border-border rounded-lg pl-8 pr-7 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary/40"
+            />
+            {designationQuery && (
+              <button
+                onClick={() => setDesignationQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+        </div>
+
         <div className="md:flex-1 md:overflow-y-auto py-2 px-2 space-y-1">
           {designations.length === 0 && (
             <p className="text-xs text-muted-foreground px-3 py-4">No designations yet.</p>
           )}
-          {designations.map(d => {
+          {designations.length > 0 && visibleDesignations.length === 0 && (
+            <p className="text-xs text-muted-foreground px-3 py-4">
+              No designation matches &ldquo;{designationQuery}&rdquo;.
+            </p>
+          )}
+          {visibleDesignations.map(d => {
             const isSelected = d.id === selectedId
             const count = props.memberCounts[d.id] ?? 0
             return (
@@ -436,10 +471,32 @@ function DesignationDetail({
   onSaveMeta: (changes: { name?: string; description?: string }) => Promise<boolean>
   onDelete: () => void
 }) {
+  const [permQuery, setPermQuery] = useState('')
   const [editing, setEditing] = useState(false)
   const [nameDraft, setNameDraft] = useState(designation.name)
   const [descDraft, setDescDraft] = useState(designation.description ?? '')
   const [pending, startTransition] = useTransition()
+
+  // Matches on label, description OR key — a module survives only if at least
+  // one of its permissions matches, so empty modules do not clutter the hits.
+  const filteredModules = useMemo(() => {
+    const q = permQuery.trim().toLowerCase()
+    if (!q) return permissionsByModule
+    return permissionsByModule
+      .map(g => ({
+        ...g,
+        perms: g.perms.filter(p =>
+          p.label.toLowerCase().includes(q)
+          || (p.description ?? '').toLowerCase().includes(q)
+          || p.key.toLowerCase().includes(q)
+          || g.label.toLowerCase().includes(q)),
+      }))
+      .filter(g => g.perms.length > 0)
+  }, [permissionsByModule, permQuery])
+  const matchCount = useMemo(
+    () => filteredModules.reduce((n, g) => n + g.perms.length, 0),
+    [filteredModules],
+  )
 
   const canEditMeta = canManage && !designation.is_admin && !designation.is_system
 
@@ -574,9 +631,40 @@ function DesignationDetail({
               </div>
             )
           })()}
-          {permissionsByModule.map(group => (
+          {/* Permission search. With well over a hundred keys across a dozen
+              modules, finding one by scrolling is the slow part of granting
+              access — and the KEY is searchable too, since that is what error
+              messages and migrations name ("needs requests.manage"). */}
+          <div className="relative">
+            <Search className="w-4 h-4 text-muted-foreground/60 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              value={permQuery}
+              onChange={e => setPermQuery(e.target.value)}
+              placeholder="Search permissions — name, description or key…"
+              className="w-full bg-card border border-border rounded-xl pl-9 pr-8 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary/40"
+            />
+            {permQuery && (
+              <button
+                onClick={() => setPermQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+          {permQuery.trim() && (
+            <p className="text-xs text-muted-foreground -mt-3">
+              {matchCount === 0
+                ? `Nothing matches “${permQuery}”.`
+                : `${matchCount} permission${matchCount === 1 ? '' : 's'} in ${filteredModules.length} module${filteredModules.length === 1 ? '' : 's'}.`}
+            </p>
+          )}
+          {filteredModules.map(group => (
             <PermissionModuleCard
               key={group.module}
+              /* Searching means you want to SEE the hits, so a filtered card
+                 opens itself rather than making you expand it again. */
+              forceOpen={!!permQuery.trim()}
               label={group.label}
               perms={group.perms}
               allowedIds={allowedIds}
@@ -614,6 +702,7 @@ function PermissionModuleCard({
   criticalPermIds,
   canManage,
   onToggle,
+  forceOpen = false,
 }: {
   label: string
   perms: Permission[]
@@ -621,8 +710,13 @@ function PermissionModuleCard({
   criticalPermIds: Set<string>
   canManage: boolean
   onToggle: (permId: string, next: boolean) => void
+  /** While a search is active the card shows its hits regardless of the
+   *  user's own collapse state — and gets it back when the search clears. */
+  forceOpen?: boolean
 }) {
-  const [open, setOpen] = useState(true)
+  const [collapsed, setCollapsed] = useState(false)
+  const open = forceOpen || !collapsed
+  const setOpen = (fn: (o: boolean) => boolean) => setCollapsed(c => !fn(!c))
   const allowedCount = perms.reduce((n, p) => n + (allowedIds.has(p.id) ? 1 : 0), 0)
   const criticalAllowed = perms.reduce((n, p) => n + (allowedIds.has(p.id) && criticalPermIds.has(p.id) ? 1 : 0), 0)
 
