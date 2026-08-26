@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { ChevronRight, Home, ChevronDown, UserCircle, Sparkles, MessageCircle } from 'lucide-react'
-import { forwardRef, useState } from 'react'
+import { forwardRef, useState, useRef, useEffect } from 'react'
 import { usePermissions } from '@/contexts/permission-context'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { CommandPaletteTrigger } from '@/components/ui/command-palette'
@@ -130,6 +130,34 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
   const [profileOpen, setProfileOpen] = useState(false)
   const [showPwdModal, setShowPwdModal] = useState(false)
 
+  // Close on any click outside, and on Escape.
+  //
+  // This replaces a `fixed inset-0 z-40` backdrop that could never work: the
+  // header is `sticky top-0 z-30`, and sticky WITH a z-index creates a stacking
+  // context — so the backdrop was confined inside it and painted below the
+  // sidebar and chat launcher (both z-50) as well as the scroll container.
+  // Verified in the browser: elementFromPoint over the main content and over
+  // the sidebar returned page elements, never the backdrop, so the click had
+  // nothing to land on and the menu stayed open.
+  //
+  // A document listener has no stacking to lose. The ref is on the WRAPPER, so
+  // the trigger button counts as inside — otherwise mousedown would close the
+  // menu and the button's own onClick would immediately reopen it.
+  const profileRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!profileOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (!profileRef.current?.contains(e.target as Node)) setProfileOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setProfileOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [profileOpen])
+
   async function openAiCapture() {
     // Capture the user's copied WhatsApp/email text when the browser permits
     // it, but never block the universal input when clipboard access is denied.
@@ -173,7 +201,7 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
       <NotificationBell />
 
       {/* Profile Dropdown */}
-      <div className="relative ml-1">
+      <div className="relative ml-1" ref={profileRef}>
         <button 
           onClick={() => setProfileOpen(!profileOpen)}
           className="flex items-center gap-2 rounded-full hover:bg-secondary/80 p-1 pr-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary group"
@@ -189,7 +217,6 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
 
         {profileOpen && (
           <>
-            <div className="fixed inset-0 z-40" onClick={() => setProfileOpen(false)} />
             <div className="absolute right-0 top-full mt-2 w-64 bg-card border border-border shadow-xl shadow-black/5 rounded-xl p-2 z-50 animate-in fade-in zoom-in-95 duration-200">
               <div className="px-2 py-2 mb-2 border-b border-border/50">
                 <div className="font-semibold text-foreground text-sm truncate tracking-tight">{user.cqid ?? 'Account'}</div>
