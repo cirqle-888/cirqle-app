@@ -20,7 +20,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { MessageCircle, Bell, X, ArrowLeft, Send, Hash, Lock, ChevronRight } from 'lucide-react'
+import { MessageCircle, Bell, X, ArrowLeft, Send, Hash, Lock, ChevronRight, ChevronLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useVisibleInterval } from '@/lib/hooks/use-visible-interval'
 import { usePermissions } from '@/contexts/permission-context'
@@ -189,6 +189,47 @@ export function FloatingCommsWidget() {
   const [loadingThread, setLoadingThread] = useState(false)
   const [, startTransition] = useTransition()
   const [toast, setToast] = useState<{ title: string; body: string; onClick: () => void } | null>(null)
+
+  // ── Getting out of the way ─────────────────────────────────────────────────
+  // The launcher is fixed over the bottom-right corner, and nothing beneath it
+  // reserves that space — so whatever lands there (a Save button, the last row
+  // of a table, a day cell) is unclickable. Two escapes, because the annoyance
+  // comes in two forms:
+  //
+  //   scrolling  it slides away while the page moves and returns when you
+  //              stop, so reaching something under it is just a nudge of the
+  //              wheel rather than a fight.
+  //   parked     a deliberate collapse to a slim edge tab, remembered, for
+  //              people who want the corner back permanently.
+  const [parked, setParked] = useState(false)
+  const [scrolling, setScrolling] = useState(false)
+  useEffect(() => {
+    try {
+      setParked(localStorage.getItem('comms.parked') === '1')
+    } catch { /* private mode — stays visible */ }
+  }, [])
+  useEffect(() => {
+    // Capture phase: the app scrolls inner containers, not window, so a
+    // listener bound to window alone would never fire.
+    let t: ReturnType<typeof setTimeout>
+    const onScroll = () => {
+      setScrolling(true)
+      clearTimeout(t)
+      t = setTimeout(() => setScrolling(false), 700)
+    }
+    window.addEventListener('scroll', onScroll, true)
+    return () => { window.removeEventListener('scroll', onScroll, true); clearTimeout(t) }
+  }, [])
+  function togglePark() {
+    setParked(v => {
+      const next = !v
+      try { localStorage.setItem('comms.parked', next ? '1' : '0') } catch { /* ignore */ }
+      return next
+    })
+  }
+  // Never hide it while the panel is open — that would strand the only way to
+  // close the thing the user is actively reading.
+  const tucked = !open && (parked || scrolling)
 
   const activeIdRef = useRef<string | null>(null)
   const openRef = useRef(false)
@@ -455,22 +496,41 @@ export function FloatingCommsWidget() {
       )}
 
       {/* Launcher */}
-      <button
-        onClick={() => setOpen(o => !o)}
-        aria-label="Chat & alerts"
+      <div
         // data-chat-launcher: globals.css hides this while a modal is open —
         // it shares z-50 with the modal overlay and would otherwise cover the
         // bottom-right of any mobile sheet, i.e. its footer buttons.
         data-chat-launcher
-        className="fixed bottom-5 right-5 z-50 flex h-12 w-12 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-transform hover:scale-105"
+        className={`fixed bottom-5 right-5 z-50 flex items-center gap-1 transition-transform duration-200 ${
+          tucked ? 'translate-x-[calc(100%-0.75rem)]' : 'translate-x-0'
+        }`}
       >
-        {open ? <X className="h-5 w-5" /> : <MessageCircle className="h-5 w-5" />}
-        {!open && totalBadge > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
-            {totalBadge > 99 ? '99+' : totalBadge}
-          </span>
+        {/* Park / unpark. Hidden while the panel is open — the X inside the
+            panel is the close action there, and two dismissals side by side
+            would be a coin toss. */}
+        {!open && (
+          <button
+            onClick={togglePark}
+            aria-label={parked ? 'Show chat button' : 'Move chat button out of the way'}
+            title={parked ? 'Show chat & alerts' : 'Tuck out of the way'}
+            className="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow hover:text-foreground"
+          >
+            {parked ? <ChevronLeft className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          </button>
         )}
-      </button>
+        <button
+          onClick={() => { if (parked) togglePark(); else setOpen(o => !o) }}
+          aria-label="Chat & alerts"
+          className="relative flex h-12 w-12 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-transform hover:scale-105"
+        >
+          {open ? <X className="h-5 w-5" /> : <MessageCircle className="h-5 w-5" />}
+          {!open && totalBadge > 0 && (
+            <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+              {totalBadge > 99 ? '99+' : totalBadge}
+            </span>
+          )}
+        </button>
+      </div>
 
       {/* Panel */}
       {open && (
