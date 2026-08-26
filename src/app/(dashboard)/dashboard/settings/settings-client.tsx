@@ -921,6 +921,18 @@ export default function SettingsClient(props: Props) {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
               </svg>
             </a>
+            {/* Sits directly under Access & Roles because it answers the
+                question that page raises: you grant a designation some keys,
+                then want to know what that actually looks like to the person. */}
+            <a
+              href="/dashboard/settings/access-preview"
+              className="flex items-center justify-between w-full text-left px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors group"
+            >
+              <span>Access Preview</span>
+              <svg className="w-3 h-3 opacity-40 group-hover:opacity-70 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+              </svg>
+            </a>
             {/* Ownership Platform — revenue/profit share, incentives, bonuses.
                 Configuration lives here; the monthly ritual lives in
                 Finance → Months. */}

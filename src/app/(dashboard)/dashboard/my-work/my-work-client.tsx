@@ -184,7 +184,12 @@ export default function MyWorkClient({ initialRows, firstName }: Props) {
     // stage's default — they agree today, and if they ever stop, the board
     // should show the truth.
     setRows(prev => prev.map(r => r.id === id ? { ...r, status: res.data!.status } : r))
-    toast.success(`Moved to ${STAGE_LABEL[to]}`)
+    // Say when a task appeared. Starting work silently creating a billable
+    // record is exactly the kind of thing people should be told about, not
+    // discover later on the Tasks page.
+    if (res.data.warning) toast.toastError('Moved, but needs attention', res.data.warning)
+    else if (res.data.taskCreated) toast.success(`Moved to ${STAGE_LABEL[to]}`, 'A task was created for this work.')
+    else toast.success(`Moved to ${STAGE_LABEL[to]}`)
     router.refresh()
   }
 
