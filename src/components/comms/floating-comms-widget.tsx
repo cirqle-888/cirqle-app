@@ -20,7 +20,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { MessageCircle, Bell, X, ArrowLeft, Send, Hash, Lock, ChevronRight, ChevronLeft } from 'lucide-react'
+import { MessageCircle, Bell, X, ArrowLeft, Send, Hash, Lock, ChevronRight, ChevronLeft, Pin, PinOff } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useVisibleInterval } from '@/lib/hooks/use-visible-interval'
 import { usePermissions } from '@/contexts/permission-context'
@@ -230,6 +230,46 @@ export function FloatingCommsWidget() {
   // Never hide it while the panel is open — that would strand the only way to
   // close the thing the user is actively reading.
   const tucked = !open && (parked || scrolling)
+
+  // ── Dismissing the panel ───────────────────────────────────────────────────
+  // Clicking away closes it, which is what every popover in the app already
+  // does and what people try first. Pinning opts out — while reading a thread
+  // and working in the page at the same time, a panel that vanishes on the
+  // first click elsewhere is worse than one you have to close by hand.
+  const panelRef = useRef<HTMLDivElement>(null)
+  const [pinned, setPinned] = useState(false)
+  useEffect(() => {
+    try { setPinned(localStorage.getItem('comms.pinned') === '1') } catch { /* ignore */ }
+  }, [])
+  function togglePin() {
+    setPinned(v => {
+      const next = !v
+      try { localStorage.setItem('comms.pinned', next ? '1' : '0') } catch { /* ignore */ }
+      return next
+    })
+  }
+  useEffect(() => {
+    if (!open || pinned) return
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node | null
+      if (!t) return
+      // The launcher counts as inside: its own onClick toggles, and closing on
+      // mousedown here would fight that into a no-op.
+      if (panelRef.current?.contains(t)) return
+      if ((t as Element).closest?.('[data-chat-launcher]')) return
+      // A modal opened FROM the panel lives elsewhere in the DOM; closing the
+      // panel out from under it would be jarring.
+      if ((t as Element).closest?.('[data-modal-overlay]')) return
+      setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open, pinned])
 
   const activeIdRef = useRef<string | null>(null)
   const openRef = useRef(false)
@@ -534,7 +574,7 @@ export function FloatingCommsWidget() {
 
       {/* Panel */}
       {open && (
-        <div className="fixed bottom-20 right-5 z-50 flex h-[540px] max-h-[calc(100dvh-6rem)] w-[360px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl">
+        <div ref={panelRef} className="fixed bottom-20 right-5 z-50 flex h-[540px] max-h-[calc(100dvh-6rem)] w-[360px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl">
           {/* Tabs */}
           <div className="flex items-center border-b border-border">
             <button onClick={() => { setTab('chat'); setActiveId(null); setClientId(null) }}
@@ -546,6 +586,14 @@ export function FloatingCommsWidget() {
               className={`flex flex-1 items-center justify-center gap-1.5 py-2.5 text-sm font-medium ${tab === 'alerts' ? 'border-b-2 border-foreground text-foreground' : 'text-muted-foreground'}`}>
               <Bell className="h-4 w-4" /> Alerts
               {notifUnread > 0 && <span className="rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">{notifUnread}</span>}
+            </button>
+            <button
+              onClick={togglePin}
+              aria-pressed={pinned}
+              title={pinned ? 'Unpin — close when you click away' : 'Keep open while you work'}
+              className={`px-2.5 py-2.5 transition-colors ${pinned ? 'text-foreground' : 'text-muted-foreground/50 hover:text-foreground'}`}
+            >
+              {pinned ? <Pin className="h-4 w-4" /> : <PinOff className="h-4 w-4" />}
             </button>
           </div>
 
