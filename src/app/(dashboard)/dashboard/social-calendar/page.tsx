@@ -244,9 +244,52 @@ export default async function SocialCalendarPage({
       const nextMonth = new Date(d.getFullYear(), d.getMonth() + 1, 1)
         .toLocaleDateString('en-CA')
 
+      // ── Which services count as "social"? ──────────────────────────────────
+      // Client + month alone is not enough: a client buys packaging, logos and
+      // print from the same agency, and none of that belongs on a SOCIAL
+      // calendar. (It showed "2 Package Designs — Product Packaging Design",
+      // which is exactly the noise this filter removes.)
+      //
+      // The allowed set is DERIVED, not hardcoded to a category name that a
+      // rename would break: take the services this calendar demonstrably deals
+      // in — the team's content-type→service defaults, plus whatever its own
+      // items use — and allow everything sharing their category. So mapping
+      // "post → Social Media Poster" admits the whole Social Media category
+      // (stories, DPs, covers) and still excludes Print & Collateral.
+      const settings: Record<string, string> = await getCompanySettings()
+      let seedServiceIds: string[] = []
+      try {
+        if (settings.social_content_type_services) {
+          seedServiceIds = Object.values(
+            JSON.parse(settings.social_content_type_services) as Record<string, string>,
+          ).filter(Boolean)
+        }
+      } catch { /* unset or malformed */ }
+      for (const it of items as any[]) if (it.service_id) seedServiceIds.push(it.service_id)
+      seedServiceIds = [...new Set(seedServiceIds)]
+
+      let allowedServiceIds: Set<string> | null = null
+      if (seedServiceIds.length) {
+        const { data: seedRows } = await admin
+          .from('services').select('id, category_id').in('id', seedServiceIds)
+        const cats = [...new Set((seedRows ?? []).map((r: any) => r.category_id).filter(Boolean))]
+        if (cats.length) {
+          const { data: sameCat } = await admin
+            .from('services').select('id').in('category_id', cats)
+          allowedServiceIds = new Set([
+            ...seedServiceIds,
+            ...(sameCat ?? []).map((r: any) => r.id),
+          ])
+        } else {
+          // Services exist but carry no category — fall back to exactly the
+          // seeds rather than opening the overlay to everything.
+          allowedServiceIds = new Set(seedServiceIds)
+        }
+      }
+
       const { data: done } = await admin
         .from('tasks')
-        .select('id, task_number, title, task_date, status, service:services(name)')
+        .select('id, task_number, title, task_date, status, service_id, service:services(name)')
         .eq('client_id', selectedCalendar.client_id)
         .is('deleted_at', null)
         .in('status', ['delivered', 'done', 'invoiced', 'paid'])
@@ -266,6 +309,9 @@ export default async function SocialCalendarPage({
 
       deliveredTasks = (done ?? [])
         .filter((t: any) => !onPlan.has(t.id))
+        // A task with no service cannot be judged social, and "unknown" is not
+        // evidence — leaving it in is how the packaging job got here.
+        .filter((t: any) => !allowedServiceIds || (t.service_id && allowedServiceIds.has(t.service_id)))
         .map((t: any) => {
           const s = Array.isArray(t.service) ? t.service[0] : t.service
           return {
