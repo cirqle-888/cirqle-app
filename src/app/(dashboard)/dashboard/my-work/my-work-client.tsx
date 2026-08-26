@@ -67,7 +67,14 @@ function DraggableCard({ row, disabled }: { row: MyWorkRow; disabled?: boolean }
   )
 }
 
-function Column({ stage, rows, busyId }: { stage: WorkStage; rows: MyWorkRow[]; busyId: string | null }) {
+function Column({ stage, rows, busyId, totalCount, footer }: {
+  stage: WorkStage
+  rows: MyWorkRow[]
+  busyId: string | null
+  /** Set when `rows` is a capped preview — the badge must show the real total. */
+  totalCount?: number
+  footer?: React.ReactNode
+}) {
   const { setNodeRef, isOver } = useDroppable({ id: stage })
   return (
     <div
@@ -77,7 +84,7 @@ function Column({ stage, rows, busyId }: { stage: WorkStage; rows: MyWorkRow[]; 
     >
       <div className="flex items-center justify-between mb-1">
         <span className="text-sm font-semibold">{STAGE_LABEL[stage]}</span>
-        <span className={`text-[11px] px-1.5 py-0.5 rounded-full border ${STAGE_CHIP[stage]}`}>{rows.length}</span>
+        <span className={`text-[11px] px-1.5 py-0.5 rounded-full border ${STAGE_CHIP[stage]}`}>{totalCount ?? rows.length}</span>
       </div>
       <p className="text-[11px] text-muted-foreground mb-3">{STAGE_HINT[stage]}</p>
       <div className="space-y-2 flex-1">
@@ -95,6 +102,7 @@ function Column({ stage, rows, busyId }: { stage: WorkStage; rows: MyWorkRow[]; 
           <p className="text-[11px] text-muted-foreground/60 py-6 text-center">Nothing here</p>
         )}
       </div>
+      {footer}
     </div>
   )
 }
@@ -114,12 +122,44 @@ export default function MyWorkClient({ initialRows, firstName }: Props) {
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }),
   )
 
-  const byStage = useMemo(() => {
-    const out: Record<WorkStage, MyWorkRow[]> = { todo: [], working: [], delivered: [], done: [] }
-    for (const r of rows) out[stageOf(r.status)].push(r)
-    return out
+  // ── The only two controls this page gets ───────────────────────────────────
+  // Deliberately not a filter/sort system. The server already returns
+  // soonest-due-first, which is the one order that matters to whoever has to
+  // do the work, and a designer holding ten or twenty cards does not need
+  // facets to find one. These two exist because each solves a real problem:
+  //   client  — batching. Five posters for one client are done in one sitting.
+  //   done    — the Done column otherwise grows forever (requests stay
+  //             assigned after completion), and a board with two hundred
+  //             finished cards in the last column is unusable within a year.
+  const [clientFilter, setClientFilter] = useState<string | null>(null)
+  const [showAllDone, setShowAllDone] = useState(false)
+
+  const clients = useMemo(() => {
+    const names = new Set<string>()
+    for (const r of rows) if (r.client_name) names.add(r.client_name)
+    return [...names].sort((a, b) => a.localeCompare(b))
   }, [rows])
 
+  const visibleRows = useMemo(
+    () => clientFilter ? rows.filter(r => r.client_name === clientFilter) : rows,
+    [rows, clientFilter],
+  )
+
+  const byStage = useMemo(() => {
+    const out: Record<WorkStage, MyWorkRow[]> = { todo: [], working: [], delivered: [], done: [] }
+    for (const r of visibleRows) out[stageOf(r.status)].push(r)
+    // Newest-finished first, so the cards a designer might still want to look
+    // at sit at the top rather than being buried under months of history.
+    out.done.sort((a, b) => (b.due_date ?? b.created_at).localeCompare(a.due_date ?? a.created_at))
+    return out
+  }, [visibleRows])
+
+  const DONE_PREVIEW = 8
+  const doneShown = showAllDone ? byStage.done : byStage.done.slice(0, DONE_PREVIEW)
+  const doneHidden = byStage.done.length - doneShown.length
+
+  // Counts always reflect the FULL queue, never the client filter — "how much
+  // is on me" must not change because you narrowed the board to one client.
   const pendingCount = useMemo(
     () => rows.filter(r => isPending(stageOf(r.status))).length,
     [rows],
@@ -190,16 +230,41 @@ export default function MyWorkClient({ initialRows, firstName }: Props) {
         </div>
       </div>
 
-      <div className="flex items-center gap-1.5 rounded-lg border border-border bg-secondary p-1 w-fit">
-        {VIEWS.map(({ key, label, Icon }) => (
-          <button
-            key={key} onClick={() => setView(key)}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors
-              ${view === key ? 'gradient-bg text-white' : 'text-muted-foreground hover:text-foreground'}`}
-          >
-            <Icon className="w-4 h-4" /> {label}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1.5 rounded-lg border border-border bg-secondary p-1 w-fit">
+          {VIEWS.map(({ key, label, Icon }) => (
+            <button
+              key={key} onClick={() => setView(key)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors
+                ${view === key ? 'gradient-bg text-white' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              <Icon className="w-4 h-4" /> {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Client chips — only when there is actually a choice to make. One
+            client means one chip that does nothing, which is worse than none. */}
+        {clients.length > 1 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              onClick={() => setClientFilter(null)}
+              className={`px-2.5 py-1.5 rounded-lg text-xs border transition-colors
+                ${clientFilter === null ? 'bg-primary/15 text-primary border-primary/30' : 'bg-secondary text-muted-foreground border-border hover:text-foreground'}`}
+            >
+              All clients
+            </button>
+            {clients.map(c => (
+              <button
+                key={c} onClick={() => setClientFilter(clientFilter === c ? null : c)}
+                className={`px-2.5 py-1.5 rounded-lg text-xs border transition-colors
+                  ${clientFilter === c ? 'bg-primary/15 text-primary border-primary/30' : 'bg-secondary text-muted-foreground border-border hover:text-foreground'}`}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {rows.length === 0 ? (
@@ -215,7 +280,20 @@ export default function MyWorkClient({ initialRows, firstName }: Props) {
           <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
             <div className="flex gap-3 overflow-x-auto pb-2 items-stretch">
               {WORK_STAGES.map(s => (
-                <Column key={s} stage={s} rows={byStage[s]} busyId={busyId} />
+                <Column
+                  key={s} stage={s}
+                  rows={s === 'done' ? doneShown : byStage[s]}
+                  totalCount={s === 'done' ? byStage.done.length : undefined}
+                  busyId={busyId}
+                  footer={s === 'done' && (doneHidden > 0 || showAllDone) ? (
+                    <button
+                      onClick={() => setShowAllDone(v => !v)}
+                      className="w-full text-[11px] text-muted-foreground hover:text-foreground py-1.5"
+                    >
+                      {showAllDone ? 'Show less' : `Show all ${byStage.done.length}`}
+                    </button>
+                  ) : null}
+                />
               ))}
             </div>
           </DndContext>
@@ -224,9 +302,9 @@ export default function MyWorkClient({ initialRows, firstName }: Props) {
           </p>
         </>
       ) : view === 'calendar' ? (
-        <CalendarView rows={rows} />
+        <CalendarView rows={visibleRows} />
       ) : (
-        <ListView rows={rows} onMove={apply} busyId={busyId} />
+        <ListView rows={visibleRows} onMove={apply} busyId={busyId} />
       )}
 
       <ToastContainer toasts={toast.toasts} onDismiss={toast.dismiss} />
@@ -308,9 +386,19 @@ function ListView({ rows, onMove, busyId }: {
   onMove: (id: string, to: WorkStage) => void
   busyId: string | null
 }) {
+  // Stage first, due date second. The incoming order is purely by date, which
+  // interleaves finished work through the list — so the thing you have to do
+  // next could sit below twenty completed cards. Actionable work leads; Done
+  // sinks to the bottom on its own, no filter needed.
+  const ordered = useMemo(() => [...rows].sort((a, b) => {
+    const d = WORK_STAGES.indexOf(stageOf(a.status)) - WORK_STAGES.indexOf(stageOf(b.status))
+    if (d !== 0) return d
+    return (a.due_date ?? '9999').localeCompare(b.due_date ?? '9999')
+  }), [rows])
+
   return (
     <div className="space-y-2">
-      {rows.map(r => {
+      {ordered.map(r => {
         const stage = stageOf(r.status)
         const next = WORK_STAGES[WORK_STAGES.indexOf(stage) + 1]
         const due = dueLabel(r.due_date)
