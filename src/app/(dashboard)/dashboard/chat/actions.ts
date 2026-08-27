@@ -22,6 +22,8 @@ import { createNotification } from '@/lib/notifications/create'
 import { sendWebPush } from '@/lib/push/send'
 import { transcribeAudio } from '@/lib/ai/transcribe'
 import { todayISO } from '@/lib/utils/local-date'
+import { loadServiceScope } from '@/lib/scope/service-scope'
+import { visibleEmployeeIds } from '@/lib/scope/employee-scope'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -772,7 +774,16 @@ export async function joinChannel(conversationId: string): Promise<Result<null>>
   return { ok: true, data: null }
 }
 
-/** Employees available for DMs / channel invites (active only, minimal fields). */
+/** Employees available for DMs / channel invites (active only, minimal fields).
+ *
+ *  Scoped to colleagues the viewer shares services with — so a designer in one
+ *  department cannot start a DM with, or even see, someone in another.
+ *
+ *  NOTE, recorded because it is a real cost: this restricts who a person can
+ *  START a conversation with. Existing conversations are unaffected, and
+ *  managers (mode 'all') still see everyone, but a designer can no longer
+ *  reach another department directly from chat. That was a deliberate choice,
+ *  taken with the trade-off understood. */
 export async function listChatEmployees(): Promise<Result<{ id: string; name: string; cqid: string }[]>> {
   const auth = await requireChatUser()
   if (!auth.ok) return auth
@@ -783,10 +794,16 @@ export async function listChatEmployees(): Promise<Result<{ id: string; name: st
     .or('is_archived.is.null,is_archived.eq.false')
     .order('name')
   if (error) return { ok: false, error: error.message }
+
+  const me = await loadCurrentUser()
+  const scope = await loadServiceScope(admin, me, 'global')
+  const visible = await visibleEmployeeIds(admin, scope)
+
   return {
     ok: true,
     data: (data ?? [])
       .filter(e => e.id !== auth.me.employeeId)
+      .filter(e => !visible || visible.has(e.id))
       .map(e => ({ id: e.id, name: e.name ?? '', cqid: e.cqid ?? '' })),
   }
 }

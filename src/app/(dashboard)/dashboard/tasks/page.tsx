@@ -4,6 +4,8 @@ import { financialVisibility, stripTaskListPricing, userCanSee } from '@/lib/per
 import { PERMS } from '@/lib/permissions/keys'
 import { resolveTaskVisibilityMode, fetchEmployeeServiceIds, filterTasksByVisibility } from '@/lib/tasks/visibility'
 import { loadUnitScope, scopeTasksByUnit, unitTaskIdsFrom } from '@/lib/scope/unit-scope'
+import { loadServiceScope } from '@/lib/scope/service-scope'
+import { visibleEmployeeIds, scopeEmployeeList, stripEmployeeNames } from '@/lib/scope/employee-scope'
 import { getPendingPricing } from '@/lib/pricing/pending'
 import { PricingPendingBanner } from '@/components/pricing/pricing-pending-banner'
 import { composeRequestDescription, sanitizeCaptionCanvas } from '@/lib/social/plan'
@@ -447,6 +449,22 @@ export default async function TasksPage({
   // Safe for display: task rows render task.service?.name, embedded by the
   // server join, so a task whose service falls outside the scope still shows
   // its real name rather than blank.
+  // ── Colleague visibility ───────────────────────────────────────────────────
+  // Task scoping says whose WORK you see; this says which PEOPLE exist for you.
+  // Without it a designer scoped to Social Media still got the whole staff list
+  // in the Assignee filter — a designer from another department they have no
+  // working relationship with.
+  //
+  // Same fail-open contract as the task filter: null = no narrowing, which is
+  // what an admin and a half-configured account both get.
+  const employeeScope = await loadServiceScope(supabase, me, 'tasks')
+  const visibleEmpIds = await visibleEmployeeIds(supabase, employeeScope)
+  const canRevealNames = isAdmin || userCanSee(me, PERMS.EMPLOYEES_REVEAL_NAMES)
+  const scopedEmployees = stripEmployeeNames(
+    scopeEmployeeList((employeesRes.data || []) as { id: string; name?: string | null }[], visibleEmpIds),
+    canRevealNames,
+  )
+
   const allServices = servicesRes.data || []
   const scopedServices =
     visibilityMode === 'services' && myServiceIds.length > 0
@@ -472,7 +490,7 @@ export default async function TasksPage({
       clients={clientsRes.data || []}
       services={scopedServices}
       clientPricings={(clientPricingsRes.data || []) as any[]}
-      employees={(employeesRes.data || []) as any[]}
+      employees={scopedEmployees as any[]}
       taskAssignments={(taskAssignmentsRes.data || []) as any[]}
       groups={(groupsRes.data || []) as any[]}
       parameters={(paramsRes.data || []) as any[]}

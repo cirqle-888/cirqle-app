@@ -8,6 +8,8 @@ import {
 } from '@/lib/scope/unit-scope'
 import ContributionsClient from './contributions-client'
 import { toISODate } from '@/lib/utils/local-date'
+import { loadServiceScope } from '@/lib/scope/service-scope'
+import { visibleEmployeeIds, scopeEmployeeList } from '@/lib/scope/employee-scope'
 
 export const dynamic = 'force-dynamic'
 
@@ -185,11 +187,22 @@ export default async function ContributionsPage() {
     return rows.filter(r => r.employee_id === myEmployeeId)
   }
 
-  const outEmployees = viewAll
+  const outEmployeesRaw = viewAll
     ? (employeesRes.data || [])
     : viewUnit
       ? (employeesRes.data || []).filter((e: any) => unitScope.memberEmployeeIds.has(e.id))
       : (employeesRes.data || []).filter((e: any) => e.id === myEmployeeId)
+
+  // Departmental isolation, applied AFTER the existing contribution-scope
+  // narrowing so it can only ever remove people, never re-add someone the
+  // view-scope already excluded. A viewer restricted to their own services
+  // sees only colleagues they share services with.
+  const contribScope = await loadServiceScope(supabase, me, 'contributions')
+  const visibleEmpIds = await visibleEmployeeIds(supabase, contribScope)
+  const outEmployees = scopeEmployeeList(
+    outEmployeesRaw as { id: string }[],
+    visibleEmpIds,
+  ) as typeof outEmployeesRaw
   const outScores             = mine(scoresRes.data || [])
   const outContributorRecords = mine(contributorRecordsRes.data || [])
   const outAssignments        = mine(mergedAssignments)
