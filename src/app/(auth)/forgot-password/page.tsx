@@ -1,21 +1,48 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
+import { getCompanyLogo } from '../login/actions'
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('')
   const [error, setError] = useState('')
   const [sent, setSent] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [logoUrl, setLogoUrl] = useState<string | null>(null)
+
+  // Same workspace-logo fetch as the login page — this screen hard-coded the
+  // default "C" mark regardless of what's uploaded in Settings → Company.
+  // Fails silently if no logo is configured; placeholder stays visible.
+  useEffect(() => {
+    let cancelled = false
+    getCompanyLogo()
+      .then(url => { if (!cancelled) setLogoUrl(url) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
     setError('')
     const supabase = createClient()
-    const origin = typeof window !== 'undefined' ? window.location.origin : ''
+    // The reset link is built from the CONFIGURED app URL, not from wherever
+    // this page happens to be served.
+    //
+    // It used to use window.location.origin, which is right until someone
+    // requests a reset from a non-production origin — a developer on
+    // localhost:3000, or a preview deployment. The email then carries a link
+    // only that machine can open, and the person who receives it cannot sign
+    // in at all. That is exactly what happened: a real reset email arrived
+    // pointing at http://localhost:3000/?error=... .
+    //
+    // Same precedence the rest of the app already uses for outbound URLs (see
+    // api/auth/google/login, lib/requests/notify): configured value first,
+    // current origin only as a fallback when it is unset.
+    const origin = process.env.NEXT_PUBLIC_APP_URL
+      || (typeof window !== 'undefined' ? window.location.origin : '')
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${origin}/reset-password`,
     })
@@ -32,12 +59,21 @@ export default function ForgotPasswordPage() {
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2 mb-4">
-            <div className="w-10 h-10 rounded-xl gradient-bg flex items-center justify-center">
-              <span className="text-white font-bold text-lg">C</span>
+          {logoUrl ? (
+            <img
+              src={logoUrl}
+              alt="Workspace logo"
+              className="mx-auto mb-4 h-14 max-w-[200px] object-contain"
+              onError={() => setLogoUrl(null)}
+            />
+          ) : (
+            <div className="inline-flex items-center gap-2 mb-4">
+              <div className="w-10 h-10 rounded-xl gradient-bg flex items-center justify-center">
+                <span className="text-white font-bold text-lg">C</span>
+              </div>
+              <span className="text-2xl font-bold gradient-text">Cirqle</span>
             </div>
-            <span className="text-2xl font-bold gradient-text">Cirqle</span>
-          </div>
+          )}
           <p className="text-muted-foreground text-sm">Reset your password</p>
         </div>
 
