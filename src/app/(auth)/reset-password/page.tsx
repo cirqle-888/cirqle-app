@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { getCompanyLogo } from '../login/actions'
 
 export default function ResetPasswordPage() {
   const [password, setPassword] = useState('')
@@ -11,6 +12,7 @@ export default function ResetPasswordPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [recoverySession, setRecoverySession] = useState<boolean | null>(null)
+  const [logoUrl, setLogoUrl] = useState<string | null>(null)
   const router = useRouter()
 
   useEffect(() => {
@@ -20,6 +22,17 @@ export default function ResetPasswordPage() {
     supabase.auth.getSession().then(({ data }) => {
       setRecoverySession(!!data.session)
     })
+  }, [])
+
+  // Same workspace-logo fetch as the login page — this screen hard-coded the
+  // default "C" mark regardless of what's uploaded in Settings → Company.
+  // Fails silently if no logo is configured; placeholder stays visible.
+  useEffect(() => {
+    let cancelled = false
+    getCompanyLogo()
+      .then(url => { if (!cancelled) setLogoUrl(url) })
+      .catch(() => {})
+    return () => { cancelled = true }
   }, [])
 
   async function handleSubmit(e: React.FormEvent) {
@@ -48,12 +61,21 @@ export default function ResetPasswordPage() {
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2 mb-4">
-            <div className="w-10 h-10 rounded-xl gradient-bg flex items-center justify-center">
-              <span className="text-white font-bold text-lg">C</span>
+          {logoUrl ? (
+            <img
+              src={logoUrl}
+              alt="Workspace logo"
+              className="mx-auto mb-4 h-14 max-w-[200px] object-contain"
+              onError={() => setLogoUrl(null)}
+            />
+          ) : (
+            <div className="inline-flex items-center gap-2 mb-4">
+              <div className="w-10 h-10 rounded-xl gradient-bg flex items-center justify-center">
+                <span className="text-white font-bold text-lg">C</span>
+              </div>
+              <span className="text-2xl font-bold gradient-text">Cirqle</span>
             </div>
-            <span className="text-2xl font-bold gradient-text">Cirqle</span>
-          </div>
+          )}
           <p className="text-muted-foreground text-sm">Set a new password</p>
         </div>
 
