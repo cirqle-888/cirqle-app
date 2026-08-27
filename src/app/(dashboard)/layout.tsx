@@ -156,7 +156,19 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <PrivacyProvider>
       <RoleProvider initialEmployee={serverEmployee}>
         <PermissionProvider user={user} logoUrl={logoUrl} logoUrlDark={logoUrlDark} faviconUrl={faviconUrl}>
-          <FavoritesProvider initialFavorites={initialFavorites}>
+          {/* key = whose favourites these are.
+              FavoritesProvider seeds its state with useState(initialFavorites),
+              which reads the prop ONLY on first mount. Across a client-side
+              navigation the provider instance is reused, so a later render
+              carrying a different person's favourites was ignored and the
+              previous list stayed on screen. Harmless while the identity never
+              changes mid-session — but view-as changes exactly that, and an
+              admin previewing a designer kept seeing their OWN pinned pages
+              (Invoices, Cash Book, Requests) in the sidebar, which reads as a
+              permission leak and is not one.
+              Keying on the employee forces a remount when, and only when, the
+              identity actually changes. */}
+          <FavoritesProvider key={me?.employeeId ?? 'anon'} initialFavorites={initialFavorites}>
           <WorkspaceProvider initial={initialWorkspaceState}>
           <RequestsBadgeProvider>
           {/* h-dvh = dynamic viewport height (adapts as Safari toolbar shows/hides).

@@ -15,6 +15,14 @@ import { CSS } from '@dnd-kit/utilities'
 import Link from 'next/link'
 import { GripVertical, X, type LucideIcon } from 'lucide-react'
 import { useFavorites } from '@/contexts/favorites-context'
+import { usePermissions } from '@/contexts/permission-context'
+import { navSections, isNavItemVisible, type NavItem } from '@/lib/nav-sections'
+
+/** href → nav item, so a pinned page can be checked against the same gate the
+ *  sidebar uses. Built once: navSections is a module constant. */
+const NAV_ITEM_BY_HREF = new Map<string, NavItem>(
+  navSections.flatMap(s => s.items.map(i => [i.href, i] as const)),
+)
 import { resolveFavoriteIcon } from '@/lib/favorites/icon-map'
 import type { FavoriteEntry } from '@/lib/favorites/queries'
 
@@ -79,13 +87,28 @@ export function FavoritesSection({
   isCollapsed: boolean; activeHref: string | null; onNavClick?: () => void
 }) {
   const { favorites, reorder, toggleFavorite } = useFavorites()
+  const { can, user } = usePermissions()
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
   // SSR-stable id: without it dnd-kit auto-numbers its aria-describedby ids,
   // which don't line up between server and client when the sidebar renders
   // two instances (desktop + mobile) → hydration-mismatch warnings.
   const dndId = useId()
 
-  if (favorites.length === 0) return null
+  // A favourite must never outrank a permission. Pins are stored rows: they
+  // survive a designation change, so a page someone could open last month can
+  // still be pinned after the key is revoked. The nav sections are gated but
+  // this list was not, which meant a stale pin rendered a link the router then
+  // refused — looking like a permission leak.
+  //
+  // Gated with the SAME helper the sidebar, launcher and command palette use,
+  // so the two can never disagree. A pin to something outside navSections
+  // (a record, not a page) has no permission to check and is left alone.
+  const visibleFavorites = favorites.filter(fav => {
+    const item = NAV_ITEM_BY_HREF.get(fav.href)
+    return !item || isNavItemVisible(item, can, user.isAdmin)
+  })
+
+  if (visibleFavorites.length === 0) return null
 
   function handleDragEnd(e: DragEndEvent) {
     const { active, over } = e
@@ -104,9 +127,9 @@ export function FavoritesSection({
         </p>
       )}
       <DndContext id={dndId} sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <SortableContext items={favorites.map(f => f.id)} strategy={verticalListSortingStrategy}>
+        <SortableContext items={visibleFavorites.map(f => f.id)} strategy={verticalListSortingStrategy}>
           <div className="space-y-0.5">
-            {favorites.map(fav => (
+            {visibleFavorites.map(fav => (
               <SortableFavoriteRow
                 key={fav.id}
                 fav={fav}
