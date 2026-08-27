@@ -433,6 +433,26 @@ export default async function TasksPage({
   const from = one('from'), to = one('to')
   const initialDateRange = from && to ? { from, to } : null
 
+  // ── Service catalogue, scoped the same way tasks are ──────────────────────
+  // Task ROWS were already filtered by service, but the catalogue behind the
+  // Service filter and the Add Task picker was the full active list — so a
+  // designer scoped to Social Media still read every other department's
+  // service names ("Offer Flyer", "A3 Offer Flyer", …) in the dropdowns, and
+  // could file a task against them.
+  //
+  // Mirrors filterTasksByVisibility EXACTLY, including its no-lockout rule:
+  // only narrows in 'services' mode, and an employee with zero assignments
+  // keeps the full list rather than being left with an empty picker.
+  //
+  // Safe for display: task rows render task.service?.name, embedded by the
+  // server join, so a task whose service falls outside the scope still shows
+  // its real name rather than blank.
+  const allServices = servicesRes.data || []
+  const scopedServices =
+    visibilityMode === 'services' && myServiceIds.length > 0
+      ? allServices.filter((s: { id: string }) => myServiceIds.includes(s.id))
+      : allServices
+
   return (
     <>
     {vis.tasksPricing && <PricingPendingBanner clients={pendingPricing.clients} services={pendingPricing.services} />}
@@ -450,7 +470,7 @@ export default async function TasksPage({
       initialTasks={initialTasks}
       initialTrash={initialTrash}
       clients={clientsRes.data || []}
-      services={servicesRes.data || []}
+      services={scopedServices}
       clientPricings={(clientPricingsRes.data || []) as any[]}
       employees={(employeesRes.data || []) as any[]}
       taskAssignments={(taskAssignmentsRes.data || []) as any[]}
