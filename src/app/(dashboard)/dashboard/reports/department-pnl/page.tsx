@@ -16,6 +16,7 @@ import {
 import { buildPackageRevenue, type PackageItemInput } from '@/lib/finance/package-revenue'
 import { cycleForMonth, isDelivered, isPackageInForceForMonth } from '@/lib/packages/progress'
 import { CheckCircle2, Info, Package, TriangleAlert } from 'lucide-react'
+import { isBillableTask } from '@/lib/tasks/billable'
 
 // Live financials — always read fresh.
 export const dynamic = 'force-dynamic'
@@ -76,7 +77,7 @@ export default async function DepartmentPnlPage({
   // `to` is inclusive, matching how every other date filter in the app reads.
   const { data: taskRows, error: taskError } = await fetchAll(
     admin.from('tasks')
-      .select('id, billing_amount_inr, service_id, package_id, status, task_date')
+      .select('id, billing_amount_inr, service_id, package_id, status, task_date, is_billable')
       .gte('task_date', range.from)
       .lte('task_date', range.to)
       .is('deleted_at', null),
@@ -88,6 +89,7 @@ export default async function DepartmentPnlPage({
     package_id: string | null
     status: string | null
     task_date: string
+    is_billable?: boolean | null
   }[]
 
   /** Which department a task belongs to — unassigned when the chain breaks. */
@@ -100,7 +102,9 @@ export default async function DepartmentPnlPage({
   for (const t of tasks) {
     const dep = departmentOf(t.service_id)
     taskDepartment.set(t.id, dep)
-    revenueBy.set(dep, (revenueBy.get(dep) ?? 0) + Number(t.billing_amount_inr || 0))
+    // Waived work is real output with no revenue behind it: it counts toward
+    // the department's task count and its labour, never toward its takings.
+    if (isBillableTask(t)) revenueBy.set(dep, (revenueBy.get(dep) ?? 0) + Number(t.billing_amount_inr || 0))
     countBy.set(dep, (countBy.get(dep) ?? 0) + 1)
   }
 

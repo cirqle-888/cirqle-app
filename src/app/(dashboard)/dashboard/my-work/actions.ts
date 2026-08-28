@@ -21,6 +21,7 @@ import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
 import { syncRequestStatusFromTask } from '@/lib/requests/task-sync'
 import { serverFillTaskBilling } from '@/app/(dashboard)/dashboard/tasks/actions'
+import { autoLinkTaskPackage } from '@/lib/packages/auto-link'
 import { nextTaskNumber } from '@/lib/utils/task-code'
 import { todayISO } from '@/lib/utils/local-date'
 import { loadMyWork } from '@/lib/requests/my-work-load'
@@ -134,6 +135,11 @@ async function ensureTaskForRequest(
   } catch {
     warning = 'The task was created but could not be priced automatically — a manager should set its amount.'
   }
+
+  // …and put it inside the client's package if one covers this service, so work
+  // their retainer already pays for never reaches the invoice as its own line.
+  // After pricing, never instead of it: the link changes invoicing only.
+  await autoLinkTaskPackage(admin, task.id)
 
   void logActivity({
     actorId: employeeId, entityType: 'task', entityId: task.id,
@@ -308,6 +314,7 @@ async function movePlanItem(
     } catch {
       warning = 'The task was created but could not be priced automatically — a manager should set its amount.'
     }
+    await autoLinkTaskPackage(admin, taskId)
   } else {
     const { error: uErr } = await admin.from('tasks')
       .update({ status: taskStatus, updated_at: new Date().toISOString() })

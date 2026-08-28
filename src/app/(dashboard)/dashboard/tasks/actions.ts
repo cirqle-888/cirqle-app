@@ -31,6 +31,8 @@ import { syncRequestStatusFromTask, syncRequestStatusFromTasks } from '@/lib/req
 import { composeRequestDescription, sanitizeCaptionCanvas, contentTypeWithVariants } from '@/lib/social/plan'
 import { retryWithoutScope, withoutScope } from '@/lib/finance/classify'
 import { activePackagesForClient, type PackageOption } from '@/lib/packages/queries'
+import { autoLinkTaskPackage } from '@/lib/packages/auto-link'
+import { normalizeNoChargeReason, retryWithoutNoChargeReason, withoutNoChargeReason } from '@/lib/tasks/billable'
 
 const REVALIDATE = '/dashboard/tasks'
 
@@ -464,6 +466,30 @@ export async function fetchClientPackages(
   return activePackagesForClient(admin, clientId, taskDate)
 }
 
+/**
+ * Link a freshly created task to the client's package, if one covers it.
+ *
+ * The Add Task form offers the picker, but nobody should have to use it: when
+ * the client has an active package that includes the task's service, that IS
+ * the answer. Called fire-and-forget right after an insert, so a task created
+ * by someone who cannot even see pricing still lands inside the retainer
+ * instead of quietly billing on its own.
+ *
+ * Guarded by tasks.create — the caller has just created a task. Never
+ * overwrites a package the user picked themselves (see auto-link.ts).
+ */
+export async function serverAutoLinkTaskPackage(
+  taskId: string,
+): Promise<ActionResult<{ packageId: string | null }>> {
+  const guard = await requirePermission(PERMS.TASKS_CREATE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+  const packageId = await autoLinkTaskPackage(admin, taskId)
+  if (packageId) revalidatePath(REVALIDATE)
+  return { ok: true, data: { packageId } }
+}
+
 /** One pickable upstream item — a queued request or a planned calendar piece. */
 export interface PendingSource {
   kind: 'request' | 'calendar'
@@ -717,6 +743,14 @@ export interface SaveTaskInput {
    * a client-side sum must never be able to overwrite the computed figure.
    */
   billingRule?: unknown
+  /**
+   * false = waived: the client is not charged, but the task keeps its
+   * Pricing-Matrix amount so commission and internal value are unaffected.
+   * `undefined` means "leave as-is", like packageId.
+   */
+  isBillable?: boolean
+  /** Why it was waived. Cleared automatically when the task is billable. */
+  noChargeReason?: string | null
 }
 
 async function toInr(
@@ -762,26 +796,35 @@ export async function serverSaveTask(
     ? await toInr(admin, input.billingAmount!, input.currency)
     : undefined
 
-  const { data, error } = await admin
-    .from('tasks')
-    .update({
-      ...(input.taskNumber != null ? { task_number: input.taskNumber } : {}),
-      title:              input.title,
-      description:        input.description,
-      client_id:          input.clientId || null,
-      service_id:         input.serviceId || null,
-      status:             input.status,
-      ...(acceptAmount ? { billing_amount: input.billingAmount } : {}),
-      ...(billingInr !== undefined ? { billing_amount_inr: billingInr } : {}),
-      ...(ruleJson !== undefined ? { billing_mode: 'percent_of_services', billing_rule: ruleJson } : {}),
-      ...(input.quantity         !== undefined ? { quantity:           input.quantity } : {}),
-      ...(input.currency         !== undefined ? { currency:           input.currency } : {}),
-      ...(input.packageId        !== undefined ? { package_id:         input.packageId } : {}),
-      task_date:          input.taskDate || null,
-    })
-    .eq('id', input.taskId)
-    .select('*, client:clients(id, name, code), service:services!service_id(id, name)')
-    .single()
+  const updates: Record<string, unknown> = {
+    ...(input.taskNumber != null ? { task_number: input.taskNumber } : {}),
+    title:              input.title,
+    description:        input.description,
+    client_id:          input.clientId || null,
+    service_id:         input.serviceId || null,
+    status:             input.status,
+    ...(acceptAmount ? { billing_amount: input.billingAmount } : {}),
+    ...(billingInr !== undefined ? { billing_amount_inr: billingInr } : {}),
+    ...(ruleJson !== undefined ? { billing_mode: 'percent_of_services', billing_rule: ruleJson } : {}),
+    ...(input.quantity         !== undefined ? { quantity:           input.quantity } : {}),
+    ...(input.currency         !== undefined ? { currency:           input.currency } : {}),
+    ...(input.packageId        !== undefined ? { package_id:         input.packageId } : {}),
+    // Waiving changes INVOICING only — the amount above is untouched, so the
+    // designer's commission on a free job is the same as on a paid one.
+    ...(input.isBillable       !== undefined ? {
+      is_billable:      input.isBillable,
+      no_charge_reason: normalizeNoChargeReason(input.isBillable, input.noChargeReason),
+    } : {}),
+    task_date:          input.taskDate || null,
+  }
+
+  const { data, error } = await retryWithoutNoChargeReason(strip =>
+    admin
+      .from('tasks')
+      .update(strip ? withoutNoChargeReason(updates) : updates)
+      .eq('id', input.taskId)
+      .select('*, client:clients(id, name, code), service:services!service_id(id, name)')
+      .single())
 
   if (error) return { ok: false, error: error.message }
 

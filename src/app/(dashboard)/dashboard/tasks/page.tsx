@@ -260,6 +260,12 @@ export default async function TasksPage({
   // the soft-delete migration. After the column lands universally, both this
   // and the `hasDeletedAt` branches below can be deleted.)
   const hasDeletedAt = await columnExists(supabase, 'tasks', 'deleted_at')
+  // Same dance for the waiver reason (migration 20260829140000): the column is
+  // new, and naming it in the select before it exists 400s the whole page.
+  const [hasNoChargeReason, hasDefaultBillable] = await Promise.all([
+    columnExists(supabase, 'tasks', 'no_charge_reason'),
+    columnExists(supabase, 'services', 'default_billable'),
+  ])
 
   const cutoff = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString()
 
@@ -277,7 +283,12 @@ export default async function TasksPage({
   // roles can be granted task visibility without pricing.
   // Typed as plain string: the explicit column list is long enough that
   // supabase-js's literal-type parser hits TS2589 (excessively deep) on it.
-  const selectClause: string = vis.tasksPricing ? ADMIN_TASK_SELECT : EMPLOYEE_TASK_SELECT
+  // Plain `string` for the same reason as selectClause below: a template
+  // literal here trips supabase-js's select-literal parser (TS2589-adjacent).
+  const serviceSelect: string = 'id, name, default_price, default_currency, pricing_type'
+    + (hasDefaultBillable ? ', default_billable' : '')
+  const selectClause: string = (vis.tasksPricing ? ADMIN_TASK_SELECT : EMPLOYEE_TASK_SELECT)
+    + (vis.tasksPricing && hasNoChargeReason ? ', no_charge_reason' : '')
 
   // Service-scoped task visibility (tasks.view_by_service). 'services' viewers
   // only receive tasks of their assigned services plus tasks they worked on —
@@ -290,7 +301,8 @@ export default async function TasksPage({
   const [allTasks, dbCountRes, clientsRes, servicesRes, clientPricingsRes, employeesRes, taskAssignmentsRes,
     groupsRes, paramsRes, groupServicesRes, paramServicesRes,
     taskGroupsRes, taskGroupAssignmentsRes, taskParamAssignmentsRes, myTaskIds,
-    visibilityBillingRes, visibilityContribRes, visibilityNamesRes, myServiceIds, unitScope] = await Promise.all([
+    visibilityBillingRes, visibilityContribRes, visibilityNamesRes, myServiceIds, unitScope,
+    packagesRes, packageItemsRes] = await Promise.all([
     fetchAllTasks(supabase, hasDeletedAt, selectClause, fullHistory),
     // Real DB count of all tasks (used for the "DB search" fallback in the UI).
     hasDeletedAt
@@ -300,7 +312,7 @@ export default async function TasksPage({
     // Services: viewers with `tasks.view_pricing` get default_price/currency/
     // pricing_type so admin task editors can use them; others get name only.
     vis.tasksPricing
-      ? supabase.from('services').select('id, name, default_price, default_currency, pricing_type').eq('is_active', true).order('display_order').order('name')
+      ? supabase.from('services').select(serviceSelect).eq('is_active', true).order('display_order').order('name')
       : supabase.from('services').select('id, name').eq('is_active', true).order('display_order').order('name'),
     // Pricing matrix is pure money — only sent to viewers with tasks.view_pricing.
     vis.tasksPricing
@@ -351,6 +363,18 @@ export default async function TasksPage({
     // Org-unit task visibility (tasks.view_by_unit). Short-circuits without a
     // query for every viewer who isn't unit-scoped.
     loadUnitScope(supabase, me, 'tasks'),
+    // Packages + their included lines, so the list can label each task
+    // Package / Extra / Waived without opening it. Tiny tables (a handful of
+    // rows), and only for viewers who can see billing at all.
+    vis.tasksPricing
+      ? safeQuery('client_packages', supabase.from('client_packages')
+          .select('id, client_id, name, billing_type, start_date, end_date, first_cycle_end, status, deleted_at')
+          .eq('status', 'active').is('deleted_at', null))
+      : Promise.resolve({ data: [] as any[], error: null }),
+    vis.tasksPricing
+      ? safeQuery('client_package_items', supabase.from('client_package_items')
+          .select('id, package_id, service_id, included_quantity, display_order'))
+      : Promise.resolve({ data: [] as any[], error: null }),
   ])
 
   // Fetch trash only if column exists. Trash uses the same pricing-aware
@@ -465,10 +489,13 @@ export default async function TasksPage({
     canRevealNames,
   )
 
-  const allServices = servicesRes.data || []
+  // Cast: the pricing branch selects through a runtime-built string (the
+  // default_billable column is only named once its migration is applied), which
+  // supabase-js cannot type statically.
+  const allServices = (servicesRes.data || []) as { id: string; name: string }[]
   const scopedServices =
     visibilityMode === 'services' && myServiceIds.length > 0
-      ? allServices.filter((s: { id: string }) => myServiceIds.includes(s.id))
+      ? allServices.filter(s => myServiceIds.includes(s.id))
       : allServices
 
   return (
@@ -489,6 +516,8 @@ export default async function TasksPage({
       initialTrash={initialTrash}
       clients={clientsRes.data || []}
       services={scopedServices}
+      packages={(packagesRes.data || []) as any[]}
+      packageItems={(packageItemsRes.data || []) as any[]}
       clientPricings={(clientPricingsRes.data || []) as any[]}
       employees={scopedEmployees as any[]}
       taskAssignments={(taskAssignmentsRes.data || []) as any[]}

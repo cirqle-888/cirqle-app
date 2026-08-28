@@ -58,8 +58,18 @@ import {
   checkPossibleDuplicateTask,
   fetchClientPackages,
   fetchPendingSourcesForClient,
+  serverAutoLinkTaskPackage,
   type PendingSource,
 } from './actions'
+import {
+  DEFAULT_NO_CHARGE_REASON, normalizeNoChargeReason, isNoChargeColumnMissing,
+  withoutNoChargeReason, isWaivedTask, noChargeReasonLabel,
+} from '@/lib/tasks/billable'
+import {
+  buildCoverageIndex, taskBillingStatus, TASK_BILLING_LABEL,
+  type CoveragePackage, type TaskBillingStatus,
+} from '@/lib/packages/task-status'
+import type { PackageItemRow } from '@/lib/packages/types'
 import { TaskBillingSection } from '@/components/ui/task-billing-section'
 import { computeTaskAmount, resolveTaskQuantity, resolvePricingType } from '@/lib/tasks/pricing'
 import {
@@ -138,6 +148,7 @@ interface Task {
   billing_percent?: number | null
   billing_override?: boolean
   is_billable?: boolean
+  no_charge_reason?: string | null
   /** Package this task is delivered under. Affects invoicing only, never price. */
   package_id?: string | null
   client?: { id: string; name: string; code: string }
@@ -150,12 +161,37 @@ interface Service {
   pricing_type?: string
   default_price?: number
   default_currency?: string
+  /** false = work this agency gives away (Instagram highlight icons, say). */
+  default_billable?: boolean
 }
 
 interface VisibilitySettings {
   billing: string          // 'all' | 'team_lead' | 'admin_only'
   contributions: string
   employee_names: string
+}
+
+/**
+ * How the client is charged for this task — shown only when it is not the
+ * ordinary case. A "Billable" chip on every row would be noise; Package, Extra
+ * and Waived are the ones worth spotting from across the table.
+ */
+function BillingChip({ status, reason }: { status: TaskBillingStatus; reason?: string | null }) {
+  if (status === 'billable') return null
+  const tone =
+    status === 'waived'  ? 'text-emerald-600 dark:text-emerald-300 bg-emerald-500/10 border-emerald-500/25' :
+    status === 'covered' ? 'text-violet-600 dark:text-violet-300 bg-violet-500/10 border-violet-500/25' :
+                           'text-amber-600 dark:text-amber-300 bg-amber-500/10 border-amber-500/25'
+  const title =
+    status === 'waived'  ? `Not billed${reason ? ` — ${noChargeReasonLabel(reason)}` : ''}. The task keeps its value and still pays commission.` :
+    status === 'covered' ? 'Covered by the client\u2019s package — no separate invoice line.' :
+                           'Beyond what the package includes — bills at the overage rate.'
+  return (
+    <span title={title}
+      className={`text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border shrink-0 ${tone}`}>
+      {TASK_BILLING_LABEL[status]}
+    </span>
+  )
 }
 
 interface Props {
@@ -194,6 +230,9 @@ interface Props {
   clients: { id: string; name: string; code: string }[]
   services: Service[]
   clientPricings: { client_id: string; service_id: string; price: number; currency: string }[]
+  /** Active packages + their included lines — the list's Package/Extra labels. */
+  packages?: CoveragePackage[]
+  packageItems?: PackageItemRow[]
   employees: { id: string; cqid: string; name: string | null; is_active: boolean }[]
   taskAssignments: { task_id: string; employee_id: string }[]
   groups: { id: string; name: string; weight: number; display_order: number; is_active?: boolean }[]
@@ -273,7 +312,8 @@ const EMPTY_FORM = {
   billing_mode: 'fixed' as 'fixed' | 'percent_of_parent' | 'parameter_driven',
   billing_percent: '',                                                           // string for input; parsed on save
   billing_override: false,                                                       // true when user types a custom amount
-  is_billable: true,                                                             // false = internal/non-billable concept
+  is_billable: true,                                                             // false = waived: priced, but never invoiced
+  no_charge_reason: null as string | null,                                       // why it was waived; null while billable
   manual_billing_amount: '',                                                     // user-typed override amount
   package_id: null as string | null,                                             // delivered under a package (invoicing only)
   // ── Derived billing ("Handling = 30% of this month's posters") ──
@@ -354,7 +394,7 @@ function SortablePanelRow({ id, label, onUp, onDown, isFirst, isLast }: {
   )
 }
 
-export default function TasksClient({ promotionRequest, promotionSocialItem, requestRefByTaskId = {}, pendingRequestCount = 0, initialSearch = '', initialClient = '', initialService = '', initialDateRange = null, dbTaskTotal, fullHistory = false, initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, myTaskIds, visibilitySettings, permissionFlags }: Props) {
+export default function TasksClient({ promotionRequest, promotionSocialItem, requestRefByTaskId = {}, pendingRequestCount = 0, initialSearch = '', initialClient = '', initialService = '', initialDateRange = null, dbTaskTotal, fullHistory = false, initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, packages = [], packageItems = [], employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, myTaskIds, visibilitySettings, permissionFlags }: Props) {
   const { role, employee: currentEmployee } = useRole()
   // Browser DB search runs through the anon/RLS client, which cannot reproduce
   // the server's service- and unit-scoped visibility model — so it is, and must
@@ -576,6 +616,9 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
   const [filterStatus, setFilterStatus] = useState('')
   const [filterClient, setFilterClient] = useState(initialClient)
   const [filterService, setFilterService] = useState(initialService)
+  // Package / Extra / Waived / Billable — how the CLIENT is charged, which is
+  // a different question from status and worth filtering on its own.
+  const [filterBilling, setFilterBilling] = useState<'' | TaskBillingStatus>('')
   // Tokenized search: field-scoped facet pills + operators. `searchQ` is derived
   // from the generic ('any') facets so the existing #number/DB-mode logic keeps
   // working unchanged; named-field facets are applied separately in filteredTasks.
@@ -1055,9 +1098,6 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
     // the display, so the matrix engine must not also produce a number here.
     if (form.derived_on) return 0
 
-    // Non-billable variant: ₹0
-    if (form.parent_task_id && !form.is_billable) return 0
-
     // Manual override
     if (form.billing_override && form.manual_billing_amount) {
       return parseFloat(form.manual_billing_amount) || 0
@@ -1185,7 +1225,16 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
     const svc = services.find(s => s.id === serviceId)
     const cp = clientPricings.find(p => p.client_id === form.client_id && p.service_id === serviceId)
     const cur = (cp?.currency || svc?.default_currency || 'INR') as Currency
-    setForm(p => ({ ...p, service_id: serviceId, currency: cur, quantity: '1', hours: '1' }))
+    // Some services are given away as a matter of policy — highlight icons ride
+    // along with the social retainer. They still carry their matrix price (the
+    // designer is paid for them); they just start out not billed. A manager can
+    // switch any of them back to Billable in the Financial section.
+    const freeByDefault = svc?.default_billable === false
+    setForm(p => ({
+      ...p, service_id: serviceId, currency: cur, quantity: '1', hours: '1',
+      is_billable: !freeByDefault,
+      no_charge_reason: freeByDefault ? DEFAULT_NO_CHARGE_REASON : null,
+    }))
   }
 
   async function saveQuickPrice() {
@@ -1251,6 +1300,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
       billing_percent:   task.billing_percent != null ? String(task.billing_percent) : '',
       billing_override:  !!task.billing_override,
       is_billable:       task.is_billable !== false,
+      no_charge_reason:  (task as { no_charge_reason?: string | null }).no_charge_reason ?? null,
       manual_billing_amount: task.billing_amount_inr != null ? String(task.billing_amount_inr) : '',
       package_id:        task.package_id ?? null,
       // Derived billing is edited in TaskEditModal, not this legacy form state.
@@ -1529,8 +1579,11 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
         billing_mode:     form.billing_mode,
         billing_percent:  form.billing_percent ? parseFloat(form.billing_percent) : null,
         billing_override: form.billing_override,
-        is_billable:      form.is_billable,
       } : {}),
+      // Waived work: no invoice line, full price kept. Written for EVERY task —
+      // this stopped being a variant-only idea when free work got a reason.
+      is_billable:      form.is_billable,
+      no_charge_reason: normalizeNoChargeReason(form.is_billable, form.no_charge_reason),
       // ── Derived billing — amounts start at 0; serverFillTaskBilling computes
       //    the real figure from the rule right after this insert. ──
       ...(derivedRule ? {
@@ -1560,6 +1613,15 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
 
     // Pre-scope-migration DBs: retry without the scope column (the Phase-1
     // trigger normally derives it; here it simply isn't stored yet).
+    // Pre-migration DBs (20260829140000): no no_charge_reason column → retry
+    // without it. is_billable itself is old enough to be everywhere, so the
+    // task still saves as waived; only the reason is dropped.
+    if (isNoChargeColumnMissing(error)) {
+      console.warn('tasks.no_charge_reason missing — saving without the waiver reason. Apply supabase/migrations/20260829140000_waived_tasks.sql.')
+      const payload = withoutNoChargeReason(insertPayload)
+      ;({ data, error } = await supabase.from('tasks').insert(payload).select(selectCols).single())
+    }
+
     if (error && isScopeColumnMissing(error)) {
       console.warn('tasks.scope missing — saving without scope. Apply supabase/migrations/20260714090000_finance_scope_foundation.sql.')
       ;({ data, error } = await supabase.from('tasks').insert(withoutScope(insertPayload)).select(selectCols).single())
@@ -1570,6 +1632,21 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
 
       // Log task created (fire-and-forget server action — doesn't block UI)
       void logTaskCreated(data.id, data.title, data.task_number ?? null)
+
+      // Nobody should have to remember the package. If the client has one
+      // running that includes this service, the server links it — and the task
+      // stops billing on its own. Skipped when the user picked one themselves
+      // (or picked "bill separately" — auto-link never overwrites a choice).
+      if (!form.package_id) {
+        void serverAutoLinkTaskPackage(data.id)
+          .then(res => {
+            if (res.ok && res.data?.packageId) {
+              setTasks(prev => prev.map(t =>
+                t.id === data!.id ? { ...t, package_id: res.data!.packageId } as Task : t))
+            }
+          })
+          .catch(() => {})
+      }
 
       // Promotion flow: link the created task back to the external request
       // (sets request → started, logs activity, emails the requester).
@@ -1898,9 +1975,34 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
     ...(showBilling ? { amount: { type: 'number' as const, get: (x: Task) => x.billing_amount_inr } } : {}),
   }), [showBilling])
 
+  // Package coverage for every listed task, from the SAME engine the invoice
+  // uses — so a row labelled "Package" is a row the client is genuinely not
+  // charged for. Recomputed only when the tasks or the packages change.
+  const coverageIndex = useMemo(
+    () => buildCoverageIndex(packages, packageItems, tasks),
+    [packages, packageItems, tasks],
+  )
+  const billingStatusOf = useCallback(
+    (task: Task): TaskBillingStatus => taskBillingStatus(task, coverageIndex),
+    [coverageIndex],
+  )
+
+  // Counts for the billing filter, and the number every manager actually asks
+  // for: what this list gave away for free.
+  const billingCounts = useMemo(() => {
+    const counts = { billable: 0, covered: 0, extra: 0, waived: 0, waivedValueInr: 0 }
+    for (const t of tasks) {
+      const st = taskBillingStatus(t, coverageIndex)
+      counts[st] += 1
+      if (st === 'waived') counts.waivedValueInr += Number(t.billing_amount_inr || 0)
+    }
+    return counts
+  }, [tasks, coverageIndex])
+
   const filteredTasks = useMemo(() => {
     let t = tasks
     if (filterStatus)  t = t.filter(x => x.status === filterStatus)
+    if (filterBilling) t = t.filter(x => taskBillingStatus(x, coverageIndex) === filterBilling)
     if (filterClient)  t = filterClient === INTERNAL_CLIENT ? t.filter(x => !x.client_id) : t.filter(x => x.client?.id === filterClient)
     if (filterService) t = t.filter(x => x.service?.id === filterService)
     // Named search facets (Title / Client / Service / Task # / Amount) with
@@ -1965,7 +2067,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
     if (sortBy === 'amount_desc') t = [...t].sort((a, b) => ((b.billing_amount_inr ?? 0)) - ((a.billing_amount_inr ?? 0)))
     if (sortBy === 'client')      t = [...t].sort((a, b) => (a.client?.name || '').localeCompare(b.client?.name || ''))
     return t
-  }, [tasks, filterStatus, filterClient, filterService, searchQ, namedFacets, sortBy, filterDate, assigneeTaskIdSet, myScope, myTaskIdSet])
+  }, [tasks, filterStatus, filterBilling, coverageIndex, filterClient, filterService, searchQ, namedFacets, sortBy, filterDate, assigneeTaskIdSet, myScope, myTaskIdSet])
 
   // visibleTasks is a passthrough — filtering is fully handled by filteredTasks above.
   // (The comment "only show their assigned tasks" was stale — server already scopes the array.)
@@ -2013,8 +2115,8 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
     ? dbModeResults.slice(0, mobileLimit)
     : visibleTasks.slice(0, mobileLimit)
 
-  const hasActiveFilters = !!(filterStatus || filterClient || filterService || searchQ || sortBy !== 'today_first' || !!filterAssignee || !!filterDate || !!myScope)
-  const activeFilterCount = [filterClient, filterService, filterAssignee, sortBy !== 'today_first' ? 'sort' : '', myScope || ''].filter(Boolean).length
+  const hasActiveFilters = !!(filterStatus || filterBilling || filterClient || filterService || searchQ || sortBy !== 'today_first' || !!filterAssignee || !!filterDate || !!myScope)
+  const activeFilterCount = [filterClient, filterService, filterBilling, filterAssignee, sortBy !== 'today_first' ? 'sort' : '', myScope || ''].filter(Boolean).length
 
   // Status counts — computed from tasks before status filter is applied so all
   // tabs show real numbers. Reuses the same assigneeTaskIdSet so the inner
@@ -2672,8 +2774,23 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                   </button>
                 )
               })}
+              {/* Billing filter — "what is the client actually paying for?" and,
+                  read the other way, "how much did we give away?". Only for
+                  viewers who can see billing at all. */}
+              {showBilling && (
+                <select value={filterBilling} onChange={e => setFilterBilling(e.target.value as '' | TaskBillingStatus)}
+                  title="Filter by how the client is charged"
+                  className="h-[30px] px-2 rounded-xl text-xs font-medium bg-secondary border border-border text-foreground focus:outline-none cursor-pointer shrink-0">
+                  <option value="">All billing</option>
+                  {(['billable', 'covered', 'extra', 'waived'] as const).map(k => (
+                    <option key={k} value={k}>
+                      {TASK_BILLING_LABEL[k]} ({billingCounts[k]})
+                    </option>
+                  ))}
+                </select>
+              )}
               {hasActiveFilters && (
-                <button onClick={() => { setFilterStatus(''); setFilterClient(''); setFilterService(''); clearSearch(); setSortBy('today_first'); setFilterAssignee(''); setFilterDate(null); setMyScope(null) }}
+                <button onClick={() => { setFilterStatus(''); setFilterBilling(''); setFilterClient(''); setFilterService(''); clearSearch(); setSortBy('today_first'); setFilterAssignee(''); setFilterDate(null); setMyScope(null) }}
                   className="text-xs text-muted-foreground hover:text-foreground px-1.5 py-1 rounded-md hover:bg-foreground/[0.04] transition-colors flex items-center gap-0.5 shrink-0">
                   <X size={11} /> Clear
                 </button>
@@ -2755,11 +2872,35 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
               ...(filterStatus ? [{ key: 'status', label: 'Status', value: getStatusLabel(filterStatus), onRemove: () => setFilterStatus('') }] : []),
               ...(filterClient ? [{ key: 'client', label: 'Client', value: filterClient === INTERNAL_CLIENT ? 'Internal' : clientList.find(c => c.id === filterClient)?.name || 'Selected', onRemove: () => setFilterClient('') }] : []),
               ...(filterService ? [{ key: 'service', label: 'Service', value: services.find(s => s.id === filterService)?.name || 'Selected', onRemove: () => setFilterService('') }] : []),
+              ...(filterBilling ? [{ key: 'billing', label: 'Billing', value: TASK_BILLING_LABEL[filterBilling], onRemove: () => setFilterBilling('') }] : []),
               ...(filterAssignee ? [{ key: 'assignee', label: 'Assignee', value: (() => { const e = employees.find(e => e.id === filterAssignee); return e ? dn(e) : 'Selected' })(), onRemove: () => setFilterAssignee('') }] : []),
               ...(filterDate ? [{ key: 'date', label: 'Date', value: getDateFilterLabel(filterDate), onRemove: () => setFilterDate(null) }] : []),
             ]}
-            onClearAll={() => { clearSearch(); setFilterStatus(''); setFilterClient(''); setFilterService(''); setFilterAssignee(''); setFilterDate(null) }}
+            onClearAll={() => { clearSearch(); setFilterStatus(''); setFilterBilling(''); setFilterClient(''); setFilterService(''); setFilterAssignee(''); setFilterDate(null) }}
           />
+
+          {/* ── Free work, in one line ────────────────────────────────────────
+              The question a manager asks about a client is "how much have we
+              given them?" — answerable here by picking the client and reading
+              this, without opening a single task. */}
+          {showBilling && billingCounts.waived > 0 && (
+            <button
+              onClick={() => setFilterBilling(filterBilling === 'waived' ? '' : 'waived')}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/[0.07] border border-emerald-500/20 text-xs text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/15 transition-colors text-left"
+            >
+              <span className="font-semibold">
+                {billingCounts.waived} waived {billingCounts.waived === 1 ? 'task' : 'tasks'}
+              </span>
+              <span className="text-emerald-700/70 dark:text-emerald-300/70">
+                · ₹{Math.round(billingCounts.waivedValueInr).toLocaleString('en-IN')} of work given away
+                {filterClient && filterClient !== INTERNAL_CLIENT ? ' to this client' : ''}
+                {billingCounts.covered > 0 ? ` · ${billingCounts.covered} covered by a package` : ''}
+              </span>
+              <span className="ml-auto text-[10px] uppercase tracking-wide opacity-70">
+                {filterBilling === 'waived' ? 'Showing' : 'Show'}
+              </span>
+            </button>
+          )}
 
           {/* ── DB mode banner ── */}
           {dbMode && (
@@ -3009,6 +3150,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                               <RefreshCw className="w-3 h-3 text-muted-foreground/50 flex-shrink-0" />
                             </span>
                           )}
+                          {showBilling && <BillingChip status={billingStatusOf(task)} reason={task.no_charge_reason} />}
                           {requestRefByTaskId[task.id] && (
                             <button
                               title="From a client request — click for the brief (design plan, links)"
@@ -3208,6 +3350,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                       </span>
                       {task.is_recurring && <RefreshCw className="w-3 h-3 text-primary/60 shrink-0" />}
                       {task.recurring_parent_id && <RefreshCw className="w-3 h-3 text-muted-foreground/50 shrink-0" />}
+                      {showBilling && <BillingChip status={billingStatusOf(task)} reason={task.no_charge_reason} />}
                       <p className="font-medium text-sm text-foreground truncate">{task.title}</p>
                     </div>
                     {/* Meta line — client · service */}
@@ -5248,16 +5391,9 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                           </div>
                         )}
 
-                        <div className="flex items-center justify-between pt-1">
-                          <label className="flex items-center gap-2 text-[11px] text-muted-foreground cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={!form.is_billable}
-                              onChange={e => setForm(p => ({ ...p, is_billable: !e.target.checked }))}
-                              className="accent-violet-500"
-                            />
-                            Internal only — don&apos;t bill the client
-                          </label>
+                        {/* Billable / waived moved to the Financial section — it
+                            applies to every task, not only variants. */}
+                        <div className="flex items-center justify-end pt-1">
                           <div className="text-[11px] text-muted-foreground">
                             Computed: <span className="text-foreground font-semibold">
                               {unitCurrency} {computedAmount.toLocaleString('en-IN')}
@@ -5303,6 +5439,10 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                 taskDate={form.task_date}
                 packageId={form.package_id}
                 onPackageChange={pid => setForm(p => ({ ...p, package_id: pid }))}
+                isBillable={form.is_billable}
+                noChargeReason={form.no_charge_reason}
+                onBillableChange={({ isBillable, noChargeReason }) =>
+                  setForm(p => ({ ...p, is_billable: isBillable, no_charge_reason: noChargeReason }))}
                 showFinancials={showBilling}
                 amount={computedAmount}
                 unitPriceDisplay={displayUnitPrice}

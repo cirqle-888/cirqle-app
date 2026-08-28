@@ -32,6 +32,7 @@ import {
   WEEKDAY, MONTH_NAMES, FULL_MONTHS,
 } from './dashboard-utils'
 import type { Granularity, PulseTab, DrawerType } from './dashboard-utils'
+import { isBillableTask } from '@/lib/tasks/billable'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Props
@@ -191,7 +192,9 @@ export default function DashboardAnalytics({
     const byClient:  Record<string, { name: string; revenue: number; count: number }> = {}
     const byService: Record<string, { name: string; revenue: number; count: number }> = {}
     for (const t of analyticsTasks) {
-      const rev = t.billing_amount_inr || 0
+      // Revenue, not task value: waived work is worth its price internally but
+      // brought in nothing, so it must not lift a client up this ranking.
+      const rev = isBillableTask(t) ? (t.billing_amount_inr || 0) : 0
       const cid = t.client?.id; const cname = t.client?.name
       if (cid && cname) {
         if (!byClient[cid]) byClient[cid] = { name: cname, revenue: 0, count: 0 }
@@ -217,7 +220,7 @@ export default function DashboardAnalytics({
     allAnalyticsTasks.forEach(t => {
       if (!t.task_date) return
       const m = new Date(t.task_date + 'T12:00:00').getMonth()
-      map[m] = (map[m] || 0) + (t.billing_amount_inr || 0)
+      map[m] = (map[m] || 0) + (isBillableTask(t) ? (t.billing_amount_inr || 0) : 0)
     })
     return Array.from({ length: 12 }, (_, i) => ({ month: FULL_MONTHS[i], revenue: map[i] || 0 }))
       .sort((a, b) => b.revenue - a.revenue)

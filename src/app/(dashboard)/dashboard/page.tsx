@@ -48,7 +48,7 @@ export default async function DashboardPage() {
   const allAnalyticsTasksPromise: Promise<any[]> = isAdmin
     ? fetchAll(supabase
         .from('tasks')
-        .select('id, billing_amount_inr, quantity, task_date, status, service_id, client:clients(id, name), service:services!service_id(id, name)')
+        .select('id, billing_amount_inr, quantity, task_date, status, service_id, is_billable, client:clients(id, name), service:services!service_id(id, name)')
         .not('status', 'eq', 'cancelled')
         // Deleted work is not done work. Without this the Job Value, Count,
         // Jobs Done chart and period comparisons all counted soft-deleted

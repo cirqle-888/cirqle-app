@@ -42,7 +42,10 @@ export default async function ReconcilePage() {
       supabase
         .from('tasks')
         .select('id, task_number, title, task_date, status, currency, billing_amount, billing_amount_inr, client_id')
-        .is('deleted_at', null),
+        .is('deleted_at', null)
+        // Waived work is deliberately on no invoice — reporting it as an orphan
+        // would turn every goodwill job into a permanent reconciliation alert.
+        .not('is_billable', 'is', false),
     ).then(r => r.data as Task[]),
     supabase.from('clients').select('id, name').then(r => (r.data || []) as { id: string; name: string }[]),
     fetchAll(supabase.from('invoice_items').select('task_id, invoice_id, total')).then(r => r.data as InvItem[]),

@@ -23,7 +23,9 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchJournalLines } from './journal'
 import { expensesFromLines, loadOverheadPolicy, type OverheadPolicy } from './profit'
 
-const r2 = (n: number) => Math.round(n * 100) / 100
+// Canonical money rounding — a local Math.round(n * 100) / 100 disagrees at
+// the .xx5 midpoints (1.005 -> 1.00 instead of 1.01). See currency.ts round2.
+import { round2 as r2 } from '@/lib/calculations/currency'
 
 // ── Proportional allocation ──────────────────────────────────────────────────
 
@@ -178,6 +180,8 @@ export async function loadRecoveryMeter(
       .select('id, task_date, billing_amount_inr')
       .gte('task_date', start).lt('task_date', nextStart)
       .is('deleted_at', null)
+      // Free work recovers no overhead — it has no client money behind it.
+      .not('is_billable', 'is', false)
       .order('task_date')
     tasks = (data || []).map((t: Record<string, unknown>) => ({
       id: t.id as string,

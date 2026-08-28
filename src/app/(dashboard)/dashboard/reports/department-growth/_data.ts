@@ -17,6 +17,7 @@ import { lastDayOfMonthISO, todayISO } from '@/lib/utils/local-date'
 import { UNASSIGNED_DEPARTMENT_ID } from '@/lib/finance/department-pnl'
 import type { DepartmentMonthPoint } from '@/lib/finance/department-trend'
 import type { ReportRange } from '@/lib/finance/report-range'
+import { isBillableTask } from '@/lib/tasks/billable'
 
 export interface DeptTask {
   id: string
@@ -119,7 +120,7 @@ export async function loadDepartmentWindow(
 
   const { data: taskRows, error: taskError } = await fetchAll(
     admin.from('tasks')
-      .select('id, billing_amount_inr, service_id, client_id, task_date')
+      .select('id, billing_amount_inr, service_id, client_id, task_date, is_billable')
       .gte('task_date', windowStart)
       .lte('task_date', windowEnd)
       .is('deleted_at', null),
@@ -130,9 +131,12 @@ export async function loadDepartmentWindow(
     service_id: string | null
     client_id: string | null
     task_date: string
+    is_billable?: boolean | null
   }[]).map(t => ({
     id: t.id,
-    billingInr: Number(t.billing_amount_inr || 0),
+    // Waived work brought in nothing. The row itself stays, so the department's
+    // task count — and the average ticket it feeds — still see the job.
+    billingInr: isBillableTask(t) ? Number(t.billing_amount_inr || 0) : 0,
     serviceId: t.service_id,
     clientId: t.client_id,
     taskDate: t.task_date,

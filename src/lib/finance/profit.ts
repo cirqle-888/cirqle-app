@@ -37,6 +37,7 @@ import type { JournalLine, StatementSection } from './types'
 // without the epsilon guard), so "the profit engine" and pnl.ts could return
 // figures a paisa apart for the same input. See currency.ts round2.
 import { round2 as r2 } from '@/lib/calculations/currency'
+import { isBillableTask } from '@/lib/tasks/billable'
 
 // ── Policy ───────────────────────────────────────────────────────────────────
 
@@ -168,12 +169,15 @@ export async function computeMonthlyProfit(
   try {
     const { data } = await admin
       .from('tasks')
-      .select('id, billing_amount_inr')
+      .select('id, billing_amount_inr, is_billable')
       .gte('task_date', start)
       .lt('task_date', nextStart)
       .is('deleted_at', null)
-    for (const t of (data || []) as { id: string; billing_amount_inr: number | null }[]) {
-      revenueInr += Number(t.billing_amount_inr || 0)
+    for (const t of (data || []) as { id: string; billing_amount_inr: number | null; is_billable?: boolean | null }[]) {
+      // Waived work earns nothing — but it still COST commission, so the id
+      // goes on the list either way. Filtering these rows out of the query
+      // instead would hide that cost and overstate the month's profit.
+      if (isBillableTask(t)) revenueInr += Number(t.billing_amount_inr || 0)
       taskIds.push(t.id)
     }
   } catch { /* leave 0 */ }

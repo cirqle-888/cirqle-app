@@ -10,6 +10,7 @@ import { fetchAll } from '@/lib/supabase/server'
 import { round2 as r2 } from '@/lib/calculations/currency'
 import { syncInvoicePackageLines } from '@/lib/packages/sync-invoice'
 import { resolveEarning, CommissionAgreement } from '@/lib/agreements/resolve-earning'
+import { isBillableTask } from '@/lib/tasks/billable'
 
 /**
  * Fallback refresh for tasks that have contribution SCORES but no raw
@@ -330,7 +331,7 @@ export async function syncDraftInvoices(taskId: string) {
   const supabase = createTypedAdminClient()
 
   const { data: task } = await supabase.from('tasks')
-    .select('id, title, status, client_id, task_date, billing_amount_inr, currency, billing_amount, quantity, deleted_at')
+    .select('id, title, status, client_id, task_date, billing_amount_inr, currency, billing_amount, quantity, deleted_at, is_billable')
     .eq('id', taskId).single()
   
   if (!task) return { error: 'Task not found' }
@@ -345,8 +346,10 @@ export async function syncDraftInvoices(taskId: string) {
   const taskUnitPrice = Math.round((taskAmt / taskQty) * 100) / 100
   const invoiceIdsToRecalculate = new Set<string>()
 
-    if (task.deleted_at || task.status === 'cancelled') {
-      // Deleted or cancelled → strip any draft line this task carries, and never add one.
+    if (task.deleted_at || task.status === 'cancelled' || !isBillableTask(task)) {
+      // Deleted, cancelled or WAIVED → strip any draft line this task carries,
+      // and never add one. A waived task keeps its amount (that is what pays the
+      // designer); what it loses is the client's invoice line.
       if (items && items.length > 0) {
         const invoiceIds = Array.from(new Set(items.map(i => i.invoice_id).filter((id): id is string => id !== null)))
         const { data: invoices } = await supabase.from('invoices').select('id').in('id', invoiceIds).eq('status', 'draft')

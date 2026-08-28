@@ -3,6 +3,7 @@ import { normalizeTaskTitle } from '@/lib/utils/title-case'
 import { createAdminClient } from '@/lib/supabase/server'
 import { aiParse, findClient, findService, normalizeDate } from '@/lib/ai/request-capture'
 import { todayISO } from '@/lib/utils/local-date'
+import { autoLinkTaskPackage } from '@/lib/packages/auto-link'
 
 /**
  * Quick-action API for iOS/iPadOS Shortcuts (and any HTTP client).
@@ -95,8 +96,9 @@ async function duplicateTask(admin: Admin, p: { taskNumber?: number | string }) 
     currency: (src as any).currency,
     quantity: (src as any).quantity || 1,
     task_date: today(),
-  }).select('task_number, title').single()
+  }).select('id, task_number, title').single()
   if (error) return { ok: false, error: error.message }
+  await autoLinkTaskPackage(admin, (data as { id: string }).id)
   return { ok: true, kind: 'task', taskNumber: (data as any).task_number, title: (data as any).title, duplicatedFrom: num }
 }
 
@@ -125,8 +127,10 @@ async function createTask(admin: Admin, p: { title?: string; client?: string; se
     currency: 'INR',
     quantity: qty,
     task_date: normalizeDate(p.date) || today(),
-  }).select('task_number, title').single()
+  }).select('id, task_number, title').single()
   if (error) return { ok: false, error: error.message }
+  // A package task must not also bill on its own — see lib/packages/auto-link.
+  await autoLinkTaskPackage(admin, (data as { id: string }).id)
   return { ok: true, kind: 'task', taskNumber: (data as any).task_number, title: (data as any).title, client: client?.name || null, amount: amount * qty }
 }
 

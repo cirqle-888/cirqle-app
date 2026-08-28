@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { FIGMA_CORS_HEADERS as CORS_HEADERS, figmaOptions, verifyFigmaAuth, logFigmaEvent } from '../_lib/auth'
 import { saveCampaign, type ProductInput } from '@/app/intake/offer/[token]/actions'
 import { todayISO } from '@/lib/utils/local-date'
+import { autoLinkTaskPackage } from '@/lib/packages/auto-link'
 
 /**
  * POST /api/figma/campaign — save an offer parsed in the Cirqle Studio plugin
@@ -394,6 +395,7 @@ export async function POST(req: NextRequest) {
           .select('id')
           .single()
         taskId = (taskRow as { id?: string } | null)?.id || null
+        if (taskId) await autoLinkTaskPackage(admin, taskId)
       }
 
       if (taskId && employeeId) {

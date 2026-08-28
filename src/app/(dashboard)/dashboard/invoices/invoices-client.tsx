@@ -1652,6 +1652,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       .from('tasks')
       .select('id, title, task_date, billing_amount, billing_amount_inr, currency, status, quantity, unit_price, service:services!service_id(name)')
       .eq('client_id', genForm.client_id)
+      // Waived work is delivered and paid for internally, but never charged —
+      // see lib/tasks/billable.ts. `not.is.false` keeps the pre-flag rows.
+      .not('is_billable', 'is', false)
       .in('status', ['done', 'invoiced'])
       .gte('task_date', from)
       .lte('task_date', to)
@@ -1823,6 +1826,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         .from('tasks')
         .select('id, title, task_date, billing_amount, billing_amount_inr, currency, client_id, client:clients(id, name, code, default_currency)')
         .eq('status', 'done')
+        .not('is_billable', 'is', false)      // waived work never reaches an invoice
         .order('task_date')
         .range(page * PAGE, (page + 1) * PAGE - 1)
       if (hasSoftDelete) q = q.is('deleted_at', null)

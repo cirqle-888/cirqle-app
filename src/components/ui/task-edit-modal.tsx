@@ -85,6 +85,8 @@ export function TaskEditModal({
     description: task.description ?? '',
     status: task.status ?? 'pending',
     package_id: (task.package_id as string | null) ?? null,
+    is_billable: task.is_billable !== false,
+    no_charge_reason: (task.no_charge_reason as string | null) ?? null,
   })
 
   // ── Committed services pinned in the picker ────────────────────────────────
@@ -191,6 +193,10 @@ export function TaskEditModal({
       // Always sent, including null — clearing the link back to "bill
       // separately" is a real edit and must not be read as "leave unchanged".
       packageId:        form.package_id,
+      // Same rule as packageId: always sent, so switching a task back to
+      // Billable is saved rather than read as "leave unchanged".
+      isBillable:       form.is_billable,
+      noChargeReason:   form.no_charge_reason,
       taskDate:         form.task_date || null,
     })
 
@@ -364,6 +370,10 @@ export function TaskEditModal({
                 taskDate={form.task_date}
                 packageId={form.package_id}
                 onPackageChange={pid => setForm(p => ({ ...p, package_id: pid }))}
+                isBillable={form.is_billable}
+                noChargeReason={form.no_charge_reason}
+                onBillableChange={({ isBillable, noChargeReason }) =>
+                  setForm(p => ({ ...p, is_billable: isBillable, no_charge_reason: noChargeReason }))}
                 showFinancials={showFinancials}
                 lockedAmount={isVariant ? variantBillingInr : null}
                 lockedCurrency={(task.currency as string) || 'INR'}

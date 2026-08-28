@@ -76,7 +76,11 @@ export async function syncInvoicePackageLines(
     // take a covered slot and push a delivered one into billable overage.
     admin.from('tasks')
       .select('id, package_id, service_id, task_date, task_number, status')
-      .in('package_id', ids).is('deleted_at', null),
+      .in('package_id', ids).is('deleted_at', null)
+      // Waived work is free to the client: it must neither consume the
+      // allowance nor bill as an overage. Same rule auto-link follows when it
+      // declines to link a waived task in the first place.
+      .not('is_billable', 'is', false),
     // One-time fees bill once EVER, so this looks across every invoice, not
     // just this one — and ignores lines on this invoice, which we are about to
     // rewrite anyway. The joined invoice month is what lets an extended opening

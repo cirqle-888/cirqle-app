@@ -7,6 +7,7 @@ import { logCronRun } from '@/lib/cron/log'
 import { parseBillingRule, isRuleDormant } from '@/lib/tasks/derived-billing'
 import { recomputeDerivedTask } from '@/lib/tasks/derived-billing-sync'
 import { todayISO } from '@/lib/utils/local-date'
+import { autoLinkTaskPackage } from '@/lib/packages/auto-link'
 
 /**
  * Recurring-task JUST-IN-TIME generation cron.
@@ -148,6 +149,13 @@ export async function GET(req: NextRequest) {
     const { data: inserted, error: insertErr } = await admin.from('tasks').insert(instances).select('id')
     if (insertErr) { errors.push(`${parent.id}: ${insertErr.message}`); continue }
     totalGenerated += instances.length
+
+    // Each occurrence joins the client's package on its OWN date — a retainer
+    // that starts in September must not swallow August's occurrence, and one
+    // that has ended must not keep swallowing new ones.
+    for (const row of (inserted ?? []) as { id: string }[]) {
+      await autoLinkTaskPackage(admin, row.id)
+    }
 
     // Price each new derived occurrence from its own month's sources.
     if (derived) {

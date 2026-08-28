@@ -24,6 +24,7 @@ import {
 } from '@/lib/tasks/pricing'
 import { fetchClientPackages } from '@/app/(dashboard)/dashboard/tasks/actions'
 import type { PackageOption } from '@/lib/packages/queries'
+import { NO_CHARGE_REASONS, DEFAULT_NO_CHARGE_REASON } from '@/lib/tasks/billable'
 
 const inputCls =
   'w-full bg-background border border-input rounded-lg px-3 py-2 text-sm shadow-sm ' +
@@ -49,6 +50,15 @@ export interface TaskBillingSectionProps {
   /** Omit to hide the picker entirely (e.g. a surface that cannot save it). */
   onPackageChange?: (packageId: string | null) => void
 
+  /**
+   * Is the client charged for this task? A waived task KEEPS its price — the
+   * amount is what pays the designer — and simply never reaches an invoice.
+   * Omit `onBillableChange` to hide the control (a surface that cannot save it).
+   */
+  isBillable?: boolean
+  noChargeReason?: string | null
+  onBillableChange?: (patch: { isBillable: boolean; noChargeReason: string | null }) => void
+
   /** False for users without pricing access: quantity inputs, no money. */
   showFinancials?: boolean
 
@@ -73,6 +83,7 @@ export function TaskBillingSection({
   services, clientPricings = [], clientId, serviceId,
   quantity, hours, spend, onChange,
   taskDate, packageId, onPackageChange,
+  isBillable = true, noChargeReason = null, onBillableChange,
   showFinancials = true,
   lockedAmount = null, lockedCurrency, lockedNote,
   amount, unitPriceDisplay, footer,
@@ -102,6 +113,55 @@ export function TaskBillingSection({
   const serviceOutsidePackage =
     !!chosen && !!serviceId && !chosen.serviceIds.includes(serviceId)
 
+  // ── Billable or waived? ───────────────────────────────────────────────────
+  // Every task, not just variants: a cover thrown in with a retainer, a
+  // goodwill highlight icon and a rework are all ordinary tasks. Waiving
+  // changes ONE thing — no invoice line. The price stays, which is what keeps
+  // the designer's commission whole. Rendered above the locked-variant return
+  // as well, so a free variant is expressible too.
+  const billableControl = onBillableChange ? (
+    <div className="rounded-xl border border-border bg-card p-3 space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <label className="text-xs font-medium text-muted-foreground">Billing</label>
+        <select
+          value={isBillable ? 'billable' : 'waived'}
+          onChange={e => {
+            const next = e.target.value === 'billable'
+            onBillableChange({
+              isBillable: next,
+              noChargeReason: next ? null : (noChargeReason || DEFAULT_NO_CHARGE_REASON),
+            })
+          }}
+          className={inputCls + ' w-auto min-w-[9.5rem]'}
+        >
+          <option value="billable">Billable</option>
+          <option value="waived">Waived — don&rsquo;t bill</option>
+        </select>
+      </div>
+
+      {!isBillable && (
+        <>
+          <div className="flex items-center justify-between gap-3">
+            <label className="text-xs font-medium text-muted-foreground">Waiver reason</label>
+            <select
+              value={noChargeReason || DEFAULT_NO_CHARGE_REASON}
+              onChange={e => onBillableChange({ isBillable: false, noChargeReason: e.target.value })}
+              className={inputCls + ' w-auto min-w-[9.5rem]'}
+            >
+              {NO_CHARGE_REASONS.map(r => (
+                <option key={r.value} value={r.value}>{r.label}</option>
+              ))}
+            </select>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            No invoice line for the client. The task keeps the value below, so it
+            still counts as delivered work and still pays commission.
+          </p>
+        </>
+      )}
+    </div>
+  ) : null
+
   const creativesInput = (
     <div>
       <label className="block text-xs text-muted-foreground mb-1">Number of creatives</label>
@@ -115,7 +175,8 @@ export function TaskBillingSection({
   if (lockedAmount != null) {
     if (!showFinancials) return null
     return (
-      <div>
+      <div className="space-y-3">
+        {billableControl}
         <label className="block text-xs font-medium text-muted-foreground mb-1.5">
           Price ({lockedCurrency || currency})
         </label>
@@ -176,6 +237,8 @@ export function TaskBillingSection({
           )}
         </div>
       )}
+
+      {billableControl}
 
       {/* ── Pricing card ──────────────────────────────────────────────────── */}
       {showFinancials && serviceSelected && (
