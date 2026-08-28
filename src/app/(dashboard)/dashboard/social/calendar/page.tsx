@@ -58,7 +58,7 @@ export default async function SocialCalendarPage({
     admin.from('clients').select('id, name').eq('is_active', true).order('name'),
     admin
       .from('social_accounts')
-      .select('id, client_id, platform, name, username, profile_picture_url, status, publishing_enabled')
+      .select('id, client_id, owner_type, platform, name, username, profile_picture_url, status, publishing_enabled')
       .neq('status', 'disconnected')
       .order('name'),
     admin.from('employees').select('id, cqid, name').eq('is_active', true).order('cqid'),
@@ -79,10 +79,24 @@ export default async function SocialCalendarPage({
     }
   })
 
+  // Only clients you can ACTUALLY post for. 31 active clients were listed while
+  // just 4 have a connected account, so 27 of them were dead ends: pick one and
+  // the account dropdown is empty with nothing to explain why. Cirqle's own
+  // accounts are handled separately in the composer — they have no client by
+  // design, so no entry here could ever reach them.
+  const accountsForPosting = (accountsRes.data ?? []) as {
+    client_id: string | null; publishing_enabled: boolean
+  }[]
+  const clientsWithAccounts = new Set(
+    accountsForPosting.filter(a => a.publishing_enabled && a.client_id).map(a => a.client_id as string),
+  )
+  const postableClients = ((clientsRes.data ?? []) as { id: string; name: string }[])
+    .filter(c => clientsWithAccounts.has(c.id))
+
   return (
     <CalendarClient
       posts={posts}
-      clients={(clientsRes.data ?? []) as { id: string; name: string }[]}
+      clients={postableClients}
       accounts={(accountsRes.data ?? []) as never[]}
       employees={(employeesRes.data ?? []) as never[]}
       year={year}

@@ -24,8 +24,15 @@ import {
   createSocialPost, updateSocialPost, approvePost, publishPostNow, createSignedMediaUpload,
 } from './actions'
 
+/**
+ * Stands in for a client in the picker when the post belongs to one of OUR
+ * accounts. Not a UUID, so it can never collide with a real client id, and it
+ * is translated back to NULL before anything is written.
+ */
+export const CIRQLE_OWNED = '__cirqle__'
+
 export interface ComposerAccount {
-  id: string; client_id: string; platform: SocialPlatform
+  id: string; client_id: string | null; owner_type?: string | null; platform: SocialPlatform
   name: string; username: string | null; publishing_enabled: boolean; status: string
 }
 export interface ComposerEmployee { id: string; cqid: string | null; name: string | null }
@@ -97,7 +104,21 @@ export function Composer({
   const [err, setErr] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const clientAccounts = useMemo(() => accounts.filter((a) => a.client_id === clientId), [accounts, clientId])
+  // Cirqle's own accounts carry no client_id, so filtering by it could never
+  // reach them — @cirqle.works was simply absent from the composer whatever
+  // you picked.
+  const clientAccounts = useMemo(
+    () => accounts.filter(a => clientId === CIRQLE_OWNED
+      ? (a.owner_type ?? 'client') === 'cirqle'
+      : a.client_id === clientId),
+    [accounts, clientId],
+  )
+  const hasOwnAccounts = useMemo(
+    () => accounts.some(a => (a.owner_type ?? 'client') === 'cirqle'),
+    [accounts],
+  )
+  /** NULL for our own accounts — that is what the column means there. */
+  const payloadClientId = clientId === CIRQLE_OWNED ? null : (clientId || null)
   const account = accounts.find((a) => a.id === accountId)
   const platform: SocialPlatform | null = account?.platform ?? null
 
@@ -117,11 +138,13 @@ export function Composer({
 
   async function handleFiles(files: FileList | null) {
     if (!files || !clientId) { if (!clientId) setErr('Pick a client before uploading.'); return }
+    // payloadClientId is null for our own accounts; the upload helper namespaces
+    // those under `cirqle/` rather than a client id.
     setUploading(true); setErr(null)
     const supabase = createBrowserClient()
     const added: MediaDescriptor[] = []
     for (const file of Array.from(files)) {
-      const signed = await createSignedMediaUpload(clientId, file.name)
+      const signed = await createSignedMediaUpload(payloadClientId, file.name)
       if (!signed.ok || !signed.data) { setErr(signed.error ?? 'Upload failed'); continue }
       const { error } = await supabase.storage.from('social-media').uploadToSignedUrl(signed.data.path, signed.data.token, file)
       if (error) { setErr(error.message); continue }
@@ -139,7 +162,7 @@ export function Composer({
 
   function buildPayload() {
     return {
-      id: post?.id, client_id: clientId, account_id: accountId, content_type: contentType,
+      id: post?.id, client_id: payloadClientId, account_id: accountId, content_type: contentType,
       caption: caption || null, hashtags: hashtags || null,
       first_comment: platform === 'instagram' ? (firstComment || null) : null,
       link_url: contentType === 'link' ? (linkUrl || null) : null,
@@ -195,6 +218,9 @@ export function Composer({
               <label className="text-xs text-muted-foreground">Client</label>
               <AppSelect value={clientId} onChange={(e) => { setClientId(e.target.value); setAccountId('') }} className="mt-1">
                 <option value="">Select client…</option>
+                {/* Our own accounts first: they belong to nobody in the client
+                    list, and posting to @cirqle.works is a normal thing to do. */}
+                {hasOwnAccounts && <option value={CIRQLE_OWNED}>Cirqle — our own accounts</option>}
                 {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </AppSelect>
             </div>

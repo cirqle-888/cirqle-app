@@ -23,7 +23,8 @@ interface ActionResult<T = void> { ok: boolean; error?: string; warnings?: strin
 
 export interface PostPayload {
   id?: string | null
-  client_id: string
+  /** NULL for one of Cirqle's own accounts, which have no client by design. */
+  client_id: string | null
   account_id: string
   content_type: SocialContentType
   caption?: string | null
@@ -62,7 +63,9 @@ function validateOrReject(platform: SocialPlatform, p: PostPayload): { error?: s
 export async function createSocialPost(p: PostPayload, intent: 'draft' | 'approval' = 'draft'): Promise<ActionResult<{ id: string }>> {
   const guard = await requirePermission(PERMS.SOCIAL_PUBLISH)
   if (!guard.ok) return { ok: false, error: guard.error }
-  if (!p.client_id || !p.account_id) return { ok: false, error: 'Pick a client and account.' }
+  // No client check: social_posts.client_id is nullable precisely because our
+  // own accounts have none. The account is what a post actually needs.
+  if (!p.account_id) return { ok: false, error: 'Pick an account.' }
 
   const admin = createAdminClient()
   const platform = await accountPlatform(admin, p.account_id)
