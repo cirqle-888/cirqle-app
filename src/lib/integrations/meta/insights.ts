@@ -171,21 +171,41 @@ async function syncFacebookPagePosts(
   token: string,
   errors: string[],
 ): Promise<number> {
-  let posts: any[] = []
-  try {
-    posts = await metaGraphAll<any>(`${account.external_id}/published_posts`, {
+  // Engagement counts need permissions the posts themselves do not, and Meta
+  // rejects the WHOLE request when one field is out of reach rather than
+  // omitting it. likes.summary needs pages_read_engagement at advanced access;
+  // comments.summary needs pages_read_user_content. Asking for both meant a
+  // single #10 threw away all 19 posts on every Page, every night — no
+  // captions, no permalinks, no images, for want of two counters.
+  //
+  // So the counters are requested, and dropped if they are refused.
+  const CORE_FIELDS =
+    'id,message,created_time,permalink_url,full_picture,status_type,shares'
+  const ENGAGEMENT_FIELDS =
+    'likes.summary(true).limit(0),comments.summary(true).limit(0)'
+
+  const fetchPosts = (fields: string) =>
+    metaGraphAll<any>(`${account.external_id}/published_posts`, {
       token,
-      params: {
-        fields:
-          'id,message,created_time,permalink_url,full_picture,status_type,' +
-          'shares,likes.summary(true).limit(0),comments.summary(true).limit(0)',
-        limit: 25,
-      },
+      params: { fields, limit: 25 },
       maxPages: 2,
     })
-  } catch (err: any) {
-    errors.push(`FB posts: ${redactTokens(err?.message)}`)
-    return 0
+
+  let posts: any[] = []
+  try {
+    posts = await fetchPosts(`${CORE_FIELDS},${ENGAGEMENT_FIELDS}`)
+  } catch (withCountsErr) {
+    // Retry without the counters. A permission problem must cost us the
+    // counts, not the posts.
+    const reason = withCountsErr instanceof Error ? withCountsErr.message : String(withCountsErr)
+    try {
+      posts = await fetchPosts(CORE_FIELDS)
+      errors.push(`FB engagement counts unavailable (posts still synced): ${redactTokens(reason)}`)
+    } catch (coreErr) {
+      const msg = coreErr instanceof Error ? coreErr.message : String(coreErr)
+      errors.push(`FB posts: ${redactTokens(msg)}`)
+      return 0
+    }
   }
 
   let written = 0
@@ -255,9 +275,15 @@ async function syncInstagramAccountInsights(
 
   const byDate = new Map<string, Record<string, number>>()
 
-  // Time-series metrics (per-day values)
+  // Time-series metrics (per-day values).
+  //
+  // `views` is NOT here, though it is the metric we most want per-day. Meta
+  // supports it only with metric_type=total_value — asking for a time series
+  // returns "(#100) The following metric (views) is incompatible with the
+  // metric type (time_series)" and the whole call fails. That error fired on
+  // every Instagram account, every night, since the metric was renamed. Only
+  // reach (and deprecated impressions) support time_series.
   const seriesMetrics: Array<{ metric: string; column: string }> = [
-    { metric: 'views', column: 'views' },
     { metric: 'reach', column: 'reach' },
     { metric: 'follower_count', column: 'follows' },
   ]
@@ -291,6 +317,10 @@ async function syncInstagramAccountInsights(
   // Total-value metrics for YESTERDAY (a daily sync fills each day as it passes)
   const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000)
   const totalMetrics: Array<{ metric: string; column: string }> = [
+    // Yesterday's total, which is the only shape Meta offers for `views`.
+    // A daily run therefore fills one day at a time, exactly as the other
+    // total_value metrics here already do.
+    { metric: 'views', column: 'views' },
     { metric: 'total_interactions', column: 'total_interactions' },
     { metric: 'accounts_engaged', column: 'accounts_engaged' },
     { metric: 'profile_links_taps', column: 'profile_links_taps' },
