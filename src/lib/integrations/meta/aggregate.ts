@@ -74,8 +74,22 @@ export interface AgencyTotals {
   unassignedAssets: number
 }
 
-function pct(cur: number, prev: number): number | null {
-  if (!prev) return cur > 0 ? 100 : null
+/**
+ * Percentage change, or null when the comparison is not worth making.
+ *
+ * A client report once read "Reach rose 26527.3%", which is arithmetically
+ * correct and completely useless: tracking only began mid-period, so the
+ * previous window held almost nothing. Dividing by a near-empty baseline
+ * manufactures spectacular growth out of missing data, and that number goes
+ * in front of a paying client.
+ *
+ * So a baseline below MIN_DELTA_BASELINE yields no percentage at all. The
+ * absolute figure is still shown; it just is not dressed up as a trend.
+ */
+const MIN_DELTA_BASELINE = 30
+
+function pct(cur: number, prev: number, minBaseline = MIN_DELTA_BASELINE): number | null {
+  if (prev < minBaseline) return null
   return Math.round(((cur - prev) / prev) * 1000) / 10
 }
 const iso = (d: Date) => d.toISOString()
@@ -101,8 +115,8 @@ export async function buildAgencyRollups(
     // owner_type is selected so Cirqle's own and untriaged assets stay OUT of
     // client rollups. Falls back to the pre-migration shape rather than failing
     // the whole dashboard if the column is not there yet.
-    admin.from('social_accounts').select('id, client_id, owner_type, status, last_synced_at').neq('status', 'disconnected')
-      .then(r => r.error ? admin.from('social_accounts').select('id, client_id, status, last_synced_at').neq('status', 'disconnected') : r),
+    admin.from('social_accounts').select('id, client_id, owner_type, status, last_synced_at, followers_count').neq('status', 'disconnected')
+      .then(r => r.error ? admin.from('social_accounts').select('id, client_id, status, last_synced_at, followers_count').neq('status', 'disconnected') : r),
     admin.from('social_account_insights_daily').select('account_id, metric_date, reach, views, total_interactions, followers_count').gte('metric_date', isoDate(prevFrom)),
     admin.from('leads').select('client_id, owner_type, created_at').gte('created_at', iso(prevFrom))
       .then(r => r.error ? admin.from('leads').select('client_id, created_at').gte('created_at', iso(prevFrom)) : r),
@@ -119,12 +133,19 @@ export async function buildAgencyRollups(
     accounts.filter(a => ownerTypeOf(a) === 'cirqle').map(a => a.id as string),
   )
   const unassignedAssets = accounts.filter(a => ownerTypeOf(a) === 'unassigned').length
+  // What actually went out on the accounts, taken from the synced mirror
+  // rather than from social_posts.
+  //
+  // social_posts only knows about content PUBLISHED THROUGH CIRQLE, and almost
+  // nothing has been — posting happens in the Instagram app. So the client
+  // report said "0 posts published" for a month in which the account posted
+  // steadily. social_media_items is what Meta says is on the account, which is
+  // the thing a client is actually being told about.
   const socialPublished = await admin
-    .from('social_posts')
-    .select('client_id')
-    .eq('status', 'published')
-    .gte('published_at', iso(curFrom))
-    .then((r) => (r.data ?? []) as { client_id: string }[], () => [])
+    .from('social_media_items')
+    .select('account_id')
+    .gte('posted_at', iso(curFrom))
+    .then((r) => (r.data ?? []) as { account_id: string }[], () => [])
 
   // account_id → client_id, for CLIENT-owned accounts only.
   //
@@ -164,12 +185,31 @@ export async function buildAgencyRollups(
       r.reach += reach
       r.views += Number(row.views ?? 0)
       r.interactions += Number(row.total_interactions ?? 0)
-      if (row.followers_count != null) r.followers = Number(row.followers_count)
+      // followers is NOT accumulated here — see the per-account sum below.
     } else {
       reachPrevByClient.set(clientId, (reachPrevByClient.get(clientId) ?? 0) + reach)
     }
   }
   for (const [clientId, r] of map) r.reachDeltaPct = pct(r.reach, reachPrevByClient.get(clientId) ?? 0)
+
+  // Followers: the CURRENT count on each account, summed across the client's
+  // accounts.
+  //
+  // It used to be read from the daily insight rows with `r.followers = ...`,
+  // an assignment inside a loop, so whichever row happened to come last won.
+  // Elara's report therefore announced 1 follower: the Facebook Page has 1,
+  // Instagram has 49, and Instagram's daily rows carry NULL here anyway
+  // because followers are only written when the row's date is today, which it
+  // usually is not. The account row holds the live figure and is refreshed
+  // every sync, so it is the honest source.
+  for (const a of accounts) {
+    if (!belongsToAnyClient(a)) continue
+    const r = map.get(a.client_id)
+    if (!r) continue
+    const n = a.followers_count
+    if (n == null) continue
+    r.followers = (r.followers ?? 0) + Number(n)
+  }
 
   // Leads cur/prev
   for (const row of (leadsRes.data ?? []) as any[]) {
@@ -214,9 +254,12 @@ export async function buildAgencyRollups(
     r.spendPrev = Math.round(adAccPrev.get(clientId)?.spend ?? 0)
   }
 
-  // Content published (social_posts)
+  // Content published — mapped through accountClient so Cirqle-owned and
+  // untriaged accounts contribute to no client, exactly as reach does.
   for (const p of socialPublished) {
-    const r = map.get(p.client_id)
+    const clientId = accountClient.get(p.account_id)
+    if (!clientId) continue
+    const r = map.get(clientId)
     if (r) r.contentPublished += 1
   }
 
