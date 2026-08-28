@@ -385,3 +385,74 @@ export async function publishSocialPost(admin: SupabaseClient, postId: string): 
 
   return result
 }
+
+/**
+ * Delete a published post from Instagram or Facebook.
+ *
+ * IRREVERSIBLE. Meta keeps no undo: the post, its likes, its comments and its
+ * permalink are gone, and reposting produces a new post with a new date and no
+ * history. Callers must confirm with a human first.
+ *
+ * Instagram allows DELETE on media it published; Facebook allows it on Page
+ * posts. Both need the same token that published the content, which is the one
+ * already stored against the account.
+ */
+export async function deletePostFromMeta(
+  admin: SupabaseClient,
+  postId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const { data: post } = await admin
+    .from('social_posts')
+    .select('id, external_media_id, permalink, account_id, status')
+    .eq('id', postId)
+    .maybeSingle()
+  if (!post) return { ok: false, error: 'Post not found.' }
+
+  const externalId = (post as { external_media_id?: string | null }).external_media_id
+  if (!externalId) {
+    return { ok: false, error: 'This post was never published through Cirqle, so there is nothing on Meta to delete.' }
+  }
+
+  const { data: account } = await admin
+    .from('social_accounts')
+    .select('id, platform, external_id, access_token, connection_id, linked_page_account_id')
+    .eq('id', (post as { account_id: string }).account_id)
+    .maybeSingle()
+  if (!account) return { ok: false, error: 'Account not found.' }
+
+  const a = account as Record<string, string | null>
+  let token = decryptToken(a.access_token)
+  if (!token && a.linked_page_account_id) {
+    const { data: page } = await admin
+      .from('social_accounts').select('access_token').eq('id', a.linked_page_account_id).maybeSingle()
+    token = decryptToken((page as { access_token?: string | null } | null)?.access_token)
+  }
+  if (!token && a.connection_id) {
+    const { data: conn } = await admin
+      .from('provider_connections').select('access_token, status').eq('id', a.connection_id).maybeSingle()
+    const c = conn as { access_token?: string | null; status?: string } | null
+    if (c?.status === 'active') token = decryptToken(c.access_token)
+  }
+  if (!token) return { ok: false, error: 'No usable access token — reconnect the Meta account.' }
+
+  try {
+    await metaGraph(`${externalId}`, { method: 'DELETE', token, retries: 1 })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { ok: false, error: redactTokens(msg) }
+  }
+
+  // Only after Meta confirms. Marking ours deleted first would leave a live
+  // post nothing in Cirqle points at.
+  await admin
+    .from('social_posts')
+    .update({ status: 'cancelled', deleted_at: new Date().toISOString() })
+    .eq('id', postId)
+
+  // The mirror row too, so the grid and the reports stop counting it.
+  if (externalId) {
+    await admin.from('social_media_items').delete().eq('external_media_id', externalId)
+  }
+
+  return { ok: true }
+}

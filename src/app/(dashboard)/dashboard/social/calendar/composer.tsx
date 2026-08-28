@@ -22,6 +22,7 @@ import {
 } from '@/lib/social-hub/validation'
 import {
   createSocialPost, updateSocialPost, approvePost, publishPostNow, createSignedMediaUpload,
+  crossPost, type CrossPostOutcome,
 } from './actions'
 
 /**
@@ -102,6 +103,11 @@ export function Composer({
   const [uploading, setUploading] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  // Extra accounts to mirror this content to. Instagram and Facebook are
+  // separate accounts on separate platforms — Meta has no single call for
+  // both — so this creates one post each, from one filled-in form.
+  const [alsoPostTo, setAlsoPostTo] = useState<string[]>([])
+  const [outcomes, setOutcomes] = useState<CrossPostOutcome[] | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   // Cirqle's own accounts carry no client_id, so filtering by it could never
@@ -119,6 +125,12 @@ export function Composer({
   )
   /** NULL for our own accounts — that is what the column means there. */
   const payloadClientId = clientId === CIRQLE_OWNED ? null : (clientId || null)
+
+  /** The client's OTHER connected accounts — the cross-post candidates. */
+  const otherAccounts = useMemo(
+    () => clientAccounts.filter(a => a.id !== accountId && a.publishing_enabled && a.status !== 'disconnected'),
+    [clientAccounts, accountId],
+  )
   const account = accounts.find((a) => a.id === accountId)
   const platform: SocialPlatform | null = account?.platform ?? null
 
@@ -173,8 +185,20 @@ export function Composer({
   }
 
   async function run(kind: 'draft' | 'approval' | 'approve' | 'publish') {
-    setErr(null); setBusy(kind)
+    setErr(null); setOutcomes(null); setBusy(kind)
     try {
+      // Mirroring to other accounts only makes sense for NEW content; editing
+      // an existing post edits that post.
+      if (!post?.id && alsoPostTo.length) {
+        const res = await crossPost(buildPayload(), [accountId, ...alsoPostTo], kind)
+        if (res.data?.outcomes) setOutcomes(res.data.outcomes)
+        if (!res.ok) { setErr(res.error ?? 'Nothing could be posted.'); return }
+        // Some accounts may have been skipped; hold the sheet open so the
+        // result is read rather than dismissed.
+        if (res.data?.outcomes?.some(o => !o.ok)) return
+        onSaved()
+        return
+      }
       const payload = buildPayload()
       // Save (create or update) first.
       let id = post?.id
@@ -236,6 +260,31 @@ export function Composer({
               </AppSelect>
               {account && <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground"><PlatformIcon platform={account.platform} className="w-3.5 h-3.5" />{account.platform === 'instagram' ? 'Instagram' : 'Facebook Page'}</div>}
             </div>
+            {/* Cross-post. Only for new content: editing a post edits that post. */}
+            {!post?.id && otherAccounts.length > 0 && (
+              <div className="rounded-lg border border-border bg-secondary/40 p-2.5">
+                <p className="text-xs font-medium">Also post to</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5 mb-1.5">
+                  One post per account — Meta has no single call for both.
+                </p>
+                <div className="space-y-1">
+                  {otherAccounts.map(a => (
+                    <label key={a.id} className="flex items-center gap-2 text-xs cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={alsoPostTo.includes(a.id)}
+                        onChange={e => setAlsoPostTo(prev =>
+                          e.target.checked ? [...prev, a.id] : prev.filter(x => x !== a.id))}
+                        className="rounded border-border"
+                      />
+                      <PlatformIcon platform={a.platform} className="w-3.5 h-3.5" />
+                      <span>{a.username ?? a.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div>
               <label className="text-xs text-muted-foreground">Content type</label>
               <div className="mt-1 flex flex-wrap gap-1.5">
@@ -316,7 +365,19 @@ export function Composer({
         {/* Validation feedback */}
         {(validation.errors.length > 0 || validation.warnings.length > 0 || err) && (
           <div className="px-4 space-y-1.5">
-            {err && <div className="text-xs text-red-400 flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
+            {outcomes && (
+            <div className="rounded-lg border border-border bg-secondary/40 p-2.5 space-y-1">
+              {outcomes.map(o => (
+                <div key={o.accountId} className="flex items-start gap-2 text-xs">
+                  <span className={o.ok ? 'text-green-500' : 'text-amber-500'}>{o.ok ? '✓' : '—'}</span>
+                  <span className="font-medium shrink-0">{o.accountLabel}</span>
+                  <span className="text-muted-foreground">{o.ok ? 'posted' : o.error}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {err && <div className="text-xs text-red-400 flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5" />{err}</div>}
             {validation.errors.map((e, i) => <div key={i} className="text-xs text-red-400 flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5 shrink-0" />{e}</div>)}
             {validation.warnings.map((w, i) => <div key={i} className="text-xs text-amber-400 flex items-center gap-1.5"><Info className="w-3.5 h-3.5 shrink-0" />{w}</div>)}
           </div>

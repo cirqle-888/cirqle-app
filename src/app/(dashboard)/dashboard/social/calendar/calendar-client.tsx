@@ -22,13 +22,16 @@ import {
 } from 'lucide-react'
 import { Composer, type ComposerAccount, type ComposerEmployee, type EditablePost } from './composer'
 import type { SocialContentType } from '@/lib/social-hub/validation'
-import { deletePost, publishPostNow } from './actions'
+import { deletePost, publishPostNow, deleteFromMeta } from './actions'
 
 interface PostRow {
   id: string; client_id: string; account_id: string; content_type: SocialContentType; status: string
   caption: string | null; hashtags: string | null; first_comment: string | null; link_url: string | null
   media: any[]; cover_url: string | null; share_to_feed: boolean
   scheduled_at: string | null; published_at: string | null; permalink: string | null; publish_error: string | null
+  /** Meta's own id. Present only once the post really went out through Cirqle,
+   *  which is exactly when deleting it from Meta becomes possible. */
+  external_media_id: string | null
   designer_id: string | null; assigned_to: string | null
   account_name: string; account_username: string | null; account_platform: 'facebook_page' | 'instagram'
 }
@@ -75,6 +78,9 @@ export default function CalendarClient({
   const [view, setView] = useState<'month' | 'list'>('month')
   const [composer, setComposer] = useState<{ post: EditablePost | null; date?: string } | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<PostRow | null>(null)
+  // Separate state, because removing a LIVE post from Meta is a different and
+  // irreversible act from tidying up Cirqle's own record.
+  const [unpublishTarget, setUnpublishTarget] = useState<PostRow | null>(null)
 
   const nav = (deltaMonth: number, client = clientFilter) => {
     const d = new Date(Date.UTC(year, month - 1 + deltaMonth, 1))
@@ -222,6 +228,17 @@ export default function CalendarClient({
                       {canPublish && p.status !== 'published' && (
                         <button title="Delete" onClick={() => setDeleteTarget(p)} className="text-muted-foreground hover:text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>
                       )}
+                      {/* Live on Meta — a different, irreversible action, and
+                          gated on approve rather than publish. */}
+                      {canApprove && p.status === 'published' && p.external_media_id && (
+                        <button
+                          title="Delete from Instagram/Facebook"
+                          onClick={() => setUnpublishTarget(p)}
+                          className="text-muted-foreground hover:text-red-500"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" strokeWidth={2.5} />
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -268,6 +285,29 @@ export default function CalendarClient({
             startTransition(async () => { const r = await deletePost(id); if (r.ok) router.refresh(); else toast.error('Delete failed', r.error) })
           }}
           onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+
+      {unpublishTarget && (
+        <ConfirmDialog
+          title="Delete this from Instagram/Facebook?"
+          body={
+            'This removes the post from the live account. Its likes, comments and link ' +
+            'are deleted with it and Meta offers no undo — reposting creates a new post ' +
+            'with a new date. Cirqle cannot bring it back.'
+          }
+          confirmLabel="Delete from Meta"
+          danger
+          onConfirm={() => {
+            const id = unpublishTarget.id
+            setUnpublishTarget(null)
+            startTransition(async () => {
+              const r = await deleteFromMeta(id)
+              if (r.ok) { toast.success('Deleted from Meta'); router.refresh() }
+              else toast.error('Could not delete from Meta', r.error)
+            })
+          }}
+          onCancel={() => setUnpublishTarget(null)}
         />
       )}
 

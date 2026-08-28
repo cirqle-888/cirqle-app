@@ -34,6 +34,12 @@ export async function GET(req: Request) {
       .select('id, scheduled_at')
       .eq('status', 'scheduled')
       .is('deleted_at', null)
+      // Never touch something Meta already has. A row carrying an
+      // external_media_id has been handed over once; publishing it again would
+      // put a duplicate on a client's account, and no status CAS protects
+      // against that because the second publish is a fresh, legitimate-looking
+      // request.
+      .is('external_media_id', null)
       .lte('scheduled_at', new Date().toISOString())
       .order('scheduled_at', { ascending: true })
       .limit(25)

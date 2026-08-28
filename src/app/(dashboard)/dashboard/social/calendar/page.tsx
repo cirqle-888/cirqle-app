@@ -44,7 +44,7 @@ export default async function SocialCalendarPage({
         .select(`
           id, client_id, account_id, content_type, status, caption, hashtags,
           first_comment, link_url, media, cover_url, share_to_feed, scheduled_at,
-          published_at, permalink, publish_error, designer_id, assigned_to, created_at,
+          published_at, permalink, publish_error, external_media_id, designer_id, assigned_to, created_at,
           account:social_accounts(name, username, platform, profile_picture_url)
         `)
         .is('deleted_at', null)
@@ -73,6 +73,7 @@ export default async function SocialCalendarPage({
       link_url: p.link_url, media: p.media ?? [], cover_url: p.cover_url,
       share_to_feed: p.share_to_feed, scheduled_at: p.scheduled_at, published_at: p.published_at,
       permalink: p.permalink, publish_error: p.publish_error,
+      external_media_id: p.external_media_id ?? null,
       designer_id: p.designer_id, assigned_to: p.assigned_to,
       account_name: account?.name ?? '—', account_username: account?.username ?? null,
       account_platform: account?.platform ?? 'facebook_page',

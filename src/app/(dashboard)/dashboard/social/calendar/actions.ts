@@ -15,11 +15,15 @@ import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
 import { revalidatePath } from 'next/cache'
 import { validateSocialPost, type MediaDescriptor, type SocialContentType, type SocialPlatform } from '@/lib/social-hub/validation'
-import { publishSocialPost } from '@/lib/integrations/meta/publish'
+import { publishSocialPost, deletePostFromMeta } from '@/lib/integrations/meta/publish'
 
 const REVALIDATE = '/dashboard/social/calendar'
 
 interface ActionResult<T = void> { ok: boolean; error?: string; warnings?: string[]; data?: T }
+
+/** A PostgREST row whose shape is known but not expressible in the generated
+ *  types. One narrow alias beats scattering `any`. */
+type Row = Record<string, unknown> & { [k: string]: any }   // eslint-disable-line @typescript-eslint/no-explicit-any
 
 export interface PostPayload {
   id?: string | null
@@ -259,4 +263,140 @@ export async function createSignedMediaUpload(
   if (error || !data) return { ok: false, error: error?.message || 'Could not create upload URL.' }
   const { data: pub } = admin.storage.from('social-media').getPublicUrl(path)
   return { ok: true, data: { path: data.path, token: data.token, publicUrl: pub.publicUrl } }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Cross-posting
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export interface CrossPostOutcome {
+  accountId: string
+  accountLabel: string
+  ok: boolean
+  /** Present when this account was skipped or failed, in plain words. */
+  error?: string
+  postId?: string
+  permalink?: string
+}
+
+/**
+ * Publish one piece of content to several accounts at once.
+ *
+ * Instagram and Facebook are separate accounts on separate platforms, so this
+ * genuinely is several posts — Meta offers no single call for both. What it
+ * removes is retyping the caption and re-uploading the media, and the risk of
+ * the two drifting apart.
+ *
+ * EACH ACCOUNT IS VALIDATED ON ITS OWN RULES, and an account that cannot take
+ * this content is SKIPPED rather than failing the batch: a link post is fine
+ * on a Page and impossible on Instagram, and discovering that should not cost
+ * you the Facebook post too. The caller is told exactly which went and which
+ * did not.
+ */
+export async function crossPost(
+  p: PostPayload,
+  accountIds: string[],
+  intent: 'draft' | 'approval' | 'approve' | 'publish',
+): Promise<ActionResult<{ outcomes: CrossPostOutcome[] }>> {
+  const needsApprove = intent === 'approve' || intent === 'publish'
+  const guard = await requirePermission(needsApprove ? PERMS.SOCIAL_APPROVE : PERMS.SOCIAL_PUBLISH)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const unique = [...new Set(accountIds.filter(Boolean))]
+  if (unique.length === 0) return { ok: false, error: 'Pick at least one account.' }
+
+  const admin = createAdminClient()
+  const { data: accounts } = await admin
+    .from('social_accounts')
+    .select('id, platform, name, username, publishing_enabled, status')
+    .in('id', unique)
+
+  const byId = new Map((accounts ?? []).map((a: Row) => [a.id as string, a]))
+  const outcomes: CrossPostOutcome[] = []
+
+  for (const accountId of unique) {
+    const account = byId.get(accountId)
+    const label = account
+      ? `${account.platform === 'instagram' ? 'IG' : 'FB'} · ${account.username ?? account.name}`
+      : accountId
+    if (!account) {
+      outcomes.push({ accountId, accountLabel: label, ok: false, error: 'Account not found.' })
+      continue
+    }
+    if (account.status === 'disconnected' || account.publishing_enabled === false) {
+      outcomes.push({ accountId, accountLabel: label, ok: false, error: 'Publishing is off for this account.' })
+      continue
+    }
+
+    const platform = account.platform as SocialPlatform
+    const { error: vErr } = validateOrReject(platform, p)
+    if (vErr) {
+      // Not a failure of the batch — this platform simply cannot take it.
+      outcomes.push({ accountId, accountLabel: label, ok: false, error: vErr })
+      continue
+    }
+
+    const created = await createSocialPost(
+      { ...p, id: null, account_id: accountId },
+      intent === 'approval' ? 'approval' : 'draft',
+    )
+    if (!created.ok || !created.data?.id) {
+      outcomes.push({ accountId, accountLabel: label, ok: false, error: created.error ?? 'Could not save.' })
+      continue
+    }
+    const postId = created.data.id
+
+    if (intent === 'approve') {
+      const res = await approvePost(postId)
+      outcomes.push({ accountId, accountLabel: label, ok: res.ok, error: res.error, postId })
+    } else if (intent === 'publish') {
+      const res = await publishPostNow(postId)
+      outcomes.push({
+        accountId, accountLabel: label, ok: res.ok, error: res.error, postId,
+        permalink: res.data?.permalink,
+      })
+    } else {
+      outcomes.push({ accountId, accountLabel: label, ok: true, postId })
+    }
+  }
+
+  revalidatePath(REVALIDATE)
+  const anyOk = outcomes.some(o => o.ok)
+  return anyOk
+    ? { ok: true, data: { outcomes } }
+    : { ok: false, error: outcomes[0]?.error ?? 'Nothing could be posted.', data: { outcomes } }
+}
+
+/**
+ * Remove a live post from Instagram or Facebook.
+ *
+ * Separate from deletePost, which only removes Cirqle's record and leaves the
+ * post up. This one is IRREVERSIBLE on the client's real account — likes,
+ * comments and the permalink go with it — so it is gated on social.approve,
+ * the same permission as publishing, rather than on social.publish.
+ */
+export async function deleteFromMeta(id: string): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.SOCIAL_APPROVE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+  const { data: post } = await admin
+    .from('social_posts').select('id, client_id, account_id, permalink').eq('id', id).maybeSingle()
+  if (!post) return { ok: false, error: 'Post not found.' }
+
+  const res = await deletePostFromMeta(admin, id)
+  if (!res.ok) return { ok: false, error: res.error }
+
+  const p = post as Row
+  void logActivity({
+    actorId: guard.employeeId,
+    entityType: p.client_id ? 'client' : 'social_account',
+    entityId: (p.client_id ?? p.account_id) as string,
+    clientId: (p.client_id ?? null) as string | null,
+    category: 'crm', action: 'social_post_deleted_from_meta',
+    detail: { permalink: p.permalink ?? null },
+  }).catch(() => {})
+
+  revalidatePath(REVALIDATE)
+  return { ok: true }
 }
