@@ -21,7 +21,12 @@ export function PermissionBypassBanner() {
   return (
     <div
       role="status"
-      className="fixed bottom-2 left-1/2 z-[200] -translate-x-1/2 rounded-full border border-amber-500/40 bg-amber-500/95 px-3 py-1 text-[11px] font-semibold text-amber-950 shadow-lg"
+      // pointer-events-none: this sits at z-[200], above every modal in the
+      // app (overlays default to z-50), and centred on the bottom edge — exactly
+      // where modal action bars put Save and Confirm. It is purely
+      // informational and never needs a click, so it must not absorb one. It
+      // silently swallowed a Save click during testing before this was added.
+      className="pointer-events-none fixed bottom-2 left-1/2 z-[200] -translate-x-1/2 rounded-full border border-amber-500/40 bg-amber-500/95 px-3 py-1 text-[11px] font-semibold text-amber-950 shadow-lg"
       title="NEXT_PUBLIC_DEV_PERMISSION_BYPASS=on in .env.local — every permission check returns allow. Remove before production."
     >
       <span className="inline-flex items-center gap-1.5">

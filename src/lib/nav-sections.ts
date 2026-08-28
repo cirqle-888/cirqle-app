@@ -14,7 +14,7 @@ import {
   Briefcase, ClipboardList, CalendarClock, CalendarDays, BadgeCheck, PieChart, Building2, Tags, History, Sparkles,
   BadgePercent, CalendarRange, HardHat, Repeat, Package as PackageIcon,
   Share2, UserPlus, Gauge, ShieldCheck, Grid3x3, MapPin,
-  Scale, Receipt,
+  Scale, Receipt, Send,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -138,6 +138,9 @@ export const navSections: NavSection[] = [
       // answers HOW THE GRID LOOKS — the two halves of planning a feed.
       { label: 'Feed Planner',     href: '/dashboard/social/feed',     icon: Grid3x3, requiredPerm: 'social.plan_feed', keywords: ['instagram grid', 'feed preview', 'mockup', 'creatives', 'profile', 'aesthetic', 'layout'] },
       { label: 'Social Calendar',  href: '/dashboard/social-calendar', icon: CalendarDays, requiredPerm: 'social.view', keywords: ['content', 'planner', 'posts', 'instagram', 'social media'] },
+      // The step after the calendar: artwork is finished, now it has to go out.
+      // Keyed on social.publish so a planner who never posts does not see it.
+      { label: 'Posting Queue',    href: '/dashboard/social/queue',    icon: Send, requiredPerm: 'social.publish', keywords: ['to post', 'publish', 'caption', 'hashtags', 'alt text', 'scheduled', 'ready to post', 'instagram'] },
       { label: 'Leads',            href: '/dashboard/leads',           icon: UserPlus, requiredPerm: 'leads.view', keywords: ['crm', 'meta leads', 'lead ads', 'prospects', 'enquiries'] },
       // Door-to-door / direct marketing: physical prospects on a map, visit
       // tracking, follow-ups — distinct from the Meta-ads Leads CRM above.
