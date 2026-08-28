@@ -21,6 +21,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { createSignedMediaUpload } from '../calendar/actions'
+import GridArranger from './grid-arranger'
 import { createClient } from '@/lib/supabase/client'
 import {
   FEED_STATUS_CHIP, FEED_STATUS_LABEL, type FeedTile,
@@ -99,7 +100,7 @@ const fmtDate = (iso: string | null) => {
 
 export default function FeedPlannerClient({
   accounts, selectedId, profile, tiles, plannedCount, publishedCount,
-  shareLinks, canPlan, aspect,
+  shareLinks, canPlan, aspect, gridTarget, gridArrangeAvailable,
 }: {
   accounts: Account[]
   selectedId: string | null
@@ -110,6 +111,13 @@ export default function FeedPlannerClient({
   shareLinks: { id: string; token: string; label: string | null; expires_at: string | null }[]
   canPlan: boolean
   aspect: FeedAspect
+  /** Saved target layout. null = none saved yet (the table may still exist). */
+  gridTarget: {
+    target_order: string[]; pinned_keys: string[]
+    live_snapshot: string[]; live_pinned: string[]; applied_at: string | null
+  } | null
+  /** False until 20260828170000 runs. Distinct from gridTarget === null. */
+  gridArrangeAvailable: boolean
 }) {
   const router = useRouter()
   const { toasts, dismiss, success, error: toastError } = useToast()
@@ -122,6 +130,12 @@ export default function FeedPlannerClient({
   const [harmony, setHarmony] = useState<HarmonyReport | null>(null)
   const [checking, setChecking] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<FeedTile | null>(null)
+  // Two different jobs on one grid, kept apart on purpose. "Plan" orders the
+  // posts we are going to publish — real, ours, enforced. "Arrange" designs
+  // how the profile should LOOK and produces steps for a human to carry out in
+  // the Instagram app, because there is no API for it. Merging them would let
+  // a drag mean two incompatible things.
+  const [arrange, setArrange] = useState(false)
   // Instagram has changed its grid crop before; this is a setting so the next
   // change is a dropdown rather than a code change.
   const tileAspect = aspectClass(aspect)
@@ -416,6 +430,46 @@ export default function FeedPlannerClient({
           </div>
         )}
 
+        {/* Mode switch, hidden until the table exists. gridTarget === null is
+            NOT the signal — that is also what "nothing arranged yet" looks
+            like, and using it would offer a tab whose every save fails. */}
+        {gridArrangeAvailable && profile && tiles.length > 0 && (
+          <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1 w-fit">
+            <button
+              onClick={() => setArrange(false)}
+              className={`text-xs px-2.5 py-1.5 rounded-md transition-colors ${
+                !arrange ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Plan upcoming
+            </button>
+            <button
+              onClick={() => setArrange(true)}
+              className={`text-xs px-2.5 py-1.5 rounded-md transition-colors ${
+                arrange ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Arrange grid
+            </button>
+          </div>
+        )}
+
+        {arrange && profile && gridArrangeAvailable ? (
+          <GridArranger
+            accountId={profile.id}
+            tiles={tiles}
+            initialTarget={gridTarget?.target_order ?? []}
+            initialPinned={gridTarget?.pinned_keys ?? []}
+            liveSnapshot={gridTarget?.live_snapshot ?? []}
+            livePinned={gridTarget?.live_pinned ?? []}
+            appliedAt={gridTarget?.applied_at ?? null}
+            tileAspect={tileAspect}
+            canPlan={canPlan}
+            onToast={success}
+            onError={toastError}
+          />
+        ) : (
+        <>
         {/* ── The grid ── */}
         {tiles.length === 0 ? (
           <div className="rounded-xl border border-border bg-card">
@@ -508,6 +562,8 @@ export default function FeedPlannerClient({
               </p>
             )}
           </div>
+        )}
+        </>
         )}
       </div>
 

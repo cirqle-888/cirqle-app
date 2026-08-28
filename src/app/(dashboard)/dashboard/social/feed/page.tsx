@@ -101,6 +101,26 @@ export default async function FeedPlannerPage({
 
   const aspectRaw = await aspectP
 
+  // The arranged layout, if one exists. The table is PROBED rather than
+  // assumed, and its absence is reported separately from "no layout saved
+  // yet" — the two look identical in the data and mean opposite things. This
+  // file has to be deployable before 20260828170000 runs, and offering an
+  // Arrange tab whose every save fails would be worse than not offering it.
+  let gridArrangeAvailable = false
+  let gridTarget: {
+    target_order: string[]; pinned_keys: string[]
+    live_snapshot: string[]; live_pinned: string[]; applied_at: string | null
+  } | null = null
+  if (selected) {
+    const { data, error } = await admin
+      .from('feed_grid_targets')
+      .select('target_order, pinned_keys, live_snapshot, live_pinned, applied_at')
+      .eq('account_id', selected.id)
+      .maybeSingle()
+    gridArrangeAvailable = !error
+    if (!error && data) gridTarget = data as unknown as typeof gridTarget
+  }
+
   const grid = buildFeedGrid({
     planned: planned as never,
     published: published as never,
@@ -117,6 +137,8 @@ export default async function FeedPlannerPage({
       shareLinks={shareLinks as never}
       canPlan={canPlan}
       aspect={parseFeedAspect(aspectRaw)}
+      gridTarget={gridTarget}
+      gridArrangeAvailable={gridArrangeAvailable}
     />
   )
 }

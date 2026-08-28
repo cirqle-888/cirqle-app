@@ -345,3 +345,111 @@ export async function setFeedAspect(aspect: string): Promise<ActionResult> {
   revalidatePath(REVALIDATE)
   return { ok: true }
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Target grid layout
+ *
+ * Instagram exposes no reorder or pin endpoint, so none of this reaches Meta.
+ * It records the layout someone wants, so the planner can compute the fewest
+ * moves and hand them a checklist to follow in the app.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** Save the arranged order and pins for an account. */
+export async function saveGridTarget(input: {
+  accountId: string
+  targetOrder: string[]
+  pinnedKeys: string[]
+}): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.SOCIAL_PLAN_FEED)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!input.accountId) return { ok: false, error: 'Pick an Instagram account first.' }
+
+  const admin = createAdminClient()
+
+  // Seed live_snapshot on first save only. After that it is owned by
+  // markGridApplied — overwriting it here would silently erase the very
+  // baseline the instructions are computed against.
+  const { data: existing } = await admin
+    .from('feed_grid_targets')
+    .select('account_id')
+    .eq('account_id', input.accountId)
+    .maybeSingle()
+
+  const row = {
+    account_id: input.accountId,
+    target_order: input.targetOrder,
+    // Truncated to Instagram's cap here rather than refused, so a fourth pin
+    // is a no-op in the UI instead of an error that loses the whole layout.
+    pinned_keys: input.pinnedKeys.slice(0, 3),
+    updated_by: guard.employeeId ?? null,
+    updated_at: new Date().toISOString(),
+  }
+
+  const { error } = existing
+    ? await admin.from('feed_grid_targets').update(row).eq('account_id', input.accountId)
+    : await admin.from('feed_grid_targets').insert(row)
+
+  if (error) return { ok: false, error: error.message }
+  revalidatePath(REVALIDATE)
+  return { ok: true }
+}
+
+/**
+ * Record that the layout has been carried out on Instagram.
+ *
+ * This is the only way the believed-live baseline moves. Cirqle cannot verify
+ * it — the API has no position field — so it is a person's word, stored as
+ * such with who and when.
+ */
+export async function markGridApplied(accountId: string): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.SOCIAL_PLAN_FEED)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+  const { data: row } = await admin
+    .from('feed_grid_targets')
+    .select('target_order, pinned_keys')
+    .eq('account_id', accountId)
+    .maybeSingle()
+  if (!row) return { ok: false, error: 'Arrange the grid first.' }
+
+  const r = row as unknown as { target_order: string[]; pinned_keys: string[] }
+  const now = new Date().toISOString()
+  const { error } = await admin
+    .from('feed_grid_targets')
+    .update({
+      live_snapshot: r.target_order ?? [],
+      live_pinned: r.pinned_keys ?? [],
+      applied_at: now,
+      applied_by: guard.employeeId ?? null,
+      updated_at: now,
+    })
+    .eq('account_id', accountId)
+
+  if (error) return { ok: false, error: error.message }
+
+  void logActivity({
+    actorId: guard.employeeId,
+    entityType: 'social_account', entityId: accountId,
+    category: 'crm', action: 'feed_grid_applied',
+    detail: { tiles: (r.target_order ?? []).length, pinned: (r.pinned_keys ?? []).length },
+  }).catch(() => {})
+
+  revalidatePath(REVALIDATE)
+  return { ok: true }
+}
+
+/** Throw away the arranged layout and go back to what is believed live. */
+export async function resetGridTarget(accountId: string): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.SOCIAL_PLAN_FEED)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('feed_grid_targets')
+    .delete()
+    .eq('account_id', accountId)
+  if (error) return { ok: false, error: error.message }
+  revalidatePath(REVALIDATE)
+  return { ok: true }
+}
