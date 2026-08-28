@@ -588,6 +588,15 @@ export default function Sidebar() {
   const isEmployee = !user.isAdmin
   const isCollapsed = !isPinned && !isHovered
 
+  // The employee bottom nav is `fixed bottom-0 z-50`, so any page-level
+  // `fixed bottom-0` action bar (Contributions' Save bar) is hidden underneath
+  // it on mobile. Publish the nav's height so those bars can clear it.
+  useEffect(() => {
+    const root = document.documentElement
+    root.style.setProperty('--bottom-nav-h', isEmployee ? '57px' : '0px')
+    return () => root.style.removeProperty('--bottom-nav-h')
+  }, [isEmployee])
+
   // Default to pinned state when rendering on server to avoid layout shift,
   // client will adjust immediately on mount.
   const effectivePinned = mounted ? isPinned : true
