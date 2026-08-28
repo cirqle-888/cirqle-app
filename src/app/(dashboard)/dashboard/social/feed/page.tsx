@@ -31,11 +31,14 @@ export default async function FeedPlannerPage({
 
   // Instagram accounts only — a feed grid is an Instagram concept. Client-owned
   // and Cirqle-owned both appear; the planner is useful for our own feed too.
-  let accounts: { id: string; name: string; username: string | null; client_id: string | null; profile_picture_url: string | null; followers_count: number | null }[] = []
+  let accounts: { id: string; name: string; username: string | null; client_id: string | null; owner_type: string | null; profile_picture_url: string | null; followers_count: number | null }[] = []
   try {
     const { data } = await admin
       .from('social_accounts')
-      .select('id, name, username, client_id, profile_picture_url, followers_count')
+      // owner_type distinguishes "ours, so no client is correct" from "a client
+      // account nobody has assigned yet". Without it the planner cannot tell
+      // a deliberate NULL from a misconfigured one.
+      .select('id, name, username, client_id, owner_type, profile_picture_url, followers_count')
       .eq('platform', 'instagram')
       .neq('status', 'disconnected')
       .order('name')

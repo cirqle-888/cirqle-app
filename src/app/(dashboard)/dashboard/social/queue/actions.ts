@@ -165,7 +165,7 @@ export async function markAsPosted(
     action: 'social_post_marked_posted',
     entityType: 'task',
     entityId: itemId,
-    details: { posted_at: when, manual: true },
+    detail: { posted_at: when, manual: true },
   }).catch(() => {})
 
   revalidatePath('/dashboard/social/queue')

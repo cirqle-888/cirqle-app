@@ -235,16 +235,22 @@ async function setStatus(id: string, status: string, perm: string): Promise<Acti
  * Create a signed upload URL for post media. The browser uploads directly to
  * the public 'social-media' bucket; we return the public URL Meta will fetch.
  */
+/**
+ * @param clientId Storage namespace. NULL is legitimate and means one of
+ *   Cirqle's OWN accounts (social_accounts.owner_type = 'cirqle'), which have
+ *   no client and never will — those files land under `cirqle/` instead. A
+ *   client-owned account that is genuinely unassigned is rejected by the
+ *   caller, which can tell the two apart; this function cannot.
+ */
 export async function createSignedMediaUpload(
-  clientId: string,
+  clientId: string | null,
   fileName: string,
 ): Promise<ActionResult<{ path: string; token: string; publicUrl: string }>> {
   const guard = await requirePermission(PERMS.SOCIAL_PUBLISH)
   if (!guard.ok) return { ok: false, error: guard.error }
-  if (!clientId) return { ok: false, error: 'Pick a client first.' }
 
   const ext = (fileName.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '')
-  const path = `${clientId}/${crypto.randomUUID()}.${ext}`
+  const path = `${clientId || 'cirqle'}/${crypto.randomUUID()}.${ext}`
   const admin = createAdminClient()
   const { data, error } = await admin.storage.from('social-media').createSignedUploadUrl(path)
   if (error || !data) return { ok: false, error: error?.message || 'Could not create upload URL.' }

@@ -45,6 +45,9 @@ export type EntityType =
   | 'offer'
   // Field Marketing — physical prospect on the territory map
   | 'field_place'
+  // Social — a connected Instagram/Facebook account. Needed because content on
+  // one of Cirqle's OWN accounts has no client to log against.
+  | 'social_account'
 
 /** Timeline filter groups — mirrors migration 014 backfill mapping. */
 export type ActivityCategory =
@@ -65,6 +68,7 @@ export const DEFAULT_CATEGORY: Record<EntityType, ActivityCategory> = {
   job_application: 'recruitment', job_position: 'recruitment',
   interview: 'recruitment', offer: 'recruitment',
   field_place: 'crm',
+  social_account: 'crm',
 }
 
 export type ActivityAction =

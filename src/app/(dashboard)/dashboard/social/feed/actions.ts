@@ -41,14 +41,15 @@ const POST_META = 'id, client_id, account_id, status, grid_order, media, caption
  */
 export async function addFeedCreative(input: {
   accountId: string
-  clientId: string
+  /** NULL for one of Cirqle's own accounts, which have no client by design. */
+  clientId: string | null
   mediaUrl: string
   storagePath?: string | null
   contentType?: 'image' | 'video'
 }): Promise<ActionResult<{ id: string }>> {
   const guard = await requirePermission(PERMS.SOCIAL_PLAN_FEED)
   if (!guard.ok) return { ok: false, error: guard.error }
-  if (!input.accountId || !input.clientId) return { ok: false, error: 'Pick an Instagram account first.' }
+  if (!input.accountId) return { ok: false, error: 'Pick an Instagram account first.' }
   if (!input.mediaUrl) return { ok: false, error: 'The upload did not complete — try again.' }
 
   const admin = createAdminClient()
@@ -170,12 +171,23 @@ export async function deleteFeedCreative(postId: string): Promise<ActionResult> 
   const { error } = await admin.from('social_posts').delete().eq('id', postId)
   if (error) return { ok: false, error: error.message }
 
-  void logActivity({
-    actorId: guard.employeeId,
-    entityType: 'client', entityId: post.client_id, clientId: post.client_id,
-    category: 'crm', action: 'social_creative_deleted',
-    detail: { caption: (post.caption ?? '').slice(0, 80) },
-  }).catch(() => {})
+  // Logged against the CLIENT when there is one, and against the account
+  // otherwise — content on one of Cirqle's own feeds has no client, and a
+  // client-typed entry carrying a null client id is a row nothing can join to.
+  void logActivity(post.client_id
+    ? {
+        actorId: guard.employeeId,
+        entityType: 'client', entityId: post.client_id, clientId: post.client_id,
+        category: 'crm', action: 'social_creative_deleted',
+        detail: { caption: (post.caption ?? '').slice(0, 80) },
+      }
+    : {
+        actorId: guard.employeeId,
+        entityType: 'social_account', entityId: post.account_id,
+        category: 'crm', action: 'social_creative_deleted',
+        detail: { caption: (post.caption ?? '').slice(0, 80), owner: 'cirqle' },
+      },
+  ).catch(() => {})
 
   revalidatePath(REVALIDATE)
   return { ok: true }

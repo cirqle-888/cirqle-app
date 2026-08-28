@@ -39,6 +39,8 @@ import {
 
 interface Account {
   id: string; name: string; username: string | null; client_id: string | null
+  /** 'cirqle' = one of our own accounts, which correctly has no client. */
+  owner_type: string | null
   profile_picture_url: string | null; followers_count: number | null
 }
 
@@ -136,7 +138,11 @@ export default function FeedPlannerClient({
   // ── Upload ────────────────────────────────────────────────────────────────
   async function handleFiles(files: FileList | null) {
     if (!files?.length || !profile) return
-    if (!profile.client_id) {
+    // A missing client is only a problem on a CLIENT-owned account. Our own
+    // accounts (@cirqle.works) have none by design and are grouped in Asset
+    // Assignment as "excluded from all client reporting" — telling someone to
+    // go and assign one there is advice that cannot be followed.
+    if (!profile.client_id && profile.owner_type === 'client') {
       toastError('No client on this account', 'Assign it to a client in Asset Assignment first.')
       return
     }
