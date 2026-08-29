@@ -198,6 +198,12 @@ export const META_OAUTH_SCOPES = [
   'pages_manage_posts',
   'pages_manage_metadata',
   'pages_manage_ads',
+  // Added 2026-08-29 alongside the Meta login configuration (869229522906617),
+  // which is what actually governs scopes while META_LOGIN_CONFIG_ID is set.
+  // pages_read_user_content is what Facebook COMMENT counts need; without it
+  // comments.summary fails and Meta discards the whole posts request.
+  'pages_read_user_content',
+  'pages_manage_engagement',
   'read_insights',
   'publish_video',
   // Instagram professional accounts
