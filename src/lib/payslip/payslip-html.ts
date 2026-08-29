@@ -1,4 +1,5 @@
 import type { PayslipData } from './types'
+import { round2 } from '@/lib/calculations/currency'
 
 /** Light-mode brand palette (hex only — email-safe). */
 const C = {
@@ -38,7 +39,7 @@ const SALARY_TYPE_LABEL: Record<string, string> = {
 }
 
 const inr = (n: number) =>
-  '₹' + (Math.round(n * 100) / 100).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+  '₹' + round2(n).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
 
 const MILESTONES = [50000, 100000, 150000, 200000, 300000, 500000, 1000000]
 function getMilestone(total: number): number | null {

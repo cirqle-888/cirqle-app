@@ -66,4 +66,6 @@ export function calcAssessment(
   return { final: weightTotal > 0 ? round2(weightedSum / weightTotal) : null, groups: out }
 }
 
-const round2 = (n: number) => Math.round(n * 100) / 100
+// Canonical money rounding — a local Math.round(n * 100) / 100 disagrees at
+// the .xx5 midpoints (1.005 -> 1.00 instead of 1.01). See currency.ts round2.
+import { round2 } from '@/lib/calculations/currency'

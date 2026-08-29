@@ -25,7 +25,10 @@ import type {
   BasisLine, OwnershipAward, OwnershipPeriod, OwnershipProgram, OwnershipRule, PeriodAggregates,
 } from './types'
 
-const r2 = (n: number) => Math.round(n * 100) / 100
+// Canonical money rounding — a local Math.round(n * 100) / 100 disagrees at
+// the .xx5 midpoints (1.005 -> 1.00 instead of 1.01) and would drift from
+// the finance engines. See currency.ts round2.
+import { round2 as r2 } from '@/lib/calculations/currency'
 
 // ── Loading ──────────────────────────────────────────────────────────────────
 

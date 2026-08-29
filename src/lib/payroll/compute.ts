@@ -13,7 +13,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAll, fetchAllIn } from '@/lib/supabase/server'
 
-const r2 = (n: number) => Math.round(n * 100) / 100
+// Canonical money rounding — a local Math.round(n * 100) / 100 disagrees at
+// the .xx5 midpoints (1.005 -> 1.00 instead of 1.01). See currency.ts round2.
+import { round2 as r2 } from '@/lib/calculations/currency'
 
 /**
  * Payroll states that FINALIZE a month. Once any payslip for a month reaches

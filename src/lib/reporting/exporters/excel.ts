@@ -160,5 +160,8 @@ function addAISheet(wb: XLSX.WorkBook, d: RenderData) {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const round2 = (n: number) => Math.round(n * 100) / 100
+// Canonical money rounding — a local Math.round(n * 100) / 100 disagrees at
+// the .xx5 midpoints (1.005 -> 1.00 instead of 1.01) and would drift from
+// the finance engines. See currency.ts round2.
+import { round2 } from '@/lib/calculations/currency'
 const deltaStr = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`
